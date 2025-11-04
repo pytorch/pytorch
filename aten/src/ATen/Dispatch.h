@@ -197,6 +197,7 @@ inline at::ScalarType scalar_type(at::ScalarType s) {
     /* don't use TYPE again in case it is an expensive or side-effect op */ \
     at::ScalarType _st = ::detail::scalar_type(the_type);                   \
     RECORD_KERNEL_FUNCTION_DTYPE(at_dispatch_name, _st);                    \
+    C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")             \
     switch (_st) {                                                          \
       __VA_ARGS__                                                           \
       default:                                                              \
@@ -208,6 +209,7 @@ inline at::ScalarType scalar_type(at::ScalarType s) {
             toString(_st),                                                  \
             "'");                                                           \
     }                                                                       \
+    C10_DIAGNOSTIC_POP()                                                    \
   }()
 
 #define AT_DISPATCH_CASE_FLOATING_TYPES(...)            \

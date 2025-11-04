@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import contextlib
 import functools
 import warnings
 from collections import deque
-from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Optional, overload, Protocol, Union
+from typing import cast, Optional, overload, Protocol, TYPE_CHECKING, Union
 from typing_extensions import TypeIs
 
 import torch
@@ -18,6 +19,10 @@ from torch._C import (
     _push_on_torch_dispatch_stack,
     DispatchKey,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # TODO: Limitations and things about enable_torch_dispatch_mode we should fix before exposing it:
@@ -430,7 +435,7 @@ class TensorWithFlatten(Protocol):
     @overload
     def to(
         self,
-        device: Optional["torch._prims_common.DeviceLikeType"] = None,
+        device: Optional[torch._prims_common.DeviceLikeType] = None,
         dtype: Optional[torch.types._dtype] = None,
         non_blocking: bool = False,
         copy: bool = False,
@@ -601,13 +606,20 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
                 raise AssertionError(f"expected torch.Tensor, got {type(ret)}")
             torch._functionalize_unsafe_set(ret, arg)
 
-    for arg_idx, schema_arg in enumerate(schema_info.args):
-        for return_idx, schema_out in enumerate(schema_info.outs):
-            is_read_only_alias_match = (
-                schema_arg.alias_set & schema_out.alias_set
-            ) and not schema_arg.is_write
-            if is_read_only_alias_match:
-                alias_non_inplace_storage(args[arg_idx], outs[return_idx])
+    for arg_idx, return_idx in schema_info.read_only_alias_match_indexes:
+        alias_non_inplace_storage(args[arg_idx], outs[return_idx])
+
+
+def _get_write_alias(x) -> Optional[str]:
+    alias_set = x.alias_set
+    if not alias_set or not x.is_write:
+        return None
+    # torchscript allows for complicated alias sets, but our dispatcher ops only really involve simple aliasing
+    if len(alias_set) != 1:
+        raise AssertionError("Expected alias_set to contain exactly one element")
+    # timeit says next(iter(alias_set)) is faster than list(alias_set)[0] even for
+    # set of size 1 on Python 3.13.
+    return next(iter(alias_set))
 
 
 # This abstracts over the fact that in return_and_correct_aliasing,
@@ -625,13 +637,16 @@ class SchemaInfo:
     args: list[AliasInfo]
     outs: list[AliasInfo]
 
-    # NOTE[SchemaInfo int_tags]: This has nothing to do with aliasing, but we take
-    # advantage of our existing caching of data for each OpOverload to paper over an
-    # efficiency problem with pybind11::enum_ (which currently is used to implement
-    # torch.Tag): a scan over a list of pybind enums using `in` is inefficient because
-    # each element must be converted to int with the __int__ method, which incurs a lot
-    # of overhead. Converting to int once and caching removes this per-op overhead.
-    int_tags: list[int]
+    is_inplace_view_op: bool
+
+    # [_get_write_alias(x) for x in outs]. Guaranteed to contain no Nones; we coerce
+    # all-Nones result to empty list instead, and we don't support
+    # some-but-not-all-Nones.
+    outs_write_aliases: Optional[list[str]]
+
+    # List of (arg_idx, return_idx) where args[arg_idx].alias_set &
+    # outs[out_idx].alias_set is not empty, and not args[arg_idx].is_write.
+    read_only_alias_match_indexes: list[tuple[int, int]]
 
 
 # Given an OpOverload, returns schema information on it.
@@ -702,14 +717,92 @@ def get_alias_info(func) -> SchemaInfo:
             )
             for a in func._schema.returns
         ]
+    read_only_alias_match_indexes = []
+    for arg_idx, schema_arg in enumerate(arg_schemas):
+        for return_idx, schema_out in enumerate(out_schemas):
+            is_read_only_alias_match = (
+                schema_arg.alias_set & schema_out.alias_set
+            ) and not schema_arg.is_write
+            if is_read_only_alias_match:
+                read_only_alias_match_indexes.append((arg_idx, return_idx))
+
+    outs_write_aliases_list: list[Optional[str]] = [
+        _get_write_alias(r) for r in out_schemas
+    ]
+    non_nones = sum(x is not None for x in outs_write_aliases_list)
+    if non_nones == 0:
+        outs_write_aliases: Optional[list[str]] = None
+    elif non_nones != len(outs_write_aliases_list):
+        # simplifying assumption: we don't have **any** ops with return types like "-> (Tensor(a!), Tensor)"
+        raise RuntimeError("Unsupported schema: " + str(func._schema))
+    else:
+        outs_write_aliases = cast(list[str], outs_write_aliases_list)
+
     schema_info = SchemaInfo(
-        args=arg_schemas, outs=out_schemas, int_tags=[int(x) for x in func.tags]
+        args=arg_schemas,
+        outs=out_schemas,
+        # This check is surprisingly expensive because pybind11 enum_s are
+        # inefficient. Just cache it.
+        is_inplace_view_op=torch.Tag.inplace_view in func.tags,
+        outs_write_aliases=outs_write_aliases,
+        read_only_alias_match_indexes=read_only_alias_match_indexes,
     )
     return schema_info
 
 
-# See NOTE[SchemaInfo int_tags] above.
-_TORCH_TAG_INPLACE_VIEW_INT = int(torch.Tag.inplace_view)  # type: ignore[call-overload]
+def autograd_would_have_decomposed(
+    func: torch._ops.OpOverload, flat_args: Sequence[Union[torch.Tensor, object]]
+) -> bool:
+    """
+    Suppose that an operator has CompositeImplicitAutograd decomp registered.
+    Would autograd have used this decomposition?  It will only use it if there
+    isn't an explicit backend registration for the device as well.  This function
+    will tell if this would have occurred.
+
+    Why do we need to apply these decompositions later?  When inference mode is
+    on, the autograd key is bypassed entirely, so a lower level mode cannot rely
+    on the decomposition have been applied.  It's easy to accidentally never apply
+    the decomposition, resulting in an operator showing up in a graph that
+    is unexpected.
+
+    Why do we need to AVOID applying the decomposition when autograd wouldn't
+    have decomposed?  If autograd doesn't decompose, this means in eager mode
+    we would have run the fused kernel.  It must be possible to trace this
+    fused kernel directly into the graph for fidelity with eager (NB: a user
+    has the option of then further decomposing at proxy tensor mode via
+    decomposition table, but we must preserve it to proxy mode to have the
+    choice.)
+
+    Why does functionalization need to also perform the test here?  This is
+    because some CompositeImplicitAutograd decompositions are not functional.
+    If we are eventually going to decompose, we need to do this while we can
+    still turn functionalization back on, so those decompositions get functionalized.
+    So an early decomposition in functionalization may still be necessary.  Note that
+    if proxy tensor decomposition process could turn functionalization back on, this
+    wouldn't be necessary, and maybe that is a useful thing to do anyway because
+    the decomposition table is user specified and a user could violate the functional
+    decomp requirement with a bad decomp.  If this happened, then you could always
+    pass through functionalization.
+    """
+    has_backend_registration = False
+    for a in flat_args:
+        if isinstance(a, torch.Tensor):
+            backend_key = torch._C._parse_dispatch_key(
+                torch._C._dispatch_key_for_device(a.device.type)
+            )
+            assert backend_key is not None
+            # TODO: use func.has_kernel_for_dispatch_key(backend_key)
+            # but this one checks py_impl and CompositeImplicitAutograd
+            # incorrectly shows up as has backend reg here
+            has_backend_registration = torch._C._dispatch_has_kernel_for_dispatch_key(
+                func.name(), backend_key
+            )
+
+            # in theory we should take all backend keys and take the highest priority one
+            # to properly mimic the dispatcher,
+            # this just grabs the first tensor and takes its device key
+            break
+    return not has_backend_registration
 
 
 def return_and_correct_aliasing(func, args, kwargs, out):
@@ -731,17 +824,6 @@ def return_and_correct_aliasing(func, args, kwargs, out):
     # Caching here because torchgen parsing is definitely not fast, and this function is called
     # once for every op in the graph during functionalization.
     schema_info = get_alias_info(func)
-
-    def get_write_alias(x):
-        alias_set = x.alias_set
-        if not alias_set or not x.is_write:
-            return None
-        # torchscript allows for complicated alias sets, but our dispatcher ops only really involve simple aliasing
-        if len(alias_set) != 1:
-            raise AssertionError("Expected alias_set to contain exactly one element")
-        # timeit says next(iter(alias_set)) is faster than list(alias_set)[0] even for
-        # set of size 1 on Python 3.13.
-        return next(iter(alias_set))
 
     def get_arg_from_alias(output_alias, schema_info, args, kwargs):
         new_args, new_kwargs = torch.fx.operator_schemas.normalize_function(  # type: ignore[misc]
@@ -770,14 +852,13 @@ def return_and_correct_aliasing(func, args, kwargs, out):
 
     # For inplace_view ops in particular, we'll try hard to make sure that the wrapper subclass's
     # metadata is set correctly.
-    # See NOTE[SchemaInfo int_tags] above.
-    if _TORCH_TAG_INPLACE_VIEW_INT in schema_info.int_tags:
+    if schema_info.is_inplace_view_op:
         # no_dispatch() to make sure that we secretly change the metadata on the wrapper,
         # but don't end up dispatching the op anywhere else.
         mutated_args = [
             x
             for i, x in enumerate(args)
-            if get_write_alias(schema_info.args[i]) is not None
+            if _get_write_alias(schema_info.args[i]) is not None
         ]
         # Assumption: we have a very small number of inplace_view ops that follow a strict schema:
         # there is only a single argument that gets its metadata mutated.
@@ -803,15 +884,10 @@ def return_and_correct_aliasing(func, args, kwargs, out):
 
     # Next: we need to make sure to return inputs directly, if the output is a mutable alias (e.g. add_()).
 
-    # Compute write aliases once instead of repeatedly.
-    schema_info_outs_write_aliases = [get_write_alias(r) for r in schema_info.outs]
+    schema_info_outs_write_aliases = schema_info.outs_write_aliases
     # simple case: none of our outputs have mutable aliases, so we can return the output as-is
-    if not any(x is not None for x in schema_info_outs_write_aliases):
+    if schema_info_outs_write_aliases is None:
         return out
-
-    # simplifying assumption: we don't have **any** ops with return types like "-> (Tensor(a!), Tensor)"
-    if not all(x is not None for x in schema_info_outs_write_aliases):
-        raise RuntimeError("Unsupported schema: " + str(func._schema))
 
     if len(schema_info_outs_write_aliases) == 1:
         return get_arg_from_alias(
