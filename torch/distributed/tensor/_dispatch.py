@@ -9,6 +9,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
+from torch._library.utils import fill_defaults
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpInfo, OpSchema, OutputSpecType
@@ -32,6 +33,23 @@ except ImportError:
 
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
+
+
+def as_strided_handler(
+    op_call: torch._ops.OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+):
+    args, kwargs = fill_defaults(op_call._schema, args, kwargs)
+    assert not kwargs
+    tensor, size, stride, storage_offset = args
+    if (
+        tensor.size() == tuple(size)
+        and tensor.stride() == tuple(stride)
+        and (storage_offset is None or tensor.storage_offset() == storage_offset)
+    ):
+        return torch.ops.aten.alias.default(tensor)
+    raise RuntimeError("as_strided not supported with DTensor")
 
 
 def is_same_size_handler(
@@ -121,6 +139,7 @@ class OpDispatcher:
             aten.convolution.default: convolution_handler,
             aten.convolution_backward.default: convolution_backward_handler,
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
+            aten.as_strided.default: as_strided_handler,
         }
 
     # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
