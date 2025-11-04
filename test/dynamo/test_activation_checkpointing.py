@@ -294,9 +294,7 @@ class ActivationCheckpointingViaTagsTests(
         x = torch.randn(4, 4, device=device, requires_grad=True)
         y = torch.randn(4, 4, device=device, requires_grad=True)
 
-        fw_compiler = functools.partial(
-            count_ops, freq=1, op=torch.ops.aten.mm.default
-        )
+        fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
         bw_compiler = functools.partial(
             count_ops, freq=3, op=torch.ops.aten.mm.default
         )  # mm recomputed in the bwd
@@ -326,9 +324,7 @@ class ActivationCheckpointingViaTagsTests(
         x = torch.randn(4, 4, device=device, requires_grad=True)
         y = torch.randn(4, 4, device=device, requires_grad=True)
 
-        fw_compiler = functools.partial(
-            count_ops, freq=1, op=torch.ops.aten.mm.default
-        )
+        fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
         bw_compiler = functools.partial(
             count_ops, freq=3, op=torch.ops.aten.mm.default
         )  # mm recomputed in the bwd
@@ -359,9 +355,7 @@ class ActivationCheckpointingViaTagsTests(
         x = torch.randn(4, 4, device=device, requires_grad=True)
         y = torch.randn(4, 4, device=device, requires_grad=True)
 
-        fw_compiler = functools.partial(
-            count_ops, freq=1, op=torch.ops.aten.mm.default
-        )
+        fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
         bw_compiler = functools.partial(
             count_ops, freq=3, op=torch.ops.aten.mm.default
         )  # mm recomputed in the bwd
@@ -395,9 +389,7 @@ class ActivationCheckpointingViaTagsTests(
 
         x = torch.randn(4, 4, device=device, requires_grad=True)
 
-        fw_compiler = functools.partial(
-            count_ops, freq=6, op=torch.ops.aten.mm.default
-        )
+        fw_compiler = functools.partial(count_ops, freq=6, op=torch.ops.aten.mm.default)
         bw_compiler = functools.partial(
             count_ops,
             freqs=[2, 18],
@@ -432,9 +424,7 @@ class ActivationCheckpointingViaTagsTests(
         x = torch.randn(4, 4, device=device, requires_grad=True)
         y = torch.randn(4, 4, device=device, requires_grad=True)
 
-        fw_compiler = functools.partial(
-            count_ops, freq=2, op=torch.ops.aten.mm.default
-        )
+        fw_compiler = functools.partial(count_ops, freq=2, op=torch.ops.aten.mm.default)
         bw_compiler = functools.partial(
             count_ops, freq=6, op=torch.ops.aten.mm.default
         )  # mm recomputed in the bwd
@@ -895,7 +885,9 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             default_partition,
         ],
     )
-    def test_compile_selective_checkpoint_must_not_recompute_gemm(self, device, partition_fn):
+    def test_compile_selective_checkpoint_must_not_recompute_gemm(
+        self, device, partition_fn
+    ):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
                 torch.ops.aten.mm.default,

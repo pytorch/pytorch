@@ -1622,7 +1622,9 @@ def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
             break
 
 
-def cleanup_recompute_tags(joint_module: fx.GraphModule, *, is_default_partition: bool) -> fx.GraphModule:
+def cleanup_recompute_tags(
+    joint_module: fx.GraphModule, *, is_default_partition: bool
+) -> fx.GraphModule:
     """
     If there are two consecutive checkpointed blocks with no operator in
     between, we would still want to stash the tensor at the boundary of
