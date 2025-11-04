@@ -17,7 +17,6 @@ from enum import auto, Enum
 from itertools import chain
 from typing import (
     Any,
-    Callable,
     cast,
     ClassVar,
     Generic,
@@ -71,7 +70,7 @@ from ..virtualized import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, MutableMapping, Sequence
+    from collections.abc import Callable, Iterator, MutableMapping, Sequence
 
     from torch.fx import GraphModule
 
@@ -780,7 +779,7 @@ class DataTypePropagation:
             # we can infer output node if it only have 1 arg
             return None
 
-        if node.target == operator.getitem:
+        if node.target is operator.getitem:
             node_arg = node.args[0]
             assert isinstance(node_arg, torch.fx.Node), type(node_arg)
             return self.deduce_node_dtype(node_arg)
@@ -2185,6 +2184,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         name: str,
         reduction_type: ReductionType,
         value: CSEVariable,
+        extra_meta: dict[str, Any],
     ) -> None:
         raise NotImplementedError
 

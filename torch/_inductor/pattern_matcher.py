@@ -49,9 +49,9 @@ import textwrap
 import typing
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from collections.abc import Collection, Generator, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Generator, Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Callable, NoReturn, Optional, Protocol, TypeVar, Union
+from typing import Any, NoReturn, Optional, Protocol, TypeVar, Union
 from typing_extensions import Self, TypeIs
 
 import torch
@@ -2099,7 +2099,7 @@ def fx_to_pattern(
         ) -> PatternExpr:
             process_arg_fn = process_arg
             # Indexing is critical for matching getitem nodes, so we can't ignore int args here
-            if target == operator.getitem:
+            if target is operator.getitem:
 
                 def process_arg_fn_impl(
                     x: T,
