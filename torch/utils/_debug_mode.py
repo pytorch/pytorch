@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
+import traceback
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
@@ -12,6 +13,7 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 from torch.utils._pytree import tree_all, tree_map
+from torch.utils._traceback import CapturedTraceback
 
 
 if TYPE_CHECKING:
@@ -19,6 +21,7 @@ if TYPE_CHECKING:
 
 
 __all__ = ["DebugMode", "get_active_debug_mode"]
+
 
 REDISTRIBUTE_FUNC = "redistribute_input"
 _DISPATCH_RECORD_HOOKS: list[Callable] = []
@@ -103,6 +106,18 @@ def default_hash_fn(t: torch.Tensor, use_scalar: bool = False) -> torch.Tensor:
     return out
 
 
+def _get_stack_trace() -> str:
+    from torch.fx.experimental.symbolic_shapes import uninteresting_files
+
+    summary = CapturedTraceback.extract().summary()
+    summary = summary[:-4]  # filter out DebugMode frames
+    summary = [
+        frame for frame in summary if frame.filename not in uninteresting_files()
+    ]
+    summary = traceback.StackSummary.from_list(summary)
+    return "".join(summary.format())
+
+
 class _DebugCall:
     """Base class for tracking operator calls in DebugMode"""
 
@@ -111,8 +126,11 @@ class _DebugCall:
         call_depth: int,
         record: Optional[dict[str, Any]] = None,
         log: Optional[dict[str, Any]] = None,
+        stack: bool = False,
     ):
         self.call_depth = call_depth
+        if stack:
+            self.stack_trace = _get_stack_trace()
 
         # results from dispatch hooks
         self.record = record
@@ -136,8 +154,15 @@ class _DebugCall:
 class _OpCall(_DebugCall):
     """Normal operator call"""
 
-    def __init__(self, op, args: tuple, kwargs: dict, call_depth: int):
-        super().__init__(call_depth)
+    def __init__(
+        self,
+        op,
+        args: tuple,
+        kwargs: dict,
+        call_depth: int,
+        stack: bool = False,
+    ):
+        super().__init__(call_depth, stack=stack)
         self.op = op
         self.args = args
         self.kwargs = kwargs
@@ -197,9 +222,15 @@ class _RedistributeCall(_DebugCall):
     """Redistribute call from DTensor dispatch"""
 
     def __init__(
-        self, arg, src_placement, dst_placement, transform_info_str, call_depth
+        self,
+        arg,
+        src_placement,
+        dst_placement,
+        transform_info_str,
+        call_depth,
+        stack=False,
     ):
-        super().__init__(call_depth)
+        super().__init__(call_depth, stack=stack)
         self.arg = arg
         self.src_placement = src_placement
         self.dst_placement = dst_placement
@@ -244,8 +275,8 @@ class _RedistributeCall(_DebugCall):
 class _NNModuleCall(_DebugCall):
     """Designates entering an nn.Module's forward method"""
 
-    def __init__(self, module_name: str, call_depth: int):
-        super().__init__(call_depth)
+    def __init__(self, module_name: str, call_depth: int, stack: bool = False):
+        super().__init__(call_depth, stack=stack)
         self.module_name = module_name
 
     def stringify_args(self, attributes: list[str]) -> None:
@@ -300,6 +331,7 @@ class DebugMode(TorchDispatchMode):
         record_tensor_attributes=None,
         record_nn_module=False,
         store_original_args=False,
+        record_stack_trace=False,
     ):
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
@@ -309,12 +341,16 @@ class DebugMode(TorchDispatchMode):
         # Pushes DebugMode onto the torchfunction stack, and records __torch_function__ calls as well.
         # WARNING: currently incompatible with torch.compile due to dynamo guard failures.
         self.record_torchfunction = record_torchfunction
+
         # Records __torch_dispatch__ calls on FakeTensors.
         self.record_faketensor = record_faketensor
+
         # Records __torch_dispatch__ calls on real tensors.
         self.record_realtensor = record_realtensor
+
         # Optional list[str] of tensor attributes, to be annotated in the string dump.
         self.record_tensor_attributes = record_tensor_attributes or []
+
         # Uses ModTracker to record nn.Module entrances, as _NNModuleCall entries.
         # This flag currently has no effect on torch.compiled-regions.
         self.record_nn_module = record_nn_module
@@ -326,6 +362,9 @@ class DebugMode(TorchDispatchMode):
         # If True, stores call args/kwargs in logs, without immediately stringifying.
         # Defaults to False for memory concerns.
         self.store_original_args = store_original_args
+
+        # For stack trace recording, stores log call stack traces in .stack_trace.
+        self.record_stack_trace = record_stack_trace
 
         self.operators = []
         self.call_depth = 0
@@ -346,7 +385,9 @@ class DebugMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
-        self._record_call(_OpCall(func, args, kwargs, self.call_depth))
+        self._record_call(
+            _OpCall(func, args, kwargs, self.call_depth, stack=self.record_stack_trace)
+        )
 
         try:
             self.call_depth += 1
@@ -361,7 +402,9 @@ class DebugMode(TorchDispatchMode):
         # Record the operation with its call depth
         call = None
         if torch.distributed.tensor.DTensor in types:
-            call = _OpCall(func, args, kwargs, self.call_depth)
+            call = _OpCall(
+                func, args, kwargs, self.call_depth, stack=self.record_stack_trace
+            )
             self._record_call(call)
             return NotImplemented
         elif FakeTensor in types or isinstance(
@@ -369,11 +412,23 @@ class DebugMode(TorchDispatchMode):
         ):
             if self.record_faketensor:
                 if func != torch.ops.prim.device.default:
-                    call = _OpCall(func, args, kwargs, self.call_depth + 1)
+                    call = _OpCall(
+                        func,
+                        args,
+                        kwargs,
+                        self.call_depth + 1,
+                        stack=self.record_stack_trace,
+                    )
                     self._record_call(call)
         elif len(types) == 0:
             if self.record_realtensor:
-                call = _OpCall(func, args, kwargs, self.call_depth + 1)
+                call = _OpCall(
+                    func,
+                    args,
+                    kwargs,
+                    self.call_depth + 1,
+                    stack=self.record_stack_trace,
+                )
                 self._record_call(call)
 
         result = func(*args, **kwargs)
@@ -435,6 +490,7 @@ class DebugMode(TorchDispatchMode):
                     dst_placement=dst_placement,
                     transform_info_str=transform_info_str,
                     call_depth=self.call_depth + 1,
+                    stack=self.record_stack_trace,
                 )
             )
             self.call_depth += 1

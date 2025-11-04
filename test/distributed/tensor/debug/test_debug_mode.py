@@ -118,7 +118,9 @@ class TestDTensorDebugMode(TestCase):
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
         y_dtensor = DTensor.from_local(y, mesh, [Shard(1)], run_check=False)
 
-        with DebugMode(record_torchfunction=True) as debug_mode:
+        with DebugMode(
+            record_torchfunction=True, record_stack_trace=True
+        ) as debug_mode:
             z = x_dtensor + y_dtensor
             z.sum().backward()
 
@@ -150,6 +152,9 @@ class TestDTensorDebugMode(TestCase):
       aten::_to_copy(t: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu)
       aten::detach(t: f32[1, 8])""",
         )
+
+        # check stack trace
+        self.assertTrue("z.sum().backward()" in debug_mode.operators[-1].stack_trace)
 
     def test_debug_mode_densor_redistribution_trace(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))

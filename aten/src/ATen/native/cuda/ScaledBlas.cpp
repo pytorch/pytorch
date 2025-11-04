@@ -591,7 +591,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     if ((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
         // cuBLAS only supports tiled 1D factor layout for 1D block scaling, no 2D block scales
         ||  (dprops->major >= 10 && (!scale_a.sizes().empty() || !scale_b.sizes().empty()))) {
-      TORCH_CHECK_VALUE(out.dtype() == kBFloat16, "Only bf16 high precision output types are supported for row-wise scaling.");
+      TORCH_CHECK_VALUE(out.dtype() == kBFloat16 || out.dtype() == kHalf, "Only bf16 and fp16 high precision output types are supported for row-wise scaling.");
       return _scaled_rowwise_rowwise(
           mat1,
           mat2,
@@ -736,7 +736,7 @@ _scaled_rowwise_rowwise(
   if (((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
       // cuBLAS only supports tiled 1D factor layout for 1D block scaling, no 2D block scales
       ||  (dprops->major == 10 && (scale_a.sizes().size() || scale_b.sizes().size())))) {
-    TORCH_CHECK_VALUE(out.dtype() == kBFloat16, "Only bf16 high precision output types are supported for row-wise scaling.");
+    TORCH_CHECK_VALUE(out.dtype() == kBFloat16 || out.dtype() == kHalf, "Only bf16 and fp16 high precision output types are supported for row-wise scaling.");
     at::cuda::detail::f8f8bf16_rowwise(
         mat_a,
         mat_b,
