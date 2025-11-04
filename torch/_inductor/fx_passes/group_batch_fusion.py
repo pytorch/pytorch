@@ -958,6 +958,7 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
                 )
                 batch_op.meta["example_value"] = self.op(
                     stack_inputs.meta["example_value"],
+                    # pyrefly: ignore [bad-argument-type]
                     inplace=subset[0].kwargs.get("inplace", False),
                 )
             else:

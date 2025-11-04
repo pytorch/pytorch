@@ -8,11 +8,11 @@
 #define MY_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type) /* empty */
 
 #define MY_PRIVATE_CASE_TYPE_USING_HINT(...) \
-  AT_PRIVATE_CASE_TYPE_USING_HINT_TMPL(      \
+  THO_PRIVATE_CASE_TYPE_USING_HINT_TMPL(     \
       MY_PRIVATE_CHECK_SELECTIVE_BUILD, __VA_ARGS__)
 
 #define MY_DISPATCH_CASE(...) \
-  AT_DISPATCH_CASE_TMPL(MY_PRIVATE_CASE_TYPE_USING_HINT, __VA_ARGS__)
+  THO_DISPATCH_CASE_TMPL(MY_PRIVATE_CASE_TYPE_USING_HINT, __VA_ARGS__)
 
 // MY_RECORD_KERNEL_FUNCTION_DTYPE is a prelude to switch
 // statement. For testing, we just avoid unused variable warning:
@@ -24,7 +24,7 @@
 #define MY_CHECK_NOT_IMPLEMENTED(...) default_count++
 
 #define MY_DISPATCH_SWITCH(...) \
-  AT_DISPATCH_SWITCH_TMPL(      \
+  THO_DISPATCH_SWITCH_TMPL(     \
       MY_RECORD_KERNEL_FUNCTION_DTYPE, MY_CHECK_NOT_IMPLEMENTED, __VA_ARGS__)
 
 // MY_CASE_FUNCTION is called in a case block. For testing, we count
@@ -45,12 +45,12 @@
 #define DEFINE_ITEM(TYPE, SCALARTYPE) ScalarType::SCALARTYPE,
 
 #define MY_DISPATCH_V2(TYPE, NAME, BODY, ...) \
-  AT_DISPATCH_V2_TMPL(                        \
+  THO_DISPATCH_V2_TMPL(                       \
       MY_DISPATCH_SWITCH,                     \
       MY_DISPATCH_CASE,                       \
       TYPE,                                   \
       NAME,                                   \
-      AT_WRAP(BODY),                          \
+      THO_WRAP(BODY),                         \
       __VA_ARGS__)
 
 #define TEST_DISPATCH_V2(NAME, EXPECTEDCOUNT, ...)                             \

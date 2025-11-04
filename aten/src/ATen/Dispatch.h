@@ -63,7 +63,7 @@ TORCH_API void record_kernel_function_dtype(std::string name);
   } while (0)
 
 #define AT_PRIVATE_CASE_TYPE_USING_HINT(enum_type, HINT, ...) \
-  AT_PRIVATE_CASE_TYPE_USING_HINT_TMPL(                       \
+  THO_PRIVATE_CASE_TYPE_USING_HINT_TMPL(                      \
       AT_PRIVATE_CHECK_SELECTIVE_BUILD, enum_type, HINT, __VA_ARGS__)
 
 #define AT_DISPATCH_CASE(enum_type, ...) \
@@ -181,7 +181,7 @@ TORCH_API void record_kernel_function_dtype(std::string name);
 // use it to shut up warnings about unused store.
 
 #define AT_DISPATCH_SWITCH(TYPE, NAME, ...) \
-  AT_DISPATCH_SWITCH_TMPL(                  \
+  THO_DISPATCH_SWITCH_TMPL(                 \
       RECORD_KERNEL_FUNCTION_DTYPE,         \
       TORCH_CHECK_NOT_IMPLEMENTED,          \
       TYPE,                                 \

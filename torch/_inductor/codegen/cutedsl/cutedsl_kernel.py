@@ -3,7 +3,8 @@ import contextlib
 import dataclasses
 import logging
 import textwrap
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import sympy
 
@@ -122,8 +123,6 @@ class CuteDSLTemplateKernel(Kernel):
 
     def kexpr(self, expr: sympy.Expr) -> str:
         """Convert sympy expression to CuteDSL string representation."""
-        # For CuteDSL, we use standard Python string conversion
-        # since CuteDSL uses Python syntax for expressions
         return str(expr)
 
     def gen_imports(self) -> str:
@@ -138,6 +137,7 @@ class CuteDSLTemplateKernel(Kernel):
             import cuda.bindings.driver as cuda
             from cutlass._mlir.dialects import math as mlir_math
             import operator
+            from torch._inductor.codegen.cutedsl._cutedsl_utils import ssa_to_indexable, result_to_ssa
             """
         )
         return imports.getvalue()
@@ -418,52 +418,32 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
     def load(self, name: str, index: sympy.Expr):
         """Handle loading from tensor or fixed(template args) input for CuteDSL."""
         if name not in self.fixed_inputs:
-            index_str = self._process_indexing(index)
             var = self._add_kernel_input(name)
             buffer = V.graph.get_buffer(name)
             var_dtype = buffer.dtype
 
-            # Get the CuteDSL dtype mapping
             cute_dtype = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
                 var_dtype, "cutlass.Float32"
             )
+            renamed_index = self.kernel.rename_indexing(index)
 
-            # NB
-            # This assumes single-value loads which is not generally the case but is a workaround
-            # since we don't have gather support yet. We do loads in non-SSA form then convert
-            # back to SSA form for any remaining operations over the loaded values.
-            #
-            # Pattern:
-            #   index_frag = cute.make_fragment(1, cutlass.Int32)
-            #   index_frag.store(index)
-            #   val_frag = cute.make_fragment(1, dtype)
-            #   index = index_frag[0]
-            #   val_frag[0] = tensor[index]
-            #   result = val_frag.load()
-
-            index_frag = self.kernel.cse.newvar(dtype=torch.int32)
-            self.kernel.body.writeline(
-                f"{index_frag} = cute.make_fragment(1, cutlass.Int32)"
+            idx_var = self._emit_scalar_fragment(
+                self.kernel.kexpr(renamed_index), "cutlass.Int32", torch.int32
             )
-            self.kernel.body.writeline(f"{index_frag}.store({index_str})")
 
             val_frag = self.kernel.cse.newvar(dtype=var_dtype)
             self.kernel.body.writeline(
                 f"{val_frag} = cute.make_fragment(1, {cute_dtype})"
             )
 
-            index_var = self.kernel.cse.newvar(dtype=torch.int32)
-            self.kernel.body.writeline(f"{index_var} = {index_frag}[0]")
-            self.kernel.body.writeline(f"{val_frag}[0] = ({var}[{index_var}])")
+            self.kernel.body.writeline(f"{val_frag}[0] = ({var}[{idx_var}])")
 
             final_expr = f"{val_frag}.load()"
 
-            # Handle upcast to fp32 if needed
             if (
                 var_dtype in (torch.float16, torch.bfloat16)
                 and config.triton.codegen_upcast_to_fp32
             ):
-                # Apply dtype conversion after fragment load
                 final_expr = f"({final_expr}).to(cutlass.Float32)"
                 var_dtype = torch.float32
 
@@ -478,10 +458,24 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         value = self.fixed_inputs[name]
         dtype = self._get_input_dtype(name)
 
-        # ensure CSE wrapping
         return self.kernel.cse.generate(
             self.kernel.body, value, bounds=ValueRanges.unknown(), dtype=dtype
         )
+
+    def _emit_scalar_fragment(
+        self, expr_str: str, cute_dtype: str, torch_dtype: torch.dtype
+    ) -> str:
+        """
+        Convert SSA expression to indexable scalar for tensor loads.
+
+        Workaround for lack of gather support: SSA values cannot be used directly
+        as indices. This generates code to convert SSA → indexable scalar.
+        """
+        result = self.kernel.cse.newvar(dtype=torch_dtype)
+        self.kernel.body.writeline(
+            f"{result} = ssa_to_indexable({expr_str}, {cute_dtype})"
+        )
+        return str(result)
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""

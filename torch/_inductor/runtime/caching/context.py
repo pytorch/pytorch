@@ -7,9 +7,10 @@ information used in caching decisions for PyTorch's Inductor runtime.
 import json
 from abc import ABC, abstractmethod
 from base64 import b64encode
+from collections.abc import Sequence
 from functools import cache
 from hashlib import sha256
-from typing import Any, Sequence
+from typing import Any
 from typing_extensions import override, TypedDict
 
 import torch
