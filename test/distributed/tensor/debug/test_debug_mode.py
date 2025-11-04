@@ -420,7 +420,7 @@ class TestDTensorDebugMode(TestCase):
             out.backward()
 
         sum_op = [
-            op for op in debug_mode.operators if str(op) == "aten.sum.dim_IntList"
+            op for op in debug_mode.operators if str(op.op) == "aten.sum.dim_IntList"
         ][-1]
         self.assertTrue("self.l2(self.l1(x))" in sum_op.fwd_stack_trace)
 
