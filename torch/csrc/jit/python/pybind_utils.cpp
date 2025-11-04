@@ -586,10 +586,7 @@ py::object toPyObject(IValue ivalue) {
     return py::none();
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
-    if (tensor.unsafeGetTensorImpl()->is_wrapped_number() ||
-        (tensor._is_zerotensor() &&
-         tensor.unsafeGetTensorImpl()->is_wrapped_number() &&
-         tensor.dim() == 0)) {
+    if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
       TORCH_INTERNAL_ASSERT(
           tensor.device().is_cpu() ||
           (tensor._is_zerotensor() && tensor.dim() == 0));
@@ -600,7 +597,9 @@ py::object toPyObject(IValue ivalue) {
       auto scalar_type = tensor.scalar_type();
       switch (scalar_type) {
         case at::ScalarType::Bool:
-          return py::cast(*tensor.const_data_ptr<bool>());
+          return (tensor._is_zerotensor())
+              ? py::cast(false)
+              : py::cast(*tensor.const_data_ptr<bool>());
         case at::ScalarType::Long:
           return (tensor._is_zerotensor())
               ? py::cast(int64_t(0))
@@ -615,7 +614,9 @@ py::object toPyObject(IValue ivalue) {
               : py::cast(*tensor.const_data_ptr<double>());
         case at::ScalarType::ComplexDouble:
           // TODO: https://github.com/pytorch/pytorch/issues/77134
-          return py::cast(static_cast<std::complex<double>>(
+          return (tensor._is_zerotensor())
+              ? py::cast(std::complex<double>(0.0, 0.0))
+              : py::cast(static_cast<std::complex<double>>(
               *tensor.const_data_ptr<c10::complex<double>>()));
         default:
           TORCH_CHECK(

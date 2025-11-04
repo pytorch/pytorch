@@ -1009,7 +1009,7 @@ static Device correct_out_device(const Tensor& self, const Tensor& other) {
   }
 }
 
-Tensor send_to_meta(const Tensor& self, const Device& device) {
+static Tensor send_to_meta(const Tensor& self, const Device& device) {
   Tensor out_meta;
   if (self._is_zerotensor() && self.unsafeGetTensorImpl()->is_wrapped_number()) {
     out_meta = at::_efficientzerotensor(self.sizes(), self.options().device(device));
