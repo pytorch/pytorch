@@ -469,7 +469,7 @@ C10_API std::string GetExceptionString(const std::exception& e);
 
 namespace c10::detail {
 template <typename... Args>
-decltype(auto) torchCheckMsgImpl(const char* /*msg*/, const Args&... args) {
+auto torchCheckMsgImpl(const char* /*msg*/, const Args&... args) {
   return ::c10::str(args...);
 }
 inline C10_API const char* torchCheckMsgImpl(const char* msg) {

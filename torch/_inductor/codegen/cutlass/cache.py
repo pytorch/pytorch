@@ -27,11 +27,11 @@ CONFIG_PREFIX: str = "configs"
 
 def get_config_request_key(
     arch: str,
-    cuda_version: str,
+    toolkit_version: str,
     instantiation_level: str,
 ) -> str:
     """
-    Return a key for the full ops, based on cutlass key, arch, cuda version, instantiation level, and serialization.py file hash.
+    Return a key for the full ops, based on cutlass key, arch, toolkit version, instantiation level, and serialization.py file hash.
     """
 
     # Get hash of serialization.py and cutlass_utils.py files using their module file paths
@@ -47,7 +47,7 @@ def get_config_request_key(
         [
             cutlass_key().hex(),
             arch,
-            cuda_version,
+            toolkit_version,
             instantiation_level,
             serialization_hash,
             cutlass_utils_hash,

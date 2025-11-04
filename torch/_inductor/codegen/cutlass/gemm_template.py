@@ -622,7 +622,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 #include "cutlass/gemm/device/gemm_universal.h"
                 #include "cutlass/gemm/device/gemm_universal_adapter.h"
                 #include "cutlass/gemm/kernel/gemm_universal.hpp"
-                //#include "cutlass/gemm/device/gemm_sparse.h"
                 #include "cutlass/gemm/collective/collective_builder.hpp"
                 #include "cutlass/epilogue/collective/collective_builder.hpp"
                 #include "cutlass/epilogue/collective/default_epilogue.hpp"
@@ -636,6 +635,13 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 #include "cutlass/util/tensor_view_io.h"
             """
         )
+        if self.device_type != "xpu":
+            # XPU SYCL-TLA does not support sparse gemm yet
+            res.splice(
+                """
+                #include "cutlass/gemm/device/gemm_sparse.h"
+                """
+            )
         if inductor_cutlass_config.generate_test_runner and not is_dynamic(
             *self.input_nodes, self.output_node
         ):
@@ -1001,7 +1007,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         No function arguments.
 
         Returns:
-            List[Tuple[str, cutlass_gemm_op.GemmOperation]]: A list of (cutlass_name, GemmOperation)
+            List[tuple[str, cutlass_gemm_op.GemmOperation]]: A list of (cutlass_name, GemmOperation)
             tuples that are compatible with the operation requirements of this template.
         """
         assert cutlass_utils.try_import_cutlass()
@@ -1571,7 +1577,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             op (cutlass_library.gemm_op.GemmOperation): This is the core GEMM operation that we are defining and rendering.
 
         Returns:
-            Tuple[str, str]: A tuple where the first part is a string that constitutes the defined GEMM operation in C++
+            tuple[str, str]: A tuple where the first part is a string that constitutes the defined GEMM operation in C++
                              code (render) and the second part is the string that specifies the operation type.
         """
         assert cutlass_utils.try_import_cutlass()
@@ -1863,7 +1869,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
             op (cutlass_library.gemm_op.GemmOperation): This is the core GEMM operation that we are defining and rendering.
 
         Returns:
-            Tuple[str, str]: A tuple where the first part is a string that constitutes the defined GEMM operation in C++
+            tuple[str, str]: A tuple where the first part is a string that constitutes the defined GEMM operation in C++
                              code (render) and the second part is the string that specifies the operation type.
         """
         assert cutlass_utils.try_import_cutlass()

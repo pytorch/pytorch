@@ -735,6 +735,7 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
 
         self.ensure_dll_loaded()
         if not out.is_xpu:
+            # no need to update_workspace_size for XPU.
             self.update_workspace_size()
 
         args = [c_void_p(tensor.data_ptr()) for tensor in list(input_tensors) + [out]]

@@ -58,15 +58,18 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     _quantize_rowwise,
     _quantize_tensorwise,
+    GPU_TYPE,
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
-    GPU_TYPE,
 )
+
 
 # We don't need triton in this test suite.
 HAS_XPU = torch.xpu.is_available()
 HAS_CUDA = torch.cuda.is_available()
 HAS_GPU = HAS_CUDA or HAS_XPU
+SM90OrLater = HAS_XPU or SM90OrLater
+SM80OrLater = HAS_XPU or SM80OrLater
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA_AND_TRITON:
@@ -221,6 +224,7 @@ class TestCutlassBackend(TestCase):
         self.assertTrue(os.path.exists(cutlass_mock_pydot_path))
         self.assertTrue(os.path.exists(cutlass_mock_scipy_path))
 
+    @skipIfXpu(msg="to be enabled")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_threshold(self):
@@ -271,10 +275,12 @@ class TestCutlassBackend(TestCase):
 
         self.assertIsNotNone(cutlass_key())
 
-    @skipIfXpu(msg="""Mismatched elements: 3193 / 8388608 (0.0%)
+    @skipIfXpu(
+        msg="""Mismatched elements: 3193 / 8388608 (0.0%)
 Greatest absolute difference: 0.00390625 at index (1896, 368) (up to 1e-05 allowed)
-Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowed)""")
-    @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
+Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowed)"""
+    )
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_subproc_mm(self):
         """
@@ -302,8 +308,8 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
             Y = torch.mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
-    @skipIfXpu(msg="cutlass kernel compilation error")
-    @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
+    @skipIfXpu(msg="SYCL-TLA kernel compilation error")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_cutlass_backend_subproc_addmm(self, dtype):
@@ -345,7 +351,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
                 Y = torch.addmm(x, a, b, alpha=alpha, beta=beta)
                 torch.testing.assert_close(Y_compiled, Y)
 
-    @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_subproc_bmm(self):
         """
@@ -370,7 +376,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
             Y = torch.bmm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
-    @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_diff_matmul_share_same_kernel(self, dynamic):
@@ -413,7 +419,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
                 2,
             ).run(codes[0])
 
-    @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_number_mm_precompiles(self):
         torch._dynamo.utils.counters.clear()
@@ -464,7 +470,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
             )
 
     # NOTE: right now tuned_mm doesn't support cutlass 2x, which is used by A100
-    @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
     @parametrize("use_aoti", (False, True))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
@@ -496,7 +502,10 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
         model = MyModel().to(GPU_TYPE)
 
         inputs = [
-            (torch.randn(M, K).to(GPU_TYPE).to(dtype), torch.randn(K, N).to(GPU_TYPE).to(dtype))
+            (
+                torch.randn(M, K).to(GPU_TYPE).to(dtype),
+                torch.randn(K, N).to(GPU_TYPE).to(dtype),
+            )
             for (M, N, K) in shapes
         ]
 
@@ -530,6 +539,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
 
             torch.testing.assert_close(actual, expected)
 
+    @skipIfXpu(msg="fp8 not supported on xpu")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
     @parametrize("use_aoti", (False, True))
@@ -622,8 +632,8 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
 
             torch.testing.assert_close(actual, expected, rtol=1e-2, atol=0.05)
 
-    @skipIfXpu(msg="cutlass kernel compilation error")
-    @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
+    @skipIfXpu(msg="SYCL-TLA kernel compilation error")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
     @parametrize("use_aoti", (False, True))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
@@ -703,7 +713,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
 
                 torch.testing.assert_close(actual, expected)
 
-    @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
     @parametrize("use_aoti", (False, True))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
@@ -737,7 +747,13 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
         for B, M, N, K in shapes:
             if use_expand:
                 # Create A using unsqueeze and expand
-                A = torch.randn(M, K).to(GPU_TYPE).to(dtype).unsqueeze(0).expand(B, -1, -1)
+                A = (
+                    torch.randn(M, K)
+                    .to(GPU_TYPE)
+                    .to(dtype)
+                    .unsqueeze(0)
+                    .expand(B, -1, -1)
+                )
             else:
                 # Original method
                 A = torch.randn(B, M, K).to(GPU_TYPE).to(dtype)
@@ -769,6 +785,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
                 actual = [compiled_model(*input) for input in inputs]
             torch.testing.assert_close(actual, expected)
 
+    @skipIfXpu(msg="streamk kernels not supported on xpu cutlass backend yet")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_regular_mm_streamk(
@@ -811,6 +828,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
                 # matmuls involved. Many small addition differences add up.
                 torch.testing.assert_close(Y_compiled, Y, atol=0.01, rtol=0.01)
 
+    @skipIfXpu(msg="streamk kernels not supported on xpu cutlass backend yet")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     def test_streamk_with_dynamic(
         self,
@@ -835,6 +853,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
             with self.assertRaisesRegex(InductorError, r".*NoValidChoicesError.*"):
                 _ = torch.compile(torch.mm, dynamic=True)(a, b)
 
+    @skipIfXpu(msg="streamk kernels not supported on xpu cutlass backend yet")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     def test_streamk_with_static(
         self,
@@ -895,7 +914,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cutlass.cutlass_max_profiling_configs": 4,
-                "cuda.cuda_version": "12.2",  # required to enable the Kernels we need
+                "cuda.version": "12.2",  # required to enable the Kernels we need
             }
         ):
             counters["inductor"]["cutlass_epilogue_fusion_counter"] = 0
@@ -908,7 +927,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
             )
             torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
 
-    @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     def test_max_autotune_cutlass_backend_simple_fusion_fp16_fp32acc(self):
         def mm(a, b):
             return (a @ b) * 3.0
@@ -917,7 +936,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
             fp16=True, expected_fuse_count=0, mm=mm
         )
 
-    @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     def test_max_autotune_cutlass_backend_chained_fusion_fp16_fp32acc(self):
         def mm(a, b):
             return (a @ b) * 3.3 - 1.234
@@ -926,7 +945,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
             fp16=True, expected_fuse_count=0, mm=mm
         )
 
-    @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     def test_max_autotune_cutlass_backend_relu_fusion_fp16_fp32acc(self):
         def mm(a, b):
             return torch.nn.functional.relu((a @ b) * 3.3 - 1.234)
@@ -936,7 +955,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
             fp16=True, expected_fuse_count=0, mm=mm
         )
 
-    @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     def test_max_autotune_cutlass_backend_relu6_fusion_fp16_fp32acc(self):
         def mm(a, b):
             return torch.clamp(torch.nn.functional.relu(a @ b), max=6.0)
@@ -946,7 +965,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
             fp16=True, expected_fuse_count=0, mm=mm
         )
 
-    @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     def test_max_autotune_cutlass_backend_no_fusion_dtype_mismatch(self):
         def mm(a, b):
             # this should not be fused, since the output dtype is different from the matmul dtype
@@ -956,7 +975,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
             fp16=True, expected_fuse_count=0, mm=mm
         )
 
-    @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     def test_max_autotune_cutlass_backend_shape_dependent_normalization_fusion(self):
         def mm(a, b):
             return (a @ b) / b.size(1)
@@ -965,8 +984,9 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
             fp16=True, expected_fuse_count=0, mm=mm
         )
 
+    @skipIfXpu(msg="int_mm not supported on xpu cutlass backend")
     # TODO: Enable dynamic test cases when dynamic support is added.
-    @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False,))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_int_mm(
@@ -1001,7 +1021,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
             torch.testing.assert_close(Y_compiled, Y)
 
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     def test_force_cutlass_backend_aoti_dynamic(self):
         class MyModel(torch.nn.Module):
             def forward(self, x, w):
@@ -1072,7 +1092,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
             torch.testing.assert_close(expected, actual)
 
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     def test_aoti_workspace_ptr(self):
         class MyModel(torch.nn.Module):
             def forward(self, x, w):
@@ -1150,6 +1170,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
                 cutlass_kernels_count += 1
         assert cutlass_kernels_count > 0
 
+    @skipIfXpu(msg="to be enabled")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_op_denylist(
@@ -1195,6 +1216,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
                             cuda_template_count += 1
                     assert cuda_template_count > 0, "No CUTLASSTemplateCaller choices"
 
+    @skipIfXpu(msg="to be enabled")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_op_allowlist(
@@ -1240,6 +1262,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
                             cuda_template_count += 1
                     assert cuda_template_count > 0, "No CUTLASSTemplateCaller choices"
 
+    @skipIfXpu(msg="fp8 not supported on xpu cutlass backend yet")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_fp8_scaled_mm_fast_accum_filtering(
@@ -1326,7 +1349,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
         run_test(True)
         run_test(False)
 
-    @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_shape_coverage_mm(
         self,
@@ -1340,12 +1363,18 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
         """
 
         inputs = [
-            (torch.randn(128, 500).to(GPU_TYPE).half(), torch.randn(500, 576).to(GPU_TYPE).half()),
+            (
+                torch.randn(128, 500).to(GPU_TYPE).half(),
+                torch.randn(500, 576).to(GPU_TYPE).half(),
+            ),
             (
                 torch.randn(500, 128).to(GPU_TYPE).half(),
                 torch.randn(128, 576).to(GPU_TYPE).half(),
             ),
-            (torch.randn(128, 250).to(GPU_TYPE).half(), torch.randn(250, 576).to(GPU_TYPE).half()),
+            (
+                torch.randn(128, 250).to(GPU_TYPE).half(),
+                torch.randn(250, 576).to(GPU_TYPE).half(),
+            ),
             (
                 torch.randn(250, 128).to(GPU_TYPE).half(),
                 torch.randn(128, 576).to(GPU_TYPE).half(),
@@ -1461,6 +1490,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
             m4, 4, "Wrong max alignment. Should have been 4 (due to float32 dtype )."
         )
 
+    @skipIfXpu(msg="to be enabled")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_standalone_runner(self):
@@ -1539,7 +1569,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
             os.remove(cu_file.name)
             os.remove(exe_file.name)
 
-    @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_integration(self):
         """
@@ -1581,6 +1611,12 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
             num_ops = int(match.group(1))
             self.assertTrue(num_ops > 0, "The number of ops should be greater than 0")
 
+    @skipIfXpu(
+        msg="""Mismatched elements: 51976 / 1048576 (5.0%)
+Greatest absolute difference: 0.0234375 at index (55, 497) (up to 1e-05 allowed)
+Greatest relative difference: 3536.0 at index (488, 127) (up to 0.016 allowed)
+"""
+    )
     @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
     def test_maybe_append_choice_caching(self):
         """
@@ -1812,6 +1848,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
         ):
             _ = torch.compile(model)(B)
 
+    @skipIfXpu(msg="evt not supported on xpu cutlass backend yet")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @use_evt_config
@@ -1864,6 +1901,11 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
             _ = torch.compile(model)(B)
         self.assertTrue(time.time() - start_time < 60)
 
+    @skipIfXpu(
+        msg="Mismatched elements: 13 / 1048576 (0.0%) "
+        "Greatest absolute difference: 3.0517578125e-05 at index (626, 846) (up to 1e-05 allowed)"
+        "Greatest relative difference: 0.1427001953125 at index (81, 861) (up to 0.001 allowed)"
+    )
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("use_aoti", (False, True))
@@ -1898,7 +1940,8 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
             torch.testing.assert_close(actual, expected)
         self.assertTrue(time.time() - start_time < 50)
 
-    @unittest.skipIf(not HAS_XPU and not SM90OrLater, "need sm_90")
+    @skipIfXpu(msg="evt not supported on xpu cutlass backend yet")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
     @evt_all_shapes
@@ -1910,6 +1953,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
 
         self.run_evt_test(TestModel(), op, shape)
 
+    @skipIfXpu(msg="evt not supported on xpu cutlass backend yet")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_bin_ops
@@ -1935,6 +1979,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
         )
         torch.testing.assert_close(result, ref_result)
 
+    @skipIfXpu(msg="evt not supported on xpu cutlass backend yet")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_un_ops
@@ -1946,10 +1991,10 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
 
         M = 1024
         N = 512
-        a = torch.ones(M, N).cuda().half()
-        b = torch.ones(N, N).cuda().half().t()
+        a = torch.ones(M, N).to(GPU_TYPE).half()
+        b = torch.ones(N, N).to(GPU_TYPE).half().t()
         extra_args = gen_args(op, (M, N))
-        model = TestModel().cuda()
+        model = TestModel().to(GPU_TYPE)
 
         result = torch.compile(model)(a, b, extra_args)
         ref_result = model(a, b, extra_args)
@@ -1959,6 +2004,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
         )
         torch.testing.assert_close(result, ref_result)
 
+    @skipIfXpu(msg="evt not supported on xpu cutlass backend yet")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
@@ -2000,6 +2046,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
 
         torch.testing.assert_close(result, ref_result)
 
+    @skipIfXpu(msg="evt not supported on xpu cutlass backend yet")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
@@ -2011,6 +2058,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
 
         self.run_evt_test(TestModel(), op, (1024, 512))
 
+    @skipIfXpu(msg="evt not supported on xpu cutlass backend yet")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
@@ -2022,6 +2070,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
 
         self.run_evt_test(TestModel(), op, (1024, 1024))  # shape needs to be square
 
+    @skipIfXpu(msg="evt not supported on xpu cutlass backend yet")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
@@ -2058,6 +2107,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
             )
             torch.testing.assert_close(result, ref_result)
 
+    @skipIfXpu(msg="evt not supported on xpu cutlass backend yet")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     def test_evt_return_accumulator(self):

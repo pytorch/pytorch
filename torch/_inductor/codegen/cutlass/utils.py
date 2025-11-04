@@ -176,8 +176,8 @@ def try_import_cutlass() -> bool:
 
 @functools.lru_cache(8)
 def _normalize_cutlass_arch(arch: str) -> str:
-    if torch.xpu.is_available():
-        return arch
+    if arch.startswith("Xe"):
+        return arch[2:]
 
     if int(arch) >= 100:
         log.warning(
@@ -208,7 +208,7 @@ class CUTLASSArgs:
     """
 
     architectures: Optional[str] = None
-    cuda_version: Optional[str] = None
+    toolkit_version: Optional[str] = None
     instantiation_level: Optional[str] = None
     operations: Optional[str] = None
 
@@ -226,9 +226,9 @@ class CUTLASSArgs:
     disable_full_archs_compilation = False
 
     def __post_init__(self):
-        if self.architectures is None or self.cuda_version is None:
+        if self.architectures is None or self.toolkit_version is None:
             raise RuntimeError(
-                f"{self.architectures=} or {self.cuda_version=} is None!"
+                f"{self.architectures=} or {self.toolkit_version=} is None!"
             )
         self.architectures = _normalize_cutlass_arch(self.architectures)
 
@@ -252,32 +252,34 @@ def _gen_ops_cached(arch, version) -> dict[Any, Any]:
             version,
         )
         return {}
+    is_xpu = arch.startswith("Xe")
     arch = _normalize_cutlass_arch(arch)
     instantiation_level: str = config.cutlass.cutlass_instantiation_level
     args = CUTLASSArgs(
         architectures=arch,
-        cuda_version=version,
+        toolkit_version=version,
         instantiation_level=instantiation_level,
         operations=CUTLASS_OPERATION_KIND,
     )
     manifest = cutlass_manifest.Manifest(args)
 
     start_time = time.time()
-    if arch == "100":
-        if hasattr(cutlass_generator, "GenerateSM100"):
-            cutlass_generator.GenerateSM100(manifest, args.cuda_version)
-        cutlass_generator.GenerateSM90(manifest, args.cuda_version)
-    if arch == "11":
-        if hasattr(cutlass_generator, "GeneratePVC"):
-            cutlass_generator.GeneratePVC(manifest, args.cuda_version)
+    if is_xpu:
+        if hasattr(cutlass_generator, "GenerateIntelXe"):
+            cutlass_generator.GenerateIntelXe(manifest, args.toolkit_version, arch=arch)
         else:
             raise NotImplementedError(
-                "Arch PVC is not supported by current cutlass lib."
+                "Arch " + arch + " is not supported by current cutlass lib."
             )
+
+    if arch == "100":
+        if hasattr(cutlass_generator, "GenerateSM100"):
+            cutlass_generator.GenerateSM100(manifest, args.toolkit_version)
+        cutlass_generator.GenerateSM90(manifest, args.toolkit_version)
     else:
         try:
             func = getattr(cutlass_generator, "GenerateSM" + arch)
-            func(manifest, args.cuda_version)
+            func(manifest, args.toolkit_version)
         except AttributeError as e:
             raise NotImplementedError(
                 "Arch " + arch + " is not supported by current cutlass lib."
