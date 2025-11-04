@@ -1535,6 +1535,7 @@ class triton:
     # Note: it may also need to be used with config.compile_threads = 1
     disallow_failing_autotune_kernels_TESTING_ONLY = False
 
+<<<<<<< HEAD
     # specify number of splits to autotune on for decompose_k. 0 disables decompose_k
     num_decompose_k_splits = int(
         os.environ.get("TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "10")
@@ -1557,6 +1558,15 @@ class triton:
 
     mix_order_reduction_split_size: Optional[int] = None
     mix_order_reduction_autotune_split_size = True
+
+    # Map for storing the amount of kernel runs with dumped imput tensors
+    # Based on hash of Triton source code to avoid bloating the folder
+    kernel_dump_occurency_map: dict[str, int] = {}
+
+    # Value for the maximum amount of runs with dumped kernel input tensors
+    # When the maximum is reached the first values get overwritten
+    # This ensures the last N runs are saved, where N is this value
+    max_kernel_dump_occurencies = 3
 
 
 class aot_inductor:
