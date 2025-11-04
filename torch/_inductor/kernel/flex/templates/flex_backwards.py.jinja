@@ -234,7 +234,7 @@
 
         start_n1 = pid * BLOCK_N1
         offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)      
-      
+        
         desc_k = None
         desc_v = None  
         {%- if USE_TMA %}
@@ -297,10 +297,27 @@
             sparse_q_num_blocks = tl.load(Q_NUM_BLKS + sparse_q_num_blks_offset)
 
             offs_m1 = q_start + tl.arange(0, BLOCK_M1)
+            desc_q = None
+            desc_do = None
+            {%- if USE_TMA %}
+            desc_q = tl.make_tensor_descriptor(
+                base=Q1,
+                shape=(Q_LEN, QK_HEAD_DIM),
+                strides=(stride_qm, stride_qd),
+                block_shape=[BLOCK_M1, QK_HEAD_DIM_ROUNDED],
+            )
+            desc_do = tl.make_tensor_descriptor(
+                base=DO1,
+                shape=(Q_LEN, V_HEAD_DIM),
+                strides=(stride_dom, stride_dod),
+                block_shape=[BLOCK_M1, V_HEAD_DIM_ROUNDED],
+            )
+            {%- endif %}
             dk, dv = bwd_dkdv_inner(
                 {{gen_argdefs()}},
                 Q1, DO1, DELTA1, LSE1,
-                dk, dv, k, v,
+                desc_q, desc_do, q_start,
+                dk, dv, k, v, 
                 off_zq, off_hq1, offs_n1, offs_m1,
                 stride_qm, stride_qd, stride_dom, stride_dod,
                 q_indices, sparse_q_num_blocks,
@@ -320,6 +337,7 @@
                 dk, dv = bwd_dkdv_inner(
                     {{gen_argdefs()}},
                     Q1, DO1, DELTA1, LSE1,
+                    desc_q, desc_do, q_start, 
                     dk, dv, k, v,
                     off_zq, off_hq1, offs_n1, offs_m1,
                     stride_qm, stride_qd, stride_dom, stride_dod,
@@ -327,7 +345,7 @@
                     MATMUL_PRECISION,
                     IS_FULL_BLOCKS=True,
                 )
-
+                
         # Write back dV and dK.
         dv_ptrs = DV + offs_n1[:, None] * stride_dvm + offs_v[None, :] * stride_dvd
 
@@ -536,6 +554,7 @@ def bwd_dq_block_mn(
 def bwd_dkdv_inner(
     {{gen_argdefs()}},
     Q, DO, DELTA, LSE, # pointers
+    desc_q, desc_do, q_start,
     dk, dv, k, v,
     off_z, off_hq, offs_n1, offs_m1,
     stride_qm, stride_qd, stride_dom, stride_dod,
@@ -552,19 +571,21 @@ def bwd_dkdv_inner(
     offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
     offs_v = tl.arange(0, V_HEAD_DIM_ROUNDED)
 
-    qT_ptrs = Q + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
-    do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_v[None, :] * stride_dod
+    #qT_ptrs = Q + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
+    #do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_v[None, :] * stride_dod
     # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
     tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
 
     # The minimum is needed to handle the case where we run with a super large
     # SPARSE_BLOCK_SIZE (i.e. no block-mask!)
     hi = tl.minimum(sparse_q_num_blocks * SPARSE_Q_MULTIPLE, tl.maximum(tl.cdiv(Q_LEN, BLOCK_M1), 1))
-
+    
+    offset_block = 0
     for start_m in range(0, hi):
         dk, dv = bwd_dkdv_block_mn(
             {{gen_argdefs()}},
-            dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
+            dk, dv, Q, k, v, DO, DELTA, LSE, 
+            desc_q, desc_do, q_start, offset_block, Q_LEN, KV_LEN,
             off_z, off_hq, offs_n1, offs_m1, offs_k, offs_v,
             stride_qm, stride_qd, stride_dom, stride_dod,
             q_indices, sparse_q_num_blocks,
@@ -576,10 +597,8 @@ def bwd_dkdv_inner(
             start_m, q_indices, sparse_q_num_blocks,
             SPARSE_Q_BLOCK_SIZE, SPARSE_Q_MULTIPLE, BLOCK_M1, BLOCKS_ARE_CONTIGUOUS
         )
-
-        qT_ptrs += offset * stride_qm
-        do_ptrs += offset * stride_dom
         offs_m1 += offset
+        offset_block += offset
 
     return dk, dv
 
@@ -587,7 +606,8 @@ def bwd_dkdv_inner(
 @triton.jit
 def bwd_dkdv_block_mn(
     {{gen_argdefs()}},
-    dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
+    dk, dv, Q, k, v, DO, DELTA, LSE, 
+    desc_q, desc_do, q_start, offset, Q_LEN, KV_LEN,
     off_z, off_hq, offs_n1, offs_m1, offs_k, offs_v,
     stride_qm, stride_qd, stride_dom, stride_dod,
     q_indices, sparse_q_num_blocks,
@@ -596,8 +616,18 @@ def bwd_dkdv_block_mn(
 ):
     {{gen_defines() | indent_except_first(1) }}
 
+    {%- if USE_TMA %}
+    q = tl.load_tensor_descriptor(
+        desc_q,
+        [(q_start + offset).to(tl.int32), 0],
+    )
+    qT = tl.trans(q)
+    {%- else %}    
+    qT_ptrs = Q + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
+    do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_v[None, :] * stride_dod
     # NB reversed order since Q is transposed
     qT = load_checked_2d(qT_ptrs, offs_k, offs_m1, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, Q_LEN)
+    {%- endif %}    
     # Load LSE before computing qk to reduce pipeline stall.
     if IS_DIVISIBLE:
         lse = tl.load(LSE + offs_m1)
@@ -648,7 +678,14 @@ def bwd_dkdv_block_mn(
     if not PRESCALE_QK:
         post_mod_scores *= RCP_LN2
     pT = tl.math.exp2(post_mod_scores - lse[None, :])
+    {%- if USE_TMA %}
+    do = tl.load_tensor_descriptor(
+        desc_do,
+        [(q_start + offset).to(tl.int32), 0],
+    )
+    {%- else %}
     do = load_checked_2d(do_ptrs, offs_m1, offs_v, None, None, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM)
+    {%- endif %}
     # Compute dV.
     ppT = pT
     dv += tl.dot(ppT.to(MATMUL_PRECISION), do, input_precision=FLOAT32_PRECISION)
