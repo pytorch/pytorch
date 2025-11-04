@@ -86,10 +86,6 @@ void pushPyOutToStack(
     py::object out,
     const char* msg);
 
-void callDTensorCustomOpHandler(
-    const c10::OperatorHandle& op,
-    torch::jit::Stack* stack);
-
 void callDTensorOpDispatch(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack);

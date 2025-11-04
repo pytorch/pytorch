@@ -34,6 +34,16 @@ aten = torch.ops.aten
 logger = logging.getLogger(__name__)
 
 
+def is_same_size_handler(
+    op_call: torch._ops.OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> bool:
+    lhs = cast(torch.Tensor, args[0])
+    rhs = cast(torch.Tensor, args[1])
+    return lhs.shape == rhs.shape
+
+
 def found_inf_reduce_handler(
     op_call: torch._ops.OpOverload,
     args: tuple[object, ...],
@@ -107,6 +117,7 @@ class OpDispatcher:
             aten.bernoulli_.float,
         }
         self._custom_op_handlers = {
+            aten.is_same_size.default: is_same_size_handler,
             aten.convolution.default: convolution_handler,
             aten.convolution_backward.default: convolution_backward_handler,
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
