@@ -2438,12 +2438,9 @@ class Module:
                     not is_param_lazy
                     and len(param.shape) == 0
                     and len(input_param.shape) == 1
+                    and input_param.shape[0] == 1
                 ):
-                    error_msgs.append(
-                        f"size mismatch for {key}: copying a param with shape {input_param.shape} from checkpoint, "
-                        f"the shape in current model is {param.shape}."
-                    )
-                    continue
+                    input_param = input_param[0]
 
                 if not is_param_lazy and input_param.shape != param.shape:
                     # local shape should match the one in checkpoint
