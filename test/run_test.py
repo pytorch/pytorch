@@ -73,10 +73,20 @@ from tools.testing.test_selections import (
     ShardedTest,
     THRESHOLD,
 )
-from tools.testing.upload_artifacts import (
-    parse_xml_and_upload_json,
-    zip_and_upload_artifacts,
-)
+
+
+try:
+    from tools.testing.upload_artifacts import (
+        parse_xml_and_upload_json,
+        zip_and_upload_artifacts,
+    )
+except ImportError:
+    # upload_artifacts.py may not be available in some environments
+    def parse_xml_and_upload_json():
+        pass
+
+    def zip_and_upload_artifacts(failed: bool):
+        pass
 
 
 # Make sure to remove REPO_ROOT after import is done
