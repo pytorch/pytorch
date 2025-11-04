@@ -152,6 +152,18 @@ class LocalSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
+class TempLocalSource(Source):
+    # like LocalSource, but cannot be guarded on
+    local_name: str
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.append_output(codegen.create_load(self.local_name))
+
+    def guard_source(self) -> GuardSource:
+        return GuardSource.TEMP_LOCAL
+
+
+@dataclasses.dataclass(frozen=True)
 class SyntheticLocalSource(Source):
     local_name: str
 
