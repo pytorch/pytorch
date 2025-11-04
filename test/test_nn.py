@@ -3882,6 +3882,37 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             hidden_shape = update_shape(correct_hidden_shape, 0, bad_size)
             test(input_shape, hidden_shape, mode)
 
+    def test_rnn_dtype_mismatch_error_message(self):
+        """test that RNN provides helpful error message for dtype mismatch."""
+        input_size = 3
+        hidden_size = 5
+
+        # test all RNN types
+        for rnn_type in [nn.RNN, nn.GRU, nn.LSTM]:
+            # create RNN with default dtype (float32)
+            rnn = rnn_type(input_size, hidden_size)
+
+            # create input with different dtype (float64)
+            input_tensor = torch.randn(2, 4, input_size, dtype=torch.float64)
+
+            # Check that error message is helpful
+            with self.assertRaisesRegex(
+                ValueError,
+                r"RNN input dtype \(torch\.float64\) does not match weight dtype \(torch\.float32\)\. "
+                r"Convert input: input\.to\(torch\.float32\), or convert model: model\.to\(torch\.float64\)"
+            ):
+                rnn(input_tensor)
+
+            # convert input to match model
+            input_converted = input_tensor.to(torch.float32)
+            output = rnn(input_converted)  # Should not raise
+            self.assertEqual(output[0].dtype, torch.float32)
+
+            # convert model to match input
+            rnn_converted = rnn.to(torch.float64)
+            output = rnn_converted(input_tensor)  # Should not raise
+            self.assertEqual(output[0].dtype, torch.float64)
+
     def test_projections_lstm_args_check(self):
         input_size = 3
         hidden_size = 5
