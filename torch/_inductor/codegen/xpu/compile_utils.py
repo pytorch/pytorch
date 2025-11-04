@@ -62,7 +62,7 @@ def _sycl_compiler_options() -> list[str]:
         "-DCUTLASS_VERSIONS_GENERATED",
         "-O3",
         "-DNDEBUG",
-        "-std=c++17",
+        "-std=c++20",
         "-fPIE",
         "-fPIC",
         "-fsycl",
