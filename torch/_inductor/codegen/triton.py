@@ -11,9 +11,9 @@ import math
 import operator
 import os
 import textwrap
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE
