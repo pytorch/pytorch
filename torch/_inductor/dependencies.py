@@ -3,8 +3,8 @@ import dataclasses
 import itertools
 import logging
 import re
-from collections.abc import Iterable, Sequence
-from typing import Any, Callable, Optional, TypeVar, Union
+from collections.abc import Callable, Iterable, Sequence
+from typing import Any, Optional, TypeVar, Union
 from typing_extensions import Self
 from unittest.mock import patch
 
