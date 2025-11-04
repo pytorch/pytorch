@@ -398,11 +398,7 @@ class TestAnalysis(TestCase):
 
         verify_triton(comp_omni)
 
-    @skipIf(
-        (not torch.xpu.is_available()) and (not SM80OrLater),
-        "Requires XPU or CUDA SM80",
-    )
-    @skipXPUIf(TEST_WITH_SLOW, "Skip because test too slow on XPU")
+    @skipIf(not SM80OrLater, "Requires SM80")
     @dtypes(torch.float, torch.float16)
     @parametrize(
         "maxat",
