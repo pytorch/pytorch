@@ -47,11 +47,14 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class TestCoalesce(TestCase):
-    def helper_test_coalesce(self, layout):
+    def helper_test_coalesce(self, layout, coalesced_layout=None):
         layoutR = coalesce(layout)
 
         _LOGGER.debug(f"{layout}  =>  {layoutR}")
 
+        if coalesced_layout:
+            self.assertEqual(coalesced_layout.shape, layoutR.shape)
+            self.assertEqual(coalesced_layout.stride, layoutR.stride)
         self.assertEqual(size(layoutR), size(layout))
 
         for i in range(size(layout)):
@@ -82,17 +85,27 @@ class TestCoalesce(TestCase):
         layout = Layout((2, (4, 6)))
         self.helper_test_coalesce(layout)
 
+        layout = Layout((1, 2), (8, 1))
+        coalesced_layout = Layout(2, 1)
+        self.helper_test_coalesce(layout, coalesced_layout)
+
         layout = Layout((2, 4), (4, 1))
-        self.helper_test_coalesce(layout)
+        coalesced_layout = Layout(8, 1)
+        self.helper_test_coalesce(layout, coalesced_layout)
 
         layout = Layout((2, 4, 6), (24, 6, 1))
-        self.helper_test_coalesce(layout)
+        coalesced_layout = Layout(48, 1)
+        self.helper_test_coalesce(layout, coalesced_layout)
 
         layout = Layout((2, 1, 3), (2, 4, 4))
         self.helper_test_coalesce(layout)
 
         layout = Layout(((2, 2), (2, 2)), ((1, 4), (8, 32)))
         self.helper_test_coalesce(layout)
+
+        layout = Layout(((2, 2), (2, 2)), ((32, 8), (4, 1)))
+        coalesced_layout = Layout((2, 4, 2), (32, 4, 1))
+        self.helper_test_coalesce(layout, coalesced_layout)
 
 
 if __name__ == "__main__":

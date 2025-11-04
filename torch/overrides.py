@@ -27,9 +27,9 @@ import contextlib
 import functools
 import types
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from functools import wraps
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -221,8 +221,11 @@ def get_ignored_functions() -> set[Callable]:
         torch.ones,
         torch.promote_types,
         torch.rand,
+        torch.rand_like,
         torch.randn,
+        torch.randn_like,
         torch.randint,
+        torch.randint_like,
         torch.randperm,
         torch.range,
         torch.result_type,
@@ -249,6 +252,8 @@ def get_ignored_functions() -> set[Callable]:
         torch.nn.functional.has_torch_function_unary,
         torch.nn.functional.has_torch_function_variadic,
         torch.nn.functional.handle_torch_function,
+        torch.nn.functional.scaled_grouped_mm,
+        torch.nn.functional.scaled_mm,
         torch.nn.functional.sigmoid,
         torch.nn.functional.hardsigmoid,
         torch.nn.functional.tanh,
@@ -362,7 +367,7 @@ def get_ignored_functions() -> set[Callable]:
         Tensor._view_func,
         Tensor._view_func_unsafe,
         Tensor._rev_view_func_unsafe,
-        Tensor._make_dtensor,
+        Tensor._dtensor__new__,
         Tensor._make_wrapper_subclass,
         Tensor._python_dispatch.__get__,
         Tensor._has_symbolic_sizes_strides.__get__,
@@ -1073,9 +1078,6 @@ def get_testing_overrides() -> dict[Callable, Callable]:
             lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1  # noqa: B950
         ),
         torch.rad2deg: lambda input, out=None: -1,
-        torch.rand_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
-        torch.randint_like: lambda input, high, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
-        torch.randn_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch.ravel: lambda input: -1,
         torch.real: lambda input, out=None: -1,
         torch.vdot: lambda input, other, out=None: -1,
@@ -1351,6 +1353,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor._grad.__get__: lambda self: -1,
         Tensor._grad_fn.__get__: lambda self: -1,
         Tensor.grad_fn.__get__: lambda self: -1,
+        Tensor.grad_dtype.__get__: lambda self: -1,
         Tensor._version.__get__: lambda self: -1,
         Tensor._autocast_to_reduced_precision: lambda self, cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype: -1,
         Tensor._autocast_to_full_precision: lambda self, cuda_enabled, cpu_enabled: -1,
@@ -1516,6 +1519,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor.zero_: lambda self: -1,
         Tensor.__dlpack__: lambda self, stream=None, max_version=None, dl_device=None, copy=None: -1,
         Tensor.__dlpack_device__: lambda self: -1,
+        Tensor.index: lambda self, a, b: -1,
         torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1,
     }  # fmt: skip
 
@@ -1653,7 +1657,8 @@ def _get_overloaded_args(
         if (
             arg_type not in overloaded_types
             and hasattr(arg_type, "__torch_function__")
-            and arg_type.__torch_function__ != torch._C._disabled_torch_function_impl
+            and arg_type.__torch_function__
+            is not torch._C._disabled_torch_function_impl
         ):
             # Create lists explicitly for the first type (usually the only one
             # done) to avoid setting up the iterator for overloaded_args.
@@ -1743,6 +1748,7 @@ def handle_torch_function(
                 "Defining your `__torch_function__ as a plain method is deprecated and "
                 "will be an error in future, please define it as a classmethod.",
                 DeprecationWarning,
+                stacklevel=2,
             )
 
         # Use `public_api` instead of `implementation` so __torch_function__
@@ -2053,7 +2059,8 @@ class TorchFunctionMode:
     @classmethod
     def push(cls, *args, **kwargs):
         warnings.warn(
-            "`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`"
+            "`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`",
+            stacklevel=2,
         )
         instance = cls(*args, **kwargs)
         return instance

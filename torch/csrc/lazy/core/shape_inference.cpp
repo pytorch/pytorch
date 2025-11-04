@@ -225,7 +225,7 @@ std::vector<Shape> compute_shape_constant_pad_nd(
     auto pad_idx = pad.size() - ((i + 1) * 2);
     auto new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1];
     TORCH_CHECK(
-        new_dim > 0,
+        new_dim >= 0,
         "The input size ",
         input_sizes[l_diff + i],
         ", plus negative padding ",

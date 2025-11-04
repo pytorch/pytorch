@@ -20,12 +20,18 @@ the code needed to recreate values.
 import dataclasses
 import enum
 import functools
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING, Union
 
+from torch import device as device_type
 from torch._guards import ChainedSource, Guard, GuardSource, Source
 
 from . import utils
-from .bytecode_transformation import create_call_function, create_instruction
+from .bytecode_transformation import (
+    create_binary_subscr,
+    create_build_tuple,
+    create_call_function,
+)
 
 
 if TYPE_CHECKING:
@@ -106,11 +112,14 @@ def is_constant_source(source: Source) -> bool:
     return False
 
 
-def _get_source_debug_name(source: Source) -> str:
-    try:
-        return source.name()
-    except NotImplementedError:
+def _get_source_debug_name(source: Optional[Source]) -> str:
+    if source is None:
         return "<unknown source>"
+    else:
+        try:
+            return source.name()
+        except NotImplementedError:
+            return "<unknown source>"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -166,7 +175,7 @@ class RandomValueSource(Source):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.append_output(codegen.create_load(codegen.tx.output.random_values_var))
         codegen.append_output(codegen.create_load_const(self.random_call_index))
-        codegen.append_output(create_instruction("BINARY_SUBSCR"))
+        codegen.append_output(create_binary_subscr())
 
     def name(self) -> str:
         return f"random_value_{self.random_call_index}"
@@ -527,6 +536,29 @@ class ConvertIntSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class DynamicScalarSource(ChainedSource):
+    is_int: bool
+
+    def __post_init__(self) -> None:
+        assert self.base is not None
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Integer casting at reconstruction helps reduce the amount of DynamicInts returned
+        # to the user, in favor of plain ints.
+        # For example, a compiled region that only does int arithmetic could return a
+        # DynamicInt without the casting here.
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "int"))
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return f"int({self.base.name()})"
+
+
+@dataclasses.dataclass(frozen=True)
 class FlattenScriptObjectSource(ChainedSource):
     def __post_init__(self) -> None:
         assert self.base is not None
@@ -595,7 +627,7 @@ class DefaultsSource(ChainedSource):
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs(self.field))
         codegen.append_output(codegen.create_load_const(self.idx_key))
-        codegen.append_output(create_instruction("BINARY_SUBSCR"))
+        codegen.append_output(create_binary_subscr())
 
     def guard_source(self) -> GuardSource:
         return self.base.guard_source()
@@ -622,7 +654,7 @@ class GetItemSource(ChainedSource):
             codegen.append_output(codegen.create_load_const(self.unpack_slice()))
         else:
             codegen.append_output(codegen.create_load_const(self.index))
-        codegen.append_output(create_instruction("BINARY_SUBSCR"))
+        codegen.append_output(create_binary_subscr())
 
     def guard_source(self) -> GuardSource:
         return self.base.guard_source()
@@ -697,7 +729,7 @@ class NonSerializableSetGetItemSource(ChainedSource):
 # Used to access an item from the dictionary
 @dataclasses.dataclass(frozen=True)
 class DictGetItemSource(ChainedSource):
-    # Key to access in the dictionary. It can be one of the the following types
+    # Key to access in the dictionary. It can be one of the following types
     # 1) ConstDictKeySource
     # 2) constant - like string, integer
     index: Any
@@ -721,7 +753,7 @@ class DictGetItemSource(ChainedSource):
             codegen(self.index)
         else:
             codegen.append_output(codegen.create_load_const(self.index))
-        codegen.append_output(create_instruction("BINARY_SUBSCR"))
+        codegen.append_output(create_binary_subscr())
 
     def name(self) -> str:
         if isinstance(self.index, ConstDictKeySource):
@@ -734,7 +766,7 @@ class DictGetItemSource(ChainedSource):
 # torch.compile does not run the overridden __getitem__ method
 @dataclasses.dataclass(frozen=True)
 class DictSubclassGetItemSource(ChainedSource):
-    # Key to access in the dictionary. It can be one of the the following types
+    # Key to access in the dictionary. It can be one of the following types
     # 1) ConstDictKeySource
     # 2) constant - like string, integer
     index: Any
@@ -945,7 +977,7 @@ class TorchSource(Source):
         codegen.extend_output(
             [
                 codegen.create_load_const(0),  # level
-                create_instruction("BUILD_TUPLE", arg=0),  # fromlist
+                create_build_tuple(0),  # fromlist
                 codegen.create_import_name("torch"),
             ]
         )
@@ -1049,6 +1081,30 @@ class ShapeEnvSource(Source):
 
     def guard_source(self) -> GuardSource:
         return GuardSource.SHAPE_ENV
+
+
+@dataclasses.dataclass(frozen=True)
+class CurrentStreamSource(Source):
+    device: device_type
+
+    def name(self) -> str:
+        return f"___get_current_stream(torch.device('{self.device.type}', {self.device.index}))"
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        num_args = 1
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(utils.__name__, "get_current_stream")
+        )
+        codegen.add_push_null(lambda: codegen.load_import_from("torch", "device"))
+        codegen.extend_output([codegen.create_load_const(self.device.type)])
+        if self.device.index is not None:
+            num_args += 1
+            codegen.extend_output([codegen.create_load_const(self.device.index)])
+        codegen.extend_output(create_call_function(num_args, False))
+        codegen.extend_output(create_call_function(1, False))
+
+    def guard_source(self) -> GuardSource:
+        return GuardSource.GLOBAL
 
 
 @dataclasses.dataclass(frozen=True)

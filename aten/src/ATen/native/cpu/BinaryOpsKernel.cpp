@@ -300,7 +300,8 @@ void div_floor_kernel(TensorIteratorBase& iter) {
     // In the special case of unsigned integer division, floor division is
     // equivalent to truncation division (since the signs of the divisor and
     // dividend are always the same)
-    return div_trunc_kernel(iter);
+    div_trunc_kernel(iter);
+    return;
   } else if (isIntegralType(dtype, /*includeBool*/ false)) {
     // There's no SIMD integer division, so don't try to vectorize it.
     AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_floor_cpu", [&]() {
@@ -850,7 +851,7 @@ void sigmoid_backward_kernel(TensorIteratorBase& iter) {
           });
     });
   } else if (iter.dtype() == kBFloat16) {
-    auto one_vec = Vectorized<float>((float)(1));
+    auto one_vec = Vectorized<float>((float)1);
     cpu_kernel_vec(
         iter,
         [=](BFloat16 a, BFloat16 b) -> BFloat16 {

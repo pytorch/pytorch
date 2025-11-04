@@ -116,8 +116,6 @@ num_guards_executed=0)
         const_guard = guards.LAMBDA_GUARD(
             root,
             functools.partial(equals_match, expected=5),
-            {},
-            False,
             equals_match_verbose_code_parts(5),
         )
         self.assertTrue(const_guard(5))
@@ -407,14 +405,10 @@ num_guards_executed=0)
         guard_manager.add_type_match_guard(id_type(5), ["type(x) == int"])
         guard_manager.add_lambda_guard(
             functools.partial(ge_match, expected=5),
-            {},
-            False,
             ge_match_verbose_code_parts(expected=5),
         )
         guard_manager.add_lambda_guard(
             functools.partial(less_match, expected=10),
-            {},
-            False,
             less_match_verbose_code_parts(expected=10),
         )
         self.assertEqual(len(guard_manager.get_leaf_guards()), 3)
@@ -434,14 +428,10 @@ num_guards_executed=0)
         guard_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"])
         guard_manager.getattr_manager("x", "x", 1, default_mgr_enum).add_lambda_guard(
             functools.partial(equals_match, expected=foo.x),
-            {},
-            False,
             equals_match_verbose_code_parts(foo.x),
         )
         guard_manager.getattr_manager("y", "y", 2, default_mgr_enum).add_lambda_guard(
             functools.partial(equals_match, expected=foo.y),
-            {},
-            False,
             equals_match_verbose_code_parts(foo.y),
         )
         self.assertEqual(len(guard_manager.get_leaf_guards()), 1)
@@ -484,14 +474,10 @@ num_guards_executed=0)
         guard_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"])
         guard_manager.getitem_manager(0, "", 1, default_mgr_enum).add_lambda_guard(
             functools.partial(equals_match, expected=foo[0]),
-            {},
-            False,
             equals_match_verbose_code_parts(foo[0]),
         )
         guard_manager.getitem_manager(1, "", 2, default_mgr_enum).add_lambda_guard(
             functools.partial(equals_match, expected=foo[1]),
-            {},
-            False,
             equals_match_verbose_code_parts(foo[1]),
         )
         self.assertEqual(len(guard_manager.get_leaf_guards()), 1)
@@ -599,8 +585,6 @@ num_guards_executed=0)
             lambda x: isinstance(x, Pair)
             and isinstance(x.x, torch.Tensor)
             and isinstance(x.y, int),
-            {},
-            False,
             "global guard fail",
         )
 
@@ -651,8 +635,6 @@ num_guards_executed=0)
         )
         attr_manager.add_lambda_guard(
             lambda x: x == 4,
-            {},
-            False,
             "Expected value 4",
         )
 
@@ -693,8 +675,6 @@ num_guards_executed=0)
 
         weakref_manager.add_lambda_guard(
             lambda x: isinstance(x, torch.Tensor),
-            {},
-            False,
             "global weakref fail",
         )
 
@@ -714,8 +694,6 @@ num_guards_executed=0)
         )
         foo_mgr.add_lambda_guard(
             lambda x: x == 3,
-            {},
-            False,
             "Expected value 3",
         )
         self.assertTrue(guard_manager.check(a))
@@ -801,7 +779,7 @@ num_guards_executed=0)
         # Add key-value manager (nothing : {"z" : 3})
         self.assertTrue(root.check(f_locals))
         dict_mgr.get_key_manager(1, "", nothing, default_mgr_enum).add_lambda_guard(
-            lambda x: x is nothing, {}, False, ["x is nothing"]
+            lambda x: x is nothing, ["x is nothing"]
         )
         self.assertTrue(root.check(f_locals))
         value_mgr = dict_mgr.get_value_manager(
@@ -978,6 +956,42 @@ class TypePropagationTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(
                 issubclass(mod_mgr.get_type_of_guarded_value(), torch.nn.Module)
             )
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(hook):
+            opt_fn(torch.randn(4, 4))
+
+
+class DuplicateGuardTest(torch._dynamo.test_case.TestCase):
+    def test_duplicate_guard(self):
+        class Foo:
+            def __init__(self):
+                self.x = 4
+                self.bar = 4
+
+        foo = Foo()
+
+        def fn(x):
+            if hasattr(foo, "y"):
+                x = torch.sin(x)
+            if hasattr(foo, "y"):
+                x = torch.sin(x)
+
+            if hasattr(foo, "bar"):
+                x = torch.cos(x)
+            if hasattr(foo, "bar"):
+                x = torch.cos(x)
+            return x + foo.x
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def hook(guard_wrapper, f_locals, builder):
+            guard_str = str(guard_wrapper)
+            # One for tensor and one for y
+            self.assertEqual(guard_str.count("NO_HASATTR"), 2)
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with install_guard_manager_testing_hook(hook):

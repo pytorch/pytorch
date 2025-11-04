@@ -6,6 +6,9 @@ from typing import Any, Optional, TYPE_CHECKING, Union
 import sympy
 
 import torch
+from torch._inductor.runtime.runtime_utils import next_power_of_2
+from torch._inductor.scheduler import MixOrderReduction
+from torch.utils._sympy.value_ranges import bound_sympy
 
 from . import config
 from .codecache import write_text
@@ -163,17 +166,17 @@ class InductorChoices:
             kernel_inputs,
             op_name,
         )
-        extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, op_name)
         # adjust the kernel inputs to the template-specific heuristic, if needed
         # default here is to just return the kernel_inputs as is
         inputs_val = heuristic.adjust_kernel_inputs(kernel_inputs, op_name)
+        extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, op_name)
         # Create KernelTemplateChoice generator using the moved function
         overrides = kwarg_overrides or {}
         return make_ktc_generator(
             template=template,
             cs=cs,
-            overrides=overrides,
             extra_kwargs=extra_kwargs,
+            overrides=overrides,
             layout=kernel_inputs.output_layout(),
             inputs=inputs_val,
         )
@@ -335,6 +338,34 @@ class InductorChoices:
             ReductionHint.INNER: 1024,
         }.get(features.get_reduction_hint(), 64)
 
+        if features.get_reduction_hint() not in (
+            ReductionHint.INNER,
+            ReductionHint.OUTER_TINY,
+        ):
+            bounds = bound_sympy(features.reduction_numel)
+            lower = bounds.lower
+            upper = bounds.upper
+
+            if not all(
+                (
+                    (isinstance(bound, int) or bound.is_constant())
+                    and bound != torch.utils._sympy.numbers.IntInfinity()
+                )
+                for bound in (lower, upper)
+            ):
+                return False
+
+            lower = next_power_of_2(int(lower))
+            upper = next_power_of_2(int(upper))
+
+            # If we are are coalescing on xblock (not ReductionHint.INNER) and this is not a tiny kernel
+            # (not ReductionHint.OUTER_TINY), do not use persistent reduction if it induces tile
+            # quantization. Persistent reduction forces rblock == rnumel, if the bounds between lower
+            # and upper are large, for the lower values we will be masking off large % of read/writes,
+            # when we could expand the coalescing xblock instead.
+            if lower != upper:
+                return False
+
         if cooperative_reduction:
             # The RSPLIT of cooperative reductions means each thread block is operating on fewer elements
             try:
@@ -350,6 +381,7 @@ class InductorChoices:
         # to pick the faster one.
         if config.triton.multi_kernel:
             threshold *= 16
+
         return V.graph.sizevars.statically_known_leq(
             features.reduction_numel, threshold
         )  # type: ignore[arg-types]
@@ -456,7 +488,9 @@ class InductorChoices:
             - config.triton.tiling_prevents_reduction_fusion
             - config.aggressive_fusion (will cause this function to be called more times)
         """
-        if shared_data_score == 0 and (
+        if (
+            shared_data_score == 0 and not MixOrderReduction.can_fuse(node1, node2)
+        ) and (
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
         ):
             if is_metric_table_enabled("fusion_failure_due_to_indexing_mismatch"):
@@ -496,6 +530,17 @@ class InductorChoices:
             WhyNoFuse(node1, node2)("Fusion will increase peak memory")
             return False
 
+        if (
+            config.max_fusion_unique_io_buffers is not None
+            and scheduler.fusion_prevent_too_many_reads_and_writes(
+                node1,
+                node2,
+                config.max_fusion_unique_io_buffers,
+            )
+        ):
+            WhyNoFuse(node1, node2)("fusion_prevent_too_many_reads_and_writes")
+            return False
+
         return True
 
     @staticmethod
@@ -516,7 +561,9 @@ class InductorChoices:
         shared_data_score: int,
     ) -> bool:
         """Hook for heuristics to prevent horizontal (consumer/consumer) fusions"""
-        if shared_data_score < config.score_fusion_memory_threshold:
+        if (
+            shared_data_score < config.score_fusion_memory_threshold
+        ) and not MixOrderReduction.can_fuse(node1, node2):
             WhyNoFuse(node1, node2)("score_fusion_memory_threshold")
             return False
         if scheduler.are_long_distant_nodes(node1, node2):
@@ -557,6 +604,7 @@ class InductorChoices:
                 and memory_score > 0
             )
 
+        # pyrefly: ignore [bad-return]
         return (
             template_score,
             node1.is_reduction() == node2.is_reduction() and memory_score > 0,

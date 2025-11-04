@@ -14,7 +14,8 @@ from collections import namedtuple
 from pathlib import Path
 from typing import NamedTuple
 
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.triton_utils import requires_gpu
 
 
 if HAS_GPU:
@@ -81,7 +82,7 @@ class TestSerialize(TestCase):
                 return 0
 
             def __eq__(self, other):
-                return type(other) == type(self)
+                return type(other) is type(self)
 
             def __call__(self, *args, **kwargs):
                 return torch.ops.aten.add.Tensor(*args, **kwargs)
@@ -599,6 +600,8 @@ def forward(self, x):
             in_ptr1,
             out_ptr,
             n_elements,
+            fval,
+            ival,
             BLOCK_SIZE: "tl.constexpr",
         ):
             pid = tl.program_id(axis=0)
@@ -607,7 +610,7 @@ def forward(self, x):
             mask = offsets < n_elements
             x = tl.load(in_ptr0 + offsets, mask=mask)
             y = tl.load(in_ptr1 + offsets, mask=mask)
-            output = x + y
+            output = x + y + fval + ival
             tl.store(out_ptr + offsets, output, mask=mask)
 
         def custom_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -617,7 +620,9 @@ def forward(self, x):
             def grid(meta):
                 return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
 
-            wrap_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+            wrap_triton(add_kernel)[grid](
+                x, y, output, n_elements, 3.14, 42, BLOCK_SIZE=16
+            )
 
             return output
 
@@ -632,7 +637,9 @@ def forward(self, x):
             def grid(meta):
                 return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
 
-            wrap_triton(add_kernel)[grid](x, y, output, n_elements, 16, num_warps=8)
+            wrap_triton(add_kernel)[grid](
+                x, y, output, n_elements, 3.14, 42, BLOCK_SIZE=16, num_warps=8
+            )
 
             return output
 
@@ -660,34 +667,44 @@ def forward(self, x):
             self.assertIsNotNone(triton_node)
 
             args = []
-            kwargs = []
+            kwargs = {}
 
             for arg in triton_node.inputs:
                 if arg.kind == ArgumentKind.POSITIONAL:
                     args.append(arg.arg)
                 elif arg.kind == ArgumentKind.KEYWORD:
-                    kwargs.append(arg.arg)
+                    kwargs[arg.name] = arg.arg
 
-            self.assertEqual(len(args), 4)
-            self.assertEqual(len(kwargs), 5)
+            self.assertEqual(len(args), 6)
+            # Always: name, grid, output_indices and num_warps are
+            # Triton version dependent: num_cpu_threads, shared_memory_bytes
+            self.assertTrue(len(kwargs) >= 4)
 
             for i in range(3):
                 self.assertIsNotNone(args[i].as_tensor)
 
             self.assertEqual(args[3].as_int, 3)
-
-            self.assertEqual(kwargs[0].as_string, "add_kernel")  # name
-            self.assertEqual(kwargs[1].as_ints, [1, 1, 1])  # grid
-            self.assertEqual(kwargs[2].as_ints, [2])  # output indices
+            self.assertAlmostEqual(args[4].as_float, 3.14, places=2)
+            self.assertEqual(args[5].as_int, 42)
+            kernel_name = kwargs["name"].as_string
+            symbol_name = kernel_name.rpartition("_")[0]
+            self.assertEqual(symbol_name, "add_kernel")
+            self.assertEqual(kwargs["grid"].as_ints, [1, 1, 1])
+            self.assertEqual(kwargs["output_indices"].as_ints, [2])
             self.assertEqual(
-                kwargs[3].as_int, 8 if isinstance(m, MyModelAutotune) else 4
-            )  # num warps
-            self.assertEqual(kwargs[4].as_int, 0)  # shared mem bytes
+                kwargs["num_warps"].as_int, 8 if isinstance(m, MyModelAutotune) else 4
+            )
+
+            if "num_cpu_threads" in kwargs:
+                self.assertEqual(kwargs["num_cpu_threads"].as_int, 0)
+            if "shared_memory_bytes" in kwargs:
+                self.assertEqual(kwargs["shared_memory_bytes"].as_int, 0)
 
             self.assertEqual(len(triton_node.outputs), 1)
             self.assertIsNotNone(triton_node.outputs[0].as_tensors)
             self.assertEqual(
-                len(triton_node.outputs[0].as_tensors), len(kwargs[2].as_ints)
+                len(triton_node.outputs[0].as_tensors),
+                len(kwargs["output_indices"].as_ints),
             )
             self.assertEqual(triton_node.outputs[0].as_tensors[0].name, "getitem")
 
@@ -886,6 +903,92 @@ def forward(self, x):
         save(ep, buffer)
         buffer.seek(0)
         loaded_ep = load(buffer)
+        self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
+
+    def test_1D_tensor_slicing(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.arange(8)[::2]
+
+            def forward(self, x):
+                return x + self.const
+
+        m = M()
+        sample_inputs = (torch.randn(4),)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
+
+    def test_2D_tensor_slicing(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.randn(4, 4)[:2, :2]
+
+            def forward(self, x):
+                return x + self.const
+
+        m = M()
+        sample_inputs = (torch.randn(2, 2),)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
+
+    def test_non_float_weight(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(
+                    torch.ones(2, 2, dtype=torch.int8), requires_grad=False
+                )
+
+            def forward(self, x):
+                return x + self.p
+
+        m = M()
+        sample_inputs = (torch.randn(2, 2),)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
+
+    @requires_gpu
+    def test_weight_sharing_gpu(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c2 = torch.ones(2, 4, device=GPU_TYPE)
+                self.c1 = self.c2[0, :]
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x) + self.c1 + self.c2
+
+        m = M().to(GPU_TYPE)
+        sample_inputs = (torch.randn(2, 4, device=GPU_TYPE),)
+        ep = torch.export.export(m, sample_inputs)
+        # Check that c1 and c2 share the same storage
+        self.assertEqual(
+            ep.constants["c1"].untyped_storage(), ep.constants["c2"].untyped_storage()
+        )
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        # Check that c1 and c2 share the same storage after serdes
+        self.assertEqual(
+            loaded_ep.constants["c1"].untyped_storage(),
+            loaded_ep.constants["c2"].untyped_storage(),
+        )
         self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
 
     def test_complex_constant(self) -> None:
@@ -1130,7 +1233,8 @@ class TestDeserialize(TestCase):
 
             # check ShapeEnv counters
             shape_env = _get_shape_env_from_gm(loaded_ep.graph_module)
-            next_index = next(shape_env.unbacked_symint_counter)
+            next_index = shape_env.unbacked_symint_counter
+            shape_env.unbacked_symint_counter += 1
             for symbol in bound:
                 self.assertTrue(symbol_is_type(symbol, SymT.UNBACKED_INT))
                 self.assertTrue(
@@ -1324,7 +1428,6 @@ class TestDeserialize(TestCase):
             def forward(self, x):
                 y = x.nonzero()
                 z = y.size(0)
-                torch._check_is_size(z)
                 torch._check(z == 2)
                 return y
 
@@ -1335,7 +1438,6 @@ class TestDeserialize(TestCase):
             def forward(self, x):
                 y = x.nonzero()
                 z = y.size(0)
-                torch._check_is_size(z)
                 torch._check(z % 3 == 0)
                 torch._check(z == 3)
                 return y
@@ -1612,13 +1714,14 @@ def forward(self, x):
     def test_exportdb_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
         _check_meta = "map" not in name
-        self.check_graph(model, case.example_args, _check_meta=_check_meta)
+        with torch._export.config.patch(use_new_tracer_experimental=True):
+            self.check_graph(model, case.example_args, _check_meta=_check_meta)
 
     def test_constraints(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
                 n = x.item()
-                torch._check_is_size(n)
+                torch._check(n >= 0)
                 return y.sum() + torch.ones(n, 5).sum()
 
         f = Module()
@@ -1911,6 +2014,51 @@ class TestSaveLoad(TestCase):
         inp = (torch.tensor(1),)
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
+    def test_save_load_with_multiple_empty_tensors(self) -> None:
+        # Test scenario where models have multiple empty tensors
+        # but with different data types.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "int_buffer",
+                    torch.zeros([0], dtype=torch.uint8),
+                )
+                self.register_buffer(
+                    "int_buffer2",
+                    torch.zeros([0], dtype=torch.uint8),
+                )
+                self.register_buffer(
+                    "float_buffer",
+                    torch.zeros([0], dtype=torch.float32),
+                )
+
+            def forward(self, t: torch.Tensor) -> torch.Tensor:
+                return t + self.int_buffer + self.float_buffer + self.int_buffer2
+
+        m = M()
+        inp = torch.rand([0])
+
+        ep = torch.export.export(m, (inp,))
+
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        model_bytes = buffer.getvalue()
+
+        # First two buffers are duplicates, but not the third one.
+        # So in the serialized model, there will be two physical tensors.
+        self.assertTrue(b"weight_0" in model_bytes)
+        self.assertTrue(b"weight_1" in model_bytes)
+        self.assertFalse(b"weight_2" in model_bytes)
+
+        buffer = io.BytesIO(model_bytes)
+        buffer.seek(0)
+        dep = torch.export.load(buffer)
+        unf = torch.export.unflatten(dep)
+        self.assertEqual(unf.int_buffer.dtype, torch.uint8)
+        self.assertEqual(unf.int_buffer2.dtype, torch.uint8)
+        self.assertEqual(unf.float_buffer.dtype, torch.float32)
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerializeCustomClass(TestCase):
@@ -2133,7 +2281,8 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
                 n = x.item()
-                torch._check_is_size(n, max=y.size(0) - 1)
+                torch._check(n >= 0)
+                torch._check(n < y.size(0))
                 return torch.empty(n), y[n]
 
         ep = torch.export.export(

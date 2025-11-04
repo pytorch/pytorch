@@ -14,7 +14,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time, time_ns
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
@@ -60,6 +60,8 @@ from torch.utils._triton import has_triton_package
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch._inductor.runtime.hints import HalideMeta
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
@@ -520,6 +522,11 @@ class AsyncCompile:
 
         # no need to call this in parallel since the sub-kernels are already parallel tasks
         return MultiKernelCall(*args, **kwargs)
+
+    def size_hint_multi_kernel(self, *args, **kwargs) -> Any:
+        from torch._inductor.codegen.multi_kernel import SizeHintMultiKernelCall
+
+        return SizeHintMultiKernelCall(*args, **kwargs)
 
     def cpp(self, source_code: str):
         kernel_code_log.info("CPP Kernel:\n%s", source_code)

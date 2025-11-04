@@ -7,12 +7,12 @@ binaries into the repo.
 You can use this script to check out a new nightly branch with the following::
 
     $ ./tools/nightly.py checkout -b my-nightly-branch
-    $ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+    $ source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 
 Or if you would like to check out the nightly commit in detached HEAD mode::
 
     $ ./tools/nightly.py checkout
-    $ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+    $ source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 
 Or if you would like to reuse an existing virtual environment, you can pass in
 the prefix argument (--prefix)::
@@ -23,18 +23,24 @@ the prefix argument (--prefix)::
 To install the nightly binaries built with CUDA, you can pass in the flag --cuda::
 
     $ ./tools/nightly.py checkout -b my-nightly-branch --cuda
-    $ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+    $ source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 
 To install the nightly binaries built with ROCm, you can pass in the flag --rocm::
 
     $ ./tools/nightly.py checkout -b my-nightly-branch --rocm
-    $ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+    $ source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 
 You can also use this tool to pull the nightly commits into the current branch as
 well. This can be done with::
 
     $ ./tools/nightly.py pull
-    $ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+    $ source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
+
+To create the virtual environment with a specific Python interpreter, you can
+pass in the --python argument::
+
+    $ ./tools/nightly.py --python /path/to/python3.12
+    $ source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 
 Pulling will recreate a fresh virtual environment and reinstall the development
 dependencies as well as the nightly binaries into the repo directory.
@@ -47,6 +53,7 @@ import atexit
 import contextlib
 import functools
 import itertools
+import json
 import logging
 import os
 import re
@@ -59,10 +66,11 @@ import textwrap
 import time
 import uuid
 from ast import literal_eval
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from platform import system as platform_system
-from typing import Any, Callable, cast, NamedTuple, TYPE_CHECKING, TypeVar
+from typing import Any, cast, NamedTuple, TYPE_CHECKING, TypeVar
 
 
 if TYPE_CHECKING:
@@ -121,41 +129,19 @@ class PipSource(NamedTuple):
     accelerator: str
 
 
-PYTORCH_NIGHTLY_PIP_INDEX_URL = "https://download.pytorch.org/whl/nightly"
-PIP_SOURCES = {
-    "cpu": PipSource(
-        name="cpu",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cpu",
-        supported_platforms={"Linux", "macOS", "Windows"},
-        accelerator="cpu",
-    ),
-    # NOTE: Sync with CUDA_ARCHES in .github/scripts/generate_binary_build_matrix.py
-    "cuda-12.6": PipSource(
-        name="cuda-12.6",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu126",
-        supported_platforms={"Linux", "Windows"},
-        accelerator="cuda",
-    ),
-    "cuda-12.8": PipSource(
-        name="cuda-12.8",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu128",
-        supported_platforms={"Linux", "Windows"},
-        accelerator="cuda",
-    ),
-    # NOTE: Sync with ROCM_ARCHES in .github/scripts/generate_binary_build_matrix.py
-    "rocm-6.3": PipSource(
-        name="rocm-6.3",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm6.3",
-        supported_platforms={"Linux"},
-        accelerator="rocm",
-    ),
-    "rocm-6.4": PipSource(
-        name="rocm-6.4",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm6.4",
-        supported_platforms={"Linux"},
-        accelerator="rocm",
-    ),
-}
+# Generate: .github/scripts/nightly_source_matrix.json
+GENERATE_MATRIX_SCRIPT = (
+    REPO_ROOT / ".github" / "scripts" / "generate_binary_build_matrix.py"
+)
+subprocess.check_call(
+    [sys.executable, str(GENERATE_MATRIX_SCRIPT)],
+    cwd=GENERATE_MATRIX_SCRIPT.parent,
+)
+
+# See: .github/scripts/nightly_source_matrix.json
+NIGHTLY_SOURCE_FILE = GENERATE_MATRIX_SCRIPT.with_name("nightly_source_matrix.json")
+NIGHTLY_SOURCE_MATRIX = json.loads(NIGHTLY_SOURCE_FILE.read_text(encoding="utf-8"))
+PIP_SOURCES = {name: PipSource(**data) for name, data in NIGHTLY_SOURCE_MATRIX.items()}
 
 
 class Formatter(logging.Formatter):
@@ -242,9 +228,18 @@ class Venv:
         *,
         base_executable: Path | str | None = None,
     ) -> None:
+        base_executable = Path(base_executable or sys.executable)
+        if not base_executable.is_absolute():
+            base_exec = shutil.which(str(base_executable))
+            if base_exec is None:
+                raise RuntimeError(
+                    f"Could not find Python executable {base_executable}",
+                )
+            base_executable = Path(base_exec)
+
         self.prefix = Path(prefix).absolute()
         self.pip_source = pip_source
-        self.base_executable = Path(base_executable or sys.executable).absolute()
+        self.base_executable = base_executable.absolute()
         self._executable: Path | None = None
         self._bindir: Path | None = None
         self._env = {
@@ -289,6 +284,7 @@ class Venv:
             python=python,
             capture_output=True,
         ).stdout
+        # pyrefly: ignore [no-matching-overload]
         candidates = list(map(Path, filter(None, map(str.strip, output.splitlines()))))
         candidates = [p for p in candidates if p.is_dir() and p.name == "site-packages"]
         if not candidates:
@@ -302,7 +298,7 @@ class Venv:
         """Get the activation script for the virtual environment."""
         if WINDOWS:
             # Assume PowerShell
-            return self.prefix / "Scripts" / "Activate.ps1"
+            return self.prefix / "Scripts" / "activate"
         # Assume POSIX-compliant shell: Bash, Zsh, etc.
         return self.prefix / "bin" / "activate"
 
@@ -311,13 +307,18 @@ class Venv:
         """Get the command to activate the virtual environment."""
         if WINDOWS:
             # Assume PowerShell
-            return f'& "{self.activate_script}"'
+            return f'. "{self.activate_script}"'
         # Assume Bash, Zsh, etc.
         # POSIX standard should use dot `. venv/bin/activate` rather than `source`
         return f"source {shlex.quote(str(self.activate_script))}"
 
     @timed("Creating virtual environment")
-    def create(self, *, remove_if_exists: bool = False) -> Path:
+    def create(
+        self,
+        *,
+        remove_if_exists: bool = False,
+        assume_yes: bool = False,
+    ) -> Path:
         """Create a virtual environment."""
         if self.prefix.exists():
             if remove_if_exists:
@@ -327,43 +328,56 @@ class Venv:
                         f"The path {self.prefix} already exists and is not a virtual environment. "
                         "Please remove it manually or choose a different prefix."
                     )
-                if self.prefix in [
-                    Path(p).absolute()
+                if any(
+                    Path(p).absolute().samefile(self.prefix)
                     for p in [
                         sys.prefix,
                         sys.exec_prefix,
                         sys.base_prefix,
                         sys.base_exec_prefix,
                     ]
-                ]:
+                ):
                     raise RuntimeError(
                         f"The path {self.prefix} trying to remove is the same as the interpreter "
                         "to run this script. Please choose a different prefix or deactivate the "
                         "current virtual environment."
                     )
-                if self.prefix in [
+                if any(
                     Path(
                         self.base_python(
                             "-c",
                             f"import os, sys; print(os.path.abspath({p}))",
                             capture_output=True,
                         ).stdout.strip()
-                    ).absolute()
+                    )
+                    .absolute()
+                    .samefile(self.prefix)
                     for p in [
                         "sys.prefix",
                         "sys.exec_prefix",
                         "sys.base_prefix",
                         "sys.base_exec_prefix",
                     ]
-                ]:
+                ):
                     raise RuntimeError(
                         f"The Python executable {self.base_executable} trying to remove is the "
                         "same as the interpreter to create the virtual environment. Please choose "
                         "a different prefix or a different Python interpreter."
                     )
+                if not assume_yes:
+                    answer = input(
+                        f"The virtual environment {self.prefix} already exists. "
+                        "Do you want to remove it and recreate it? [y/N] "
+                    )
+                    if answer.lower() not in ("y", "yes"):
+                        if answer.lower() not in ("n", "no", ""):
+                            print(f"Invalid answer: {answer!r}")
+                        else:
+                            print(f"Aborting due to existing prefix: {self.prefix}")
+                        sys.exit(1)
+
                 print(f"Removing existing venv: {self.prefix}")
                 _remove_existing(self.prefix)
-
             else:
                 raise RuntimeError(f"Path {self.prefix} already exists.")
 
@@ -415,6 +429,15 @@ class Venv:
         """Ensure the virtual environment exists."""
         if not self.is_venv():
             return self.create(remove_if_exists=True)
+        if (
+            self.python_version().split(".")[:2]
+            != self.base_python_version().split(".")[:2]
+        ):
+            raise RuntimeError(
+                f"Python version mismatch: venv has Python {self.python_version()} "
+                f"but base Python is {self.base_python_version()}. "
+                "Please recreate the virtual environment with the correct Python version."
+            )
 
         self.pip_install(*self.AGGRESSIVE_UPDATE_PACKAGES, upgrade=True)
         return self.prefix
@@ -431,6 +454,7 @@ class Venv:
         cmd = [str(python), *args]
         env = popen_kwargs.pop("env", None) or {}
         check = popen_kwargs.pop("check", True)
+        # pyrefly: ignore [no-matching-overload]
         return subprocess.run(
             cmd,
             check=check,
@@ -449,7 +473,10 @@ class Venv:
         return self.python(*args, python=self.base_executable, **popen_kwargs)
 
     def python_version(self, *, python: Path | str | None = None) -> str:
-        """Get the Python version for the virtual environment."""
+        """Get the Python version for the virtual environment.
+
+        Return a string like "3.13.7", "3.13.7t", "3.13.7d", "3.13.7td", etc.
+        """
         return self.python(
             "-c",
             (
@@ -461,7 +488,10 @@ class Venv:
         ).stdout.strip()
 
     def base_python_version(self) -> str:
-        """Get the Python version for the base environment."""
+        """Get the Python version for the base environment.
+
+        Return a string like "3.13.7", "3.13.7t", "3.13.7d", "3.13.7td", etc.
+        """
         return self.python_version(python=self.base_executable)
 
     def uv(
@@ -476,6 +506,7 @@ class Venv:
         cmd = [str(self.bindir / "uv"), *args]
         env = popen_kwargs.pop("env", None) or {}
         check = popen_kwargs.pop("check", True)
+        # pyrefly: ignore [no-matching-overload]
         return subprocess.run(
             cmd,
             check=check,
@@ -883,6 +914,7 @@ def _move_single(
 
 def _copy_files(listing: list[Path], source_dir: Path, target_dir: Path) -> None:
     for src in listing:
+        # pyrefly: ignore [bad-argument-type]
         _move_single(src, source_dir, target_dir, shutil.copy2, "Copying")
 
 
@@ -968,13 +1000,15 @@ def install(
     packages: Iterable[str],
     subcommand: str = "checkout",
     branch: str | None = None,
+    fresh_venv: bool = False,
+    assume_yes: bool = False,
 ) -> None:
     """Development install of PyTorch"""
-    use_existing = subcommand == "checkout"
-    if use_existing:
+    if not fresh_venv:
+        print(f"Using existing venv: {venv.prefix}")
         venv.ensure()
     else:
-        venv.create(remove_if_exists=True)
+        venv.create(remove_if_exists=True, assume_yes=assume_yes)
 
     packages = [p for p in packages if p != "torch"]
 
@@ -1049,8 +1083,8 @@ def make_parser() -> argparse.ArgumentParser:
             metavar="PYTHON",
         )
         subparser.add_argument(
-            "-p",
             "--prefix",
+            "-p",
             type=lambda p: Path(p).absolute(),
             help='Path to virtual environment directory (e.g. "./venv")',
             dest="prefix",
@@ -1058,8 +1092,26 @@ def make_parser() -> argparse.ArgumentParser:
             metavar="PATH",
         )
         subparser.add_argument(
-            "-v",
+            "--fresh",
+            help="Remove existing virtual environment if it exists",
+            dest="fresh",
+            default=False,
+            action="store_true",
+        )
+        subparser.add_argument(
+            "--yes",
+            "-y",
+            help=(
+                "Automatic yes to prompts; assume 'yes' as answer to all prompts "
+                "(e.g., removing existing venv)"
+            ),
+            dest="yes",
+            default=False,
+            action="store_true",
+        )
+        subparser.add_argument(
             "--verbose",
+            "-v",
             help="Provide debugging info",
             dest="verbose",
             default=False,
@@ -1149,6 +1201,8 @@ def main() -> None:
             packages=PACKAGES_TO_INSTALL,
             subcommand=args.subcmd,
             branch=args.branch,
+            fresh_venv=args.fresh,
+            assume_yes=args.yes,
         )
 
 

@@ -20,8 +20,14 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     skipIf,
+    skipXPUIf,
 )
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    parametrize,
+    run_tests,
+    TEST_WITH_SLOW,
+    TestCase,
+)
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
 
@@ -289,12 +295,14 @@ class TestAnalysis(TestCase):
         om = _test_model(device, dtype)
         REPEAT = 5
         trace1, trace2 = trace_files()
+        print(f"first trace {trace1}")
         torch._dynamo.reset()  # reset the cache
         with fresh_inductor_cache():
             with torch.profiler.profile(record_shapes=True) as p:
                 om()
         p.export_chrome_trace(trace1)
 
+        print(f"second trace {trace2}")
         torch._dynamo.reset()  # reset the cache
         with fresh_inductor_cache():
             with torch.profiler.profile(record_shapes=True) as p:
@@ -302,6 +310,7 @@ class TestAnalysis(TestCase):
                     om()
         p.export_chrome_trace(trace2)
 
+        print("diffing...")
         with patch(
             "sys.argv",
             [
@@ -379,7 +388,11 @@ class TestAnalysis(TestCase):
 
         verify_triton(comp_omni)
 
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(
+        (not torch.xpu.is_available()) and (not SM80OrLater),
+        "Requires XPU or CUDA SM80",
+    )
+    @skipXPUIf(TEST_WITH_SLOW, "Skip because test too slow on XPU")
     @dtypes(torch.float, torch.float16)
     @parametrize(
         "maxat",
@@ -464,6 +477,7 @@ class TestAnalysis(TestCase):
                         "aten::cudnn_convolution",
                         "aten::convolution",
                         "aten::_convolution",
+                        "aten::convolution_overrideable",
                     )
                 )
                 or "conv" in name

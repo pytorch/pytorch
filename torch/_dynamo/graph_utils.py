@@ -79,16 +79,16 @@ def _detect_cycles(
     return "no cycle detected"
 
 
-def _graph_uses_non_cpu(graph: Optional[Graph]) -> bool:
+def _graph_device_type(graph: Optional[Graph]) -> str:
     if graph is None:
-        return False
+        return "cpu"
 
-    def _is_non_cpu(x: Any) -> bool:
+    def _device_type(x: Any) -> str:
         if isinstance(x, torch.device):
-            return x.type != "cpu"
+            return x.type
         if isinstance(x, torch.Tensor):
-            return x.device.type != "cpu"
-        return False
+            return x.device.type
+        return "cpu"
 
     def _flatten_meta(node: Node, key: str) -> list[Any]:
         if key not in node.meta:
@@ -99,19 +99,18 @@ def _graph_uses_non_cpu(graph: Optional[Graph]) -> bool:
     for node in graph.nodes:
         for key in ("val", "example_value"):
             for obj in _flatten_meta(node, key):
-                if _is_non_cpu(obj):
-                    return True
+                return _device_type(obj)
 
         # Check for device conversions
         if node.op == "call_method":
-            if node.target == "cuda":
-                return True
-            if node.target == "to" and "cuda" in node.args:
-                return True
+            for gpu in ["cuda", "xpu"]:
+                if node.target == gpu:
+                    return gpu
+                if node.target == "to" and gpu in node.args:
+                    return gpu
 
         # Check args/kwargs for non-CPU device specs
         flat_args, _ = tree_flatten((node.args, node.kwargs))
         for obj in flat_args:
-            if _is_non_cpu(obj):
-                return True
-    return False
+            return _device_type(obj)
+    return "cpu"

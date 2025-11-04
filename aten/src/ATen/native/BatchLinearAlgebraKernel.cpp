@@ -143,13 +143,13 @@ Tensor& cholesky_inverse_kernel_impl(Tensor& result, Tensor& infos, bool upper) 
  For more info see https://github.com/pytorch/pytorch/issues/145801#issuecomment-2631781776
 */
 template <typename T>
-static inline
+inline
 std::enable_if_t<std::is_floating_point_v<T>, int> lapack_work_to_int(const T val) {
     const auto next_after = std::nextafter(val, std::numeric_limits<T>::infinity());
     return std::max<int>(1, std::ceil(next_after));
 }
 template <typename T>
-static inline
+inline
 std::enable_if_t<c10::is_complex<T>::value, int> lapack_work_to_int(const T val) {
     return lapack_work_to_int(val.real());
 }
@@ -343,7 +343,7 @@ void linalg_eigh_kernel(const Tensor& eigenvalues, const Tensor& eigenvectors, c
   For further details, please see the LAPACK documentation for GEQRF.
 */
 template <typename scalar_t>
-static void apply_geqrf(const Tensor& input, const Tensor& tau) {
+void apply_geqrf(const Tensor& input, const Tensor& tau) {
 #if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
@@ -946,10 +946,10 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
     }
   };
   // avoid overflow
-  float matrix_rank = float(std::min(m, n));
+  auto matrix_rank = std::min(m, n);
   // A heuristic tested on a 32 core/socket ICX system
   // https://github.com/pytorch/pytorch/pull/93037#discussion_r1090112948
-  int64_t chunk_size_per_thread = int64_t(
+  int64_t chunk_size_per_thread = static_cast<int64_t>(
       std::min(1.0, 3200.0 / (matrix_rank * matrix_rank * matrix_rank)));
   int64_t grain_size = chunk_size_per_thread * at::get_num_threads();
   at::parallel_for(0, batch_size, grain_size, loop);
@@ -1039,7 +1039,7 @@ void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, Tr
 }
 
 template <typename scalar_t>
-static void apply_svd(const Tensor& A,
+void apply_svd(const Tensor& A,
                       const bool full_matrices,
                       const bool compute_uv,
                       const Tensor& U,

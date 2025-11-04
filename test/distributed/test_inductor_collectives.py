@@ -10,6 +10,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.logging
 import torch._dynamo.test_case
+import torch.distributed as c10d
 
 # for some reason importing functional collectives after dynamo breaks collectives handling!
 import torch.distributed._functional_collectives as _functional_collectives
@@ -22,6 +23,7 @@ from torch._inductor.comms import (
     sink_waits_iterative,
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
+from torch._inductor.fx_passes.bucketing import is_all_gather_into_tensor
 from torch._inductor.scheduler import (
     _get_mm_like_fn,
     BaseSchedulerNode,
@@ -37,14 +39,14 @@ from torch.testing._internal.common_distributed import (
     DynamoDistributedMultiProcTestCase,
     DynamoDistributedSingleProcTestCase,
     MultiProcessTestCase,
-    requires_nccl,
+    requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    requires_cuda,
     skipIfRocm,
+    skipIfXpu,
     TEST_XPU,
     xfailIf,
 )
@@ -52,19 +54,14 @@ from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
-def _tolist_with_constrain_as_size(tensor):
-    lst = tensor.tolist()
-    for elem in lst:
-        torch._check_is_size(elem)
-    return lst
-
-
-@requires_nccl()
+@requires_accelerator_dist_backend(["nccl", "xccl"])
 @instantiate_parametrized_tests
 class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     """
     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
     """
+
+    device = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
     def get_world_trs(self):
         return {
@@ -102,8 +99,11 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 example,
                 **self.get_world_trs(),
             )
-            t = torch.randn(4, 4, device="cuda")
-            inputs = (t if self.rank == 0 else torch.zeros(4, 4, device="cuda"), 0)
+            t = torch.randn(4, 4, device=self.device)
+            inputs = (
+                t if self.rank == 0 else torch.zeros(4, 4, device=self.device),
+                0,
+            )
             eager_out = example(*inputs)
             self.assertTrue(same(t, eager_out))
 
@@ -137,7 +137,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 matmul_cat_col,
                 **self.get_world_trs(),
             )
-            inputs = (torch.ones(4, 4, device="cuda") + self.rank,) * 6
+            inputs = (torch.ones(4, 4, device=self.device) + self.rank,) * 6
 
             eager_out = matmul_cat_col(*inputs)
             compiled_matmul_cat_col = compile(matmul_cat_col, inputs)
@@ -179,7 +179,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             for nelem in [1024, 2048, 4096]:
                 # CI (Tesla T4) does not support bfloat16 compilation natively,
                 # using float
-                x = torch.randn(nelem, device="cuda", dtype=torch.float)
+                x = torch.randn(nelem, device=self.device, dtype=torch.float)
                 golden_out = eager_func(x)
 
                 for _ in range(3):
@@ -217,8 +217,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 eager_func,
                 **self.get_world_trs(),
             )
-            eager_inputs = (torch.ones(4, 4, device="cuda") + self.rank,) * 4
-            inductor_inputs = (torch.ones(4, 4, device="cuda") + self.rank,) * 2
+            eager_inputs = (torch.ones(4, 4, device=self.device) + self.rank,) * 4
+            inductor_inputs = (torch.ones(4, 4, device=self.device) + self.rank,) * 2
 
             eager_out = inductor_func(eager_func(*eager_inputs), *inductor_inputs)
             compiled_inductor_func = compile(
@@ -256,8 +256,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 inductor_func,
                 **self.get_world_trs(),
             )
-            inductor_inputs = (torch.ones(4, 4, device="cuda") + self.rank,) * 4
-            eager_inputs = (torch.ones(4, 4, device="cuda") + self.rank,) * 2
+            inductor_inputs = (torch.ones(4, 4, device=self.device) + self.rank,) * 4
+            eager_inputs = (torch.ones(4, 4, device=self.device) + self.rank,) * 2
 
             eager_out = eager_func(inductor_func(*inductor_inputs), *eager_inputs)
             compiled_inductor_func = compile(inductor_func, inductor_inputs)
@@ -270,6 +270,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1728
     @skipIfRocm
+    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1728
     def test_eager_async_allreduce_inductor_wait(self):
         import torch.distributed as dist
         from torch._inductor.utils import run_and_get_code
@@ -292,7 +293,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             return y * y
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
-            x = torch.ones(12800, 12800, device="cuda") + self.rank
+            x = torch.ones(12800, 12800, device=self.device) + self.rank
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
             # NOTE: We run for 10 iterations each, to ensure that the GPU execution is way behind CPU
@@ -363,7 +364,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             return (e,)
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
-            inputs = torch.ones(4, 4, device="cuda") + self.rank
+            inputs = torch.ones(4, 4, device=self.device) + self.rank
             compiled = torch.compile(func)
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
@@ -380,7 +381,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             inputs = (
                 # rank0: [0., 1.], rank1: [2., 3.]
-                torch.arange(2, dtype=torch.float32, device="cuda") + 2 * self.rank,
+                torch.arange(2, dtype=torch.float32, device=self.device)
+                + 2 * self.rank,
                 [1, 0],
             )
             compiled = torch.compile(func)
@@ -389,7 +391,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(out, correct))
 
             # rank0: [2., 3.], rank1: [0., 1.]
-            expected = torch.arange(2, dtype=torch.float32, device="cuda") + 2 * (
+            expected = torch.arange(2, dtype=torch.float32, device=self.device) + 2 * (
                 (self.rank - 1 + self.world_size) % self.world_size
             )
             self.assertEqual(out, expected)
@@ -412,9 +414,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 return out
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
-            model = Model().cuda()
+            model = Model().to(self.device)
             model_compiled = torch.compile(model)
-            inp = torch.tensor([[2, 1, 3, 0]], dtype=torch.long, device="cuda")
+            inp = torch.tensor([[2, 1, 3, 0]], dtype=torch.long, device=self.device)
             out = model_compiled(inp, self.world_size, **self.get_world_trs())
             correct = model(inp, self.world_size, **self.get_world_trs())
             self.assertTrue(same(out, correct))
@@ -429,7 +431,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             func_compiled = torch.compile(func)
-            inp = torch.tensor(self.rank, dtype=torch.long, device="cuda")
+            inp = torch.tensor(self.rank, dtype=torch.long, device=self.device)
             out = func_compiled(inp, self.world_size)
             correct = func(inp, self.world_size)
             self.assertTrue(same(out, correct))
@@ -451,9 +453,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 return out
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
-            model = Model().cuda()
+            model = Model().to(self.device)
             model_compiled = torch.compile(model)
-            inp = torch.tensor([[2, 1, 3, 0]], dtype=torch.long, device="cuda")
+            inp = torch.tensor([[2, 1, 3, 0]], dtype=torch.long, device=self.device)
             out = model_compiled(inp, self.world_size, **self.get_world_trs())
             correct = model(inp, self.world_size, **self.get_world_trs())
             self.assertTrue(same(out, correct))
@@ -482,7 +484,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 example,
                 **self.get_world_trs(),
             )
-            inputs = (torch.ones(4, 4, device="cuda") + self.rank,) * 2
+            inputs = (torch.ones(4, 4, device=self.device) + self.rank,) * 2
 
             eager_out = example(*inputs)
             compiled_matmul_cat_col = compile(example, inputs)
@@ -509,7 +511,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 example,
                 **self.get_world_trs(),
             )
-            inputs = (torch.ones(4, 4, device="cuda") + self.rank,) * 2
+            inputs = (torch.ones(4, 4, device=self.device) + self.rank,) * 2
 
             eager_out = example(*inputs)
             compiled_fn = compile(example, inputs)
@@ -529,10 +531,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             ranks,
             group_size,
         ):
-            input_split_sizes = _tolist_with_constrain_as_size(input_split_sizes_tensor)
-            output_split_sizes = _tolist_with_constrain_as_size(
-                output_split_sizes_tensor
-            )
+            input_split_sizes = input_split_sizes_tensor.tolist()
+            output_split_sizes = output_split_sizes_tensor.tolist()
             a2a = torch.ops.c10d_functional.all_to_all_single(
                 inp,
                 output_split_sizes,
@@ -563,7 +563,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 dtype=torch.int64,
             )
             inputs = (
-                torch.ones(int(row), 5, device="cuda") * (self.rank + 1),
+                torch.ones(int(row), 5, device=self.device) * (self.rank + 1),
                 input_split_sizes_tensor,
                 output_split_sizes_tensor,
             )
@@ -692,10 +692,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             ranks,
             group_size,
         ):
-            input_split_sizes = _tolist_with_constrain_as_size(input_split_sizes_tensor)
-            output_split_sizes = _tolist_with_constrain_as_size(
-                output_split_sizes_tensor
-            )
+            input_split_sizes = input_split_sizes_tensor.tolist()
+            output_split_sizes = output_split_sizes_tensor.tolist()
             a2a = torch.ops.custom_ns.alltoall_autograd.default(
                 inp,
                 output_split_sizes,
@@ -732,7 +730,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 dtype=torch.int64,
             )
             inputs = (
-                torch.ones(int(row), 5, device="cuda", requires_grad=True)
+                torch.ones(int(row), 5, device=self.device, requires_grad=True)
                 * (self.rank + 1),
                 input_split_sizes_tensor,
                 output_split_sizes_tensor,
@@ -795,7 +793,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             inputs = (
-                torch.ones(self.world_size, self.world_size, device="cuda")
+                torch.ones(self.world_size, self.world_size, device=self.device)
                 * (self.rank + 1),
             )
             trs = self.get_world_trs()
@@ -819,8 +817,11 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
 
 @instantiate_parametrized_tests
-@requires_nccl()
-@requires_cuda
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+@unittest.skipIf(
+    not torch.accelerator.is_available(),
+    "No accelerator is available",
+)
 class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     """
     Prefer single-proc test runner for basic tests as it is easier to work with.
@@ -843,7 +844,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             ar = torch.ops.c10d_functional.wait_tensor(ar)
             return ar
 
-        inputs = torch.ones(4, 4, device="cuda")
+        inputs = torch.ones(4, 4, device=self.device)
 
         compiled = torch.compile(func)
         out = compiled(inputs, **self.get_world_trs())
@@ -878,7 +879,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             other = torch.ones_like(inp) + 22
             return ar, other
 
-        inputs = torch.ones(4, 4, device="cuda")
+        inputs = torch.ones(4, 4, device=self.device)
 
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
@@ -911,7 +912,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             other = torch.ones_like(inp) + 22
             return ar, y, other
 
-        inputs = torch.ones(4, 4, device="cuda")
+        inputs = torch.ones(4, 4, device=self.device)
 
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
@@ -952,7 +953,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             ar = _functional_collectives.all_reduce(inp, "sum", "0")
             return ar
 
-        inputs = torch.ones(4, 4, device="cuda")
+        inputs = torch.ones(4, 4, device=self.device)
         counter = CompileCounter()
         compiled = torch.compile(func, backend=counter)
         out = compiled(inputs)
@@ -963,12 +964,13 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(counter.op_count, 2)
         self.assertTrue(same(out, correct))
 
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_all_gather_tensor(self):
         def func(inp):
             ar = _functional_collectives.all_gather_tensor(inp, 0, "0")
             return ar
 
-        inputs = torch.ones(4, 4, device="cuda")
+        inputs = torch.ones(4, 4, device=self.device)
         counter = CompileCounter()
         compiled = torch.compile(func, backend=counter)
         out = compiled(inputs)
@@ -979,6 +981,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(counter.op_count, 2)
         self.assertTrue(same(out, correct))
 
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_all_gather_tensor_pg(self):
         def func(inp, *, pg):
             ar = _functional_collectives.all_gather_tensor(inp, 0, pg)
@@ -995,6 +998,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(counter.op_count, 2)
         self.assertTrue(same(out, correct))
 
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_all_gather(self):
         def func(inp, out, *, pg):
             torch.distributed.all_gather_into_tensor(
@@ -1020,6 +1024,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 3
         assert same(outputs, correct_outputs)
 
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_all_gather_list(self):
         def func(inp, out, *, pg):
             torch.distributed.all_gather(
@@ -1042,6 +1047,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.frame_count == 1
         assert same(outputs, correct_outputs)
 
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_all_gather_args_match(self):
         # Duplicated most of the structure from test_dynamo_rewrite_dist_all_gather
         # except uses kwargs to ensure rewrite has matching arg names
@@ -1070,6 +1076,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 3
         assert same(outputs, correct_outputs)
 
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_reduce_scatter(self):
         def func(inp, out, *, pg):
             torch.distributed.reduce_scatter_tensor(
@@ -1237,6 +1244,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         input = torch.ones(2, device=self.device)
         compiled(input)
 
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_support_collective_op_with_async_op_False(self):
         def func(inp, out, *, pg):
             # user explicitly set the attribute `async_op` to False,
@@ -1296,12 +1304,13 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 1
         assert same(outputs, correct_outputs)
 
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_reduce_scatter_tensor(self):
         def func(inp):
             ar = _functional_collectives.reduce_scatter_tensor(inp, "sum", 0, "0")
             return ar
 
-        inputs = torch.ones(4, 4, device="cuda")
+        inputs = torch.ones(4, 4, device=self.device)
         counter = CompileCounter()
         compiled = torch.compile(func, backend=counter)
         out = compiled(inputs)
@@ -1312,6 +1321,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(counter.op_count, 2)
         self.assertTrue(same(out, correct))
 
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_allgather_coalesced(self):
         def func(inp, *, tag, ranks, group_size):
             ar = torch.ops.c10d_functional.all_gather_into_tensor_coalesced(
@@ -1319,7 +1329,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             )
             return ar
 
-        inputs = [torch.ones(4, 4, device="cuda"), torch.ones(6, 6, device="cuda")]
+        inputs = [
+            torch.ones(4, 4, device=self.device),
+            torch.ones(6, 6, device=self.device),
+        ]
         counter = CompileCounter()
         compiled = torch.compile(func, backend=counter)
         out = compiled(inputs, **self.get_world_trs())
@@ -1339,7 +1352,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             ar = _functional_collectives.all_reduce(inp, "sum", "0")
             return ar
 
-        input = torch.ones(4, 4, device="cuda", requires_grad=True)
+        input = torch.ones(4, 4, device=self.device, requires_grad=True)
         compiled = torch.compile(
             func, backend="aot_eager"
         )  # inductor bug with single-op allreduce graph
@@ -1357,6 +1370,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         out = torch.ops.c10d_functional.all_reduce(x, "sum", **self.get_world_trs())
         self.assertEqual(x.size(), out.size())
 
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
     def test_inductor_all_gather_coalesced(self):
@@ -1376,7 +1390,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             other = torch.ones_like(inp) + 22
             return ar0, y, other, ar1
 
-        inputs = torch.ones(4, 4, device="cuda")
+        inputs = torch.ones(4, 4, device=self.device)
 
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
@@ -1403,6 +1417,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         correct = func(inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
 
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
     def test_inductor_reduce_scatter_coalesced(self):
@@ -1422,7 +1437,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             other = torch.ones_like(inp) + 22
             return ar0, y, other, ar1
 
-        inputs = torch.ones(4, 4, device="cuda")
+        inputs = torch.ones(4, 4, device=self.device)
 
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
@@ -1449,6 +1464,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         correct = func(inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
 
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_reorder_peak_memory(self):
         """
@@ -1470,7 +1486,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             other = torch.ones_like(inp) + 22
             return ar0, y, other, ar1
 
-        inputs = torch.ones(4, 4, device="cuda")
+        inputs = torch.ones(4, 4, device=self.device)
 
         # get stats directly from the internal helper without affecting the real pass's signature
         node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
@@ -1642,10 +1658,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
             return y, ag_0_out, ag_1_out
 
-        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
-        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ag_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ag_1 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        x = torch.ones(4, 384, device=self.device, dtype=torch.float32)
+        w = torch.ones(384, 512, device=self.device, dtype=torch.float32)
+        ag_0 = torch.ones(384, 512, device=self.device, dtype=torch.float32)
+        ag_1 = torch.ones(384, 512, device=self.device, dtype=torch.float32)
         inputs = [x, w, ag_0, ag_1]
 
         with torch._inductor.config.patch(
@@ -1730,6 +1746,124 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
+    @parametrize("bucket_mode", ["all"])
+    def test_all_reduce_bucket(self, bucket_mode):
+        def func(x, w, ar_0, ar_1, tag, ranks, group_size):
+            y = torch.mm(x, w)
+
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            ar_0_out = torch.ops._c10d_functional.all_reduce.default(
+                ar_0, "sum", group_name
+            )
+            ar_1_out = torch.ops._c10d_functional.all_reduce.default(
+                ar_1, "sum", group_name
+            )
+
+            ar_0_w = torch.ops.c10d_functional.wait_tensor(ar_0_out)
+            ar_1_w = torch.ops.c10d_functional.wait_tensor(ar_1_out)
+
+            return y, ar_0_w, ar_1_w
+
+        f = func
+
+        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
+        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        ar_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        ar_1 = torch.ones(384, 256, device="cuda", dtype=torch.float32)
+        inputs = [x, w, ar_0, ar_1]
+        f(*inputs, **self.get_world_trs())
+
+        def _pass(g):
+            from torch._inductor.fx_passes.bucketing import bucket_all_reduce
+
+            bucket_all_reduce(g.owning_module, lambda _: 2000)
+
+        torch._inductor.config.post_grad_custom_post_pass = _pass
+
+        with torch._inductor.config.patch(
+            {
+                "reorder_for_compute_comm_overlap": False,
+            }
+        ):
+            compiled = torch.compile(f)
+            compiled(*inputs, **self.get_world_trs())
+            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+        # NOTE: The first return value should be the output of the first wait_tensor.
+        # We want to make sure no unnecessary copy is made.
+        (
+            FileCheck()
+            .check_count(
+                "torch.ops._c10d_functional.all_reduce_.default(",
+                count=1,
+                exactly=True,
+            )
+            .run(code)
+        )
+        out = compiled(*inputs, **self.get_world_trs())
+        correct = f(*inputs, **self.get_world_trs())
+        assert same(out, correct), f"{out} va {correct}"
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not SM80OrLater, "bfloat16")
+    @parametrize("bucket_mode", ["all_custom_ops_multidtype"])
+    def test_all_gather_bucket_multidtype(self, bucket_mode):
+        def func(x, w, ag_0, ag_1, *, tag, ranks, group_size):
+            # do some unrelated matmuls
+            y = torch.mm(x, w)
+
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+
+            ag_0_w = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_0, group_size, group_name
+            )
+            ag_0_out = torch.ops.c10d_functional.wait_tensor(ag_0_w)
+            ag_0_out = ag_0_out * 2
+
+            ag_1_w = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_1, group_size, group_name
+            )
+
+            ag_1_out = torch.ops.c10d_functional.wait_tensor(ag_1_w)
+
+            return y, ag_0_out, ag_1_out
+
+        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
+        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        ag_0 = torch.ones(384, 512, device="cuda", dtype=torch.bfloat16)
+        ag_1 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        inputs = [x, w, ag_0, ag_1]
+        correct = func(*inputs, **self.get_world_trs())
+
+        with torch._inductor.config.patch(
+            {
+                "bucket_all_gathers_fx": bucket_mode,
+                "reorder_for_compute_comm_overlap": False,
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+            (
+                FileCheck()
+                .check_count(
+                    "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
+                    count=1,
+                    exactly=True,
+                )
+                .run(code)
+            )
+        out = compiled(*inputs, **self.get_world_trs())
+        _, y_ag0, y_ag1 = out
+        assert y_ag0.dtype == ag_0.dtype
+        assert y_ag1.dtype == ag_1.dtype
+
+        assert same(out, correct), f"{out} va {correct}"
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not SM80OrLater, "bfloat16")
     @parametrize("bucket_mode", ["all", "all_custom_ops"])
     def test_reorder_peak_memory_bucketed(self, bucket_mode):
         """
@@ -1810,12 +1944,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 rs_3_out,
             )
 
-        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
-        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ag_0 = torch.ones(1024, 512, device="cuda", dtype=torch.float32)
-        ag_1 = torch.ones(512, 1024, device="cuda", dtype=torch.float32)
-        ag_2 = torch.ones(1024, 512, device="cuda", dtype=torch.float32)
-        ag_3 = torch.ones(512, 1024, device="cuda", dtype=torch.float32)
+        x = torch.ones(4, 384, device=self.device, dtype=torch.float32)
+        w = torch.ones(384, 512, device=self.device, dtype=torch.float32)
+        ag_0 = torch.ones(1024, 512, device=self.device, dtype=torch.float32)
+        ag_1 = torch.ones(512, 1024, device=self.device, dtype=torch.float32)
+        ag_2 = torch.ones(1024, 512, device=self.device, dtype=torch.float32)
+        ag_3 = torch.ones(512, 1024, device=self.device, dtype=torch.float32)
         inputs = [x, w, ag_0, ag_1, ag_2, ag_3]
 
         # get stats directly from the internal helper without affecting the real pass's signature
@@ -1875,36 +2009,37 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         # NOTE: The first return value should be the output of the first wait_tensor.
         # We want to make sure no unnecessary copy is made.
-        (
-            FileCheck()
-            .check_count(
-                "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
-                count=2,
-                exactly=True,
+        if not torch._inductor.config.triton.native_matmul:
+            (
+                FileCheck()
+                .check_count(
+                    "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
+                    count=2,
+                    exactly=True,
+                )
+                .check(
+                    "extern_kernels.mm",
+                )
+                .check(
+                    "extern_kernels.addmm",
+                )
+                .run(code)
             )
-            .check(
-                "extern_kernels.mm",
+            (
+                FileCheck()
+                .check_count(
+                    "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
+                    count=2,
+                    exactly=True,
+                )
+                .check(
+                    "extern_kernels.mm",
+                )
+                .check(
+                    "extern_kernels.addmm",
+                )
+                .run(code)
             )
-            .check(
-                "extern_kernels.addmm",
-            )
-            .run(code)
-        )
-        (
-            FileCheck()
-            .check_count(
-                "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
-                count=2,
-                exactly=True,
-            )
-            .check(
-                "extern_kernels.mm",
-            )
-            .check(
-                "extern_kernels.addmm",
-            )
-            .run(code)
-        )
         out = compiled(*inputs, **self.get_world_trs())
         correct = func(*inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
@@ -1917,6 +2052,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         node_stat1 = next(it)
         self.assertTrue("collective ordering" in node_stat1.limiting_factor)
 
+    @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_reorder_respects_wait_dep(self):
         """
@@ -1939,7 +2075,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             # ensure other is not incorrectly aliasing ar's buffer
             return ag_1_wait
 
-        inputs = torch.ones(4, 4, device="cuda")
+        inputs = torch.ones(4, 4, device=self.device)
 
         # get stats directly from the internal helper without affecting the real pass's signature
         node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
@@ -1988,7 +2124,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             self.assertEqual(stats.moves, 0)
 
 
-@requires_nccl()
+@requires_accelerator_dist_backend(["nccl", "xccl"])
 class TestSyncDecisionCrossRanks(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -2004,16 +2140,21 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
 
     @property
     def device(self) -> torch.device:
-        return torch.device(f"cuda:{self.rank}")
+        device_type = torch.accelerator.current_accelerator().type
+        return torch.device(f"{device_type}:{self.rank}")
 
     def _init_process_group(self) -> None:
         torch._inductor.config.triton.store_cubin = True
         torch._inductor.config.debug = True
 
-        torch.cuda.set_device(self.device)
+        torch.get_device_module(self.device).set_device(self.device)
         store = torch.distributed.FileStore(self.file_name, self.world_size)
+        backend = c10d.get_default_backend_for_device(
+            torch.accelerator.current_accelerator().type
+        )
+
         torch.distributed.init_process_group(
-            backend="nccl",
+            backend=backend,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -2056,6 +2197,48 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         self._init_process_group()
         saved_values = _sync_decision_cross_ranks(test_graph, saved_values)
         self.assertEqual(saved_values, [wt1])
+
+    @skip_if_lt_x_gpu(2)
+    def test_comm_analysis(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(
+            group_name, torch.distributed.group.WORLD
+        )
+        group_size = group.size()
+
+        def func(inp, group_size, group_name):
+            ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                inp, group_size, group_name
+            )
+            ag_0_wait = torch.ops.c10d_functional.wait_tensor(ag_0_out)
+            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_0_wait, group_size, group_name
+            )
+            ag_1_wait = torch.ops.c10d_functional.wait_tensor(ag_1_out)
+            return ag_1_wait
+
+        gm = make_fx(func)(torch.ones(4, 4, device=self.device), group_size, group_name)
+        g = gm.graph
+        for n in g.nodes:
+            if is_all_gather_into_tensor(n):
+                from torch._inductor.comm_analysis import (
+                    estimate_nccl_collective_runtime_from_fx_node,
+                )
+
+                est_ms = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=False
+                )
+                assert est_ms > 0
+                est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=True
+                )
+                assert est_ms_nccl > 0
 
 
 if __name__ == "__main__":
