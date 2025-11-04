@@ -336,6 +336,7 @@ class CachingAutotuner(KernelInterface):
             name=self.fn.__name__,
             size_hints=size_hints,
             inductor_meta=self.inductor_meta,
+            frozen_fields=self.get_coordesc_frozen_fields(),
         )
         self.filename = filename
 
@@ -364,6 +365,13 @@ class CachingAutotuner(KernelInterface):
 
         # Mode for launch grid calculation
         self.grid_mode: Literal["python", "cpp"] = "python"
+
+    def get_coordesc_frozen_fields(self) -> OrderedSet[str]:
+        out: OrderedSet[str] = OrderedSet()
+        if self.inductor_meta.get("RSPLIT_SIZE"):
+            # We fix XBLOCK for mix order reduction
+            out.add("XBLOCK")
+        return out
 
     def is_statically_launchable(self):
         """
