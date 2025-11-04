@@ -3,6 +3,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/OpMathType.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/functional.h>
@@ -347,34 +348,35 @@ struct MinValuesOps: public at::native::MinOps<scalar_t> {
 };
 
 void min_values_kernel_impl(TensorIterator& iter) {
-  if (iter.dtype() == kLong) {
-    // This case is special because of Vectorized<int64_t> does not
-    // handle upper_bound<int64_t>().
-    // See: https://github.com/pytorch/pytorch/issues/43254
-    using scalar_t = int64_t;
-    binary_kernel_reduce(
-      iter,
-      MinValuesOps<scalar_t>{},
-      std::pair<scalar_t, int64_t>(upper_bound<scalar_t>(), -1));
+  // This case is special because of Vectorized<int64_t> does not
+  // handle upper_bound<int64_t>().
+  // See: https://github.com/pytorch/pytorch/issues/43254
+  if (iter.dtype() == kLong || iter.dtype() == kUInt64) {
+    AT_DISPATCH_V2(iter.dtype(), "min_values_cpu", AT_WRAP([&iter] {
+      binary_kernel_reduce(
+        iter,
+        MinValuesOps<scalar_t>{},
+        std::pair<scalar_t, int64_t>(upper_bound<scalar_t>(), -1));
+    }), kLong, kUInt64);
     return;
   }
-  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(), "min_values_cpu", [&iter] {
+  AT_DISPATCH_V2(iter.dtype(), "min_values_cpu", AT_WRAP([&iter] {
     binary_kernel_reduce_vec(
       iter,
       [](scalar_t a, scalar_t b) -> scalar_t { return min_impl(a, b); },
       [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return minimum(a, b); },
       static_cast<double>(upper_bound<scalar_t>()));
-  });
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf, kBool);
 }
 
 void max_values_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(), "max_values_cpu", [&iter] {
+  AT_DISPATCH_V2(iter.dtype(), "max_values_cpu", AT_WRAP([&iter] {
     binary_kernel_reduce_vec(
       iter,
       [](scalar_t a, scalar_t b) -> scalar_t { return max_impl(a, b); },
       [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return maximum(a, b); },
       lower_bound<scalar_t>());
-  });
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf, kBool);
 }
 
 void argmax_kernel_impl(TensorIterator &iter) {
