@@ -38,7 +38,7 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
 
   Generator getNewGenerator(
       [[maybe_unused]] DeviceIndex device_index = -1) const override {
-    // TODO(FFFrog): Perserved for BC and will be removed in the future.
+    // TODO(FFFrog): Preserved for BC and will be removed in the future.
     if (at::GetGeneratorPrivate().has_value())
       return at::GetGeneratorForPrivateuse1(device_index);
 

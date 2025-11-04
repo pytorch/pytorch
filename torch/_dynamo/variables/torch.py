@@ -33,8 +33,8 @@ import inspect
 import logging
 import math
 import re
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch._C
 import torch._refs
@@ -65,6 +65,7 @@ from ..utils import (
     guard_if_dyn,
     has_torch_function,
     hashable,
+    is_wrapper_or_member_descriptor,
     product,
     proxy_args_kwargs,
     unwrap_if_wrapper,
@@ -245,7 +246,23 @@ class BaseTorchVariable(VariableTracker):
 
     @classmethod
     def create_with_source(cls, value, source):
-        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+        if inspect.isclass(value):
+            install_guard(source.make_guard(GuardBuilder.CLASS_MATCH))
+        elif inspect.ismodule(value):
+            install_guard(source.make_guard(GuardBuilder.MODULE_MATCH))
+        elif inspect.isfunction(value):
+            install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
+        elif inspect.isbuiltin(value) or isinstance(
+            value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
+        ):
+            install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
+        elif is_wrapper_or_member_descriptor(value) or isinstance(
+            value, torch._dynamo.compiled_autograd.Op
+        ):
+            # Dont need to guard on wrappers
+            pass
+        else:
+            install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
         return cls(value, source=source)
 
     def __init__(self, value, **kwargs) -> None:
@@ -665,7 +682,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_use_deterministic_algorithms(
             self, tx: "InstructionTranslator", mode, warn_only=False
         ):
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             if warn_only and warn_only.as_python_constant():
                 unimplemented_v2(
                     gb_type="Attempted to use torch.use_deterministic_algorithms(warn_only=True)",
@@ -817,12 +834,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(torch.full)
         def handle_full(self, tx, size, fill_value, **kwargs):
             if isinstance(fill_value, TensorVariable):
-                result = TorchInGraphFunctionVariable(
-                    torch.ops.aten._local_scalar_dense
-                ).call_function(tx, [fill_value], {})
-                return TorchInGraphFunctionVariable(torch.full).call_function(
-                    tx, [size, result], kwargs
+                # Decompose: create empty tensor and fill it
+                # This avoids the scalar extraction at compile time
+                empty_result = TorchInGraphFunctionVariable(torch.empty).call_function(
+                    tx, [size], kwargs
                 )
+                # Call fill_ method on the empty tensor
+                return empty_result.call_method(tx, "fill_", [fill_value], {})
 
         @register(torch._foreach_lerp_)
         def handle_inplace_foreach_lerp_scalar(
@@ -1050,7 +1068,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 raise torch._dynamo.exc.Unsupported("branch not supported")
             return variables.ConstantVariable.create(
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 torch.fx.experimental.symbolic_shapes.guard_scalar(val)
             )
 
@@ -1097,7 +1115,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return
 
             return variables.ConstantVariable.create(
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 torch.fx.experimental.symbolic_shapes.has_static_value(val)
             )
 
@@ -1238,18 +1256,47 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
 
             # need to guard only on no-arg get_device_module
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             if device is None:
                 source = CallFunctionNoArgsSource(self.source)
                 install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             # assumes `module` is in the form `torch.xyz`
             new_source = AttrSource(
                 TorchSource(),
-                # pyrefly: ignore  # unbound-name
+                # pyrefly: ignore [unbound-name]
                 module.__name__.rsplit(".", maxsplit=1)[-1],
             )
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             return VariableTracker.build(tx, module, new_source)
+
+        @register(torch.accelerator.current_stream)
+        def handle_current_stream(self, tx: "InstructionTranslator", *args, **kwargs):
+            if len(args) + len(kwargs) > 1 or (kwargs and "device" not in kwargs):
+                unimplemented_v2(
+                    gb_type="unsupported arguments to torch.accelerator.current_stream",
+                    context=f"args={args}, kwargs={kwargs}",
+                    explanation="torch.accelerator.current_stream accepts one optional argument `device`",
+                    hints=[
+                        *graph_break_hints.USER_ERROR,
+                    ],
+                )
+            try:
+                if kwargs:
+                    device = torch.device(kwargs["device"].as_python_constant())
+                elif args:
+                    device = torch.device(args[0].as_python_constant())
+                else:
+                    device = None
+
+                return tx.symbolic_stream_state.cur_stream(device)
+            except Exception as e:
+                unimplemented_v2(
+                    gb_type="bad device argument to torch.accelerator.current_stream",
+                    context=f"args={args}, kwargs={kwargs}",
+                    explanation="Expected valid string/torch.device argument ('cpu', 'cuda', etc.)",
+                    hints=[*graph_break_hints.USER_ERROR],
+                    from_exc=e,
+                )
 
         @register(torch.set_default_device)
         def handle_set_default_device(
@@ -1404,11 +1451,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
             input_spec_proxy = tx.output.register_static_attr_and_return_proxy(
                 fn.__name__ + "_input_spec",
-                # pyrefly: ignore  # unbound-name
+                # pyrefly: ignore [unbound-name]
                 input_spec,
             )
             f_spec_proxy.node.type = type(f_spec)
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             input_spec_proxy.node.type = type(input_spec)
             all_args = (f_spec_proxy, input_spec_proxy, *proxified_flat_args)
 
@@ -1447,6 +1494,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ):
             # constant fold functions need to be guarded.
             if self.value in constant_fold_functions_need_guards:
+                assert self.source is not None
                 source = CallFunctionNoArgsSource(self.source)
                 install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
             # constant fold
@@ -1602,7 +1650,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # take the conservative approach to graph break on size changes, and
             # assume other cases can fall through soundly.
             #
-            # Note that although these tensor variablels would hold different
+            # Note that although these tensor variables would hold different
             # proxies, the in-place mutation semantics is preserved in the FX
             # graph, so we won't have correctness issues.
             if isinstance(saved_out_shapes, list):
@@ -1749,7 +1797,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             )
 
         # this results in cleaner graphs, but only works for inputs
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         if data.source:
             return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
 
@@ -1770,7 +1818,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         if isinstance(
             data,
             TensorWithTFOverrideVariable,
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
         ) or is_traceable_wrapper_subclass_type(data.class_type):
             unimplemented_v2(
                 gb_type="Attempted to use torch.nn.Parameter constructor with tensor subclass",
@@ -1793,11 +1841,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             )
 
         try:
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             shape = tuple(data.var_getattr(tx, "shape").as_python_constant())
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             dtype = data.var_getattr(tx, "dtype").as_python_constant()
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             device = data.var_getattr(tx, "device").as_python_constant()
         except NotImplementedError as e:
             unimplemented_v2(
@@ -1813,12 +1861,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         placeholder = tx.output.synthetic_graph_input(
             new_parameter_placeholder,
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             [shape, dtype, device, requires_grad],
         )
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         if data.requires_grad:
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             data = data.call_method(tx, "detach", [], {})
 
         from .builder import wrap_fx_proxy
@@ -1828,7 +1876,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             tx.output.create_proxy(
                 "call_function",
                 tracable_create_parameter,
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 (data.as_proxy(), placeholder.as_proxy()),
                 {},
             ),
@@ -1969,7 +2017,7 @@ class FuncTorchInterpreterVariable(BaseTorchVariable):
             return variables.EnumVariable(self.value.key())
         elif name == "process":
             return tx.inline_user_function_return(
-                variables.UserFunctionVariable(self.value.process.__func__),
+                VariableTracker.build(tx, self.value.process.__func__),
                 [self] + args,
                 kwargs,
             )
