@@ -2176,7 +2176,7 @@ Tensor _nested_split_with_sizes_backward(
     const Tensor& nt_sizes,
     const at::TensorOptions& options) {
   // add 1 to account for batch dim
-  dim = at::maybe_wrap_dim(dim, static_cast<int64_t>(nt_sizes.size(1)) + 1);
+  dim = at::maybe_wrap_dim(dim, nt_sizes.size(1) + 1);
   // it's possible some of the grads are not defined (represents tensors of all
   // 0s). Since at::cat can't handle those, let's define them
   std::vector<Tensor> grads_all_defined;
@@ -2187,10 +2187,9 @@ Tensor _nested_split_with_sizes_backward(
       const auto& length = split_sizes[i].guard_int(__FILE__, __LINE__);
       auto nt_split_size = nt_sizes.clone();
       auto nt_split_size_ptr = nt_split_size.data_ptr<int64_t>();
-      for (int64_t j : c10::irange(static_cast<int64_t>(nt_sizes.size(0)))) {
+      for (int64_t j : c10::irange(nt_sizes.size(0))) {
         // subtract 1 to account for batch dim
-        nt_split_size_ptr
-            [j * static_cast<int64_t>(nt_sizes.size(1)) + (dim - 1)] = length;
+        nt_split_size_ptr[j * nt_sizes.size(1) + (dim - 1)] = length;
       }
       Tensor zeros_buffer = at::zeros(
           {at::native::get_numel_from_nested_size_tensor(nt_split_size)},
@@ -4569,7 +4568,7 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
   if (!grad.defined() || (!A_requires_grad && !B_requires_grad)) {
     return std::make_tuple(Tensor{}, Tensor{});
   }
-  // We always need to comput G_B
+  // We always need to compute G_B
   const Tensor A_H = A.mH();
   const Tensor G_B =
       at::linalg_solve_triangular(A_H, grad, !upper, left, unitriangular);
@@ -6504,7 +6503,7 @@ Tensor rms_norm_jvp(
   Tensor rstd_t;
   if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
       input_t._is_zerotensor()) {
-    rstd_t = -rstd_p.pow(3) * (input_t) * (input_p);
+    rstd_t = -rstd_p.pow(3) * input_t * input_p;
   } else {
     rstd_t = input_t * input_p;
     rstd_t *= -rstd_p.pow(3);
@@ -6515,7 +6514,7 @@ Tensor rms_norm_jvp(
   Tensor result_t;
   if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
       input_t._is_zerotensor()) {
-    result_t = (input_t)*rstd_p + (input_p)*rstd_t;
+    result_t = input_t * rstd_p + input_p * rstd_t;
   } else {
     result_t = input_t * rstd_p;
     auto temp = input_p * rstd_t;
@@ -6559,7 +6558,7 @@ Tensor rms_norm_rstd_jvp(
   Tensor rstd_t;
   if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
       input_t._is_zerotensor()) {
-    rstd_t = -rstd_p.pow(3) * (input_t) * (input_p);
+    rstd_t = -rstd_p.pow(3) * input_t * input_p;
   } else {
     rstd_t = input_t * input_p;
     rstd_t *= -rstd_p.pow(3);

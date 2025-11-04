@@ -65,14 +65,28 @@ def _get_hiprtc_library() -> ctypes.CDLL:
     lib.nvrtcGetPTX = lib.hiprtcGetCode  # type: ignore[attr-defined]
     lib.nvrtcGetProgramLogSize = lib.hiprtcGetProgramLogSize  # type: ignore[attr-defined]
     lib.nvrtcGetProgramLog = lib.hiprtcGetProgramLog  # type: ignore[attr-defined]
+    lib.nvrtcAddNameExpression = lib.hiprtcAddNameExpression  # type: ignore[attr-defined]
+    lib.nvrtcGetLoweredName = lib.hiprtcGetLoweredName  # type: ignore[attr-defined]
     return lib
 
 
 def _get_nvrtc_library() -> ctypes.CDLL:
+    major_version = int(torch.version.cuda.split(".")[0])  # type: ignore[union-attr]
     if sys.platform == "win32":
-        return ctypes.CDLL("nvrtc64_120_0.dll")
+        nvrtc_libs = [
+            f"nvrtc64_{major_version}0_0.dll",
+        ]
     else:
-        return ctypes.CDLL("libnvrtc.so")
+        nvrtc_libs = [
+            f"libnvrtc.so.{major_version}",
+            "libnvrtc.so",  # Fallback to unversioned
+        ]
+    for lib_name in nvrtc_libs:
+        try:
+            return ctypes.CDLL(lib_name)
+        except OSError:
+            continue
+    raise OSError("Could not find any NVRTC library")
 
 
 def _get_gpu_rtc_library() -> ctypes.CDLL:
@@ -112,10 +126,10 @@ def _nvrtc_compile(
     kernel_source: str,
     kernel_name: str,
     compute_capability: Optional[str] = None,
-    header_code: str = "",
     cuda_include_dirs: Optional[list] = None,
     nvcc_options: Optional[list] = None,
-) -> bytes:
+    auto_pch: bool = False,
+) -> tuple[bytes, str]:
     """
     Compiles a CUDA kernel using NVRTC and returns the PTX code.
 
@@ -124,12 +138,12 @@ def _nvrtc_compile(
         kernel_name (str): The name of the kernel function to compile
         compute_capability (str, None): The compute capability to target (e.g., "86").
                                            If None, will detect from current device.
-        header_code (str, optional): Additional header code to prepend to the kernel source
         cuda_include_dirs (list, None): List of directories containing CUDA headers
         nvcc_options (list, None): Additional options to pass to NVRTC
+        auto_pch (bool): Enable automatic precompiled headers (CUDA 12.8+)
 
     Returns:
-        str: The compiled PTX code
+        Tuple[bytes, str]: The compiled PTX code and mangled kernel name
     """
     # Ensure CUDA is initialized
     import torch.cuda
@@ -152,18 +166,8 @@ def _nvrtc_compile(
             )
             raise RuntimeError(f"CUDA error: {error_message}")
 
-    # Add 'extern "C"' if not already present to ensure C linkage
-    if not kernel_source.strip().startswith('extern "C"'):
-        kernel_source = f'extern "C" {kernel_source}'
-
-    # Combine header code and kernel source
-    if header_code:
-        full_source = header_code + "\n" + kernel_source
-    else:
-        full_source = kernel_source
-
     # Convert source to bytes
-    source_bytes = full_source.encode("utf-8")
+    source_bytes = kernel_source.encode("utf-8")
 
     # Get compute capability if not provided
     if compute_capability is None:
@@ -192,6 +196,13 @@ def _nvrtc_compile(
         for directory in cuda_include_dirs:
             options.append(f"-I{directory}".encode())
 
+    # Enable automatic precompiled headers (CUDA 12.8+)
+    if auto_pch:
+        assert str(torch.version.cuda) >= "12.8", "PCH requires CUDA 12.8+"
+        if nvcc_options is None:
+            nvcc_options = []
+        nvcc_options.append("--pch")
+
     # Add custom NVCC options
     if nvcc_options:
         for option in nvcc_options:
@@ -217,6 +228,10 @@ def _nvrtc_compile(
         )
     )
 
+    # Add kernel name, which can be a template expression
+    c_kernel_name = kernel_name.encode("utf-8")
+    check_nvrtc(libnvrtc.nvrtcAddNameExpression(prog, c_kernel_name))
+
     # Compile program
     res = libnvrtc.nvrtcCompileProgram(prog, num_options, options_array)
 
@@ -234,12 +249,24 @@ def _nvrtc_compile(
     check_nvrtc(libnvrtc.nvrtcGetPTXSize(prog, ctypes.byref(ptx_size)))
     ptx = ctypes.create_string_buffer(ptx_size.value)
     check_nvrtc(libnvrtc.nvrtcGetPTX(prog, ptx))
+
+    # Get mangled name
+    c_mangled_name = ctypes.c_char_p()
+    check_nvrtc(
+        libnvrtc.nvrtcGetLoweredName(prog, c_kernel_name, ctypes.byref(c_mangled_name))
+    )
+    if c_mangled_name.value is not None:
+        mangled_name = c_mangled_name.value.decode()  # make a copy
+    else:
+        mangled_name = ""
+
     libnvrtc.nvrtcDestroyProgram(ctypes.byref(prog))
 
     # For HIP, hipRTC generates raw CO binaries instead of PTX,
     # and for some reason, ".value" causes the string to be truncated,
     # likely due to the presence of '\0' in the string. So we use .raw instead.
-    return ptx.raw if torch.version.hip else ptx.value
+    ptx_bytes = ptx.raw if torch.version.hip else ptx.value
+    return ptx_bytes, mangled_name
 
 
 class _CudaModule:
@@ -252,6 +279,7 @@ class _CudaModule:
             return self._kernels[name]
 
         # Import the CUDA library inside the method
+        # pyrefly: ignore [missing-module-attribute]
         from torch.cuda._utils import _get_gpu_runtime_library
 
         libcuda = _get_gpu_runtime_library()
@@ -393,7 +421,7 @@ class _CudaKernel:
             # navi, CDNA1-CDNA3 allows a max of 64KB shared memory
             # CDNA4 allows a max of 160KB shared memory
             max_shared_mem = (
-                65536 if device_props.gcnArchName not in ["gfx950"] else 160 * 1024
+                65536 if device_props.gcnArchName != "gfx950" else 160 * 1024
             )
         else:
             max_shared_mem = getattr(

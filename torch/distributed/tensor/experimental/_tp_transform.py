@@ -203,7 +203,7 @@ def _mark_sharding(
                 )
             node.meta["sharding"] = placement_strategies[node]
         elif node.op == "call_function":
-            if node.target == operator.getitem:
+            if node.target is operator.getitem:
                 input_nodes = node.all_input_nodes
                 assert len(input_nodes) == 1, (
                     f"non-compute op only support one input now, found node: {node} with length of inputs: {len(node.args)}"
@@ -237,8 +237,11 @@ def _mark_sharding(
                         op_schema,
                     )
                 placement_strategies[node] = OpSpec(
+                    # pyrefly: ignore [bad-argument-type]
                     output_specs=_get_output_spec_from_output_sharding(output_sharding),
+                    # pyrefly: ignore [missing-attribute]
                     input_specs=output_sharding.redistribute_schema.args_spec
+                    # pyrefly: ignore [missing-attribute]
                     if output_sharding.redistribute_schema is not None
                     else _get_input_node_specs(node, placement_strategies),
                 )
@@ -464,7 +467,7 @@ def _insert_reshard_gm(
             if reshard_node.op not in ["placeholder", "output"]:
                 reshard_node.meta["nn_module_stack"] = (
                     copy.copy(input_arg.meta["nn_module_stack"])
-                    if not input_arg.op == "placeholder"
+                    if input_arg.op != "placeholder"
                     else copy.copy(node.meta["nn_module_stack"])
                 )
         output_node = gm.graph.graph_copy(

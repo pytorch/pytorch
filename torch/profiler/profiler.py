@@ -5,10 +5,10 @@ import os
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 from typing_extensions import Self
 from warnings import warn
 
@@ -161,14 +161,19 @@ class _KinetoProfile:
         self.mem_tl: Optional[MemoryProfileTimeline] = None
         self.use_device = None
         if ProfilerActivity.CUDA in self.activities:
+            # pyrefly: ignore [bad-assignment]
             self.use_device = "cuda"
         elif ProfilerActivity.XPU in self.activities:
+            # pyrefly: ignore [bad-assignment]
             self.use_device = "xpu"
         elif ProfilerActivity.MTIA in self.activities:
+            # pyrefly: ignore [bad-assignment]
             self.use_device = "mtia"
         elif ProfilerActivity.HPU in self.activities:
+            # pyrefly: ignore [bad-assignment]
             self.use_device = "hpu"
         elif ProfilerActivity.PrivateUse1 in self.activities:
+            # pyrefly: ignore [bad-assignment]
             self.use_device = _get_privateuse1_backend_name()
 
         # user-defined metadata to be amended to the trace
@@ -380,6 +385,7 @@ class _KinetoProfile:
         }
         if backend == "nccl":
             nccl_version = torch.cuda.nccl.version()
+            # pyrefly: ignore [unsupported-operation]
             dist_info["nccl_version"] = ".".join(str(v) for v in nccl_version)
         return dist_info
 
@@ -506,7 +512,10 @@ def schedule(
         wait >= 0 and warmup >= 0 and active > 0 and repeat >= 0 and skip_first >= 0
     ), "Invalid profiler schedule arguments"
     if warmup == 0:
-        warn("Profiler won't be using warmup, this can skew profiler results")
+        warn(
+            "Profiler won't be using warmup, this can skew profiler results",
+            stacklevel=2,
+        )
     return schedule_fn
 
 
@@ -924,7 +933,8 @@ class ExecutionTraceObserver(_ITraceObserver):
                 fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
             except Exception as e:
                 warn(
-                    f"Execution trace will not be recorded. Exception on creating default temporary file: {e}"
+                    f"Execution trace will not be recorded. Exception on creating default temporary file: {e}",
+                    stacklevel=2,
                 )
                 return None
             fp.close()
@@ -1009,7 +1019,10 @@ class ExecutionTraceObserver(_ITraceObserver):
                 try:
                     os.mkdir(resource_dir)
                 except Exception:
-                    warn(f"Execution trace exception when creating {resource_dir}")
+                    warn(
+                        f"Execution trace exception when creating {resource_dir}",
+                        stacklevel=2,
+                    )
                     return None
             else:
                 return None
@@ -1025,14 +1038,15 @@ class ExecutionTraceObserver(_ITraceObserver):
                 resource_dir = self.get_resources_dir()
             except Exception as e:
                 warn(
-                    f"Execution trace exception when generating resource directory: {e}"
+                    f"Execution trace exception when generating resource directory: {e}",
+                    stacklevel=2,
                 )
                 return
             if not resource_dir:
                 return
 
             # Save the kernel paths for the generated kernels
-            from torch._inductor.codecache import PyCodeCache as PyCodeCache
+            from torch._inductor.codecache import PyCodeCache
 
             kernel_files = [
                 v.__file__
@@ -1060,7 +1074,7 @@ class ExecutionTraceObserver(_ITraceObserver):
             try:
                 _save_triton_kernels()
             except Exception as e:
-                warn(f"Execution trace failed to save kernels: {e}")
+                warn(f"Execution trace failed to save kernels: {e}", stacklevel=2)
 
             _remove_execution_trace_observer()
             if self.output_file_path.endswith("gz"):

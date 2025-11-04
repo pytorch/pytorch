@@ -4,9 +4,9 @@ import logging
 import operator
 import typing
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.export._trace
@@ -704,7 +704,8 @@ class TS2FXGraphConverter:
         # In a sense, the converter now becomes an stateful interpreter
         warnings.warn(
             "Converting aten::append.t, which is a inplace mutation of the list. "
-            "This makes the converter non-functional: the result depends on the order of the append nodes being converter!"
+            "This makes the converter non-functional: the result depends on the order of the append nodes being converter!",
+            stacklevel=2,
         )
 
         args = tuple(self.get_fx_value_by_ir_value(inp) for inp in node.inputs())
@@ -764,7 +765,7 @@ class TS2FXGraphConverter:
             raise ValueError(f"Unsupported JitType ({input_type}) when get device")
 
     def convert_prim_GetAttr(self, node: torch._C.Node):
-        # Build fully qulified name
+        # Build fully qualified name
         attr_fqn = get_attribute_fqn_from_ts_node(self.name_to_attribute_fqn, node)
         output_name = node.output().debugName()
         self.name_to_attribute_fqn[output_name] = attr_fqn
@@ -970,7 +971,7 @@ class TS2FXGraphConverter:
         # "cannot mutate tensors with frozen storage" functionalization error.
         # To work around the issue, we override the copy to be True, so that the output
         # is for sure not an alias of input
-        if target == torch.ops.aten.to.dtype or target == torch.ops.aten.to.prim_dtype:
+        if target is torch.ops.aten.to.dtype or target is torch.ops.aten.to.prim_dtype:
             user_nodes = [use.user for use in node.output().uses()]
             user_targets = [
                 get_op_overload(user_node)
@@ -1010,7 +1011,7 @@ class TS2FXGraphConverter:
         else:
             target = get_op_overload(node)
 
-        if target == torch.ops.aten.add.t:
+        if target is torch.ops.aten.add.t:
             # special handle python list/tuple add: "aten::add.t(t[] a, t[] b) -> t[]" for
             # RuntimeError: aten::add() Expected a value of type 'List[t]' for argument 'a' but instead found type 'immutable_list'.
             args, _kwargs = self.get_args_kwargs(node, target._schema)
@@ -1109,6 +1110,7 @@ class TS2FXGraphConverter:
                     fx_block_args[i] = self.name_to_node[output_name]
 
             # Update the value of global variables, whose values are modified inplace.
+
             for i, name in enumerate(
                 subgraph_converter.name_update_from_subblock_to_parent
             ):
@@ -1453,7 +1455,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         )
         gm = graph_converter.convert()
 
-        # Post-proccessing step to deal with quantized operators.
+        # Post-processing step to deal with quantized operators.
         replace_quantized_ops_with_standard_ops(gm)
         log.info("GraphModule: %s", gm.print_readable(print_output=False))
 
@@ -1470,7 +1472,8 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
             for k, tensor in self.ts_model.state_dict().items():  # type: ignore[union-attr]
                 if k not in ep.state_dict:
                     warnings.warn(
-                        f"Manually populate {k} into state_dict ExportedProgram, but it is never used by the ExportedProgram."
+                        f"Manually populate {k} into state_dict ExportedProgram, but it is never used by the ExportedProgram.",
+                        stacklevel=2,
                     )
                     ep.state_dict[k] = tensor
 

@@ -579,7 +579,7 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
-        and V.graph.sizevars.statically_known_equals(in_chan, x.get_size()[1])  # type: ignore[arg-type]
+        and V.graph.sizevars.statically_known_equals(in_chan * groups, x.get_size()[1])  # type: ignore[arg-type]
     ):
         if (
             is_ones(kernel_shape)
@@ -677,7 +677,7 @@ def _convolution(
 
 
 def constrain_conv_to_fx_strides(fx_node, *args, **kwargs):
-    assert fx_node.target == torch.ops.aten.convolution.default
+    assert fx_node.target is torch.ops.aten.convolution.default
     if V.graph.layout_opt:
         return args, kwargs
     else:

@@ -31,6 +31,7 @@
 #################################################################################################
 
 from .int_tuple import (
+    as_tuple,
     crd2crd,
     crd2idx,
     elem_scale,
@@ -41,11 +42,12 @@ from .int_tuple import (
     IntTuple,
     is_int,
     is_tuple,
-    prefix_product,
+    match_structure,
     product,
     shape_div,
     signum,
     slice_,
+    suffix_product,
     tuple_max,
 )
 from .layout import (

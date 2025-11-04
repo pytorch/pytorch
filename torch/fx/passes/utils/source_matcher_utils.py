@@ -1,7 +1,8 @@
 import logging
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph

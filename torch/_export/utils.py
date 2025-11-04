@@ -9,10 +9,10 @@ import math
 import operator
 import re
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from inspect import ismethod, Parameter
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._guards import detect_fake_mode
@@ -464,13 +464,18 @@ def _check_input_constraints_for_graph(
                 )
 
         elif isinstance(node_val, (int, float, str)):
-            if type(arg) != type(node_val) or arg != node_val:
+            if type(arg) is not type(node_val) or arg != node_val:
                 raise RuntimeError(
                     f"Expected input at {get_keystr(key_path)} to be equal to {node_val}, but got {arg}",
                 )
         elif isinstance(node_val, torch.SymInt):
             _check_symint(
-                node_val, arg, range_constraints, unification_map, key_path, None
+                node_val,
+                arg,
+                range_constraints,
+                unification_map,
+                key_path,
+                None,
             )
 
 
@@ -488,6 +493,7 @@ def register_dataclass_as_pytree_node(
         f"Only dataclasses can be registered with this function: {cls}"
     )
 
+    @torch._dynamo.dont_skip_tracing
     def default_flatten_fn(obj: Any) -> tuple[list[Any], Context]:
         flattened = []
         flat_names = []
@@ -501,10 +507,12 @@ def register_dataclass_as_pytree_node(
                 none_names.append(name)
         return flattened, [flat_names, none_names]
 
+    @torch._dynamo.dont_skip_tracing
     def default_unflatten_fn(values: Iterable[Any], context: Context) -> Any:
         flat_names, none_names = context
         return cls(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
 
+    @torch._dynamo.dont_skip_tracing
     def default_flatten_fn_with_keys(obj: Any) -> tuple[list[Any], Context]:
         flattened, (flat_names, _none_names) = flatten_fn(obj)  # type: ignore[misc]
         return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], flat_names
@@ -673,7 +681,7 @@ def _insert_aten_to_metadata_assert_pass(gm: torch.fx.GraphModule) -> None:
     for node in gm.graph.nodes:
         if node.target in aten_to_variants:
             if (
-                node.prev.target == torch.ops.aten._assert_tensor_metadata.default
+                node.prev.target is torch.ops.aten._assert_tensor_metadata.default
                 and node.args[0] == node.prev.args[0]
             ):
                 # skip if already guarded
@@ -842,7 +850,7 @@ def node_inline_(call_mod_node: torch.fx.Node) -> Optional[torch.fx.GraphModule]
                 get_item_users = nodes_filter(
                     list(call_mod_node.users.keys()),
                     lambda node: node.op == "call_function"
-                    and node.target == operator.getitem,
+                    and node.target is operator.getitem,
                 )
                 # get_item_node.args[1] is the idx referring to new_output[idx]
                 nodes_map(
@@ -1112,12 +1120,14 @@ def placeholder_naming_pass(
         if (  # handle targets for custom objects
             spec.kind == InputKind.CUSTOM_OBJ and spec.target in name_map
         ):
+            # pyrefly: ignore [index-error]
             spec.target = name_map[spec.target][4:]  # strip obj_ prefix
 
     for spec in export_graph_signature.output_specs:
         if spec.arg.name in name_map:
             spec.arg.name = name_map[spec.arg.name]
         if spec.kind == OutputKind.USER_INPUT_MUTATION and spec.target in name_map:
+            # pyrefly: ignore [index-error]
             spec.target = name_map[spec.target]
 
     # rename keys in constants dict for custom objects
@@ -1467,7 +1477,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
         flattened, _ = flatten_fn(obj)
 
         # NOTE: This helper function will replicate an nn.Module in the exactly same
-        #       structure to be used together with _reparametrize_module. This will
+        #       structure to be used together with _reparameterize_module. This will
         #       create a clone of the module with the new parameters and buffers without
         #       affecting the original module.
         def copy_module(mod: torch.nn.Module):

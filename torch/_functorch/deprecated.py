@@ -10,7 +10,8 @@ documentation.
 
 import textwrap
 import warnings
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Optional, Union
 
 import torch._functorch.apis as apis
 import torch._functorch.eager_transforms as _impl

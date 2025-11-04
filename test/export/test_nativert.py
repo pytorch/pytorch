@@ -12,13 +12,14 @@ import torch
 import torch._dynamo as torchdynamo
 from torch._C._nativert import PyModelRunner
 from torch._dynamo.test_case import TestCase
+from torch._environment import is_fbcode
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.nativert.backends._lower_utils import (
     lower_exported_program,
     package_nativert_with_aoti_delegate,
 )
 from torch.testing._internal.common_utils import IS_WINDOWS
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.utils import _pytree as pytree
 
 
@@ -127,7 +128,7 @@ def run_with_nativert(ep):
         flat_results = pytree.tree_leaves(results)
         assert len(flat_results) == len(flat_expected)
         for result, expected in zip(flat_results, flat_expected):
-            assert type(result) == type(expected)
+            assert type(result) is type(expected)
             if isinstance(result, torch.Tensor) and isinstance(expected, torch.Tensor):
                 assert result.shape == expected.shape
                 assert result.dtype == expected.dtype
@@ -197,6 +198,7 @@ def make_dynamic_cls(cls, strict=False):
 
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+@unittest.skipIf(not is_fbcode(), "FBcode only for now")
 class TestNativeRT(TestCase):
     @staticmethod
     def get_module():
@@ -243,7 +245,7 @@ class TestNativeRT(TestCase):
 
     parameters = []
     for device in ["cpu", "cuda"]:
-        if device == "cuda" and not HAS_GPU:
+        if device == "cuda" and not HAS_CUDA_AND_TRITON:
             continue
         for module, sample_inputs in [
             (get_module.__func__().to(device), (torch.randn(4, 4).to(device),)),
@@ -321,7 +323,7 @@ class TestNativeRT(TestCase):
             flat_results = pytree.tree_leaves(results)
             assert len(flat_results) == len(flat_expected)
             for result, expected in zip(flat_results, flat_expected):
-                assert type(result) == type(expected)
+                assert type(result) is type(expected)
                 if isinstance(result, torch.Tensor) and isinstance(
                     expected, torch.Tensor
                 ):
@@ -342,15 +344,16 @@ class TestNativeRT(TestCase):
             pathlib.Path(filename).unlink(missing_ok=True)
 
 
-tests = [
-    test_export.TestExport,
-]
-for test in tests:
-    make_dynamic_cls(test, strict=True)
-    make_dynamic_cls(test, strict=False)
-del test
+if is_fbcode():
+    for test in [test_export.TestExport]:
+        make_dynamic_cls(test, strict=True)
+        make_dynamic_cls(test, strict=False)
+    del test
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    run_tests()
+    # nativert has not been supported on XPU yet.
+    if not torch.xpu.is_available():
+        run_tests()

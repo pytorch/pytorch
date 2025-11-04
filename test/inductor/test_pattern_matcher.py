@@ -3,7 +3,8 @@ import copy
 import itertools
 import os
 import unittest
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -34,7 +35,7 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
-from torch.testing._internal.common_device_type import expectedFailureXPU, skipCUDAIf
+from torch.testing._internal.common_device_type import skipCUDAIf
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -138,7 +139,7 @@ class TestPatternMatcher(TestCase):
                 ref[indices], test[indices]
             )  # also checks that dtype is correct
 
-    @skipIfXpu
+    # @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
@@ -180,8 +181,7 @@ class TestPatternMatcher(TestCase):
             self._test_fused_int_mm_mul_impl(fn2, args, True)
 
     def test_duplicate_search(self):
-        from collections.abc import Iterable
-        from typing import Callable
+        from collections.abc import Callable, Iterable
 
         import torch
         from torch._inductor.pattern_matcher import (
@@ -239,7 +239,6 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(f(inp), f_replaced(inp))
         self.assertEqual(count, 2)
 
-    @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
@@ -288,7 +287,6 @@ class TestPatternMatcher(TestCase):
             self._test_fused_int_mm_mul_impl(fn2, args, True)
 
     @skipIfRocm
-    @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
@@ -336,7 +334,6 @@ class TestPatternMatcher(TestCase):
                 "triton_tem" if not extern_mm else "extern_kernels.mm"
             ).run(code)
 
-    @expectedFailureXPU
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
@@ -372,7 +369,6 @@ class TestPatternMatcher(TestCase):
         for args in args_list:
             self._test_mixed_impl(fn, args, True, False)
 
-    @expectedFailureXPU
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
@@ -399,7 +395,6 @@ class TestPatternMatcher(TestCase):
             )
             self._test_mixed_impl(fn, args, True, False, rtol=0.16, atol=1e-4)
 
-    @expectedFailureXPU
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
@@ -431,7 +426,6 @@ class TestPatternMatcher(TestCase):
         for args in args_list:
             self._test_mixed_impl(fn, args, True, False)
 
-    @expectedFailureXPU
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
@@ -469,7 +463,6 @@ class TestPatternMatcher(TestCase):
         for args in args_list:
             self._test_mixed_impl(fn, args, True, False)
 
-    @expectedFailureXPU
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_mixed_mm_gating(self):
@@ -752,6 +745,9 @@ class TestPatternMatcher(TestCase):
             torch.randn(2, 16, device=GPU_TYPE),
         ]
         self.common(fn, args, 1, 3)
+
+    # called in test_gpu_cpp_wrapper
+    test_cat_slice_cat_xpu = test_cat_slice_cat_cuda
 
     def test_pointless_view_pair(self):
         def f(x):
@@ -1428,6 +1424,41 @@ class TestPatternMatcher(TestCase):
                 actual = torch.compile(fn)(*copy.deepcopy(args))
                 self.assertEqual(counter, 1)
                 torch.testing.assert_close(actual, expected)
+
+    def test_input_output_same(self):
+        def pattern(x, y):
+            out1 = torch.add(x, y)
+            return out1, x
+
+        def replace(x, y):
+            out1 = torch.mul(x, y)
+            out2 = torch.mul(out1, y)
+            return out1, out2
+
+        my_patterns = PatternMatcherPass()
+        inputs = (torch.ones(3, 3), torch.ones(3, 3))
+        register_replacement(pattern, replace, inputs, fwd_only, my_patterns)
+
+        def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
+            _ = my_patterns.apply(graph)
+            stable_topological_sort(graph)
+            graph.eliminate_dead_code()
+            return graph
+
+        @torch.compile(
+            options={
+                "post_grad_custom_post_pass": custom_pass,
+            }
+        )
+        def f(x, y):
+            res = torch.add(x, y)
+            sub = torch.sub(res, x)
+            return sub
+
+        test, (code,) = run_and_get_code(f, *(torch.ones(3, 3), torch.ones(3, 3)))
+
+        self.assertTrue("aten.add.default" not in code)
+        self.assertTrue("aten.mul.default" not in code)
 
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations3(self):

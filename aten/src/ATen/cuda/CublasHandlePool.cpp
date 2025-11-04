@@ -155,8 +155,8 @@ size_t parseChosenWorkspaceSize() {
     while (next != end) {
       std::smatch match = *next;
       TORCH_CHECK(match.size() == 3, "Expected CUBLAS_WORKSPACE_SPACE_CONFIG match of size 3 (Format :SIZE:COUNT)");
-      size_t curr_size = (size_t) std::stoi(match.str(1));
-      size_t count = (size_t) std::stoi(match.str(2));
+      size_t curr_size = std::stoull(match.str(1));
+      size_t count = std::stoull(match.str(2));
       total_size += curr_size * 1024 * count;
       next++;
     }
@@ -310,7 +310,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   // FP32 data type calculations based on the value of the allow_tf32 flag.
   // To enable TF32, set the math mode of the handle to CUBLAS_TF32_TENSOR_OP_MATH.
   if (!NoTF32Guard::should_disable_tf32() &&
-      at::globalContext().float32Precision("cuda", "matmul") == "tf32") {
+      at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) == at::Float32Precision::TF32) {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TF32_TENSOR_OP_MATH));
   } else {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));

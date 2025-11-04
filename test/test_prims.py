@@ -342,6 +342,16 @@ $1: f32[2] = torch._ops.prims.sin.default($0)""")
             x = torch.randn(4, dtype=torch.complex64, device='meta').conj()
             x + 1
 
+    def test_clone_meta_stride_preservation_dense(self):
+        tensor = torch.randn(1, 5).t()
+        meta_clone = prims._clone_meta(tensor, memory_format=torch.preserve_format)
+        self.assertEqual(tensor.stride(), meta_clone.stride())
+
+    def test_clone_meta_stride_preservation_sparse(self):
+        tensor = torch.arange(12).float().view(3, 4)[1:, ::2]
+        meta_clone = prims._clone_meta(tensor, memory_format=torch.preserve_format)
+        self.assertEqual(tensor.contiguous().stride(), meta_clone.stride())
+
     def test_check_deprecation_warning(self):
         with self.assertWarnsRegex(FutureWarning, 'will be removed in the future'):
             torch._prims_common.check(True, lambda: 'message')

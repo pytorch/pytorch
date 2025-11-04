@@ -5,11 +5,12 @@ import itertools
 import numbers
 import operator
 import sys
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from contextlib import nullcontext
 from enum import Enum
 from functools import partial, reduce
 from itertools import chain, product
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, cast, Optional, Union
 
 import torch
 import torch._meta_registrations
@@ -381,6 +382,7 @@ def to_real_dtype(dtype: torch.dtype):
 def mse_loss(
     self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value
 ) -> Tensor:
+    # pyrefly: ignore [unsupported-operation]
     loss = (self - target) ** 2
     return apply_loss_reduction(loss, reduction)
 
@@ -414,6 +416,7 @@ def smooth_l1_loss(
     beta: float = 1.0,
 ):
     loss = (self - target).abs()
+    # pyrefly: ignore [unsupported-operation]
     loss = torch.where(loss < beta, 0.5 * loss**2 / beta, loss - 0.5 * beta)
     return apply_loss_reduction(loss, reduction)
 
@@ -721,10 +724,7 @@ def slice_forward(
     end: Optional[int] = None,
     step: int = 1,
 ):
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_size_oblivious,
-        statically_known_true,
-    )
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
 
     ndim = self.dim()
     if ndim == 0:
@@ -739,22 +739,22 @@ def slice_forward(
     start_val = start if start is not None else 0
     end_val = end if end is not None else sys.maxsize  # 2^63 - 1
 
-    if guard_size_oblivious(start_val < 0):
+    if start_val < 0:
         start_val += sizes[dim]
 
-    if guard_size_oblivious(end_val < 0):
+    if end_val < 0:
         end_val += sizes[dim]
 
-    if guard_size_oblivious(start_val < 0):
+    if start_val < 0:
         start_val = 0
-    elif guard_size_oblivious(start_val > sizes[dim]):
+    elif start_val > sizes[dim]:
         start_val = sizes[dim]
 
     if statically_known_true(end_val == sys.maxsize):
         end_val = sizes[dim]
-    elif guard_size_oblivious(end_val < start_val):
+    elif end_val < start_val:
         end_val = start_val
-    elif guard_size_oblivious(end_val > sizes[dim]):
+    elif end_val > sizes[dim]:
         end_val = sizes[dim]
 
     storage_offset = self.storage_offset() + start_val * strides[dim]
@@ -924,7 +924,7 @@ def im2col(
     def check_positive(param, param_name, strict=True):
         cond = all(p > 0 for p in param) if strict else all(p >= 0 for p in param)
         torch._check(
-            cond, lambda: "{param_name} should be greater {'than' zero, but got {param}"
+            cond, lambda: f"{param_name} should be greater than zero, but got {param}"
         )
 
     check_positive(kernel_size, "kernel_size")
@@ -1009,7 +1009,7 @@ def col2im(
     def check_positive(param, param_name, strict=True):
         cond = all(p > 0 for p in param) if strict else all(p >= 0 for p in param)
         torch._check(
-            cond, lambda: "{param_name} should be greater than zero, but got {param}"
+            cond, lambda: f"{param_name} should be greater than zero, but got {param}"
         )
 
     check_positive(kernel_size, "kernel_size")
@@ -1173,6 +1173,8 @@ def native_dropout(input: Tensor, p: float, train: Optional[bool]):
 @register_decomposition(aten._softmax)
 @out_wrapper()
 def _softmax(x: Tensor, dim: int, half_to_float: bool):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     # eager softmax returns a contiguous tensor. Ensure that decomp also returns
     # a contiguous tensor.
     x = x.contiguous()
@@ -1182,7 +1184,7 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    if x.numel() == 0:
+    if guard_or_false(x.numel() == 0):
         unnormalized = torch.exp(x)
     else:
         x_max = torch.amax(x, dim, keepdim=True)
@@ -1196,6 +1198,8 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
 @register_decomposition(aten._log_softmax)
 @out_wrapper(exact_dtype=True)
 def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     # eager log_softmax returns a contiguous tensor. Ensure that decomp also
     # returns a contiguous tensor.
     x = x.contiguous()
@@ -1205,7 +1209,7 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    if x.numel() == 0:
+    if guard_or_false(x.numel() == 0):
         shifted = x
     else:
         x_max = torch.amax(x, dim, keepdim=True)
@@ -1438,8 +1442,18 @@ def tensor_split_tensor_indices_or_sections_py_impl(
         assert isinstance(sections, IntLike)
         return self.tensor_split(sections, dim)
     else:
-        indices = [i.item() for i in tensor_indices_or_sections]
-        # WARNING: Tempted to torch._check_is_size on the indices here?  You
+        ctx = nullcontext
+        if (fake_mode := torch._guards.detect_fake_mode()) and (
+            shape_env := fake_mode.shape_env
+        ):
+            ctx = shape_env.ignore_fresh_unbacked_symbols  # type: ignore[assignment]
+        # In fake tensor prop, we end up calling slice() with these unbacked indices.
+        # Because slice has flexible semantics, the unbacked handling generates new output sizes
+        # for each slice, effectively clobbering over these index symbols.
+        # To avoid PendingUnbackedSymbolNotFound errors, we tell the compiler it's fine to not bind these.
+        with ctx():
+            indices = [i.item() for i in tensor_indices_or_sections]
+        # WARNING: Tempted to torch._check(x>0) on the indices here?  You
         # can't: tensor_split works with negative values in indices:
         #
         # >>> torch.tensor_split(torch.randn(10), torch.tensor([-5, 5]))
@@ -1539,9 +1553,9 @@ def native_group_norm_backward(
         lambda: f"Expect gamma to have {C} elements but got {gamma.numel() if gamma is not None else -1}",
     )
 
-    cpg, _rem = divmod(C, group)
+    cpg = C // group
     torch._check(
-        _rem == 0,
+        C == cpg * group,
         lambda: f"Expect number of channels {C} to be evenly-divisible by number of groups {group}",
     )
 
@@ -1710,8 +1724,8 @@ def native_layer_norm_backward(
 
     return (
         _maybe_cast(d_input, input.dtype),
-        _maybe_cast(d_weight, input.dtype),
-        _maybe_cast(d_bias, input.dtype),
+        _maybe_cast(d_weight, weight.dtype if weight is not None else None),
+        _maybe_cast(d_bias, bias.dtype if bias is not None else None),
     )
 
 
@@ -1741,6 +1755,61 @@ def native_layer_norm_backward_out(
             _safe_copy_out(copy_from=r, copy_to=grad_input[i], exact_dtype=True)
 
     return grad_input
+
+
+@register_decomposition(aten._fused_rms_norm.default)
+def _fused_rms_norm(
+    input: Tensor,
+    normalized_shape: list[int],
+    weight: Optional[Tensor],
+    eps: Optional[float],
+) -> tuple[Tensor, Tensor]:
+    dims_to_reduce: list[int] = []
+    for i in range(len(normalized_shape)):
+        dims_to_reduce.append(input.dim() - i - 1)
+
+    # upcast is needed for fp16 and bf16
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+    upcasted_input = input.to(computation_dtype)
+
+    # computation_dtype would be one of [Double, Float, ComplexFloat, ComplexDouble]
+    if eps is None:
+        if computation_dtype in (torch.float32, torch.complex64):
+            eps_val = torch.finfo(torch.float32).eps
+        else:
+            eps_val = torch.finfo(torch.float64).eps
+    else:
+        eps_val = eps
+
+    rqrst_input = torch.rsqrt(
+        # NB: don't inplace here, will violate functional IR invariant
+        # NB: carefully use the Scalar overload of add to ensure compatibility with the C++ decomp
+        torch.ops.aten.add.Scalar(
+            torch.pow(upcasted_input, 2).mean(dim=dims_to_reduce, keepdim=True), eps_val
+        )
+    )
+
+    upcasted_result = upcasted_input.mul(rqrst_input)
+
+    if weight is not None:
+        upcasted_result = upcasted_result.mul(weight)
+
+    # NB: nested should be dead here, just here for fidelity
+    is_nested = input.is_nested or (weight is not None and weight.is_nested)
+    memory_format = utils.suggest_memory_format(input)
+    is_channels_last = memory_format in (
+        torch.channels_last,
+        torch.channels_last_3d,
+    )
+
+    if not is_nested and not is_channels_last:
+        upcasted_result = upcasted_result.contiguous()
+        rqrst_input = rqrst_input.contiguous()
+
+    # Cast normalized result back to original input type
+    result = upcasted_result.type_as(input)
+
+    return result, rqrst_input
 
 
 @register_decomposition(aten._fused_rms_norm_backward.default)
@@ -2776,7 +2845,7 @@ def _index_add(
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
         torch._check(
-            python_type == bool
+            python_type is bool
             or utils.is_weakly_lesser_type(type(alpha), python_type),
             lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
         )
@@ -4065,6 +4134,7 @@ def _nll_loss_forward(
         return result, total_weight
 
     if weight is not None:
+        # pyrefly: ignore [unbound-name]
         w = w.expand(self.shape)
         wsum = torch.gather(w, channel_dim, safe_target_).squeeze(channel_dim)
         wsum = torch.where(target != ignore_index, wsum, 0)
@@ -4881,7 +4951,9 @@ def _reflection_pad_backward(grad_output, x, padding):
 @register_decomposition(aten.aminmax)
 @out_wrapper("min", "max")
 def aminmax(self, *, dim=None, keepdim=False):
+    # pyrefly: ignore [bad-argument-type]
     amin = torch.amin(self, dim=dim, keepdim=keepdim)
+    # pyrefly: ignore [bad-argument-type]
     amax = torch.amax(self, dim=dim, keepdim=keepdim)
     return amin, amax
 
@@ -5126,6 +5198,7 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
         alpha = int(alpha)
     result = torch.bmm(batch1, batch2)
     if not isinstance(alpha, numbers.Number) or alpha != 1:
+        # pyrefly: ignore [unsupported-operation]
         result = result * alpha
     if beta == 0:
         return result
