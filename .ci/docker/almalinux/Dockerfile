@@ -7,7 +7,7 @@ ENV LC_ALL en_US.UTF-8
 ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
 
-ARG DEVTOOLSET_VERSION=11
+ARG DEVTOOLSET_VERSION=13
 
 RUN yum -y update
 RUN yum -y install epel-release
