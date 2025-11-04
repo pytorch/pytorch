@@ -1315,39 +1315,6 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         # The future will be awaited at scheduling time in select_algorithm.py
         best_config_future = gen_best_config(mat1, mat2)
 
-    # If not using benchmark_epilogue_fusion, try to inline subgraph for fusion
-    if (
-        not inductor_config.benchmark_epilogue_fusion
-        and inductor_config.enable_inline_subgraph_fusion
-    ):
-        result, winning_choice = autotune_select_algorithm(
-            name,
-            choices,
-            kernel_inputs.nodes(),
-            layout,
-            best_config_future=best_config_future,
-            return_choice=True,
-        )
-
-        # If choice has graph to lower, inline it; otherwise use result as-is(cublas mm)
-        if hasattr(winning_choice, "gm"):
-            from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
-
-            log.debug(
-                "Inlining subgraph choice: %s (name=%s)",
-                getattr(winning_choice, "name", type(winning_choice).__name__),
-                name,
-            )
-            return inline_subgraph_to_ir_nodes(winning_choice.gm, [mat1, mat2], name)
-
-        log.debug(
-            "Choice does not support inlining: %s (name=%s)",
-            getattr(winning_choice, "name", type(winning_choice).__name__),
-            name,
-        )
-        return result
-
-    # Normal path: use autotune_select_algorithm directly
     return autotune_select_algorithm(
         name,
         choices,

@@ -389,7 +389,6 @@ class TestCustomOpAutoTune(TestCase):
                 CustomOpConfig(k_splits=128),
             ],
             name="matmul_relu_epilogue_autotuned",
-            enable_fusion=True,  # Enable inline fusion
             input_gen_fns={
                 "a": lambda fake_tensor: torch.randn_like(
                     fake_tensor, device=self.device
@@ -419,8 +418,7 @@ class TestCustomOpAutoTune(TestCase):
 
         with config.patch(
             max_autotune=True,
-            enable_custom_op_inline_fusion=True,  # Enable inline fusion
-            benchmark_fusion=True,  # Enable fusion benchmarking
+            benchmark_fusion=True,
         ):
             compiled_result = test_model(a, b, bias)
 

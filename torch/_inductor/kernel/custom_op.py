@@ -229,7 +229,6 @@ def autotune_custom_op(
     user_input_gen_fns: Optional[
         dict[str, Callable[[torch.Tensor], torch.Tensor]]
     ] = None,
-    enable_fusion: bool = False,
 ) -> Union[TensorBox, Any]:
     """Autotune custom operations by comparing multiple decomposition implementations.
 
@@ -238,7 +237,7 @@ def autotune_custom_op(
 
     This function generates multiple implementation choices for a custom operation and
     uses Inductor's autotuning system to select the best performing variant at runtime.
-    After selecting the best choice, optionally applies inline fusion.
+    After selecting the best choice, applies inline fusion if the winning choice has a graph.
 
     Args:
         name: Unique identifier for the autotuning operation
@@ -249,7 +248,6 @@ def autotune_custom_op(
         user_input_gen_fns: Optional custom input generators for benchmarking.
                            Maps input indices to functions that take fake tensors
                            and return real tensors for performance measurement.
-        enable_fusion: If True, apply inline fusion to the best choice
 
     Returns:
         IR node representing the optimized operation result
@@ -321,17 +319,7 @@ def autotune_custom_op(
         )
         input_gen_fns = _adapt_user_input_gen_fns(inputs, arg_names, user_input_gen_fns)
 
-    # Run autotuning to select the best choice
-    if not enable_fusion:
-        return autotune_select_algorithm(
-            name=name,
-            choices=choices,
-            input_nodes=list(inputs),
-            layout=choices[0].layout,
-            input_gen_fns=input_gen_fns,
-        )
-
-    # Request both the result and the winning choice when fusion is enabled
+    # Run autotuning and get both result and winning choice
     selected_result, winning_choice = autotune_select_algorithm(
         name=name,
         choices=choices,
@@ -348,7 +336,9 @@ def autotune_custom_op(
             getattr(winning_choice, "name", type(winning_choice).__name__),
             name,
         )
-        return _inline_custom_op_choice(winning_choice, inputs, name)
+        from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
+
+        return inline_subgraph_to_ir_nodes(winning_choice.gm, inputs, name)
 
     log.debug(
         "Winning choice does not support inlining: %s (name=%s)",
@@ -358,33 +348,11 @@ def autotune_custom_op(
     return selected_result
 
 
-def _inline_custom_op_choice(
-    winning_choice: Any, inputs: list[Any], name: str
-) -> TensorBox:
-    """Inline the winning custom op choice by converting its FX operations to individual IR nodes.
-
-    This converts the custom op from a single ExternKernel (unfusable) to multiple ComputedBuffer
-    nodes (fusable), enabling epilogue fusion with subsequent operations.
-
-    Args:
-        winning_choice: The winning SubgraphChoiceCaller from autotuning
-        inputs: Original input nodes
-        name: Custom op name for debugging
-
-    Returns:
-        TensorBox containing the final operation result as individual IR nodes
-    """
-    from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
-
-    return inline_subgraph_to_ir_nodes(winning_choice.gm, inputs, name)
-
-
 def register_custom_op_autotuning(
     custom_op: torch._library.custom_ops.CustomOpDef,
     configs: Union[list[CustomOpConfig], list[Callable[..., Any]]],
     name: Optional[str] = None,
     input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]] = None,
-    enable_fusion: bool = False,
 ) -> None:
     """Register custom op for autotuning with custom_op configs where each config
     specifies a decomposition implementation function with its parameter values.
@@ -394,7 +362,6 @@ def register_custom_op_autotuning(
         configs: List of CustomOpConfig objects
         name: Operation name (default: "{op_name}_autotuned")
         input_gen_fns: Custom input generators for benchmarking
-        enable_fusion: Enable inlining and fusion for the best choice
 
     Examples:
         @torch.library.custom_op("mylib::attention", mutates_args=())
@@ -413,7 +380,6 @@ def register_custom_op_autotuning(
                 "key": lambda fake: torch.randn_like(fake, device='cuda'),
                 "value": lambda fake: torch.randn_like(fake, device='cuda'),
             },
-            enable_fusion=True
         )
     """
     from torch._library.custom_ops import CustomOpDef
@@ -470,7 +436,6 @@ def register_custom_op_autotuning(
             non_tensor_args=non_tensor_args,
             op_overload=op_overload,
             user_input_gen_fns=input_gen_fns,
-            enable_fusion=enable_fusion,
         )
 
         validate_ir(result)
