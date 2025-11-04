@@ -178,6 +178,8 @@ elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
   # setting PYTHON_TEST_EXTRA_OPTION
   export PYTHON_TEST_EXTRA_OPTION="--xpu"
+  # extra pip package installation
+  pip_install sycl-tla==0.6.0
 fi
 
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
