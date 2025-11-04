@@ -2120,6 +2120,7 @@ class GuardBuilder(GuardBuilderBase):
             if not are_inline_hooks(hooks):
                 return None
 
+            pack_hook, unpack_hook = hooks
             return tuple(map(id, hooks))
 
         guard_hooks_ids = hooks_ids_fn(get_hooks())
