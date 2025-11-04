@@ -1658,10 +1658,17 @@ class TestFullyShardAllocFromPG(FSDPTest):
 class TestFullyShardForceSumReduction(FSDPTest):
     # The messages might change when we move to a different NCCL version.
     # Please update this test if it starts failing.
-    COLLECTIVE_RE = (
-        "NCCL INFO {coll}: opCount [0-9a-f]+ sendbuff 0x[0-9a-f]+ recvbuff 0x[0-9a-f]+ "
-        "count {count} datatype [0-9]+ op {reduce_op} root [0-9]+ comm 0x[0-9a-f]+"
-    )
+
+    if torch.cuda.nccl.version()[:2] >= (2, 27):
+        COLLECTIVE_RE = (
+            r"NCCL INFO {coll}: opCount [0-9a-f]+ sendbuff 0x[0-9a-f]+ recvbuff 0x[0-9a-f]+ acc \(nil\) "
+            "count {count} datatype [0-9]+ op {reduce_op} root [0-9]+ comm 0x[0-9a-f]+"
+        )
+    else:
+        COLLECTIVE_RE = (
+            "NCCL INFO {coll}: opCount [0-9a-f]+ sendbuff 0x[0-9a-f]+ recvbuff 0x[0-9a-f]+ "
+            "count {count} datatype [0-9]+ op {reduce_op} root [0-9]+ comm 0x[0-9a-f]+"
+        )
     # See here for the numerical values for each reduction op:
     # https://github.com/NVIDIA/nccl/blob/72d2432094d6ae36abd6e511c3a16a2d052dbf94/src/nccl.h.in#L260-L275
     SUM_REDUCTION = 0
