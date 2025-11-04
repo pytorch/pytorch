@@ -119,8 +119,8 @@ void setConvolutionParams(
   params->input_dim = input.dim();
   params->memory_format = memory_format;
   for (int i = 0; i != params->input_dim; ++i) {
-    params->input_size[i] = (int)input.sizes()[i];
-    params->weight_size[i] = (int)weight.sizes()[i];
+    params->input_size[i] = static_cast<int>(input.sizes()[i]);
+    params->weight_size[i] = static_cast<int>(weight.sizes()[i]);
   }
   // ASSERT(padding.size() == stride.size())
   // ASSERT(padding.size() == dilation.size())

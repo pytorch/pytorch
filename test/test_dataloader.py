@@ -243,14 +243,14 @@ class TestDatasetRandomSplit(TestCase):
         dataset = CustomDataset(self, x)
         dataset = random_split(dataset, [5])[0]
         data_loader = DataLoader(dataset)
-        for batch in data_loader:
+        for _batch in data_loader:
             pass
 
         # fractional splitting
         dataset = CustomDataset(self, x)
         dataset = random_split(dataset, [1.0])[0]
         data_loader = DataLoader(dataset)
-        for batch in data_loader:
+        for _batch in data_loader:
             pass
 
     def test_splits_reproducibility(self):
@@ -1156,7 +1156,7 @@ class TestMultiEpochDataset(IterableDataset):
         worker_info = torch.utils.data.get_worker_info()
         assert worker_info is not None
         worker_id = worker_info.id
-        for idx in range(self.length // worker_info.num_workers):
+        for _ in range(self.length // worker_info.num_workers):
             yield worker_id
 
     def __len__(self):
@@ -2008,7 +2008,7 @@ except RuntimeError as e:
             dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
         )
 
-        for ind in range(num_epochs):
+        for _ in range(num_epochs):
             for batch_idx, sample in enumerate(dataloader):
                 self.assertEqual(
                     sample.tolist(), [batch_idx % num_workers] * batch_size
@@ -3026,7 +3026,7 @@ class IntegrationTestDataLoaderDataPipe(TestCase):
 
                 # Same seeds
                 dl_res = []
-                for epoch in range(2):
+                for _epoch in range(2):
                     torch.manual_seed(123)
                     dl_res.append(list(dl))
                 self.assertEqual(dl_res[0], dl_res[1])
@@ -3286,7 +3286,7 @@ except RuntimeError as e:
             )
             dataset.start = 0
             for i in range(10):
-                for x in dataloader:
+                for _ in dataloader:
                     pass
                 # Changing the start value here doesn't have any effect in the dataset
                 # cached by the workers. since they are not recreated between epochs

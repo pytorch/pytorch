@@ -59,6 +59,7 @@
 // forward declare
 class cublasCommonArgs;
 
+#ifndef _WIN32
 namespace fbgemm_gpu {
 
 // NOTE(slayton58): FBGemm_GPU kernels come from <fbgemm_gpu/torch_ops.h> within the FBGemm repo.
@@ -74,6 +75,7 @@ at::Tensor f4f4bf16(
     bool use_mx);
 
 } // namespace fbgemm_gpu
+#endif
 
 using at::blas::ScalingType;
 using at::blas::SwizzleType;
@@ -607,7 +609,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     if ((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
         // cuBLAS only supports tiled 1D factor layout for 1D block scaling, no 2D block scales
         ||  (dprops->major >= 10 && (!scale_a.sizes().empty() || !scale_b.sizes().empty()))) {
-      TORCH_CHECK_VALUE(out.dtype() == kBFloat16, "Only bf16 high precision output types are supported for row-wise scaling.");
+      TORCH_CHECK_VALUE(out.dtype() == kBFloat16 || out.dtype() == kHalf, "Only bf16 and fp16 high precision output types are supported for row-wise scaling.");
       return _scaled_rowwise_rowwise(
           mat1,
           mat2,
@@ -752,7 +754,7 @@ _scaled_rowwise_rowwise(
   if (((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
       // cuBLAS only supports tiled 1D factor layout for 1D block scaling, no 2D block scales
       ||  (dprops->major == 10 && (scale_a.sizes().size() || scale_b.sizes().size())))) {
-    TORCH_CHECK_VALUE(out.dtype() == kBFloat16, "Only bf16 high precision output types are supported for row-wise scaling.");
+    TORCH_CHECK_VALUE(out.dtype() == kBFloat16 || out.dtype() == kHalf, "Only bf16 and fp16 high precision output types are supported for row-wise scaling.");
     at::cuda::detail::f8f8bf16_rowwise(
         mat_a,
         mat_b,
@@ -783,33 +785,6 @@ _scaled_rowwise_rowwise(
   return out;
 }
 
-// Check the shapes & sizes of scales for deepseek-style (1x128, 128x128) scaling.
-// Wraps check_size_stride for easier integration, correctly handles cases where a dimension of the scale == 1,
-// and strides become somewhat meaningless
-void _check_deepseek_scale_stride(const Tensor& scale, const Tensor& t, const ScalingType scale_type) {
-  if (scale_type == ScalingType::BlockWise1x128) {
-    TORCH_CHECK_VALUE(check_size_stride(scale, 0, t.size(0), 1),
-        "at dim=0 scale should have ", t.size(0), "elements and stride(0) ", 1, "if ", t.size(0), " > 1 - Got: ",
-        "shape=", scale.sizes(), ", stride=", scale.strides());
-    auto expected_size = ceil_div<int64_t>(t.size(1), 128);
-    TORCH_CHECK_VALUE(check_size_stride(scale, 1, expected_size, t.size(0)),
-        "at dim=1 scale should have ", expected_size, "elements and stride ", t.size(0), "if ", expected_size, " > 1 - Got: ",
-        "shape=", scale.sizes(), ", stride=", scale.strides());
-  } else if (scale_type == ScalingType::BlockWise128x128) {
-      TORCH_CHECK_VALUE(check_size_stride(
-          scale,
-          0,
-          ceil_div<int64_t>(t.size(0), 128),
-          ceil_div<int64_t>(t.size(1), 128)),
-        "at dim=0 scale should have ", ceil_div<int64_t>(t.size(0), 128), "elements and stride(0) ", ceil_div<int64_t>(t.size(1), 128), "if ", ceil_div<int64_t>(t.size(0), 128), " > 1 - Got: ",
-        "shape=", scale.sizes(), ", stride=", scale.strides());
-      TORCH_CHECK(check_size_stride(
-          scale, 1, ceil_div<int64_t>(t.size(1), 128), 1),
-        "at dim=1 scale should have ", ceil_div<int64_t>(t.size(1), 128), "elements and stride(1) ", 1, "if ", ceil_div<int64_t>(t.size(1), 128), " > 1 - Got: ",
-        "shape=", scale.sizes(), ", stride=", scale.strides());
-  }
-}
-
 void
 _check_deepseek_support() {
 #ifndef USE_ROCM
@@ -822,7 +797,7 @@ _check_deepseek_support() {
   }
   // Only in cublasLt >= 12.9
   TORCH_CHECK_NOT_IMPLEMENTED(
-    CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900,
+    CUBLAS_VERSION >= 120900 && cublasLtGetVersion() >= 120900,
     "DeepSeek style (1x128, 128x128) scaling requires cublasLt >= 12.9"
   );
 #endif
@@ -839,22 +814,60 @@ _scaled_block1x128_block1x128(
 #ifndef USE_ROCM
   // Restrictions:
   // A, B are FP8, scales are fp32, shape K//128
-  // CUDA: Only Hopper GPUs
+  // As: [M x K // 128], stride: [1, M]
+  // Bs: [N x K // 128], stride: [1, N]
   _check_deepseek_support();
 
-  TORCH_CHECK_VALUE(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
-      mat_a.scalar_type(), mat_b.scalar_type());
-  TORCH_CHECK_VALUE(scale_a.sizes()[0] == mat_a.sizes()[0] && scale_a.sizes()[1] == mat_a.sizes()[1] / 128 && scale_a.scalar_type() == kFloat,
-      "scale_a must have shape ", mat_a.sizes()[0], " x ", mat_a.sizes()[1] / 128, " Float elements, got ", scale_a.sizes())
-  TORCH_CHECK_VALUE(scale_b.sizes()[0] == ceil_div<int64_t>(mat_b.sizes()[0], 128) && scale_b.sizes()[1] == mat_b.sizes()[1] && scale_b.scalar_type() == kFloat,
-      "scale_b must have shape ", ceil_div<int64_t>(mat_b.sizes()[0], 128), " x ", mat_b.sizes()[1], " Float elements, got ", scale_b.sizes())
+  // check types
+  TORCH_CHECK_VALUE(
+    isFloat8Type(mat_a.scalar_type()) &&
+    isFloat8Type(mat_b.scalar_type()),
+    "mat_a and mat_b must be fp8 types, got: ", mat_a.scalar_type(), mat_b.scalar_type()
+  );
+
+  const int64_t M = mat_a.sizes()[0];
+  const int64_t K = mat_a.sizes()[1];
+  const int64_t N = mat_b.sizes()[1];
+
+  // scale_a shape
+  TORCH_CHECK_VALUE(
+    scale_a.size(0) == M &&
+    scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
+    scale_a.scalar_type() == kFloat,
+    "scale_a must have shape ", M, " x ", ceil_div<int64_t>(K, 128), " Float elements, got ", scale_a.sizes()
+  );
+  // scale_a stride
+  TORCH_CHECK_VALUE(
+    scale_a.stride(0) == 1 &&
+    (
+      scale_a.stride(1) == M ||
+      (scale_a.size(1) == 1 && scale_b.stride(1) == 1)
+    ),
+    "scale_a strides must be (", 1, ", ", M, "); got: ", scale_a.strides()
+  );
+
+  // scale_b shape
+  TORCH_CHECK_VALUE(
+    scale_b.size(0) == N &&
+    scale_b.size(1) == ceil_div<int64_t>(K, 128) &&
+    scale_b.scalar_type() == kFloat,
+    "scale_b must have shape ", N, " x ", ceil_div<int64_t>(K, 128), " Float elements, got ", scale_b.sizes()
+  );
+  // scale_b stride
+  TORCH_CHECK_VALUE(
+    scale_b.stride(0) == 1 &&
+    (
+      scale_b.stride(1) == N ||
+      (
+        scale_b.size(1) == 1 &&
+        scale_b.stride(1) == 1
+      )
+    ),
+    "scale_b strides must be (", 1, ", ", N, "); got: ", scale_a.strides()
+  );
 
   auto scaling_choice_a = ScalingType::BlockWise1x128;
   auto scaling_choice_b = ScalingType::BlockWise1x128;
-
-  // Check scale strides (including stride=1 small cases)
-  _check_deepseek_scale_stride(scale_a, mat_a, scaling_choice_a);
-  _check_deepseek_scale_stride(scale_b.t(), mat_b.t(), scaling_choice_b);
 
   _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out);
 
@@ -877,23 +890,64 @@ _scaled_block128x128_block1x128(
           Tensor& out) {
 #ifndef USE_ROCM
   // Restrictions:
-  // A, B are FP8, scales are fp32, shape K//128
-  // CUDA: Only Hopper GPUs
   _check_deepseek_support();
 
-  TORCH_CHECK_VALUE(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
-      mat_a.scalar_type(), mat_b.scalar_type());
-  TORCH_CHECK_VALUE(scale_a.sizes()[0] == ceil_div<int64_t>(mat_a.sizes()[0], 128) && scale_a.sizes()[1] == ceil_div<int64_t>(mat_a.sizes()[1], 128) && scale_a.scalar_type() == kFloat,
-      "scale_a must have shape ", ceil_div<int64_t>(mat_a.sizes()[0], 128), " x ", ceil_div<int64_t>(mat_a.sizes()[1], 128), " Float elements, got ", scale_a.sizes())
-  TORCH_CHECK_VALUE(scale_b.sizes()[0] == ceil_div<int64_t>(mat_b.sizes()[0], 128) && scale_b.sizes()[1] == mat_b.sizes()[1] && scale_b.scalar_type() == kFloat,
-      "scale_b must have shape ", ceil_div<int64_t>(mat_b.sizes()[0], 128), " x ", mat_b.sizes()[1], " Float elements, got ", scale_b.sizes())
+  // A: [M, K], B: [K, N] are FP8, scales are fp32
+  // As: [round_up(K // 128, 4), M // 128], stride: [M // 128, 1]
+  // Bs: [N x K // 128], stride: [1, N]
+  TORCH_CHECK_VALUE(
+    isFloat8Type(mat_a.scalar_type()) &&
+    isFloat8Type(mat_b.scalar_type()),
+    "mat_a and mat_b must be fp8 types, got: ",  mat_a.scalar_type(), mat_b.scalar_type()
+  );
+
+  const int64_t M = mat_a.sizes()[0];
+  const int64_t K = mat_a.sizes()[1];
+  const int64_t N = mat_b.sizes()[1];
+
+  // scale_a shape
+  TORCH_CHECK_VALUE(
+    scale_a.size(0) == round_up<int64_t>(ceil_div<int64_t>(K, 128), 4) &&
+    scale_a.size(1) == ceil_div<int64_t>(M, 128) &&
+    scale_a.scalar_type() == kFloat,
+    "scale_a must have shape ", round_up<int64_t>(ceil_div<int64_t>(K, 128), 4), " x ",
+      ceil_div<int64_t>(M, 128), " Float elements, got ", scale_a.sizes()
+  );
+  // scale_a stride
+  TORCH_CHECK_VALUE(
+    scale_a.stride(0) == 1 &&
+    (
+      scale_a.stride(1) == round_up<int64_t>(ceil_div<int64_t>(K, 128), 4) ||
+      (
+        scale_a.size(1) == 1 &&
+        scale_a.stride(1) == 1
+      )
+    ),
+    "scale_a must have strides (1, ", round_up<int64_t>(ceil_div<int64_t>(K, 128), 4), "); got ", scale_b.strides()
+  );
+
+  // scale_b shape
+  TORCH_CHECK_VALUE(
+    scale_b.size(0) == N &&
+    scale_b.size(1) == ceil_div<int64_t>(K, 128) &&
+    scale_b.scalar_type() == kFloat,
+    "scale_b must have shape ", N, " x ", ceil_div<int64_t>(K, 128), " Float elements, got ", scale_b.sizes()
+  );
+  // scale_b stride
+  TORCH_CHECK_VALUE(
+    scale_b.stride(0) == 1 &&
+    (
+      scale_b.stride(1) == N ||
+      (
+        scale_b.size(1) == 1 &&
+        scale_b.stride(1) == 1
+      )
+    ),
+    "scale_b must have strides (1, ", N, "); got ", scale_b.strides()
+  );
 
   auto scaling_choice_a = ScalingType::BlockWise128x128;
   auto scaling_choice_b = ScalingType::BlockWise1x128;
-
-  // Check scale strides (including stride=1 small cases)
-  _check_deepseek_scale_stride(scale_a, mat_a, scaling_choice_a);
-  _check_deepseek_scale_stride(scale_b.t(), mat_b.t(), scaling_choice_b);
 
   _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out);
 
@@ -916,23 +970,61 @@ _scaled_block1x128_block128x128(
           Tensor& out) {
 #ifndef USE_ROCM
   // Restrictions:
-  // A, B are FP8, scales are fp32, A: shape K//128, B: K//128, N//128
-  // CUDA: Only Hopper GPUs
   _check_deepseek_support();
+  // A: [M, K], B: [K, N] are FP8, scales are fp32
+  // As: [M x K // 128], stride: [1, M]
+  // Bs: [round_up(K // 128, 4) x N // 128], stride: [1, N // 128]
+  TORCH_CHECK_VALUE(
+    isFloat8Type(mat_a.scalar_type()) &&
+    isFloat8Type(mat_b.scalar_type()),
+    "mat_a and mat_b must be fp8 types, got: ", mat_a.scalar_type(), mat_b.scalar_type()
+  );
 
-  TORCH_CHECK_VALUE(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
-      mat_a.scalar_type(), mat_b.scalar_type());
-  TORCH_CHECK_VALUE(scale_a.sizes()[0] == mat_a.sizes()[0] && scale_a.sizes()[1] == mat_a.sizes()[1] / 128 && scale_a.scalar_type() == kFloat,
-      "scale_a must have shape ", mat_a.sizes()[0], " x ", mat_a.sizes()[1] / 128, " Float elements, got ", scale_a.sizes())
-  TORCH_CHECK_VALUE(scale_b.sizes()[0] == mat_b.sizes()[0] / 128 && scale_b.sizes()[1] == mat_b.sizes()[1] / 128 && scale_b.scalar_type() == kFloat,
-      "scale_b must have shape ", mat_b.sizes()[0] / 128, " x ", mat_b.sizes()[1] / 128, " Float elements, got ", scale_b.sizes())
+  int64_t M = mat_a.size(0);
+  int64_t K = mat_a.size(1);
+  int64_t N = mat_b.size(1);
+
+  // scale_a shape
+  TORCH_CHECK_VALUE(
+    scale_a.size(0) == M &&
+    scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
+    scale_a.scalar_type() == kFloat,
+    "scale_a must have shape ", M, " x ", ceil_div<int64_t>(K, 128), " Float elements, got ", scale_a.sizes()
+  );
+  // scale_a stride
+  TORCH_CHECK_VALUE(
+    scale_a.stride(0) == 1 &&
+    (
+      scale_a.stride(1) == M ||
+      (
+        scale_a.size(1) == 1 &&
+        scale_a.stride(1) == 1
+      )
+    ),
+    "scale_a must have strides (1, ", M, "); got ", scale_b.strides()
+  );
+  // scale_b shape
+  TORCH_CHECK_VALUE(
+    scale_b.size(0) == round_up<int64_t>(ceil_div<int64_t>(K, 128), 4) &&
+    scale_b.size(1) == ceil_div<int64_t>(N, 128) &&
+    scale_b.scalar_type() == kFloat,
+    "scale_b must have shape ", round_up<int64_t>(ceil_div<int64_t>(K, 128), 4), " x ", ceil_div<int64_t>(N, 128), " Float elements, got ", scale_b.sizes()
+  );
+  // scale_b stride
+  TORCH_CHECK_VALUE(
+    scale_b.stride(0) == 1 &&
+    (
+      scale_b.stride(1) == round_up<int64_t>(ceil_div<int64_t>(K, 128), 4) ||
+      (
+        scale_b.size(1) == 1 &&
+        scale_b.stride(1) == 1
+      )
+    ),
+    "scale_b must have strides (1, ", round_up<int64_t>(ceil_div<int64_t>(K, 128), 4), "); got ", scale_b.strides()
+  );
 
   auto scaling_choice_a = ScalingType::BlockWise1x128;
   auto scaling_choice_b = ScalingType::BlockWise128x128;
-
-  // Check scale strides (including stride=1 small cases)
-  _check_deepseek_scale_stride(scale_a, mat_a, scaling_choice_a);
-  _check_deepseek_scale_stride(scale_b.t(), mat_b.t(), scaling_choice_b);
 
   _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out);
 
@@ -1013,9 +1105,9 @@ _scaled_mxfp4_mxfp4(
           const std::optional<Tensor>& bias,
           const c10::ScalarType out_dtype,
           Tensor& out) {
-#if !defined(USE_ROCM) && !defined(USE_FBGEMM_GENAI)
+#if defined(_WIN32) || (!defined(USE_ROCM) && !defined(USE_FBGEMM_GENAI))
   TORCH_CHECK_NOT_IMPLEMENTED(false, "MXFP4 scaling supported on ROCM and CUDA+FBGEMM_GENAI only");
-#endif
+#else
   // Restrictions:
   // A, B are FP4, scales are e8m0, A: shape K//32, B: K, N//32
   TORCH_CHECK_VALUE(mat_a.scalar_type() == at::kFloat4_e2m1fn_x2 && mat_b.scalar_type() == at::kFloat4_e2m1fn_x2, "mat_a and mat_b must be fp4 types, got: ",
@@ -1090,6 +1182,7 @@ _scaled_mxfp4_mxfp4(
   );
 
   return out;
+#endif
 #endif
 }
 

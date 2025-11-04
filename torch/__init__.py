@@ -663,6 +663,9 @@ class SymFloat:
     def __float__(self):
         return self.node.guard_float("", 0)
 
+    def __int__(self):
+        return self.__trunc__().__int__()
+
     # Symbolic power does NOT work with negative base, this is to avoid
     # potential complex outputs
     def __pow__(self, other):
@@ -810,6 +813,15 @@ class SymBool:
         else:
             # Force specialization
             return hash(builtins.bool(self))
+
+    def __sym_float__(self):
+        """
+        Provides a SymFloat representation (0.0 or 1.0) for this SymBool.
+        Called by torch.sym_float() when casting SymBool to float.
+        """
+        from torch.fx.experimental.sym_node import wrap_node
+
+        return wrap_node(self.node.sym_float())
 
 
 def sym_not(a):
@@ -2644,7 +2656,16 @@ def compile(
     from torch._inductor.compiler_bisector import CompilerBisector
 
     if bisect_backend := CompilerBisector.get_backend():
-        backend = bisect_backend
+        import torch._inductor.config as inductor_config
+
+        # don't override the backend for use cases like vllm
+        # which leverages their custom backend.
+        if not (
+            inductor_config.test_configs.bisect_keep_custom_backend_for_inductor
+            and bisect_backend == "inductor"
+            and not isinstance(backend, str)
+        ):
+            backend = bisect_backend
 
     guard_filter_fn = None
     if options and isinstance(options, dict):
