@@ -6,6 +6,7 @@ import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._functorch.aot_autograd import aot_export_module
 from torch._higher_order_ops.effects import _deregister_effectful_op
+from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import register_opaque_type
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -256,6 +257,22 @@ def forward(self, arg0_1, arg1_1):
         fake_x = fake_mode.from_tensor(x)
         gm = aot_export_module(mod, (fake_rng, fake_x), trace_joint=False)[0]
 
+        # By default we don't register ops containing PyObjs as being effectful
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(arg1_1, arg0_1);  arg1_1 = None
+    mul = torch.ops.aten.mul.Tensor(noisy_inject, noisy_inject);  noisy_inject = None
+    noisy_inject_1 = torch.ops._TestOpaqueObject.noisy_inject.default(mul, arg0_1);  mul = arg0_1 = None
+    add = torch.ops.aten.add.Tensor(noisy_inject_1, noisy_inject_1);  noisy_inject_1 = None
+    return (add,)""",  # noqa: B950
+        )
+
+        torch.library._register_effectful_op(
+            "_TestOpaqueObject::noisy_inject", EffectType.ORDERED
+        )
+        gm = aot_export_module(mod, (rng, fake_x), trace_joint=False)[0]
         # inputs: token, rng, x
         # return: token, res
         self.assertExpectedInline(
@@ -273,26 +290,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     return (getitem_2, add)""",  # noqa: B950
         )
 
-        # By default, ops with ScriptObjects as inputs are registered as being
-        # effectful
-        _deregister_effectful_op("_TestOpaqueObject::noisy_inject")
-
-        # If we register with None, this means the ops do not have effect
-        torch.library._register_effectful_op("_TestOpaqueObject::noisy_inject", None)
-        gm = aot_export_module(mod, (rng, fake_x), trace_joint=False)[0]
-
-        # There is no longer a token input, and no longer with_effect HOO
-        # because the ops are marked as not effectful
-        self.assertExpectedInline(
-            gm.code.strip(),
-            """\
-def forward(self, arg0_1, arg1_1):
-    noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(arg1_1, arg0_1);  arg1_1 = None
-    mul = torch.ops.aten.mul.Tensor(noisy_inject, noisy_inject);  noisy_inject = None
-    noisy_inject_1 = torch.ops._TestOpaqueObject.noisy_inject.default(mul, arg0_1);  mul = arg0_1 = None
-    add = torch.ops.aten.add.Tensor(noisy_inject_1, noisy_inject_1);  noisy_inject_1 = None
-    return (add,)""",  # noqa: B950
-        )
         _deregister_effectful_op("_TestOpaqueObject::noisy_inject")
 
 
