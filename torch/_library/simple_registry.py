@@ -68,7 +68,7 @@ class SimpleOperatorEntry:
             # In the HOO case
             return
         for arg in schema.arguments:
-            if isinstance(arg.type, (torch.ClassType, torch.PyObjectType)):
+            if isinstance(arg.type, torch.ClassType):
                 self.effect = EffectType.ORDERED
                 break
 
