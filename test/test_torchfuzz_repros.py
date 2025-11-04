@@ -257,7 +257,6 @@ class TestFuzzerCompileIssues(TestCase):
         out_compiled.sum().backward()
         print("Compile Success! ✅")
 
-    @pytest.mark.xfail(reason="Issue #163971")
     def test_fuzzer_issue_163971(self):
         torch.manual_seed(0)
 
