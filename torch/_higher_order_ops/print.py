@@ -27,6 +27,7 @@ class Print(HigherOrderOperator):
         super().__init__("print")
 
     def __call__(self, format_str: str, **kwargs: object) -> object:
+        assert isinstance(format_str, str)
         return super().__call__(format_str, **kwargs)
 
 
@@ -47,23 +48,17 @@ def trace_print(proxy_mode, func_overload, format_str, **kwargs):
     if not isinstance(format_str, str):
         raise ValueError("print's first argument must be a string")
 
-    with disable_proxy_modes_tracing():
-        out = print_cpu(format_str, **kwargs)
-
     node_args = (format_str, kwargs)
     proxy_args = pytree.tree_map(_unwrap_proxy, node_args)
-    out_proxy = proxy_mode.tracer.create_proxy(
+    return proxy_mode.tracer.create_proxy(
         "call_function", func_overload, proxy_args, {}, name="print"
     )
-    return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
-
 
 @print.py_impl(ProxyTorchDispatchMode)
 # pyre-ignore
 def print_proxy_torch_dispatch_mode(mode, format_str, **kwargs):
     res = trace_print(mode, print, format_str, **kwargs)
     return res
-
 
 @print.py_impl(torch._C.DispatchKey.CompositeExplicitAutograd)
 # pyre-ignore

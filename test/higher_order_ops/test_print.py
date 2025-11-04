@@ -7,9 +7,6 @@ import torch
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing import FileCheck
-
-from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
 class TestHopPrint(TestCase):
@@ -44,8 +41,6 @@ class TestHopPrint(TestCase):
 
         self.assertEqual(printed_output, "moo 1 2")
 
-    def setUp(self):
-        init_torchbind_implementations()
 
     def test_print_with_proxy_graph(self):
         class M(torch.nn.Module):
