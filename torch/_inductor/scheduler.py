@@ -219,6 +219,9 @@ class MixOrderReduction:
     # TODO add a cache
     @classmethod
     def can_fuse(cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
+        """
+        Check whether we can fuse two reductions with mix loop orders.
+        """
         if not config.triton.mix_order_reduction:
             return False
 
@@ -245,6 +248,13 @@ class MixOrderReduction:
         g1 = cls.get_numel_rnumel(node1)
         nrow = sympy.Max(g1[0], g1[1])
         ncol = sympy.Min(g1[0], g1[1])
+
+        # the fused version has worse perf than non-fused version for
+        # small workload. When a workload is small enough, data can be
+        # fully cached by L2
+        size_thres = 5 * 2**20
+        if not V.graph.sizevars.statically_known_geq(nrow * ncol, size_thres):
+            return False
 
         # We require more more row than columns since
         # 1, we prefer doing persistent reduction for each row
