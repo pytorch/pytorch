@@ -56,6 +56,11 @@ def print_proxy_torch_dispatch_mode(
     proxy_args = pytree.tree_map(_unwrap_proxy, node_args)
     mode.tracer.create_proxy("call_function", print, proxy_args, {}, name="print")
 
+@print.py_functionalize_impl
+# pyre-ignore
+def print_functionalize(ctx: Any, format_str: str, **kwargs: object) -> None:
+    with ctx.redispatch_to_next():
+        return None
 
 @print.py_impl(torch._C.DispatchKey.CompositeExplicitAutograd)
 # pyre-ignore

@@ -28,6 +28,7 @@ SIDE_EFFECTS = WeakKeyDictionary[OpType, _EffectType](
     [
         (torch.ops.aten._print.default, _EffectType.ORDERED),
         (call_torchbind, _EffectType.ORDERED),
+        # (torch._higher_order_ops.print, _EffectType.ORDERED),
     ]
 )
 
