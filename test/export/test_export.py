@@ -1408,6 +1408,7 @@ graph():
     def test_int_shape_specialization(self):
         class M(torch.nn.Module):
             def forward(self, x):
+                breakpoint()
                 ori_size = (
                     int(x.shape[-2] / 1),
                     int(x.shape[-1] / 1),

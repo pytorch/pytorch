@@ -39,7 +39,7 @@ from ..bytecode_transformation import (
     create_instruction,
 )
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
-from ..exc import raise_observed_exception, unimplemented, unimplemented_v2
+from ..exc import raise_observed_exception, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
@@ -1382,7 +1382,15 @@ class TypingVariable(VariableTracker):
         if name == "__getitem__" and len(args) == 1:
             new_typing = self.value[args[0].as_python_constant()]
             return TypingVariable(new_typing)
-        unimplemented("unsupported method call on typing variable")
+        unimplemented_v2(
+            gb_type="unsupported method call on `typing` variable",
+            context=f"typing variable: {self.value}, method name: {name}, args: {args}, kwargs: {kwargs}",
+            explanation=f"`torch.compile` does not support method call `{name}` on `typing` variable f{self.value}.",
+            hints=[
+                f"Avoid calling the {name} method on {self.value}.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         from .builder import SourcelessBuilder, VariableBuilder
@@ -1493,16 +1501,28 @@ class NumpyVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if not config.trace_numpy:
-            unimplemented(f"numpy.{self.value}()")
+            unimplemented_v2(
+                gb_type="attempted to trace numpy function with config.trace_numpy=False",
+                context=f"numpy function: {self.value}, args: {args}, kwargs: {kwargs}",
+                explanation=f"Attempted to trace numpy function {self.value} "
+                "while `torch._dynamo.config.trace_numpy` was set to False.",
+                hints=[
+                    "Set `torch._dynamo.config.trace_numpy` to True to trace numpy functions.",
+                ],
+            )
 
         from ..utils import numpy_to_tensor_wrapper
         from .tensor import NumpyNdarrayVariable
 
         func = get_np_to_tnp_map().get(self.value)
         if func is None:
-            unimplemented(
-                f"Can't find numpy function {self.value} in torch._numpy. "
-                " Please file an issue to request support for this function."
+            unimplemented_v2(
+                gb_type="attempted to trace numpy function unsupported by PyTorch",
+                context=f"numpy function: {self.value}, args: {args}, kwargs: {kwargs} (corresponding torch function: {func})",
+                explanation=f"Can't find numpy numpy function {self.value} in torch._numpy.",
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
 
         # We are dealing with a function that produces a const collection type (np.dtype, np.iinfo/np.finfo)
@@ -1516,20 +1536,32 @@ class NumpyVariable(VariableTracker):
                         **{k: v.as_python_constant() for k, v in kwargs.items()},
                     )
                 )
-            except NotImplementedError:
-                unimplemented(
-                    f"{self.value.__name__} with non-const args: {args} {kwargs}"
+            except AsPythonConstantNotImplementedError:
+                unimplemented_v2(
+                    gb_type="numpy function that produces a const collection type encountered non-const arguments",
+                    context=f"numpy function: {self.value}, args: {args}, kwargs: {kwargs} (corresponding torch function: {func})",
+                    explanation=f"numpy function {self.value} that produces a const collection type "
+                    "(e.g. np.dtype, np.iinfo/np.finfo) "
+                    "received arguments that are not constant.",
+                    hints=[
+                        *graph_break_hints.USER_ERROR,
+                    ],
                 )
         else:
             if (
                 func.__module__ == "torch._numpy.random"
                 and config.use_numpy_random_stream
             ):
-                msg = f"delegate '{func.__qualname__}' to NumPy itself via "
-                msg += (
-                    f"config.use_numpy_random_stream={config.use_numpy_random_stream}"
+                unimplemented_v2(
+                    gb_type="attempted to trace torch._numpy.random function with config.use_numpy_random_stream=True",
+                    context=f"numpy function: {self.value}, args: {args}, kwargs: {kwargs} (corresponding torch function: {func})",
+                    explanation=f"Attempted to trace {self.value} when `torch._dynamo.config.use_numpy_random_stream` "
+                    "is set to True.",
+                    hints=[
+                        "Set `torch._dynamo.config.use_numpy_random_stream` to False.",
+                        f"Avoid calling {self.value}.",
+                    ],
                 )
-                unimplemented(msg)
 
             args, kwargs = NumpyNdarrayVariable.patch_args(func.__name__, args, kwargs)
 
@@ -1559,7 +1591,14 @@ class NumpyVariable(VariableTracker):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        unimplemented("numpy")
+        unimplemented_v2(
+            gb_type="attempted to trace numpy.* function as a method",
+            context=f"numpy function: {self.value}, args: {args}, kwargs: {kwargs}",
+            explanation="Tracing numpy.* functions as methods is not supported.",
+            hints=[
+                *graph_break_hints.DIFFICULT,
+            ],
+        )
 
     def as_python_constant(self):
         return self.value
@@ -1584,7 +1623,15 @@ class NullVariable(VariableTracker):
 
     def reconstruct(self, codegen: "PyCodegen"):
         if sys.version_info < (3, 11):
-            unimplemented("cannot reconstruct NullVariable in < Python 3.11")
+            unimplemented_v2(
+                gb_type="cannot reconstruct NullVariable in Python < 3.11",
+                context="",
+                explanation="Attempted to generate PUSH_NULL instruction in Python < 3.11; "
+                "where this instruction does not exist.",
+                hints=[
+                    *graph_break_hints.DYNAMO_BUG,
+                ],
+            )
         codegen.append_output(create_instruction("PUSH_NULL"))
 
 
@@ -1665,9 +1712,14 @@ class DebuggingVariable(VariableTracker):
             return
 
         if not self.can_reorder_logs(self.value, args, kwargs):
-            unimplemented(
-                f"Reordering debugging function {self.value} "
-                f"with inputs {args} {kwargs} is not yet implemented."
+            unimplemented_v2(
+                gb_type="attempted to reorder a debugging function that can't actually be reordered",
+                context=f"fn: {self.value}, args: {args}, kwargs: {kwargs}",
+                explanation="`torch.compile` can only reorder functions where the arguments "
+                "are Tensors, constants, or string formatters.",
+                hints=[
+                    f"Avoid calling the logging function {self.value} with args that are not supported.",
+                ],
             )
 
         tx.debug_locals.append((self, list(args)))
@@ -1719,10 +1771,13 @@ class LoggingLoggerVariable(VariableTracker):
         function = getattr(method, "__func__", None)
         if {method, function}.intersection(torch._dynamo.config.ignore_logger_methods):
             return variables.ConstantVariable.create(None)
-        unimplemented(
-            "Logger not supported for non-export cases. "
-            "To avoid graph breaks caused by logger in compile-mode, it is recommended to"
-            " disable logging by adding logging methods to config.ignore_logger_methods"
+        unimplemented_v2(
+            gb_type="logging.Logger method not supported for non-export cases",
+            context=f"method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
+            explanation="logging.Logger methods are not supported for non-export cases.",
+            hints=[
+                "Add the logging method to `torch._dynamo.config.ignore_logger_methods.",
+            ],
         )
 
 
@@ -1759,7 +1814,14 @@ class ConstantLikeVariable(VariableTracker):
             cargs = [x.as_python_constant() for x in args]
             ckwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
         except NotImplementedError:
-            unimplemented(f"{self._error_prefix}.{name}(*{args}, **{kwargs})")
+            unimplemented_v2(
+                gb_type="constant-like method call with non-constant args",
+                context=f"{self._error_prefix}.{name}(*{args}, **{kwargs})",
+                explanation=f"Attempted to call {self._error_prefix}.{name} with non-constant args.",
+                hints=[
+                    "Ensure that the args to the method call are constant (int, str, etc.).",
+                ],
+            )
 
         result = getattr(self.value, name)(*cargs, **ckwargs)
 
@@ -1768,7 +1830,14 @@ class ConstantLikeVariable(VariableTracker):
         if isinstance(result, re.Match):
             return ConstantRegexMatchVariable(result)
 
-        unimplemented(f"{self._error_prefix}.{name}() -> {result}")
+        unimplemented_v2(
+            gb_type="constant-like method call with unsupported return type",
+            context=f"{self._error_prefix}.{name}(*{args}, **{kwargs}) returned {result}",
+            explanation=f"Attempted to call {self._error_prefix}.{name}, got unsupported return value {result}.",
+            hints=[
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         result = getattr(self.value, name)
@@ -1831,10 +1900,15 @@ class RandomClassVariable(VariableTracker):
         super().__init__(**kwargs)
 
     def call_function(self, tx: "InstructionTranslator", args, kwargs):
-        if len(args) > 1:
-            unimplemented("random.Random() with > 1 arg")
-        elif kwargs:
-            unimplemented("random.Random() with kwargs")
+        if len(args) > 1 or kwargs:
+            unimplemented_v2(
+                gb_type="random.Random() with improper arguments",
+                context=f"args: {args}, kwargs: {kwargs}",
+                explanation="random.Random() with > 1 arg or with kwargs is not supported.",
+                hints=[
+                    *graph_break_hints.USER_ERROR,
+                ],
+            )
         seed = variables.ConstantVariable.create(None) if len(args) == 0 else args[0]
         return RandomVariable(
             seed=seed, mutation_type=variables.base.ValueMutationNew()
