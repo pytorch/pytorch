@@ -171,14 +171,14 @@ case "$tag" in
   pytorch-linux-jammy-py3.11-clang12)
     ANACONDA_PYTHON_VERSION=3.11
     CLANG_VERSION=12
-    VISION=yes
-    TRITON=yes
+    # VISION=yes
+    # TRITON=yes
     ;;
   pytorch-linux-jammy-py3.12-clang12)
     ANACONDA_PYTHON_VERSION=3.12
     CLANG_VERSION=12
-    VISION=yes
-    TRITON=yes
+    # VISION=yes
+    # TRITON=yes
     ;;
   pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3)
     if [[ $tag =~ "jammy" ]]; then

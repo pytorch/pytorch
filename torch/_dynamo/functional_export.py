@@ -16,6 +16,7 @@ from torch._dynamo.eval_frame import argument_names, check_user_input_output
 from torch._dynamo.exc import UserErrorType
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
+from torch._guards import TracingContext
 from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
 from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -449,6 +450,14 @@ def _suggest_or_raise_constraint_violation(
         raise constraint_violation_error
 
 
+def _normalize_shuffle_graph(shuffle_gm: torch.fx.GraphModule) -> None:
+    shuffle_gm.graph.eliminate_dead_code()
+    shuffle_gm.recompile()
+    for name, buffer in list(shuffle_gm.named_buffers()):
+        delattr(shuffle_gm, name)
+        setattr(shuffle_gm, name, buffer)
+
+
 @dataclass(frozen=True)
 class PyTreeifyOutput:
     graph_module: torch.fx.GraphModule
@@ -525,6 +534,7 @@ def pytreeify(
     in_shuffle_graph = make_fx(
         InShuffle(), tracing_mode="symbolic", proxy_module_inputs=True
     )(*flat_real_args)
+    _normalize_shuffle_graph(in_shuffle_graph)
 
     output_node = next(iter(reversed(backend_input.graph_module.graph.nodes)))
 
@@ -572,6 +582,7 @@ def pytreeify(
     out_shuffle_graph = make_fx(
         out_shuffle, tracing_mode="symbolic", proxy_module_inputs=True
     )(*flat_out_shuffle_args)
+    _normalize_shuffle_graph(out_shuffle_graph)
 
     assert out_shuffle.out_spec is not None
     return PyTreeifyOutput(
@@ -650,6 +661,10 @@ def dynamo_graph_capture_for_export(
         )
         assert out.backend_input is not None
         graph_module.meta["fake_mode"] = out.backend_input.fake_mode  # type: ignore[attr-defined]
+        graph_module.meta["fake_mode"].allow_non_fake_inputs = True
+        tracing_context = TracingContext(graph_module.meta["fake_mode"])
+        tracing_context.tensor_to_context = out.backend_input.tensor_to_context  # type: ignore[attr-defined]
+        graph_module.meta["tracing_context"] = tracing_context
         return graph_module
 
     return inner
