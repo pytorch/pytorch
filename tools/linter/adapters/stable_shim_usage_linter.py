@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-STABLE_SHIM_USAGE: Ensures that calls to versioned shim functions in
-torch/csrc/stable are properly wrapped in TORCH_FEATURE_VERSION macros
-corresponding to the version when those functions were introduced.
+STABLE_SHIM_USAGE: Ensures that calls to versioned shim functions from
+torch/csrc/stable/c/shim.h in torch/csrc/stable are properly wrapped in
+TORCH_FEATURE_VERSION macros corresponding to the version when those
+functions were introduced.
 """
 
 from __future__ import annotations
@@ -87,63 +88,6 @@ def get_current_version() -> tuple[int, int] | None:
     return None
 
 
-def get_added_lines(filename: str) -> set[int]:
-    """
-    Get the line numbers of added lines in the current uncommitted changes.
-    Uses hg/git to determine which lines are new in this commit.
-
-    Returns:
-        Set of line numbers (1-indexed) that are new additions.
-    """
-    import subprocess
-
-    added_lines = set()
-
-    try:
-        # Try hg first (Meta's version control)
-        result = subprocess.run(
-            ["hg", "diff", filename],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            diff_output = result.stdout
-        else:
-            # Try git as fallback
-            result = subprocess.run(
-                ["git", "diff", "HEAD", filename],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode != 0:
-                return added_lines
-            diff_output = result.stdout
-
-        # Parse diff output to find added lines
-        current_line = 0
-        for line in diff_output.split("\n"):
-            # Unified diff format: @@ -old_start,old_count +new_start,new_count @@
-            if line.startswith("@@"):
-                match = re.search(r"\+(\d+)", line)
-                if match:
-                    current_line = int(match.group(1))
-            elif line.startswith("+") and not line.startswith("+++"):
-                # This is an added line
-                added_lines.add(current_line)
-                current_line += 1
-            elif not line.startswith("-"):
-                # Context line or unchanged line
-                current_line += 1
-
-    except Exception:
-        # If we can't get diff info, return empty set
-        pass
-
-    return added_lines
-
-
 def get_shim_functions() -> dict[str, tuple[int, int]]:
     """
     Extract function names from shim.h and their required version.
@@ -155,54 +99,80 @@ def get_shim_functions() -> dict[str, tuple[int, int]]:
     shim_file = repo_root / "torch/csrc/stable/c/shim.h"
 
     if not shim_file.exists():
-        return {}
+        raise RuntimeError(
+            f"Could not find shim.h at {shim_file}. "
+            f"This linter requires torch/csrc/stable/c/shim.h to exist in the repository."
+        )
 
     functions: dict[str, tuple[int, int]] = {}
 
-    try:
-        with open(shim_file) as f:
-            lines = f.readlines()
+    with open(shim_file) as f:
+        lines = f.readlines()
 
-        current_version: tuple[int, int] | None = None
-        version_pattern = re.compile(
-            r"#if\s+TORCH_FEATURE_VERSION\s*>=\s*TORCH_VERSION_(\d+)_(\d+)_\d+"
-        )
-        # Match function declarations like: AOTI_TORCH_EXPORT ... function_name(
-        function_pattern = re.compile(r"AOTI_TORCH_EXPORT\s+\w+\s+(\w+)\s*\(")
-        # Also match typedef function pointers
-        typedef_pattern = re.compile(r"typedef\s+.*\(\*(\w+)\)")
+    # Track ALL preprocessor conditional blocks to properly match #if/#endif pairs
+    # Each element is (is_version_block, version_tuple_or_none)
+    preprocessor_stack: list[tuple[bool, tuple[int, int] | None]] = []
+    current_version: tuple[int, int] | None = None
 
-        for line in lines:
-            stripped = line.strip()
+    version_pattern = re.compile(
+        r"#if\s+TORCH_FEATURE_VERSION\s*>=\s*TORCH_VERSION_(\d+)_(\d+)_\d+"
+    )
+    # Match function declarations like: AOTI_TORCH_EXPORT ... function_name(
+    function_pattern = re.compile(r"AOTI_TORCH_EXPORT\s+\w+\s+(\w+)\s*\(")
+    # Also match typedef function pointers
+    typedef_pattern = re.compile(r"typedef\s+.*\(\*(\w+)\)")
 
-            # Check for version block start
-            version_match = version_pattern.match(stripped)
-            if version_match:
-                major = int(version_match.group(1))
-                minor = int(version_match.group(2))
-                current_version = (major, minor)
-                continue
+    for line in lines:
+        stripped = line.strip()
 
-            # Check for version block end
-            if stripped.startswith("#endif") and "TORCH_FEATURE_VERSION" in stripped:
+        # Skip comments
+        if stripped.startswith("//"):
+            continue
+
+        # Check for TORCH_FEATURE_VERSION block start
+        version_match = version_pattern.match(stripped)
+        if version_match:
+            major = int(version_match.group(1))
+            minor = int(version_match.group(2))
+            version_tuple = (major, minor)
+            preprocessor_stack.append((True, version_tuple))
+            current_version = version_tuple
+            continue
+
+        # Track any other #if/#ifdef/#ifndef directives
+        if stripped.startswith(("#if", "#ifdef", "#ifndef")) and not version_match:
+            preprocessor_stack.append((False, None))
+            continue
+
+        # Track #endif directives
+        if stripped.startswith("#endif"):
+            if preprocessor_stack:
+                is_version_block, _ = preprocessor_stack.pop()
+                # If we just closed a version block, check if we're still in one
+                if is_version_block:
+                    current_version = None
+                    for is_ver, ver_tuple in reversed(preprocessor_stack):
+                        if is_ver:
+                            current_version = ver_tuple
+                            break
+            continue
+
+        # Track #else and #elif (exit version blocks on the topmost block)
+        if stripped.startswith(("#else", "#elif")):
+            if preprocessor_stack and preprocessor_stack[-1][0]:
                 current_version = None
-                continue
+            continue
 
-            # Check for function declarations
-            func_match = function_pattern.search(stripped)
-            if func_match and current_version:
-                func_name = func_match.group(1)
-                functions[func_name] = current_version
-                continue
+        # Check for function declarations
+        func_match = function_pattern.search(stripped)
+        if func_match and current_version:
+            func_name = func_match.group(1)
+            functions[func_name] = current_version
 
-            typedef_match = typedef_pattern.search(stripped)
-            if typedef_match and current_version:
-                func_name = typedef_match.group(1)
-                functions[func_name] = current_version
-                continue
-
-    except Exception:
-        pass
+        typedef_match = typedef_pattern.search(stripped)
+        if typedef_match and current_version:
+            func_name = typedef_match.group(1)
+            functions[func_name] = current_version
 
     return functions
 
@@ -221,32 +191,18 @@ def check_file(filename: str) -> list[LintMessage]:
     # Get current version
     current_version = get_current_version()
     if current_version is None:
-        lint_messages.append(
-            LintMessage(
-                path=filename,
-                line=None,
-                char=None,
-                code=LINTER_CODE,
-                severity=LintSeverity.WARNING,
-                name="version-detection-failed",
-                original=None,
-                replacement=None,
-                description="Could not determine current PyTorch version from version.txt",
-            )
+        raise RuntimeError(
+            "Could not determine current PyTorch version from version.txt. "
+            "This linter requires version.txt to exist in the repository root and contain a valid version number."
         )
-        return lint_messages
 
     # Get versioned shim functions
     shim_functions = get_shim_functions()
     if not shim_functions:
-        # No versioned functions found, nothing to check
-        return lint_messages
+        raise RuntimeError("Could not extract any shim_functions")
 
-    try:
-        with open(filename) as f:
-            lines = f.readlines()
-    except Exception:
-        return lint_messages
+    with open(filename) as f:
+        lines = f.readlines()
 
     # Track current version block
     inside_version_block = False
