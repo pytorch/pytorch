@@ -61,7 +61,11 @@ from ..utils import (
     raise_args_mismatch,
     tuple_methods,
 )
-from .base import raise_type_error_exc, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    raise_type_error_exc,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
@@ -1260,6 +1264,38 @@ class MethodWrapperVariable(VariableTracker):
                 return variables.BuiltinVariable(object).call_method(
                     tx, wrapper_name, [self_obj, *args], kwargs
                 )
+        elif (
+            sys.version_info >= (3, 14)
+            # for some reason, even if the below check passes,
+            # self.method_wrapper may not be the same as type.__dict__["__annotations__"].__get__
+            and self_obj is type.__dict__["__annotations__"]
+            and wrapper_name == "__get__"
+        ):
+            from .builder import SourcelessBuilder
+
+            if len(args) == 1 and not kwargs:
+                try:
+                    return SourcelessBuilder.create(
+                        tx, self.method_wrapper(args[0].as_python_constant())
+                    )
+                except AttributeError:
+                    raise_observed_exception(AttributeError, tx)
+                except AsPythonConstantNotImplementedError:
+                    pass
+
+            unimplemented_v2(
+                gb_type="unsupported type.__dict__['__annotations__'].__get__ call",
+                context=f"call_function {self}, args: {args}, kwargs: {kwargs}",
+                explanation="`torch.compile` only supports calling type.__dict__['__annotations__'].__get__ "
+                "on a single constant argument (i.e. a type).",
+                hints=[
+                    "Make sure your call to type.__dict__['__annotations__'] only has "
+                    "one positional argument (no keyword arguments).",
+                    "Make sure the argument to type.__dict__['__annotations__'] is a constant "
+                    "(i.e. type). For example, `object`, `int`, `MyCustomClass`.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
         return super().call_function(tx, args, kwargs)
 
