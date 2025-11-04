@@ -62,7 +62,7 @@ def parse_version(version: str) -> tuple[int, int, int]:
     return tuple([int(n) for n in version_number_str.split(".")])  # type: ignore[return-value]
 
 
-def get_current_version() -> tuple[int, int] | None:
+def get_current_version() -> tuple[int, int]:
     """
     Get the current PyTorch version from version.txt.
     This uses the same logic as tools/setup_helpers/gen_version_header.py
@@ -74,17 +74,15 @@ def get_current_version() -> tuple[int, int] | None:
     version_file = repo_root / "version.txt"
 
     if not version_file.exists():
-        return None
+        raise RuntimeError(
+            "Could not find version.txt. This linter require version.txt to run"
+        )
 
-    try:
-        with open(version_file) as f:
-            version = f.read().strip()
-            major, minor, patch = parse_version(version)
-            return (major, minor)
-    except Exception:
-        pass
+    with open(version_file) as f:
+        version = f.read().strip()
+        major, minor, patch = parse_version(version)
 
-    return None
+    return (major, minor)
 
 
 def get_added_lines(filename: str) -> set[int]:
@@ -162,12 +160,6 @@ def parse_shim_file(filename: str) -> list[LintMessage]:
 
     # Get current version
     current_version = get_current_version()
-    if current_version is None:
-        raise RuntimeError(
-            "Could not determine current PyTorch version from version.txt. "
-            "This linter requires version.txt to exist in the repository root and contain a valid version number."
-        )
-
     major, minor = current_version
     expected_version_macro = f"TORCH_VERSION_{major}_{minor}_0"
     expected_version_check = f"#if TORCH_FEATURE_VERSION >= {expected_version_macro}"
