@@ -27,7 +27,7 @@
 // THO_DISPATCH_SWITCH and THO_DISPATCH_CASE instead of
 // AT_DISPATCH_SWITCH and AT_DISPATCH_CASE, respectively.
 #define THO_DISPATCH_V2(TYPE, NAME, BODY, ...) \
-  AT_DISPATCH_V2_TMPL(                         \
+  THO_DISPATCH_V2_TMPL(                        \
       THO_DISPATCH_SWITCH, THO_DISPATCH_CASE, TYPE, NAME, BODY, __VA_ARGS__)
 
 // Type collection macros
