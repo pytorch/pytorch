@@ -48,6 +48,10 @@ from typing_extensions import deprecated, NamedTuple, Self, TypeAlias, TypeIs
 from torch.torch_version import TorchVersion as _TorchVersion
 
 
+if TYPE_CHECKING:
+    import torch.utils._cxx_pytree as cxx
+
+
 __all__ = [
     "PyTree",
     "Context",
@@ -1382,26 +1386,30 @@ def treespec_dict(
     return TreeSpec(dict, list(dct.keys()), list(dct.values()))
 
 
-if TYPE_CHECKING:
-    import torch.utils._cxx_pytree as cxx
-
-
-def _is_pytreespec_instance(obj: Any) -> TypeIs[Union[TreeSpec, "cxx.TreeSpec"]]:
+def _is_pytreespec_instance(obj: Any) -> TypeIs[Union[TreeSpec, "cxx.PyTreeSpec"]]:
     if isinstance(obj, TreeSpec):
         return True
     if "torch.utils._cxx_pytree" in sys.modules:
         # The C++ pytree module is not always available, so we check if it is loaded.
         # If the C++ pytree module is loaded, we can check if the treespec
         # is an instance of the C++ TreeSpec class.
-        from torch.utils._cxx_pytree import TreeSpec as CxxTreeSpec
+        import torch.utils._cxx_pytree as cxx
 
-        if isinstance(obj, CxxTreeSpec):
+        if isinstance(obj, cxx.PyTreeSpec):
+            return True
+    if "torch._dynamo.polyfills.pytree" in sys.modules:
+        # The PyTorch Dynamo pytree module is not always available, so we check if it is loaded.
+        # If the PyTorch Dynamo pytree module is loaded, we can check if the treespec
+        # is an instance of the PyTorch Dynamo TreeSpec class.
+        import torch._dynamo.polyfills.pytree as dynamo_pytree
+
+        if isinstance(obj, dynamo_pytree.PyTreeSpec):
             return True
     return False
 
 
 def _ensure_python_treespec_instance(
-    treespec: Union[TreeSpec, "cxx.TreeSpec"],
+    treespec: Union[TreeSpec, "cxx.PyTreeSpec"],
 ) -> TreeSpec:
     if isinstance(treespec, TreeSpec):
         return treespec
