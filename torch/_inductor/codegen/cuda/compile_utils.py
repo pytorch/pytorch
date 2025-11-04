@@ -69,8 +69,8 @@ def _cutlass_include_paths() -> list[str]:
 
 
 def _cuda_compiler() -> Optional[str]:
-    if cuda_env.nvcc_exist(config.cutlass.cuda_cxx):
-        return config.cutlass.cuda_cxx
+    if cuda_env.nvcc_exist(config.cuda.cuda_cxx):
+        return config.cuda.cuda_cxx
     if config.is_fbcode():
         return os.path.join(build_paths.sdk_home, "bin", "nvcc")
     if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
@@ -219,6 +219,7 @@ def cuda_compile_command(
     else:
         autotuning_log.debug("CUDA command: %s", res)
     return res
+
 
 class CUDACompileSourceCapturingContext:
     # Helper class for Benchmarking and Testing CUTLASS Kernels in isolation.
