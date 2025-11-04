@@ -103,6 +103,21 @@ from .utils import (
 _thread_local = threading.local()
 
 
+# Saved tensor hooks context
+# Compiled saved tensor hooks are convenient way to inline some logic in the graphs
+# for saved nodes from forward to backward. (E.g. activations quantization)
+# In base implementation user does not have any additional information about saved value
+# in the hook, except FakeTensor shape, dtype, device etc.
+# _get_saved_tensor_hook_context gives additional graph information about that saved value,
+# that can be used to make a decisions which pack/unpack to apply for particular saved value.
+# This allows user to reuse saved tensors hooks api to apply selective pack/unpack in
+# graph aware way.
+# Alternative to this will be making user to write a custom pass that mucks with forward outputs,
+# backward input metadata, which requires significantly more effort.
+#
+# As for now in context we expose forward graph, backward graph and current saved node,
+# which contains node.meta with additional information about that fx.Node.
+# Warning: This API may change without backward compatibility.
 @contextmanager
 def _saved_tensor_hook_context(state: dict[str, Any]):
     previous_state = getattr(_thread_local, "state", None)
