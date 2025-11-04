@@ -111,6 +111,9 @@ test_failures = {
     # Failed to find dynamic for loop variable:
     #
     "test_conv1d_with_permute_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    "test_triton_argmin_argmax_transpose_logical_index_dynamic_shapes": TestFailure(
+        ("cpu",), is_skip=True
+    ),
     # XPU always convert conv1d to conv2d and can not match the expected codegen result.
     "test_conv1d_depthwise_dynamic_shapes": TestFailure(("xpu",), is_skip=True),
     "test_arange1_dynamic_shapes": TestFailure(("cpu",)),
@@ -156,6 +159,9 @@ test_failures = {
     #
     "test_complex_fallback_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_adaptive_avg_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_linalg_eig_stride_consistency_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu")
+    ),
     "test_adaptive_max_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_argmax_to_float_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_avg_pool2d7_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),

@@ -13,7 +13,7 @@ import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
 from torch.distributed.algorithms._comm_hooks import default_hooks
-from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
+from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
     _FSDPDeviceHandle,
@@ -431,7 +431,8 @@ def _init_core_state(
             warnings.warn(
                 "FSDP is switching to use `NO_SHARD` instead of "
                 f"{sharding_strategy or ShardingStrategy.FULL_SHARD} since "
-                "the world size is 1."
+                "the world size is 1.",
+                stacklevel=2,
             )
         sharding_strategy = ShardingStrategy.NO_SHARD
     elif sharding_strategy == ShardingStrategy.NO_SHARD:
@@ -509,11 +510,11 @@ def _init_prefetching_state(
 
 
 @no_type_check
-# pyrefly: ignore  # bad-function-definition
+# pyrefly: ignore [bad-function-definition]
 def _init_extension(state: _FSDPState, device_mesh: DeviceMesh = None) -> _FSDPState:
     # TODO: we need to add additional check once we support FSDP + PiPPy.
     # This check is currently sufficient, since we only support FSDP + TP.
-    root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+    root_mesh = device_mesh._get_root_mesh() if device_mesh is not None else None
     # if a root mesh is not the same as device_mesh,
     # meaning the device_mesh is sliced out from the root mesh.
     if device_mesh and root_mesh != state._device_mesh:
@@ -704,7 +705,8 @@ def _get_ignored_modules(
         warnings.warn(
             "Trying to ignore the top-level module passed into the FSDP "
             "constructor itself will result in all parameters being "
-            f"ignored and is not well-supported: {module}"
+            f"ignored and is not well-supported: {module}",
+            stacklevel=2,
         )
     # Include nested FSDP modules' ignored modules
     for submodule in root_module.modules():
@@ -847,7 +849,8 @@ def _get_device_from_device_id(
             f"FSDP will use the current device {device_handle.current_device()}. "
             f"If this is incorrect, please explicitly call `torch.{device.type}.set_device()` "
             "before FSDP initialization or pass in the explicit device "
-            "index as the `device_id` argument."
+            "index as the `device_id` argument.",
+            stacklevel=2,
         )
         device = torch.device(device_handle.current_device())
     return device
@@ -918,7 +921,7 @@ def _materialize_meta_module(
                 # the module has directly managed parameters/buffers
                 module_state_iter = itertools.chain(
                     module.parameters(recurse=False),
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     module.buffers(recurse=False),
                 )
                 has_module_states = len(list(module_state_iter)) > 0
@@ -929,7 +932,8 @@ def _materialize_meta_module(
         warnings.warn(
             "Unable to call `reset_parameters()` for module on meta "
             f"device with error {str(e)}. Please ensure that your module of"
-            f"type {type(module)} implements a `reset_parameters()` method."  # type: ignore[possibly-undefined]
+            f"type {type(module)} implements a `reset_parameters()` method.",
+            stacklevel=2,  # type: ignore[possibly-undefined]
         )
         raise e
 
@@ -1049,7 +1053,8 @@ def _warn_cpu_init():
         "recommend passing in the `device_id` argument for FSDP to move "
         "`module` to GPU for the sharding initialization. `module` must also "
         "be on GPU device to work with the `sync_module_states=True` flag "
-        "since that requires GPU communication."
+        "since that requires GPU communication.",
+        stacklevel=2,
     )
 
 
