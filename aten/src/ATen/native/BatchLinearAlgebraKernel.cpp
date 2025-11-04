@@ -197,18 +197,36 @@ void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& in
   lapackEig<scalar_t, value_t>(jobvl, jobvr, n, input_data, lda, values_data,
     lvectors_data, ldvl, rvectors_data, ldvr, &work_query, -1, rwork_data, &infos_data[0]);
 
-  int lwork = lapack_work_to_int(work_query);
-  Tensor work = at::empty({lwork}, input.dtype());
-  auto work_data = work.mutable_data_ptr<scalar_t>();
+  const int lwork = lapack_work_to_int(work_query);
 
-  for (const auto i : c10::irange(batch_size)) {
-    scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
-    scalar_t* values_working_ptr = &values_data[i * values_stride];
-    scalar_t* rvectors_working_ptr = compute_eigenvectors ? &rvectors_data[i * input_matrix_stride] : nullptr;
-    int* info_working_ptr = &infos_data[i];
-    lapackEig<scalar_t, value_t>(jobvl, jobvr, n, input_working_ptr, lda, values_working_ptr,
-      lvectors_data, ldvl, rvectors_working_ptr, ldvr, work_data, lwork, rwork_data, info_working_ptr);
-  }
+  const auto loop = [&](int64_t start, int64_t end) {
+    Tensor work = at::empty({lwork}, input.dtype());
+    auto work_data = work.mutable_data_ptr<scalar_t>();
+
+    value_t* thread_rwork_data = nullptr;
+    Tensor thread_rwork;
+    if (input.is_complex()) {
+      ScalarType real_dtype = toRealValueType(input.scalar_type());
+      thread_rwork = at::empty({lda * 2}, input.options().dtype(real_dtype));
+      thread_rwork_data = thread_rwork.mutable_data_ptr<value_t>();
+    }
+
+    for (const auto i : c10::irange(start, end)) {
+      scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+      scalar_t* values_working_ptr = &values_data[i * values_stride];
+      scalar_t* rvectors_working_ptr = compute_eigenvectors ? &rvectors_data[i * input_matrix_stride] : nullptr;
+      int* info_working_ptr = &infos_data[i];
+      lapackEig<scalar_t, value_t>(jobvl, jobvr, n, input_working_ptr, lda, values_working_ptr,
+        lvectors_data, ldvl, rvectors_working_ptr, ldvr, work_data, lwork, thread_rwork_data, info_working_ptr);
+    }
+  };
+
+  const double scaling_factor = (n < 20) ? 500.0 : 3200.0;
+  const double matrix_rank = static_cast<double>(n);
+  const int64_t chunk_size_per_thread = int64_t(
+      std::min(1.0, scaling_factor / (matrix_rank * matrix_rank * matrix_rank)));
+  const int64_t grain_size = chunk_size_per_thread * at::get_num_threads();
+  at::parallel_for(0, batch_size, grain_size, loop);
 #endif
 }
 
