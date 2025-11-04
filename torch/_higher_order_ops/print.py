@@ -33,15 +33,11 @@ def print_cpu(format_str: str, **kwargs: object) -> None:
         torch.fx.immutable_collections.immutable_dict: dict,
         torch.fx.immutable_collections.immutable_list: list,
     }
-    if kwargs:
-        new_kwargs = pytree.tree_map_only(
-            tuple(map_types.keys()),
-            lambda a: map_types[type(a)](a),
-            kwargs,
-            lambda a: isinstance(a, tuple(map_types.keys())),
-        )
-        print_str = format_str.format(**new_kwargs)
-    else:
-        print_str = format_str
+    new_kwargs = pytree.tree_map_only(
+          tuple(map_types.keys()),
+          lambda a: map_types[type(a)](a),
+          kwargs,
+          lambda a: isinstance(a, tuple(map_types.keys())),
+      )
     # Use built-in print to avoid recursion with the HOP print
-    builtins.print(print_str)
+    builtins.print(format_str.format(**new_kwargs))
