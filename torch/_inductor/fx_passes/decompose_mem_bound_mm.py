@@ -66,7 +66,9 @@ def should_decompose_bmm(mat1, mat2) -> bool:
         return False
     if len(mat1.shape) != 3 or len(mat2.shape) != 3:
         return False
-    if check_device(mat1, mat2, device="cuda"):
+    if check_device(mat1, mat2, device="cuda") or check_device(
+        mat1, mat2, device="xpu"
+    ):
         if mat1.shape[0] < min_first_dimension_decomposition:
             return False
         # 2 of m, n, k must be <= MAX_OTHER_DIMENSION_DECOMPOSITION
@@ -130,7 +132,10 @@ def should_decompose_mm(mat1, mat2) -> bool:
         "skip_dynamic_shape_dim_check", False
     ):
         return (
-            check_device(mat1, mat2, device="cuda")
+            (
+                check_device(mat1, mat2, device="cuda")
+                or check_device(mat1, mat2, device="xpu")
+            )
             and statically_known_true(
                 mat1.shape[0] >= min_first_dimension_decomposition
             )
@@ -151,7 +156,10 @@ def should_decompose_mm(mat1, mat2) -> bool:
     # case 2: we decompose mm if the input is dynamic shape
     else:
         return (
-            check_device(mat1, mat2, device="cuda")
+            (
+                check_device(mat1, mat2, device="cuda")
+                or check_device(mat1, mat2, device="xpu")
+            )
             and (
                 statically_known_true(
                     mat1.shape[0] >= min_first_dimension_decomposition
@@ -225,7 +233,7 @@ def decompose_bmm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
 
     if should_decompose_bmm(mat1, mat2):
         counters["inductor"]["decompose_bmm"] += 1
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         match.replace_by_example(repl, [mat1, mat2])
         print_decompose_pattern(match, [mat1, mat2])
         realize_inputs([mat1, mat2])
@@ -249,7 +257,7 @@ def decompose_addmm(
 
     if should_decompose_mm(mat2, mat3):
         counters["inductor"]["decompose_addmm"] += 1
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         match.replace_by_example(repl, [mat1, mat2, mat3])
         print_decompose_pattern(match, [mat1, mat2, mat3])
         realize_inputs([mat1, mat2, mat3])
@@ -270,7 +278,7 @@ def decompose_mm(
 
     if should_decompose_mm(mat1, mat2):
         counters["inductor"]["decompose_mm"] += 1
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         match.replace_by_example(repl, [mat1, mat2])
         print_decompose_pattern(match, [mat1, mat2])
         realize_inputs([mat1, mat2])
