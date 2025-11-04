@@ -16,10 +16,12 @@ runtime_estimations_align_across_all_distributed_ranks: bool = False
 reorder_iterative_debug_memory_recompute: bool = False
 reorder_iterative_debug_limit_to_reorder: Optional[int] = (
     None
+    # pyrefly: ignore[unbound-name]
     if (env_str := os.getenv("PYTORCH_REORDER_COLLECTIVES_LIMIT")) is None
     else int(env_str)
 )
 sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
+    # pyrefly: ignore[unbound-name]
     None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
 )
 

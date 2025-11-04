@@ -690,6 +690,7 @@ def _reorder_communication_preserving_peak_memory_internal(
                     is_groupable_result, grouping_reason = is_groupable(candidate)
                     if is_groupable_result:
                         group_head = candidate
+                        # pyrefly: ignore[unbound-name]
                         if config_comms.reorder_iterative_use_runtime_estimations:
                             if contains_wait(candidate):
                                 comm_time, comp_time, _ = (
@@ -718,13 +719,16 @@ def _reorder_communication_preserving_peak_memory_internal(
                         info.limiting_factor = msg
                         break
 
+                # pyrefly: ignore[unbound-name]
                 if config_comms.reorder_iterative_use_runtime_estimations:
                     # Check if candidate has sync runtime
                     if not contains_async_collective(candidate):
                         c_runtime = runtimes[candidate]
 
                         if c_runtime > 0 and len(group_waits) > 0:
+                            # pyrefly: ignore[no-matching-overload]
                             exposed_before = max(0, info.comm_time - info.comp_time)
+                            # pyrefly: ignore[no-matching-overload]
                             exposed_after = max(
                                 0, info.comm_time - info.comp_time - c_runtime
                             )
@@ -763,7 +767,9 @@ def _reorder_communication_preserving_peak_memory_internal(
                             comm_time, comp_time, _ = coll_exposed_communication_time(
                                 _group_nodes(candidate, None), runtimes
                             )
+                            # pyrefly: ignore[no-matching-overload]
                             exposed_before = max(0, comm_time - comp_time)
+                            # pyrefly: ignore[no-matching-overload]
                             exposed_after = max(
                                 0, comm_time - comp_time + group_runtime
                             )
@@ -816,6 +822,7 @@ def _reorder_communication_preserving_peak_memory_internal(
 
                 if (
                     potential_peak - peak_memory
+                    # pyrefly: ignore[unbound-name]
                     > peak_memory * config_comms.reorder_iterative_peak_memory_budget
                 ):
                     info.limiting_factor = (
@@ -905,6 +912,7 @@ def _reorder_communication_preserving_peak_memory_internal(
         for snode, node_info in node_stats.items()
     ]
     if importlib.util.find_spec("tabulate"):
+        # pyrefly: ignore[import-error]
         from tabulate import tabulate
 
         reorder_log_str += tabulate(
@@ -1349,6 +1357,7 @@ def _sink_waits_iterative_internal(
                 # Conservative sink wait, limiting by space before next collective.
                 # The global strategy is that bucketing should create space.
                 # For 2D we can experiment with allowing to sink Wait beyond non current group collective.
+                # pyrefly: ignore[unbound-name]
                 if not config_comms.sink_waits_iterative_swap_with_collectives:
                     if contains_async_collective(candidate):
                         info.limiting_factor = f"candidate contains_async_collective {candidate.get_name()}"
@@ -1373,6 +1382,7 @@ def _sink_waits_iterative_internal(
                                 f"candidate contains_async_collective {snode.get_name()}",
                             )
 
+                        # pyrefly: ignore[unbound-name]
                         if not config_comms.sink_iterative_use_runtime_estimations:
                             # Heuristics pre-use_runtime_estimations:
                             # TODO(ivankobzarev): Remove them after confirming,
@@ -1394,6 +1404,7 @@ def _sink_waits_iterative_internal(
                     if _is_groupable:
                         group_tail = candidate
                         if (
+                            # pyrefly: ignore[unbound-name]
                             config_comms.sink_iterative_use_runtime_estimations
                             and contains_collective(candidate)
                         ):
@@ -1413,6 +1424,7 @@ def _sink_waits_iterative_internal(
                         continue
                     elif data_dep is None:
                         if (
+                            # pyrefly: ignore[unbound-name]
                             not config_comms.sink_waits_iterative_unsafe_collectives_reorder
                             and both_contain_comms
                         ):
@@ -1431,6 +1443,7 @@ def _sink_waits_iterative_internal(
                         )
                         break
 
+                # pyrefly: ignore[unbound-name]
                 if config_comms.sink_iterative_use_runtime_estimations:
                     if is_wait(candidate.node):
                         # Corresponding collective is before the group,
@@ -1438,7 +1451,9 @@ def _sink_waits_iterative_internal(
                         comm_time, comp_time, _ = wait_exposed_communication_time(
                             _group_nodes(_head, candidate), runtimes
                         )
+                        # pyrefly: ignore[no-matching-overload]
                         exposed_before = max(0, comm_time - comp_time)
+                        # pyrefly: ignore[no-matching-overload]
                         exposed_after = max(0, comm_time - comp_time + group_runtime)
                         # We do not know how much we can sink more after this swap,
                         # Just comparing advantage at the moment for now.
@@ -1458,9 +1473,13 @@ def _sink_waits_iterative_internal(
 
                         if c_runtime > 0 and len(group_colls) > 0:
                             # Advantage for current Wait to do the Swap
+                            # pyrefly: ignore[no-matching-overload]
                             exposed_delta = max(
-                                0, info.comm_time - info.comp_time
-                            ) - max(0, info.comm_time - info.comp_time - c_runtime)
+                                0,
+                                info.comm_time - info.comp_time,
+                            )
+                            # pyrefly: ignore[no-matching-overload]
+                            -max(0, info.comm_time - info.comp_time - c_runtime)
                             for gc, (gc_comm_time, gc_comp_time) in group_colls.items():
                                 exposed_delta += max(
                                     0, gc_comm_time - gc_comp_time
@@ -1525,6 +1544,7 @@ def _sink_waits_iterative_internal(
                 )
                 if (
                     potential_peak - peak_memory
+                    # pyrefly: ignore[unbound-name]
                     > peak_memory * config_comms.sink_iterative_peak_memory_budget
                 ):
                     info.limiting_factor = (
@@ -1608,6 +1628,7 @@ def _sink_waits_iterative_internal(
     ]
     log_str = ""
     if importlib.util.find_spec("tabulate"):
+        # pyrefly: ignore[import-error]
         from tabulate import tabulate
 
         log_str += tabulate(
