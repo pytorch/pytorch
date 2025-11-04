@@ -4359,12 +4359,12 @@ event=cudaLaunchKernel node=sub stack_trace=return x - 1"""
 
         actual_traces = _enrich_profiler_traces(prof)
         self.assertExpectedInline(actual_traces, """\
-event=aten::mul node=mul stack_trace=a = s + self.c
-event=cudaLaunchKernel node=mul stack_trace=a = s + self.c
-event=aten::sin node=sin stack_trace=return a
-event=cudaLaunchKernel node=sin stack_trace=return a
-event=aten::add node=add stack_trace=File "/data/users/shangdiy/pytorch/test/test_fx.py", line 4347, in forward
-event=cudaLaunchKernel node=add stack_trace=File "/data/users/shangdiy/pytorch/test/test_fx.py", line 4347, in forward"""
+event=aten::mul node=mul stack_trace=m = torch.mul(x, y)
+event=cudaLaunchKernel node=mul stack_trace=m = torch.mul(x, y)
+event=aten::sin node=sin stack_trace=s = m.sin()
+event=cudaLaunchKernel node=sin stack_trace=s = m.sin()
+event=aten::add node=add stack_trace=a = s + self.c
+event=cudaLaunchKernel node=add stack_trace=a = s + self.c"""
             )
 
 
