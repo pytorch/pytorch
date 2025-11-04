@@ -23,6 +23,7 @@ from ._context_parallel._load_balancer import (
 )
 
 
+# TODO(fegin): add deprecation message once the final interfaces are concluded.
 __all__ = [
     "_CausalBehavior",
     "_context_parallel_shard",
