@@ -512,7 +512,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
   cublasStatus_t cublasStatus = CUBLAS_STATUS_SUCCESS;
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
-  // on Blackwell+, we fake a n > 1 matmul when queruying heuristics
+  // on Blackwell+, we fake a n > 1 matmul when querying heuristics
   // to prevent cuBLASLt from dispatching to a GEMV kernel for batch-invariance
 #ifndef USE_ROCM
   const bool lie_to_cublaslt = mask == CUBLASLT_REDUCTION_SCHEME_NONE && n == 1 && at::cuda::getCurrentDeviceProperties()->major >= 10;
