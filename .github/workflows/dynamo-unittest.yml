@@ -48,8 +48,8 @@ jobs:
         python-version: ['3.10', '3.11', '3.12', '3.13'] #, '3.14']
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py${{ matrix.python-version }}-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-gcc11
+      build-environment: linux-jammy-py${{ matrix.python-version }}-clang12
+      docker-image-name: ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang12
       test-matrix: |
         { include: [
           { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
@@ -66,7 +66,7 @@ jobs:
       matrix:
         python-version: ['3.10', '3.11', '3.12', '3.13']
     with:
-      build-environment: linux-jammy-py${{ matrix.python-version }}-gcc11
+      build-environment: linux-jammy-py${{ matrix.python-version }}-clang12
       docker-image: ${{ needs.dynamo-build.outputs.docker-image }}
       test-matrix: ${{ needs.dynamo-build.outputs.test-matrix }}
     secrets: inherit
