@@ -1,3 +1,8 @@
+# Skip on windows
+if(WIN32)
+  return()
+endif()
+
 set(AOTI_ABI_CHECK_TEST_ROOT ${TORCH_ROOT}/test/cpp/aoti_abi_check)
 
 # Build the cpp gtest binary containing the cpp-only tests.
@@ -30,8 +35,15 @@ target_compile_definitions(test_aoti_abi_check PRIVATE USE_GTEST)
 
 # WARNING: DO NOT LINK torch!!!
 # The purpose is to check if the used aten/c10 headers are written in a header-only way
-target_link_libraries(test_aoti_abi_check PRIVATE gtest_main)
+target_link_libraries(test_aoti_abi_check PRIVATE gtest_main sleef)
 target_include_directories(test_aoti_abi_check PRIVATE ${ATen_CPU_INCLUDE})
+if(NOT USE_SYSTEM_SLEEF)
+  target_include_directories(test_aoti_abi_check PRIVATE ${CMAKE_BINARY_DIR}/include)
+endif()
+
+# Disable unused-variable warnings for variables that are only used to test compilation
+target_compile_options_if_supported(test_aoti_abi_check -Wno-unused-variable)
+target_compile_options_if_supported(test_aoti_abi_check -Wno-unused-but-set-variable)
 
 foreach(test_src ${AOTI_ABI_CHECK_VEC_TEST_SRCS})
   foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
@@ -41,12 +53,17 @@ foreach(test_src ${AOTI_ABI_CHECK_VEC_TEST_SRCS})
     separate_arguments(FLAGS UNIX_COMMAND "${FLAGS}")
     add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}")
 
-    target_link_libraries(${test_name}_${CPU_CAPABILITY} PRIVATE gtest_main)
+    target_link_libraries(${test_name}_${CPU_CAPABILITY} PRIVATE gtest_main sleef)
     target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE ${ATen_CPU_INCLUDE})
+    if(NOT USE_SYSTEM_SLEEF)
+      target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE ${CMAKE_BINARY_DIR}/include)
+    endif()
 
     # Define CPU_CAPABILITY and CPU_CAPABILITY_XXX macros for conditional compilation
     target_compile_definitions(${test_name}_${CPU_CAPABILITY} PRIVATE CPU_CAPABILITY=${CPU_CAPABILITY} CPU_CAPABILITY_${CPU_CAPABILITY})
     target_compile_options(${test_name}_${CPU_CAPABILITY} PRIVATE ${FLAGS})
+    target_compile_options_if_supported(${test_name}_${CPU_CAPABILITY} -Wno-unused-variable)
+    target_compile_options_if_supported(${test_name}_${CPU_CAPABILITY} -Wno-unused-but-set-variable)
   endforeach()
 endforeach()
 
