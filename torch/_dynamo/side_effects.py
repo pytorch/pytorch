@@ -258,6 +258,7 @@ class SideEffects:
                 "Dynamo needs to fully exhaust the generator, which may cause "
                 "unintended variable modifications."
             )
+        assert item.mutation_type is not None
         if not is_side_effect_safe(item.mutation_type):
             # TODO plumb HOP information here
             unimplemented_v2(
@@ -373,7 +374,7 @@ class SideEffects:
 
         if self.is_attribute_mutation(item):
             return item in self.store_attr_mutations
-
+        assert item.mutation_type is not None
         return item.mutation_type.is_modified  # type: ignore[attr-defined]
 
     def _track_obj(
@@ -625,6 +626,12 @@ class SideEffects:
         cur_tx: Optional[InstructionTranslatorBase] = tx
         while cur_tx is not None:
             init_live_vars.extend([cur_tx.stack, cur_tx.symbolic_locals])
+            if cur_tx.parent is not None:
+                # for non-root tx'es, also keep the cells/freevars alive so they get codegen'd properly
+                # TODO see if we could prune dead cells - cell pruning information needs to be forwarded
+                # to the resume function creation as well.
+                assert cur_tx.post_prune_cell_and_freevars is not None
+                init_live_vars.append(cur_tx.post_prune_cell_and_freevars)
             cur_tx = cur_tx.parent
         VariableTracker.visit(
             visit,

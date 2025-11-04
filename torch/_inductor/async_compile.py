@@ -563,8 +563,6 @@ class AsyncCompile:
 
         def task():
             if aot_compile:
-                # We rely on JITInductor to compile the CUDA code,
-                # so that we can load it into AOTInductor.
                 output_path, *_ = XPUCodeCache.compile(source_code, "o")
                 XPUCodeCache.aot_kernels_o.append(output_path)
             return XPUCodeCache.load(source_code, dst_file_ext)[0]
