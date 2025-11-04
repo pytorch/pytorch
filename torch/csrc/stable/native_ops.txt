@@ -1,0 +1,10 @@
+# List of ATen native ops used in torch/csrc/stable/ops.h
+# Each line should contain one op name in the format: aten::op_name or aten::op_name.overload
+# This file is used by the NATIVE_OPS_LIST and NATIVE_FUNCTION_SCHEMA linters to ensure
+# that all ops are documented and that schema changes have corresponding adapters.
+
+aten::clone
+aten::copy_
+aten::empty_like
+aten::transpose.int
+aten::zero_
