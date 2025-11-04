@@ -81,7 +81,9 @@ try:
         zip_and_upload_artifacts,
     )
 except ImportError:
-    # upload_artifacts.py may not be available in some environments
+    # some imports in those files might fail, e.g., boto3 not installed. These
+    # functions are only needed under specific circumstances (CI) so we can
+    # define dummy functions here.
     def parse_xml_and_upload_json():
         pass
 
