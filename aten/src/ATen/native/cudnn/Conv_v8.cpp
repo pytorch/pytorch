@@ -565,10 +565,15 @@ auto get_generator_sources(
     const cudnnBackendDescriptorType_t& desc,
     const Tensor& x,
     const bool deterministic,
-    const bool allow_tf32,
+    bool allow_tf32,
     const cudnnBackendHeurMode_t heur_mode,
     const bool heuristic,
     const bool fallback) {
+  const long cudnn_version = at::detail::getCUDAHooks().versionCuDNN();
+  // TODO(eqy): reenable when this is fixed
+  if (cudnn_version >= 91000 && cudnn_version <= 91500 && x.dim() == 5) {
+    allow_tf32 = false;
+  }
   // Method for engine config generator based on heuristics
   const auto heurgen_method =
       [/*&desc,*/ &x, deterministic, allow_tf32, heur_mode](
