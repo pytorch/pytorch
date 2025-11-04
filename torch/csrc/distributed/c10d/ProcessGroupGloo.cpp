@@ -1345,8 +1345,7 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
     // Use single flat output tensor.
     // The first dimension corresponds to the index into outputs[N],
     // so copying into the actual output later is easy.
-    at::Tensor flatOutputTensor =
-        newLikeFlat(outputs[0], /*preserve_strides*/ false);
+    at::Tensor flatOutputTensor = newLikeFlat(outputs[0]);
     GENERATE_ALL_TYPES(scalarType, setOutput, opts, flatOutputTensor);
     gloo::allgather(opts);
 
@@ -1363,7 +1362,7 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
   }
 
   const std::vector<at::Tensor> getOutputTensors() override {
-    return {newLikeFlat(outputs[0], /*preserve_strides*/ false)};
+    return {newLikeFlat(outputs[0])};
   }
 
   void run() override {
@@ -1659,7 +1658,7 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
   }
 
   const std::vector<at::Tensor> getOutputTensors() override {
-    return {newLikeFlat(output_lists[0], /*preserve_strides*/ false)};
+    return {newLikeFlat(output_lists[0])};
   }
 
   void run() override {
@@ -1783,7 +1782,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
     // This is later scattered to the separate output tensors.
     at::Tensor flatOutputTensor;
     if (context_->rank == root) {
-      flatOutputTensor = newLikeFlat(outputs[0], /*preserve_strides*/ false);
+      flatOutputTensor = newLikeFlat(outputs[0]);
       GENERATE_ALL_TYPES(scalarType, setOutput, opts, flatOutputTensor);
     }
 
@@ -1806,8 +1805,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
 
   const std::vector<at::Tensor> getOutputTensors() override {
     return outputs.empty() ? std::vector<at::Tensor>{}
-                           : std::vector<at::Tensor>{newLikeFlat(
-                                 outputs[0], /*preserve_strides*/ false)};
+                           : std::vector<at::Tensor>{newLikeFlat(outputs[0])};
   }
 
   void run() override {
@@ -2023,8 +2021,7 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
 
   const std::vector<at::Tensor> getInputTensors() override {
     return inputs.empty() ? std::vector<at::Tensor>{}
-                          : std::vector<at::Tensor>{newLikeFlat(
-                                inputs[0], /*preserve_strides*/ false)};
+                          : std::vector<at::Tensor>{newLikeFlat(inputs[0])};
   }
 
   const std::vector<at::Tensor> getOutputTensors() override {
