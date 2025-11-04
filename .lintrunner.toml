@@ -1752,3 +1752,15 @@ command = [
   "python3",
   "tools/linter/adapters/gb_registry_linter.py",
 ]
+
+[[linter]]
+code = 'STABLE_SHIM_VERSION'
+include_patterns = [
+    'torch/csrc/stable/c/shim.h',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/stable_shim_version_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
