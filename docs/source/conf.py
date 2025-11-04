@@ -243,6 +243,58 @@ autosummary_filename_map = {
 }
 
 coverage_ignore_functions = [
+    # torch
+    "typename",
+    # torch.cuda._sanitizer
+    "zip_arguments",
+    "zip_by_key",
+    # torch.distributed.autograd
+    "is_available",
+    # torch.distributed.checkpoint.state_dict
+    "gc_context",
+    # torch.distributed.elastic.events
+    "record_rdzv_event",
+    # torch.distributed.elastic.metrics
+    "initialize_metrics",
+    # torch.distributed.elastic.rendezvous.registry
+    "get_rendezvous_handler",
+    # torch.distributed.launch
+    "launch",
+    "main",
+    "parse_args",
+    # torch.distributed.rpc
+    "is_available",
+    # torch.distributed.run
+    "config_from_args",
+    "determine_local_world_size",
+    "get_args_parser",
+    "get_rdzv_endpoint",
+    "get_use_env",
+    "main",
+    "parse_args",
+    "parse_min_max_nnodes",
+    "run",
+    "run_script_path",
+    # torch.distributions.constraints
+    "is_dependent",
+    # torch.hub
+    "import_module",
+    # torch.jit
+    "export_opnames",
+    # torch.jit.unsupported_tensor_ops
+    "execWrapper",
+    # torch.onnx
+    "unregister_custom_op_symbolic",
+    # torch.ao.quantization
+    "default_eval_fn",
+    # torch.backends
+    "disable_global_flags",
+    "flags_frozen",
+    # torch.distributed.algorithms.ddp_comm_hooks
+    "register_ddp_comm_hook",
+    # torch.nn.parallel
+    "DistributedDataParallelCPU",
+    # torch.utils
     "set_module",
     "burn_in_info",
     "get_info_and_burn_skeleton",

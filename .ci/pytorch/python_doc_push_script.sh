@@ -105,10 +105,23 @@ if [ "$is_main_doc" = true ]; then
     echo coverage output not found
     exit 1
   elif [ "$undocumented" -gt 0 ]; then
-    echo "undocumented objects found:"
-    cat build/coverage/python.txt
+    echo ""
+    echo "====================="
+    echo "UNDOCUMENTED OBJECTS:"
+    echo "====================="
+    echo ""
+    # Find the line number of the TOTAL row and print only what comes after it
+    total_line=$(grep -n "| TOTAL" build/coverage/python.txt | cut -d: -f1)
+    if [ -n "$total_line" ]; then
+      # Print only the detailed list (skip the statistics table)
+      tail -n +$((total_line + 2)) build/coverage/python.txt
+    else
+      # Fallback to showing entire file if TOTAL line not found
+      cat build/coverage/python.txt
+    fi
+    echo ""
     echo "Make sure you've updated relevant .rsts in docs/source!"
-    echo "You can reproduce locally by running 'cd docs && make coverage && cat build/coverage/python.txt'"
+    echo "You can reproduce locally by running 'cd docs && make coverage && tail -n +\$((grep -n \"| TOTAL\" build/coverage/python.txt | cut -d: -f1) + 2)) build/coverage/python.txt'"
     exit 1
   fi
 else
