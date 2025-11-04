@@ -1937,10 +1937,11 @@ def use_blackwell_cutedsl_grouped_mm(
     """
     Returns True if we can use the blackwell kernel for grouped mm.
     Required conditions:
-        1. CuTeDSL is available
-        2. We are on a blackwell arch
-        3. The dtype is bf16
-        4. Max autotune or max autotune gemm is enabled
+        1. CuTeDSL backend is enabled
+        2. CuTeDSL is available
+        3. We are on a blackwell arch
+        4. The dtype is bf16
+        5. Max autotune or max autotune gemm is enabled
         6. A, B, and the output are 16B aligned
         7. We are not using dynamic shapes
         8. A is 2d
@@ -1951,9 +1952,15 @@ def use_blackwell_cutedsl_grouped_mm(
     if not ensure_cute_available():
         return False
 
+    if not _use_autotune_backend("CUTEDSL"):
+        return False
+
     from .codegen.cuda.cuda_env import is_datacenter_blackwell_arch
 
-    if not is_gpu(layout.device.type) and is_datacenter_blackwell_arch():
+    if not is_gpu(layout.device.type):
+        return False
+
+    if not is_datacenter_blackwell_arch():
         return False
 
     layout_dtypes = [torch.bfloat16]
