@@ -958,11 +958,11 @@ class TestFlexAttention(InductorTestCase):
         q1_gold, k1_gold, v1_gold = query_key_value_clones(q1, k1, v1, torch.float64)
         ref_out1 = sdpa_partial1(q1_ref, k1_ref, v1_ref)
         golden_out1 = sdpa_partial1(q1_gold, k1_gold, v1_gold)
+        
         if requires_grad:
             backward_grad1 = torch.randn((B, H, S, D), dtype=dtype, device=device)
             golden_out1.backward(backward_grad1.to(torch.float64))
             ref_out1.backward(backward_grad1)
-            print("Completed backward for first batch")
 
         # Second batch with modified dimensions (B * 2, H, S / 2, D)
         B = int(B * 2)
