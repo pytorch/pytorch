@@ -53,6 +53,7 @@ __all__ = [
     "DumpableContext",
     "ToDumpableContextFn",
     "FromDumpableContextFn",
+    "PyTreeSpec",
     "TreeSpec",
     "LeafSpec",
     "keystr",

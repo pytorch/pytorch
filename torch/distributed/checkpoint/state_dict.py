@@ -578,7 +578,7 @@ def _load_model_state_dict(
     assign = False
     if info.broadcast_from_rank0 or info.full_state_dict:
         devices = set()
-        for key, value in local_state_dict.items():
+        for value in local_state_dict.values():
             if torch.is_tensor(value) and value.dim() > 0:
                 devices.add(value.device)
         # In lora state_dict, there could be multiple devices, with meta device inside.

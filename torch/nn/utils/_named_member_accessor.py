@@ -250,7 +250,7 @@ class NamedMemberAccessor:
             values = list(values)
         assert len(names) == len(values), "names and values must have the same length"
 
-        for name, value in zip(names, values):
+        for name, value in zip(names, values, strict=True):
             self.set_tensor(name, value)
 
     def set_tensors_dict(self, named_tensors: dict[str, torch.Tensor]) -> None:
@@ -298,7 +298,7 @@ class NamedMemberAccessor:
 
         return [
             self.swap_tensor(name, value, allow_missing=allow_missing)
-            for name, value in zip(names, values)
+            for name, value in zip(names, values, strict=True)
         ]
 
     def swap_tensors_dict(
