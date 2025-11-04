@@ -405,6 +405,7 @@ isolate_fails_code_str = None
                 # pyrefly: ignore [missing-attribute]
                 kernel._fn_name
                 if isinstance(kernel, JITFunction)
+                # pyrefly: ignore  # missing-attribute
                 else kernel.fn._fn_name
             )
             fn_name = fn_name.split(".")[-1]
