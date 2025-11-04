@@ -503,6 +503,21 @@ std::vector<Tensor> foreach_tensor_norm_slow(
   return result;
 }
 
+std::vector<Tensor> foreach_tensor_norm_dim_slow(
+    TensorList tensors,
+    const Scalar& ord,
+    at::OptionalIntArrayRef dim,
+    bool keepdim,
+    std::optional<ScalarType> dtype) {
+  check_foreach_api_restrictions(tensors);
+  std::vector<Tensor> result;
+  result.reserve(tensors.size());
+  for (const auto& t : tensors) {
+    result.emplace_back(at::linalg_vector_norm(t, ord, dim, keepdim, dtype));
+  }
+  return result;
+}
+
 std::vector<Tensor> foreach_tensor_powsum_slow(
     TensorList tensors,
     const Scalar& ord,

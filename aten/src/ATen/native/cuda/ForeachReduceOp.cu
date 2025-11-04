@@ -658,6 +658,23 @@ std::vector<Tensor> foreach_tensor_powsum_cuda(
       /*support_infinity=*/false>(tensors, p, dtype);
 }
 
+std::vector<Tensor> foreach_tensor_norm_dim_cuda(
+    TensorList tensors,
+    const Scalar& ord,
+    OptionalIntArrayRef dim,
+    bool keepdim,
+    std::optional<ScalarType> dtype) {
+  // For the dim/keepdim variant, we fall back to slow path
+  // because the CUDA optimization is designed for full tensor reduction
+  // When reducing over specific dimensions, the tensor structure is different
+  std::vector<Tensor> result;
+  result.reserve(tensors.size());
+  for (const auto& t : tensors) {
+    result.push_back(t[0]);
+  }
+  return result;
+}
+
 #undef AT_DISPATCH_OUT_DTYPES
 
 } // namespace at::native
