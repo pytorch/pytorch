@@ -772,7 +772,7 @@ def list_gpu_processes(device: "Device" = None) -> str:
             import pynvml  # type: ignore[import]
         except ModuleNotFoundError:
             return "pynvml module not found, please install nvidia-ml-py"
-        # pyrefly: ignore  # import-error
+        # pyrefly: ignore [import-error]
         from pynvml import NVMLError_DriverNotLoaded
 
         try:
@@ -855,7 +855,7 @@ def _record_memory_history_legacy(
     _C._cuda_record_memory_history_legacy(  # type: ignore[call-arg]
         enabled,
         record_context,
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         trace_alloc_max_entries,
         trace_alloc_record_context,
         record_context_cpp,
@@ -1076,7 +1076,7 @@ def _set_memory_metadata(metadata: str):
         metadata (str): Custom metadata string to attach to allocations.
                        Pass an empty string to clear the metadata.
     """
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     torch._C._cuda_setMemoryMetadata(metadata)
 
 
@@ -1087,7 +1087,7 @@ def _get_memory_metadata() -> str:
     Returns:
         str: The current metadata string, or empty string if no metadata is set.
     """
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     return torch._C._cuda_getMemoryMetadata()
 
 
@@ -1110,7 +1110,7 @@ def _save_memory_usage(filename="output.svg", snapshot=None):
     category=FutureWarning,
 )
 def _set_allocator_settings(env: str):
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     return torch._C._accelerator_setAllocatorSettings(env)
 
 

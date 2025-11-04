@@ -41,7 +41,7 @@ void standardizeVectorForUnion(std::vector<TypePtr>* to_flatten);
 inline bool is_contiguous_strides(
     const IntArrayRef sizes,
     const IntArrayRef strides) {
-  int n_dim = static_cast<int>(sizes.size());
+  size_t n_dim = sizes.size();
   if (n_dim == 0) {
     return true;
   }
@@ -50,7 +50,7 @@ inline bool is_contiguous_strides(
     return false;
   }
 
-  for (int i = n_dim - 2; i >= 0; i--) {
+  for (int i = static_cast<int>(n_dim) - 2; i >= 0; i--) {
     if (strides[i] != strides[i + 1] * sizes[i + 1]) {
       return false;
     }
@@ -922,6 +922,7 @@ struct TORCH_API DictType : public SharedType {
     if (auto dyn = key->castRaw<DynamicType>()) {
       kind = dyn->dynamicKind();
     }
+    C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
     switch (kind) {
       case TypeKind::AnyType:
       case TypeKind::IntType:
@@ -938,6 +939,7 @@ struct TORCH_API DictType : public SharedType {
             key->str(),
             "', only int, float, complex, Tensor, device and string keys are supported");
     }
+    C10_DIAGNOSTIC_POP()
   }
 
   // aligned with the format in FunctionSchema
@@ -2371,7 +2373,7 @@ private:
 };
 
 template<>
-inline typename detail::CastReturnType<NamedType>::type Type::cast<NamedType>() {
+inline detail::CastReturnType<NamedType>::type Type::cast<NamedType>() {
   if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
       kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
     return std::static_pointer_cast<NamedType>(static_cast<NamedType *>(this)->shared_from_this());
@@ -2380,7 +2382,7 @@ inline typename detail::CastReturnType<NamedType>::type Type::cast<NamedType>() 
 }
 
 template<>
-inline typename detail::CastConstReturnType<NamedType>::type Type::cast<NamedType>() const {
+inline detail::CastConstReturnType<NamedType>::type Type::cast<NamedType>() const {
   if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
       kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
     return std::static_pointer_cast<const NamedType>(static_cast<const NamedType *>(this)->shared_from_this());

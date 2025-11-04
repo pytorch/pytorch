@@ -2064,6 +2064,23 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
 
         self.assertEqual(f(), 1)
 
+    def test_error_on_graph_break_nonempty_checkpoint(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            x = x + 1
+            x = x + 1
+            x = x + 1
+            with torch._dynamo.error_on_graph_break(True):
+                torch._dynamo.graph_break()
+            return x + 1
+
+        with self.assertRaises(Unsupported):
+            fn(torch.ones(3))
+
+        self.assertEqual(cnts.frame_count, 0)
+
     def test_nested_compile_fullgraph(self):
         # Test that fullgraph=True cannot be toggled back by fullgraph=False
         inp = torch.ones(3)
