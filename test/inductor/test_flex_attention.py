@@ -77,7 +77,6 @@ torch.set_float32_matmul_precision("high")
 
 index = torch.ops.aten.index
 Tensor = torch.Tensor
-
 T = TypeVar("T")
 M = TypeVar("M", bound=Callable)
 
@@ -367,14 +366,14 @@ test_score_mods = [
 ]
 
 test_score_mask_mod_map = {
-    # _identity: noop_mask,
-    # _times_two: noop_mask,
-    # _squared: noop_mask,
+    _identity: noop_mask,
+    _times_two: noop_mask,
+    _squared: noop_mask,
     _causal: _causal_mask,
-    # _inverse_causal: _inverse_causal_mask,
-    # _rel_bias: noop_mask,
-    # _rel_causal: _causal_mask,
-    # _generate_alibi_bias(8): noop_mask,
+    _inverse_causal: _inverse_causal_mask,
+    _rel_bias: noop_mask,
+    _rel_causal: _causal_mask,
+    _generate_alibi_bias(8): noop_mask,
 }
 
 captured_buffers_map = {
