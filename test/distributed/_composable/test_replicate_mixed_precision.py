@@ -3,7 +3,7 @@
 import copy
 import dataclasses
 import functools
-from typing import Optional, Union
+from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -14,7 +14,6 @@ from torch.distributed.fsdp import MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
 )
-from torch.distributed.tensor import Shard
 from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     SaveForwardInputsModel,
@@ -46,35 +45,20 @@ class TestReplicateMixedPrecisionTraining(FSDPTest):
 
     def _init_models_and_optims(
         self,
-        reshard_after_forward: Union[bool, int],
         param_dtype: Optional[torch.dtype],
         reduce_dtype: Optional[torch.dtype],
-        use_shard_placement_fn,
     ):
         torch.manual_seed(42)
         model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])
         ref_model = copy.deepcopy(model).to(device_type)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
-        def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
-            largest_dim = -1
-            largest_dim_size = -1
-            for dim, dim_size in enumerate(param.shape):
-                if dim_size > largest_dim_size:
-                    largest_dim = dim
-                    largest_dim_size = dim_size
-            assert largest_dim >= 0, f"{param.shape}"
-            return Shard(largest_dim)
-
         mp_policy = MixedPrecisionPolicy(
             param_dtype=param_dtype, reduce_dtype=reduce_dtype
         )
-        shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
         replicate_fn = functools.partial(
             replicate,
-            reshard_after_forward=reshard_after_forward,
             mp_policy=mp_policy,
-            shard_placement_fn=shard_placement_fn,
         )
         for mlp in model:
             replicate_fn(mlp)
@@ -82,27 +66,13 @@ class TestReplicateMixedPrecisionTraining(FSDPTest):
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
         return ref_model, ref_optim, model, optim
 
-    def _get_use_shard_placement_fn_vals_for_bf16_reduce(self):
-        use_shard_placement_fn_vals = [False]
-        if self.world_size == 2:
-            # For world size >2, gradient elements get reduced in different
-            # orders for the baseline vs. dim-1 sharding, leading to numeric
-            # differences for bf16 reduction, so only test world size 2.
-            use_shard_placement_fn_vals.append(True)
-        return use_shard_placement_fn_vals
-
     @skipIfRocmVersionLessThan((7, 0))
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_compute_dtype(self):
-        use_shard_placement_fn_vals = (
-            self._get_use_shard_placement_fn_vals_for_bf16_reduce()
-        )
         self.run_subtests(
             {
                 "param_dtype": [torch.bfloat16, torch.float16],
-                "reshard_after_forward": [False, True],
-                "use_shard_placement_fn": use_shard_placement_fn_vals,
             },
             self._test_compute_dtype,
         )
@@ -110,14 +80,10 @@ class TestReplicateMixedPrecisionTraining(FSDPTest):
     def _test_compute_dtype(
         self,
         param_dtype: torch.dtype,
-        reshard_after_forward: Union[bool, int],
-        use_shard_placement_fn: bool,
     ):
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
-            reshard_after_forward,
             param_dtype=param_dtype,
             reduce_dtype=None,
-            use_shard_placement_fn=use_shard_placement_fn,
         )
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
         orig_reduce_scatter = dist.reduce_scatter_tensor
@@ -175,39 +141,14 @@ class TestReplicateMixedPrecisionTraining(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_reduce_dtype(self):
-        self.run_subtests(
-            {
-                "reshard_after_forward": [False, True],
-                "use_shard_placement_fn": [False, True],
-            },
-            self._test_reduce_dtype_fp32_reduce,
-        )
-        use_shard_placement_fn_vals = (
-            self._get_use_shard_placement_fn_vals_for_bf16_reduce()
-        )
-        self.run_subtests(
-            {
-                "reshard_after_forward": [False, True],
-                "use_shard_placement_fn": use_shard_placement_fn_vals,
-            },
-            self._test_reduce_dtype_bf16_reduce,
-        )
+        self._test_reduce_dtype_fp32_reduce()
+        self._test_reduce_dtype_bf16_reduce()
 
-    def _test_reduce_dtype_fp32_reduce(
-        self, reshard_after_forward: Union[bool, int], use_shard_placement_fn: bool
-    ):
-        if (
-            self.world_size > 2
-            and isinstance(reshard_after_forward, int)
-            and use_shard_placement_fn
-        ):
-            return
+    def _test_reduce_dtype_fp32_reduce(self):
         param_dtype, reduce_dtype = torch.bfloat16, torch.float32
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
-            reshard_after_forward,
             param_dtype=param_dtype,
             reduce_dtype=reduce_dtype,
-            use_shard_placement_fn=use_shard_placement_fn,
         )
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
         orig_reduce_scatter = dist.reduce_scatter_tensor
@@ -249,14 +190,12 @@ class TestReplicateMixedPrecisionTraining(FSDPTest):
             check_sharded_parity(self, ref_model, model)
 
     def _test_reduce_dtype_bf16_reduce(
-        self, reshard_after_forward: Union[bool, int], use_shard_placement_fn: bool
+        self,
     ):
         param_dtype, reduce_dtype = torch.float32, torch.bfloat16
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
-            reshard_after_forward,
             param_dtype=param_dtype,
             reduce_dtype=reduce_dtype,
-            use_shard_placement_fn=use_shard_placement_fn,
         )
         group = dist.distributed_c10d._get_default_group()
         orig_reduce_scatter = dist.reduce_scatter_tensor
@@ -321,12 +260,8 @@ class TestReplicateMixedPrecisionTraining(FSDPTest):
         ref_model_compute = copy.deepcopy(ref_model).to(param_dtype)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         for mlp in model:
-            replicate(
-                mlp, reshard_after_forward=reshard_after_forward, mp_policy=mp_policy
-            )
-        replicate(
-            model, reshard_after_forward=reshard_after_forward, mp_policy=mp_policy
-        )
+            replicate(mlp, mp_policy=mp_policy)
+        replicate(model, mp_policy=mp_policy)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         orig_reduce_scatter = dist.reduce_scatter_tensor
 
