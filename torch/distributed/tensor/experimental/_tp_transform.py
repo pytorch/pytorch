@@ -203,7 +203,7 @@ def _mark_sharding(
                 )
             node.meta["sharding"] = placement_strategies[node]
         elif node.op == "call_function":
-            if node.target == operator.getitem:
+            if node.target is operator.getitem:
                 input_nodes = node.all_input_nodes
                 assert len(input_nodes) == 1, (
                     f"non-compute op only support one input now, found node: {node} with length of inputs: {len(node.args)}"

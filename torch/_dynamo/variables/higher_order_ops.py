@@ -2595,7 +2595,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         from torch.utils.checkpoint import noop_context_fn
 
         context_fn = None
-        if "context_fn" in kwargs and kwargs["context_fn"] != noop_context_fn:
+        if "context_fn" in kwargs and kwargs["context_fn"] is not noop_context_fn:
             ctx = kwargs.pop("context_fn")
             if isinstance(ctx, torch._dynamo.variables.UserFunctionVariable):
                 context_fn = ctx.fn
@@ -3560,7 +3560,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         if type(value) is not type(_local_map_wrapped):
             return False
 
-        return value == _local_map_wrapped and cls._enabled
+        return value is _local_map_wrapped and cls._enabled
 
     @staticmethod
     def build(**options):

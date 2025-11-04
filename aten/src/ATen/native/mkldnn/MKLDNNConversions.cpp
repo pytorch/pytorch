@@ -530,7 +530,7 @@ static Tensor get_mkldnn_serialized_md(const Tensor& self) {
 #else
       TORCH_CHECK(false, "Unexpected IDeep version to do weight serialization.");
 #endif
-  Tensor serialized_md = at::from_blob((void*)serialized_wei_desc.data(), {(int64_t)serialized_wei_desc.size()}, at::TensorOptions(at::kByte));
+  Tensor serialized_md = at::from_blob((void*)serialized_wei_desc.data(), {static_cast<int64_t>(serialized_wei_desc.size())}, at::TensorOptions(at::kByte));
   auto res = at::empty_like(serialized_md);
   // serialized_md shares the buffer with serialized_wei_desc,
   // which will be released outside of this function thus invalidating the buffer of serialized_md.
