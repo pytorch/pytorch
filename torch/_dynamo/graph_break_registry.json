@@ -1736,6 +1736,14 @@
   "GB0175": [
     {
       "Gb_type": "builtin isinstance() cannot determine type of argument",
+      "Context": "isinstance({arg}, {isinstance_type_var})",
+      "Explanation": "Dynamo doesn't have a rule to determine the type of argument {arg}",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    },
+    {
+      "Gb_type": "builtin isinstance() cannot determine type of argument",
       "Context": "isinstance({arg}, {isinstance_type})",
       "Explanation": "Dynamo doesn't have a rule to determine the type of argument {arg}",
       "Hints": [
