@@ -335,7 +335,7 @@ class BatchSampler(Sampler[list[int]]):
         if self.drop_last:
             # Create multiple references to the same iterator
             args = [sampler_iter] * self.batch_size
-            for batch_droplast in zip(*args):
+            for batch_droplast in zip(*args, strict=False):
                 yield [*batch_droplast]
         else:
             batch = [*itertools.islice(sampler_iter, self.batch_size)]
