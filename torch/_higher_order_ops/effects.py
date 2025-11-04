@@ -7,7 +7,6 @@ from torch._C import DispatchKey
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.custom_ops import CustomOpDef
 from torch._library.effects import EffectType
-from torch._library.fake_class_registry import FakeScriptObject
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -64,6 +63,7 @@ def _get_effect(op: _op_identifier) -> Optional[_EffectType]:
 
 
 _register_effectful_op("aten::_print", _EffectType.ORDERED)
+_register_effectful_op("profiler::_record_function_exit._RecordFunction", None)
 _register_effectful_op(call_torchbind, _EffectType.ORDERED)
 
 
@@ -124,29 +124,8 @@ def has_effects(op, args, kwargs) -> bool:
     return (
         isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
         and not has_aliasing(op)
-        and get_effect_key(op, args, kwargs) is not None
+        and _get_effect(op) is not None
     )
-
-
-def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
-    if effect := _get_effect(op):
-        return effect
-
-    for arg in args:
-        if isinstance(arg, (torch.ScriptObject, FakeScriptObject)):
-            # Add it to the table so that next time we see the same op we don't
-            # have to parse through the args again
-            _register_effectful_op(op, _EffectType.ORDERED)
-            return _EffectType.ORDERED
-
-    for arg in kwargs.values():
-        if isinstance(arg, (torch.ScriptObject, FakeScriptObject)):
-            # Add it to the table so that next time we see the same op we don't
-            # have to parse through the args again
-            _register_effectful_op(op, _EffectType.ORDERED)
-            return _EffectType.ORDERED
-
-    return None
 
 
 def new_token_tensor() -> torch.Tensor:
@@ -253,7 +232,7 @@ def handle_effects(
     # Get a token. We can't do `tokens.get(op, torch.tensor([]))` because
     # this will create an empty tensor during proxy mode tracing if the token
     # doesn't exist. But the tokens should always exist during proxy mode tracing.
-    key = get_effect_key(op, args, kwargs)
+    key = _get_effect(op)
     assert key is not None
     if key not in tokens:
         assert allow_token_discovery, (
