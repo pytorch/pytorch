@@ -16,7 +16,7 @@ from torch.utils._pytree import tree_map, tree_map_only
 
 
 if TYPE_CHECKING:
-    from torch._inductor.codegen.cuda_combined_scheduling import _IntLike
+    from torch._inductor.codegen.combined_scheduling import _IntLike
 else:
     _IntLike = Union[int, sympy.Expr]
 
