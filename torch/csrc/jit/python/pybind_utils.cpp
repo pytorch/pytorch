@@ -617,7 +617,7 @@ py::object toPyObject(IValue ivalue) {
           return (tensor._is_zerotensor())
               ? py::cast(std::complex<double>(0.0, 0.0))
               : py::cast(static_cast<std::complex<double>>(
-              *tensor.const_data_ptr<c10::complex<double>>()));
+                    *tensor.const_data_ptr<c10::complex<double>>()));
         default:
           TORCH_CHECK(
               false,
