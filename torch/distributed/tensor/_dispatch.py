@@ -514,7 +514,7 @@ class OpDispatcher:
                 schema_info=runtime_schema_info,
             )
             if create_schema
-            else None,
+            else None, # type: ignore[arg-type]
             args_schema,
             tuple(local_args),
             local_kwargs,
