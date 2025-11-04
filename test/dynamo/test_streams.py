@@ -376,6 +376,78 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
+    def test_stream_backward(self) -> None:
+        def fn(x, y):
+            s2 = torch.Stream()
+            s1 = torch.Stream()
+            s0 = torch.Stream()
+            with s1:
+                with s2:
+                    x.add_(y)
+            with s0:
+                z1 = torch.add(y, y)
+                z0 = torch.add(z1, y)
+                with s2:
+                    y = 2 + z1
+
+            return z0, y
+
+        inp = (
+            torch.ones(2, 2, requires_grad=True) + 1,
+            torch.ones(2, 2, requires_grad=True),
+        )
+        expected = fn(*inp)
+        (
+            actual,
+            _,
+            fw_graphs,
+            bw_graphs,
+        ) = extract_graph(fn, *inp)
+        self.assertEqual(len(fw_graphs), 1)
+        self.assertEqual(expected, actual)
+        self.assertExpectedInline(
+            print_graph(fw_graphs[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[2, 2]", primals_2: "f32[2, 2]"):
+        # No stacktrace found for following nodes
+        clone: "f32[2, 2]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+
+        # Annotation: {'stream': 0}
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(clone, primals_2);  clone = None
+
+        # Annotation: {'stream': 2}
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(primals_2, primals_2)
+
+        # Annotation: {'stream': 2}
+        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, primals_2);  primals_2 = None
+
+        # Annotation: {'stream': 0}
+        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, 2);  add_1 = None
+        return (add, add_2, add_3)
+""",
+        )
+
+        breakpoint()
+        actual[0].sum().backward()
+        self.assertExpectedInline(
+            print_graph(bw_graphs[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, tangents_1: "f32[2, 2]", tangents_2: "f32[2, 2]", tangents_3: "f32[2, 2]"):
+        #
+        add_4: "f32[2, 2]" = torch.ops.aten.add.Tensor(tangents_3, tangents_2);  tangents_3 = None
+
+        #
+        add_5: "f32[2, 2]" = torch.ops.aten.add.Tensor(tangents_2, add_4);  tangents_2 = None
+        add_6: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_5, add_4);  add_5 = add_4 = None
+
+        #
+        add_7: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_6, tangents_1);  add_6 = None
+        return (tangents_1, add_7)
+""",
+        )
+
     @requires_cuda
     def test_run_opcheck(self):
         from torch._dynamo.variables.streams import fork_stream, join_stream
