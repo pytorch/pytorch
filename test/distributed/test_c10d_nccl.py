@@ -2001,45 +2001,21 @@ class DistributedDataParallelTest(
     @skip_if_lt_x_gpu(2)
     def test_ddp_complex_params_and_grads(self):
         # test ddp with complex parameters and gradients
-        class ComplexLinear(nn.Module):
-            def __init__(self, in_features, out_features):
-                super().__init__()
-                self.weight = nn.Parameter(
-                    torch.randn(out_features, in_features, dtype=torch.cfloat) * 0.1
-                )
-                self.bias = nn.Parameter(
-                    torch.randn(out_features, dtype=torch.cfloat) * 0.1
-                )
-
-            def forward(self, x):
-                return torch.matmul(x, self.weight.t()) + self.bias
-
-        class ComplexReLU(nn.Module):
-            def forward(self, x):
-                magnitude = torch.abs(x)
-                phase = torch.angle(x)
-                return F.relu(magnitude) * torch.exp(1j * phase)
-
-        class ComplexNet(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.fc1 = ComplexLinear(4, 8)
-                self.fc2 = ComplexLinear(8, 2)
-                self.act = ComplexReLU()
-
-            def forward(self, x):
-                x = self.act(self.fc1(x))
-                return self.fc2(x)
-
         process_group = self._get_process_group()
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         device = torch.device(f"cuda:{device_id}")
 
         torch.manual_seed(42 + self.rank)
-        model = ComplexNet().to(device)
+        model = nn.Sequential(
+            nn.Linear(4, 8, dtype=torch.cfloat),
+            nn.Linear(8, 2, dtype=torch.cfloat),
+        ).to(device)
 
         torch.manual_seed(42 + self.rank)
-        ref_model = ComplexNet().to(device)
+        ref_model = nn.Sequential(
+            nn.Linear(4, 8, dtype=torch.cfloat),
+            nn.Linear(8, 2, dtype=torch.cfloat),
+        ).to(device)
 
         # 0.001 forces tiny buckets, creating multiple buckets, stress-testing bucketing
         ddp_model = DistributedDataParallel(
@@ -2048,9 +2024,6 @@ class DistributedDataParallelTest(
             process_group=process_group,
             bucket_cap_mb=0.001,
         )
-
-        def complex_mse_loss(pred, target):
-            return torch.mean(torch.abs(pred - target) ** 2)
 
         torch.manual_seed(100)
         batch_size = 16
@@ -2063,11 +2036,10 @@ class DistributedDataParallelTest(
         optimizer_ddp = torch.optim.SGD(ddp_model.parameters(), lr=0.01)
         optimizer_ref = torch.optim.SGD(ref_model.parameters(), lr=0.01)
 
-        n_iterations = 5
-        for iteration in range(n_iterations):
+        for iteration in range(5):
             optimizer_ddp.zero_grad()
             output_ddp = ddp_model(x)
-            loss_ddp = complex_mse_loss(output_ddp, y)
+            loss_ddp = torch.mean(torch.abs(output_ddp - y) ** 2)
             loss_ddp.backward()
 
             optimizer_ref.zero_grad()
@@ -2076,7 +2048,7 @@ class DistributedDataParallelTest(
                     p_ref.copy_(p_ddp)
 
             output_ref = ref_model(x)
-            loss_ref = complex_mse_loss(output_ref, y)
+            loss_ref = torch.mean(torch.abs(output_ref - y) ** 2)
             loss_ref.backward()
 
             for param in ref_model.parameters():
@@ -2093,23 +2065,28 @@ class DistributedDataParallelTest(
                     p_ddp.grad,
                     f"DDP gradient is None at iteration {iteration}, param {name}",
                 )
+
                 self.assertIsNotNone(
                     p_ref.grad,
                     f"Reference gradient is None at iteration {iteration}, param {name}",
                 )
+
                 self.assertTrue(
                     p_ddp.grad.is_complex(),
                     f"DDP gradient lost complex dtype at iteration {iteration}, param {name}",
                 )
+
                 self.assertTrue(
                     p_ref.grad.is_complex(),
                     f"Reference gradient lost complex dtype at iteration {iteration}, param {name}",
                 )
+
                 self.assertFalse(
                     torch.allclose(p_ddp.grad.imag, torch.zeros_like(p_ddp.grad.imag)),
                     f"DDP imaginary gradient is all zeros at iteration {iteration}, param {name}! "
                     f"This indicates the complex gradient bug.",
                 )
+
                 self.assertTrue(
                     torch.allclose(
                         p_ddp.grad.real, p_ref.grad.real, rtol=1e-5, atol=1e-5
@@ -2118,6 +2095,7 @@ class DistributedDataParallelTest(
                     f"DDP real: {p_ddp.grad.real.mean():.6f}, "
                     f"Ref real: {p_ref.grad.real.mean():.6f}",
                 )
+
                 self.assertTrue(
                     torch.allclose(
                         p_ddp.grad.imag, p_ref.grad.imag, rtol=1e-5, atol=1e-5
@@ -2126,6 +2104,7 @@ class DistributedDataParallelTest(
                     f"DDP imag: {p_ddp.grad.imag.mean():.6f}, "
                     f"Ref imag: {p_ref.grad.imag.mean():.6f}",
                 )
+
             optimizer_ddp.step()
             optimizer_ref.step()
 
