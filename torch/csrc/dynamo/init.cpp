@@ -244,14 +244,10 @@ static int VariableTrackerMeta_traverse(
     PyObject* self,
     visitproc visit,
     void* arg) {
-  // Visit any PyObject* members this type contains
-  // Since you're a metaclass, you probably don't need this
   return PyType_Type.tp_traverse(self, visit, arg);
 }
 
 static int VariableTrackerMeta_clear(PyObject* self) {
-  // Clear any PyObject* members this type contains
-  // Since you're a metaclass, you probably don't need this
   return PyType_Type.tp_clear(self);
 }
 
@@ -273,8 +269,8 @@ static PyType_Slot VariableTrackerMetaSlots[] = {
     {Py_tp_methods, VariableTrackerMetaMethods},
     {Py_tp_dealloc, (void*)VariableTrackerMeta_dealloc},
     {Py_tp_init, (void*)VariableTrackerMeta_init_fn},
-    {Py_tp_traverse, (void*)VariableTrackerMeta_traverse}, // Add this
-    {Py_tp_clear, (void*)VariableTrackerMeta_clear}, // Add this
+    {Py_tp_traverse, (void*)VariableTrackerMeta_traverse},
+    {Py_tp_clear, (void*)VariableTrackerMeta_clear},
     {0, nullptr},
 };
 
