@@ -149,21 +149,6 @@ def get_tests(workflow_run_id: int, workflow_run_attempt: int) -> list[dict[str,
         return flattened
 
 
-def get_tests_for_circleci(
-    workflow_run_id: int, workflow_run_attempt: int
-) -> list[dict[str, Any]]:
-    # Parse the reports and transform them to JSON
-    test_cases = []
-    for xml_report in Path(".").glob("**/test/test-reports/**/*.xml"):
-        test_cases.extend(
-            parse_xml_report(
-                "testcase", xml_report, workflow_run_id, workflow_run_attempt
-            )
-        )
-
-    return test_cases
-
-
 def summarize_test_cases(test_cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Group test cases by classname, file, and job_id. We perform the aggregation
     manually instead of using the `test-suite` XML tag because xmlrunner does
