@@ -43,7 +43,10 @@ def move_cutlass_compiled_cache() -> None:
     if not try_import_cutlass.cache_info().currsize > 0:
         return
 
-    import cutlass_cppgen  # type: ignore[import-not-found]
+    try:
+        import cutlass_cppgen  # type: ignore[import-not-found]
+    except ImportError:
+        import cutlass as cutlass_cppgen  # type: ignore[import-not-found]
 
     # Check if the CACHE_FILE attribute exists in cutlass_cppgen and if the file exists
     if not hasattr(cutlass_cppgen, "CACHE_FILE") or not os.path.exists(
@@ -92,7 +95,10 @@ def try_import_cutlass() -> bool:
         return True
 
     try:
-        cutlass_version = Version(importlib.metadata.version("cutlass"))
+        try:
+            cutlass_version = Version(importlib.metadata.version("cutlass_cppgen"))
+        except (ModuleNotFoundError, importlib.metadata.PackageNotFoundError):
+            cutlass_version = Version(importlib.metadata.version("cutlass"))
         if cutlass_version < Version("3.7"):
             log.warning("CUTLASS version < 3.7 is not recommended.")
 
