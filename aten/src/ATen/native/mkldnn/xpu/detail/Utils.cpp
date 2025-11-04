@@ -157,7 +157,7 @@ bool onednn_strides_check(const Tensor& src) {
     return true;
 
   dnnl_dims_t blocks = {0};
-  int perm[DNNL_MAX_NDIMS] = {0};
+  std::array<int, DNNL_MAX_NDIMS> perm = {0};
   for (int d = 0; d < md_ndims; ++d) {
     // no strides check needed for empty tensor
     if ((*md_padded_dims)[d] == 0)
