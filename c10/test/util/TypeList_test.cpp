@@ -239,7 +239,7 @@ struct Class2 {
 
 struct mapper_call_func {
   template <class T>
-  decltype(auto) operator()(T) {
+  auto operator()(T) {
     return T::type::func();
   }
 };
@@ -254,7 +254,7 @@ TEST(TypeListTest, MapTypesToValues_members) {
 
 struct mapper_call_nonexistent_function {
   template <class T>
-  decltype(auto) operator()(T) {
+  auto operator()(T) {
     return T::type::this_doesnt_exist();
   }
 };
