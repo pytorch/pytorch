@@ -765,7 +765,7 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
       *out = at::toDLPackVersioned(tensor);
       return 0;
     } catch (const std::exception& e) {
-      SetError(error_ctx, "ManagedTensorAllocator", e.what());
+      SetError(error_ctx, "MemoryError", e.what());
       return -1;
     }
   }
