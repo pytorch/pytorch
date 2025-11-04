@@ -399,6 +399,3 @@ CLAUDE.local.md
 /debug_*.py
 CLAUDE_CONTEXT/
 /.claude/settings.local.json
-
-# Copilot generated instructions
-.github/copilot-instructions.md
