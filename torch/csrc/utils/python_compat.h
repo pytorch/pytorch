@@ -40,21 +40,21 @@ static inline int PyUnstable_TryIncRef(PyObject* obj) {
   local += 1;
   if (local == 0) {
     // immortal
-    return true;
+    return 1;
   }
   if (_Py_IsOwnedByCurrentThread(obj)) {
     _Py_atomic_store_uint32_relaxed(&obj->ob_ref_local, local);
 #ifdef Py_REF_DEBUG
     _Py_INCREF_IncRefTotal();
 #endif
-    return true;
+    return 1;
   }
   Py_ssize_t shared = _Py_atomic_load_ssize_relaxed(&obj->ob_ref_shared);
   for (;;) {
     // If the shared refcount is zero and the object is either merged
     // or may not have weak references, then we cannot incref it.
     if (shared == 0 || shared == _Py_REF_MERGED) {
-      return false;
+      return 0;
     }
 
     if (_Py_atomic_compare_exchange_ssize(
@@ -64,15 +64,15 @@ static inline int PyUnstable_TryIncRef(PyObject* obj) {
 #ifdef Py_REF_DEBUG
       _Py_INCREF_IncRefTotal();
 #endif
-      return true;
+      return 1;
     }
   }
 #else
   if (Py_REFCNT(obj) > 0) {
     Py_INCREF(obj);
-    return true;
+    return 1;
   }
-  return false;
+  return 0;
 #endif
 }
 
