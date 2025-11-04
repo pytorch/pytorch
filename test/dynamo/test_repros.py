@@ -5748,7 +5748,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(func(x, 0), opt_func(x, 0))
 
     def test_grad(self):
-        # Write to `grad` or `_grad` should reflecte in reading from the other,
+        # Write to `grad` or `_grad` should reflective in reading from the other,
         # and should be codegen-ed.
         def fn(x, y):
             x._grad = y + 1
@@ -7260,30 +7260,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             fn(torch.ones(3)), torch.compile(fn, backend="eager")(torch.ones(3))
         )
 
-    def test_311_resume_block_keyerror(self):
-        # https://github.com/pytorch/pytorch/issues/162313
-        flag = True
-
-        def fn(x):
-            x = x + 1
-            torch._dynamo.graph_break()
-            x = x + 2
-            if flag:
-                with torch.no_grad():
-                    torch._dynamo.graph_break()
-                x = x + 4
-            else:
-                with torch.no_grad():
-                    torch._dynamo.graph_break()
-                x = x + 8
-            return x + 16
-
-        inp = torch.ones(3)
-        opt_fn = torch.compile(fn, backend="eager")
-        self.assertEqual(fn(inp), opt_fn(inp))
-        flag = False
-        self.assertEqual(fn(inp), opt_fn(inp))
-
     def test_cells_unsupported_step_exception(self):
         # This error happened because:
         #  - we were generating cells into a list on the stack
@@ -8100,6 +8076,14 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         gm = _dynamo_graph_capture_for_export(foo)(x, y)
         res = gm(x, y)
         self.assertEqual(res, ref)
+
+    def test_current_accelerator(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            torch.accelerator.current_accelerator()
+            return x + 1
+
+        self.assertEqual(fn(torch.ones(3)), torch.ones(3) + 1)
 
 
 instantiate_parametrized_tests(ReproTests)

@@ -928,7 +928,7 @@ def reorder_for_peak_memory(
     # other methods
     for method in methods:
         try:
-            if method == topological_sort_lpmf:
+            if method is topological_sort_lpmf:
                 order = method(
                     nodes, name_to_freeable_input_buf, name_to_buf, graph_outputs
                 )
