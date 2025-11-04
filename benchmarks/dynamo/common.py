@@ -3645,7 +3645,10 @@ def process_entry(rank, runner, original_dir, args):
 
 
 def maybe_fresh_cache(args):
-    if args.cold_start_latency or args.ci:
+    cache_dir_assigned = "TORCHINDUCTOR_CACHE_DIR" in os.environ
+    if not cache_dir_assigned and (
+        args.cold_start_latency or args.warm_start_latency or args.ci
+    ):
         return fresh_cache()
     else:
         return contextlib.nullcontext()
