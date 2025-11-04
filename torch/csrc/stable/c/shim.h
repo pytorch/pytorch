@@ -15,12 +15,6 @@
 extern "C" {
 #endif
 
-AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher_v2(
-    const char* opName,
-    const char* overloadName,
-    StableIValue* stack,
-    uint64_t extension_build_version);
-
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 using StableIValue = uint64_t;
 
