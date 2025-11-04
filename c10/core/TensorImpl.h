@@ -2186,6 +2186,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     (*pyobj_slot_.pyobj_interpreter())->decref(obj);
   }
 
+  bool try_incref_pyobject() const override final {
+    c10::impl::PyInterpreter* interp = pyobj_slot_.pyobj_interpreter();
+    if (C10_UNLIKELY(!interp)) {
+      return false;
+    }
+    return (*interp)->try_incref(pyobj_slot_);
+  }
+
  private:
   // See NOTE [std::optional operator usage in CUDA]
   // We probably don't want to expose this publicly until

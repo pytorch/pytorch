@@ -321,6 +321,9 @@ class C10_API intrusive_ptr_target {
    */
   virtual void incref_pyobject() const {}
   virtual void decref_pyobject() const {}
+  virtual bool try_incref_pyobject() const {
+    return false;
+  }
 
   uint32_t refcount(std::memory_order order = std::memory_order_relaxed) const {
     return detail::refcount(combined_refcount_.load(order));
@@ -1020,6 +1023,7 @@ class weak_intrusive_ptr final {
     if (target_ == NullType::singleton()) {
       return intrusive_ptr<TTarget, NullType>();
     } else {
+      bool increfed = false;
       auto combined_refcount =
           target_->combined_refcount_.load(std::memory_order_relaxed);
       do {
@@ -1028,16 +1032,30 @@ class weak_intrusive_ptr final {
           // Return nullptr.
           return intrusive_ptr<TTarget, NullType>();
         }
+        if constexpr (detail::TargetTraits<TTarget>::can_have_pyobject) {
+          if (detail::has_pyobject(combined_refcount) &&
+              detail::refcount(combined_refcount) == 1 && !increfed) {
+            // Object has a python wrapper with no other C++ references.
+            // We need to to incref the Python object before we acquire a
+            // strong reference to the C++ object to avoid a situation
+            // where the Python object is deallocated concurrently.
+            if (!target_->try_incref_pyobject()) {
+              return intrusive_ptr<TTarget, NullType>();
+            }
+            increfed = true;
+          }
+        }
       } while (!target_->combined_refcount_.compare_exchange_weak(
           combined_refcount,
           combined_refcount + detail::kReferenceCountOne,
           std::memory_order_acquire,
           std::memory_order_relaxed));
 
-      // FIXME(sgross): this isn't thread-safe if the Python wrapper is the
-      // only reference and may be deallocated concurrently.
-      detail::maybe_incref_pyobject<TTarget>(
-          target_, combined_refcount + detail::kReferenceCountOne);
+      if constexpr (detail::TargetTraits<TTarget>::can_have_pyobject) {
+        if (increfed && detail::refcount(combined_refcount) != 1) {
+          target_->decref_pyobject();
+        }
+      }
 
       return intrusive_ptr<TTarget, NullType>(
           target_, raw::DontIncreaseRefcount{});

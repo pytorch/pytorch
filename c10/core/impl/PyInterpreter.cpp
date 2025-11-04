@@ -13,6 +13,10 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
 
   void decref(PyObject* pyobj) const override {} // do nothing
 
+  bool try_incref(const c10::impl::PyObjectSlot& pyobj_slot) const override {
+    return false;
+  }
+
 #define PANIC(m)              \
   TORCH_INTERNAL_ASSERT(      \
       0,                      \

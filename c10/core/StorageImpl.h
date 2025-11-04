@@ -115,6 +115,14 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     (*pyobj_slot_.pyobj_interpreter())->decref(obj);
   }
 
+  bool try_incref_pyobject() const override final {
+    c10::impl::PyInterpreter* interp = pyobj_slot_.pyobj_interpreter();
+    if (C10_UNLIKELY(!interp)) {
+      return false;
+    }
+    return (*interp)->try_incref(pyobj_slot_);
+  }
+
   size_t nbytes() const {
     // OK to do this instead of maybe_as_int as nbytes is guaranteed positive
     TORCH_CHECK(!size_bytes_is_heap_allocated_);

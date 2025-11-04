@@ -18,6 +18,9 @@ namespace c10 {
 struct IValue;
 class OperatorHandle;
 struct TensorImpl;
+namespace impl {
+struct PyObjectSlot;
+} // namespace impl
 } // namespace c10
 
 namespace torch::jit {
@@ -128,6 +131,8 @@ struct C10_API PyInterpreterVTable {
   virtual void incref(PyObject* pyobj) const = 0;
   // Run Py_DECREF on a PyObject.  We DO NOT assume the GIL is held on call.
   virtual void decref(PyObject* pyobj) const = 0;
+  // Run PyUnstable_TryIncRef on a PyObject if it's not NULL.
+  virtual bool try_incref(const c10::impl::PyObjectSlot& pyobj_slot) const = 0;
   // Run Py_REFCNT on a PyObject.
   virtual size_t refcnt(PyObject* pyobj) const = 0;
 

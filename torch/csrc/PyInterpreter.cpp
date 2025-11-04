@@ -46,6 +46,7 @@ struct ConcretePyInterpreterVTable final
 
   void incref(PyObject* pyobj) const override;
   void decref(PyObject* pyobj) const override;
+  bool try_incref(const c10::impl::PyObjectSlot& pyobj_slot) const override;
   size_t refcnt(PyObject* pyobj) const override;
 
   // TODO: Need to make this work for StorageImpl too. I imagine I'll want to
@@ -251,6 +252,26 @@ void ConcretePyInterpreterVTable::incref(PyObject* pyobj) const {
     return;
   pybind11::gil_scoped_acquire gil;
   Py_INCREF(pyobj);
+}
+
+bool ConcretePyInterpreterVTable::try_incref(
+    const c10::impl::PyObjectSlot& pyobj_slot) const {
+  if (!Py_IsInitialized())
+    return false;
+  pybind11::gil_scoped_acquire gil;
+  PyObject* pyobj = pyobj_slot.load_pyobj();
+  if (!pyobj) {
+    return false;
+  }
+#if IS_PYTHON_3_14_PLUS
+  return PyUnstable_TryIncRef(pyobj);
+#else
+  if (Py_REFCNT(pyobj) > 0) {
+    Py_INCREF(pyobj);
+    return true;
+  }
+  return false;
+#endif
 }
 
 size_t ConcretePyInterpreterVTable::refcnt(PyObject* pyobj) const {
