@@ -1408,32 +1408,75 @@ AOTITorchError aoti_torch_zero_(AtenTensorHandle tensor) {
 
 #include <aten/src/ATen/core/List.h>
 
-inline c10::impl::GenericList* list_handle_to_list_pointer(C10ListHandle handle) {
-  return reinterpret_cast<c10::impl::GenericList*>(handle);
+inline std::vector<StableIValue>* list_handle_to_list_pointer(StableListHandle handle) {
+  TORCH_WARN("in list_handle_to_list_pointer")
+  return reinterpret_cast<std::vector<StableIValue>*>(handle);
 }
 
-inline C10ListHandle list_pointer_to_list_handle(c10::impl::GenericList* list) {
-  return reinterpret_cast<C10ListHandle>(list);
+inline StableListHandle list_pointer_to_list_handle(std::vector<StableIValue>* list_ptr) {
+  TORCH_WARN("in list_pointer_to_list_handle")
+  return reinterpret_cast<StableListHandle>(list_ptr);
 }
 
-inline C10ListHandle new_list_handle(c10::impl::GenericList&& list) {
-  c10::impl::GenericList* new_list = new c10::impl::GenericList(std::move(list));
+inline StableListHandle new_list_handle(std::vector<StableIValue>&& list) {
+  std::vector<StableIValue>* new_list = new std::vector<StableIValue>(list);
   return list_pointer_to_list_handle(new_list);
 }
 
-AOTITorchError torch_new_list_handle(
-    C10ListHandle orig_handle,
-    C10ListHandle* new_handle) {
+AOTITorchError torch_new_list_reserve_size(size_t size, StableListHandle* ret) {
+  auto list_ptr = std::make_unique<std::vector<StableIValue>>();
+  list_ptr->reserve(size);
+  TORCH_WARN("In torch_new_list_reserve_size! size is: ", size, " and list_ptr->size() is: ", list_ptr->size());
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    c10::impl::GenericList* l = list_handle_to_list_pointer(orig_handle);
-    *new_handle = new_list_handle(c10::impl::GenericList(*l));
+    *ret = list_pointer_to_list_handle(list_ptr.release());
   });
 }
 
-AOTITorchError torch_delete_list_object(C10ListHandle list) {
+AOTITorchError torch_new_list_handle(
+    StableListHandle orig_handle,
+    StableListHandle* new_handle) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    c10::impl::GenericList* l = list_handle_to_list_pointer(list);
-    delete l;
+    std::vector<StableIValue>* list = list_handle_to_list_pointer(orig_handle);
+    *new_handle = new_list_handle(std::vector<StableIValue>(*list));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_list_size(StableListHandle list_handle, size_t* size) {
+  TORCH_WARN("in torch_list_size");
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::vector<StableIValue>* list = list_handle_to_list_pointer(list_handle);
+    *size = list->size();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_list_get(
+  StableListHandle list_handle,
+  size_t index,
+  StableIValue* element
+) {
+  TORCH_WARN("in torch_list_get with index: ", index);
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::vector<StableIValue>* list = list_handle_to_list_pointer(list_handle);
+    *element = list->at(index);
+  });
+}
+
+AOTITorchError torch_list_emplace_back(
+  StableListHandle list_handle,
+  StableIValue element
+) {
+  TORCH_WARN("in torch_list_emplace_back");
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::vector<StableIValue>* list = list_handle_to_list_pointer(list_handle);
+    list->emplace_back(element);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_delete_list_object(StableListHandle list_handle) {
+  TORCH_WARN("in torch_delete_list_object");
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::vector<StableIValue>* list_ptr = list_handle_to_list_pointer(list_handle);
+    delete list_ptr;
   });
 }
 
@@ -1442,6 +1485,7 @@ static StableIValue from_ivalue(
     const c10::IValue& ivalue) {
   switch (type->kind()) {
     case c10::TypeKind::TensorType: {
+      TORCH_WARN("In from_ivalue TENSOR TYPE");
       AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(
           std::move(const_cast<at::Tensor&>(ivalue.toTensor())));
       return from(ath);
@@ -1488,17 +1532,21 @@ static StableIValue from_ivalue(
       return from(sivp);
     }
     case c10::TypeKind::ListType: {
+      TORCH_WARN("In from_ivalue LIST TYPE");
       auto inner_type = type->castRaw<c10::ListType>()->getElementType();
+      TORCH_WARN("inner_type is: ", inner_type->annotation_str());
       auto ivalue_list = ivalue.toList();
-      c10::List<StableIValue> stableivalue_list;
-      stableivalue_list.reserve(ivalue_list.size());
-      // StableList* stablelist_ptr = new StableList(ivalue_list.size());  // We should write our own StableList that will contain StableIValues
+      TORCH_WARN("Finished calling toList! ivalue_list size is: ", ivalue_list.size());
+      auto stableivalue_list = std::make_unique<std::vector<StableIValue>>();
+      TORCH_WARN("WE ARE DONE MAKING LIST! stableivalue_list size is: ", stableivalue_list->size());
+      stableivalue_list->reserve(ivalue_list.size());
       for (const auto& elem : ivalue_list) {
-        stableivalue_list.emplace_back(from_ivalue(inner_type, elem));
+        TORCH_WARN("in loop! about to call from_ivalue again");
+        stableivalue_list->emplace_back(from_ivalue(inner_type, elem));
       }
-      // Now we need to figure out a SIV representation of StableList that we call from on.
-      auto nontemplated_list = new c10::impl::GenericList(c10::impl::toList(std::move(stableivalue_list)));
-      return from(list_pointer_to_list_handle(nontemplated_list));
+      TORCH_WARN("Done with filling up our stableivalue list! size is: ", stableivalue_list->size(), 
+      " and the first element is: ", stableivalue_list->at(0));
+      return from(list_pointer_to_list_handle(stableivalue_list.release()));
     }
     default: {
       TORCH_CHECK(
@@ -1512,6 +1560,7 @@ static StableIValue from_ivalue(
 static c10::IValue to_ivalue(
     const c10::TypePtr& type,
     const StableIValue stable_ivalue) {
+  
   switch (type->kind()) {
     case c10::TypeKind::TensorType: {
       auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
@@ -1561,6 +1610,19 @@ static c10::IValue to_ivalue(
       auto ival = to_ivalue(inner_type, *sivp);
       delete sivp;
       return ival;
+    }
+    case c10::TypeKind::ListType: {
+      TORCH_WARN("IN TO_IVALUE LIST TYPE");
+      auto inner_type = type->castRaw<c10::ListType>()->getElementType();
+      auto list_handle = to<StableListHandle>(stable_ivalue);
+      std::vector<StableIValue>* stableivalue_list = list_handle_to_list_pointer(list_handle);
+      auto ivalue_list = c10::impl::GenericList(inner_type);
+      ivalue_list.reserve(stableivalue_list->size());
+      for (const auto& elem : *stableivalue_list) {
+        ivalue_list.emplace_back(to_ivalue(inner_type, elem));
+      }
+      TORCH_ERROR_CODE_CHECK(torch_delete_list_object(list_handle));
+      return ivalue_list;
     }
     default: {
       TORCH_CHECK(

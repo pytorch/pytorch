@@ -184,17 +184,28 @@ struct FromImpl<torch::stable::Tensor> {
   }
 };
 
-// Specialization for C10ListHandle => StableIValue
-// Returns a new owning reference of the underlying C10ListHandle.
-// Explicitly deletes the original handle.
-// I need to figure out if this matters tbh.
-template <>
-struct FromImpl<C10ListHandle> {
-  static StableIValue call(const C10ListHandle& val) {
-    C10ListHandle new_list_handle;
-    TORCH_ERROR_CODE_CHECK(torch_new_list_handle(val, &new_list_handle));
-    TORCH_ERROR_CODE_CHECK(torch_delete_list_object(val));
+// Specialization for torch::headeronly::HeaderOnlyArrayRef<T> => StableIValue
+// Returns a new OWNING reference of the underlying list!
+template <typename T>
+struct FromImpl<torch::headeronly::HeaderOnlyArrayRef<T>> {
+  static StableIValue call(const torch::headeronly::HeaderOnlyArrayRef<T>& val) {
+    StableListHandle new_list_handle;
+    TORCH_ERROR_CODE_CHECK(torch_new_list_reserve_size(val.size(), &new_list_handle));
+    for (const auto& elem: val) {
+      TORCH_ERROR_CODE_CHECK(
+          torch_list_emplace_back(new_list_handle, from(elem)));
+    }
     return from(new_list_handle);
+  }
+};
+
+// Specialization for std::vector<T> => StableIValue, which is implemented the
+// same way as HeaderOnlyArrayRef<T> => StableIValue
+// Returns a new OWNING reference of the underlying list!
+template <typename T>
+struct FromImpl<std::vector<T>> {
+  static StableIValue call(const std::vector<T>& val) {
+    return from<torch::headeronly::HeaderOnlyArrayRef<T>>(val);
   }
 };
 
@@ -319,6 +330,35 @@ struct ToImpl<std::optional<T>> {
     delete sivp;
 
     return std::make_optional(inner_val);
+  }
+};
+
+// Specialization for StableIValue => std::vector<T>
+// std::vector<T> should be represented as a StableListHandle
+// filled with StableIValues
+// The new std::vector steals ownership of the underlying elements
+// and StableListHandle is freed.
+template <typename T>
+struct ToImpl<std::vector<T>> {
+  static std::vector<T> call(StableIValue val) {
+    auto list_handle = to<StableListHandle>(val);
+    // we need to construct a std::vector<T> from the list_handle
+    // meaning we need to recursively call to<T> on each element
+    // meaning we need to be able to get the size and access the
+    // elements of our list handle, meaning we need to add these
+    // functions to the shim.
+    size_t size;
+    TORCH_ERROR_CODE_CHECK(torch_list_size(list_handle, &size));
+    std::vector<T> result;
+    result.reserve(size);
+    for (size_t i = 0; i < size; i++) {
+      StableIValue element;
+      TORCH_ERROR_CODE_CHECK(torch_list_get(list_handle, i, &element));
+      result.emplace_back(to<T>(element));
+    }
+
+    TORCH_ERROR_CODE_CHECK(torch_delete_list_object(list_handle));
+    return result;
   }
 };
 

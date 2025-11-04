@@ -334,6 +334,18 @@ def my_new_zeros_dtype_variant(t) -> Tensor:
     """
     return torch.ops.libtorch_agnostic.my_new_zeros_dtype_variant.default(t)
 
+def my__foreach_mul_(tensors, others) -> ():
+    """
+    Updates tensors to be the result of pointwise multiplying with others.
+
+    Args:
+        tensors: list of tensors
+        others: list of tensors (with the same corresponding shapes as tensors)
+
+    Returns: nothing, tensors is updated in place.
+    """
+    torch.ops.libtorch_agnostic.my__foreach_mul_.default(tensors, others)
+
 
 def my__foreach_mul(tensors, others) -> list[Tensor]:
     """
@@ -347,3 +359,16 @@ def my__foreach_mul(tensors, others) -> list[Tensor]:
     Returns: list of multiplied tensors
     """
     return torch.ops.libtorch_agnostic.my__foreach_mul.default(tensors, others)
+
+
+def make_tensor_clones_and_call_foreach(t1, t2) -> list[Tensor]:
+    """
+    Returns a list of 2 tensors corresponding to the square of the inputs.
+
+    Args:
+        t1: Tensor
+        t2: Tensor
+    
+    Returns: list of [t1^2, t2^2]
+    """
+    return torch.ops.libtorch_agnostic.make_tensor_clones_and_call_foreach.default(t1, t2)
