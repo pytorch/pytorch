@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     subtest,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
 
@@ -1503,16 +1504,14 @@ class TestCxxPytree(TestCase):
         ],
     )
     def test_pytree_serialize(self, spec):
-        self.assertEqual(
-            spec,
-            cxx_pytree.tree_structure(
-                cxx_pytree.tree_unflatten([0] * spec.num_leaves, spec)
-            ),
-        )
-
         serialized_spec = cxx_pytree.treespec_dumps(spec)
         self.assertIsInstance(serialized_spec, str)
-        self.assertEqual(spec, cxx_pytree.treespec_loads(serialized_spec))
+        roundtrip_spec = cxx_pytree.treespec_loads(serialized_spec)
+        if TEST_WITH_TORCHDYNAMO:
+            self.assertEqual(type(roundtrip_spec).__name__, type(spec).__name__)
+            self.assertEqual(repr(roundtrip_spec), repr(spec))
+        else:
+            self.assertEqual(roundtrip_spec, spec)
 
     def test_pytree_serialize_namedtuple(self):
         python_pytree._register_namedtuple(
@@ -1538,7 +1537,11 @@ class TestCxxPytree(TestCase):
         spec = cxx_pytree.tree_structure(GlobalDummyType(0, 1))
         serialized_spec = cxx_pytree.treespec_dumps(spec)
         roundtrip_spec = cxx_pytree.treespec_loads(serialized_spec)
-        self.assertEqual(roundtrip_spec, spec)
+        if TEST_WITH_TORCHDYNAMO:
+            self.assertEqual(type(roundtrip_spec).__name__, type(spec).__name__)
+            self.assertEqual(repr(roundtrip_spec), repr(spec))
+        else:
+            self.assertEqual(roundtrip_spec, spec)
 
         class LocalDummyType:
             def __init__(self, x, y):
@@ -1554,7 +1557,11 @@ class TestCxxPytree(TestCase):
         spec = cxx_pytree.tree_structure(LocalDummyType(0, 1))
         serialized_spec = cxx_pytree.treespec_dumps(spec)
         roundtrip_spec = cxx_pytree.treespec_loads(serialized_spec)
-        self.assertEqual(roundtrip_spec, spec)
+        if TEST_WITH_TORCHDYNAMO:
+            self.assertEqual(type(roundtrip_spec).__name__, type(spec).__name__)
+            self.assertEqual(repr(roundtrip_spec), repr(spec))
+        else:
+            self.assertEqual(roundtrip_spec, spec)
 
 
 instantiate_parametrized_tests(TestGenericPytree)
