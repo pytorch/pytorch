@@ -155,7 +155,7 @@ void set_params_fprop(Flash_fwd_params &params,
     // [Minor] We want to round down since when we do the comparison we use <= instead of <
     // params.p_dropout_in_uint = uint32_t(std::floor(params.p_dropout * 4294967295.0));
     // params.p_dropout_in_uint16_t = uint16_t(std::floor(params.p_dropout * 65535.0));
-    params.p_dropout_in_uint8_t = uint8_t(std::floor(params.p_dropout * 255.0));
+    params.p_dropout_in_uint8_t = static_cast<uint8_t>(std::floor(params.p_dropout * 255.0));
     params.rp_dropout = 1.f / params.p_dropout;
     params.scale_softmax_rp_dropout = params.rp_dropout * params.scale_softmax;
     TORCH_CHECK(p_dropout < 1.f);
@@ -307,7 +307,7 @@ inline int num_splits_heuristic(int batch_nheads_mblocks, int num_SMs, int num_n
         if (!is_split_eligible(num_splits)) {
             efficiency.push_back(0.f);
         } else {
-            float n_waves = float(batch_nheads_mblocks * num_splits) / num_SMs;
+            float n_waves = static_cast<float>(batch_nheads_mblocks * num_splits) / num_SMs;
             float eff = n_waves / ceil(n_waves);
             // printf("num_splits = %d, eff = %f\n", num_splits, eff);
             if (eff > max_efficiency) { max_efficiency = eff; }
