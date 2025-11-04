@@ -18,10 +18,9 @@ from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
 from enum import Enum
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
+from torch._C._dynamo import VariableTrackerMeta as C_VariableTrackerMeta
 from torch._guards import Guard
 from torch.fx.proxy import Node
-
-from torch._C._dynamo import VariableTrackerMeta as C_VariableTrackerMeta
 
 from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
