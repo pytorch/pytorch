@@ -400,10 +400,16 @@ class Library:
         self.m.fallback(dispatch_key, fn, with_keyset)
 
     def _register_effectful_op(self, op_name: str, effect: Optional[EffectType]):
-        from torch._higher_order_ops.effects import _register_effectful_op
+        """
+        Registers an effect to an operator. This is used to register an op that
+        has side effects that is not capturable by the schema.
 
-        handle = _register_effectful_op(op_name, effect)
-        self._registration_handles.append(handle)
+        Args:
+            op_name: operator name (along with the overload) or OpOverload object.
+            effect: The effect of the op.
+        """
+        entry = torch._library.simple_registry.singleton.find(op_name)
+        entry.effect = effect
 
     def _destroy(self):
         if self.m is not None:
@@ -1095,11 +1101,7 @@ def _register_effectful_op(
         )
 
     if isinstance(op, torch._ops.OpOverload):
-        if op._overloadname == "default":
-            # for some reason they don't add "default" to the name
-            op = f"{op._name}.{op._overloadname}"
-        else:
-            op = op._name
+        op = op._name
     opdef = _maybe_get_opdef(op)
     if opdef is not None:
         opdef.register_effect(effect)
