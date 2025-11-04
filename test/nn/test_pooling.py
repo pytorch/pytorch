@@ -98,6 +98,22 @@ class TestAvgPool(TestCase):
                     actual = actual.view(1, actual.numel())
                     expected = self._sum_pool2d(input, (i, j)) / divisor
                     self.assertEqual(actual, expected, rtol=0, atol=1e-5)
+    
+    def test_avg_pool2d_batch_channel(self):
+        batch_sizes = [1, 2]      
+        channels = [1, 3]         
+        height, width = 4, 4      
+        kernel_size = (2, 2)    
+        
+        for N in batch_sizes:
+            for C in channels:
+                input = torch.rand(N, C, height, width, dtype=torch.double)
+                actual = F.avg_pool2d(input, kernel_size)
+                expected = self._avg_pool2d(input, kernel_size)
+                self.assertTrue(torch.allclose(actual.flatten(), expected.flatten(), rtol=1e-5, atol=1e-8),
+                    msg=f"Failed for batch={N}, channel={C}"
+                )
+
 
     def test_doubletensor_avg_pool3d(self):
         h, w, d = 5, 6, 7
