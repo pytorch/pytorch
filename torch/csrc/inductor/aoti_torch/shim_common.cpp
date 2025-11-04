@@ -29,6 +29,7 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Stream.h>
 #include <c10/util/FileSystem.h>
+#include <torch/headeronly/version.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -194,12 +195,9 @@ AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(
     ComplexDouble)
 #undef AOTI_TORCH_SCALAR_TO_TENSOR_IMPL
 
-#ifndef C10_MOBILE
-#include <torch/version.h>
 uint64_t aoti_torch_abi_version() {
   return TORCH_ABI_VERSION;
 }
-#endif // C10_MOBILE
 
 bool aoti_torch_grad_mode_is_enabled() {
   return c10::GradMode::is_enabled();
