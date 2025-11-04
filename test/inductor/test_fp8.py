@@ -938,6 +938,7 @@ class TestFP8Lowering(TestCase):
         torch.testing.assert_close(y_eager, y_compiled, rtol=5e-2, atol=0.07)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @torch._inductor.config.patch("emulate_precision_casts", True)
     def test_mx_fusion(self):
         # Register fake_scaled_mm custom op scoped to this test
         with torch.library._scoped_library("test_fp8", "FRAGMENT") as lib:
