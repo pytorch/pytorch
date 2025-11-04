@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-NATIVE_OPS_LIST: Ensures that all ATen ops called via torch_call_dispatcher
-or aoti_torch_call_dispatcher in torch/csrc/stable/ops.h are documented
-in torch/csrc/stable/native_ops.txt.
+STABLE_NATIVE_OPS_LIST: Ensures that all ATen ops called via torch_call_dispatcher
+in torch/csrc/stable/ops.h are documented in torch/csrc/stable/native_ops.txt.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 
-LINTER_CODE = "NATIVE_OPS_LIST"
+LINTER_CODE = "STABLE_NATIVE_OPS_LIST"
 
 
 class LintSeverity(str, Enum):
@@ -41,37 +40,31 @@ class LintMessage(NamedTuple):
 
 def extract_native_ops_from_ops_h(ops_h_path: Path) -> set[str]:
     """
-    Extract all ATen op names that are called via torch_call_dispatcher
-    or aoti_torch_call_dispatcher in ops.h.
+    Extract all ATen op names that are called via torch_call_dispatcher in ops.h.
 
     Returns a set of op names like "aten::empty_like", "aten::transpose.int", etc.
     """
     ops = set()
 
-    try:
-        with open(ops_h_path) as f:
-            content = f.read()
+    with open(ops_h_path) as f:
+        content = f.read()
 
-        # Pattern to match torch_call_dispatcher("aten::...", "overload", ...)
-        # or aoti_torch_call_dispatcher("aten::...", "overload", ...)
-        pattern = re.compile(
-            r'(?:torch_call_dispatcher|aoti_torch_call_dispatcher)\s*\(\s*"(aten::[^"]+)"\s*,\s*"([^"]*)"\s*,'
-        )
+    # Pattern to match torch_call_dispatcher("aten::...", "overload", ...)
+    pattern = re.compile(
+        r'torch_call_dispatcher\s*\(\s*"(aten::[^"]+)"\s*,\s*"([^"]*)"\s*,'
+    )
 
-        for match in pattern.finditer(content):
-            op_name = match.group(1)  # e.g., "aten::empty_like"
-            overload = match.group(2)  # e.g., "" or "int"
+    for match in pattern.finditer(content):
+        op_name = match.group(1)  # e.g., "aten::empty_like"
+        overload = match.group(2)  # e.g., "" or "int"
 
-            # Construct full op name with overload if present
-            if overload:
-                full_op_name = f"{op_name}.{overload}"
-            else:
-                full_op_name = op_name
+        # Construct full op name with overload if present
+        if overload:
+            full_op_name = f"{op_name}.{overload}"
+        else:
+            full_op_name = op_name
 
-            ops.add(full_op_name)
-
-    except Exception:
-        pass
+        ops.add(full_op_name)
 
     return ops
 
@@ -83,21 +76,20 @@ def read_native_ops_txt(native_ops_txt_path: Path) -> set[str]:
     Each line should contain one op name.
     Empty lines and lines starting with # are ignored.
     """
-    ops = set()
-
     if not native_ops_txt_path.exists():
-        return ops
+        raise RuntimeError(
+            f"Could not find native_ops.txt at {native_ops_txt_path}. "
+            f"This linter requires torch/csrc/stable/native_ops.txt to exist in the repository."
+        )
 
-    try:
-        with open(native_ops_txt_path) as f:
-            for line in f:
-                line = line.strip()
-                # Skip empty lines and comments
-                if not line or line.startswith("#"):
-                    continue
-                ops.add(line)
-    except Exception:
-        pass
+    ops = set()
+    with open(native_ops_txt_path) as f:
+        for line in f:
+            line = line.strip()
+            # Skip empty lines and comments
+            if not line or line.startswith("#"):
+                continue
+            ops.add(line)
 
     return ops
 
@@ -105,11 +97,16 @@ def read_native_ops_txt(native_ops_txt_path: Path) -> set[str]:
 def check_file(filename: str) -> list[LintMessage]:
     """
     Check if ops.h has any ops that are not documented in native_ops.txt.
+    This check runs when either ops.h or native_ops.txt is modified.
     """
     lint_messages: list[LintMessage] = []
 
-    # Only lint torch/csrc/stable/ops.h
-    if not filename.endswith("torch/csrc/stable/ops.h"):
+    # Only lint torch/csrc/stable/ops.h or native_ops.txt
+    if not (
+        filename.endswith(
+            ("torch/csrc/stable/ops.h", "torch/csrc/stable/native_ops.txt")
+        )
+    ):
         return []
 
     repo_root = Path(__file__).resolve().parents[3]
@@ -129,7 +126,7 @@ def check_file(filename: str) -> list[LintMessage]:
         sorted_ops = sorted(undocumented_ops)
         lint_messages.append(
             LintMessage(
-                path=filename,
+                path=str(ops_h_path),
                 line=None,
                 char=None,
                 code=LINTER_CODE,

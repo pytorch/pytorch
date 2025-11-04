@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NATIVE_FUNCTION_SCHEMA: Ensures that when a native function schema is changed
+STABLE_NATIVE_FUNCTION_SCHEMA: Ensures that when a native function schema is changed
 in native_functions.yaml for an op that is used in torch/csrc/stable/ops.h,
 a schema adapter is registered in torch/csrc/shim_common.cpp.
 """
@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 
-LINTER_CODE = "NATIVE_FUNCTION_SCHEMA"
+LINTER_CODE = "STABLE_NATIVE_FUNCTION_SCHEMA"
 
 
 class LintSeverity(str, Enum):
@@ -50,18 +50,15 @@ def read_native_ops_txt(native_ops_txt_path: Path) -> set[str]:
     ops = set()
 
     if not native_ops_txt_path.exists():
-        return ops
+        raise RuntimeError("Could not find torch/csrc/stable/native_ops.txt")
 
-    try:
-        with open(native_ops_txt_path) as f:
-            for line in f:
-                line = line.strip()
-                # Skip empty lines and comments
-                if not line or line.startswith("#"):
-                    continue
-                ops.add(line)
-    except Exception:
-        pass
+    with open(native_ops_txt_path) as f:
+        for line in f:
+            line = line.strip()
+            # Skip empty lines and comments
+            if not line or line.startswith("#"):
+                continue
+            ops.add(line)
 
     return ops
 
@@ -70,77 +67,71 @@ def get_changed_function_schemas(
     native_functions_yaml_path: Path,
 ) -> dict[str, tuple[str, str]]:
     """
-    Get the function schemas that were changed in the current commit.
+    Get the function schemas that were changed in the most recent commit or uncommitted changes.
 
     Returns a dict mapping op name to (old_schema, new_schema) tuples.
     """
     changed_schemas = {}
 
-    try:
-        # Try hg first (Meta's version control)
-        result = subprocess.run(
-            ["hg", "diff", str(native_functions_yaml_path)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode != 0:
-            # Try git as fallback
-            result = subprocess.run(
-                ["git", "diff", "HEAD", str(native_functions_yaml_path)],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode != 0:
-                return changed_schemas
+    # Check uncommitted changes (working directory vs HEAD)
+    result = subprocess.run(
+        ["git", "diff", "HEAD", str(native_functions_yaml_path)],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    diff_output = result.stdout
 
-        diff_output = result.stdout
+    # Also check the most recent commit (HEAD vs HEAD~1)
+    result = subprocess.run(
+        ["git", "diff", "HEAD~1..HEAD", str(native_functions_yaml_path)],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    diff_output += "\n" + result.stdout
 
-        # Parse the diff to find changed function schemas
-        # We're looking for lines like:
-        # - func: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
-        # + func: transpose.int(Tensor(a) self, int dim0, int dim1, *, int new_arg=0) -> Tensor(a)
+    # Parse the diff to find changed function schemas
+    # We're looking for lines like:
+    # - func: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
+    # + func: transpose.int(Tensor(a) self, int dim0, int dim1, *, int new_arg=0) -> Tensor(a)
 
-        current_op: str | None = None
-        old_schema: str | None = None
-        new_schema: str | None = None
+    current_op: str | None = None
+    old_schema: str | None = None
+    new_schema: str | None = None
 
-        for line in diff_output.split("\n"):
-            # Check for removed schema line (old version)
-            # Note: In YAML diffs, lines like "- func:" appear as "-- func:" in git diff
-            if line.startswith("-") and "func:" in line:
-                # Match op name: everything after "func:" up to the opening paren
-                match = re.search(r"func:\s*([^\s(]+)", line)
-                if match:
-                    current_op = match.group(1)
-                    # Extract the full schema (skip the leading "- ")
-                    schema_match = re.search(r"func:\s*(.+)", line[1:].lstrip())
-                    if schema_match:
-                        old_schema = schema_match.group(1).strip()
+    for line in diff_output.split("\n"):
+        # Check for removed schema line (old version)
+        # Note: In YAML diffs, lines like "- func:" appear as "-- func:" in git diff
+        if line.startswith("-") and "func:" in line:
+            # Match op name: everything after "func:" up to the opening paren
+            match = re.search(r"func:\s*([^\s(]+)", line)
+            if match:
+                current_op = match.group(1)
+                # Extract the full schema (skip the leading "- ")
+                schema_match = re.search(r"func:\s*(.+)", line[1:].lstrip())
+                if schema_match:
+                    old_schema = schema_match.group(1).strip()
 
-            # Check for added schema line (new version)
-            # Note: In YAML diffs, lines like "- func:" appear as "+- func:" in git diff
-            elif line.startswith("+") and "func:" in line and current_op:
-                # Match op name: everything after "func:" up to the opening paren
-                match = re.search(r"func:\s*([^\s(]+)", line)
-                if match and match.group(1) == current_op:
-                    # Extract the full schema (skip the leading "+ ")
-                    schema_match = re.search(r"func:\s*(.+)", line[1:].lstrip())
-                    if schema_match:
-                        new_schema = schema_match.group(1).strip()
+        # Check for added schema line (new version)
+        # Note: In YAML diffs, lines like "- func:" appear as "+- func:" in git diff
+        elif line.startswith("+") and "func:" in line and current_op:
+            # Match op name: everything after "func:" up to the opening paren
+            match = re.search(r"func:\s*([^\s(]+)", line)
+            if match and match.group(1) == current_op:
+                # Extract the full schema (skip the leading "+ ")
+                schema_match = re.search(r"func:\s*(.+)", line[1:].lstrip())
+                if schema_match:
+                    new_schema = schema_match.group(1).strip()
 
-                        # Store the change
-                        if old_schema:
-                            changed_schemas[current_op] = (old_schema, new_schema)
+                    # Store the change (old_schema must exist since current_op is set)
+                    if old_schema:
+                        changed_schemas[current_op] = (old_schema, new_schema)
 
                         # Reset for next op
                         current_op = None
                         old_schema = None
                         new_schema = None
-
-    except Exception:
-        pass
 
     return changed_schemas
 
@@ -153,19 +144,15 @@ def get_registered_adapters(shim_common_path: Path) -> set[str]:
     """
     adapters = set()
 
-    try:
-        with open(shim_common_path) as f:
-            content = f.read()
+    with open(shim_common_path) as f:
+        content = f.read()
 
-        # Pattern to match register_schema_adapter("aten::...", ...)
-        pattern = re.compile(r'register_schema_adapter\s*\(\s*"(aten::[^"]+)"')
+    # Pattern to match register_schema_adapter("aten::...", ...)
+    pattern = re.compile(r'register_schema_adapter\s*\(\s*"(aten::[^"]+)"')
 
-        for match in pattern.finditer(content):
-            op_name = match.group(1)
-            adapters.add(op_name)
-
-    except Exception:
-        pass
+    for match in pattern.finditer(content):
+        op_name = match.group(1)
+        adapters.add(op_name)
 
     return adapters
 
@@ -189,11 +176,6 @@ def check_file(filename: str) -> list[LintMessage]:
     # Get the list of ops we care about
     tracked_ops = read_native_ops_txt(native_ops_txt_path)
 
-    if not tracked_ops:
-        # If native_ops.txt doesn't exist or is empty, nothing to check
-        return lint_messages
-
-    # Get changed function schemas
     changed_schemas = get_changed_function_schemas(native_functions_yaml_path)
 
     if not changed_schemas:

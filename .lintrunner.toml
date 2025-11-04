@@ -1782,9 +1782,10 @@ command = [
 ]
 
 [[linter]]
-code = 'NATIVE_OPS_LIST'
+code = 'STABLE_NATIVE_OPS_LIST'
 include_patterns = [
     'torch/csrc/stable/ops.h',
+    'torch/csrc/stable/native_ops.txt',
 ]
 command = [
     'python3',
@@ -1794,7 +1795,7 @@ command = [
 ]
 
 [[linter]]
-code = 'NATIVE_FUNCTION_SCHEMA'
+code = 'STABLE_NATIVE_FUNCTION_SCHEMA'
 include_patterns = [
     'aten/src/ATen/native/native_functions.yaml',
 ]
