@@ -6,7 +6,7 @@ import time
 import zipfile
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from tools.stats.upload_test_stats import parse_xml_report
 
@@ -151,38 +151,43 @@ def parse_xml_and_upload_json() -> None:
     uploaded to s3, and upload the json reports to s3.
     """
     json_files = [
-        Path(f).relative_to(REPO_ROOT).with_suffix("")
+        Path(f).with_suffix("")
         for f in glob.glob(f"{REPO_ROOT}/test/test-reports/**/*.json", recursive=True)
     ]
-    xml_files = [
-        Path(f).relative_to(REPO_ROOT).with_suffix("")
-        for f in glob.glob(f"{REPO_ROOT}/test/test-reports/**/*.xml", recursive=True)
-    ]
 
-    for file_stem in xml_files:
-        if file_stem in json_files:
+    try:
+        job_id: Optional[int] = int(os.environ.get("JOB_ID", 0))
+        if job_id == 0:
+            job_id = None
+    except (ValueError, TypeError):
+        job_id = None
+
+    for xml_file in glob.glob(
+        f"{REPO_ROOT}/test/test-reports/**/*.xml", recursive=True
+    ):
+        xml_path = Path(xml_file)
+        json_version = xml_path.with_suffix(".json")
+        if json_version in json_files:
             # It has already been parsed and uploaded
             continue
 
         test_cases = parse_xml_report(
             "testcase",
-            REPO_ROOT / file_stem.with_suffix(".xml"),
+            xml_path,
             int(os.environ.get("GITHUB_RUN_ID", "0")),
             int(os.environ.get("GITHUB_RUN_ATTEMPT", "0")),
+            job_id,
         )
         line_by_line_jsons = "\n".join([json.dumps(tc) for tc in test_cases])
 
         gzipped = gzip.compress(line_by_line_jsons.encode("utf-8"))
         s3_key = (
-            file_stem.with_suffix(".json")
-            .relative_to("test/test-reports")
-            .as_posix()
-            .replace("/", "_")
+            json_version.relative_to("test/test-reports").as_posix().replace("/", "_")
         )
         get_s3_resource().put_object(
             Body=gzipped,
             Bucket="gha-artifacts",
-            Key=f"test_jsons_while_running/{os.environ.get('GITHUB_RUN_ID')}/{s3_key}",
+            Key=f"test_jsons_while_running/{os.environ.get('GITHUB_RUN_ID')}/{job_id}/{s3_key}",
             ContentType="application/json",
             ContentEncoding="gzip",
         )
@@ -190,5 +195,5 @@ def parse_xml_and_upload_json() -> None:
         # We don't need to save the json file locally, but doing so lets us
         # track which ones have been uploaded already. We could probably also
         # check S3
-        with open(REPO_ROOT / file_stem.with_suffix(".json"), "w") as f:
+        with open(json_version, "w") as f:
             f.write(line_by_line_jsons)
