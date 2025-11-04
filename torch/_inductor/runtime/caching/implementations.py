@@ -7,6 +7,7 @@ appropriate locking mechanisms.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
@@ -14,7 +15,7 @@ from io import BufferedReader, BufferedWriter
 from os import PathLike
 from pathlib import Path
 from threading import Lock
-from typing import Any, Generator
+from typing import Any
 from typing_extensions import override
 
 from filelock import FileLock
