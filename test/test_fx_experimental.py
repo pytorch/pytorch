@@ -272,7 +272,7 @@ class TestFXExperimental(JitTestCase):
                 x = self.bottom_layers(a)
                 y = []
                 c = []
-                for i in range(len(self.embedding_layers)):
+                for _ in range(len(self.embedding_layers)):
                     temp = torch.randint(10, (8,))
                     c.append(temp + b)
                 for i in range(len(self.embedding_layers)):

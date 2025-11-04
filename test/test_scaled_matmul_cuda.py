@@ -280,11 +280,13 @@ def scaled_grouped_mm_wrap(
 
 
 
-def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype) -> torch.Tensor:
+def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype, bias: Optional[torch.Tensor] = None) -> torch.Tensor:
     # naive implementation: dq -> op -> q
     x_fp32 = x.to(torch.float) / x_scale
     y_fp32 = y.to(torch.float) / y_scale
     out_fp32 = torch.mm(x_fp32, y_fp32)
+    if bias is not None:
+        out_fp32 += bias.to(torch.float)
 
     return out_fp32.to(out_dtype)
 
@@ -1181,7 +1183,7 @@ class TestFP8Matmul(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
-    @parametrize("base_dtype", [torch.bfloat16, torch.float32])
+    @parametrize("base_dtype", [torch.bfloat16, torch.float16, torch.float32])
     @with_tf32_off
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):
         # Fp32 out_dtype is only supported by cuBLAS, which however only started
@@ -1194,12 +1196,21 @@ class TestFP8Matmul(TestCase):
             if torch.cuda.get_device_capability() < (9, 0):
                 raise unittest.SkipTest("Need sm90+ for row-wise fp8 w/ cuBLAS")
 
+        if base_dtype is torch.float16:
+            if torch.version.hip:
+                raise unittest.SkipTest("hipblaslt rowwise _scaled_mm only supports BFloat16")
+            if torch.cuda.get_device_capability() < (9, 0):
+                raise unittest.SkipTest("Need sm90+ for row-wise fp8 w/ cuBLAS")
+
         torch.manual_seed(42)
         input_dtype = e4m3_type
         output_dtype = base_dtype
 
         x = torch.randn(16, 16, device="cuda", dtype=base_dtype)
         y = torch.randn(32, 16, device="cuda", dtype=base_dtype).t()
+        bias = None
+        if base_dtype in {torch.bfloat16, torch.float16}:
+            bias = torch.randn((32,), device="cuda", dtype=base_dtype)
 
         x_scales = tensor_to_scale(x, input_dtype, dim=1).float()
         y_scales = tensor_to_scale(y, input_dtype, dim=0).float()
@@ -1214,12 +1225,13 @@ class TestFP8Matmul(TestCase):
                 y_fp8,
                 scale_a=x_scales.reciprocal(),
                 scale_b=y_scales.reciprocal(),
-                out_dtype=output_dtype
+                out_dtype=output_dtype,
+                bias=bias
             )
 
             # Calculate emulated F8 mm
             out_emulated = mm_float8_emulated(
-                x_fp8, x_scales, y_fp8, y_scales, output_dtype
+                x_fp8, x_scales, y_fp8, y_scales, output_dtype, bias
             )
 
             if base_dtype in {torch.bfloat16, torch.float16}:
@@ -1234,7 +1246,7 @@ class TestFP8Matmul(TestCase):
         if torch.cuda.get_device_capability() != (9, 0) and output_dtype == torch.float:
             with self.assertRaisesRegex(
                 ValueError,
-                "Only bf16 high precision output types are supported for row-wise scaling."
+                "Only bf16 and fp16 high precision output types are supported for row-wise scaling."
             ):
                 test()
         else:
