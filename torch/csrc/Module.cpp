@@ -406,12 +406,15 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
       "Expected no weakrefs to t2's Tensor object but got  ",
       b->cdata.weak_use_count() - 1);
 
+  // NB: Creating local copies of *both* Tensors here ensures that they each
+  // hold a strong reference to their PyObject. This avoids having to fix up
+  // reference counts when we swap the PyObject slots below.
+  at::Tensor tmp_a = a->cdata;
+  at::Tensor tmp_b = b->cdata;
+
   // Swap the Tensor Impl
-  {
-    at::Tensor tmp = a->cdata;
-    a->cdata = b->cdata;
-    b->cdata = tmp;
-  }
+  a->cdata = tmp_b;
+  b->cdata = tmp_a;
 
   // Swap the PyObjects associated with each TensorImpl
   auto& a_slot = *a->cdata.unsafeGetTensorImpl()->pyobj_slot();

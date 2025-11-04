@@ -2232,7 +2232,9 @@ static int THPVariable_clear(THPVariable* self) {
   // First clear Tensor specific things
   Py_CLEAR(self->backward_hooks);
   Py_CLEAR(self->post_accumulate_grad_hooks);
-  self->cdata.unsafeGetTensorImpl()->pyobj_slot()->clear();
+  if (self->cdata.defined()) {
+    self->cdata.unsafeGetTensorImpl()->pyobj_slot()->clear();
+  }
   {
     // MapAllocator can take significant time to release large tensors;
     // release the GIL here to avoid impacting main thread perf.
