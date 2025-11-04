@@ -1320,10 +1320,10 @@ def register_onednn_fusion_ops():
             if (
                 isinstance(result.data.data, ir.CppTemplateBuffer)
                 and binary_attr == "sum"
+                and result.data.data.layout == x2.get_layout()
             ):
-                # In this case, x2 is inplace updated when binary_attr is "sum"
-                # So we update the layout of result to view of x2
-                assert result.data.data.layout == x2.get_layout()
+                # In this case, since x2 is inplace updated when binary_attr is "sum"
+                # we update the layout of result to view of x2
                 result = ir.TensorBox.create(
                     ir.CppTemplateBuffer(
                         layout=ir.NonOwningLayout(
