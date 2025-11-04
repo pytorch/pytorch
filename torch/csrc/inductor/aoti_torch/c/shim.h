@@ -41,6 +41,7 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/complex.h>
+#include <torch/headeronly/util/Exception.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -537,35 +538,6 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher(
     const char* overloadName,
     StableIValue* stack);
 
-struct StableListOpaque;
-using StableListHandle = StableListOpaque*;
-
-AOTI_TORCH_EXPORT AOTITorchError torch_new_list_reserve_size(size_t size, StableListHandle* ret);
-
-AOTI_TORCH_EXPORT AOTITorchError torch_new_list_handle(
-  StableListHandle orig_handle,
-  StableListHandle* new_handle
-);
-
-// Get the size of the list
-AOTI_TORCH_EXPORT AOTITorchError torch_list_size(StableListHandle list, size_t* size);
-
-// Get the element at the given index
-AOTI_TORCH_EXPORT AOTITorchError torch_list_get(
-  StableListHandle list,
-  size_t index,
-  StableIValue* element
-);
-
-AOTI_TORCH_EXPORT AOTITorchError torch_list_emplace_back(
-  StableListHandle list,
-  StableIValue element
-);
-
-// Free the list object
-AOTI_TORCH_EXPORT AOTITorchError
-torch_delete_list_object(StableListHandle list);
-
 // Device-generic guard for managing device context
 struct DeviceGuardOpaque;
 using DeviceGuardHandle = DeviceGuardOpaque*;
@@ -650,34 +622,8 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(
     int num_tensors,
     AtenTensorHandle* flatten_tensor_args);
 
-AOTI_TORCH_EXPORT void aoti_torch_check(
-    bool cond,
-    const char* func,
-    const char* file,
-    uint32_t line,
-    const char* msg);
-
-#ifdef STRIP_ERROR_MESSAGES
-#define AOTI_TORCH_CHECK(cond, ...)              \
-  if (!(cond)) {                                 \
-    aoti_torch_check(                            \
-        false,                                   \
-        __func__,                                \
-        __FILE__,                                \
-        static_cast<uint32_t>(__LINE__),         \
-        TORCH_CHECK_MSG(cond, "", __VA_ARGS__)); \
-  }
-#else
-#define AOTI_TORCH_CHECK(cond, ...)                \
-  if (!(cond)) {                                   \
-    aoti_torch_check(                              \
-        false,                                     \
-        __func__,                                  \
-        __FILE__,                                  \
-        static_cast<uint32_t>(__LINE__),           \
-        TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
-  }
-#endif
+// Preserve for BC and will delete it later, using the STD_TORCH_CHECK directly
+#define AOTI_TORCH_CHECK(cond, ...) STD_TORCH_CHECK(cond, ##__VA_ARGS__)
 
 AOTI_TORCH_EXPORT void aoti_torch_warn(
     const char* func,

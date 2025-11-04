@@ -3,11 +3,12 @@ import concurrent
 import dataclasses
 import logging
 import threading
+from collections.abc import Callable
 from concurrent.futures import Future, ProcessPoolExecutor
 from dataclasses import dataclass
 from multiprocessing.context import BaseContext
 from time import time
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read
@@ -83,7 +84,7 @@ class TrackedProcessPoolExecutor(ProcessPoolExecutor):
     def submit(
         self, fn: Callable[_P, _R], /, *args: _P.args, **kwargs: _P.kwargs
     ) -> Future[_R]:
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         f = super().submit(fn, *args, **kwargs)
         self._record_enqueue(f)
         return f

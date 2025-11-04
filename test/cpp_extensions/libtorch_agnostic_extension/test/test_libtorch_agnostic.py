@@ -393,13 +393,13 @@ if not IS_WINDOWS:
 
             for result_t, expected_t in zip(result, expected):
                 self.assertEqual(result_t, expected_t)
-            
+
             def _make_cuda_tensors(prior_mem):
                 cuda_res = libtorch_agnostic.ops.my__foreach_mul(tensors, others)
                 self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
 
                 expected = torch._foreach_mul(tensors, others)
-                for result_t, expected_t in zip(result, expected):
+                for result_t, expected_t in zip(cuda_res, expected):
                     self.assertEqual(result_t, expected_t)
 
             if tensors[0].is_cuda:
@@ -408,7 +408,7 @@ if not IS_WINDOWS:
                     _make_cuda_tensors(init_mem)
                     curr_mem = torch.cuda.memory_allocated(device)
                     self.assertEqual(curr_mem, init_mem)
-        
+
         def test_make_tensor_clones_and_call_foreach(self, device):
             import libtorch_agnostic
 
