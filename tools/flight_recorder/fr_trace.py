@@ -46,8 +46,11 @@ def main(args: Optional[Sequence[str]] = None) -> None:
     assert args.trace_dir, "Trace directory trace_dir is required"
     # pyrefly: ignore [bad-argument-type]
     details, version = read_dir(args)
+    # pyrefly: ignore [missing-attribute]
     if args.transform_ft:
+        # pyrefly: ignore [missing-attribute]
         assert args.group_world_size, "World size is required for transform_ft"
+        # pyrefly: ignore [bad-argument-type]
         details = transform_ft(details, args.group_world_size)
     # pyrefly: ignore [bad-argument-type]
     db = build_db(details, args, version)
