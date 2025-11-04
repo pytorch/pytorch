@@ -602,6 +602,27 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.radians), args, kwargs
                 )
+            
+        @register(math.fma)
+        def handle_fma(self, tx: "InstructionTranslator", *args, **kwargs):
+            if len(args) != 3 or kwargs:
+                return None
+            
+            x, y, z = args
+
+            if any(isinstance(arg, variables.TensorVariable) for arg in args):
+                try:
+                    # Use inductor FMA if available
+                    from torch._inductor.inductor_prims import fma as inductor_fma
+                    fma_fn = TorchInGraphFunctionVariable(inductor_fma)
+                    return fma_fn.call_function(tx, args, {})
+                except ImportError:
+                    # Fallback to addcmul expansion
+                    addcmul_fn = TorchInGraphFunctionVariable(torch.addcmul)
+                    return addcmul_fn.call_function(tx, [z, x, y], {})
+            
+            # Use math.fma if constants
+            return None
 
         @register(torch.is_inference_mode_enabled)
         def handle_is_inference_mode_enabled(self, tx: "InstructionTranslator"):

@@ -405,6 +405,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "math.fabs",
         "math.factorial",
         "math.floor",
+        "math.fma",
         "math.fmod",
         "math.frexp",
         "math.fsum",
