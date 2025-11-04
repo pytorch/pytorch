@@ -6,6 +6,7 @@
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cpu/zmath.h>
+#include <climits>
 
 #include <c10/util/irange.h>
 
@@ -253,6 +254,16 @@ void apply_lapack_eigh(const Tensor& values, const Tensor& vectors, const Tensor
   char jobz = compute_eigenvectors ? 'V' : 'N';
 
   auto n = vectors.size(-1);
+  
+  // Check that matrix size doesn't exceed INT_MAX
+  // LAPACK functions use 'int' for the leading dimension parameter, so
+  // matrices larger than INT_MAX cannot be processed due to overflow
+  TORCH_CHECK(n <= INT_MAX, 
+      "linalg.eigh: Matrix size (", n, ") exceeds the maximum value (", INT_MAX, 
+      ") supported by LAPACK. The LAPACK routines used by eigh internally ",
+      "require 32-bit integer parameters, which causes overflow for very large matrices. ",
+      "Please consider using a matrix of size at most ", INT_MAX, " or splitting your problem.");
+  
   auto lda = std::max<int64_t>(1, n);
   auto batch_size = batchCount(vectors);
 
