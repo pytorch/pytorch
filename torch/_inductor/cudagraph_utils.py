@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import counters, get_metrics_context
