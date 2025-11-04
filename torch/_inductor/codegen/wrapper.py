@@ -12,8 +12,9 @@ import operator
 import random
 import re
 import tempfile
+from collections.abc import Callable
 from itertools import chain, count
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -289,11 +290,15 @@ def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
                 if isinstance(symbol, JITFunction):
                     compile_wrapper.newline()
                     compile_wrapper.writeline("@triton.jit")
+                    # pyrefly: ignore  # missing-attribute
                     compile_wrapper.splice(symbol.src, strip=True)
                     symbols_included.add(symbol_name)
                     traverse(symbol)
                 elif hasattr(triton, "constexpr_function") and isinstance(
-                    symbol, triton.runtime.jit.ConstexprFunction
+                    # pyrefly: ignore  # missing-attribute
+                    symbol,
+                    # pyrefly: ignore  # missing-attribute
+                    triton.runtime.jit.ConstexprFunction,
                 ):
                     compile_wrapper.newline()
                     compile_wrapper.writeline("@triton.constexpr_function")
@@ -3604,16 +3609,12 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline("if not should_loop:")
         if stack_output:
             # Handle the case when loop never executes
-            for i, (carried_input, carried_buf) in enumerate(
-                zip(outer_carried_inputs, while_loop.carried_inputs)
-            ):
+            for i, carried_input in enumerate(outer_carried_inputs):
                 self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
                 self.writeline(f"{name}[{i}] = {carried_input}.unsqueeze(0).clone()")
                 self.writeline(ExitSubgraphLine(self))
         else:
-            for i, (carried_input, carried_buf) in enumerate(
-                zip(outer_carried_inputs, while_loop.carried_inputs)
-            ):
+            for i, carried_input in enumerate(outer_carried_inputs):
                 self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
                 self.writeline(f"{name}[{i}] = {carried_input}.clone()")
                 self.writeline(ExitSubgraphLine(self))

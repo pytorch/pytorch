@@ -1257,7 +1257,7 @@ def _canonicalize_profiler_events(events):
     events_with_traces.sort(key=lambda x: x["start_time"])
 
     # Format as a string
-    lines = []
+    lines: list[str] = []
     for evt in events_with_traces:
         lines.append(
             f"event={evt['event_name']} node={evt['node_name']} stack_trace={evt['stack_trace']}"

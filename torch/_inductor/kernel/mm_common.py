@@ -1,17 +1,20 @@
 # mypy: allow-untyped-defs
 import logging
 from collections.abc import Sequence
+from functools import partial
+from pathlib import Path
 from typing import Any
 
 import torch
 from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
-from torch._inductor.utils import sympy_product
+from torch._inductor.utils import get_current_backend, sympy_product
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
 from .. import config
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import _IntLike, Layout, TensorBox
+from ..utils import load_template
 
 
 log = logging.getLogger(__name__)
@@ -145,7 +148,10 @@ def use_native_matmul(mat1, mat2):
         raise AssertionError("native matmul doesn't support block_ptr codegen yet")
 
     # Currently only enable native matmul for triton on GPU.
-    if not (mat1.get_device().type == "cuda" and config.cuda_backend == "triton"):
+    device_type = mat1.get_device().type
+    if not (
+        device_type in ("cuda", "xpu") and get_current_backend(device_type) == "triton"
+    ):
         return False
 
     # Currently, tl.dot only supports following dtypes
@@ -251,3 +257,7 @@ def is_batch_stride_largest_or_zero(mat1, mat2, layout) -> bool:
             return False
 
     return True
+
+
+_KERNEL_TEMPLATE_DIR = Path(__file__).parent / "templates"
+load_kernel_template = partial(load_template, template_dir=_KERNEL_TEMPLATE_DIR)
