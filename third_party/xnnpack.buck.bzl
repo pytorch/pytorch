@@ -1,7 +1,7 @@
 load("//tools/build_defs:fb_xplat_cxx_library.bzl", "fb_xplat_cxx_library")
 load("//tools/build_defs:fbsource_utils.bzl", "is_arvr_mode")
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
-load("//tools/build_defs:platform_defs.bzl", "ANDROID", "APPLE", "APPLETVOS", "CXX", "IOS", "MACOSX", "WINDOWS")
+load("//tools/build_defs:platform_defs.bzl", "ANDROID", "APPLE", "CXX", "IOS", "MACOSX", "WINDOWS")
 load(
     "@fbsource//xplat/caffe2/third_party:xnnpack_buck_shim.bzl",
     "LOGGING_SRCS",
@@ -55,7 +55,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         exported_headers = {
             "xnnpack.h": "XNNPACK/include/xnnpack.h",
         },
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         labels = labels,
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS,
         visibility = ["PUBLIC"],
@@ -70,7 +70,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         srcs = SUBGRAPH_SRCS + ["XNNPACK/src/datatype.c"],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ],
@@ -97,7 +97,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         srcs = TABLE_SRCS,
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ],
@@ -121,7 +121,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         srcs = prod_srcs_for_arch_wrapper("scalar"),
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
             "-fno-fast-math",
@@ -147,7 +147,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ],
@@ -179,7 +179,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         name = "ukernels_sse_ovr_win32",
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ],
@@ -211,7 +211,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ],
@@ -243,7 +243,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         name = "ukernels_sse2_ovr_win32",
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ],
@@ -275,7 +275,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ],
@@ -307,7 +307,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         name = "ukernels_ssse3_ovr_win32",
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ],
@@ -339,7 +339,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ],
@@ -371,7 +371,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         name = "ukernels_sse41_ovr_win32",
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ],
@@ -403,7 +403,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -443,7 +443,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         name = "ukernels_avx_ovr_win32",
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
             "-mavx",
@@ -476,7 +476,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -531,7 +531,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         name = "ukernels_avx512vnnigfni_ovr_win32",
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ],
@@ -568,7 +568,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -625,7 +625,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         name = "ukernels_avx512vnni_ovr_win32",
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ],
@@ -660,7 +660,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         srcs = prod_srcs_for_arch_wrapper("avxvnni") if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
             "-mavxvnni",
@@ -697,7 +697,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         name = "ukernels_avxvnni_ovr_win32",
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ],
@@ -729,7 +729,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -770,7 +770,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         name = "ukernels_f16c_ovr_win32",
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
             "-mf16c",
@@ -804,7 +804,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -853,7 +853,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         name = "ukernels_fma3_ovr_win32",
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
             "-mfma",
@@ -894,7 +894,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -948,7 +948,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         name = "ukernels_avx2_ovr_win32",
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
             "-mavx2",
@@ -994,7 +994,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -1039,7 +1039,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -1108,7 +1108,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         name = "ukernels_avx512_ovr_win32",
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
             "-mavx512f",
@@ -1141,7 +1141,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -1206,7 +1206,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         name = "ukernels_avx512skx_ovr_win32",
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
             "-mavx512f",
@@ -1259,7 +1259,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
             "-fno-fast-math",
@@ -1301,7 +1301,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -1350,7 +1350,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ],
@@ -1378,7 +1378,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -1430,7 +1430,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ],
@@ -1460,7 +1460,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
             "-Wno-error=missing-braces",  # required since the SGX toolchain does not have this by default
@@ -1532,7 +1532,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -1582,7 +1582,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -1645,7 +1645,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -1690,7 +1690,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -1729,7 +1729,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -1774,7 +1774,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -1815,7 +1815,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -1860,7 +1860,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -1900,7 +1900,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -1959,7 +1959,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }) if is_arvr_mode() else [],
         headers = get_xnnpack_headers(),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -2004,7 +2004,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ("XNNPACK/src", "**/*.S"),
         ]),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -2053,7 +2053,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ("XNNPACK/src", "**/*.S"),
         ]),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
         ] + select({
@@ -2088,7 +2088,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
 
     fb_xplat_cxx_library(
         name = "arm64_lib",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         labels = labels,
         fbandroid_link_whole = True,
         preferred_linkage = "static",
@@ -2114,7 +2114,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
 
     fb_xplat_cxx_library(
         name = "x86_and_x86_64_lib",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         labels = labels,
         preferred_linkage = "static",
         visibility = ["PUBLIC"],
@@ -2138,7 +2138,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
 
     fb_xplat_cxx_library(
         name = "x86_and_x86_64_lib_ovr_win32",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         labels = labels,
         preferred_linkage = "static",
         visibility = ["PUBLIC"],
@@ -2165,7 +2165,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
 
     fb_xplat_cxx_library(
         name = "arm_lib",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         labels = labels,
         preferred_linkage = "static",
         visibility = ["PUBLIC"],
@@ -2193,7 +2193,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
 
     fb_xplat_cxx_library(
         name = "armv7_lib",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         labels = labels,
         fbandroid_link_whole = True,
         preferred_linkage = "static",
@@ -2209,7 +2209,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
 
     fb_xplat_cxx_library(
         name = "prod_ukernels",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         labels = labels,
         fbandroid_link_whole = True,
         preferred_linkage = "static",
@@ -2234,7 +2234,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
 
     fb_xplat_cxx_library(
         name = "XNNPACK",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         labels = labels,
         deps = [
             ":tables",
