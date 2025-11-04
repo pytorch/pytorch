@@ -20,6 +20,19 @@ from tools.stats.upload_stats_lib import (
 )
 
 
+def should_upload_full_test_run(head_branch: str | None, head_repository: str) -> bool:
+    """Return True if we should upload the full test_run dataset.
+
+    Rules:
+    - Only for the main repository (pytorch/pytorch)
+    - If head_branch is 'main', or a tag of form 'trunk/{40-hex-sha}'
+    """
+    is_trunk_tag = bool(re.fullmatch(r"trunk/[0-9a-fA-F]{40}", (head_branch or "")))
+    return head_repository == "pytorch/pytorch" and (
+        head_branch == "main" or is_trunk_tag
+    )
+
+
 def parse_xml_report(
     tag: str,
     report: Path,
@@ -288,13 +301,8 @@ if __name__ == "__main__":
         remove_nan_inf(failed_tests_cases),
     )
 
-    # Upload full test_run only for trusted refs:
-    #  - main branch
-    #  - trunk/{sha} tag (40-hex sha)
-    is_trunk_tag = bool(re.fullmatch(r"trunk/[0-9a-fA-F]{40}", args.head_branch or ""))
-    if args.head_repository == "pytorch/pytorch" and (
-        args.head_branch == "main" or is_trunk_tag
-    ):
+    # Upload full test_run only for trusted refs (main or trunk/{sha} tags)
+    if should_upload_full_test_run(args.head_branch, args.head_repository):
         # For jobs on main branch, upload everything.
         upload_workflow_stats_to_s3(
             args.workflow_run_id,
