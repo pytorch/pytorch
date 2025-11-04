@@ -840,7 +840,7 @@ class ScheduleGPipe(PipelineScheduleSingle):
             for mb_idx in range(self._n_microbatches):
                 actions.append(_Action(rank, _ComputationType.FULL_BACKWARD, mb_idx))
 
-            pipeline_order[rank] = _add_reduce_grad(actions)
+            pipeline_order[rank] = _add_reduce_grad(actions, self._n_microbatches)
 
         return pipeline_order  # type: ignore[return-value]
 
@@ -1060,34 +1060,21 @@ class Schedule1F1B(PipelineScheduleSingle):
                     backward_mb += 1
                     remaining_backward -= 1
 
-            pipeline_order[rank] = _add_reduce_grad(actions)
+            pipeline_order[rank] = _add_reduce_grad(actions, self._n_microbatches)
         return pipeline_order
 
 
 def _requires_reduce_grad(action_type: _ComputationType) -> bool:
-    return action_type in (I, W, B)
+    return action_type in (W, B)
 
 
-def _add_reduce_grad(actions: list[Optional[_Action]]) -> list[Optional[_Action]]:
+def _add_reduce_grad(
+    actions: list[Optional[_Action]], n_microbatches: int
+) -> list[Optional[_Action]]:
     """
     REDUCE_GRAD refers to joint across minibatches grad reduction.
     reduce_grad frees memory and we want to schedule it just after the last "backward"-like stage.
     """
-    stage_with_bw_count: dict[int, int] = defaultdict(int)
-
-    def _count_leaf_action(a):
-        if _requires_reduce_grad(a.computation_type):
-            stage_with_bw_count[a.stage_index] += 1
-
-    for a in actions:
-        if a is None:
-            continue
-        if a.computation_type == OVERLAP_F_B and a.sub_actions is not None:
-            for sub_action in a.sub_actions:
-                _count_leaf_action(sub_action)
-        else:
-            _count_leaf_action(a)
-
     actions_with_reduce_grad: list[Optional[_Action]] = []
     cnt: dict[int, int] = defaultdict(int)
 
@@ -1095,7 +1082,7 @@ def _add_reduce_grad(actions: list[Optional[_Action]]) -> list[Optional[_Action]
         if _requires_reduce_grad(a.computation_type):
             stage_index = a.stage_index
             cnt[stage_index] += 1
-            if cnt[stage_index] == stage_with_bw_count[stage_index]:
+            if cnt[stage_index] == n_microbatches:
                 to_schedule.append(stage_index)
 
     for a in actions:
@@ -1967,7 +1954,8 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                     actions[rank]
                 )
                 self.pipeline_order_with_comms[rank] = _add_reduce_grad(  # type: ignore[assignment]
-                    self.pipeline_order_with_comms[rank]  # type: ignore[arg-type]
+                    self.pipeline_order_with_comms[rank],  # type: ignore[arg-type]
+                    self._n_microbatches,
                 )
 
             self.pipeline_order_with_comms = _add_send_recv(

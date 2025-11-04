@@ -46,7 +46,7 @@ import torch
 from torch import SymInt
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.graph_bytecode_inputs import (
-    get_user_object_by_index,
+    get_external_object_by_index,
     register_user_object,
 )
 from torch._dynamo.utils import (
@@ -178,7 +178,6 @@ from .ctx_manager import (
     ErrorOnGraphBreakVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
-    StreamContextVariable,
 )
 from .dicts import (
     ConstDictVariable,
@@ -259,7 +258,7 @@ from .nn_module import (
 from .optimizer import OptimizerVariable
 from .script_object import TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
-from .streams import EventVariable, StreamVariable
+from .streams import EventVariable, StreamContextVariable, StreamVariable
 from .tensor import (
     NumpyNdarrayVariable,
     supported_const_comparison_op_values,
@@ -629,7 +628,7 @@ class VariableBuilder:
                 lambda self, value: LambdaVariable(
                     _dataclasses_fields_lambda,
                     source=self.source,
-                    **self.install_guards(GuardBuilder.FUNCTION_MATCH),
+                    **self.install_guards(GuardBuilder.CLOSURE_MATCH),
                 ),
             ),
             (torch.__version__, lambda self, value: TorchVersionVariable()),
@@ -927,8 +926,10 @@ class VariableBuilder:
                     )
             elif inspect.isclass(value):
                 self.install_guards(GuardBuilder.CLASS_MATCH)
+            elif inspect.isfunction(value):
+                self.install_guards(GuardBuilder.CLOSURE_MATCH)
             elif callable(value):
-                self.install_guards(GuardBuilder.FUNCTION_MATCH)
+                self.install_guards(GuardBuilder.ID_MATCH)
             else:
                 self.install_guards(GuardBuilder.TYPE_MATCH)
             return NumpyVariable(value, source=self.source)
@@ -945,7 +946,7 @@ class VariableBuilder:
             return NumpyTypeInfoVariable(value, source=self.source)
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            self.install_guards(GuardBuilder.CLOSURE_MATCH)
             return CollectiveFunctionRewriteVariable.create(
                 self.tx,
                 value,
@@ -1052,16 +1053,16 @@ class VariableBuilder:
             stream_var = VariableBuilder(self.tx, stream_source)(value.stream)
             return StreamContextVariable.create(self.tx, stream_var)
         elif isinstance(value, torch.Stream):
+            # This refers to the device-agnostic torch.Stream
             self.install_guards(GuardBuilder.TYPE_MATCH)
             index = register_user_object(value, self.source)
             stream_proxy = self.tx.output.create_proxy(
-                "call_function", get_user_object_by_index, (index,), {}
+                "call_function", get_external_object_by_index, (index,), {}
             )
             set_example_value(stream_proxy.node, value)
             var = StreamVariable(
                 stream_proxy,
                 value,
-                value.device,
                 source=self.source,
             )
             return self.tx.output.side_effects.track_object_existing(value, var)
@@ -1076,7 +1077,7 @@ class VariableBuilder:
             index = register_user_object(value, self.source)
             event_proxy = self.tx.output.create_proxy(
                 "call_function",
-                get_user_object_by_index,
+                get_external_object_by_index,
                 (index,),
                 {},
             )
@@ -1371,7 +1372,7 @@ class VariableBuilder:
         elif isinstance(value, types.MethodWrapperType):
             # Method-wrappers are written in C, and they are not guaranteed to
             # return the same object on attribute lookup. Therefore, we cannot
-            # insert a FUNCTION_MATCH guard here. method-wrappers are very
+            # insert a ID_MATCH guard here. method-wrappers are very
             # unlikely to change, so its ok to skip the guard here.
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type) and issubclass(value, BaseException):
@@ -1810,7 +1811,7 @@ class VariableBuilder:
         ]
         self.install_guards(GuardBuilder.TYPE_MATCH)
         if isinstance(value, slice):
-            return SliceVariable(items, source=self.source)
+            return SliceVariable(items, self.tx, source=self.source)
         else:
             return RangeVariable(items, source=self.source)
 
@@ -2227,70 +2228,25 @@ class VariableBuilder:
         if isinstance(source, GradSource) and is_from_optimizer_source(source):
             guard_type = GuardBuilder.NOT_NONE_MATCH
 
-        is_dtensor = torch.distributed.is_available() and isinstance(
-            value, torch.distributed.tensor.DTensor
-        )
-        if not is_dtensor:
-            # We guard on the _local_tensor and the _spec, and therefore we dont
-            # have to guard on the outer DTensor.
-            self.install_guards(
-                functools.partial(
-                    guard_type,
-                    value=(
-                        value
-                        if isinstance(source, NumpyTensorSource)
-                        else TensorWeakRef(value)
-                    ),
-                )
+        self.install_guards(
+            functools.partial(
+                guard_type,
+                value=(
+                    value
+                    if isinstance(source, NumpyTensorSource)
+                    else TensorWeakRef(value)
+                ),
             )
+        )
 
         # We install TYPE_MATCH guards for traceable wrapper subclass object,
         # and recursively install corresponding guard for each inner attribute.
         if is_traceable_wrapper_subclass(value):
-            # Tensor subclass guards are very expensive because they are
-            # implemented in Python. Since DTensor is PyTorch-maintained class,
-            # we can skip a lot of these guards.
-            if is_dtensor:
-                self.install_guards(GuardBuilder.TYPE_MATCH)
-
-                # The inner tensor name is always _local_tensor. If its not, we
-                # raise assertion to update the check accordingly.
-                inner_tensor_name = value.__tensor_flatten__()[0][0]
-                if inner_tensor_name != "_local_tensor":
-                    raise RuntimeError(
-                        "Expecting Dtensor inner tensor name to be _local_tensor"
-                    )
-
-                # Now selectively guard on the flattening context
-                flattening_ctx = value.__tensor_flatten__()[1]
-                # This is supposed to be (self._spec, self.requires_grad)
-                if not (
-                    len(flattening_ctx) == 2
-                    and flattening_ctx[0] == value._spec
-                    and flattening_ctx[1] == value.requires_grad
-                ):
-                    # If not, raise an assertion to update to the new guards
-                    raise RuntimeError(
-                        "Expecting Dtensor flattening ctx to be _spec, requires_grad"
-                    )
-                # Guard on the dtensor spec
-                install_guard(
-                    AttrSource(self.source, "_spec").make_guard(
-                        GuardBuilder.DTENSOR_SPEC_MATCH
-                    )
-                )
-                # Move this to C++
-                install_guard(
-                    AttrSource(self.source, "requires_grad").make_guard(
-                        GuardBuilder.EQUALS_MATCH
-                    )
-                )
-            else:
-                self.install_guards(GuardBuilder.TENSOR_SUBCLASS_METADATA_MATCH)
-                self.install_guards(GuardBuilder.TYPE_MATCH)
-                install_guard(
-                    SubclassAttrListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
-                )
+            self.install_guards(GuardBuilder.TENSOR_SUBCLASS_METADATA_MATCH)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            install_guard(
+                SubclassAttrListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
+            )
 
             attrs, _ = value.__tensor_flatten__()
             for attr in attrs:
@@ -2973,12 +2929,12 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         hasattr(proxy.node.target, "__name__")
         and proxy.node.target.__name__ == "set_state"
         and isinstance(proxy.node.target.__self__, torch._C.Generator)
-        or proxy.node.target == torch.random.set_rng_state
+        or proxy.node.target is torch.random.set_rng_state
     ):
         return TorchInGraphFunctionVariable(proxy.node.target)
     elif (
-        proxy.node.target == torch._C._DisableFuncTorch
-        or proxy.node.target == torch.cuda._is_in_bad_fork
+        proxy.node.target is torch._C._DisableFuncTorch
+        or proxy.node.target is torch.cuda._is_in_bad_fork
     ):
         return UserDefinedObjectVariable(example_value)
     elif istype(example_value, torch.Size) and all(
@@ -3049,14 +3005,15 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         set_example_value(proxy.node, example_value)
         return SymNodeVariable(proxy, example_value, **options)
     elif (
-        inspect.isclass(proxy.node.target)
-        and issubclass(proxy.node.target, torch.Stream)
+        isinstance(example_value, torch.Stream)
+        and proxy.node.target
+        in (get_external_object_by_index, torch.accelerator.current_stream)
     ) or proxy.node.target in [
         device_interface.current_stream
         for _, device_interface in get_registered_device_interfaces()
     ]:
         set_example_value(proxy.node, example_value)
-        return StreamVariable(proxy, example_value, example_value.device, **options)
+        return StreamVariable(proxy, example_value, **options)
     elif (
         inspect.isclass(proxy.node.target)
         and issubclass(proxy.node.target, torch.Event)
@@ -3770,9 +3727,7 @@ class SourcelessBuilder:
                 pass  # failthrough to unimplemented branch
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
-        elif isinstance(
-            value, (torch.utils._pytree.TreeSpec, torch.utils._pytree.LeafSpec)
-        ):
+        elif isinstance(value, torch.utils._pytree.TreeSpec):
             return UserDefinedObjectVariable(value)
         elif PlacementVariable.is_placement(value):
             return PlacementVariable(value)
@@ -3788,7 +3743,7 @@ class SourcelessBuilder:
             return torch._dynamo.variables.higher_order_ops.FlexAttentionBackwardHighOrderVariable(
                 value
             )
-        elif isinstance(value, types.GenericAlias):
+        elif isinstance(value, (types.GenericAlias, types.UnionType)):
             return TypingVariable(value)
         elif is_namedtuple(value):
             output = [

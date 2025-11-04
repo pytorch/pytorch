@@ -11,18 +11,24 @@ architectures:
     * Latest XPU
 """
 
+import json
 import os
+import re
+from pathlib import Path
 from typing import Optional
 
 
-# NOTE: Please also update the CUDA sources in `PIP_SOURCES` in tools/nightly.py when changing this
+SCRIPT_DIR = Path(__file__).absolute().parent
+REPO_ROOT = SCRIPT_DIR.parent.parent
+
+
 CUDA_ARCHES = ["12.6", "12.8", "12.9", "13.0"]
 CUDA_STABLE = "12.8"
 CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
     "12.8": "12.8.1",
     "12.9": "12.9.1",
-    "13.0": "13.0.2",
+    "13.0": "13.0.0",
 }
 CUDA_ARCHES_CUDNN_VERSION = {
     "12.6": "9",
@@ -31,8 +37,7 @@ CUDA_ARCHES_CUDNN_VERSION = {
     "13.0": "9",
 }
 
-# NOTE: Please also update the ROCm sources in `PIP_SOURCES` in tools/nightly.py when changing this
-ROCM_ARCHES = ["6.4", "7.0"]
+ROCM_ARCHES = ["7.0", "7.1"]
 
 XPU_ARCHES = ["xpu"]
 
@@ -56,7 +61,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu12==3.3.24; platform_system == 'Linux' | "
+        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
         "nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' | "
         "nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' | "
         "nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux'"
@@ -73,7 +78,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusparse-cu12==12.5.8.93; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu12==3.3.24; platform_system == 'Linux' | "
+        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
         "nvidia-nvtx-cu12==12.8.90; platform_system == 'Linux' | "
         "nvidia-nvjitlink-cu12==12.8.93; platform_system == 'Linux' | "
         "nvidia-cufile-cu12==1.13.1.3; platform_system == 'Linux'"
@@ -90,7 +95,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusparse-cu12==12.5.10.65; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu12==3.3.20; platform_system == 'Linux' | "
+        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
         "nvidia-nvtx-cu12==12.9.79; platform_system == 'Linux' | "
         "nvidia-nvjitlink-cu12==12.9.86; platform_system == 'Linux' | "
         "nvidia-cufile-cu12==1.14.1.1; platform_system == 'Linux'"
@@ -107,7 +112,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusparse==12.6.3.3; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.0; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.27.7; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu13==3.3.24; platform_system == 'Linux' | "
+        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux' | "
         "nvidia-nvtx==13.0.85; platform_system == 'Linux' | "
         "nvidia-nvjitlink==13.0.88; platform_system == 'Linux' | "
         "nvidia-cufile==1.15.1.6; platform_system == 'Linux'"
@@ -137,9 +142,48 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
 }
 
 
-def get_nccl_wheel_version(arch_version: str) -> str:
-    import re
+# Used by tools/nightly.py
+PYTORCH_NIGHTLY_PIP_INDEX_URL = "https://download.pytorch.org/whl/nightly"
+NIGHTLY_SOURCE_MATRIX = {
+    "cpu": dict(
+        name="cpu",
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cpu",
+        supported_platforms=["Linux", "macOS", "Windows"],
+        accelerator="cpu",
+    )
+}
+CUDA_NIGHTLY_SOURCE_MATRIX = {
+    f"cuda-{major}.{minor}": dict(
+        name=f"cuda-{major}.{minor}",
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu{major}{minor}",
+        supported_platforms=["Linux", "Windows"],
+        accelerator="cuda",
+    )
+    for major, minor in (map(int, version.split(".")) for version in CUDA_ARCHES)
+}
+ROCM_NIGHTLY_SOURCE_MATRIX = {
+    f"rocm-{major}.{minor}": dict(
+        name=f"rocm-{major}.{minor}",
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm{major}.{minor}",
+        supported_platforms=["Linux"],
+        accelerator="rocm",
+    )
+    for major, minor in (map(int, version.split(".")) for version in ROCM_ARCHES)
+}
+XPU_NIGHTLY_SOURCE_MATRIX = {
+    "xpu": dict(
+        name="xpu",
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/xpu",
+        supported_platforms=["Linux"],
+        accelerator="xpu",
+    )
+}
+NIGHTLY_SOURCE_MATRIX.update(CUDA_NIGHTLY_SOURCE_MATRIX)
+NIGHTLY_SOURCE_MATRIX.update(ROCM_NIGHTLY_SOURCE_MATRIX)
+NIGHTLY_SOURCE_MATRIX.update(XPU_NIGHTLY_SOURCE_MATRIX)
 
+
+def get_nccl_wheel_version(arch_version: str) -> str:
     requirements = map(
         str.strip, re.split("[;|]", PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version])
     )
@@ -147,17 +191,14 @@ def get_nccl_wheel_version(arch_version: str) -> str:
 
 
 def read_nccl_pin(arch_version: str) -> str:
-    from pathlib import Path
-
-    nccl_pin_path = os.path.join(
-        Path(__file__).absolute().parents[2],
-        ".ci",
-        "docker",
-        "ci_commit_pins",
-        f"nccl-cu{arch_version[:2]}.txt",
+    nccl_pin_path = (
+        REPO_ROOT
+        / ".ci"
+        / "docker"
+        / "ci_commit_pins"
+        / f"nccl-cu{arch_version[:2]}.txt"
     )
-    with open(nccl_pin_path) as f:
-        return f.read().strip()
+    return nccl_pin_path.read_text().strip()
 
 
 def validate_nccl_dep_consistency(arch_version: str) -> None:
@@ -165,7 +206,8 @@ def validate_nccl_dep_consistency(arch_version: str) -> None:
     wheel_ver = get_nccl_wheel_version(arch_version)
     if not nccl_release_tag.startswith(f"v{wheel_ver}"):
         raise RuntimeError(
-            f"{arch_version} NCCL release tag version {nccl_release_tag} does not correspond to wheel version {wheel_ver}"
+            f"{arch_version} NCCL release tag version {nccl_release_tag} "
+            f"does not correspond to wheel version {wheel_ver}"
         )
 
 
@@ -412,7 +454,14 @@ def generate_wheels_matrix(
     return ret
 
 
-validate_nccl_dep_consistency("13.0")
-validate_nccl_dep_consistency("12.9")
-validate_nccl_dep_consistency("12.8")
-validate_nccl_dep_consistency("12.6")
+arch_version = ""
+for arch_version in CUDA_ARCHES:
+    validate_nccl_dep_consistency(arch_version)
+del arch_version
+
+
+if __name__ == "__main__":
+    # Used by tools/nightly.py
+    (SCRIPT_DIR / "nightly_source_matrix.json").write_text(
+        json.dumps(NIGHTLY_SOURCE_MATRIX, indent=4) + "\n"
+    )

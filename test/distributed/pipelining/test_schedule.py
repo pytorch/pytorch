@@ -603,7 +603,7 @@ class TestScheduleLowering(TestCase):
         compute_sch = self._parse_actions(test_info["compute"])
         expected_comms_sch = self._parse_actions(test_info["comms"])
 
-        comms_sch = _add_reduce_grad(compute_sch)
+        comms_sch = _add_reduce_grad(compute_sch, 2)
         for expected, actual in zip(expected_comms_sch, comms_sch, strict=True):
             self.assertEqual(
                 expected,

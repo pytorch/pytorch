@@ -23,6 +23,7 @@ import operator
 import textwrap
 import traceback
 import types
+from collections.abc import Sequence
 from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
@@ -66,9 +67,9 @@ from ..utils import (
     set_example_value,
     tensortype_to_dtype,
 )
-from .base import AttributeMutationNew, VariableTracker
+from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
-from .lists import SizeVariable
+from .lists import ListIteratorVariable, SizeVariable
 from .user_defined import UserDefinedClassVariable
 
 
@@ -427,7 +428,7 @@ class TensorVariable(VariableTracker):
         # Today, var_getattr returns GetAttrVariable for both non-existent
         # attributes and existing attributes. This is a bug and requires more
         # deep dive.
-        if name in ("size", "stride"):
+        if name in ("size", "stride", "__iter__"):
             return ConstantVariable(True)
 
         try:
@@ -631,7 +632,7 @@ class TensorVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "list[VariableTracker]",
+        args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from .builder import SourcelessBuilder, VariableBuilder
@@ -1078,6 +1079,14 @@ class TensorVariable(VariableTracker):
 
         tx = InstructionTranslator.current_tx()
         return self.call_method(tx, "size", [ConstantVariable.create(0)], {})
+
+    def method___iter__(self):
+        from ..symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        return ListIteratorVariable(
+            self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
+        )
 
     def method_addcmul_(self, tensor1, tensor2, *, value=None):
         from ..symbolic_convert import InstructionTranslator
@@ -1612,7 +1621,7 @@ class NumpyNdarrayVariable(TensorVariable):
                     ),
                     hints=[*graph_break_hints.FUNDAMENTAL],
                 )
-        if name in ["__len__", "size", "tolist"]:
+        if name in ["__len__", "size", "tolist", "__iter__"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)
         if name in ("tostring", "tobytes", "__delattr__"):

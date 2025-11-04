@@ -252,7 +252,7 @@ class _PipelineStageBase(ABC):
         self._outputs_meta = tuple(outputs_meta)  # type: ignore[assignment]
 
     def get_outputs_meta(self) -> tuple[torch.Tensor, ...]:
-        """Get the output metadata (meta tensors) reprensenting the outputs of this stage"""
+        """Get the output metadata (meta tensors) representing the outputs of this stage"""
         assert self._outputs_meta is not None, (
             "Attempted to get_outputs_meta() without configuring output meta"
         )
@@ -723,7 +723,7 @@ class _PipelineStageBase(ABC):
         )
         self._validate_fwd_outputs(output_tuple)
 
-        # We return the original user-provied output, not normalized to tuple.
+        # We return the original user-provided output, not normalized to tuple.
         # See [Note: pipeline model output type]
         return output
 
@@ -979,6 +979,10 @@ class _PipelineStageBase(ABC):
         return ops
 
     def perform_reduce_grad(self, grad_scale_factor: int):
+        """
+        Called as a part of schedule IR.
+        REDUCE_GRAD action is scheduled after all microbatches W, B actions.
+        """
         # Manually call post backward for FSDP
         if isinstance(self.submod, FSDPModule):
             fsdp_module = self.submod
@@ -1189,7 +1193,7 @@ class _PipelineStage(_PipelineStageBase):
             #   No need to send back to rank 0
             # - If user.target is stage_backward:
             #   No need to send assuming submod output is stored locally or
-            #   should be re-calucated in case of activation checkpointing
+            #   should be re-calculated in case of activation checkpointing
             return None
 
     def _create_act_send_info(self):

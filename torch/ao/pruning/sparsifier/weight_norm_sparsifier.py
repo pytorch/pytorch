@@ -95,7 +95,8 @@ class WeightNormSparsifier(BaseSparsifier):
     ):
         r"""Creates patches of size `block_shape` after scattering the indices."""
         if mask is None:
-            assert input_shape is not None
+            if input_shape is None:
+                raise AssertionError("input_shape must be provided when mask is None")
             mask = torch.ones(input_shape, device=device)
         mask.scatter_(dim=dim, index=indices, value=0)
         mask.data = F.fold(
