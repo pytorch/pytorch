@@ -167,9 +167,20 @@ class C10_API intrusive_ptr_target {
   // Note [PyObject preservation for Tensor and Storages]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   // intrusive_ptr has special support for preserving PyObject wrappers
-  // for TensorImpl and StorageImpl. The most significant bit of the
-  // combined_refcount_ is used to indicate whether the object has a
-  // PyObject wrapper. TODO(sgross) expand on this note.
+  // for TensorImpl and StorageImpl. The most significant bit (kHasPyObject) of
+  // the combined_refcount_ is used to indicate whether the object has a
+  // PyObject wrapper.
+  //
+  //   - The PyObject, if it exists, holds a strong reference to the
+  //     intrusive_ptr_target.
+  //
+  //   - When the refcount goes from 1 to 2, we incref the PyObject.
+  //
+  //   - When the refcount goes from 2 to 1, we decref the PyObject.
+  //
+  // In other words, the intrusive_ptr keeps the PyObject alive as long as there
+  // are other C++ references to the intrusive_ptr_target.
+
   mutable std::atomic<uint64_t> combined_refcount_;
   static_assert(sizeof(std::atomic<uint64_t>) == 8);
   static_assert(alignof(std::atomic<uint64_t>) == 8);

@@ -40,6 +40,11 @@ struct C10_API PyObjectSlot {
     return pyobj != nullptr && load_pyobj_interpreter()->refcnt(pyobj) == 1;
   }
 
+  void clear() {
+    pyobj_.store(nullptr, std::memory_order_relaxed);
+    pyobj_interpreter_.store(nullptr, std::memory_order_relaxed);
+  }
+
   // Non thread-safe swap
   void swap(PyObjectSlot& other) noexcept {
     PyInterpreter* tmp_interpreter =

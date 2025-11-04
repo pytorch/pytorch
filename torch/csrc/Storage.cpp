@@ -89,6 +89,7 @@ PyObject* THPStorage_Wrap(c10::Storage storage) {
 
 static void THPStorage_dealloc(PyObject* self) {
   THPStorage* _self = reinterpret_cast<THPStorage*>(self);
+  _self->cdata.unsafeGetStorageImpl()->pyobj_slot()->clear();
   _self->cdata.~Storage();
   Py_TYPE(_self)->tp_free(self);
 }
