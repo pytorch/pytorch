@@ -535,7 +535,7 @@ class DTensorExportTest(TestCase):
 
         self.assertEqual(fn(z), gm(z)[0])
 
-    def test_dtensor_data_dependent_index(self):
+    def test_dtensor_data_dependent_index_and_slice(self):
         device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
 
         class Foo(torch.nn.Module):
@@ -547,6 +547,16 @@ class DTensorExportTest(TestCase):
         x_dt = distribute_tensor(x, device_mesh, placements=[Replicate()])
         y_dt = distribute_tensor(y, device_mesh, placements=[Replicate()])
         _dynamo_graph_capture_for_export(Foo())(x_dt, y_dt)
+
+        class Bar(torch.nn.Module):
+            def forward(self, x):
+                val = torch.clamp(x.max(), min=1).item()
+                torch._check(val >= 1)
+                return x[:val]
+
+        x = torch.randint(1000, (4, 64, 16))
+        x_dt = distribute_tensor(x, device_mesh, placements=[Replicate()])
+        _dynamo_graph_capture_for_export(Bar())(x_dt)
 
 
 instantiate_parametrized_tests(DTensorExportTest)
