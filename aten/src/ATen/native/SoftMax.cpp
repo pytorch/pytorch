@@ -176,7 +176,7 @@ void host_softmax(
   scalar_t* input_data_base = input.data_ptr<scalar_t>();
   scalar_t* output_data_base = output.data_ptr<scalar_t>();
   bool* mask_data_base = mask;
-  int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
+  int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, static_cast<int64_t>(1));
   parallel_for(
       0, outer_size * inner_size, grain_size,
       [&](int64_t begin, int64_t end) {
@@ -265,7 +265,7 @@ void host_softmax_backward(
   scalar_t* output_data_base = output.data_ptr<scalar_t>();
   scalar_t* gradOutput_data_base = grad.data_ptr<scalar_t>();
   bool* mask_data_base = mask;
-  int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
+  int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, static_cast<int64_t>(1));
   parallel_for(
       0, outer_size * inner_size, grain_size, [&](int64_t begin, int64_t end) {
         for (const auto i : c10::irange(begin, end)) {

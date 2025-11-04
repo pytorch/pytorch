@@ -157,7 +157,7 @@ Tensor& squeeze__batching_rule(Tensor& self) {
   const auto physical_shape = batched->value().sizes();
   auto how_many_dims_of_size_1_before_bdim = 0;
   for (const auto i : c10::irange(0, physical_shape.size())) {
-    if ((int64_t)i == bdim) {
+    if (static_cast<int64_t>(i) == bdim) {
       break;
     }
     if (physical_shape[i] == 1) {
@@ -573,7 +573,7 @@ Tensor cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
   }
 
   auto new_dim = bdim_size.has_value() ? dim + 1 : dim;
-  std::optional<int64_t> new_bdim = bdim_size.has_value() ? std::make_optional((int64_t)0) : std::nullopt;
+  std::optional<int64_t> new_bdim = bdim_size.has_value() ? std::make_optional(static_cast<int64_t>(0)) : std::nullopt;
   auto result = at::cat(tensors_to_cat, new_dim);
   return makeBatched(result, new_bdim, get_current_level());
 }
@@ -733,7 +733,7 @@ TORCH_LIBRARY_IMPL(_, FuncTorchBatched, m) {
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
-  // still legacy b/c teturns multiple tensors
+  // still legacy b/c returns multiple tensors
   m.impl("split.Tensor", split_batching_rule);
   m.impl("split_with_sizes", split_with_sizes_batching_rule);
   m.impl("split_with_sizes_copy", split_with_sizes_copy_batching_rule);

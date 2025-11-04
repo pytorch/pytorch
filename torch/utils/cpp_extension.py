@@ -290,7 +290,8 @@ def _get_icpx_version() -> str:
     match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.decode().strip())
     version = ['0', '0', '0'] if match is None else list(match.groups())
     version = list(map(int, version))
-    assert len(version) == 3, "Failed to parse DPC++ compiler version"
+    if len(version) != 3:
+        raise AssertionError("Failed to parse DPC++ compiler version")
     # Aligning version format with what torch.version.xpu() returns
     return f"{version[0]}{version[1]:02}{version[2]:02}"
 
@@ -324,7 +325,8 @@ def _get_sycl_device_flags(cflags):
     # We need last occurrence of -fsycl-targets as it will be the one taking effect.
     # So searching in reversed list.
     flags = [f for f in reversed(cflags) if f.startswith('-fsycl-targets=')]
-    assert flags, "bug: -fsycl-targets should have been amended to cflags"
+    if not flags:
+        raise AssertionError("bug: -fsycl-targets should have been amended to cflags")
 
     arch_list = _get_sycl_arch_list()
     if arch_list != '':
@@ -662,7 +664,8 @@ class BuildExtension(build_ext):
             extension = next(extension_iter, None)
 
         if sycl_ext:
-            assert self.use_ninja, "ninja is required to build sycl extensions."
+            if not self.use_ninja:
+                raise AssertionError("ninja is required to build sycl extensions.")
 
         if cuda_ext and not IS_HIP_EXTENSION:
             _check_cuda_version(compiler_name, compiler_version)
@@ -694,7 +697,10 @@ class BuildExtension(build_ext):
             self._define_torch_extension_name(extension)
 
             if 'nvcc_dlink' in extension.extra_compile_args:
-                assert self.use_ninja, f"With dlink=True, ninja is required to build cuda extension {extension.name}."
+                if not self.use_ninja:
+                    raise AssertionError(
+                        f"With dlink=True, ninja is required to build cuda extension {extension.name}."
+                    )
 
         # Register .cu, .cuh, .hip, .mm and .sycl as valid source extensions.
         # NOTE: At the moment .sycl is not a standard extension for SYCL supported
@@ -788,7 +794,7 @@ class BuildExtension(build_ext):
 
             # Use absolute path for output_dir so that the object file paths
             # (`objects`) get generated with absolute paths.
-            # pyrefly: ignore  # no-matching-overload
+            # pyrefly: ignore [no-matching-overload]
             output_dir = os.path.abspath(output_dir)
 
             # See Note [Absolute include_dirs]
@@ -979,7 +985,7 @@ class BuildExtension(build_ext):
                                    is_standalone=False):
             if not self.compiler.initialized:
                 self.compiler.initialize()
-            # pyrefly: ignore  # no-matching-overload
+            # pyrefly: ignore [no-matching-overload]
             output_dir = os.path.abspath(output_dir)
 
             # Note [Absolute include_dirs]
@@ -1531,7 +1537,7 @@ def include_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str
         # Support CUDA_INC_PATH env variable supported by CMake files
         if (cuda_inc_path := os.environ.get("CUDA_INC_PATH", None)) and \
                 cuda_inc_path != '/usr/include':
-            # pyrefly: ignore  # unbound-name
+
             paths.append(cuda_inc_path)
         if CUDNN_HOME is not None:
             paths.append(os.path.join(CUDNN_HOME, 'include'))
@@ -2573,7 +2579,7 @@ def _get_num_workers(verbose: bool) -> Optional[int]:
 def _get_vc_env(vc_arch: str) -> dict[str, str]:
     try:
         from setuptools import distutils  # type: ignore[attr-defined]
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         return distutils._msvccompiler._get_vc_env(vc_arch)
     except AttributeError:
         try:
@@ -2653,9 +2659,11 @@ def _import_module_from_library(module_name, path, is_python_module):
     if is_python_module:
         # https://stackoverflow.com/questions/67631/how-to-import-a-module-given-the-full-path
         spec = importlib.util.spec_from_file_location(module_name, filepath)
-        assert spec is not None
+        if spec is None:
+            raise AssertionError(f"Failed to create spec for module {module_name} at {filepath}")
         module = importlib.util.module_from_spec(spec)
-        assert isinstance(spec.loader, importlib.abc.Loader)
+        if not isinstance(spec.loader, importlib.abc.Loader):
+            raise AssertionError("spec.loader is not a valid importlib Loader")
         spec.loader.exec_module(module)
         return module
     else:
@@ -2857,8 +2865,10 @@ e.
     ldflags = sanitize_flags(ldflags)
 
     # Sanity checks...
-    assert len(sources) == len(objects)
-    assert len(sources) > 0
+    if len(sources) != len(objects):
+        raise AssertionError("sources and objects lists must be the same length")
+    if len(sources) == 0:
+        raise AssertionError("At least one source is required to build a library")
 
     compiler = get_cxx_compiler()
 
@@ -2937,7 +2947,7 @@ e.
 
     # Emit one build rule per source to enable incremental build.
     build = []
-    for source_file, object_file in zip(sources, objects):
+    for source_file, object_file in zip(sources, objects, strict=True):
         is_cuda_source = _is_cuda_file(source_file) and with_cuda
         is_sycl_source = _is_sycl_file(source_file) and with_sycl
         if is_cuda_source:
