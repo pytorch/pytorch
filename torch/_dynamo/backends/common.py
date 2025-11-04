@@ -104,7 +104,7 @@ class AotAutograd:
 
         # debug asserts slow down compile time noticeably,
         # So only default them on when the aot_eager backend is used.
-        if self.kwargs.get("fw_compiler", None) == nop:
+        if self.kwargs.get("fw_compiler", None) is nop:
             patch_config: contextlib.AbstractContextManager[Any] = patch(
                 "functorch.compile.config.debug_assert", True
             )

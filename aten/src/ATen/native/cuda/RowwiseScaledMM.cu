@@ -54,7 +54,6 @@ namespace {
 using DtypeScale = float;
 using DtypeAccum = float;
 using DtypeEpilogue = float;
-using DtypeOutput = cutlass::bfloat16_t;
 
 using Multiply = cutlass::epilogue::fusion::Sm90Compute<
     cutlass::multiplies,
@@ -65,12 +64,6 @@ using Multiply = cutlass::epilogue::fusion::Sm90Compute<
 using Add = cutlass::epilogue::fusion::Sm90Compute<
     cutlass::plus,
     DtypeEpilogue,
-    DtypeEpilogue,
-    cutlass::FloatRoundStyle::round_to_nearest>;
-
-using Cast = cutlass::epilogue::fusion::Sm90Compute<
-    cutlass::epilogue::thread::Identity,
-    DtypeOutput,
     DtypeEpilogue,
     cutlass::FloatRoundStyle::round_to_nearest>;
 
@@ -120,7 +113,8 @@ template <
     typename FastAccum,
     typename DtypeA,
     typename DtypeB,
-    typename DtypeBias>
+    typename DtypeBias,
+    typename DtypeOutput>
 void f8f8bf16_rowwise_impl(
     at::Tensor XQ, // FP8
     at::Tensor WQ, // FP8
@@ -181,6 +175,11 @@ void f8f8bf16_rowwise_impl(
       WScale,
       cutlass::epilogue::fusion::Sm90EVT<Multiply, XScale, Accum>>;
 
+  using Cast = cutlass::epilogue::fusion::Sm90Compute<
+      cutlass::epilogue::thread::Identity,
+      DtypeOutput,
+      DtypeEpilogue,
+      cutlass::FloatRoundStyle::round_to_nearest>;
   using EpilogueEVT = cutlass::epilogue::fusion::Sm90EVT<
       Cast,
       cutlass::epilogue::fusion::Sm90EVT<
@@ -313,7 +312,8 @@ template <
     typename FastAccum,
     typename DtypeA,
     typename DtypeB,
-    typename DtypeBias>
+    typename DtypeBias,
+    typename DtypeOutput>
 void f8f8bf16_rowwise_impl_sm100_sm120(
     at::Tensor XQ, // FP8
     at::Tensor WQ, // FP8
@@ -372,6 +372,11 @@ void f8f8bf16_rowwise_impl_sm100_sm120(
       WScale,
       cutlass::epilogue::fusion::Sm90EVT<Multiply, XScale, Accum>>;
 
+  using Cast = cutlass::epilogue::fusion::Sm90Compute<
+      cutlass::epilogue::thread::Identity,
+      DtypeOutput,
+      DtypeEpilogue,
+      cutlass::FloatRoundStyle::round_to_nearest>;
   using EpilogueEVT = cutlass::epilogue::fusion::Sm90EVT<
       Cast,
       cutlass::epilogue::fusion::Sm90EVT<
@@ -498,7 +503,8 @@ template <
     typename FastAccum,
     typename DtypeA,
     typename DtypeB,
-    typename DtypeBias>
+    typename DtypeBias,
+    typename DtypeOutput>
 void f8f8bf16_rowwise_impl_sm89(
     at::Tensor XQ, // FP8
     at::Tensor WQ, // FP8
@@ -765,7 +771,8 @@ template <
     typename FastAccum,
     typename DtypeA,
     typename DtypeB,
-    typename DtypeBias>
+    typename DtypeBias,
+    typename DtypeOutput>
 void handle_transposition(
     at::Tensor XQ,
     at::Tensor WQ,
@@ -782,7 +789,8 @@ void handle_transposition(
         FastAccum,
         DtypeA,
         DtypeB,
-        DtypeBias>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
+        DtypeBias,
+        DtypeOutput>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
   } else {
     dispatch_fp8_rowwise_kernel_on_tile_size<
         ClusterShape,
@@ -791,7 +799,8 @@ void handle_transposition(
         FastAccum,
         DtypeB,
         DtypeA,
-        DtypeBias>(WQ.t(), XQ.t(), w_scale.t(), x_scale.t(), bias, out.t(), swizzle);
+        DtypeBias,
+        DtypeOutput>(WQ.t(), XQ.t(), w_scale.t(), x_scale.t(), bias, out.t(), swizzle);
   }
 }
 
@@ -1027,11 +1036,19 @@ void dispatch_fp8_rowwise_kernel_on_bias_dtype(
     at::Tensor out) {
   if (bias.has_value() && bias->dtype() == at::kBFloat16) {
     dispatch_fp8_rowwise_kernel_on_input_dtypes<
+        cutlass::bfloat16_t,
         cutlass::bfloat16_t>
+        (XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
+  } else if (bias.has_value() && bias->dtype() == at::kHalf){
+    TORCH_CHECK(out.dtype() == at::kHalf, "Output should be Float16 when bias is Float16");
+    dispatch_fp8_rowwise_kernel_on_input_dtypes<
+        cutlass::half_t,
+        cutlass::half_t>
         (XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
   } else {
     dispatch_fp8_rowwise_kernel_on_input_dtypes<
-        float>
+        float,
+        cutlass::bfloat16_t>
         //Types...>
         (XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
   }
@@ -1073,14 +1090,14 @@ void check_inputs(
 
   if (bias.has_value()) {
     TORCH_CHECK(bias->device() == b.device());
-    TORCH_CHECK(bias->dtype() == at::kFloat || bias->dtype() == at::kBFloat16);
+    TORCH_CHECK(bias->dtype() == at::kFloat || bias->dtype() == at::kBFloat16 || bias->dtype() == at::kHalf);
     TORCH_CHECK(bias->dim() == 1);
     TORCH_CHECK(bias->size(0) == b.size(1));
     TORCH_CHECK(bias->stride(0) == 1);
   }
 
   TORCH_CHECK(out.device() == a.device());
-  TORCH_CHECK(out.dtype() == at::kBFloat16);
+  TORCH_CHECK(out.dtype() == at::kBFloat16 || out.dtype() == at::kHalf);
   TORCH_CHECK(out.dim() == 2);
   TORCH_CHECK(out.size(0) == a.size(0));
   TORCH_CHECK(out.size(1) == b.size(1));
