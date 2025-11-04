@@ -153,7 +153,7 @@ class PyCodegen:
             self.clear_tos()
 
     def __call__(
-        self, value: Union[VariableTracker, Source], allow_cache: bool = True
+        self, value: Union[VariableTracker, Source, None], allow_cache: bool = True
     ) -> None:
         """
         Generate code such that top-of-stack (TOS) is set to value.
@@ -188,7 +188,7 @@ class PyCodegen:
             value to handle aliasing (check side_effects.py and search for
             allow_cache=False).
 
-            b) If value.source is None, this is not allowed. TODO - assert this.
+            b) If value.source is None, this is not allowed
 
         Notable effects:
         1. `self.top_of_stack` will be set to `value`, if we don't codegen
@@ -197,6 +197,7 @@ class PyCodegen:
             `top_of_stack` or cached `tempvars`, or (b). `value` has special VT
             types like `NNModuleVariable`, etc.
         """
+        assert value is not None
         if isinstance(value, Source):
             # If the source needs to be overridden, use the new one.
             source = self.overridden_sources.get(value, value)
@@ -289,7 +290,8 @@ class PyCodegen:
             self.load_graph_output(graph_outputs[graph_outputs_key].index)
             output.append(
                 self.create_load_global(
-                    value.global_mangled_class_name(self.tx), add=True
+                    value.global_mangled_class_name(self.tx),  # type: ignore[arg-type]
+                    add=True,
                 )
             )
             output.extend(create_call_function(2, False))

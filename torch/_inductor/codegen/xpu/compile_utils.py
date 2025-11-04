@@ -47,7 +47,7 @@ def _sycl_host_compiler_options() -> list[str]:
 
 
 def _sycl_arch_as_compile_option() -> str:
-    arc_option_map = {"pvc": "intel_gpu_pvc", "bmg": "intel_gpu_bmg"}
+    arc_option_map = {"Xe12": "intel_gpu_pvc", "Xe20": "intel_gpu_bmg"}
     arch = get_xpu_arch()
     return arc_option_map.get(arch, "intel_gpu_pvc")
 
@@ -62,7 +62,7 @@ def _sycl_compiler_options() -> list[str]:
         "-DCUTLASS_VERSIONS_GENERATED",
         "-O3",
         "-DNDEBUG",
-        "-std=c++17",
+        "-std=c++20",
         "-fPIE",
         "-fPIC",
         "-fsycl",
