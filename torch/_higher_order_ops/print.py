@@ -42,7 +42,7 @@ def print_autograd(format_str: str, **kwargs: object) -> None:
 def print_proxy_torch_dispatch_mode(
     mode: ProxyTorchDispatchMode, format_str: str, **kwargs: object
 ) -> None:
-    def _unwrap_proxy(e) -> Any:
+    def _unwrap_proxy(e: tuple) -> Any:
         if not isinstance(e, (torch.Tensor, torch.SymInt, torch.SymFloat)):
             return e
         return get_proxy_slot(
