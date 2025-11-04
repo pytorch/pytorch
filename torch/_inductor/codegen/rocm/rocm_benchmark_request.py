@@ -4,7 +4,7 @@ from __future__ import annotations
 import functools
 import logging
 from ctypes import byref, c_int, c_size_t, c_void_p
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._inductor import config
@@ -17,7 +17,7 @@ from torch._inductor.codecache import DLLWrapper, ROCmCodeCache
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
 
 log = logging.getLogger(__name__)
