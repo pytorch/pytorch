@@ -46,7 +46,7 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
   parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {
     map(
         [](const Vectorized<scalar_t>& x) {
-          return Vectorized<scalar_t>((scalar_t)(1)) / x.sqrt();
+          return Vectorized<scalar_t>((scalar_t)1) / x.sqrt();
         },
         out + begin,
         in + begin,

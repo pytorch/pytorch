@@ -337,7 +337,7 @@ test_python() {
 
 test_python_smoke() {
   # Smoke tests for H100/B200
-  time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -460,29 +460,35 @@ test_inductor_shard() {
     --verbose
 }
 
-test_inductor_aoti() {
-  # docker build uses bdist_wheel which does not work with test_aot_inductor
-  # TODO: need a faster way to build
+test_inductor_aoti_cpp() {
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     # We need to hipify before building again
     python3 tools/amd_build/build_amd.py
   fi
   if [[ "$BUILD_ENVIRONMENT" == *sm86* ]]; then
-    BUILD_COMMAND=(TORCH_CUDA_ARCH_LIST=8.6 USE_FLASH_ATTENTION=OFF python -m pip install --no-build-isolation -v -e .)
     # TODO: Replace me completely, as one should not use conda libstdc++, nor need special path to TORCH_LIB
     TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="/opt/conda/envs/py_3.10/lib:${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}")
   else
-    BUILD_COMMAND=(python -m pip install --no-build-isolation -v -e .)
     TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
   fi
 
-  # aoti cmake custom command requires `torch` to be installed
-  # initialize the cmake build cache and install torch
-  /usr/bin/env "${BUILD_COMMAND[@]}"
-  # rebuild with the build cache with `BUILD_AOT_INDUCTOR_TEST` enabled
-  /usr/bin/env CMAKE_FRESH=1 BUILD_AOT_INDUCTOR_TEST=1 "${BUILD_COMMAND[@]}"
-
   /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
+}
+
+test_inductor_aoti_cross_compile_for_windows() {
+
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  # Set WINDOWS_CUDA_HOME environment variable
+  WINDOWS_CUDA_HOME="$(pwd)/win-torch-wheel-extracted"
+  export WINDOWS_CUDA_HOME
+
+  echo "WINDOWS_CUDA_HOME is set to: $WINDOWS_CUDA_HOME"
+  echo "Contents:"
+  ls -lah "$(pwd)/win-torch-wheel-extracted/lib/x64/" || true
+
+  python test/inductor/test_aoti_cross_compile_windows.py -k compile --package-dir "$TEST_REPORTS_DIR" --win-torch-lib-dir "$(pwd)/win-torch-wheel-extracted/torch/lib"
 }
 
 test_inductor_cpp_wrapper_shard() {
@@ -566,6 +572,8 @@ fi
 
 if [[ "${TEST_CONFIG}" == *cpu* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--device cpu)
+elif [[ "${TEST_CONFIG}" == *xpu* ]]; then
+  DYNAMO_BENCHMARK_FLAGS+=(--device xpu)
 else
   DYNAMO_BENCHMARK_FLAGS+=(--device cuda)
 fi
@@ -659,6 +667,8 @@ test_perf_for_dashboard() {
     device=cuda_b200
   elif [[ "${TEST_CONFIG}" == *rocm* ]]; then
     device=rocm
+  elif [[ "${TEST_CONFIG}" == *xpu* ]]; then
+    device=xpu
   fi
 
   for mode in "${modes[@]}"; do
@@ -900,7 +910,7 @@ test_inductor_set_cpu_affinity(){
   export LD_PRELOAD="$JEMALLOC_LIB":"$LD_PRELOAD"
   export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
 
-  if [[ "${TEST_CONFIG}" != *aarch64* ]]; then
+  if [[ "$(uname -m)" != "aarch64" ]]; then
     # Use Intel OpenMP for x86
     IOMP_LIB="$(dirname "$(which python)")/../lib/libiomp5.so"
     export LD_PRELOAD="$IOMP_LIB":"$LD_PRELOAD"
@@ -914,7 +924,7 @@ test_inductor_set_cpu_affinity(){
   cores=$((cpus / thread_per_core))
 
   # Set number of cores to 16 on aarch64 for performance runs
-  if [[ "${TEST_CONFIG}" == *aarch64* && $cores -gt 16 ]]; then
+  if [[ "$(uname -m)" == "aarch64" && $cores -gt 16 ]]; then
     cores=16
   fi
   export OMP_NUM_THREADS=$cores
@@ -1615,6 +1625,7 @@ test_operator_benchmark() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   TEST_DIR=$(pwd)
+  ARCH=$(uname -m)
 
   test_inductor_set_cpu_affinity
 
@@ -1629,7 +1640,7 @@ test_operator_benchmark() {
   pip_install pandas
   python check_perf_csv.py \
       --actual "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
-      --expected "expected_ci_operator_benchmark_eager_float32_cpu.csv"
+      --expected "${ARCH}_expected_ci_operator_benchmark_eager_float32_cpu.csv"
 }
 
 test_operator_microbenchmark() {
@@ -1642,7 +1653,7 @@ test_operator_microbenchmark() {
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
 
-  for OP_BENCHMARK_TESTS in matmul mm addmm bmm; do
+  for OP_BENCHMARK_TESTS in matmul mm addmm bmm conv; do
     $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}_compile.json" \
       --benchmark-name "PyTorch operator microbenchmark" --use-compile
@@ -1666,7 +1677,7 @@ if [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
     python -m pip install --pre numpy==2.0.2 scipy==1.13.1 numba==0.60.0
   fi
   python test/run_test.py --include dynamo/test_functions.py dynamo/test_unspec.py test_binary_ufuncs.py test_fake_tensor.py test_linalg.py test_numpy_interop.py test_tensor_creation_ops.py test_torch.py torch_np/test_basic.py
-elif [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" != *perf_cpu_aarch64* ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" == 'default' ]]; then
   test_linux_aarch64
 elif [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility
@@ -1717,6 +1728,8 @@ elif [[ "${TEST_CONFIG}" == *inductor-triton-cpu* ]]; then
   test_inductor_triton_cpu
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
+elif [[ "${TEST_CONFIG}" == *aoti_cross_compile_for_windows* ]]; then
+  test_inductor_aoti_cross_compile_for_windows
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
@@ -1748,7 +1761,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   else
     # Do this after checkout_install_torchbench to ensure we clobber any
     # nightlies that torchbench may pull in
-    if [[ "${TEST_CONFIG}" != *cpu* ]]; then
+    if [[ "${TEST_CONFIG}" != *cpu* && "${TEST_CONFIG}" != *xpu* ]]; then
       install_torchrec_and_fbgemm
     fi
     PYTHONPATH=/torchbench test_dynamo_benchmark torchbench "$id"
@@ -1757,7 +1770,7 @@ elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   install_torchvision
   PYTHONPATH=/torchbench test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
   if [[ "$SHARD_NUMBER" -eq "1" ]]; then
-    test_inductor_aoti
+    test_inductor_aoti_cpp
   fi
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision

@@ -69,6 +69,7 @@ from torch.fx.experimental.symbolic_shapes import (
     constrain_unify,
     ConstraintViolationError,
     expect_true,
+    guard_or_false,
     guard_size_oblivious,
     ShapeEnv,
 )
@@ -100,7 +101,6 @@ from torch.testing._internal.common_utils import (
     wrapDeterministicFlagAPITest,
 )
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.logging_utils import logs_to_string
 
 
 pytree_modules = {
@@ -110,6 +110,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
     import torch.utils._cxx_pytree as cxx_pytree
 
     pytree_modules["cxx"] = cxx_pytree
+    pytree_modules["native_optree"] = cxx_pytree.optree
 else:
     cxx_pytree = None
 
@@ -241,6 +242,57 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertTrue(same(val3, correct3))
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
+
+    def test_dynamo_inside_custom_op(self):
+        cnt = torch._dynamo.testing.InductorAndRecordGraphs()
+        cnt1 = torch._dynamo.testing.InductorAndRecordGraphs()
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            m.define("foo(Tensor x) -> Tensor")
+
+            def inner(x):
+                return x.sin().cos()
+
+            def foo_impl(x):
+                return torch.compile(inner, fullgraph=True, dynamic=True, backend=cnt)(
+                    x
+                )
+
+            m.impl("foo", foo_impl, "CompositeExplicitAutograd")
+
+            @torch.compile(fullgraph=True, dynamic=True, backend=cnt1)
+            def f(x):
+                return torch.ops.mylib.foo.default(x)
+
+            x = torch.randn(3)
+            res = f(x)
+            res1 = f(x)
+            res2 = f(x)
+            expected = x.sin().cos()
+            self.assertEqual(res, expected)
+            self.assertEqual(res1, expected)
+            self.assertEqual(res2, expected)
+            self.assertTrue(len(cnt.inductor_graphs), 1)
+            self.assertTrue(len(cnt1.inductor_graphs), 1)
+            self.assertExpectedInline(
+                str(cnt.inductor_graphs[0].graph).strip(),
+                """\
+graph():
+    %arg0_1 : [num_users=0] = placeholder[target=arg0_1]
+    %arg1_1 : [num_users=1] = placeholder[target=arg1_1]
+    %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%arg1_1,), kwargs = {})
+    %cos : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%sin,), kwargs = {})
+    return (cos,)""",
+            )
+            self.assertExpectedInline(
+                str(cnt1.inductor_graphs[0].graph).strip(),
+                """\
+graph():
+    %arg0_1 : [num_users=0] = placeholder[target=arg0_1]
+    %arg1_1 : [num_users=1] = placeholder[target=arg1_1]
+    %foo : [num_users=1] = call_function[target=torch.ops.mylib.foo.default](args = (%arg1_1,), kwargs = {})
+    return (foo,)""",
+            )
 
     @torch._dynamo.config.patch(accumulated_recompile_limit=1)
     def test_dynamo_disabled_in_custom_op_kernels(self):
@@ -605,6 +657,31 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
         fn = torch.compile(f, backend="eager", dynamic=True, fullgraph=True)
         fn(torch.tensor([5]), 5)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_cond_runtime_assert_generation(self):
+        def fn(x):
+            y = x.nonzero()  # unbacked binding u0
+            torch._check(y.shape[0] % 4 == 0)
+
+            return torch.randn(y.shape[0])
+
+        @torch.compile(dynamic=True, backend="aot_eager")
+        def foo(x):
+            b = torch.cond(
+                pred=(x.shape[0] % 4 == 0),
+                true_fn=lambda: fn(x),
+                false_fn=lambda: fn(x),
+            )
+
+            return b
+
+        foo(torch.randn(4, 4))
+        with self.assertRaisesRegex(
+            RuntimeError, "Runtime assertion failed for expression Eq(Mod(u1, 4), 0)*"
+        ):
+            foo(torch.randn(5, 5))
 
     def test_tensor_setattr_getset_descriptor(self):
         # Tensor attribute `real` has special getter/setter for complex dtype.
@@ -1194,6 +1271,20 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         r2 = opt_fn(d)
         self.assertEqual(r1, r2)
+
+    def test_tensor__iter__(self):
+        def fn(x):
+            it = x.__iter__()
+            for y in it:
+                y.add_(1.0)
+            return y
+
+        torch._dynamo.testing.standard_test(
+            self,
+            fn,
+            1,
+            expected_ops=20,
+        )
 
     def test_tensor_iter(self):
         def fn(x):
@@ -1883,6 +1974,15 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         res2, res3 = func()
         self.assertTrue(same(res2, torch.ones(2)))
         self.assertTrue(same(res3, torch.ones(3)))
+
+    def test_range___iter__(self):
+        def func(x):
+            it = range(3).__iter__()
+            return x + next(it)
+
+        opt_func = torch.compile(func, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertTrue(same(func(x), opt_func(x)))
 
     def test_range_iter_side_effects(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -4246,6 +4346,33 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
+
+    def test_tying_union_new_syntax(self):
+        def fn(x):
+            def inner1(y: torch.Tensor | None):
+                return y
+
+            def inner2(y: None | torch.Tensor):
+                return y
+
+            def inner3(y: torch.Tensor | list[int]):
+                return y
+
+            return x + 1
+
+        torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(3))
+
+    @unittest.expectedFailure
+    def test_typing_union_new_syntax_reconstruct(self):
+        def fn(x):
+            return (
+                x + 1,
+                torch.Tensor | None,
+                None | torch.Tensor,
+                torch.Tensor | list[int],
+            )
+
+        torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(3))
 
     def test_optimize_on_module(self):
         class MockModule(torch.nn.Module):
@@ -6893,7 +7020,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         # guard is expected for both static and dynamic shapes
         self.assertTrue(guard_failure is not None)
         self.assertIn(
-            """len(x) == 10""",
+            """size mismatch at index 0. expected 10, actual 9""",
             guard_failure[0],
         )
 
@@ -7701,6 +7828,19 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
 
         opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(opt_fn(torch.ones(1)), torch.tensor([3.0]))
+
+    def test_sparse_output_inductor_should_break(self) -> None:
+        # See https://github.com/pytorch/pytorch/issues/164823
+        # We want consistent semantics here
+        def forward(x: torch.Tensor) -> torch.Tensor:
+            x_sparse = x.to_sparse()
+            return x_sparse * 2
+
+        test_tensor = torch.randn(10, 10)
+        pt = forward(test_tensor)
+        aot_eager = torch.compile(forward, backend="aot_eager")(test_tensor)
+        self.assertEqual(pt, aot_eager)
+        inductor = torch.compile(forward, backend="inductor")(test_tensor)
 
     def test_nested_sequential_try_with(self):
         def fn(x):
@@ -9517,6 +9657,18 @@ def ___make_guard_fn():
         res, msg = fn(img1)
         self.assertEqual(msg, "shape torch.Size([8, 8]) batch size 1")
         self.assertEqual(res, img1 + torch.sin(img1))
+
+    def test_str___iter__(self):
+        def fn(x):
+            s = "a"
+            if next(s.__iter__()) == "a":
+                return x + 1
+            else:
+                return x
+
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
 
     def test_str_format_return2(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -12798,6 +12950,9 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
+            if pytree.__name__ == "optree":
+                # The treespec argument comes first in OpTree / JAX PyTree
+                return pytree.tree_unflatten(spec, res)
             return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
@@ -12812,6 +12967,9 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
+            if pytree.__name__ == "optree":
+                # The treespec argument comes first in OpTree / JAX PyTree
+                return pytree.tree_unflatten(spec, res)
             return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
@@ -12829,6 +12987,9 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
+            if pytree.__name__ == "optree":
+                # The treespec argument comes first in OpTree / JAX PyTree
+                return pytree.tree_unflatten(spec, res)
             return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
@@ -12846,6 +13007,9 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
+            if pytree.__name__ == "optree":
+                # The treespec argument comes first in OpTree / JAX PyTree
+                return pytree.tree_unflatten(spec, res)
             return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
@@ -12867,6 +13031,9 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
+            if pytree.__name__ == "optree":
+                # The treespec argument comes first in OpTree / JAX PyTree
+                return pytree.tree_unflatten(spec, res)
             return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
@@ -12968,7 +13135,13 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
                 torch.ones(3, 2),
                 1,
             ]
-            new_tree = pytree.tree_unflatten(new_leaves, treespec)
+            if pytree.__name__ == "optree":
+                # `None` is a internal node rather than leaf in default OpTree / JAX PyTree
+                new_leaves.pop()
+                # The treespec argument comes first in OpTree / JAX PyTree
+                new_tree = pytree.tree_unflatten(treespec, new_leaves)
+            else:
+                new_tree = pytree.tree_unflatten(new_leaves, treespec)
             return leaves, new_tree
 
         x = torch.randn(3, 2)
@@ -13023,6 +13196,10 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
 
     @parametrize_pytree_module
     def test_pytree_tree_map_only(self, pytree):
+        if not callable(getattr(pytree, "tree_map_only", None)):
+            # OpTree and JAX PyTree do not have `tree_map_only`
+            return
+
         def fn(xs):
             def mapper(x):
                 return x.clone()
@@ -13457,6 +13634,74 @@ devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(
     MiscTestsDevice, globals(), only_for=devices, allow_xpu=True
 )
+
+
+class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
+    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
+    def test_symbool_tensor_mul(self):
+        def symbool_mul_fn(x_bool, sentinel):
+            result = x_bool * sentinel
+            return result
+
+        x_true = torch.tensor([True], device="cuda")
+        x_false = torch.tensor([False], device="cuda")
+        sentinel = torch.tensor(2.0, requires_grad=True, device="cuda")
+        eager_result_true = symbool_mul_fn(x_true, sentinel)
+        eager_result_false = symbool_mul_fn(x_false, sentinel)
+        compiled_fn = torch.compile(symbool_mul_fn, fullgraph=True, dynamic=True)
+        compiled_result_true = compiled_fn(x_true, sentinel)
+        compiled_result_false = compiled_fn(x_false, sentinel)
+        self.assertEqual(eager_result_true, compiled_result_true)
+        self.assertEqual(eager_result_false, compiled_result_false)
+        self.assertEqual(compiled_result_true.item(), 2.0)
+        self.assertEqual(compiled_result_false.item(), 0.0)
+
+    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
+    def test_symbool_guard_or_false(self):
+        def symbool_guard_fn(a_bool_tensor, b):
+            u0 = a_bool_tensor.item()
+            # Make sure guard_or_false still handles SymBool produced by .item()
+            if guard_or_false(u0):
+                return b * 10
+            else:
+                return b * 100
+
+        compiled_guard_fn = torch.compile(
+            symbool_guard_fn, backend="eager", dynamic=True
+        )
+        a_true = torch.tensor(True, device="cuda")
+        a_false = torch.tensor(False, device="cuda")
+        b = torch.randn(6, device="cuda")
+        eager_res_true = symbool_guard_fn(a_true, b)
+        compiled_res_true = compiled_guard_fn(a_true, b)
+        self.assertEqual(eager_res_true, compiled_res_true)
+        eager_res_false = symbool_guard_fn(a_false, b)
+        compiled_res_false = compiled_guard_fn(a_false, b)
+        self.assertEqual(eager_res_false, compiled_res_false)
+        self.assertEqual(compiled_res_true, b * 10)
+        self.assertEqual(compiled_res_false, b * 100)
+
+    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
+    def test_symbool_tensor_mul_does_not_fail(self):
+        def fuzzed_program(arg_0, sentinel):
+            var_node_2 = arg_0
+            var_node_1 = torch.squeeze(var_node_2)
+            var_node_0 = var_node_1.item()
+            result = var_node_0 * sentinel
+            if result.is_complex():
+                result = result.real
+            return result
+
+        sentinel = torch.tensor(1.0, requires_grad=True, device="cuda")
+        arg_0 = torch.tensor([True], dtype=torch.bool, device="cuda")
+        args = (arg_0,) + (sentinel,)
+        try:
+            compiled_program = torch.compile(
+                fuzzed_program, fullgraph=True, dynamic=True
+            )
+            compiled_program(*args)
+        except Exception as e:
+            self.fail(f"torch.compile failed with error: {e}")
 
 
 if __name__ == "__main__":

@@ -7,24 +7,20 @@ appropriate locking mechanisms.
 """
 
 from abc import ABC, abstractmethod
-from contextlib import _GeneratorContextManager, contextmanager
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
 from io import BufferedReader, BufferedWriter
 from os import PathLike
 from pathlib import Path
 from threading import Lock
-from typing import Any, Callable, Generator, Optional
-from typing_extensions import override, TypeAlias
+from typing import Any
+from typing_extensions import override
 
 from filelock import FileLock
 
 from . import locks, utils
-
-
-_LockContextManager: TypeAlias = (
-    Generator[None, None, None] | _GeneratorContextManager[None, None, None]
-)
 
 
 @dataclass
@@ -71,7 +67,7 @@ class _CacheImpl(ABC):
         self._lock: Lock = Lock()
 
     @property
-    def lock(self) -> Callable[[Optional[float]], _LockContextManager]:
+    def lock(self) -> locks._LockProtocol:
         """Get a context manager for acquiring the cache lock.
 
         Locking of the cache is not done by the implementation itself, but by the
@@ -87,14 +83,14 @@ class _CacheImpl(ABC):
         """
 
         def _lock_with_timeout(
-            timeout: Optional[float] = None,
-        ) -> _LockContextManager:
+            timeout: float | None = None,
+        ) -> locks._LockContextManager:
             return locks._acquire_lock_with_timeout(self._lock, timeout)
 
         return _lock_with_timeout
 
     @abstractmethod
-    def get(self, key: Any) -> Optional[Hit]:
+    def get(self, key: Any) -> Hit | None:
         """Retrieve a value from the cache.
 
         Args:
@@ -132,7 +128,7 @@ class _InMemoryCacheImpl(_CacheImpl):
         self._memory: dict[bytes, Any] = {}
 
     @override
-    def get(self, key: Any) -> Optional[Hit]:
+    def get(self, key: Any) -> Hit | None:
         """Retrieve a value from the in-memory cache.
 
         Args:
@@ -182,7 +178,7 @@ class _OnDiskCacheImpl(_CacheImpl):
     _version: int = 0
     _version_header_length: int = 4
 
-    def __init__(self, sub_dir: Optional[PathLike[str]] = None) -> None:
+    def __init__(self, sub_dir: PathLike[str] | None = None) -> None:
         """Initialize the on-disk cache with a specified subdirectory.
 
         Args:
@@ -190,6 +186,7 @@ class _OnDiskCacheImpl(_CacheImpl):
                     Defaults to empty string if not specified.
         """
         self._cache_dir: Path = self._base_dir / (sub_dir or "")
+        # pyrefly: ignore [bad-assignment]
         self._flock: FileLock = FileLock(str(self._cache_dir / "dir.lock"))
 
     @property
@@ -246,7 +243,7 @@ class _OnDiskCacheImpl(_CacheImpl):
 
     @override
     @property
-    def lock(self) -> Callable[[Optional[float]], _LockContextManager]:
+    def lock(self) -> locks._LockProtocol:
         """Get a context manager for acquiring the file lock.
 
         Uses file locking to ensure thread safety across processes.
@@ -259,14 +256,14 @@ class _OnDiskCacheImpl(_CacheImpl):
         """
 
         def _lock_with_timeout(
-            timeout: Optional[float] = None,
-        ) -> _LockContextManager:
+            timeout: float | None = None,
+        ) -> locks._LockContextManager:
             return locks._acquire_flock_with_timeout(self._flock, timeout)
 
         return _lock_with_timeout
 
     @override
-    def get(self, key: Any) -> Optional[Hit]:
+    def get(self, key: Any) -> Hit | None:
         """Retrieve a value from the on-disk cache.
 
         Args:
@@ -281,7 +278,7 @@ class _OnDiskCacheImpl(_CacheImpl):
         if not fpath.is_file():
             return None
 
-        pickled_value: Optional[bytes] = None
+        pickled_value: bytes | None = None
         with open(fpath, "rb") as fp:
             if self._version_header_matches(fp):
                 pickled_value = fp.read()
@@ -370,7 +367,7 @@ except ModuleNotFoundError:
 
         @override
         @property
-        def lock(self) -> Callable[[Optional[float]], _LockContextManager]:
+        def lock(self) -> locks._LockProtocol:
             """Get a pseudo lock that does nothing.
 
             Most remote cache implementations don't have an ability to implement
@@ -386,14 +383,14 @@ except ModuleNotFoundError:
 
             @contextmanager
             def pseudo_lock(
-                timeout: Optional[float] = None,
+                timeout: float | None = None,
             ) -> Generator[None, None, None]:
                 yield
 
             return pseudo_lock
 
         @override
-        def get(self, key: Any) -> Optional[Hit]:
+        def get(self, key: Any) -> Hit | None:
             """Raise NotImplementedError for remote cache get operations.
 
             Args:
