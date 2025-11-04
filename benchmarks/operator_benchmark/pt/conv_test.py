@@ -38,6 +38,10 @@ class ConvTranspose1dBenchmark(op_bench.TorchBenchmarkBase):
 op_bench.generate_pt_test(
     configs.conv_1d_configs_short + configs.conv_1d_configs_long, Conv1dBenchmark
 )
+op_bench.generate_pt_gradient_test(
+    configs.remove_cpu(configs.conv_1d_configs_short + configs.conv_1d_configs_long),
+    Conv1dBenchmark,
+)
 
 
 if not torch.backends.mkldnn.is_acl_available():
@@ -103,6 +107,20 @@ op_bench.generate_pt_test(
     configs.conv_2d_pw_configs_short + configs.conv_2d_pw_configs_long,
     Conv2dPointwiseBenchmark,
 )
+op_bench.generate_pt_gradient_test(
+    configs.remove_cpu(configs.conv_2d_configs_short + configs.conv_2d_configs_long),
+    Conv2dBenchmark,
+)
+op_bench.generate_pt_gradient_test(
+    configs.remove_cpu(configs.conv_2d_configs_short + configs.conv_2d_configs_long),
+    ConvTranspose2dBenchmark,
+)
+op_bench.generate_pt_gradient_test(
+    configs.remove_cpu(
+        configs.conv_2d_pw_configs_short + configs.conv_2d_pw_configs_long
+    ),
+    Conv2dPointwiseBenchmark,
+)
 
 
 """
@@ -134,6 +152,12 @@ class ConvTranspose3dBenchmark(op_bench.TorchBenchmarkBase):
 
 op_bench.generate_pt_test(configs.conv_3d_configs_short, Conv3dBenchmark)
 op_bench.generate_pt_test(configs.conv_3d_configs_short, ConvTranspose3dBenchmark)
+op_bench.generate_pt_gradient_test(
+    configs.remove_cpu(configs.conv_3d_configs_long), Conv3dBenchmark
+)
+op_bench.generate_pt_gradient_test(
+    configs.remove_cpu(configs.conv_3d_configs_long), ConvTranspose3dBenchmark
+)
 
 
 if __name__ == "__main__":

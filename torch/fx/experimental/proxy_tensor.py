@@ -40,6 +40,7 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch._logging import trace_structured
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
@@ -2435,7 +2436,7 @@ class _MakefxTracer:
                         hint=x,
                         source=source,
                     )
-                elif isinstance(x, torch.ScriptObject):
+                elif isinstance(x, torch.ScriptObject) or is_opaque_type(type(x)):
                     return torch._library.fake_class_registry.maybe_to_fake_obj(
                         self.fake_tensor_mode, x
                     )
