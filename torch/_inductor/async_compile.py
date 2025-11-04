@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import atexit
-import contextlib
 import functools
 import json
 import logging
@@ -264,7 +263,7 @@ class AsyncCompile:
         if config.worker_start_method == "subprocess":
             # Wrapper around ProcessPoolExecutor forks in a new process we control
             pool = SubprocPool(
-                get_compile_threads(), quiesce = config.quiesce_async_compile_pool
+                get_compile_threads(), quiesce=config.quiesce_async_compile_pool
             )
         else:
             if config.worker_start_method == "spawn":
