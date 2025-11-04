@@ -186,7 +186,7 @@ bool onednn_strides_check(const Tensor& src) {
     else
       return strides[a] < strides[b];
   };
-  std::sort(perm, perm + md_ndims, idx_sorter);
+  std::sort(perm.begin(), perm.begin() + md_ndims, idx_sorter);
 
   auto min_stride = block_size;
   for (int idx = 0; idx < md_ndims; ++idx) {
