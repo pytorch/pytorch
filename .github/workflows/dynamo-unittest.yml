@@ -1,0 +1,69 @@
+# Workflow: Dynamo Unit Test
+# 1. runs unit tests for dynamo.
+# TODO(guilhermeleobas): We might not need to run it daily
+# 2. performs daily memory leak checks and reruns of disabled tests, scheduled at `29 8 * * *`.
+name: dynamo-unittest
+
+on:
+  pull_request:
+    branches-ignore:
+      - nightly
+  push:
+    branches:
+      - main
+      - release/*
+      - landchecks/*
+    tags:
+      - ciflow/pull/*
+  workflow_dispatch:
+  schedule:
+    - cron: 29 8 * * *  # about 1:29am PDT
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-unittest
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
+
+  dynamo-build:
+    name: linux-jammy-py${{ matrix.python-version }}-gcc11
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13'] #, '3.14']
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py${{ matrix.python-version }}-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-gcc11
+      test-matrix: |
+        { include: [
+          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+        ]}
+    secrets: inherit
+
+  dynamo-test:
+    name: dynamo-test
+    uses: ./.github/workflows/_linux-test.yml
+    needs: dynamo-build
+    with:
+      build-environment: linux-jammy-py${{ matrix.python-version }}-gcc11
+      docker-image: ${{ needs.dynamo-build.outputs.docker-image }}
+      test-matrix: ${{ needs.dynamo-build.outputs.test-matrix }}
+    secrets: inherit
