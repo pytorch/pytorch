@@ -2000,7 +2000,8 @@ Greatest relative difference: 3536.0 at index (488, 127) (up to 0.016 allowed)
         ref_result = model(a, b, extra_args)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
         )
         torch.testing.assert_close(result, ref_result)
 
