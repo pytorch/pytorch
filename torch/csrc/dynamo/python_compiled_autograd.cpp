@@ -980,7 +980,7 @@ static CacheNode* _compiled_autograd_impl(
     // cache miss, need to capture FX graph
     TORCH_INTERNAL_ASSERT(!vlogger.has_value() || compile_reason.has_value());
     ClosingTHPObjectPtr py_compiler(
-        check(PyObject_CallNoArgs((the_autograd_compiler))));
+        check(PyObject_CallNoArgs(the_autograd_compiler)));
     PyCompilerGuard py_compiler_guard(
         std::make_unique<PyCompilerInterfaceImpl>());
 

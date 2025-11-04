@@ -573,7 +573,6 @@ def create_aot_state(
                     keep_input_mutations=aot_config.keep_inference_input_mutations,
                     is_train=needs_autograd,
                     pre_dispatch=aot_config.pre_dispatch,
-                    is_export=aot_config.is_export,
                 )(*_dup_fake_script_obj(fake_flat_args))
 
             req_subclass_dispatch = requires_subclass_dispatch(
@@ -723,6 +722,7 @@ def aot_function(
     # Whether or not to trace with dynamic shapes
     dynamic=False,
     enable_log=True,
+    disable_functionalization=False,
 ) -> Callable:
     """
     Traces the forward and backward graph of :attr:`fn` using torch dispatch
@@ -790,6 +790,7 @@ def aot_function(
         is_export=False,
         no_tangents=False,
         enable_log=enable_log,
+        disable_functionalization=disable_functionalization,
     )
     cached_res = None
 
@@ -902,6 +903,8 @@ def prepare_aot_module_simplified(
     flatten: bool,
     *,
     force_non_lazy_backward_lowering: bool = False,
+    disable_functionalization: bool = False,
+    _record_nn_module_stack: bool = False,
 ):
     if not flatten:
         assert kwargs is None
@@ -928,7 +931,13 @@ def prepare_aot_module_simplified(
     # NB: This doesn't change the in/out convention, except adding the
     # parameters as explicit arguments
     functional_call = create_functional_call(
-        mod, params_buffers_spec, params_len + buffers_len, strict_out_tuple=not flatten
+        mod,
+        params_buffers_spec,
+        params_len + buffers_len,
+        strict_out_tuple=not flatten,
+        # We need this for export to run ModuleStackTracer
+        # instead of PythonKeyTracer
+        store_orig_mod=_record_nn_module_stack,
     )
 
     full_args = [*params_flat, *buffers_flat, *args]
@@ -966,7 +975,9 @@ def prepare_aot_module_simplified(
     (
         aot_autograd_arg_pos_to_source,
         static_input_indices,
-    ) = _try_get_metadata_from_dynamo(mod, params_buffers.keys(), len(full_args))
+    ) = _try_get_metadata_from_dynamo(
+        mod, params_buffers.keys(), len(full_args), full_args_descs
+    )
 
     dynamic_shapes = False
     for x in full_args:
@@ -992,6 +1003,7 @@ def prepare_aot_module_simplified(
         ignore_shape_env=ignore_shape_env,
         precompile_backend_id=getattr(mod, "_backend_id", None),
         force_non_lazy_backward_lowering=force_non_lazy_backward_lowering,
+        disable_functionalization=False,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     # NB: full_args_descs not needed here, fake_flat_args is 1:1 with full_args
@@ -1028,6 +1040,7 @@ def aot_module_simplified(
     cudagraphs: Optional[BoxedBool] = None,
     boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
     ignore_shape_env: bool = False,
+    disable_functionalization: bool = False,
 ) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -1066,6 +1079,7 @@ def aot_module_simplified(
             ignore_shape_env,
             flatten=False,
             force_non_lazy_backward_lowering=config.force_non_lazy_backward_lowering,
+            disable_functionalization=disable_functionalization,
         )
 
         compiled_fn = None
@@ -1168,6 +1182,8 @@ def aot_export_joint_with_descriptors(
     decompositions: Optional[dict] = None,
     keep_inference_input_mutations=False,
     ignore_shape_env=False,
+    disable_functionalization=False,
+    _record_nn_module_stack=False,
 ) -> JointWithDescriptors:
     """
     This API captures the joint graph for an nn.Module.  However, unlike
@@ -1257,6 +1273,8 @@ def aot_export_joint_with_descriptors(
         # Metric(s) {'is_forward'} have already been set in the current
         # context.
         force_non_lazy_backward_lowering=True,
+        disable_functionalization=disable_functionalization,
+        _record_nn_module_stack=_record_nn_module_stack,
     )
 
     # TODO: Maybe this should be in create_aot_state?  Not sure, that would
@@ -1574,7 +1592,7 @@ def aot_export_joint_simple(
             decompositions=decompositions,
             trace_joint=trace_joint,
         )
-        in_spec, _kw_in_spec = in_spec.children_specs
+        in_spec, _kw_in_spec = in_spec.children()
     # At this point, we can just directly return the (joint or inference graph) that we traced.
     # First though: a bunch of assertions to make sure that our graph doesn't require
     # any calling convention changes compared to the original function.
@@ -1601,7 +1619,7 @@ def aot_export_joint_simple(
         raise RuntimeError(
             f"aot_export_joint_simple requires inputs to be a single list/tuple. in_spec={str(in_spec)}"
         )
-    if not all(child.is_leaf() for child in in_spec.children_specs):
+    if not all(child.is_leaf() for child in in_spec.children()):
         raise RuntimeError(
             f"aot_export_joint_simple requires individual inputs not to be pytrees. in_spec={str(in_spec)}"
         )
@@ -1609,7 +1627,7 @@ def aot_export_joint_simple(
         raise RuntimeError(
             f"aot_export_joint_simple requires outputs to be a single list/tuple. out_spec={str(out_spec)}"
         )
-    if not all(child.is_leaf() for child in out_spec.children_specs):
+    if not all(child.is_leaf() for child in out_spec.children()):
         raise RuntimeError(
             f"aot_export_joint_simple requires individual outputs not to be pytrees. out_spec={str(out_spec)}"
         )

@@ -149,7 +149,7 @@ def _compute_local_shape_and_global_offset(
     ordered_placements = _explicit_order_placements(mesh_shape, placements)
 
     local_shape = list(global_shape)
-    # We'll compute the data for where the shard beings on a per-dim basis.
+    # We'll compute the data for where the shard begins on a per-dim basis.
     # However, a single dim can be sharded multiple times, so we will end up
     # doing a Sum(size*stride) like computation to determine the location of our
     # shard for each of the shardings on that dim.
@@ -170,6 +170,14 @@ def _compute_local_shape_and_global_offset(
 
             local_shape[shard_dim] = shard_size
 
+            shard_global_offset = global_offset[shard_dim] + not_none(shard_offset)
+
+            zero_global_offset = global_shape[shard_dim]
+            if isinstance(shard_global_offset, torch.SymInt) and not isinstance(
+                zero_global_offset, torch.SymInt
+            ):
+                zero_global_offset = torch.SymInt(zero_global_offset)
+
             global_offset[shard_dim] = torch.sym_ite(
                 shard_size == 0,
                 # Special case to fill in a standardized non-garbage value for
@@ -179,11 +187,11 @@ def _compute_local_shape_and_global_offset(
                 # Note that you can end up with zero-size shards that are
                 # still otherwise in bounds for the tensor (TODO: give an
                 # example).
-                global_shape[shard_dim],
+                zero_global_offset,
                 # As we successively shard the same dimension, we keep
                 # advancing our pointer beyond our original offset until we
                 # get to the final chunk start.
-                global_offset[shard_dim] + not_none(shard_offset),
+                shard_global_offset,
             )
 
     # NOTE: the offset compute relies on the local shard index and it has no
@@ -212,36 +220,38 @@ def _compute_local_shape_and_global_offset(
     return tuple(local_shape), tuple(global_offset)
 
 
-def compute_global_tensor_info(
-    tensor: torch.Tensor, mesh: DeviceMesh, placements: Sequence[Placement]
+compute_global_tensor_info = torch._C._DTensor_compute_global_tensor_info
+
+
+def compute_local_tensor_info(
+    global_tensor: torch.Tensor,
+    mesh: DeviceMesh,
+    placements: Sequence[Placement],
 ) -> tuple[list[int], list[int]]:
     """
-    Compute the global size and stride of a DTensor from the given local tensor.
-    The local size is multiplited by `world_size` per Sharding dim.
-    The local stride is multiplited by `world_size` per Sharding dim, as long as the
-    dimension is outside sharding dim.
+    Compute the local size and stride of a DTensor from the given global tensor info.
 
-    For example, if we have a local tensor with size (4, 8, 2) and stride (16, 1, 8).
+    For example, if we have a global tensor with size (4, 8, 4) and stride (32, 1, 8).
     If the DTensor placements are [Shard(2)] and world_size is 2;
-    then the global size is (4, 8, 4) and stride is (16 * 2, 1, 8).
+    then the local size is (4, 8, 2) and stride is (16, 1, 8).
 
     Args:
         tensor (:class:`torch.Tensor`):
-            Local tensor which DTensor will be constructed from.
+            Global tensor which DTensor will distribute
         mesh (:class:`DeviceMesh`):
             Object which describes the mesh topology
             of devices for the DTensor.
-        placements (Sequence[:class:`Placement`]]):
+        placements (Sequence[:class:`Placement`]):
             The attribute of the DTensor that describes its layout
             on the mesh topology.
 
-    Return:
-        tensor_shape: A List of int which specifies the size of DTensor which build
-            on top of the local tensor.
-        tensor_stride: A List of int which specifies the stride of DTensor.
+    Returns:
+        local_shape: A List of int which specifies the size of the local tensor.
+        local_stride: A List of int which specifies the stride of the local tensor.
     """
-    tensor_shape = list(tensor.size())
-    tensor_stride = list(tensor.stride())
+    local_shape = list(global_tensor.size())
+    local_stride = list(global_tensor.stride())
+
     for idx, placement in enumerate(placements):
         mesh_dim_size = mesh.size(idx)
         if placement.is_shard():
@@ -252,23 +262,29 @@ def compute_global_tensor_info(
                     f"the user-facing APIs: {shard_placement}"
                 )
             shard_dim = shard_placement.dim
-
-            assert shard_dim < tensor.ndim, (
-                f"Sharding dim {shard_dim} greater than tensor ndim {tensor.ndim} for placement number {idx}."
+            assert shard_dim < len(local_shape), (
+                f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)} "
+                f"for placement number {idx}."
             )
 
-            local_dim_size = tensor_shape[shard_dim]
-            tensor_shape[shard_dim] = local_dim_size * mesh_dim_size
+            global_dim_size = local_shape[shard_dim]
+            assert global_dim_size % mesh_dim_size == 0, (
+                f"Global dim {global_dim_size} not divisible by mesh size {mesh_dim_size}"
+            )
+            local_shape[shard_dim] = global_dim_size // mesh_dim_size
 
-            # recover tensor stride by modifying the stride that larger than
-            # the current stride on the shard_dim
-            for i in range(len(tensor_stride)):
-                if i != shard_dim and tensor_stride[i] >= tensor_stride[shard_dim]:
-                    # rescale the stride by the shard size
-                    tensor_stride[i] = tensor_stride[i] * mesh_dim_size
+            # shrink strides that were scaled up globally
+            for i in range(len(local_stride)):
+                if (
+                    i != shard_dim
+                    and local_stride[i] >= local_stride[shard_dim] * mesh_dim_size
+                ):
+                    local_stride[i] = local_stride[i] // mesh_dim_size
+
         elif not isinstance(placement, (Replicate, Partial)):
             raise RuntimeError(f"placement type {type(placement)} not supported!")
-    return tensor_shape, tensor_stride
+
+    return local_shape, local_stride
 
 
 def compute_global_tensor_shape(

@@ -47,7 +47,8 @@ class DataNormSparsifier(BaseDataSparsifier):
         if zeros_per_block is None:
             zeros_per_block = reduce(operator.mul, sparse_block_shape)
 
-        assert norm in ["L1", "L2"], "only L1 and L2 norm supported at the moment"
+        if norm not in ["L1", "L2"]:
+            raise AssertionError("only L1 and L2 norm supported at the moment")
 
         defaults = {
             "sparsity_level": sparsity_level,
