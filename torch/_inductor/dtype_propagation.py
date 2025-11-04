@@ -58,6 +58,7 @@ def promote_types(
 ):
     dtype_prop_candidates = []
 
+    # pyrefly: ignore [bad-assignment]
     for arg in args:
         assert not isinstance(arg, str)
         if isinstance(arg, OpsValue):
@@ -68,6 +69,7 @@ def promote_types(
             dtype_prop_candidates.append((type_to_dtype(type(arg)), True))
             continue
 
+        # pyrefly: ignore [missing-attribute]
         dtype_prop_candidates.append((arg.dtype, getattr(arg, "is_scalar", False)))
 
     dtype = get_promoted_dtype(
@@ -247,6 +249,15 @@ class DtypePropagationOpsHandler:
         return None
 
     @staticmethod
+    def partial_accumulate(
+        name: str,
+        reduction_type: str,
+        value: DTypeArg,
+        extra_meta: dict[str, Any],
+    ) -> None:
+        return None
+
+    @staticmethod
     def load(name: str, index) -> torch.dtype:
         return upcast_compute_type(V.graph.get_dtype(name))
 
@@ -346,6 +357,11 @@ class DtypePropagationOpsHandler:
     def halide_clamp(value, size, check):
         # TODO - way of registering dtype for op in backend
         return torch.int32
+
+    @staticmethod
+    def dot(x: DTypeArg, y: DTypeArg) -> torch.dtype:
+        # triton tl.dot out_dtype is tl.float32 by default.
+        return torch.float32
 
     @staticmethod
     def inline_asm_elementwise(

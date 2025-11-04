@@ -223,7 +223,7 @@ void Context::setSDPPriorityOrder(const std::vector<int64_t>& order) {
     "setSDPPriority order expected ", sdp_priority_order.size() - 1, " but got ",
     at::num_sdp_backends, " unique backends specified in priority order.");
   for (uint32_t i = 0; i < order.size(); i++) {
-    sdp_priority_order[i] = (at::SDPBackend) order[i];
+    sdp_priority_order[i] = static_cast<at::SDPBackend>(order[i]);
   }
 }
 
@@ -587,20 +587,33 @@ void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
   rocm_fa_preferred_backend = b;
 }
 
-bool Context::allowFP16ReductionCuBLAS() const {
+CuBLASReductionOption Context::allowFP16ReductionCuBLAS() const {
   return allow_fp16_reduction_cublas;
 }
 
-void Context::setAllowFP16ReductionCuBLAS(bool b) {
-  allow_fp16_reduction_cublas = b;
+CuBLASReductionOption inline get_reduction_option(bool allow_reduced_precision, bool allow_splitk) {
+  TORCH_CHECK(
+      !(allow_reduced_precision && !allow_splitk),
+      "allow_splitk=False is not supported when reduced precision reductions are enabled");
+  if (allow_reduced_precision) {
+    return CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
+  } else if (allow_splitk) {
+    return CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK;
+  } else {
+    return CuBLASReductionOption::DisallowReducedPrecisionDisallowSplitK;
+  }
 }
 
-bool Context::allowBF16ReductionCuBLAS() const {
+void Context::setAllowFP16ReductionCuBLAS(bool allow_reduced_precision, bool allow_splitk) {
+  allow_fp16_reduction_cublas = get_reduction_option(allow_reduced_precision, allow_splitk);
+}
+
+CuBLASReductionOption Context::allowBF16ReductionCuBLAS() const {
   return allow_bf16_reduction_cublas;
 }
 
-void Context::setAllowBF16ReductionCuBLAS(bool b) {
-  allow_bf16_reduction_cublas = b;
+void Context::setAllowBF16ReductionCuBLAS(bool allow_reduced_precision, bool allow_splitk) {
+  allow_bf16_reduction_cublas = get_reduction_option(allow_reduced_precision, allow_splitk);
 }
 
 bool Context::allowFP16AccumulationCuBLAS() const {
@@ -810,6 +823,14 @@ bool Context::areVmapFallbackWarningsEnabled() const {
 
 void Context::setDisplayVmapFallbackWarnings(bool enabled) {
   display_vmap_fallback_warnings_ = enabled;
+}
+
+bool Context::warnOnAccumulateGradStreamMismatch() const {
+  return warn_on_accumulate_grad_stream_mismatch_;
+}
+
+void Context::setWarnOnAccumulateGradStreamMismatch(bool enabled) {
+  warn_on_accumulate_grad_stream_mismatch_ = enabled;
 }
 
 bool Context::isDefaultMobileCPUAllocatorSet() {

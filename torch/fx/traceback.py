@@ -10,6 +10,7 @@ from torch._utils_internal import signpost_event
 
 from ._compatibility import compatibility
 from .graph import Graph
+from .graph_module import GraphModule
 from .node import Node
 
 
@@ -17,6 +18,7 @@ log = logging.getLogger(__name__)
 
 __all__ = [
     "annotate",
+    "annotate_fn",
     "preserve_node_meta",
     "has_preserved_node_meta",
     "set_stack_trace",
@@ -28,9 +30,12 @@ __all__ = [
     "NodeSource",
     "NodeSourceAction",
     "get_graph_provenance_json",
+    "set_current_replay_node",
+    "get_current_replay_node",
 ]
 
 current_meta: dict[str, Any] = {}
+current_replay_node: Optional[Node] = None
 should_preserve_node_meta = False
 
 
@@ -265,19 +270,16 @@ def annotate(annotation_dict: dict):
             into the FX trace metadata.
 
     Example:
+        After exiting the context, custom annotations are removed.
+
         >>> with annotate({"source": "custom_pass", "tag": 42}):
-        ...     # compute here
-        # After exiting the context, custom annotations are removed.
+        ...     pass  # Your computation here
     """
 
     global current_meta
 
     has_custom = "custom" in current_meta
-    old_custom = {}
-    # cannot use `old_custom = copy.copy(current_meta.get("custom", {}))` here,
-    # as dynamo doesn't support copy.copy()
-    for k, v in current_meta.get("custom", {}).items():
-        old_custom[k] = v  # noqa: PERF403
+    old_custom = copy.copy(current_meta.get("custom", {}))
 
     try:
         if not has_custom:
@@ -292,6 +294,43 @@ def annotate(annotation_dict: dict):
             current_meta["custom"] = old_custom
         else:
             del current_meta["custom"]
+
+
+@compatibility(is_backward_compatible=False)
+def annotate_fn(annotation_dict: dict):
+    """
+    A decorator that wraps a function with the annotate context manager.
+    Use this when you want to annotate an entire function instead of a specific code block.
+
+    Note:
+        This API is **not backward compatible** and may evolve in future releases.
+
+    Note:
+        This API is not compatible with fx.symbolic_trace or jit.trace. It's intended
+        to be used with PT2 family of tracers, e.g. torch.export and dynamo.
+
+    Args:
+        annotation_dict (dict): A dictionary of custom key-value pairs to inject
+            into the FX trace metadata for all operations in the function.
+
+    Example:
+        All operations in my_function will have {"pp_stage": 1} in their metadata.
+
+        >>> @annotate_fn({"pp_stage": 1})
+        ... def my_function(x):
+        ...     return x + 1
+    """
+    from functools import wraps
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            with annotate(annotation_dict):
+                return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 @compatibility(is_backward_compatible=False)
@@ -365,6 +404,31 @@ def get_current_meta() -> dict[str, Any]:
 
 
 @compatibility(is_backward_compatible=False)
+@contextmanager
+def set_current_replay_node(node):
+    """
+    Set the currently replay node. If `current_replay_node` is not None,
+    then we're re-generating the `current_replay_node` in FunctionalTensorMode.
+    """
+    # See [Note] annotation for more details.
+    global current_replay_node
+    saved_current_replay_node = current_replay_node
+    try:
+        current_replay_node = node
+        yield
+    finally:
+        current_replay_node = saved_current_replay_node
+
+
+@compatibility(is_backward_compatible=False)
+def get_current_replay_node():
+    """
+    Get the currently replay node
+    """
+    return current_replay_node
+
+
+@compatibility(is_backward_compatible=False)
 def get_graph_provenance_json(graph: Graph) -> dict[str, Any]:
     """
     Given an fx.Graph, return a json that contains the provenance information of each node.
@@ -392,3 +456,20 @@ def get_graph_provenance_json(graph: Graph) -> dict[str, Any]:
             },
         )
         return {}
+
+
+def _get_custom_metadata(gm: GraphModule) -> str:
+    assert isinstance(gm, GraphModule)
+
+    def helper(gm: GraphModule):
+        custom_metadata = []
+        for node in gm.graph.nodes:
+            if hasattr(node, "meta") and node.meta.get("custom", None):
+                custom_metadata.append((node.op, node.name, node.meta["custom"]))
+            if node.op == "get_attr" and isinstance(
+                getattr(gm, node.target), GraphModule
+            ):
+                custom_metadata.append(helper(getattr(gm, node.target)))
+        return custom_metadata
+
+    return "\n".join(str(x) for x in helper(gm))

@@ -607,7 +607,6 @@ class ProcessGroup:
     def group_desc(self) -> str: ...
 
 class FakeProcessGroup(Backend):
-    def __init__(self, rank: int, world_size: int) -> None: ...
     @staticmethod
     def _create_internal(rank: int, world_size: int) -> FakeProcessGroup: ...
 
@@ -850,7 +849,9 @@ class _SymmetricMemory:
 
 class ProcessGroupXCCL(Backend):
     class Options(Backend.Options):
-        def __init__(self): ...
+        is_high_priority_stream: bool
+
+        def __init__(self, is_high_priority_stream: bool = False): ...
 
     def __init__(
         self,

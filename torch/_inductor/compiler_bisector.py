@@ -243,6 +243,7 @@ class CompilerBisector:
         lines = cls.read_lines_from_file(file_path)
         low = None
         high = None
+        # pyrefly: ignore [bad-assignment]
         for line in reversed(lines):
             if line.startswith("low="):
                 low = int(line.strip().split("=")[1])
@@ -490,6 +491,13 @@ class CompilerBisector:
         Run fn repeatedly attempting to bisect torch.compile. fn should return True on success and False on failure.
         """
 
+        # TODO graph bisecting is not well composed with lowering
+        # bisector so far. Use a config to opt-in
+        import torch._inductor.config as inductor_config
+
+        if inductor_config.test_configs.bisect_pre_grad_graph:
+            BACKENDS["inductor"].insert(0, BisectSubsystem("pre_grad_graph"))
+
         if not cli_interface:
             bisection_enabled_orig = cls.bisection_enabled
             cls.delete_bisect_status()
@@ -500,6 +508,9 @@ class CompilerBisector:
                 cls.bisection_enabled = bisection_enabled_orig
                 cls.delete_bisect_status()
                 cls.in_process_cache = None
+
+                if BACKENDS["inductor"][0].name == "pre_grad_graph":
+                    del BACKENDS["inductor"][0]
 
             cleanup_handler = atexit.register(cleanup)
 
@@ -550,7 +561,7 @@ class CompilerBisector:
                         curr_backend,
                         curr_subsystem.name,
                         low,
-                        call_counter_debug_info.get(low, None),
+                        call_counter_debug_info.get(low),
                     )
 
                 next_subsystem = cls.advance_subsystem(curr_backend, curr_subsystem)

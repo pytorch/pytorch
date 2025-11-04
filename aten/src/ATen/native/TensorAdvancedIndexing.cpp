@@ -1701,13 +1701,13 @@ Tensor& index_select_out_cpu_(
                   TORCH_CHECK_INDEX(
                       (self_i >= 0) && (self_i < self_dim_size),
                       "index out of range in self");
-                  auto self_data = static_cast<const char*>(selfSlice_data) +
+                  auto self_data = const_cast<char*>(static_cast<const char*>(
+                                       selfSlice_data)) +
                       self_i * self_stride_bytes;
                   auto result_data = static_cast<char*>(resultSlice_data) +
                       i * result_stride_bytes;
                   sub_iter.unsafe_replace_operand(0, result_data);
-                  sub_iter.unsafe_replace_operand(
-                      1, const_cast<char*>(self_data));
+                  sub_iter.unsafe_replace_operand(1, self_data);
                   copy_stub(sub_iter.device_type(), sub_iter, false);
                 };
               });
@@ -1906,11 +1906,9 @@ Tensor& index_fill_(
         "This also applies to advanced indexing e.g. tensor[mask] = scalar");
   }
 
-  if (!self.is_complex() && source.isComplex()) {
-    TORCH_CHECK(
-        false,
-        "index_fill_(): Converting complex Scalar to non-complex type is not supported");
-  }
+  TORCH_CHECK(
+      self.is_complex() || !source.isComplex(),
+      "index_fill_(): Converting complex Scalar to non-complex type is not supported");
 
   // Handle the case when `self` is 0-dim
   Tensor self_nonzero_dim = (self.dim() == 0) ? self.unsqueeze(-1) : self;
@@ -2676,7 +2674,7 @@ inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
       std::move(dim));
 }
 
-static inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
+inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
   TORCH_CHECK(
       !t.defined() || t.device() == device,
       "Expected tensor to have ",
@@ -2689,7 +2687,7 @@ static inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
       ")");
 }
 
-static inline void checkDevice(
+inline void checkDevice(
     CheckedFrom c,
     at::ArrayRef<Tensor> tensors,
     Device device) {

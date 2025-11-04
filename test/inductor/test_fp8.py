@@ -10,7 +10,9 @@ from torch._inductor import config, utils
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
+from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
 )
@@ -20,6 +22,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.inductor_utils import (
+    _quantize_blockwise,
     _quantize_rowwise,
     _quantize_tensorwise,
     _to_fp8_saturated,
@@ -623,7 +626,12 @@ class TestFP8Lowering(TestCase):
                 bias,
             )
 
-            FileCheck().check("SCALING_ROWWISE : tl.constexpr = False").run(code[0])
+            FileCheck().check(
+                f"SCALE_RECIPE_A : tl.constexpr = {ScalingType.TensorWise.value}"
+            ).run(code[0])
+            FileCheck().check(
+                f"SCALE_RECIPE_B : tl.constexpr = {ScalingType.TensorWise.value}"
+            ).run(code[0])
             self.assertEqual(y_eager.dtype, dtype)
             self.assertEqual(y_compiled.dtype, dtype)
             # depending on the kernel config (BLOCK_M size, etc) selected during Inductor
@@ -768,7 +776,121 @@ class TestFP8Lowering(TestCase):
                 bias,
             )
 
-        FileCheck().check("SCALING_ROWWISE : tl.constexpr = True").run(code[0])
+        FileCheck().check(
+            f"SCALE_RECIPE_A : tl.constexpr = {ScalingType.RowWise.value}"
+        ).run(code[0])
+        FileCheck().check(
+            f"SCALE_RECIPE_B : tl.constexpr = {ScalingType.RowWise.value}"
+        ).run(code[0])
+        self.assertEqual(y_eager.dtype, dtype)
+        self.assertEqual(y_compiled.dtype, dtype)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 9),
+        "cuBLAS blockwise scaling added in CUDA 12.9",
+    )
+    @parametrize("shape", ((16, 256, 256), (1024, 512, 1024)))
+    @parametrize("use_fast_accum", (False, True))
+    @parametrize(
+        "scaling_block_sizes", ((1, 128, 128, 128), (1, 128, 1, 128))
+    )  # (BlockWise1x128, BlockWise128x128), (BlockWise1x128, BlockWise1x128)
+    def test_main_loop_scaling(
+        self,
+        shape: tuple[int, int, int],
+        use_fast_accum: bool,
+        scaling_block_sizes: tuple[int, int, int, int],
+    ):
+        # Only bf16 output type is supported for non-tensorwise scaling, not fp32
+        dtype: torch.dtype = torch.bfloat16
+        device = "cuda"
+        dtype_float8 = torch.float8_e4m3fn
+        dtype_float8 = _fix_fp8_dtype_for_rocm(dtype_float8, device)
+
+        M, N, K = shape  # Matmul Y = X [M, K] x W [N, K]
+        x = torch.randn(M, K, dtype=dtype, device=device)
+        w = torch.randn(N, K, dtype=dtype, device=device)
+        bias = None
+
+        am, ak, bn, bk = scaling_block_sizes
+
+        # quantize weight (prior to inference)
+        w_fp8, w_inverse_scale = _quantize_blockwise(
+            w, dtype_float8, block_outer=bn, block_inner=bk
+        )
+        w_t_fp8 = w_fp8.t()
+        if (bn, bk) == (1, 128):
+            w_inverse_scale = (
+                w_inverse_scale.t().contiguous().t().t()
+            )  # 1x128 blocks need scales to be outer-dim-major
+        else:
+            w_inverse_scale = w_inverse_scale.t()  # scale_b should be (1, N)
+
+        # quantize input x
+        x_fp8, x_inverse_scale = _quantize_blockwise(
+            x, dtype_float8, block_outer=am, block_inner=ak
+        )
+        if (am, ak) == (1, 128):
+            x_inverse_scale = (
+                x_inverse_scale.t().contiguous().t()
+            )  # 1x128 blocks need scales to be outer-dim-major
+
+        def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
+            y = torch._scaled_mm(
+                x_fp8,
+                w_t_fp8,
+                x_inverse_scale,
+                w_inverse_scale,
+                bias,
+                out_dtype=dtype,
+                use_fast_accum=use_fast_accum,
+            )
+            return y
+
+        y_eager = linear(
+            x_fp8,
+            x_inverse_scale,
+            w_t_fp8,
+            w_inverse_scale,
+            bias,
+        )
+        with config.patch(
+            {
+                "triton.enable_persistent_tma_matmul": True,
+                "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma",
+                "max_autotune_gemm_backends": "TRITON",
+                "max_autotune": True,
+            }
+        ):
+            linear_compiled = torch.compile(
+                linear, backend="inductor", mode="max-autotune"
+            )
+            y_compiled, code = run_and_get_code(
+                linear_compiled,
+                x_fp8,
+                x_inverse_scale,
+                w_t_fp8,
+                w_inverse_scale,
+                bias,
+            )
+
+        # Verify that Inductor chooses the correct scaling recipes
+        FileCheck().check(
+            f"SCALE_RECIPE_A : tl.constexpr = {ScalingType.BlockWise1x128.value}"
+        ).run(code[0])
+
+        if (bn, bk) == (1, 128):
+            check_scale_recipe_b = ScalingType.BlockWise1x128.value
+        else:
+            check_scale_recipe_b = ScalingType.BlockWise128x128.value
+        FileCheck().check(
+            f"SCALE_RECIPE_B : tl.constexpr = {check_scale_recipe_b}"
+        ).run(code[0])
+
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
