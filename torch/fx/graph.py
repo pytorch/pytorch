@@ -645,7 +645,16 @@ class CodeGen:
 
             if verbose:
                 # override annotation with more detailed information
-                from torch.distributed.tensor._api import DTensor, DTensorSpec
+                try:
+                    from torch.distributed.tensor._api import DTensor, DTensorSpec
+
+                    dtensor_type = type(DTensor)
+                    dtensorspec_format_shard_order_str = (
+                        DTensorSpec.format_shard_order_str
+                    )
+                except ModuleNotFoundError:
+                    dtensor_type = None
+                    dtensorspec_format_shard_order_str = None
                 from torch.fx.experimental.proxy_tensor import py_sym_types
                 from torch.fx.passes.shape_prop import TensorMetadata
 
@@ -676,10 +685,11 @@ class CodeGen:
                     core = _tensor_annotation(meta_val)
                     if is_plain:
                         maybe_type_annotation = f': "{core}"'
-                    elif isinstance(meta_val, DTensor):
-                        dtensor_meta = DTensorSpec.format_shard_order_str(
-                            meta_val._spec.placements,
-                            meta_val._spec.shard_order,
+                    elif type(meta_val) is dtensor_type:
+                        assert dtensorspec_format_shard_order_str is not None
+                        dtensor_meta = dtensorspec_format_shard_order_str(
+                            meta_val._spec.placements,  # type: ignore[attr-defined]
+                            meta_val._spec.shard_order,  # type: ignore[attr-defined]
                         )
                         cls = meta_val.__class__.__name__
                         maybe_type_annotation = (
