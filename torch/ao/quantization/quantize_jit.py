@@ -157,12 +157,12 @@ def _convert_ondevice_jit(
     model, method_name, inplace=False, debug=False, quant_type=QuantType.STATIC
 ):
     _check_is_script_module(model)
-    assert quant_type == QuantType.DYNAMIC, (
-        "This API, while should work for static quant, is only tested for dynamic quant."
-    )
-    assert not method_name.startswith("observe_"), (
-        "Pass in valid method to be quantized, e.g. forward"
-    )
+    if quant_type != QuantType.DYNAMIC:
+        raise AssertionError(
+            "This API, while should work for static quant, is only tested for dynamic quant."
+        )
+    if method_name.startswith("observe_"):
+        raise AssertionError("Pass in valid method to be quantized, e.g. forward")
     observe_method_name = "observe_" + method_name
     quantize_method_name = "quantize_" + method_name
     model_c = model._c
@@ -230,12 +230,14 @@ def _quantize_jit(
         model = prepare_dynamic_jit(model, qconfig_dict, inplace)
         model = convert_dynamic_jit(model, True, debug)
     else:
-        assert run_fn, (
-            "Must provide calibration function for post training static quantization"
-        )
-        assert run_args, (
-            "Must provide calibration dataset for post training static quantization"
-        )
+        if not run_fn:
+            raise AssertionError(
+                "Must provide calibration function for post training static quantization"
+            )
+        if not run_args:
+            raise AssertionError(
+                "Must provide calibration dataset for post training static quantization"
+            )
         model = prepare_jit(model, qconfig_dict, inplace)
         run_fn(model, *run_args)
         model = convert_jit(model, True, debug)
