@@ -460,6 +460,22 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   });
   m.def("_clear_callbacks", []() { at::clearCallbacks(); });
   m.def(
+      "_create_ownership_token",
+      [](py::handle grad_fn) {
+        return py::reinterpret_steal<py::object>(
+            THPFunction_create_ownership_token(grad_fn.ptr()));
+      },
+      py::arg("grad_fn"),
+      R"(
+      Create an ownership token for a grad_fn that keeps its cdata alive.
+
+      Args:
+          grad_fn: The grad_fn (autograd.Function) to create an ownership token for.
+
+      Returns:
+          An ownership token object that keeps the underlying C++ Node alive.
+      )");
+  m.def(
       "_saved_tensors_hooks_is_enabled",
       at::SavedTensorDefaultHooks::is_enabled);
   m.def("_saved_tensors_hooks_enable", at::SavedTensorDefaultHooks::enable);

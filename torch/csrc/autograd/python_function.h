@@ -150,6 +150,9 @@ TORCH_PYTHON_API extern PyTypeObject THPFunctionType;
 TORCH_PYTHON_API extern PyObject* THPFunctionClass;
 TORCH_PYTHON_API extern PyObject* THPGradientEdgeClass;
 
+// Create an ownership token that keeps the cdata (PyNode) alive
+TORCH_PYTHON_API PyObject* THPFunction_create_ownership_token(PyObject* grad_fn);
+
 inline bool THPFunction_Check(PyObject* obj) {
   return PyObject_IsInstance(obj, (PyObject*)&THPFunctionType);
 }
