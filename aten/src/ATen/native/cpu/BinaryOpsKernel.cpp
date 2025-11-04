@@ -815,17 +815,35 @@ void smooth_l1_kernel(TensorIteratorBase& iter, double beta) {
 void huber_kernel(TensorIterator& iter, double delta) {
   // Special-case kHalf: compute in float for numerical stability
   if (iter.dtype() == kHalf) {
-    cpu_kernel(
+    const float delta_val(static_cast<float>(delta));
+    const Vectorized<float> delta_vec(static_cast<float>(delta));
+    const Vectorized<float> point_five_vec(static_cast<float>(0.5));
+    cpu_kernel_vec(
       iter,
       // scalar lambda: convert half -> float, compute in float, cast back to half
-      [&] (at::Half a, at::Half b) -> at::Half {
+      [&delta_val] (at::Half a, at::Half b) -> at::Half {
         float af = static_cast<float>(a);
         float bf = static_cast<float>(b);
         float z = std::abs(af - bf);
-        float out = z < static_cast<float>(delta)
+        float out = z < static_cast<float>(delta_val)
           ? 0.5f * z * z
-          : static_cast<float>(delta) * (z - 0.5f * static_cast<float>(delta));
+          : static_cast<float>(delta_val) * (z - 0.5f * static_cast<float>(delta_val));
         return static_cast<at::Half>(out);
+      },
+      [&delta_vec, &point_five_vec] (Vectorized<Half> a, Vectorized<Half> b) {
+        auto [a0, a1] = convert_half_float(a);
+        auto [b0, b1] = convert_half_float(b);
+        auto z = (a0 - b0).abs();
+        a0 = Vectorized<float>::blendv(
+          point_five_vec * z * z,
+          delta_vec * (z - point_five_vec * delta_vec),
+          z >= delta_vec);
+        z = (a1 - b1).abs();
+        a1 = Vectorized<float>::blendv(
+          point_five_vec * z * z,
+          delta_vec * (z - point_five_vec * delta_vec),
+          z >= delta_vec);
+        return convert_float_half(a0, a1);
       }
     );
     return;
