@@ -9,8 +9,8 @@
 
 #include <c10/core/Allocator.h>
 
-#include <c10/util/python_stub.h>
 #include <ATen/detail/AcceleratorHooksInterface.h>
+#include <c10/util/python_stub.h>
 
 #include <string>
 namespace at {
@@ -26,8 +26,7 @@ constexpr const char* MTIA_HELP =
 struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
 // this fails the implementation if MTIAHooks functions are called, but
 // MTIA backend is not present.
-#define FAIL_MTIAHOOKS_FUNC(func) \
-  TORCH_CHECK(false, "Cannot execute ", func, "() without MTIA backend.");
+#define FAIL_MTIAHOOKS_FUNC(func) TORCH_CHECK(false, "Cannot execute ", func, "() without MTIA backend.");
 
   ~MTIAHooksInterface() override = default;
 
@@ -92,7 +91,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return c10::Stream::unpack3(-1, 0, c10::DeviceType::MTIA);
   }
 
-  virtual void setCurrentStream(const c10::Stream& /*stream*/ ) const {
+  virtual void setCurrentStream(const c10::Stream& /*stream*/) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
@@ -124,11 +123,9 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
-
-  virtual void recordMemoryHistory(
-    const std::optional<std::string>& /*enabled*/,
-    const std::string& /*stacks*/,
-    size_t /*max_entries*/) const {
+  virtual void recordMemoryHistory(const std::optional<std::string>& /*enabled*/,
+                                   const std::string& /*stacks*/,
+                                   size_t /*max_entries*/) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
@@ -159,6 +156,10 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return -1;
   }
 
+  virtual void mtiagraphDestroy(int64_t handle) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+  }
+
   virtual void mtiagraphCaptureBegin(int64_t handle, MempoolId_t pool) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
@@ -187,8 +188,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
 struct TORCH_API MTIAHooksArgs {};
 
 TORCH_DECLARE_REGISTRY(MTIAHooksRegistry, MTIAHooksInterface, MTIAHooksArgs);
-#define REGISTER_MTIA_HOOKS(clsname) \
-  C10_REGISTER_CLASS(MTIAHooksRegistry, clsname, clsname)
+#define REGISTER_MTIA_HOOKS(clsname) C10_REGISTER_CLASS(MTIAHooksRegistry, clsname, clsname)
 
 namespace detail {
 TORCH_API const MTIAHooksInterface& getMTIAHooks();

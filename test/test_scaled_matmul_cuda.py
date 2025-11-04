@@ -144,36 +144,42 @@ def infer_scale_swizzle(mat, scale):
         ] == math.ceil(mat.shape[1] // 128):
             return ScalingType.BlockWise128x128, SwizzleType.NO_SWIZZLE
 
-    # if we're checking for nvfp4, need to adjust for packed-K
-    K_multiplier = 2 if mat.dtype == torch.float4_e2m1fn_x2 else 1
     # NVFP4
     if (
         (scale.numel()
-            == round_up(mat.shape[0], 128) * round_up(math.ceil(K_multiplier * mat.shape[1] // 16), 4)
+            == round_up(mat.shape[0], 128) * round_up(math.ceil(2 * mat.shape[1] // 16), 4)
             or scale.numel()
-            == round_up(mat.shape[1], 128) * round_up(math.ceil(K_multiplier * mat.shape[0] // 16), 4))
+            == round_up(mat.shape[1], 128) * round_up(math.ceil(2 * mat.shape[0] // 16), 4))
         and mat.dtype == torch.float4_e2m1fn_x2
         and scale.dtype == torch.float8_e4m3fn
     ):
         return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_4_4
 
-    # MX formats
+    # MXFP4 w/o swizzle
+    if (
+        (scale.numel() == 2 * math.ceil(mat.shape[0] // 32) * mat.shape[1]
+            or scale.numel() == 2 * math.ceil(mat.shape[1] // 32) * mat.shape[0])
+        and mat.dtype == torch.float4_e2m1fn_x2
+        and scale.dtype == torch.float8_e8m0fnu
+    ):
+        return ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE
+
     if not torch.version.hip:
-        # MX w/swizzle (NVIDIA)
+        # MXFP8 w/ swizzle
         if (
             (scale.numel()
-                == round_up(mat.shape[0], 128) * round_up(math.ceil(K_multiplier * mat.shape[1] // 32), 4)
+                == round_up(mat.shape[0], 128) * round_up(math.ceil(mat.shape[1] // 32), 4)
                 or scale.numel()
-                == round_up(mat.shape[1], 128) * round_up(math.ceil(K_multiplier * mat.shape[0] // 32), 4))
+                == round_up(mat.shape[1], 128) * round_up(math.ceil(mat.shape[0] // 32), 4))
             and scale.dtype == torch.float8_e8m0fnu
         ):
             return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
 
     else:
-        # MX w/o swizzle (AMD)
+        # MXFP8 w/o swizzle
         if (
-            (scale.numel() == math.ceil(mat.shape[0] // 32) * K_multiplier * mat.shape[1]
-                or scale.numel() == math.ceil(K_multiplier * mat.shape[1] // 32) * mat.shape[0])
+            (scale.numel() == math.ceil(mat.shape[0] // 32) * mat.shape[1]
+                or scale.numel() == math.ceil(mat.shape[1] // 32) * mat.shape[0])
             and scale.dtype == torch.float8_e8m0fnu
         ):
             return ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE
@@ -274,11 +280,13 @@ def scaled_grouped_mm_wrap(
 
 
 
-def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype) -> torch.Tensor:
+def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype, bias: Optional[torch.Tensor] = None) -> torch.Tensor:
     # naive implementation: dq -> op -> q
     x_fp32 = x.to(torch.float) / x_scale
     y_fp32 = y.to(torch.float) / y_scale
     out_fp32 = torch.mm(x_fp32, y_fp32)
+    if bias is not None:
+        out_fp32 += bias.to(torch.float)
 
     return out_fp32.to(out_dtype)
 
@@ -1175,7 +1183,7 @@ class TestFP8Matmul(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
-    @parametrize("base_dtype", [torch.bfloat16, torch.float32])
+    @parametrize("base_dtype", [torch.bfloat16, torch.float16, torch.float32])
     @with_tf32_off
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):
         # Fp32 out_dtype is only supported by cuBLAS, which however only started
@@ -1188,12 +1196,21 @@ class TestFP8Matmul(TestCase):
             if torch.cuda.get_device_capability() < (9, 0):
                 raise unittest.SkipTest("Need sm90+ for row-wise fp8 w/ cuBLAS")
 
+        if base_dtype is torch.float16:
+            if torch.version.hip:
+                raise unittest.SkipTest("hipblaslt rowwise _scaled_mm only supports BFloat16")
+            if torch.cuda.get_device_capability() < (9, 0):
+                raise unittest.SkipTest("Need sm90+ for row-wise fp8 w/ cuBLAS")
+
         torch.manual_seed(42)
         input_dtype = e4m3_type
         output_dtype = base_dtype
 
         x = torch.randn(16, 16, device="cuda", dtype=base_dtype)
         y = torch.randn(32, 16, device="cuda", dtype=base_dtype).t()
+        bias = None
+        if base_dtype in {torch.bfloat16, torch.float16}:
+            bias = torch.randn((32,), device="cuda", dtype=base_dtype)
 
         x_scales = tensor_to_scale(x, input_dtype, dim=1).float()
         y_scales = tensor_to_scale(y, input_dtype, dim=0).float()
@@ -1208,12 +1225,13 @@ class TestFP8Matmul(TestCase):
                 y_fp8,
                 scale_a=x_scales.reciprocal(),
                 scale_b=y_scales.reciprocal(),
-                out_dtype=output_dtype
+                out_dtype=output_dtype,
+                bias=bias
             )
 
             # Calculate emulated F8 mm
             out_emulated = mm_float8_emulated(
-                x_fp8, x_scales, y_fp8, y_scales, output_dtype
+                x_fp8, x_scales, y_fp8, y_scales, output_dtype, bias
             )
 
             if base_dtype in {torch.bfloat16, torch.float16}:
@@ -1228,7 +1246,7 @@ class TestFP8Matmul(TestCase):
         if torch.cuda.get_device_capability() != (9, 0) and output_dtype == torch.float:
             with self.assertRaisesRegex(
                 ValueError,
-                "Only bf16 high precision output types are supported for row-wise scaling."
+                "Only bf16 and fp16 high precision output types are supported for row-wise scaling."
             ):
                 test()
         else:
@@ -1244,6 +1262,7 @@ class TestFP8Matmul(TestCase):
     @parametrize("output_dtype", [torch.bfloat16, torch.float32])
     @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
     @parametrize("M,N,K", [(256, 768, 512)])
+    @with_tf32_off
     def test_scaled_mm_vs_emulated_block_wise(self, output_dtype, lhs_block, rhs_block, M, N, K):
         torch.manual_seed(42)
 
@@ -1601,7 +1620,7 @@ class TestFP8Matmul(TestCase):
         (127, 96, 1024),
         (1025, 128, 96)
     ], name_fn=lambda mkn: f"{mkn[0]}_{mkn[1]}_{mkn[2]}")
-    @parametrize("recipe", ["mxfp8", "mxfp4", "nvfp4"])
+    @parametrize("recipe", ["mxfp8", "mxfp4" if torch.version.hip else "nvfp4"])
     def test_blockwise_mxfp8_nvfp4_mxfp4_numerics(self, test_case_name, fast_accum, mkn, recipe) -> None:
         if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
             raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
@@ -1615,12 +1634,8 @@ class TestFP8Matmul(TestCase):
             if not (M % 16 == 0 and K % 128 == 0 and N % 16 == 0):
                 raise unittest.SkipTest("M and N must be multiples of 16 and K must be multiple of 128 on ROCm, skipping")
 
-        fp4_scaling_dtype = torch.float8_e8m0fnu if recipe == "mxfp4" else torch.float8_e4m3fn
-        BLOCK_SIZE = 16 if recipe == "nvfp4" else 32
-
-        if K % BLOCK_SIZE != 0:
-            raise unittest.SkipTest(f"K ({K}) must be divisible by BLOCK_SIZE ({BLOCK_SIZE}), skipping")
-
+        fp4_scaling_dtype = torch.float8_e8m0fnu if torch.version.hip else torch.float8_e4m3fn
+        BLOCK_SIZE = 32 if torch.version.hip else (16 if recipe == "nvfp4" else 32)
         require_exact_match = True
         approx_match_sqnr_target = 22.0
 
@@ -1798,7 +1813,7 @@ class TestFP8Matmul(TestCase):
                 B = B.clamp(min=min_val, max=max_val)
                 B = _bfloat16_to_float4_e2m1fn_x2(B)
 
-                approx_match_sqnr_target = 15 if recipe == "mxfp4" else 15.8
+                approx_match_sqnr_target = 15 if torch.version.hip else 15.8
 
         C_ref = A_ref @ B_ref.t()
 

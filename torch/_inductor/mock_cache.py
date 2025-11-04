@@ -6,7 +6,7 @@ import contextlib
 import dataclasses
 import sys
 import threading
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 from typing_extensions import override, Self
 from unittest.mock import patch
 
@@ -15,6 +15,7 @@ from torch._inductor.remote_cache import RemoteCacheBackend
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from types import TracebackType
 
 
