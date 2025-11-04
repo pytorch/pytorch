@@ -24,7 +24,7 @@ struct Datapoint {
 
 class TORCH_API InstructionSpan {
  public:
-  explicit InstructionSpan(Node&);
+  explicit InstructionSpan(Node& /*node*/);
   ~InstructionSpan();
   InstructionSpan(InstructionSpan&&) = delete;
   InstructionSpan& operator=(InstructionSpan&&) = delete;
@@ -91,7 +91,7 @@ class TORCH_API ScriptProfile : public CustomClassHolder {
   void enable();
   void disable();
   const SourceMap& dumpStats();
-  void addDatapoint(std::shared_ptr<profiling::Datapoint>);
+  void addDatapoint(std::shared_ptr<profiling::Datapoint> /*datapoint*/);
   ~ScriptProfile() override;
 
  private:
