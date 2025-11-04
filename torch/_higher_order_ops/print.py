@@ -73,6 +73,6 @@ def print_cpu(format_str: str, **kwargs: object) -> None:
         lambda a: map_types[type(a)](a),
         kwargs,
         lambda a: isinstance(a, tuple(map_types.keys())),
-      )
+    )
     # Use built-in print to avoid recursion with the HOP print
     builtins.print(format_str.format(**new_kwargs))
