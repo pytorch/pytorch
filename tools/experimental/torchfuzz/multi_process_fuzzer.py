@@ -72,6 +72,30 @@ IGNORE_PATTERNS: list[re.Pattern] = [
     re.compile(
         r"dimensionality of sizes \(0\) must match dimensionality of strides \(1\)"
     ),  # https://github.com/pytorch/pytorch/issues/164814
+    re.compile(
+        r"self and mat2 must have the same dtype"
+    ),  # https://github.com/pytorch/pytorch/issues/165718
+    re.compile(
+        r"free\(\): invalid next size \(fast\)"
+    ),  # TODO: figure out why sometimes heap metadata gets corrupted on program exit (checks actually pass successfully)
+    re.compile(
+        r'assert "int" in str\(indices\.get_dtype\(\)\)'
+    ),  # https://github.com/pytorch/pytorch/issues/166042
+    re.compile(
+        r'self\.shape_env\.guard_or_defer_runtime_assert\(expr, "guard_equals"\)'
+    ),  # https://github.com/pytorch/pytorch/issues/166245
+    re.compile(
+        r"assert len\(self\.stride\) == len\(order\)"
+    ),  # https://github.com/pytorch/pytorch/issues/166270
+    re.compile(
+        r"assert len\(input_size\) == len\(new_size\)"
+    ),  # https://github.com/pytorch/pytorch/issues/166279
+    re.compile(
+        r"torch\._inductor\.exc\.InductorError: IndexError: list index out of range"
+    ),  # https://github.com/pytorch/pytorch/issues/166290
+    re.compile(
+        r"assert bool\(static_expr\)"
+    ),  # https://github.com/pytorch/pytorch/issues/166319
     # Add more patterns here as needed, e.g.:
     # re.compile(r"Some other error message"),
 ]

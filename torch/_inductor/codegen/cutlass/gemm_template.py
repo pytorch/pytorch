@@ -35,8 +35,6 @@ from ..common import IndentedBuffer
 from . import utils as cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
 from .cuda_template import CUTLASSTemplate
-from .cutlass_python_evt import CutlassEVTCodegen, scaled_mm_evt
-from .cutlass_utils import (
 from .python_evt import CutlassEVTCodegen, scaled_mm_evt
 from .utils import (
     ACCUMULATOR_DTYPES,
@@ -1000,7 +998,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         No function arguments.
 
         Returns:
-            List[Tuple[str, cutlass_gemm_op.GemmOperation]]: A list of (cutlass_name, GemmOperation)
+            List[tuple[str, cutlass_gemm_op.GemmOperation]]: A list of (cutlass_name, GemmOperation)
             tuples that are compatible with the operation requirements of this template.
         """
         assert cutlass_utils.try_import_cutlass()
@@ -1570,7 +1568,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             op (cutlass_library.gemm_op.GemmOperation): This is the core GEMM operation that we are defining and rendering.
 
         Returns:
-            Tuple[str, str]: A tuple where the first part is a string that constitutes the defined GEMM operation in C++
+            tuple[str, str]: A tuple where the first part is a string that constitutes the defined GEMM operation in C++
                              code (render) and the second part is the string that specifies the operation type.
         """
         assert cutlass_utils.try_import_cutlass()
@@ -1860,7 +1858,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
             op (cutlass_library.gemm_op.GemmOperation): This is the core GEMM operation that we are defining and rendering.
 
         Returns:
-            Tuple[str, str]: A tuple where the first part is a string that constitutes the defined GEMM operation in C++
+            tuple[str, str]: A tuple where the first part is a string that constitutes the defined GEMM operation in C++
                              code (render) and the second part is the string that specifies the operation type.
         """
         assert cutlass_utils.try_import_cutlass()

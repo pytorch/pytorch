@@ -204,7 +204,7 @@ def side_effect_func(x: torch.Tensor):
 class TestFX(JitTestCase):
     def setUp(self):
         super().setUp()
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations
@@ -2365,7 +2365,7 @@ class TestFX(JitTestCase):
 
         g = torch.fx.Graph()
         x = g.placeholder("x")
-        for i in range(depth):
+        for _ in range(depth):
             x = g.call_function(torch.relu, (x,))
         g.output(x)
 
@@ -4198,7 +4198,7 @@ def run_getitem_target():
 
 class TestOperatorSignatures(JitTestCase):
     def setUp(self):
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations
@@ -4241,7 +4241,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         super().setUp()
         self.maxDiff = None
 
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations
@@ -4597,7 +4597,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 class TestFunctionalTracing(JitTestCase):
     def setUp(self):
         super().setUp()
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations

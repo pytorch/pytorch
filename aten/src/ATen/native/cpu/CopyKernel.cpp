@@ -77,9 +77,7 @@ static void reduced_float_copy_kernel(TensorIteratorBase &iter, bool requires_ne
 
       int64_t grain_size = at::internal::GRAIN_SIZE;
 
-      auto loop = [strides_in, requires_neg](char** base, const int64_t* strides, int64_t size0, int64_t size1) {
-        std::array<char*, 2> data;
-        std::copy_n(base, 2, data.data());
+      auto loop = [strides_in, requires_neg](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
         const int64_t *outer_strides = &strides[2];
 
         for ([[maybe_unused]] const auto it : c10::irange(size1)) {
@@ -146,9 +144,7 @@ static void reduced_float_copy_kernel(TensorIteratorBase &iter, bool requires_ne
 
       int64_t grain_size = at::internal::GRAIN_SIZE;
 
-      auto loop = [strides_in, requires_neg](char** base, const int64_t* strides, int64_t size0, int64_t size1) {
-        std::array<char*, 2> data;
-        std::copy_n(base, 2, data.data());
+      auto loop = [strides_in, requires_neg](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
         const int64_t *outer_strides = &strides[2];
 
         for ([[maybe_unused]] const auto it : c10::irange(size1)) {

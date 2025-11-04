@@ -60,9 +60,9 @@ def CDNA2OrLater():
 
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
+        arch_list = ["gfx90a", "gfx942", "gfx1201", "gfx950"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
-            arch_list += ["gfx1101", "gfx1150", "gfx1151", "gfx1200"]
+            arch_list += ["gfx1100", "gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
     if TEST_CUDA:
         return not IS_WINDOWS and SM80OrLater
@@ -70,9 +70,9 @@ def evaluate_platform_supports_flash_attention():
 
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
+        arch_list = ["gfx90a", "gfx942", "gfx1201", "gfx950"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
-            arch_list += ["gfx1101", "gfx1150", "gfx1151", "gfx1200"]
+            arch_list += ["gfx1100", "gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
     if TEST_CUDA:
         return True
@@ -375,6 +375,20 @@ def xfailIfSM120OrLater(func):
 
 def xfailIfDistributedNotSupported(func):
     return func if not (IS_MACOS or IS_JETSON) else unittest.expectedFailure(func)
+
+def _check_has_working_nvml() -> bool:
+    try:
+        if not torch.cuda.is_available():
+            return False
+        import pynvml
+        torch.cuda.device_memory_used()
+        return True
+    except ModuleNotFoundError:
+        return False
+    except pynvml.NVMLError_NotSupported:
+        return False
+
+HAS_WORKING_NVML = _check_has_working_nvml()
 
 # Importing this module should NOT eagerly initialize CUDA
 if not CUDA_ALREADY_INITIALIZED_ON_IMPORT:
