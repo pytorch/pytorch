@@ -975,7 +975,9 @@ def prepare_aot_module_simplified(
     (
         aot_autograd_arg_pos_to_source,
         static_input_indices,
-    ) = _try_get_metadata_from_dynamo(mod, params_buffers.keys(), len(full_args))
+    ) = _try_get_metadata_from_dynamo(
+        mod, params_buffers.keys(), len(full_args), full_args_descs
+    )
 
     dynamic_shapes = False
     for x in full_args:

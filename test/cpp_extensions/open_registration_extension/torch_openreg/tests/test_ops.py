@@ -246,7 +246,7 @@ class TestSDPA(NNTestCase):
             max_k,
             philox_seed,
             philox_offset,
-            debug_attn_mask,
+            _debug_attn_mask,
         ) = torch.ops.aten._scaled_dot_product_fused_attention_overrideable(
             q_privateuse1, k_privateuse1, v_privateuse1, attn_bias=attn_mask_privateuse1
         )
@@ -256,7 +256,7 @@ class TestSDPA(NNTestCase):
         )
         rand_upward_privateuse1 = rand_upward.to("openreg")
         grad_input_mask = [True, True, True, True]
-        grad_q, grad_k, grad_v, grad_attn_mask = (
+        _grad_q, _grad_k, _grad_v, _grad_attn_mask = (
             torch.ops.aten._scaled_dot_product_fused_attention_overrideable_backward(
                 rand_upward_privateuse1,
                 q_privateuse1,
