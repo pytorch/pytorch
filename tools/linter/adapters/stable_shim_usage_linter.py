@@ -40,54 +40,6 @@ class LintMessage(NamedTuple):
     description: str | None
 
 
-def parse_version(version: str) -> tuple[int, int, int]:
-    """
-    Parses a version string into (major, minor, patch) version numbers.
-    This function is copied from tools/setup_helpers/gen_version_header.py
-    to ensure consistency with how PyTorch parses its version.
-
-    Args:
-        version: Full version number string, possibly including revision / commit hash.
-
-    Returns:
-        A tuple of (major, minor, patch) version numbers.
-    """
-    # Extract version number part (i.e. toss any revision / hash parts).
-    version_number_str = version
-    for i in range(len(version)):
-        c = version[i]
-        if not (c.isdigit() or c == "."):
-            version_number_str = version[:i]
-            break
-
-    return tuple([int(n) for n in version_number_str.split(".")])  # type: ignore[return-value]
-
-
-def get_current_version() -> tuple[int, int] | None:
-    """
-    Get the current PyTorch version from version.txt.
-    This uses the same logic as tools/setup_helpers/gen_version_header.py
-    which is used to generate torch/headeronly/version.h from version.h.in.
-
-    Returns (major, minor) tuple or None if not found.
-    """
-    repo_root = Path(__file__).resolve().parents[3]
-    version_file = repo_root / "version.txt"
-
-    if not version_file.exists():
-        return None
-
-    try:
-        with open(version_file) as f:
-            version = f.read().strip()
-            major, minor, patch = parse_version(version)
-            return (major, minor)
-    except Exception:
-        pass
-
-    return None
-
-
 def get_shim_functions() -> dict[str, tuple[int, int]]:
     """
     Extract function names from shim.h and their required version.
@@ -168,11 +120,13 @@ def get_shim_functions() -> dict[str, tuple[int, int]]:
         if func_match and current_version:
             func_name = func_match.group(1)
             functions[func_name] = current_version
+            continue
 
         typedef_match = typedef_pattern.search(stripped)
         if typedef_match and current_version:
             func_name = typedef_match.group(1)
             functions[func_name] = current_version
+            continue
 
     return functions
 
@@ -187,14 +141,6 @@ def check_file(filename: str) -> list[LintMessage]:
     # Only lint files in torch/csrc/stable (but not the shim itself)
     if "torch/csrc/stable" not in filename or filename.endswith("c/shim.h"):
         return []
-
-    # Get current version
-    current_version = get_current_version()
-    if current_version is None:
-        raise RuntimeError(
-            "Could not determine current PyTorch version from version.txt. "
-            "This linter requires version.txt to exist in the repository root and contain a valid version number."
-        )
 
     # Get versioned shim functions
     shim_functions = get_shim_functions()
@@ -287,7 +233,7 @@ def check_file(filename: str) -> list[LintMessage]:
                             replacement=None,
                             description=(
                                 f"Call to versioned shim function '{func_name}' is not wrapped "
-                                f"in a TORCH_FEATURE_VERSION block. This function requires:\n"
+                                f"in a TORCH_FEATURE_VERSION block. This function requires at least:\n"
                                 f"#if TORCH_FEATURE_VERSION >= {required_macro}\n"
                                 f"  // ... your code calling {func_name} ...\n"
                                 f"#endif // TORCH_FEATURE_VERSION >= {required_macro}"
@@ -296,8 +242,10 @@ def check_file(filename: str) -> list[LintMessage]:
                     )
                 elif (
                     current_version_macro is not None
-                    and current_version_macro != required_version
+                    and current_version_macro < required_version
                 ):
+                    # Error only if current version is LESS than required version
+                    # If current version is >= required version, that's fine
                     current_major, current_minor = current_version_macro
                     current_macro = f"TORCH_VERSION_{current_major}_{current_minor}_0"
                     lint_messages.append(
@@ -307,13 +255,13 @@ def check_file(filename: str) -> list[LintMessage]:
                             char=None,
                             code=LINTER_CODE,
                             severity=LintSeverity.ERROR,
-                            name="wrong-version-for-shim-call",
+                            name="insufficient-version-for-shim-call",
                             original=None,
                             replacement=None,
                             description=(
                                 f"Call to '{func_name}' is wrapped in {current_macro}, "
-                                f"but this function requires {required_macro}. "
-                                f"Please use the correct version guard:\n"
+                                f"but this function requires at least {required_macro}. "
+                                f"The version guard must be at least the required version:\n"
                                 f"#if TORCH_FEATURE_VERSION >= {required_macro}\n"
                                 f"  // ... your code calling {func_name} ...\n"
                                 f"#endif // TORCH_FEATURE_VERSION >= {required_macro}"
