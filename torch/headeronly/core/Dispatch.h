@@ -1,31 +1,41 @@
 #pragma once
 
 #include <torch/headeronly/core/ScalarType.h>
+#include <torch/headeronly/macros/Macros.h>
 
-#define AT_PRIVATE_CASE_TYPE_USING_HINT_TMPL(PRELUDE, enum_type, HINT, ...)   \
-  case enum_type: {                                                           \
-    PRELUDE(enum_type);                                                       \
-    using HINT [[maybe_unused]] = c10::impl::ScalarTypeToCPPTypeT<enum_type>; \
-    return __VA_ARGS__();                                                     \
+// THO_PRIVATE_CASE_TYPE_USING_HINT_TMPL is same as
+// AT_PRIVATE_CASE_TYPE_USING_HINT but with a custom PRELUDE macro:
+#define THO_PRIVATE_CASE_TYPE_USING_HINT_TMPL(PRELUDE, enum_type, HINT, ...) \
+  case enum_type: {                                                          \
+    PRELUDE(enum_type);                                                      \
+    using HINT [[maybe_unused]] =                                            \
+        torch::headeronly::impl::ScalarTypeToCPPTypeT<enum_type>;            \
+    return __VA_ARGS__();                                                    \
   }
 
-#define AT_DISPATCH_CASE_TMPL(CASE_TYPE_USING_HINT, enum_type, ...) \
+// THO_DISPATCH_CASE_TMPL is same as AT_DISPATCH_CASE but with a
+// custom CASE_TYPE_USING_HINT macro:
+#define THO_DISPATCH_CASE_TMPL(CASE_TYPE_USING_HINT, enum_type, ...) \
   CASE_TYPE_USING_HINT(enum_type, scalar_t, __VA_ARGS__)
 
 namespace detail {
-inline c10::ScalarType scalar_type(c10::ScalarType s) {
+inline torch::headeronly::ScalarType scalar_type(
+    torch::headeronly::ScalarType s) {
   return s;
 }
 } // namespace detail
 
-#define AT_DISPATCH_SWITCH_TMPL(                                            \
+// THO_DISPATCH_SWITCH_TMPL is same as AT_DISPATCH_SWITCH but with
+// custom PRELUDE and CHECK_NOT_IMPLEMENTED macros:
+#define THO_DISPATCH_SWITCH_TMPL(                                           \
     PRELUDE, CHECK_NOT_IMPLEMENTED, TYPE, NAME, ...)                        \
   [&] {                                                                     \
     const auto& the_type = TYPE;                                            \
     constexpr const char* at_dispatch_name = NAME;                          \
     /* don't use TYPE again in case it is an expensive or side-effect op */ \
-    c10::ScalarType _st = ::detail::scalar_type(the_type);                  \
+    torch::headeronly::ScalarType _st = ::detail::scalar_type(the_type);    \
     PRELUDE(at_dispatch_name, _st);                                         \
+    C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")             \
     switch (_st) {                                                          \
       __VA_ARGS__                                                           \
       default:                                                              \
@@ -34,7 +44,8 @@ inline c10::ScalarType scalar_type(c10::ScalarType s) {
             '"',                                                            \
             at_dispatch_name,                                               \
             "\" not implemented for '",                                     \
-            c10::toString(_st),                                             \
+            torch::headeronly::toString(_st),                               \
             "'");                                                           \
     }                                                                       \
+    C10_DIAGNOSTIC_POP()                                                    \
   }()
