@@ -507,7 +507,7 @@ struct map_types_to_values<typelist<Types...>> final {
 } // namespace detail
 
 template <class TypeList, class Func>
-decltype(auto) map_types_to_values(Func&& func) {
+auto map_types_to_values(Func&& func) {
   return detail::map_types_to_values<TypeList>::call(std::forward<Func>(func));
 }
 

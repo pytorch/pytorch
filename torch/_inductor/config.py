@@ -546,6 +546,10 @@ max_autotune_flex_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
     "TORCHINDUCTOR_MAX_AUTOTUNE_FLEX_SEARCH_SPACE", "DEFAULT"
 ).upper()  # type: ignore[assignment]
 
+cutedsl_enable_autotuning: bool = (
+    os.environ.get("CUTEDSL_ENABLE_AUTOTUNING", "0") == "1"
+)
+
 # DEPRECATED. This setting is ignored.
 autotune_fallback_to_aten = False
 
@@ -1555,6 +1559,9 @@ class triton:
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0") == "1"
     )
 
+    mix_order_reduction_split_size: Optional[int] = None
+    mix_order_reduction_autotune_split_size = True
+
 
 class aot_inductor:
     """
@@ -2149,6 +2156,9 @@ class test_configs:
     distort_benchmarking_result = os.getenv(
         "TORCHINDUCTOR_DISTORT_BENCHMARKING_RESULT", ""
     )
+
+    bisect_pre_grad_graph = False
+    bisect_keep_custom_backend_for_inductor = False
 
 
 if TYPE_CHECKING:
