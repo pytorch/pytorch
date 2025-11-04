@@ -7,7 +7,7 @@ from typing import Callable
 
 import torch
 from torch._C import ScriptObject
-from torch._C._distributed_c10d import CallbackWork, FakeWork
+from torch._C._distributed_c10d import FakeWork, PythonCallbackWork
 from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed.distributed_c10d import (
     _check_op,
@@ -774,7 +774,7 @@ def _local_send(
     tensor = tensors[0]
 
     assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
-    src = int(tensor.__rank__)
+    src = int(tensor.__src_rank__)
 
     LocalRunnerMode.current()._signal_send(src, dst, tensor._local_tensors[src])
 
@@ -797,7 +797,7 @@ def _local_recv_(
     tensor = tensors[0]
 
     assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
-    dst = int(tensor.__rank__)
+    dst = int(tensor.__src_rank__)
 
     def _recv_and_store(timeout: timedelta) -> bool:
         def _wait_and_store(obj: object) -> None:
@@ -808,7 +808,7 @@ def _local_recv_(
         LocalRunnerMode.current()._wait_recv(src, dst, _wait_and_store)
         return True
 
-    work = CallbackWork(_recv_and_store)
+    work = PythonCallbackWork(_recv_and_store)
     work_so = Work.boxed(work)
     return work_so
 
@@ -822,31 +822,22 @@ def _local_recv_any_source_(
     return _local_recv_(tensors, process_group_so, -1, tag)
 
 
-def _unpack_ranks(ranks: int | torch.SymInt) -> list[int]:
-    """
-    Unpacks the input `ranks` into a list of integer rank ids.
-    """
-    from . import LocalIntNode
-
-    if isinstance(ranks, torch.SymInt) and isinstance(ranks.node, LocalIntNode):
-        return list(ranks.node._local_ints.keys())
-    if isinstance(ranks, int):
-        return [ranks]
-    raise AssertionError(f"Unsupported ranks type {type(ranks)}")
-
-
 def _attach_rank(tensor: torch.Tensor, rank: int) -> torch.Tensor:
     """
     Attaches rank as an attribute to given tensor so that the send or recv implementation
     knows which rank initiates the operation (note under local tensor mode ).
     """
-    tensor.__rank__ = rank  # type: ignore[attr-defined]
+    from torch.distributed.tensor import DTensor
+
+    if isinstance(tensor, DTensor):
+        tensor = tensor._local_tensor
+
+    tensor.__src_rank__ = rank  # type: ignore[attr-defined]
     return tensor
 
 
 def local_p2p_op(
-    src: int | torch.SymInt,
-    dst: int | torch.SymInt,
+    dst: torch.SymInt,
     tensor: torch.Tensor,
     op: Callable[[torch.Tensor, int], Work | None],
 ) -> Work | None | list[Work | None]:
@@ -854,11 +845,17 @@ def local_p2p_op(
     Runs a point-to-point (P2P) operation for all combinations of source and destination ranks.
     """
     _check_op(op)
+
+    from . import LocalIntNode
+
+    assert isinstance(dst.node, LocalIntNode), (
+        "Expected 'dst' to be a LocalIntNode where the value is the destination rank and key is the source rank"
+    )
+
     w = []
-    for r in _unpack_ranks(src):
-        for p in _unpack_ranks(dst):
-            tensor = _attach_rank(tensor, r)
-            w.append(op(tensor, p))
+    for s, d in dst.node._local_ints.items():
+        tensor = _attach_rank(tensor, s)
+        w.append(op(tensor, d))
     return w
 
 
@@ -868,7 +865,7 @@ def wait_all(work: Work | None | list[Work | None]) -> None:
 
     A single Work object, None, or a list of Work objects (possibly containing None).
     If None, does nothing. If a single Work, waits for it to complete. If a list, waits
-    for each non-None Work in the list to complete.å
+    for each non-None Work in the list to complete.
     """
 
     if work is None:

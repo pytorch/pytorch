@@ -922,6 +922,22 @@ class LocalTensorMode(TorchDispatchMode):
             # pyrefly: ignore [bad-argument-type, bad-argument-count]
             return LocalTensor({r: cb(r) for r in self.ranks})
 
+    def tensor_map(
+        self, tensor: LocalTensor, cb: Callable[[int, Tensor], Tensor | None]
+    ) -> LocalTensor:
+        """
+        Creates a LocalTensor instance by mapping rank id to ids local shard.
+        """
+
+        with self.disable():
+            results = {}
+            for r in self.ranks:
+                if r in tensor._local_tensors:
+                    m = cb(r, tensor._local_tensors[r])
+                    if m is not None:
+                        results[r] = m
+            return LocalTensor(results)
+
     def _patch_device_mesh(self) -> None:
         assert self._old_get_coordinate is None
         self._old_get_coordinate = DeviceMesh.get_coordinate  # type: ignore[assignment]
@@ -1144,7 +1160,7 @@ class LocalRunnerMode:
         assert obj is not None, "Cannot signal None"
         self._assert_holds_run_lock()
         # Only a single thread a time executes so it is safe to mutate
-        # read objects queue (executing thread is already holdin the lock)
+        # read objects queue (executing thread is already holding the lock)
         self._recv_objects[dst][src].put(obj)
         # Signal directly condition variable since the calling thread is already
         # holding the lock

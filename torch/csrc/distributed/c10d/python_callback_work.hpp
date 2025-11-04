@@ -6,11 +6,15 @@
 
 namespace c10d {
 
-class CallbackWork : public Work {
+// PythonCallbackWork is a subclass of Work that wraps a Python callback
+// function that implements wait(). This allows asynchronous work to
+// be integrated with Python code, enabling custom completion logic or
+// post-processing in Python.
+class PythonCallbackWork : public Work {
  public:
-  explicit CallbackWork(py::function callback);
+  explicit PythonCallbackWork(py::function callback);
 
-  ~CallbackWork() override;
+  ~PythonCallbackWork() override;
 
   bool wait(std::chrono::milliseconds timeout) override;
 

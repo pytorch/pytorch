@@ -11,7 +11,6 @@ from torch.distributed._local_tensor import (
     LocalRunnerMode,
     LocalTensor,
     LocalTensorMode,
-    maybe_run_for_local_tensor,
 )
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -20,8 +19,10 @@ from torch.distributed.tensor import (
     Partial,
     Replicate,
     Shard,
+    zeros,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.distributed._tensor.common_dtensor import reduce_local_int
 
 
 class LocalTensorTestBase(TestCase):
@@ -418,54 +419,69 @@ from torch.distributed._local_tensor._c10d import local_p2p_op, wait_all
 
 
 class TestLocalRunner(LocalTensorTestBase):
-    world_size = 4
-
-    @maybe_run_for_local_tensor
-    @staticmethod
-    def _get_peer(rank, world_size, dir) -> int:
-        return (rank + dir) % world_size
+    world_size = 6
 
     @staticmethod
-    def get_rank(world_size: int) -> torch.SymInt:
-        return torch.SymInt(LocalIntNode({r: r for r in range(world_size)}))
+    def _get_pp_peer(pp_index, mesh, dim, dir):
+        pp_meshes = mesh._get_all_submeshes(dim)
+        pp_ret = {}
+        for pp_mesh in pp_meshes:
+            global_rank = pp_mesh.mesh[pp_index].item()
+            global_peer = pp_mesh.mesh[(pp_index + dir) % pp_mesh.size()].item()
+            pp_ret[global_rank] = global_peer
 
-    def _run(
+        return torch.SymInt(LocalIntNode(pp_ret))
+
+    def _run_dp_pp(
         self,
-        world_size: int,
-        rank: int,
+        mesh: DeviceMesh,
+        pp_index: int,
         actual: list[torch.Tensor | None],
         expected: list[torch.Tensor | None],
     ) -> None:
-        ltm = LocalTensorMode(world_size)
+        ltm = LocalTensorMode(mesh.size())
         with ltm:
-            expected[rank] = ltm.rank_map(
-                lambda r: torch.tensor(
-                    [TestLocalRunner._get_peer(r, world_size, -1)], dtype=torch.int
+            dp_mesh = mesh["dp"]
+            pp_mesh = mesh["pp"]
+
+            x = torch.rand(2, 4)
+            xd = distribute_tensor(x, dp_mesh, [Shard(0)])
+            xd = xd * 2
+            x = x * 2
+
+            yd = zeros(*xd.shape, device_mesh=dp_mesh, placements=[Shard(0)])
+
+            if pp_index != pp_mesh.size(0) - 1:
+                # Send to next pp rank
+                pp_next_rank = TestLocalRunner._get_pp_peer(pp_index, mesh, "pp", +1)
+                local_p2p_op(pp_next_rank, xd, dist.isend)
+                expected[pp_index + 1] = ltm.tensor_map(
+                    x,
+                    lambda r, t: t
+                    if reduce_local_int(pp_next_rank, lambda vals: r in vals.values())
+                    else torch.zeros_like(t),
                 )
-                if r == rank
-                else torch.tensor([-1], dtype=torch.int)
-            )
-            x = torch.ones(1, dtype=torch.int) * rank
-            y = torch.ones_like(x) * -1
 
-            next_rank = TestLocalRunner._get_peer(rank, world_size, +1)
-            prev_rank = TestLocalRunner._get_peer(rank, world_size, -1)
+            if pp_index != 0:
+                # Receive from prev pp rank
+                pp_prev_rank = TestLocalRunner._get_pp_peer(pp_index, mesh, "pp", -1)
+                rw = local_p2p_op(pp_prev_rank, yd, dist.irecv)
+                wait_all(rw)
 
-            local_p2p_op(rank, next_rank, x, dist.isend)
+                y = yd.full_tensor()
+                actual[pp_index] = y
 
-            rw = local_p2p_op(rank, prev_rank, y, dist.irecv)
-
-            wait_all(rw)
-
-            actual[rank] = y
-
-    def test_send_recv(self):
-        actual: list[torch.Tensor | None] = [None] * self.world_size
-        expected: list[torch.Tensor | None] = [None] * self.world_size
+    def test_dp_pp(self):
+        pp_size = 3
+        mesh = init_device_mesh(
+            "cpu", (self.world_size // pp_size, pp_size), mesh_dim_names=("dp", "pp")
+        )
+        actual: list[torch.Tensor | None] = [None] * pp_size
+        expected: list[torch.Tensor | None] = [None] * pp_size
         with LocalRunnerMode(
             self.world_size,
-            self.world_size,
-            lambda rank: self._run(self.world_size, rank, actual, expected),
+            pp_size,
+            lambda pp_index: self._run_dp_pp(mesh, pp_index, actual, expected),
         ):
             pass
 

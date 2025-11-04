@@ -1,9 +1,9 @@
 #include <c10/core/TensorOptions.h>
-#include <torch/csrc/distributed/c10d/CallbackWork.hpp>
+#include <torch/csrc/distributed/c10d/python_callback_work.hpp>
 
 namespace c10d {
 
-CallbackWork::CallbackWork(py::function callback)
+PythonCallbackWork::PythonCallbackWork(py::function callback)
     : callback_(std::move(callback)) {
   // Create a future that will be marked as complete when wait() is called
   future_ = c10::make_intrusive<c10::ivalue::Future>(
@@ -11,7 +11,7 @@ CallbackWork::CallbackWork(py::function callback)
 }
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
-CallbackWork::~CallbackWork() {
+PythonCallbackWork::~PythonCallbackWork() {
   py::gil_scoped_acquire ag;
   callback_.dec_ref();
   // Explicitly set callback_ to nullptr to prevent py::object's dtor
@@ -20,7 +20,7 @@ CallbackWork::~CallbackWork() {
   callback_.ptr() = nullptr;
 }
 
-bool CallbackWork::wait(std::chrono::milliseconds timeout) {
+bool PythonCallbackWork::wait(std::chrono::milliseconds timeout) {
   py::gil_scoped_acquire ag;
 
   try {
@@ -57,7 +57,7 @@ bool CallbackWork::wait(std::chrono::milliseconds timeout) {
   }
 }
 
-c10::intrusive_ptr<c10::ivalue::Future> CallbackWork::getFuture() {
+c10::intrusive_ptr<c10::ivalue::Future> PythonCallbackWork::getFuture() {
   return future_;
 }
 

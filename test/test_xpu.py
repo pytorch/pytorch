@@ -14,10 +14,8 @@ from torch.testing import make_tensor
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyXPU,
     OpDTypes,
     ops,
-    skipXPUIf,
 )
 from torch.testing._internal.common_methods_invocations import ops_and_refs
 from torch.testing._internal.common_utils import (
@@ -74,6 +72,8 @@ _xpu_computation_ops = [
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpu(TestCase):
+    expandable_segments = False
+
     def test_device_behavior(self):
         current_device = torch.xpu.current_device()
         torch.xpu.set_device(current_device)
@@ -385,56 +385,6 @@ if __name__ == "__main__":
         torch.xpu.set_rng_state(g_state0)
         self.assertEqual(2024, torch.xpu.initial_seed())
 
-    @onlyXPU
-    @suppress_warnings
-    @ops(_xpu_computation_ops, dtypes=any_common_cpu_xpu_one)
-    def test_compare_cpu(self, device, dtype, op):
-        def to_cpu(arg):
-            if isinstance(arg, torch.Tensor):
-                return arg.to(device="cpu")
-            return arg
-
-        samples = op.reference_inputs(device, dtype)
-
-        for sample in samples:
-            cpu_sample = sample.transform(to_cpu)
-            xpu_results = op(sample.input, *sample.args, **sample.kwargs)
-            cpu_results = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
-
-            xpu_results = sample.output_process_fn_grad(xpu_results)
-            cpu_results = cpu_sample.output_process_fn_grad(cpu_results)
-
-            # Lower tolerance because we are running this as a `@slowTest`
-            # Don't want the periodic tests to fail frequently
-            self.assertEqual(xpu_results, cpu_results, atol=1e-4, rtol=1e-4)
-
-    @onlyXPU
-    @ops(_xpu_computation_ops, allowed_dtypes=(torch.bool,))
-    def test_non_standard_bool_values(self, device, dtype, op):
-        # Test boolean values other than 0x00 and 0x01 (gh-54789)
-        def convert_boolean_tensors(x):
-            if not isinstance(x, torch.Tensor) or x.dtype != torch.bool:
-                return x
-
-            # Map False -> 0 and True -> Random value in [2, 255]
-            true_vals = torch.randint(
-                2, 255, x.shape, dtype=torch.uint8, device=x.device
-            )
-            false_vals = torch.zeros((), dtype=torch.uint8, device=x.device)
-            x_int = torch.where(x, true_vals, false_vals)
-
-            ret = x_int.view(torch.bool)
-            self.assertEqual(ret, x)
-            return ret
-
-        for sample in op.sample_inputs(device, dtype):
-            expect = op(sample.input, *sample.args, **sample.kwargs)
-
-            transformed = sample.transform(convert_boolean_tensors)
-            actual = op(transformed.input, *transformed.args, **transformed.kwargs)
-
-            self.assertEqual(expect, actual)
-
     def test_serialization_array_with_storage(self):
         x = torch.randn(5, 5).xpu()
         y = torch.zeros(2, 5, dtype=torch.int, device="xpu")
@@ -470,6 +420,8 @@ if __name__ == "__main__":
             self.assertEqual(copy.get_device(), original.get_device())
 
     def test_out_of_memory(self):
+        if self.expandable_segments:
+            self.skipTest("Skipping OOM test for expandable segments allocator.")
         tensor = torch.zeros(1024, device="xpu")  # noqa: F841
 
         with self.assertRaisesRegex(RuntimeError, "Tried to allocate 800000000.00 GiB"):
@@ -479,6 +431,8 @@ if __name__ == "__main__":
             torch.empty(1024 * 1024 * 1024 * 8000000000, dtype=torch.int8, device="xpu")
 
     def test_raises_oom(self):
+        if self.expandable_segments:
+            self.skipTest("Skipping OOM test for expandable segments allocator.")
         torch.xpu.memory.empty_cache()
         with self.assertRaises(torch.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device="xpu")
@@ -591,7 +545,7 @@ if __name__ == "__main__":
         self.assertEqual(torch.accelerator.max_memory_allocated(), prev_max_allocated)
         self.assertEqual(torch.accelerator.max_memory_reserved(), prev_max_reserved)
 
-    @skipXPUIf(
+    @unittest.skipIf(
         int(torch.version.xpu) < 20250000,
         "Test requires SYCL compiler version 2025.0.0 or newer.",
     )
@@ -639,6 +593,8 @@ if __name__ == "__main__":
                 self.assertTrue(b"libsycl.so" in result)
 
     def test_dlpack_conversion(self):
+        if self.expandable_segments:
+            self.skipTest("Skipping DLPack test for expandable segments allocator.")
         x = make_tensor((5,), dtype=torch.float32, device="xpu")
         if IS_WINDOWS and int(torch.version.xpu) < 20250000:
             with self.assertRaisesRegex(
@@ -652,7 +608,58 @@ if __name__ == "__main__":
             self.assertEqual(z, x)
 
 
-instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)
+@unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
+class TestXpuOps(TestCase):
+    @suppress_warnings
+    @ops(_xpu_computation_ops, dtypes=any_common_cpu_xpu_one)
+    def test_compare_cpu(self, device, dtype, op):
+        def to_cpu(arg):
+            if isinstance(arg, torch.Tensor):
+                return arg.to(device="cpu")
+            return arg
+
+        samples = op.reference_inputs(device, dtype)
+
+        for sample in samples:
+            cpu_sample = sample.transform(to_cpu)
+            xpu_results = op(sample.input, *sample.args, **sample.kwargs)
+            cpu_results = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
+
+            xpu_results = sample.output_process_fn_grad(xpu_results)
+            cpu_results = cpu_sample.output_process_fn_grad(cpu_results)
+
+            # Lower tolerance because we are running this as a `@slowTest`
+            # Don't want the periodic tests to fail frequently
+            self.assertEqual(xpu_results, cpu_results, atol=1e-4, rtol=1e-4)
+
+    @ops(_xpu_computation_ops, allowed_dtypes=(torch.bool,))
+    def test_non_standard_bool_values(self, device, dtype, op):
+        # Test boolean values other than 0x00 and 0x01 (gh-54789)
+        def convert_boolean_tensors(x):
+            if not isinstance(x, torch.Tensor) or x.dtype != torch.bool:
+                return x
+
+            # Map False -> 0 and True -> Random value in [2, 255]
+            true_vals = torch.randint(
+                2, 255, x.shape, dtype=torch.uint8, device=x.device
+            )
+            false_vals = torch.zeros((), dtype=torch.uint8, device=x.device)
+            x_int = torch.where(x, true_vals, false_vals)
+
+            ret = x_int.view(torch.bool)
+            self.assertEqual(ret, x)
+            return ret
+
+        for sample in op.sample_inputs(device, dtype):
+            expect = op(sample.input, *sample.args, **sample.kwargs)
+
+            transformed = sample.transform(convert_boolean_tensors)
+            actual = op(transformed.input, *transformed.args, **transformed.kwargs)
+
+            self.assertEqual(expect, actual)
+
+
+instantiate_device_type_tests(TestXpuOps, globals(), only_for="xpu", allow_xpu=True)
 
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
