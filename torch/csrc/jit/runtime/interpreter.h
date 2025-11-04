@@ -129,7 +129,7 @@ struct InterpreterContinuation {
       : state(std::move(state_)),
         stack(std::move(stack_)),
         tls_state_(std::move(tls_state))
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
         ,
         dist_autograd_context_id_(dist_autograd_context_id)
 #endif
@@ -142,7 +142,7 @@ struct InterpreterContinuation {
   InterpreterState state;
   Stack stack;
   std::optional<at::ThreadLocalState> tls_state_ = std::nullopt;
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
   int64_t dist_autograd_context_id_;
 #endif
 };

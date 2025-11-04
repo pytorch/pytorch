@@ -7,7 +7,6 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import datetime
-import os
 import socket
 from contextlib import closing
 from typing import Optional
@@ -44,8 +43,8 @@ def create_c10d_store(
             "is not set, libuv will be used by default."
         )
 
-    # check os.environ for use_libuv
-    use_libuv = os.environ.get("USE_LIBUV", "1") == "1"  # libuv is the default option
+    # libuv is only supported with tensorpipe and since tensorpipe is deprecated. This is deprecated as well, defaulting to false.
+    use_libuv = False
 
     if server_port == -1 and world_size > 1:
         raise ValueError(

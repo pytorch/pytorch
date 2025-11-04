@@ -84,7 +84,8 @@ class ShardedTensorTestBase(MultiProcessTestCase):
 
 
 # wrapper to initialize comms (processgroup + rpc)
-def with_comms(func=None, init_rpc=True, backend="nccl"):
+# tensorpipe and rpc are deprecated now
+def with_comms(func=None, init_rpc=False, backend="nccl"):
     if func is None:
         return partial(
             with_comms,
