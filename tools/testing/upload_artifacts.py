@@ -166,8 +166,8 @@ def parse_xml_and_upload_json() -> None:
         f"{REPO_ROOT}/test/test-reports/**/*.xml", recursive=True
     ):
         xml_path = Path(xml_file)
-        json_version = xml_path.with_suffix(".json")
-        if json_version in json_files:
+        json_file = xml_path.with_suffix(".json")
+        if json_file in json_files:
             # It has already been parsed and uploaded
             continue
 
@@ -182,7 +182,9 @@ def parse_xml_and_upload_json() -> None:
 
         gzipped = gzip.compress(line_by_line_jsons.encode("utf-8"))
         s3_key = (
-            json_version.relative_to("test/test-reports").as_posix().replace("/", "_")
+            json_file.relative_to(REPO_ROOT / "test/test-reports")
+            .as_posix()
+            .replace("/", "_")
         )
         get_s3_resource().put_object(
             Body=gzipped,
@@ -195,5 +197,5 @@ def parse_xml_and_upload_json() -> None:
         # We don't need to save the json file locally, but doing so lets us
         # track which ones have been uploaded already. We could probably also
         # check S3
-        with open(json_version, "w") as f:
+        with open(json_file, "w") as f:
             f.write(line_by_line_jsons)
