@@ -62,6 +62,9 @@ jobs:
     name: dynamo-test
     uses: ./.github/workflows/_linux-test.yml
     needs: dynamo-build
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
     with:
       build-environment: linux-jammy-py${{ matrix.python-version }}-gcc11
       docker-image: ${{ needs.dynamo-build.outputs.docker-image }}
