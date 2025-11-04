@@ -156,6 +156,10 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return -1;
   }
 
+  virtual void mtiagraphDestroy(int64_t handle) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+  }
+
   virtual void mtiagraphCaptureBegin(int64_t handle, MempoolId_t pool) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
