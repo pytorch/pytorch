@@ -22,7 +22,11 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from torch.nn.attention.flex_attention import (
+    BlockMask,
+    create_block_mask,
+    flex_attention,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -32,6 +36,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.utils._pytree import register_pytree_node
 
 
 class SimpleModel(torch.nn.Module):
@@ -174,6 +179,15 @@ def aot_export_joint_with_descriptors_alone(model, args, kwargs=None):
 
 def _count_op(gm, target):
     return sum(1 for node in gm.graph.nodes if node.target == target)
+
+
+register_pytree_node(
+    BlockMask,
+    BlockMask._flatten,
+    BlockMask._unflatten,
+    flatten_with_keys_fn=BlockMask._flatten_with_keys,
+    serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
+)
 
 
 @requires_cuda
@@ -505,6 +519,21 @@ class DTensorExportTest(TestCase):
             _count_op(joint_gm, torch.ops.higher_order.flex_attention_backward),
             2,
         )
+
+    def test_union_typed_annotation(self):
+        def fn(leaf: torch.Tensor | DTensor):
+            def nest_fn(leaf: torch.Tensor | DTensor):
+                # def nest_fn(leaf: Union[torch.Tensor, DTensor]):  # this works
+                if isinstance(leaf, DTensor):
+                    leaf = leaf.to_local()
+                return leaf
+
+            return nest_fn(leaf) + 1
+
+        z = torch.randn(16, 16)
+        gm = graph_capture_and_aot_export_joint_with_descriptors(fn, (z,))
+
+        self.assertEqual(fn(z), gm(z)[0])
 
 
 instantiate_parametrized_tests(DTensorExportTest)

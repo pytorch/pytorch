@@ -34,7 +34,7 @@ from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
 )
 from torch.nn.attention._utils import _validate_sdpa_input
-from torch.utils._pytree import GetAttrKey, register_pytree_node, tree_map_only
+from torch.utils._pytree import GetAttrKey, tree_map_only
 
 
 # Private debug flag to disable internal compilation wrapping for debugging purposes.
@@ -738,7 +738,7 @@ class BlockMask:
             (slice(i + n, i + n + 1) if -n <= i < 0 else slice(i, i + 1))
             if isinstance(i, int)
             else i
-            for i, n in zip(padded, sizes)
+            for i, n in zip(padded, sizes, strict=True)
         )
         new_kv_num_blocks = self.kv_num_blocks[index]
         new_kv_indices = self.kv_indices[index]
@@ -944,6 +944,7 @@ class BlockMask:
             **dict(zip(cls._CONTEXT_ATTRS, context)),
             **dict(zip(cls._TENSOR_ATTRS, tensors)),
         }
+        # pyrefly: ignore [bad-argument-type]
         return cls(**kwargs)
 
     def _flatten_with_keys(self):
@@ -1648,12 +1649,3 @@ def flex_attention(
     return _finalize_outputs(
         out, lse, max_scores, return_aux=return_aux, return_lse=return_lse
     )
-
-
-register_pytree_node(
-    BlockMask,
-    BlockMask._flatten,
-    BlockMask._unflatten,
-    flatten_with_keys_fn=BlockMask._flatten_with_keys,
-    serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
-)

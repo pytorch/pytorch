@@ -742,7 +742,7 @@ def forward(self, pred_1, x_1):
 
     def test_cond_in_forloop(self):
         def for_loop_fake(x):
-            for i in range(3):
+            for _ in range(3):
                 x = x * x + 1
             return x
 
@@ -1236,7 +1236,7 @@ def forward(self, pred_1, x_1):
         from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 
         # This is a helper function that extracts the metadata from the tensor and
-        # sets the requries_grad flag to false. This is needed as we compare the
+        # sets the requires_grad flag to false. This is needed as we compare the
         # metadata of the operands and the gradients
         def _extract_tensor_metadata_except_requires_grad(arg):
             metadata = _extract_tensor_metadata(arg)
@@ -3088,9 +3088,7 @@ class GraphModule(torch.nn.Module):
             )
 
             # Compare gradients for each layer
-            for i, (uncompiled_grad, compiled_grad) in enumerate(
-                zip(uncompiled_grads, compiled_grads)
-            ):
+            for uncompiled_grad, compiled_grad in zip(uncompiled_grads, compiled_grads):
                 self.assertEqual(
                     uncompiled_grad,
                     compiled_grad,

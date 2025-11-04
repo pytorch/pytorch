@@ -2707,6 +2707,7 @@ def to_subclass(t: Any, cls: type) -> Any:
 dict_getitem = dict.__getitem__
 
 
+@torch.fx.wrap
 def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
     # Call dict(d) to prevent calling overridden __iter__/keys
     dict_class = dict
@@ -4695,6 +4696,10 @@ def clear_torch_function_mode_stack() -> None:
         _pop_torch_function_stack()
 
 
+def get_current_stream(device: torch.device) -> torch.Stream:
+    return torch.accelerator.current_stream(device)
+
+
 # call from C dynamo in order to inspect values in pdb
 def _breakpoint_for_c_dynamo(*args: Any) -> None:
     breakpoint()
@@ -4759,33 +4764,8 @@ def _extract_tensor_dict(t: torch.Tensor) -> dict[str, Any]:
     return tensor_dict
 
 
-# This is useful for reconstructing within the Dynamo graph the non-graph-input objects
-# whose lifetime is governed by the user.
-# e.g. torch.cuda.Event is a prime example.
-user_obj_id_to_weakref: dict[int, weakref.ReferenceType[object]] = {}
-
-
-# TODO: mlazos to remove after replacing w/ above API
-def get_user_object_from_id(obj_id: int) -> Any:
-    obj = user_obj_id_to_weakref[obj_id]()
-    assert obj is not None, "User object is no longer alive"
-    return obj
-
-
-def store_user_object_weakref(obj: object) -> None:
-    obj_id = id(obj)
-    try:
-        user_obj_id_to_weakref[obj_id] = weakref.ref(obj)
-    except TypeError as e:
-        from .exc import unimplemented_v2
-
-        unimplemented_v2(
-            gb_type="Failed to make weakref to User Object when storing by ID",
-            context=f"user_objected: {obj}",
-            explanation="Object does not allow us to make a weakref to it",
-            hints=[],
-            from_exc=e,
-        )
+def build_stream(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Stream:
+    return torch._C.Stream(*args, **kwargs)
 
 
 class CompileTimeInstructionCounter:
