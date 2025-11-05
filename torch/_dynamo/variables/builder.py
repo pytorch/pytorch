@@ -3167,7 +3167,7 @@ def construct_tensor_variable(
     """
     cached_tensor_vts = tx.output.cached_tensor_vts
 
-    if id(example_value) in cached_tensor_vts:
+    if id(example_value) in cached_tensor_vts and proxy.node.op != "placeholder":
         saved_vt = cached_tensor_vts[id(example_value)]
         # Overwrite the existing proxy so that from now on, this VT always uses
         # the new proxy
