@@ -3254,7 +3254,9 @@ def handle_traced_output(
             assert hasattr(example_value, "_fields"), (
                 f"expected named tuple but got {type(example_value)}"
             )
-            return NewNamedTupleVariable(unpacked, example_value.__class__, **options)
+            return NewNamedTupleVariable(
+                unpacked, example_value.__class__, **options
+            )
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable.create(None, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
