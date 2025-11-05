@@ -38,7 +38,7 @@ jobs:
       opt_out_experiments: lf
 
   dynamo-build:
-    name: dynamo-build-py3_11
+    name: dynamo-build-py311
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     # strategy:
@@ -46,8 +46,8 @@ jobs:
     #     python-version: ['3.10', '3.11', '3.12', '3.13'] #, '3.14']
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.11-clang12
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.11-clang12
+      build-environment: linux-jammy-py311-clang12
+      docker-image-name: ci-image:pytorch-linux-jammy-py311-clang12
       test-matrix: |
         { include: [
           { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
@@ -57,15 +57,15 @@ jobs:
     secrets: inherit
 
   dynamo-test:
-    name: dynamo-test-py3_11
+    name: dynamo-test-py311
     uses: ./.github/workflows/_linux-test.yml
     needs: dynamo-build
     # strategy:
     #   matrix:
     #     python-version: ['3.10', '3.11', '3.12', '3.13']
     with:
-      build-environment: linux-jammy-py3.11-clang12
+      build-environment: linux-jammy-py311-clang12
       # docker-image: ${{ needs.dynamo-build.outputs.docker-image }}
-      docker-image: ${{ needs.dynamo-build-py3.11.outputs.docker-image }}
+      docker-image: ${{ needs.dynamo-build-py311.outputs.docker-image }}
       test-matrix: ${{ needs.dynamo-build.outputs.test-matrix }}
     secrets: inherit
