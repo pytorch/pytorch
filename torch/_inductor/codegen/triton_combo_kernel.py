@@ -98,7 +98,7 @@ def _default_custom_combo_kernel_horizontal_partition(
         ]
         short_reduction = [n for n in reduction if n not in long_reduction]
         if long_reduction:
-            log.warning(
+            log.debug(
                 "ComboKernels: %d long reduction nodes are separated",
                 len(long_reduction),
             )
@@ -112,7 +112,7 @@ def _default_custom_combo_kernel_horizontal_partition(
         ]
         if large_pointwise:
             # TODO benchmark the performance when large pointwise nodes combining with others
-            log.warning(
+            log.debug(
                 "ComboKernels: %d large pointwise nodes are separated",
                 len(large_pointwise),
             )
