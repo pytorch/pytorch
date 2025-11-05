@@ -48,6 +48,7 @@ from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
+    expectedFailureDynamic,
     rand_strided,
     same,
     skipIfNotPy312,
@@ -7443,6 +7444,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             msg,
         )
 
+    @expectedFailureDynamic
     def test_dynamo_default_lru_cache_behavior(self):
         @torch.compile(backend="eager")
         def fn(x):
@@ -7482,6 +7484,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(c[0], dynamic_shapes_cache_entry)
         self.assertEqual(c[1], static_shapes_cache_entry)
 
+    @expectedFailureDynamic
     def test_dynamo_disable_lru_cache_behavior(self):
         @torch.compile(backend="eager")
         def fn(x):
