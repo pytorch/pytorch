@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import TypeIs
 
 import torch.utils._pytree as python_pytree
@@ -24,9 +24,15 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 
+_T = TypeVar("_T")
+_KT = TypeVar("_KT")
+_VT = TypeVar("_VT")
+
+
 if python_pytree._cxx_pytree_dynamo_traceable:
     import optree
     import optree._C
+    import optree.utils
 
     import torch.utils._cxx_pytree as cxx_pytree  # noqa: F401
 
@@ -64,7 +70,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
         del __func
     del __name
 
-    @substitute_in_graph(optree.tree_is_leaf, can_constant_fold_through=True)
+    @substitute_in_graph(optree.tree_is_leaf, can_constant_fold_through=True)  # type: ignore[arg-type]
     def tree_is_leaf(
         tree: PyTree,
         /,
@@ -79,7 +85,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
             return True
         return False
 
-    @substitute_in_graph(optree.tree_iter, can_constant_fold_through=False)
+    @substitute_in_graph(optree.tree_iter, can_constant_fold_through=False)  # type: ignore[arg-type]
     def tree_iter(
         tree: PyTree,
         /,
@@ -110,7 +116,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
 
     __all__ += ["tree_iter"]
 
-    @substitute_in_graph(optree.tree_leaves, can_constant_fold_through=True)
+    @substitute_in_graph(optree.tree_leaves, can_constant_fold_through=True)  # type: ignore[arg-type]
     def tree_leaves(
         tree: PyTree,
         /,
@@ -451,7 +457,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
             dict,
             metadata,
             entries,
-            unflatten_func,
+            unflatten_func,  # type: ignore[arg-type]
             none_is_leaf=none_is_leaf,
             namespace=namespace,
         )
@@ -507,7 +513,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
                 type(node),
                 metadata,
                 entries,
-                unflatten_func,
+                unflatten_func,  # type: ignore[arg-type]
                 none_is_leaf=none_is_leaf,
                 namespace=namespace,
             )  # type: ignore[arg-type]
@@ -557,7 +563,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
 
     __all__ += ["tree_unflatten"]
 
-    @substitute_in_graph(optree.tree_map, can_constant_fold_through=True)
+    @substitute_in_graph(optree.tree_map, can_constant_fold_through=True)  # type: ignore[arg-type]
     def tree_map(
         func: Callable[..., Any],
         tree: PyTree,
@@ -578,7 +584,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
 
     __all__ += ["tree_map"]
 
-    @substitute_in_graph(optree.tree_map_, can_constant_fold_through=True)
+    @substitute_in_graph(optree.tree_map_, can_constant_fold_through=True)  # type: ignore[arg-type]
     def tree_map_(
         func: Callable[..., Any],
         tree: PyTree,
@@ -600,14 +606,47 @@ if python_pytree._cxx_pytree_dynamo_traceable:
 
     __all__ += ["tree_map_"]
 
-    _none_unflatten = optree.register_pytree_node.get(type(None)).unflatten_func  # type: ignore[union-attr]
+    _none_registration = optree.register_pytree_node.get(type(None))
+    assert _none_registration is not None
 
     @substitute_in_graph(  # type: ignore[arg-type]
-        _none_unflatten,
+        _none_registration.unflatten_func,
         can_constant_fold_through=True,
         skip_signature_check=True,
     )
-    def none_unflatten(_: None, children: Iterable[Any], /) -> None:
+    def none_unflatten(_: None, children: Iterable[_T], /) -> None:
         if len(list(children)) != 0:
             raise ValueError("Expected no children.")
         return None
+
+    with optree.dict_insertion_ordered(False, namespace="torch"):
+        _dict_registration = optree.register_pytree_node.get(dict)
+        assert _dict_registration is not None
+
+    @substitute_in_graph(  # type: ignore[arg-type]
+        _dict_registration.flatten_func,
+        can_constant_fold_through=True,
+        skip_signature_check=True,
+    )
+    def dict_flatten(
+        dct: dict[_KT, _VT], /
+    ) -> tuple[list[_VT], tuple[list[_KT], list[_KT]], tuple[_KT, ...]]:
+        sorted_keys = optree.utils.total_order_sorted(dct)
+        values = [dct[key] for key in sorted_keys]
+        original_keys = list(dct)
+        return values, (original_keys, sorted_keys), tuple(sorted_keys)
+
+    @substitute_in_graph(  # type: ignore[arg-type]
+        _dict_registration.unflatten_func,
+        can_constant_fold_through=True,
+        skip_signature_check=True,
+    )
+    def dict_unflatten(
+        metadata: tuple[list[_KT], list[_KT]],
+        values: Iterable[_VT],
+        /,
+    ) -> dict[_KT, _VT]:
+        original_keys, sorted_keys = metadata
+        d = dict.fromkeys(original_keys)
+        d.update(zip(sorted_keys, values))
+        return d  # type: ignore[return-value]
