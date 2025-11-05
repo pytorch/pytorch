@@ -57,7 +57,7 @@ While previously your kernels might have included APIs from `<torch/*.h>` (for e
 - all uses of `TORCH_CHECK` must be replaced with `STD_TORCH_CHECK`
 - all uses of `at::kCUDA` must be replaced with `torch::headeronly::kCUDA` etc.
 - native functions such as `at::pad` must be replaced with `torch::stable::pad`
-- native functions that are called as Tensor methods (e.g., `Tensor.pad`) must be replaced with the ATen variant through `torch::stable::pad`. 
+- native functions that are called as Tensor methods (e.g., `Tensor.pad`) must be replaced with the ATen variant through `torch::stable::pad`.
 
 As mentioned above, the LibTorch stable ABI is still under development. If there is any API or feature you would like to see added to the stable ABI/`torch::headeronly`/`torch::stable`, please file a request through a [new issue on the PyTorch repo](https://github.com/pytorch/pytorch/issues).
 
