@@ -87,8 +87,6 @@
         off_hq2 = off_pid // NUM_Q_BLOCKS + off_hkv * GQA_SHARED_HEADS
         start_m2_block = off_pid % NUM_Q_BLOCKS
         off_pid_mask = start_m2_block // SPARSE_Q_MULTIPLE
-        start_m2 = start_m2_block * BLOCK_M2
-        offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
         stride_kv_num_blks_h = {{stride("KV_NUM_BLKS", 1)}}
         stride_kv_idx_h = {{stride("KV_IDX", 1)}}
         stride_kv_idx_m = {{stride("KV_IDX", 2)}}
@@ -113,8 +111,11 @@
         LSE2 = LSE + off_chz2
         DELTA2 = DELTA + off_chz2
 
-        # dq = tl.zeros([BLOCK_M2, QK_HEAD_DIM], dtype=tl.float32)
         dq = tl.zeros([BLOCK_M2, QK_HEAD_DIM_ROUNDED], dtype=tl.float32)
+
+        start_m2 = start_m2_block * BLOCK_M2
+        offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
+
         desc_q = None
         desc_do = None
         desc_k = None
@@ -146,11 +147,11 @@
         )
         q = tl.load_tensor_descriptor(
             desc_q,
-            [(start_m2_block * BLOCK_M2).to(tl.int32), 0],
+            [start_m2.to(tl.int32), 0],
         )
         do = tl.load_tensor_descriptor(
             desc_do,
-            [(start_m2_block * BLOCK_M2).to(tl.int32), 0],
+            [start_m2.to(tl.int32), 0],
         )
         {%- else %}
         # load Q and do: they stay in SRAM throughout the inner loop.
@@ -175,7 +176,6 @@
         kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
         sparse_kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
 
-        #offs_n2 = kv_start + tl.arange(0, BLOCK_N2)
         dq = bwd_dq_inner(
             {{gen_argdefs()}},
             K, V, desc_k, desc_v, kv_start, start_m2,
