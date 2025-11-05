@@ -9246,8 +9246,10 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS   # Float64 is not supported
     @onlyNativeDeviceTypes
     def test_Transformer_empty(self, device):
-        for batch_first, src_shape, tgt_shape in [(True, (10, 0, 512), (20, 0, 512))]:
-            transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12, dtype=torch.double).to(device)
+        for batch_first, src_shape, tgt_shape in [(True, (0, 10, 512), (0, 20, 512)),
+                                                  (False, (10, 0, 512), (20, 0, 512))]:
+            transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12, dtype=torch.double,
+                                               batch_first=batch_first).to(device)
             src = torch.rand(*src_shape, requires_grad=True, device=device, dtype=torch.double)
             tgt = torch.rand(*tgt_shape, requires_grad=True, device=device, dtype=torch.double)
             self._test_module_empty_inputs(transformer_model, [src, tgt])

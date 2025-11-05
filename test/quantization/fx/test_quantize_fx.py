@@ -204,7 +204,8 @@ import itertools
 import operator
 import unittest
 import io
-from typing import Callable, Optional
+from typing import Optional
+from collections.abc import Callable
 
 class BinaryOp(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
@@ -9435,7 +9436,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             criterion = nn.CrossEntropyLoss()
             train_one_epoch(prepared, criterion, optimizer, [(input_value, output_value)], torch.device('cpu'), 1)
         else:
-            for i in range(10):
+            for _ in range(10):
                 prepared(input_value)
 
         # print('after observation root:', prepared.root)
@@ -9480,7 +9481,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 optimizer = torch.optim.SGD(qeager.parameters(), lr=0.0001)
                 train_one_epoch(qeager, criterion, optimizer, [(input_value, output_value)], torch.device('cpu'), 1)
             else:
-                for i in range(10):
+                for _ in range(10):
                     qeager(input_value)
 
             # print('ref after observation:', qeager)
