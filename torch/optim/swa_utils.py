@@ -35,7 +35,26 @@ PARAM_LIST = Union[tuple[Tensor, ...], list[Tensor]]
 
 
 def get_ema_multi_avg_fn(decay=0.999):
-    """Get the function applying exponential moving average (EMA) across multiple params."""
+    """Get the function applying exponential moving average (EMA) across multiple params.
+
+    The EMA is initialized as:
+        W^{EMA}_0 = W^{model}_0  (initialization)
+
+    And then updated according to:
+        W^{EMA}_t = α W^{EMA}_{t-1} + (1-α) W^{model}_t  (for t > 0)
+
+    where:
+    - W^{EMA}_t is the EMA at current step t
+    - W^{EMA}_{t-1} is the EMA at previous step t-1
+    - W^{model}_t is the current model weights at step t
+    - α is the decay rate (default=0.999)
+
+    The `AveragedModel` stores a buffer `n_averaged` that counts how many
+    updates have been applied; this value is passed as `num_averaged` to the
+    `multi_avg_fn`. We use `num_averaged == 0` to detect the first update and
+    initialize the EMA by copying model weights into the EMA buffers. On
+    subsequent updates we perform the standard EMA update.
+    """
 
     if decay < 0.0 or decay > 1.0:
         raise ValueError(
@@ -43,15 +62,42 @@ def get_ema_multi_avg_fn(decay=0.999):
         )
 
     @torch.no_grad()
-    def ema_update(ema_param_list: PARAM_LIST, current_param_list: PARAM_LIST, _):
-        # foreach lerp only handles float and complex
-        if torch.is_floating_point(ema_param_list[0]) or torch.is_complex(
-            ema_param_list[0]
-        ):
-            torch._foreach_lerp_(ema_param_list, current_param_list, 1 - decay)
+    def ema_update(ema_param_list: PARAM_LIST, current_param_list: PARAM_LIST, num_averaged: Union[Tensor, int]):
+        """In-place update of `ema_param_list` using `current_param_list`.
+
+        If `num_averaged == 0` we initialize EMA := model (W^{EMA}_0 = W^{model}_0).
+        Otherwise we apply the EMA step:
+            W^{EMA}_t = α W^{EMA}_{t-1} + (1-α) W^{model}_t
+        """
+
+        # Detect first update (num_averaged can be Tensor or int)
+        if isinstance(num_averaged, Tensor):
+            is_first_update = int(num_averaged.item()) == 0
         else:
+            is_first_update = num_averaged == 0
+
+        # Prefer foreach implementations for floating types
+        if torch.is_floating_point(ema_param_list[0]) or torch.is_complex(ema_param_list[0]):
+            if is_first_update:
+                # Initialize EMA to model weights: W^{EMA}_0 = W^{model}_0
+                try:
+                    # efficient list copy if supported
+                    torch._foreach_copy_(ema_param_list, current_param_list)
+                except Exception:
+                    for p_ema, p_model in zip(ema_param_list, current_param_list, strict=True):
+                        p_ema.copy_(p_model)
+            else:
+                # Apply lerp: p_ema = (1 - alpha) * p_model + alpha * p_ema
+                # torch._foreach_lerp_(list_a, list_b, weight) performs: list_a[i] = (1-weight)*list_a[i] + weight*list_b[i]
+                # we pass weight = 1 - decay to get: p_ema = decay * p_ema + (1 - decay) * p_model
+                torch._foreach_lerp_(ema_param_list, current_param_list, 1 - decay)
+        else:
+            # Fallback for non-floating types
             for p_ema, p_model in zip(ema_param_list, current_param_list, strict=True):
-                p_ema.copy_(p_ema * decay + p_model * (1 - decay))
+                if is_first_update:
+                    p_ema.copy_(p_model)
+                else:
+                    p_ema.copy_(p_ema * decay + p_model * (1 - decay))
 
     return ema_update
 
