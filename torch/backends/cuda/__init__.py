@@ -205,6 +205,17 @@ class cuBLASModule:
             return torch._C._set_fp32_precision_setter("cuda", "matmul", value)
         raise AttributeError("Unknown attribute " + name)
 
+class MathSDPModule:
+    def __getattr__(self, name):
+        if name == "fp32_precision":
+            return torch._C._get_fp32_precision_getter("cuda", "math_sdp")
+        raise AttributeError("Unknown attribute " + name)
+
+    def __setattr__(self, name, value):
+        if name == "fp32_precision":
+            return torch._C._set_fp32_precision_setter("cuda", "math_sdp", value)
+        raise AttributeError("Unknown attribute " + name)
+
 
 _LinalgBackends = {
     "default": torch._C._LinalgBackend.Default,
@@ -591,3 +602,4 @@ def sdp_kernel(
 
 cufft_plan_cache = cuFFTPlanCacheManager()
 matmul = cuBLASModule()
+math_sdp = MathSDPModule()

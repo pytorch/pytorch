@@ -46,7 +46,7 @@ enum class CuBLASReductionOption : uint8_t {
   DisallowReducedPrecisionDisallowSplitK = 2,
 };
 enum class TORCH_API Float32Backend { GENERIC, CUDA, MKLDNN };
-enum class TORCH_API Float32Op { ALL, CONV, RNN, MATMUL };
+enum class TORCH_API Float32Op { ALL, CONV, RNN, MATMUL, MATH_SDP };
 enum class TORCH_API Float32Precision { NONE, IEEE, TF32, BF16 };
 
 TORCH_API Float32Backend str2backend(const std::string& name);
@@ -531,6 +531,7 @@ class TORCH_API Context {
        float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
            ? Float32Precision::NONE
            : Float32Precision::TF32},
+      {{Float32Backend::CUDA, Float32Op::MATH_SDP}, Float32Precision::NONE},
   };
 
   Allocator* prev_allocator_ptr_{nullptr};
