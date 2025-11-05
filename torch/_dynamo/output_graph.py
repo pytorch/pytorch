@@ -2995,6 +2995,8 @@ class SubgraphTracer(fx.Tracer):
                 "Inference mode is supposed to be disabled during compilation. Please open an issue."
             )
 
+        self.tracked_tensor_vts: OrderedSet[VariableTracker] = OrderedSet()
+
     # preserve original meta if it is available
     def _maybe_preserve_original_meta(
         self, tx: "InstructionTranslatorBase", node: fx.Node
