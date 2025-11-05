@@ -469,7 +469,6 @@ def aot_dispatch_autograd_graph(
     # See Note: [Fake Modules and AOTAutograd]
     torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
 
-    breakpoint()
     # Have to copy before eliminate_dead_code otherwise the
     # fw node match might be erased
     copy_fwd_metadata_to_bw_nodes(fx_g)

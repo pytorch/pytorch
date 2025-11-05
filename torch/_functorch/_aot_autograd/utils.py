@@ -452,7 +452,6 @@ def _copy_metadata_to_bw_nodes_in_subgraph(
 
         if not _is_backward_node_with_seq_nr(node):
             continue
-        breakpoint()
 
         # fwd_node should always exist, but handle non-existence just in case
         fwd_node = fwd_seq_nr_to_node.get(node.meta["seq_nr"])
@@ -485,8 +484,6 @@ def copy_fwd_metadata_to_bw_nodes(fx_g: torch.fx.GraphModule) -> None:
     for submod in fx_g.modules():
         if isinstance(submod, torch.fx.GraphModule):
             _collect_fwd_nodes_from_subgraph(submod, fwd_seq_nr_to_node)
-
-    breakpoint()
 
     if annotation_log.isEnabledFor(logging.DEBUG):
         for k, v in fwd_seq_nr_to_node.items():

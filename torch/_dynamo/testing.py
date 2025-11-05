@@ -89,9 +89,7 @@ def extract_graph_and_tracker(fn, *args, **kwargs):  # type: ignore[no-untyped-d
 
 def extract_graph(fn, *args, **kwargs):  # type: ignore[no-untyped-def]
     backend = AotEagerAndRecordGraphs()
-    result = torch.compile()(fn)(*args, **kwargs)
-    result[0].sum().backward()
-    breakpoint()
+    result = torch.compile(backend=backend)(fn)(*args, **kwargs)
     return result, backend.graphs, backend.fw_graphs, backend.bw_graphs
 
 
