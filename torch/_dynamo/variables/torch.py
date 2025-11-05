@@ -610,15 +610,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             if any(isinstance(arg, variables.TensorVariable) for arg in args):
                 x, y, z = args
-                try:
-                    # Use inductor FMA if available
-                    from torch._inductor.inductor_prims import fma as inductor_fma
-                    fma_fn = TorchInGraphFunctionVariable(inductor_fma)
-                    return fma_fn.call_function(tx, args, {})
-                except ImportError:
-                    # Fallback to addcmul expansion
-                    addcmul_fn = TorchInGraphFunctionVariable(torch.addcmul)
-                    return addcmul_fn.call_function(tx, [z, x, y], {})
+                addcmul_fn = TorchInGraphFunctionVariable(torch.addcmul)
+                return addcmul_fn.call_function(tx, [z, x, y], {})
             
             # Use math.fma if constants
             return None
