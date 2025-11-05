@@ -45,25 +45,20 @@ using StableListHandle = StableListOpaque*;
 AOTI_TORCH_EXPORT AOTITorchError
 torch_new_list_reserve_size(size_t size, StableListHandle* ret);
 
-// new list handle steals ownership of underlying elements from orig_handle
-AOTI_TORCH_EXPORT AOTITorchError torch_new_list_handle(
-    StableListHandle orig_handle,
-    StableListHandle* new_handle);
-
 AOTI_TORCH_EXPORT AOTITorchError
 torch_list_size(StableListHandle list_handle, size_t* size);
 
-AOTI_TORCH_EXPORT AOTITorchError torch_list_get(
+AOTI_TORCH_EXPORT AOTITorchError torch_list_at(
     StableListHandle list_handle,
     size_t index,
     StableIValue* element);
 
 AOTI_TORCH_EXPORT AOTITorchError
-torch_list_emplace_back(StableListHandle list_handle, StableIValue element);
+torch_list_push_back(StableListHandle list_handle, StableIValue element);
 
 // deletes the underlying list referenced by list_handle
 AOTI_TORCH_EXPORT AOTITorchError
-torch_delete_list_object(StableListHandle list_handle);
+torch_delete_list(StableListHandle list_handle);
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 

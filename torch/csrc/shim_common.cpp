@@ -17,15 +17,6 @@ AOTITorchError torch_new_list_reserve_size(size_t size, StableListHandle* ret) {
       { *ret = list_pointer_to_list_handle(list_ptr.release()); });
 }
 
-AOTITorchError torch_new_list_handle(
-    StableListHandle orig_handle,
-    StableListHandle* new_handle) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    std::vector<StableIValue>* list = list_handle_to_list_pointer(orig_handle);
-    *new_handle = new_list_handle(std::vector<StableIValue>(*list));
-  });
-}
-
 AOTI_TORCH_EXPORT AOTITorchError
 torch_list_size(StableListHandle list_handle, size_t* size) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
@@ -34,7 +25,7 @@ torch_list_size(StableListHandle list_handle, size_t* size) {
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError torch_list_get(
+AOTI_TORCH_EXPORT AOTITorchError torch_list_at(
     StableListHandle list_handle,
     size_t index,
     StableIValue* element) {
@@ -44,17 +35,17 @@ AOTI_TORCH_EXPORT AOTITorchError torch_list_get(
   });
 }
 
-AOTITorchError torch_list_emplace_back(
+AOTITorchError torch_list_push_back(
     StableListHandle list_handle,
     StableIValue element) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     std::vector<StableIValue>* list = list_handle_to_list_pointer(list_handle);
-    list->emplace_back(element);
+    list->push_back(element);
   });
 }
 
 AOTI_TORCH_EXPORT AOTITorchError
-torch_delete_list_object(StableListHandle list_handle) {
+torch_delete_list(StableListHandle list_handle) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     std::vector<StableIValue>* list_ptr =
         list_handle_to_list_pointer(list_handle);
@@ -222,7 +213,7 @@ static c10::IValue to_ivalue(
         ivalue_list.emplace_back(
             to_ivalue(inner_type, elem, extension_build_version));
       }
-      TORCH_ERROR_CODE_CHECK(torch_delete_list_object(list_handle));
+      TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
       return ivalue_list;
     }
     default: {

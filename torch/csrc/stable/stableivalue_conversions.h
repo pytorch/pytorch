@@ -194,7 +194,7 @@ struct FromImpl<torch::stable::Tensor> {
 };
 
 // Specialization for torch::headeronly::HeaderOnlyArrayRef<T> => StableIValue
-// Returns a new OWNING reference of the underlying list!
+// Returns a new owning reference of the underlying list.
 template <typename T>
 struct FromImpl<torch::headeronly::HeaderOnlyArrayRef<T>> {
   static StableIValue call(
@@ -205,8 +205,7 @@ struct FromImpl<torch::headeronly::HeaderOnlyArrayRef<T>> {
     TORCH_ERROR_CODE_CHECK(
         torch_new_list_reserve_size(val.size(), &new_list_handle));
     for (const auto& elem : val) {
-      TORCH_ERROR_CODE_CHECK(
-          torch_list_emplace_back(new_list_handle, from(elem)));
+      TORCH_ERROR_CODE_CHECK(torch_list_push_back(new_list_handle, from(elem)));
     }
     return from(new_list_handle);
   }
@@ -214,7 +213,7 @@ struct FromImpl<torch::headeronly::HeaderOnlyArrayRef<T>> {
 
 // Specialization for std::vector<T> => StableIValue, which is implemented the
 // same way as HeaderOnlyArrayRef<T> => StableIValue
-// Returns a new OWNING reference of the underlying list!
+// Returns a new owning reference of the underlying list.
 template <typename T>
 struct FromImpl<std::vector<T>> {
   static StableIValue call(
@@ -362,6 +361,19 @@ struct ToImpl<std::optional<T>> {
   }
 };
 
+// Specialization for StableIValue => torch::stable::Tensor
+// The resulting stable::Tensor steals ownership of the input's
+// underlying AtenTensorHandle.
+template <>
+struct ToImpl<torch::stable::Tensor> {
+  static torch::stable::Tensor call(
+      StableIValue val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    return torch::stable::Tensor(to<AtenTensorHandle>(val));
+  }
+};
+
 // Specialization for StableIValue => std::vector<T>
 // std::vector<T> should be represented as a StableListHandle
 // filled with StableIValues
@@ -380,25 +392,12 @@ struct ToImpl<std::vector<T>> {
     result.reserve(size);
     for (size_t i = 0; i < size; i++) {
       StableIValue element;
-      TORCH_ERROR_CODE_CHECK(torch_list_get(list_handle, i, &element));
+      TORCH_ERROR_CODE_CHECK(torch_list_at(list_handle, i, &element));
       result.emplace_back(to<T>(element));
     }
 
-    TORCH_ERROR_CODE_CHECK(torch_delete_list_object(list_handle));
+    TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
     return result;
-  }
-};
-
-// Specialization for StableIValue => torch::stable::Tensor
-// The resulting stable::Tensor steals ownership of the input's
-// underlying AtenTensorHandle.
-template <>
-struct ToImpl<torch::stable::Tensor> {
-  static torch::stable::Tensor call(
-      StableIValue val,
-      [[maybe_unused]] uint64_t extension_build_version,
-      [[maybe_unused]] bool is_internal) {
-    return torch::stable::Tensor(to<AtenTensorHandle>(val));
   }
 };
 
