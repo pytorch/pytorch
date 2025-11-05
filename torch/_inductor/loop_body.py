@@ -6,7 +6,7 @@ import functools
 import itertools
 import re
 from enum import auto, Enum
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, NamedTuple, Optional, TYPE_CHECKING, TypeVar
 
 import sympy
 
@@ -28,7 +28,7 @@ from .virtualized import ops, V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 
 T = TypeVar("T")

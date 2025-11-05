@@ -64,7 +64,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
         del __func
     del __name
 
-    @substitute_in_graph(optree.tree_is_leaf, can_constant_fold_through=True)
+    @substitute_in_graph(optree.tree_is_leaf, can_constant_fold_through=True)  # type: ignore[arg-type]
     def tree_is_leaf(
         tree: PyTree,
         /,
@@ -79,7 +79,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
             return True
         return False
 
-    @substitute_in_graph(optree.tree_iter, can_constant_fold_through=False)
+    @substitute_in_graph(optree.tree_iter, can_constant_fold_through=False)  # type: ignore[arg-type]
     def tree_iter(
         tree: PyTree,
         /,
@@ -110,7 +110,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
 
     __all__ += ["tree_iter"]
 
-    @substitute_in_graph(optree.tree_leaves, can_constant_fold_through=True)
+    @substitute_in_graph(optree.tree_leaves, can_constant_fold_through=True)  # type: ignore[arg-type]
     def tree_leaves(
         tree: PyTree,
         /,
@@ -451,7 +451,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
             dict,
             metadata,
             entries,
-            unflatten_func,
+            unflatten_func,  # type: ignore[arg-type]
             none_is_leaf=none_is_leaf,
             namespace=namespace,
         )
@@ -507,7 +507,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
                 type(node),
                 metadata,
                 entries,
-                unflatten_func,
+                unflatten_func,  # type: ignore[arg-type]
                 none_is_leaf=none_is_leaf,
                 namespace=namespace,
             )  # type: ignore[arg-type]
@@ -557,7 +557,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
 
     __all__ += ["tree_unflatten"]
 
-    @substitute_in_graph(optree.tree_map, can_constant_fold_through=True)
+    @substitute_in_graph(optree.tree_map, can_constant_fold_through=True)  # type: ignore[arg-type]
     def tree_map(
         func: Callable[..., Any],
         tree: PyTree,
@@ -578,7 +578,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
 
     __all__ += ["tree_map"]
 
-    @substitute_in_graph(optree.tree_map_, can_constant_fold_through=True)
+    @substitute_in_graph(optree.tree_map_, can_constant_fold_through=True)  # type: ignore[arg-type]
     def tree_map_(
         func: Callable[..., Any],
         tree: PyTree,
@@ -600,7 +600,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
 
     __all__ += ["tree_map_"]
 
-    _none_unflatten = optree.register_pytree_node.get(type(None)).unflatten_func  # type: ignore[union-attr]
+    _none_unflatten = optree.register_pytree_node.get(type(None)).unflatten_func  # type: ignore[union-attr, attr-defined]
 
     @substitute_in_graph(  # type: ignore[arg-type]
         _none_unflatten,
