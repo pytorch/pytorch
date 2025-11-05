@@ -56,7 +56,7 @@ from ..exc import (
     ObservedTypeError,
     ObservedUserStopIteration,
     raise_observed_exception,
-    unimplemented_v2,
+    unimplemented,
 )
 from ..graph_bytecode_inputs import get_external_object_by_index
 from ..guards import GuardBuilder, install_guard
@@ -459,7 +459,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 args[1:],
             )
         elif name == "__setattr__" and self.ban_mutation:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Class attribute mutation when the __dict__ was already materialized",
                 context=str(self.value),
                 explanation="Dyanmo does not support tracing mutations on a class when its __dict__ is materialized",
@@ -515,7 +515,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif is_typeddict(self.value):
             if self.value.__optional_keys__:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="TypedDict with optional keys",
                     context=str(self.value),
                     explanation="Dyanmo does not support tracing TypedDict with optional keys",
@@ -534,7 +534,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             try:
                 bound_args = inspect.signature(deque_signature).bind(*args, **kwargs)
             except TypeError as e:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="collections.deque() with bad arguments",
                     context=f"args={args}, kwargs={kwargs}",
                     explanation="Detected call to collections.deque() with bad arguments.",
@@ -549,7 +549,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if not bound_args.arguments["iterable"].has_force_unpack_var_sequence(
                     tx
                 ):
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="collections.deque() with bad iterable argument",
                         context=f"args={args}, kwargs={kwargs}",
                         explanation="Call to collections.deque() has an iterable argument that Dynamo cannot "
@@ -578,7 +578,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.WeakRefVariable(args[0], callback)
         elif self.value is functools.partial:
             if not args:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="missing args to functools.partial",
                     context="",
                     explanation="functools.partial requires at least one argument",
@@ -636,7 +636,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             ):
                 # We are not changing the behavior of Dynamo as these function were
                 # already ignored on trace_rules.py before #136033 landed
-                unimplemented_v2(
+                unimplemented(
                     gb_type="unsupported contextlib.* API",
                     context=f"{self.value}",
                     explanation=f"{self.value} not supported. This may be due to its use of "
@@ -651,7 +651,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 args[0], (BaseUserFunctionVariable, TorchCtxManagerClassVariable)
             ):
                 if not torch._dynamo.config.enable_trace_contextlib:
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="attempted to trace contextlib.contextmanager",
                         context=f"args={args}",
                         explanation="Tracing contextlib.contextmanager is disabled.",
@@ -1088,7 +1088,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if torch._dynamo.config.enable_faithful_generator_behavior and isinstance(
                 self.value, types.GeneratorType
             ):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="call_method on generator",
                     context=f"object={self.value}, method={name}, args={args}, kwargs={kwargs}",
                     explanation="Detected a method call to a user-defined generator object. "
@@ -1127,7 +1127,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         try:
             name = name.as_python_constant()
         except NotImplementedError:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="non-const setattr name on user-defined object",
                 context=f"object={self}, name={name}, value={value}",
                 explanation="Detected a call to `setattr` of a user-defined object with a non-constant name.",
@@ -1253,7 +1253,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ).call_function(tx, [var], kwargs)
 
             if self.source is None:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="attempted to call sourceless user-defined object as a method",
                     context=f"object={self.value}, function={func}, args={args}, kwargs={kwargs}",
                     explanation="Dynamo does not support this.",
@@ -1383,7 +1383,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     )
                 return out_source
 
-        unimplemented_v2(
+        unimplemented(
             gb_type="could not find name in object's mro",
             context=f"name={name}, object type={type(self.value)}, mro={type(self.value).__mro__}",
             explanation=f"Could not find name `{name}` in mro {type(self.value).__mro__}",
@@ -1479,7 +1479,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return out
 
             elif getattr_fn is not None:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="User-defined object with non-function __getattr__",
                     context=f"object={self.value}, name={name}, getattr_fn={getattr_fn}",
                     explanation=f"Found a non-function __getattr__ {getattr_fn} from a user-defined object {self.value} "
@@ -1605,7 +1605,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if isinstance(subobj, types.MethodType):
                 if dynamic_subobj.__self__ is not self.value:
                     if not isinstance(dynamic_subobj.__func__, types.FunctionType):
-                        unimplemented_v2(
+                        unimplemented(
                             gb_type="User-defined object method with non-function __func__",
                             context=f"object={self.value}, name={name}, method={dynamic_subobj}, "
                             f"method.__self__={dynamic_subobj.__self__}, method.__func__={dynamic_subobj.__func__}",

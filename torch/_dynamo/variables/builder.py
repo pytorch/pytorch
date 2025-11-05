@@ -87,7 +87,7 @@ from torch.utils.weak import TensorWeakRef
 
 from .. import config, graph_break_hints, mutation_guard, replay_record, trace_rules
 from ..device_interface import get_registered_device_interfaces
-from ..exc import InternalTorchDynamoError, raise_observed_exception, unimplemented_v2
+from ..exc import InternalTorchDynamoError, raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..pgo import (
     auto_dynamic,
@@ -567,7 +567,7 @@ class VariableBuilder:
         # Our current infra requires the hook to be registered and removed in
         # the same frame. So graph break.
         # Related test - PYTORCH_TEST_WITH_DYNAMO=1 python test/test_autograd.py -k TestAutograd.test_hooks
-        unimplemented_v2(
+        unimplemented(
             gb_type="Attempted to represent unregistered RemovableHandle",
             context="",
             explanation="Dynamo attempted to build a representation of a torch.utils.hooks.RemovableHandle, "
@@ -589,7 +589,7 @@ class VariableBuilder:
         all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
 
         if not all_const:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="non-const keys in mappingproxy",
                 context=f"non-const keys: {[k for k in value.keys() if not ConstantVariable.is_literal(k)]}",
                 explanation="Dynamo expects mappingproxy keys to be constants.",
@@ -807,7 +807,7 @@ class VariableBuilder:
             return var
         elif istype(value, set):
             if any(isinstance(x, torch.Tensor) for x in value):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Attempted to wrap a set with tensors",
                     context="Python set containing torch.Tensor elements",
                     explanation=(
@@ -888,7 +888,7 @@ class VariableBuilder:
             keywords_source = AttrSource(self.get_source(), "keywords")
             for k, v in value.keywords.items():
                 if not ConstantVariable.is_literal(k):
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="functools.partial() with non-literal keyword",
                         context=f"non-literal keyword: {k}",
                         explanation="functools.partial() expects literal/string keywords",
@@ -1039,7 +1039,7 @@ class VariableBuilder:
             return self.wrap_unspecialized_primitive(value)
         elif isinstance(value, HigherOrderOperator):
             if value is torch._higher_order_ops.invoke_subgraph:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Attempted to wrap torch._higher_order_ops.invoke_subgraph",
                     context="",
                     explanation="Directly using invoke_subgraph is not supported. Use nested_compile_region",
@@ -1203,7 +1203,7 @@ class VariableBuilder:
                     # this is automatically done by evaluating the guards once but this
                     # will cause data-dependent error when we evaluate the outer unbacked symints.
                     # The test case that triggers this graph break is test_cond_unbacked_symint_closure
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Attempted to wrap unbacked SymInt",
                         context="",
                         explanation="Unbacked SymInt input is not supported yet.",
@@ -1617,7 +1617,7 @@ class VariableBuilder:
                 )
                 return DictKeySetVariable(items, source=self.source)
             else:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="non-const keys in dict_keys",
                     context=f"non-const keys: {[k for k in value if not ConstantVariable.is_literal(k)]}",
                     explanation="Dynamo expects dict_keys keys to be constants.",
@@ -1666,7 +1666,7 @@ class VariableBuilder:
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         for item in value:
             if item is value:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="list elements are pointing to the list itself",
                     context="",
                     explanation="Dynamo does not support lists whose items reference to itself",
@@ -1835,7 +1835,7 @@ class VariableBuilder:
         from ..eval_frame import OptimizedModule
 
         if len(value.__dict__) == 0:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Uninitialized nn.Module",
                 context=typestr(value),
                 explanation=f"Attempted to trace an uninitialized nn.Module of type {typestr(value)}.",
@@ -1867,7 +1867,7 @@ class VariableBuilder:
             isinstance(value, (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM))
             and not config.allow_rnn
         ):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Attempted to wrap RNN, GRU, or LSTM",
                 context=str(value),
                 explanation="Dynamo does not support RNN, GRU, or LSTM.",
@@ -1881,7 +1881,7 @@ class VariableBuilder:
             # we can't do this assert inside FSDP constructor,
             # since we don't know yet whether dynamo will be used
             if not getattr(value, "_fsdp_use_orig_params", False):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="FSDP with use_orig_params=False",
                     context="",
                     explanation="Dynamo only supports FSDP with use_orig_params=True",
@@ -2146,7 +2146,7 @@ class VariableBuilder:
             and value.is_nested
             and not isinstance(value, torch.nested._internal.nested_tensor.NestedTensor)
         ):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Attempted to wrap strided NestedTensor",
                 context="",
                 explanation="torch.compile does not support strided NestedTensor",
@@ -2162,7 +2162,7 @@ class VariableBuilder:
             # A hot fix for sparse tensors + torch.compile. Support for
             # export + sparsity is being added but we need to create
             # SPARSE_TENSOR_GUARDS for guards to work properly.
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Attempted to wrap sparse Tensor",
                 context="",
                 explanation="torch.compile does not support sparse Tensors",
@@ -2174,7 +2174,7 @@ class VariableBuilder:
             and safe_grad(value) is not None
             and value.dtype != safe_grad(value).dtype
         ):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="dtype mismatch between tensor and its gradient",
                 context=f"tensor dtype: {value.dtype}; grad dtype: {safe_grad(value).dtype}",
                 explanation="Inconsistent dtype between tensor and its gradient. "
@@ -2295,7 +2295,7 @@ class VariableBuilder:
                     tensor_value = clone_preserve_strides(tensor_value)
             except NotImplementedError as e:
                 # failed to convert to tensor, graph break
-                unimplemented_v2(
+                unimplemented(
                     gb_type="failed to convert numpy.ndarray to Tensor",
                     context=str(value),
                     explanation="Exception encountered when attempting to convert numpy.ndarray to Tensor",
@@ -2674,7 +2674,7 @@ def _dataclasses_fields_lambda(obj):
     if isinstance(obj, UserDefinedObjectVariable):
         value = obj.value
     else:
-        unimplemented_v2(
+        unimplemented(
             gb_type="dataclass fields failure",
             context=f"obj: {obj}; variable type: {type(obj)}",
             explanation=f"Dataclass fields handling fails for {obj}. Expected it to be a user-defined object.",
@@ -2902,7 +2902,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         if is_sparse_any(example_value) and (
             not tx.export or not config.capture_sparse_compute
         ):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Attempted to wrap sparse Tensor with VariableTracker",
                 context=str(example_value),
                 explanation="torch.compile does not support sparse Tensors with VariableTracker",
@@ -3095,7 +3095,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     else:
-        unimplemented_v2(
+        unimplemented(
             gb_type="torch.* op returned non-Tensor",
             context=f"example_value type: {typestr(example_value)}; op: {proxy.node.op}; target: {proxy.node.target}",
             explanation="torch.* ops that return a non-Tensor cannot be traced into the Dynamo FX graph output",
@@ -3295,7 +3295,7 @@ def _automatic_dynamic(
     if e.is_nested and not isinstance(
         e, torch.nested._internal.nested_tensor.NestedTensor
     ):
-        unimplemented_v2(
+        unimplemented(
             gb_type="Encountered strided NestedTensor in automatic dynamic dim determination",
             context="",
             explanation="torch.compile does not support strided NestedTensor",
@@ -3757,7 +3757,7 @@ class SourcelessBuilder:
         ):
             proxy = tx.output.bound_symbols[value.node.expr]
             return SymNodeVariable.create(tx, proxy)
-        unimplemented_v2(
+        unimplemented(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",
             explanation=f"SourcelessBuilder.create does not know how to wrap {value_type}",

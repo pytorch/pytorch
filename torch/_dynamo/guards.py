@@ -2283,7 +2283,7 @@ class GuardBuilder(GuardBuilderBase):
                 # If guard_nn_modules is true, we will guard on the right set of guards
                 self._guard_on_attribute(guard, "training", GuardBuilder.CONSTANT_MATCH)  # type: ignore[arg-type]
         else:
-            exc.unimplemented_v2(
+            exc.unimplemented(
                 gb_type="Attempted to guard on uninitialized nn.Module",
                 context="",
                 explanation="Attempted to setup an NN_MODULE guard on uninitialized "

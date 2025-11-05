@@ -28,7 +28,7 @@ from ..exc import (
     handle_observed_exception,
     ObservedUserStopIteration,
     raise_observed_exception,
-    unimplemented_v2,
+    unimplemented,
     UserError,
 )
 from .base import ValueMutationNew, VariableTracker
@@ -64,7 +64,7 @@ class ItertoolsVariable(VariableTracker):
 
         if self.value is itertools.product:
             if any(kw != "repeat" for kw in kwargs.keys()):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Unsupported kwargs for itertools.product",
                     context=f"call_function {self} {args} {kwargs}",
                     explanation=f"Expected kwargs: 'repeat', but got "
@@ -102,7 +102,7 @@ class ItertoolsVariable(VariableTracker):
             )
         elif self.value is itertools.groupby:
             if any(kw != "key" for kw in kwargs.keys()):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Unsupported kwargs for itertools.groupby",
                     context=f"call_function {self} {args} {kwargs}",
                     explanation=f"Expected kwargs: 'key', but got "
@@ -116,7 +116,7 @@ class ItertoolsVariable(VariableTracker):
                 elif isinstance(key, variables.ConstantVariable):
                     return key.as_python_constant()
                 else:
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Unsupported key type for itertools.groupby",
                         context=f"call_function {self} {args} {kwargs}",
                         explanation="Dynamo does not know how to trace "
@@ -128,7 +128,7 @@ class ItertoolsVariable(VariableTracker):
             if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
                 seq = args[0].unpack_var_sequence(tx)
             else:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Unsupported arguments for itertools.groupby",
                     context=f"call_function {self} {args} {kwargs}",
                     explanation="Dynamo does not know how to trace "
@@ -173,7 +173,7 @@ class ItertoolsVariable(VariableTracker):
                         )
                     )
             except Exception as e:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Unexpected failure during itertools.groupby() iteration",
                     context=f"call_function {self} {args} {kwargs}",
                     explanation="Unexpected failure in invoking function during groupby",
@@ -223,7 +223,7 @@ class IteratorVariable(VariableTracker):
         super().__init__(**kwargs)
 
     def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
-        unimplemented_v2(
+        unimplemented(
             gb_type="Unimplemented next() call",
             context=f"next({self})",
             explanation="This abstract method must be implemented",

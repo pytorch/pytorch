@@ -97,7 +97,7 @@ from .exc import (
     get_stack_above_dynamo,
     ResumePrologueTracingError,
     StepUnsupported,
-    unimplemented_v2,
+    unimplemented,
     Unsupported,
 )
 from .funcname_cache import get_funcname
@@ -657,7 +657,7 @@ def generic_jump(
                 elif self.should_compile_partial_graph():
                     jump_graph_break(self, inst, value)
                 else:
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Data-dependent assertion failed (cannot compile partial graph)",
                         context=f"value: {value}",
                         explanation="Dynamo has determined when encountering a data-dependent assert failure "
@@ -696,7 +696,7 @@ def generic_jump(
 
                 result = torch.fx.experimental.symbolic_shapes.expect_true(sym_expr)
                 if not result:
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Assertion failed on symbolic shapes",
                         context=str(sym_expr),
                         explanation="",
@@ -772,7 +772,7 @@ def generic_jump(
                             self.push(value)
                         self.jump(inst)
                 else:
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Data-dependent branching with non-constant __bool__",
                         context=f"method: {x}, result: {result}",
                         explanation="Attempted to perform data-dependent branching on a user-defined "
@@ -825,7 +825,7 @@ def generic_jump(
                         self.push(value)
                     self.jump(inst)
             else:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Data-dependent branching",
                     context=f"attempted to jump with {value}",
                     explanation=_explanation,
@@ -859,7 +859,7 @@ def break_graph_if_unsupported(
                     # We don't support graph break under GenericContextWrappingVariable,
                     # If there is, we roll back to the checkpoint and fall back.
                     excp.remove_from_stats()
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Graph break under GenericContextWrappingVariable",
                         context=f"Active generic context managers: {self.active_generic_context_managers}",
                         explanation="Attempted to graph break in an active context manager(s) that doesn't support graph breaking.",
@@ -983,7 +983,7 @@ class BytecodeDispatchTableMeta(type):
         super().__init__(name, bases, dct)  # type: ignore[misc]
 
         def _missing(opname: str, *args: Any) -> None:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Missing bytecode handler",
                 context=f"{opname} with args {args}",
                 explanation=f"Dynamo does not know how to handle the bytecode instruction `{opname}`.",
@@ -1337,7 +1337,7 @@ class InstructionTranslatorBase(
                 or self.is_tracing_resume_prologue
             ):
                 if isinstance(e, StepUnsupported):
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="cannot resume from torch._dynamo.step_unsupported()",
                         context="",
                         explanation="traced torch._dynamo.step_unsupported(), but Dynamo is instructed "
@@ -1352,7 +1352,7 @@ class InstructionTranslatorBase(
             if self.current_speculation is None:
                 log.debug("empty checkpoint - cannot resume from graph break")
                 if isinstance(e, StepUnsupported):
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="torch._dynamo.step_unsupported() with empty checkpoint",
                         context="",
                         explanation="traced torch._dynamo.step_unsupported(), but there is no checkpoint "
@@ -1709,7 +1709,7 @@ class InstructionTranslatorBase(
                     new_name = name.replace(".", "implicit")
                     self.push(self.symbolic_locals[new_name])
                 except KeyError:
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Attempted to read undefined local variable (implicit)",
                         context=f"LOAD_FAST {name}",
                         explanation=f"Could not find an implicit local variable with name `{name}`",
@@ -1719,7 +1719,7 @@ class InstructionTranslatorBase(
                         ],
                     )
             else:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Attempted to read undefined local variable",
                     context=f"LOAD_FAST {name}",
                     explanation=f"Could not find a local variable with name `{name}`",
@@ -1824,7 +1824,7 @@ class InstructionTranslatorBase(
             source, self.symbolic_globals[name]
         )
         if isinstance(value, RemovableHandleVariable):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Storing Tensor hook handle in globals",
                 context=name,
                 explanation="This is not supported.",
@@ -1920,7 +1920,7 @@ class InstructionTranslatorBase(
                     globals=self.f_globals,
                 )
             except ImportError:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Import failure",
                     context=f"module_name: {module_name}, fromlist: {fromlist}, level={level}",
                     explanation="Failure when attempting to import.",
@@ -1951,7 +1951,7 @@ class InstructionTranslatorBase(
             # pyrefly: ignore [unbound-name]
             self.push(PythonModuleVariable(value, source=source))
         else:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Bad import result",
                 # pyrefly: ignore [unbound-name]
                 context=typestr(value),
@@ -2092,7 +2092,7 @@ class InstructionTranslatorBase(
         if self._isinstance_exception(val):
             observed_exception_type = exc.get_dynamo_observed_exception(val.exc_type)  # type: ignore[attr-defined, union-attr]
             raise observed_exception_type(f"raised exception {val}")
-        unimplemented_v2(
+        unimplemented(
             gb_type="Failed to raise exception",
             context=str(exc),
             explanation="Attempted to raise a non-Exception type/value.",
@@ -2132,7 +2132,7 @@ class InstructionTranslatorBase(
         tos = self.stack[-1]
         assert isinstance(tos, ExceptionVariable)
         if tos.exc_type is StopIteration:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="CLEANUP_THROW with StopIteration",
                 context="",
                 explanation="Received StopIteration when handling generator.throw/close. This is not supported.",
@@ -2218,7 +2218,7 @@ class InstructionTranslatorBase(
             curr_exc = self.exn_vt_stack.get_current_exception()
             dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
             assert isinstance(raised_exception, dynamo_exc)  # sanity check
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Observed exception",
                 context=f"raised exception {curr_exc.python_type_name()}({curr_exc.args})",  # type: ignore[union-attr]
                 explanation=observed_exn_gb_explanation,
@@ -2273,7 +2273,7 @@ class InstructionTranslatorBase(
                         # instruction translator.
                         self.stack.clear()
                         if type(self) is InstructionTranslator:
-                            unimplemented_v2(
+                            unimplemented(
                                 gb_type="Observed exception (EXCEPT_HANDLER)",
                                 context=str(raised_exception),
                                 explanation=observed_exn_gb_explanation
@@ -2411,7 +2411,7 @@ class InstructionTranslatorBase(
                 UserDefinedExceptionObjectVariable,
             ),
         ):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Exception with bad expected type",
                 context=str(expected_exc_types),
                 explanation=f"`except ...` has unsupported type {expected_exc_types}.",
@@ -2420,7 +2420,7 @@ class InstructionTranslatorBase(
 
         if sys.version_info >= (3, 11):
             if not self._isinstance_exception(exc_instance):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Caught non-Exception value",
                     context=str(exc_instance),
                     explanation=f"Except expects to receive an object of Exception type but received {exc_instance}.",
@@ -2443,7 +2443,7 @@ class InstructionTranslatorBase(
                     UserDefinedExceptionClassVariable,
                 ),
             ):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Exception with non-type expectation",
                     context=str(expected_type),
                     explanation=f"`except ...` expects a non-type: {expected_type}.",
@@ -2498,7 +2498,7 @@ class InstructionTranslatorBase(
                 kwargsvars = ConstDictVariable({})
             argsvars = self.pop()
         else:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Variadic function call with bad flags",
                 context=f"flags: {inst.argval}",
                 explanation=f"Attempted to call a variadic function (CALL_FUNCTION_EX) with bad flags {inst.argval}",
@@ -2536,7 +2536,7 @@ class InstructionTranslatorBase(
             kwargsvars,
             ConstDictVariable,
         ):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Variadic function call with bad args/kwargs type",
                 # pyrefly: ignore [unbound-name]
                 context=f"args type: {typestr(argsvars)}, kwargs type: {typestr(kwargsvars)}",
@@ -2652,7 +2652,7 @@ class InstructionTranslatorBase(
 
     def store_attr_graph_break(self, inst: Instruction) -> None:
         if not self.should_compile_partial_graph():
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Should not compile partial graph (STORE_ATTR)",
                 context="",
                 explanation="Dynamo has determined when encountering an unsupported "
@@ -3236,7 +3236,7 @@ class InstructionTranslatorBase(
 
     def BUILD_SET(self, inst: Instruction) -> None:
         if config.inject_BUILD_SET_unimplemented_TESTING_ONLY:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="missing BUILD_SET handler",
                 context="",
                 explanation="Missing BUILD_SET bytecode handler (for testing purposes).",
@@ -3253,7 +3253,7 @@ class InstructionTranslatorBase(
             try:
                 items.extend(seq.force_unpack_var_sequence(self))
             except NotImplementedError:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Failed to unpack object for BUILD_LIST_UNPACK",
                     context=str(seq),
                     explanation=f"{seq} cannot be unpacked into a list for the BUILD_LIST_UNPACK "
@@ -3391,7 +3391,7 @@ class InstructionTranslatorBase(
         elif seq.has_force_unpack_var_sequence(self):
             val = seq.force_unpack_var_sequence(self)
         else:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Failed to unpack object for UNPACK_SEQUENCE",
                 context=str(seq),
                 explanation=f"{seq} cannot be unpacked into a list for the UNPACK_SEQUENCE bytecode "
@@ -3400,7 +3400,7 @@ class InstructionTranslatorBase(
             )
         # pyrefly: ignore [unbound-name]
         if len(val) != inst.argval:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Length mismatch when unpacking object for UNPACK_SEQUENCE",
                 # pyrefly: ignore [unbound-name]
                 context=f"expected length: {inst.argval}, actual: {len(val)}",
@@ -3429,7 +3429,7 @@ class InstructionTranslatorBase(
             for item in reversed(vals_prefix):
                 self.push(item)
         else:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Failed to unpack object for UNPACK_EX",
                 context=str(seq),
                 explanation=f"{seq} cannot be unpacked into a list for the UNPACK_EX bytecode.",
@@ -3439,7 +3439,7 @@ class InstructionTranslatorBase(
     @break_graph_if_unsupported(push=0)
     def graph_break_on_leaf_function(self, inst: Instruction) -> None:
         if self.is_leaf_tracer:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Forced graph break on leaf function",
                 context="",
                 explanation="Forced graph break for nested graph break testing purposes",
@@ -3545,7 +3545,7 @@ class InstructionTranslatorBase(
                 format_string_parts.append(part.format_string)
                 args.extend(part.sym_args)
                 if set(kwargs.keys()) & set(part.sym_kwargs.keys()):
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="BUILD_STRING key conflict",
                         context=f"format_string_parts: {format_string_parts}, kwargs: {kwargs}, part.sym_kwargs: {part.sym_kwargs}",
                         explanation="Failed to build format string due to key conflict",
@@ -3553,7 +3553,7 @@ class InstructionTranslatorBase(
                     )
                 kwargs.update(part.sym_kwargs)
             else:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="BUILD_STRING type error",
                     context=str(part),
                     explanation="Format string part type is not correct - expected constant or format string.",
@@ -3867,7 +3867,7 @@ class InstructionTranslatorBase(
 
     @staticmethod
     def unsupported_ctx_graph_break(ctx: VariableTracker) -> NoReturn:
-        unimplemented_v2(
+        unimplemented(
             gb_type="Unsupported context manager",
             context=f"Attempted SETUP_WITH/BEFORE_WITH/LOAD_SPECIAL on {ctx}",
             explanation=f"Dynamo does not know how to enter a `{ctx.python_type_name()}` context manager.",
@@ -3930,7 +3930,7 @@ class InstructionTranslatorBase(
 
     def LOAD_FAST_CHECK(self, inst: Instruction) -> None:
         if istype(self.symbolic_locals.get(inst.argval, None), NullVariable):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="LOAD_FAST_CHECK on uninitialized variable",
                 context=inst.argval,
                 explanation=f"Attempted to load uninitialized local variable {inst.argval}",
@@ -3964,7 +3964,7 @@ class InstructionTranslatorBase(
             # INTRINSIC_LIST_TO_TUPLE
             self.push(TupleVariable(self.pop().force_unpack_var_sequence(self)))
         else:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Missing CALL_INTRINSIC_1 handler",
                 context=f"CALL_INTRINSIC_1 operand: {inst.argval}",
                 explanation=f"No handler implemented for CALL_INTRINSIC_1 {inst.argval} instruction.",
@@ -4561,7 +4561,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 # if it reaches here, it means Dynamo failed to inline a functorch function
                 f"- torch.func.{name}(fn) requires the function to be inlined by dynamo"
             )
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported functorch tracing attempt",
                 context="",
                 explanation=msg,
@@ -4669,7 +4669,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     @staticmethod
     def check_inlineable(func: Any) -> trace_rules.SkipResult:
         if func.has_self():
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Inline attempt with __self__",
                 context=str(func),
                 explanation="Attempted to inline a function with the `__self__` attribute. "
@@ -4683,7 +4683,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             msg = inspect.getattr_static(
                 func.get_function(), "_torchdynamo_disable_msg", None
             )
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Skip inlining `torch.compiler.disable()`d function",
                 context=str(func.get_function()),
                 explanation=f"Skip inlining function {func.get_function()} since it was wrapped "
@@ -4719,7 +4719,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     "More graph breaks may occur as a result of attempting to trace into the function.",
                     "Please file an issue to PyTorch.",
                 ]
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Attempted to inline function marked as skipped",
                 context=f"qualname: {fn_qualname}, name: {func.get_name()}, "
                 f"filename: `{func.get_filename()}`, skip reason: {result.reason}",
@@ -4761,7 +4761,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if result is None:
             if isinstance(func, SkipFunctionVariable):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Attempted to inline function marked as skipped (SkipFunctionVariable)",
                     context=f"Attempted to inline a SkipFunctionVariable {func}",
                     explanation=(
@@ -4792,7 +4792,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         for v in itertools.chain(sub_locals.values()):
             if not isinstance(v, VariableTracker):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Encountered unconverted argument when attempting to inline",
                     context=f"func: {func}, arg: {v}",
                     explanation="An argument to an inlined function was not successfully converted to a VariableTracker.",
@@ -4802,7 +4802,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if code.co_name in ("__setitem__", "__setattr__") and not (
             args and isinstance(args[0], variables.UserDefinedObjectVariable)
         ):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported __setitem__/__setattr__ inline attempt",
                 context=f"code name: {code.co_name}, args: {args}",
                 explanation=f"Attempted to inline {code.co_name} where first argument (self) is not a user-defined object.",
@@ -5025,7 +5025,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     ) -> list[Instruction]:
         if config.nested_graph_breaks:
             return super().create_call_resume_at(inst, all_stack_locals_metadata)
-        unimplemented_v2(
+        unimplemented(
             gb_type="Graph break in inlined function",
             context="",
             explanation="Graph breaks in an inlined call are not supported.",
@@ -5106,7 +5106,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         else:
             value = self.pop()
             if isinstance(value, RemovableHandleVariable):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Storing Tensor hook handle in globals (inline call)",
                     context=inst.argval,
                     explanation="This is not supported.",
@@ -5173,7 +5173,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             # lifted the `unimplemented("generator")` in frame conversion. This codepath handles
             # subgenerator and lines up with this line in Python 3.10
             # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L2599
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unreachable sub-generator code",
                 context="",
                 explanation="Should only be encountered while implementing generator support.",
@@ -5231,14 +5231,14 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                 # lifted the `unimplemented("generator")` in frame conversion. This codepath handles
                 # subgenerator and lines up with this line in Python 3.11
                 # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2597
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Unreachable sub-generator code",
                     context="",
                     explanation="Should only be encountered while implementing generator support.",
                     hints=[],
                 )
         else:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="SEND with bad type",
                 context=f"TOS type: {typestr(tos)}",
                 explanation=f"Attempted to SEND with unsupported type {typestr(tos)}.",
