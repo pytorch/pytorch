@@ -95,18 +95,13 @@ def _benchmark_collective_with_cuda_events_impl(
     Returns runtime in ms or None on failure.
     """
     import torch.distributed as c10d
-    from torch.utils._python_dispatch import _disable_current_modes
 
-    # Replace tensors in args/kwargs using tree_map_only pattern
-    def to_benchmark_tensor(t: torch.Tensor) -> torch.Tensor:
-        return benchmark_tensor
-
-    with _disable_current_modes():
-        bench_args, bench_kwargs = torch.utils._pytree.tree_map_only(
-            torch.Tensor,
-            to_benchmark_tensor,
-            (args, kwargs),
-        )
+    # Replace tensors in args/kwargs with benchmark_tensor
+    bench_args, bench_kwargs = torch.utils._pytree.tree_map_only(
+        torch.Tensor,
+        lambda t: benchmark_tensor,
+        (args, kwargs),
+    )
 
     # Warmup: call collective once
     torch.cuda.synchronize()
@@ -134,6 +129,7 @@ def _benchmark_collective_with_cuda_events_impl(
     return comm_time / nruns
 
 
+@torch.utils._python_dispatch._disable_current_modes()
 def benchmark_collective_with_cuda_events(
     n: torch.fx.Node,
     nruns: int = 2,
@@ -144,10 +140,8 @@ def benchmark_collective_with_cuda_events(
     Uses power-of-2 rounding for bandwidth-bound ops and byte-based caching
     (dtype-agnostic: fp32 512 == fp16 1024 both = 2048 bytes).
     """
-    import torch.distributed as c10d
     from torch._inductor import fx_utils
     from torch._inductor.runtime.runtime_utils import next_power_of_2
-    from torch.utils._python_dispatch import _disable_current_modes
 
     # Early check: can we actually run collectives?
     if not can_benchmark_collective():
