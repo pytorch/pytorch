@@ -1628,8 +1628,8 @@ class GraphLowering(torch.fx.Interpreter):
                     or CompilerBisector.disable_subsystem(
                         "inductor", "lowerings", lambda: repr(n)
                     )
+                    or should_fallback_by_default(n)
                 )
-                or should_fallback_by_default(n)
             ):
                 debug("fallback_handler")
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
