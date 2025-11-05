@@ -5,7 +5,7 @@ from typing import Any, Optional
 import torch
 from torch._dynamo.variables.dicts import ConstDictVariable
 from torch._dynamo.variables.lists import TupleVariable
-from torch.fx import Proxy
+from torch.fx import has_side_effect, Proxy
 
 from .. import graph_break_hints
 from ..bytecode_transformation import create_call_function
@@ -60,6 +60,9 @@ def _(
     pass
 
 
+has_side_effect(torch.ops.streams.fork.default)
+
+
 @custom_op("streams::join", mutates_args=())
 def join_stream(from_index: int, to_index: int) -> None:
     torch.accelerator.set_stream(_get_stream_by_index(to_index))
@@ -71,6 +74,9 @@ def _(
     to_index: int,
 ) -> None:
     pass
+
+
+has_side_effect(torch.ops.streams.join.default)
 
 
 @custom_op("streams::record_event", mutates_args=())
@@ -88,6 +94,9 @@ def _(
     pass
 
 
+has_side_effect(torch.ops.streams.record_event.default)
+
+
 @custom_op("streams::wait_event", mutates_args=())
 def wait_event(event_index: int, stream_index: int) -> None:
     event = _get_event_by_index(event_index)
@@ -101,6 +110,9 @@ def _(
     stream_index: int,
 ) -> None:
     pass
+
+
+has_side_effect(torch.ops.streams.wait_event.default)
 
 
 class SymbolicStreamState:
