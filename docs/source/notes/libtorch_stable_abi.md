@@ -211,6 +211,7 @@ There are two invariants for the stack:
     a. When calling a stack-based API, you must give owning references to the calling stack and steal references from the returned stack.
     b. When registering your function to be called with a stack, you must steal references from your argument stack and push onto the stack new references.
 
+(stack-based-apis)=
 ### Stack-based APIs
 
 The above is relevant in two places:
