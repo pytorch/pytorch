@@ -1812,7 +1812,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    def test_sharded_tensor_to_accelerator(self):
+    def test_sharded_tensor_to_cuda(self):
         cpu_spec = ChunkShardingSpec(
             dim=0,
             placements=[
