@@ -59,7 +59,7 @@ jobs:
   dynamo-test:
     name: dynamo-test-py${{ matrix.python-version }}
     uses: ./.github/workflows/_linux-test.yml
-    needs: dynamo-build-py${{ matrix.python-version }}
+    needs: dynamo-build
     strategy:
       matrix:
         python-version: ['3.10', '3.11', '3.12', '3.13']
