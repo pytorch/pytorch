@@ -33,7 +33,9 @@ def fork_stream(
     to_index: int,
 ) -> None:
     stream = get_external_object_by_index(to_index)
-    assert isinstance(stream, torch.Stream), "fork_stream expects a stream object"
+    assert isinstance(stream, torch.Stream), (
+        f"fork_stream expects a stream object at index {to_index}"
+    )
     torch.accelerator.set_stream(stream)
 
 
@@ -48,7 +50,9 @@ def _(
 @custom_op("streams::join", mutates_args=())
 def join_stream(from_index: int, to_index: int) -> None:
     stream = get_external_object_by_index(to_index)
-    assert isinstance(stream, torch.Stream), "join_stream expects a stream object"
+    assert isinstance(stream, torch.Stream), (
+        f"join_stream expects a stream object at index {to_index}"
+    )
     torch.accelerator.set_stream(stream)
 
 
