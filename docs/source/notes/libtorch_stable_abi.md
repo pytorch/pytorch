@@ -127,15 +127,15 @@ torch::stable::Tensor add_scalar(const torch::stable::Tensor& input, double scal
 // (5) Add Boxed wrapper required for STABLE_TORCH_LIBRARY
 void boxed_add_scalar(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
   // Extract arguments from stack using `to<T>`
-  auto input = torch::stable::to<torch::stable::Tensor>(stack[0]);
-  auto scalar = torch::stable::to<double>(stack[1]);
+  auto input = to<torch::stable::Tensor>(stack[0]);
+  auto scalar = to<double>(stack[1]);
 
   // Call the actual kernel
   auto result = add_scalar(input, scalar);
 
   // Put result back on stack using `from()`
   // Stack slot 0 now holds the return value
-  stack[0] = torch::stable::from(result);
+  stack[0] = from(result);
 }
 
 // (6) Register the operator using STABLE_TORCH_LIBRARY
