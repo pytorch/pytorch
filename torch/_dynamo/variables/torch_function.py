@@ -164,7 +164,8 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         if value is not None:
             super().__init__(value, **kwargs)
         self.value = value
-        self.cm_obj = value  # needed for BC with calling enter from CM code
+        # needed for BC with calling enter from CM code
+        self.cm_obj = value  # type: ignore[assignment]
         self.source = source  # type: ignore[assignment]
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
