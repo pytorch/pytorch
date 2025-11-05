@@ -28,15 +28,6 @@ class Print(HigherOrderOperator):
 print = Print()
 
 
-@print.py_autograd_impl
-# pyre-ignore
-def print_autograd(format_str: str, **kwargs: object) -> None:
-    with torch._C._ExcludeDispatchKeyGuard(
-        torch._C.DispatchKeySet(torch._C.DispatchKey.AutogradCPU)
-    ):
-        return None
-
-
 @print.py_impl(ProxyTorchDispatchMode)
 # pyre-ignore
 def print_proxy_torch_dispatch_mode(
