@@ -5,7 +5,7 @@ import time
 import unittest
 from itertools import product
 from functools import partial
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 
