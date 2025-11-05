@@ -936,8 +936,9 @@ class TestExplicitRedistribute(LocalTensorTestBase):
                 dA_repl = dA.redistribute(device_mesh, [Replicate()])
                 torch.matmul(dx, dA_repl)
 
+            dx = distribute_tensor(x, device_mesh, [Shard(0)])
+            dA = distribute_tensor(A, device_mesh, [Replicate()])
             with ExplicitRedistributionContext():
-                dA_repl = dA.redistribute(device_mesh, [Replicate()])
                 dY = torch.matmul(dx, dA_repl)
                 loss = dY.sum()
 
