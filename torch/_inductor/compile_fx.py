@@ -1403,145 +1403,149 @@ class _InProcessFxCompile(FxCompile):
                             const_graph.codegen_with_cpp_wrapper()
                         )
 
+                if len(gm.graph.nodes) == 4:
+                    # Replace complex expressions in input sizes/strides with single symbols
+                    # to simplify downstream codegen
+                    import sympy
+                    from torch._subclasses.fake_tensor import FakeTensor
+                    import torch
 
-                # Replace complex expressions in input sizes/strides with single symbols
-                # to simplify downstream codegen
-                import sympy
-                from torch._subclasses.fake_tensor import FakeTensor
-                import torch
+                    shape_env = fake_mode.shape_env
+                    replacement_counter = [0]  # Use list to allow mutation in nested function
+                    # Cache to ensure same expression always gets same replacement symbol
+                    expr_to_replacement = {}  # Maps: sympy.Expr -> SymInt
 
-                shape_env = fake_mode.shape_env
-                replacement_counter = [0]  # Use list to allow mutation in nested function
-                # Cache to ensure same expression always gets same replacement symbol
-                expr_to_replacement = {}  # Maps: sympy.Expr -> SymInt
+                    def replace_complex_expressions(dim_values, prefix):
+                        """
+                        Replace complex sympy expressions in size/stride with single symbols.
 
-                def replace_complex_expressions(dim_values, prefix):
-                    """
-                    Replace complex sympy expressions in size/stride with single symbols.
+                        Args:
+                            dim_values: Tuple of dimension values (from .size() or .stride())
+                            prefix: String prefix for replacement symbol names ('size' or 'stride')
 
-                    Args:
-                        dim_values: Tuple of dimension values (from .size() or .stride())
-                        prefix: String prefix for replacement symbol names ('size' or 'stride')
+                        Returns:
+                            (new_values, made_replacement): Tuple of replaced values list and bool flag
+                        """
+                        new_values = []
+                        made_replacement = False
 
-                    Returns:
-                        (new_values, made_replacement): Tuple of replaced values list and bool flag
-                    """
-                    new_values = []
-                    made_replacement = False
-
-                    for dim, dim_expr in enumerate(dim_values):
-                        # Extract the underlying sympy expression from SymInt
-                        if hasattr(dim_expr, 'node'):
-                            # This is a SymInt, get the underlying sympy expr
-                            underlying_expr = dim_expr.node.expr
-                        else:
-                            # This is already a sympy expr or int
-                            underlying_expr = dim_expr
-
-                        # Check if it's a complex expression (not just a single symbol)
-                        if isinstance(underlying_expr, sympy.Expr) and not isinstance(underlying_expr, sympy.Symbol):
-                            # This is a complex expression, not a single symbol
-                            # Check cache first - reuse replacement if we've seen this expression before
-                            if underlying_expr in expr_to_replacement:
-                                new_sym = expr_to_replacement[underlying_expr]
-                                new_values.append(new_sym)
-                                made_replacement = True
+                        for dim, dim_expr in enumerate(dim_values):
+                            # Extract the underlying sympy expression from SymInt
+                            if hasattr(dim_expr, 'node'):
+                                # This is a SymInt, get the underlying sympy expr
+                                underlying_expr = dim_expr.node.expr
                             else:
-                                # First time seeing this expression - create new replacement
-                                # Get the hint (concrete value) from the original SymInt if available
-                                hint = None
-                                if hasattr(dim_expr, 'node') and hasattr(dim_expr.node, 'hint'):
-                                    hint = dim_expr.node.hint
+                                # This is already a sympy expr or int
+                                underlying_expr = dim_expr
 
-                                # Create a new unbacked symbol using shape_env's method
-                                # This properly registers the symbol with bounds and value ranges
-                                new_sym = shape_env.create_unbacked_symint()
-                                replacement_counter[0] += 1
-                                made_replacement = True
+                            # Check if it's a complex expression (not just a single symbol)
+                            if isinstance(underlying_expr, sympy.Expr) and not isinstance(underlying_expr, sympy.Symbol):
+                                # This is a complex expression, not a single symbol
+                                # Check cache first - reuse replacement if we've seen this expression before
+                                if underlying_expr in expr_to_replacement:
+                                    new_sym = expr_to_replacement[underlying_expr]
+                                    new_values.append(new_sym)
+                                    made_replacement = True
+                                else:
+                                    # First time seeing this expression - create new replacement
+                                    # Get the hint (concrete value) from the original SymInt if available
+                                    hint = None
+                                    if hasattr(dim_expr, 'node') and hasattr(dim_expr.node, 'hint'):
+                                        hint = dim_expr.node.hint
 
-                                # Add a constraint that the new symbol equals the old expression
-                                # This maintains semantic correctness
-                                shape_env.replacements[underlying_expr] = new_sym.node.expr
-                                if hasattr(shape_env, 'add_equality'):
-                                    shape_env.add_equality(new_sym.node.expr, underlying_expr)
+                                    # Create a new unbacked symbol using shape_env's method
+                                    # This properly registers the symbol with bounds and value ranges
+                                    new_sym = shape_env.create_unbacked_symint()
+                                    replacement_counter[0] += 1
+                                    made_replacement = True
 
-                                # Cache the replacement for reuse
-                                expr_to_replacement[underlying_expr] = new_sym
+                                    # Add a constraint that the new symbol equals the old expression
+                                    # This maintains semantic correctness
+                                    shape_env.replacements[underlying_expr] = new_sym.node.expr
+                                    if hasattr(shape_env, 'add_equality'):
+                                        shape_env.add_equality(new_sym.node.expr, underlying_expr)
 
-                                # Use the newly created SymInt directly
-                                new_values.append(new_sym)
-                        else:
-                            new_values.append(dim_expr)
+                                    # Cache the replacement for reuse
+                                    expr_to_replacement[underlying_expr] = new_sym
 
-                    return new_values, made_replacement
+                                    # Use the newly created SymInt directly
+                                    new_values.append(new_sym)
+                            else:
+                                new_values.append(dim_expr)
 
-                for node in gm.graph.nodes:
-                    if "val" in node.meta:
-                        example_value = node.meta["val"]
-                        if isinstance(example_value, FakeTensor):
-                            # Replace complex expressions in sizes and strides
+                        return new_values, made_replacement
+
+                    for node in gm.graph.nodes:
+                        if "val" in node.meta:
+                            example_value = node.meta["val"]
+                            if isinstance(example_value, FakeTensor):
+                                # Replace complex expressions in sizes and strides
+                                new_size, size_replaced = replace_complex_expressions(
+                                    example_value.size(), 'size'
+                                )
+                                new_stride, stride_replaced = replace_complex_expressions(
+                                    example_value.stride(), 'stride'
+                                )
+                                made_replacement = size_replaced or stride_replaced
+
+                                # Update FakeTensor metadata if we made any replacements
+                                if made_replacement:
+                                    # Create a new FakeTensor with the replaced size/stride
+                                    # Since we're in a FakeTensorMode context and new_size/new_stride
+                                    # contain proper SymInts, torch.empty_strided will create a proper FakeTensor
+                                    with fake_mode:
+                                        new_fake_tensor = torch.empty_strided(
+                                            new_size,
+                                            new_stride,
+                                            dtype=example_value.dtype,
+                                            device=example_value.device
+                                        )
+
+                                    # Update node metadata
+                                    node.meta["val"] = new_fake_tensor
+
+                                    # Update tensor_meta if it exists - extract from the new FakeTensor
+                                    if "tensor_meta" in node.meta:
+                                        from torch._subclasses.fake_tensor import extract_tensor_metadata
+                                        node.meta["tensor_meta"] = extract_tensor_metadata(new_fake_tensor)
+
+                    # Also replace complex expressions in example_inputs to match the graph
+                    new_example_inputs = []
+                    for example_input in example_inputs:
+                        if isinstance(example_input, FakeTensor):
+                            # Replace complex expressions in example_input sizes and strides
                             new_size, size_replaced = replace_complex_expressions(
-                                example_value.size(), 'size'
+                                example_input.size(), 'size'
                             )
                             new_stride, stride_replaced = replace_complex_expressions(
-                                example_value.stride(), 'stride'
+                                example_input.stride(), 'stride'
                             )
                             made_replacement = size_replaced or stride_replaced
 
-                            # Update FakeTensor metadata if we made any replacements
                             if made_replacement:
-                                # Create a new FakeTensor with the replaced size/stride
-                                # Since we're in a FakeTensorMode context and new_size/new_stride
-                                # contain proper SymInts, torch.empty_strided will create a proper FakeTensor
+                                # Create a new FakeTensor with replaced size/stride
                                 with fake_mode:
-                                    new_fake_tensor = torch.empty_strided(
+                                    new_example_input = torch.empty_strided(
                                         new_size,
                                         new_stride,
-                                        dtype=example_value.dtype,
-                                        device=example_value.device
+                                        dtype=example_input.dtype,
+                                        device=example_input.device
                                     )
-
-                                # Update node metadata
-                                node.meta["val"] = new_fake_tensor
-
-                                # Update tensor_meta if it exists - extract from the new FakeTensor
-                                if "tensor_meta" in node.meta:
-                                    from torch._subclasses.fake_tensor import extract_tensor_metadata
-                                    node.meta["tensor_meta"] = extract_tensor_metadata(new_fake_tensor)
-
-                # Also replace complex expressions in example_inputs to match the graph
-                new_example_inputs = []
-                for example_input in example_inputs:
-                    if isinstance(example_input, FakeTensor):
-                        # Replace complex expressions in example_input sizes and strides
-                        new_size, size_replaced = replace_complex_expressions(
-                            example_input.size(), 'size'
-                        )
-                        new_stride, stride_replaced = replace_complex_expressions(
-                            example_input.stride(), 'stride'
-                        )
-                        made_replacement = size_replaced or stride_replaced
-
-                        if made_replacement:
-                            # Create a new FakeTensor with replaced size/stride
-                            with fake_mode:
-                                new_example_input = torch.empty_strided(
-                                    new_size,
-                                    new_stride,
-                                    dtype=example_input.dtype,
-                                    device=example_input.device
-                                )
-                            new_example_inputs.append(new_example_input)
+                                new_example_inputs.append(new_example_input)
+                            else:
+                                new_example_inputs.append(example_input)
                         else:
+                            # Not a FakeTensor, keep as-is
                             new_example_inputs.append(example_input)
-                    else:
-                        # Not a FakeTensor, keep as-is
-                        new_example_inputs.append(example_input)
 
-                # Use the updated example_inputs
-                example_inputs = new_example_inputs
+                    # Use the updated example_inputs
+                    example_inputs = new_example_inputs
 
-                gm.print_readable()
+                    # gm.print_readable()
+                    from torchtitan.tools.logging import logger
+
+                    logger.info("Modified")
+                    logger.info(gm.print_readable(print_output=False))
 
                 graph = GraphLowering(
                     gm,
