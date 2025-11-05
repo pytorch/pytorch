@@ -3189,12 +3189,18 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     def test_qlinear_sum_cpu(self):
         for bias in [True, False]:
-            use_bf16 = [True, False] if is_mkldnn_bf16_supported("cpu") else [False,]
+            use_bf16 = (
+                [True, False]
+                if is_mkldnn_bf16_supported("cpu")
+                else [
+                    False,
+                ]
+            )
             for int8_mixed_bf16 in use_bf16:
                 self._qlinear_sum_test_helper(
                     (torch.randn((2, 2, 4)), torch.randn(2, 2, 4)),
                     bias=bias,
-                    int8_mixed_bf16=int8_mixed_bf16
+                    int8_mixed_bf16=int8_mixed_bf16,
                 )
 
     def _test_qlinear_fp8_inductor_cpu_helper(self, qlinear_op, post_op="none"):

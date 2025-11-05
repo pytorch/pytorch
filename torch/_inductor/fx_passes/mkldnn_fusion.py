@@ -774,7 +774,7 @@ if torch._C._has_mkldnn:
                 # CppTemplateBuffer/QLinearPointwiseBinaryPT2E will not be used directly but the view.
                 if isinstance(
                     _other.data.data.data,  # type: ignore[attr-defined]
-                    (ir.CppTemplateBuffer, mkldnn_ir.QLinearPointwiseBinaryPT2E)
+                    (ir.CppTemplateBuffer, mkldnn_ir.QLinearPointwiseBinaryPT2E),
                 ):
                     return True
                 else:

@@ -2073,7 +2073,9 @@ class PythonWrapperCodegen(CodeGen):
         # In this case, x.data.layout == X.layout is (10, 10), the reinterpret view will return buf0,
         # but buf0 need to be viewed from (2, 5, 10) to (10, 10).
         # So we need to dig into the chain to find the innermost buffer's layout.
-        d_size, d_stride, d_offset, d_dtype, collapsible = codegen_reinterpret_view_helper(data)
+        d_size, d_stride, d_offset, d_dtype, collapsible = (
+            codegen_reinterpret_view_helper(data)
+        )
 
         def apply_reinterpret(name, tgt_size, tgt_stride, tgt_offset, cast_dtype, base_dtype):
             s = self.codegen_python_shape_tuple(tgt_size)
@@ -2087,7 +2089,7 @@ class PythonWrapperCodegen(CodeGen):
         name = data.get_name()
         collapsed = collapsible and offset == d_offset
         if collapsed:
-            same_layout = (size == d_size and stride == d_stride)
+            same_layout = size == d_size and stride == d_stride
             base_dtype = d_dtype
         else:
             same_layout = (
@@ -3267,7 +3269,9 @@ class PythonWrapperCodegen(CodeGen):
             box = layout.view.data
             assert isinstance(box, ir.StorageBox), type(box)
             input_buffer = box.data
-            assert isinstance(input_buffer, (ir.Buffer, ir.ReinterpretView)), type(input_buffer)
+            assert isinstance(input_buffer, (ir.Buffer, ir.ReinterpretView)), type(
+                input_buffer
+            )
             if isinstance(input_buffer, ir.ReinterpretView):
                 def unwrap_views(target) -> ir.Buffer:
                     if isinstance(target, ir.BaseView):
@@ -3276,6 +3280,7 @@ class PythonWrapperCodegen(CodeGen):
                         return unwrap_views(target.data)
                     assert isinstance(target, ir.Buffer), type(target)
                     return target
+
                 input_buffer = unwrap_views(input_buffer)
             self.codegen_allocation(input_buffer)
             self.writeline(ReinterpretLine(self, input_buffer, buffer, layout))

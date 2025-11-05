@@ -26,7 +26,6 @@ from ..pattern_matcher import (
 from ..utils import pad_listlike
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
-from ..virtualized import V
 
 
 aten = torch.ops.aten

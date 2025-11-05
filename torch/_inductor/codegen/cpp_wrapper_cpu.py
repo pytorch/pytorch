@@ -1805,7 +1805,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         reinterpreted tensor data.  Callers of this function are responsible for saving
         the handle if persistent access is needed."""
 
-        d_size, d_stride, d_offset, d_dtype, collapsible = codegen_reinterpret_view_helper(data)
+        d_size, d_stride, d_offset, d_dtype, collapsible = (
+            codegen_reinterpret_view_helper(data)
+        )
 
         dim = str(len(size))
         original_offset = offset
@@ -1854,7 +1856,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         collapsed = collapsible and original_offset == d_offset
         if collapsed:
-            same_layout = (size == d_size and stride == d_stride)
+            same_layout = size == d_size and stride == d_stride
             base_dtype = d_dtype
         else:
             same_layout = (
@@ -1875,7 +1877,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # need reinterpret
             final_tensor_str = create_reinterpret_call()
             if dtype is not None and dtype != base_dtype:
-                final_tensor_str, tmp_call_strs = create_dtypeview_call(final_tensor_str)
+                final_tensor_str, tmp_call_strs = create_dtypeview_call(
+                    final_tensor_str
+                )
                 call_strs.extend(tmp_call_strs)
 
         for line in call_strs:
