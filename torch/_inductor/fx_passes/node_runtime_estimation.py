@@ -1,16 +1,15 @@
 """
 Collective runtime estimation using CUDA events and power-of-2 rounding.
-Cache structure: LocalCache["collective_benchmarking"]["{op}: ({bytes} bytes)"] = runtime_ms
 """
 
 from __future__ import annotations
 
-import functools
 from functools import lru_cache
-from typing import Any, Optional
+from typing import Optional
 
 import torch
 from torch._logging import getArtifactLogger
+from torch._inductor.utils import clear_on_fresh_cache
 
 
 # Setup logger for artifact logging
@@ -18,37 +17,32 @@ log = getArtifactLogger(__name__, "node_runtime_estimation")
 
 
 # ============================================================================
-# Cache (following overlap_scheduling.py)
+# Cache (process-local, not disk-based to avoid concurrent writes from ranks)
 # ============================================================================
 
-
-@functools.cache
-def get_estimation_cache() -> Any:
-    from torch._inductor.codecache import LocalCache
-
-    return LocalCache()
-
-
-@lru_cache(maxsize=1)
-def clear_collective_cache_once() -> None:
-    """Clear all collective benchmarks once per process (lru_cache ensures one-time)."""
-    get_estimation_cache().set_value("collective_benchmarking", value={})
+# TODO: Consider using a distributed-aware cache or rank-local disk cache
+# not using local cache because different ranks might write to it concurrently.
+# solvable in future, potentially with workflow to seed cache
+@clear_on_fresh_cache
+@lru_cache
+def _get_collective_cache() -> dict[str, float]:
+    """Get process-local cache for collective benchmarks."""
+    return {}
 
 
 def get_cached_runtime(key: str) -> Optional[float]:
-    """Get cached runtime from persistent cache under 'collective_benchmarking' namespace."""
-    cache = get_estimation_cache().lookup("collective_benchmarking")
-    if cache is None:
-        return None
-    return cache.get(key)  # type: ignore[return-value]
+    """Get cached runtime from process-local cache."""
+    return _get_collective_cache().get(key)
 
 
 def set_cached_runtime(key: str, value: float) -> None:
-    """Set cached runtime in persistent cache under 'collective_benchmarking' namespace."""
-    cache = get_estimation_cache().lookup("collective_benchmarking") or {}
-    cache[key] = value
-    get_estimation_cache().set_value("collective_benchmarking", value=cache)
+    """Set cached runtime in process-local cache."""
+    _get_collective_cache()[key] = value
 
+
+# ============================================================================
+# Utilities
+# ============================================================================
 
 def get_hint(x: int | torch.SymInt) -> Optional[int]:
     if isinstance(x, int):
@@ -162,7 +156,6 @@ def benchmark_collective_with_cuda_events(
     if actual_bytes is None or actual_device is None or actual_dtype is None:
         return None, ""
 
-    # Find power-of-2 BYTE bounds
     upper_pow2_bytes = next_power_of_2(actual_bytes)
     lower_pow2_bytes = (
         upper_pow2_bytes if upper_pow2_bytes == actual_bytes else upper_pow2_bytes // 2
@@ -205,7 +198,7 @@ def benchmark_collective_with_cuda_events(
         set_cached_runtime(key, runtime)
         return runtime, key
 
-    # If exact power-of-2 bytes, just benchmark it
+    # If exact power-of-2 bytes, just return benchmark
     if actual_bytes in (lower_pow2_bytes, upper_pow2_bytes):
         return benchmark_bytes(actual_bytes, actual_dtype)
 

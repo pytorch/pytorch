@@ -966,8 +966,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
         ):
             # Clear any stale cache from previous tests
             from torch._inductor.fx_passes.node_runtime_estimation import clear_collective_cache_once
-            clear_collective_cache_once.cache_clear()  # Reset the lru_cache
-            clear_collective_cache_once()  # Actually clear the cache
+            clear_collective_cache_once()
 
             inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
 

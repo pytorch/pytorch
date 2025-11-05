@@ -382,6 +382,7 @@ class OverlapScheduler:
         world_size: int,
     ) -> None:
         """Log collective benchmarks with analytical comparisons for tlparse."""
+        print(f"LOG: _log_collective_benchmarks called with {len(collective_keys)} keys")
         collective_benchmarks = {}
         for key, benchmarked_ms, coll_node in zip(
             collective_keys, benchmarked_medians, collective_nodes
@@ -402,6 +403,8 @@ class OverlapScheduler:
                 "analytical_inductor_ms": inductor_ms,
             }
 
+        print(f"LOG: Emitting tlparse artifact with {len(collective_benchmarks)} benchmarks")
+        print(f"LOG: collective_benchmarks = {collective_benchmarks}")
         # Emit tlparse artifact
         from torch._logging import trace_structured
 
@@ -441,11 +444,7 @@ class OverlapScheduler:
         if self.collective_estimator == "benchmark":
             from torch._inductor.fx_passes.node_runtime_estimation import (
                 benchmark_collective_with_cuda_events,
-                clear_collective_cache_once,
             )
-
-            # Clear stale cache once per process
-            clear_collective_cache_once()
 
             collective_nodes = [
                 info.start_node for info in self.collective_info.values()
