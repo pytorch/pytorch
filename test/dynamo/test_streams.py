@@ -376,6 +376,66 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
+    def test_stream_backward(self) -> None:
+        def fn(x, y):
+            s2 = torch.Stream()
+            s0 = torch.Stream()
+            with s0:
+                y0 = 2 * x + y
+            with s2:
+                z = 2 * x + y
+
+            return y0, z
+
+        inp = (
+            torch.ones(2, 2, requires_grad=True) + 1,
+            torch.ones(2, 2, requires_grad=True),
+        )
+        expected = fn(*inp)
+        (
+            actual,
+            _,
+            fw_graphs,
+            bw_graphs,
+        ) = extract_graph(fn, *inp)
+        self.assertEqual(len(fw_graphs), 1)
+        self.assertEqual(expected, actual)
+        self.assertExpectedInline(
+            print_graph(fw_graphs[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[2, 2]", primals_2: "f32[2, 2]"):
+        # Annotation: {'stream': 1}
+        mul: "f32[2, 2]" = torch.ops.aten.mul.Tensor(primals_1, 2);  primals_1 = None
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul, primals_2)
+
+        # Annotation: {'stream': 0}
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul, primals_2);  mul = primals_2 = None
+        return (add, add_1)
+""",
+        )
+
+        actual[1].sum().backward()
+        self.assertExpectedInline(
+            print_graph(bw_graphs[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, tangents_1: "f32[2, 2]", tangents_2: "f32[2, 2]"):
+        # Annotation: {'stream': 0}
+        mul_2: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_2, 2)
+
+        #
+        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(tangents_2, tangents_1);  tangents_2 = None
+
+        # Annotation: {'stream': 1}
+        mul_3: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_1, 2);  tangents_1 = None
+
+        #
+        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = mul_3 = None
+        return (add_3, add_2)
+""",
+        )
+
     @requires_cuda
     def test_run_opcheck(self):
         from torch._dynamo.variables.streams import fork_stream, join_stream
