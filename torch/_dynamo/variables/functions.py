@@ -101,7 +101,8 @@ if TYPE_CHECKING:
         TritonKernelType,
     )
 
-    from .lists import BaseListVariable
+    from .lists import BaseListVariable, ListVariable
+    from .tensor import TensorVariable
 
 
 _F = TypeVar("_F", bound=Callable[..., Any])
@@ -155,7 +156,7 @@ def _get_spec(func: FunctionType) -> FunctionSpec:
 def bind_args_cached(
     func: FunctionType,
     tx: "InstructionTranslator",
-    fn_source: Any,
+    fn_source: Optional[Source],
     args: Sequence[Any],
     kwargs: dict[str, Any],
 ) -> dict[str, VariableTracker]:
@@ -252,7 +253,7 @@ def bind_args_cached(
 
 
 def wrap_bound_arg(
-    tx: "InstructionTranslator", val: Any, source: Any = None
+    tx: "InstructionTranslator", val: Any, source: Optional[Source] = None
 ) -> VariableTracker:
     # Source propagation is best effort since not every object we encounter has a source to begin with.
     if isinstance(val, VariableTracker):
@@ -331,7 +332,7 @@ fn_known_dunder_attrs = {
 
 
 def fn_var_getattr(
-    tx: "InstructionTranslator", fn: Any, source: Any, name: str
+    tx: "InstructionTranslator", fn: object, source: Optional[Source], name: str
 ) -> VariableTracker:
     source = source and AttrSource(source, name)
 
@@ -407,10 +408,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def __init__(
         self,
-        fn: types.FunctionType | torch.jit.ScriptFunction,
+        fn: types.FunctionType | torch.jit.ScriptFunction,  # type: ignore[type-arg]
         is_constant: bool = False,
         **kwargs: Any,
-    ) -> None:  # type: ignore[type-arg]
+    ) -> None:
         super().__init__(**kwargs)
         if getattr(fn, "_dynamo_marked_constant", False):
             # This method should be treated as a constant for the purposes of compilation
@@ -501,7 +502,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
             elif source:
                 closure_cell = GetItemSource(ClosureSource(source), idx)
-                closure_cell_contents = AttrSource(closure_cell, "cell_contents")  # type: ignore[arg-type]
+                closure_cell_contents = AttrSource(closure_cell, "cell_contents")
                 try:
                     contents_var = VariableTracker.build(
                         parent, cell.cell_contents, closure_cell_contents
@@ -1158,7 +1159,7 @@ class UserMethodVariable(UserFunctionVariable):
     def self_args(self) -> list[VariableTracker]:
         return [self.obj]
 
-    def python_type(self) -> type:
+    def python_type(self) -> type[types.MethodType]:
         return types.MethodType
 
     def call_function(
@@ -1284,8 +1285,8 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        all_args = self.self_args() + list(args)
-        result = super().call_function(tx, all_args, kwargs)
+        self.context.enter(tx)
+        result = super().call_function(tx, args, kwargs)
         self.context.exit(tx)
         return result
 
@@ -1455,10 +1456,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         wrap_args_kwargs(parent.output.root_tx, result)  # type: ignore[arg-type]
         init_cellvars(parent, result, code)
 
-        assert self.closure is not None
         for idx, name in enumerate(code.co_freevars):
             assert name not in result
-            cell = self.closure.items[idx]  # type: ignore[attr-defined]
+            cell = self.closure.items[idx]  # type: ignore[attr-defined, union-attr]
             result[name] = cell
 
         return result
@@ -1525,7 +1525,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
     def __init__(
         self,
-        wrapped: VariableTracker,
+        wrapped: Any,
         context: "ContextWrappingVariable",
         **kwargs: Any,
     ) -> None:
@@ -1538,14 +1538,14 @@ class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
         kwargs.pop("closure", None)
         kwargs.pop("wrapped_fn", None)
         super().__init__(
-            wrapped.fn_name,  # type: ignore[attr-defined]
-            wrapped.code,  # type: ignore[attr-defined]
-            wrapped.f_globals,  # type: ignore[attr-defined]
-            wrapped.defaults,  # type: ignore[attr-defined]
-            wrapped.kwdefaults,  # type: ignore[attr-defined]
-            wrapped.annotations,  # type: ignore[attr-defined]
-            wrapped.closure,  # type: ignore[attr-defined]
-            wrapped.wrapped_fn,  # type: ignore[attr-defined]
+            wrapped.fn_name,
+            wrapped.code,
+            wrapped.f_globals,
+            wrapped.defaults,
+            wrapped.kwdefaults,
+            wrapped.annotations,
+            wrapped.closure,
+            wrapped.wrapped_fn,
         )
         self.wrapped = wrapped
         self.context = context
@@ -2046,7 +2046,7 @@ class FunctoolsPartialVariable(VariableTracker):
     def __init__(
         self,
         func: VariableTracker,
-        args: list[VariableTracker],
+        args: Sequence[VariableTracker],
         keywords: dict[str, VariableTracker],
         **kwargs: Any,
     ) -> None:
@@ -2266,12 +2266,12 @@ class PolyfilledFunctionVariable(VariableTracker):
 
 class TracebackVariable(VariableTracker):
     # We don't track traceback. A call to any function in this module is a no-op
-    def call_function(
+    def call_function(  # type: ignore[empty-body]
         self,
         tx: "InstructionTranslator",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker: ...  # type: ignore[empty-body]
+    ) -> VariableTracker: ...
 
 
 class SysFunctionVariable(VariableTracker):
@@ -2358,8 +2358,8 @@ class DynamoTritonHOPifier(TritonHOPifier):
     def call_user_defined_fn(
         self,
         user_fn: Callable[..., Any],
-        args: list[Any],
-        kwargs: dict[str, Any],
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
         tx: Optional["InstructionTranslator"],
         variable: Any,
     ) -> VariableTracker:
@@ -2394,7 +2394,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
 
         return configs
 
-    def maybe_unpack_heuristic_result(self, result: Any) -> Any:
+    def maybe_unpack_heuristic_result(self, result: VariableTracker) -> Any:
         if not result.is_python_constant():
             self.raise_unsupported(
                 "@triton.heuristics must return constant values because configs can only contain constant values."
@@ -2553,9 +2553,9 @@ class TMADescriptorExperimentalVariable(VariableTracker):
     def __init__(
         self,
         data_ptr: "variables.DataPtrVariable",
-        dims: list[Any],
-        block_dims: list[Any],
-        element_size: Any,
+        dims: list[VariableTracker],
+        block_dims: list[VariableTracker],
+        element_size: VariableTracker,
         **kwargs: Any,
     ) -> None:
         assert isinstance(data_ptr, variables.DataPtrVariable)
@@ -2591,8 +2591,8 @@ class TMADescriptorExperimentalVariable(VariableTracker):
 class TMADescriptorStableVariable(VariableTracker):
     def __init__(
         self,
-        tensor: Any,
-        block_shape: Any,
+        tensor: "TensorVariable",
+        block_shape: "ListVariable",
         **kwargs: Any,
     ) -> None:
         assert isinstance(tensor, variables.TensorVariable)
@@ -2693,6 +2693,6 @@ class CreateTMADescriptorStableVariable(VariableTracker):
         block_shape = kwargs["block_shape"] if "block_shape" in kwargs else args[1]
 
         return TMADescriptorStableVariable(
-            tensor=tensor,
-            block_shape=block_shape,
+            tensor=tensor,  # type: ignore[arg-type]
+            block_shape=block_shape,  # type: ignore[arg-type]
         )
