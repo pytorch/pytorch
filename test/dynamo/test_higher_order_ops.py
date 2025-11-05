@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import contextlib
 import enum
 import functools
 import pprint
@@ -7162,6 +7163,231 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
                 "Mod.linear": {torch.ops.aten.addmm: 128},
             },
         )
+
+
+class TestCtx:
+    def __init__(self):
+        pass
+
+    def __enter__(self):
+        return None
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return None  # Don't suppress exceptions
+
+
+_test_global_state = None
+
+
+class TestCtxSideEffectfulInit:
+    def __init__(self, x):
+        global _test_global_state
+
+        _test_global_state = x if _test_global_state is None else _test_global_state + x
+
+    def __enter__(self):
+        return None
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return None  # Don't suppress exceptions'
+
+
+def get_test_ctx():
+    # To test ctx defined in local scope
+    class TestCtx:
+        def __init__(self):
+            pass
+
+        def __enter__(self):
+            return None
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            return None  # Don't suppress exceptions
+
+    return TestCtx
+
+
+@contextlib.contextmanager
+def enable_hopify_ctx(cls):
+    try:
+        torch._dynamo.config._enable_hopify_generic_context_manager.add(cls)
+        yield
+
+    finally:
+        torch._dynamo.config._enable_hopify_generic_context_manager.remove(cls)
+
+
+class HopifyContextManagerTests(torch._dynamo.test_case.TestCase):
+    def setUp(self):
+        global _test_global_state
+        _test_global_state = None
+        torch._dynamo.config._enable_hopify_generic_context_manager.add(
+            TestCtxSideEffectfulInit
+        )
+        torch._dynamo.config._enable_hopify_generic_context_manager.add(TestCtx)
+
+    def tearDown(self):
+        global _test_global_state
+        torch._dynamo.config._enable_hopify_generic_context_manager.remove(TestCtx)
+        torch._dynamo.config._enable_hopify_generic_context_manager.remove(
+            TestCtxSideEffectfulInit
+        )
+        _test_global_state = None
+
+    def test_basic(self):
+        def fn(x):
+            b = x.clone()
+            with TestCtx():
+                x = x.sin().cos().sin()
+            return x, b
+
+        a = torch.rand((4, 4), requires_grad=True)
+        compiled_fn = torch.compile(
+            fn, backend="aot_eager_decomp_partition", fullgraph=True
+        )
+        self.assertEqual(compiled_fn(a), fn(a))
+
+    def test_return_unassigned(self):
+        def fn(x):
+            with TestCtx():
+                return x.sin().cos().sin()
+
+        a = torch.rand((4, 4), requires_grad=True)
+        compiled_fn = torch.compile(
+            fn, backend="aot_eager_decomp_partition", fullgraph=True
+        )
+        self.assertEqual(compiled_fn(a), fn(a))
+
+    def test_nesting(self):
+        # Test multiple layers of nesting, each layer can have multiple children
+        def fn(x):
+            x = x.sin()
+            with TestCtx():
+                x_1 = x.cos()
+                with TestCtx():
+                    x_2 = x.sin()
+                with TestCtx():
+                    x_3 = x.sin() + x_2
+            with TestCtx():
+                x_4 = x_2.clone()
+            return x_1.sin() + x_2.cos() + x_3.sin() + x_4.clone()
+
+        a = torch.rand((4, 4), requires_grad=True)
+        compiled_fn = torch.compile(
+            fn, backend="aot_eager_decomp_partition", fullgraph=True
+        )
+        self.assertEqual(compiled_fn(a), fn(a))
+
+    def test_list_append(self):
+        # Today we cannot mutate non locals, but we should be able to relax
+        # this constraint.
+        def fn(x):
+            x = x.sin()
+            with TestCtx():
+                out = []
+                out.append(x.sin())
+            return out[0].cos()
+
+        a = torch.rand((4, 4), requires_grad=True)
+        compiled_fn = torch.compile(
+            fn, backend="aot_eager_decomp_partition", fullgraph=True
+        )
+        self.assertEqual(compiled_fn(a), fn(a))
+
+    def test_compile_symints_lifted_as_inputs(self):
+        def fn(x):
+            with TestCtx():
+                b = x.shape[0]
+            return x / b
+
+        a = torch.rand((2, 3), requires_grad=True)
+        compiled_fn = torch.compile(
+            fn, backend="aot_eager_decomp_partition", fullgraph=True
+        )
+        self.assertEqual(compiled_fn(a), fn(a))
+
+    @torch._dynamo.config.patch(
+        {
+            "capture_dynamic_output_shape_ops": True,
+        }
+    )
+    def test_compile_symints_not_lifted_as_inputs(self):
+        def fn(x):
+            with TestCtx():
+                nz = x.nonzero()
+                b = nz.shape[0]
+            return x / b
+
+        a = torch.rand((2, 3), requires_grad=True)
+        compiled_fn = torch.compile(
+            fn, backend="aot_eager_decomp_partition", fullgraph=True, dynamic=True
+        )
+        self.assertEqual(compiled_fn(a), fn(a))
+
+    @unittest.expectedFailure
+    def test_ctx_defined_in_local_scope(self):
+        test_ctx_cls = get_test_ctx()
+        with enable_hopify_ctx(test_ctx_cls):
+
+            def fn(x):
+                x = x.sin()
+                with test_ctx_cls():
+                    out = []
+                    out.append(x.sin())
+                return out[0].cos()
+
+            a = torch.rand((4, 4), requires_grad=True)
+            compiled_fn = torch.compile(
+                fn, backend="aot_eager_decomp_partition", fullgraph=True
+            )
+            self.assertEqual(compiled_fn(a), fn(a))
+
+    def test_ctx_init_only_constant_args(self):
+        class Test:
+            pass
+
+        my_tensor = torch.tensor(1.0)
+        a = torch.rand((4, 4), requires_grad=True)
+
+        @torch.compile(backend="aot_eager_decomp_partition", fullgraph=True)
+        def bad_fn_1(x):
+            x = x.sin()
+            with TestCtxSideEffectfulInit(Test):
+                y = x.cos()
+            return y.sin()
+
+        msg = r"Unsupported argument type .* for context manager .*"
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            bad_fn_1(a)
+
+        @torch.compile(backend="aot_eager_decomp_partition", fullgraph=True)
+        def bad_fn_2(x):
+            x = x.sin()
+            with TestCtxSideEffectfulInit(my_tensor):
+                y = x.cos()
+            return y.sin()
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            bad_fn_2(a)
+
+    def test_side_effect_in_init(self):
+        global _test_global_state
+
+        def fn(x):
+            x = x.sin()
+            with TestCtxSideEffectfulInit(3):
+                y = x.cos()
+            return y.sin()
+
+        self.assertIsNone(_test_global_state)
+
+        a = torch.rand((4, 4), requires_grad=True)
+        compiled_fn = torch.compile(
+            fn, backend="aot_eager_decomp_partition", fullgraph=True
+        )
+        compiled_fn(a)
+        self.assertEqual(_test_global_state, 3)
 
 
 xfail_hops_compile = {

@@ -1546,6 +1546,7 @@ def _get_dynamo_config_for_logging() -> Optional[str]:
             "ignore_logger_methods",
             "traceable_tensor_subclasses",
             "nontraceable_tensor_subclasses",
+            "_enable_hopify_generic_context_manager",
             "_custom_ops_profile",
         }
 
