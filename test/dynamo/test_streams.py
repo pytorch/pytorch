@@ -381,10 +381,11 @@ class <lambda>(torch.nn.Module):
             s2 = torch.Stream()
             s0 = torch.Stream()
             with s0:
-                with s2:
-                    y = 2 * x + y
+                y0 = 2 * x + y
+            with s2:
+                z = 2 * x + y
 
-            return y
+            return y0, z
 
         inp = (
             torch.ones(2, 2, requires_grad=True) + 1,
@@ -404,22 +405,34 @@ class <lambda>(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[2, 2]", primals_2: "f32[2, 2]"):
+        # Annotation: {'stream': 1}
+        mul: "f32[2, 2]" = torch.ops.aten.mul.Tensor(primals_1, 2);  primals_1 = None
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul, primals_2)
+
         # Annotation: {'stream': 0}
-        mul: "f32[2, 2]" = torch.ops.aten.mul.Tensor(primals_2, 2);  primals_2 = None
-        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul, primals_1);  mul = primals_1 = None
-        return (add_1,)
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul, primals_2);  mul = primals_2 = None
+        return (add, add_1)
 """,
         )
 
-        actual[0].sum().backward()
+        actual[1].sum().backward()
         self.assertExpectedInline(
             print_graph(bw_graphs[0]),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, tangents_1: "f32[2, 2]"):
+    def forward(self, tangents_1: "f32[2, 2]", tangents_2: "f32[2, 2]"):
         # Annotation: {'stream': 0}
-        mul_1: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_1, 2)
-        return (tangents_1, mul_1)
+        mul_2: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_2, 2)
+
+        #
+        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(tangents_2, tangents_1);  tangents_2 = None
+
+        # Annotation: {'stream': 1}
+        mul_3: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_1, 2);  tangents_1 = None
+
+        #
+        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = mul_3 = None
+        return (add_3, add_2)
 """,
         )
 
