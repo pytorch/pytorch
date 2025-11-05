@@ -29,6 +29,7 @@ from ._fsdp_collectives import (
 )
 from ._fsdp_common import (
     compiled_autograd_enabled,
+    DDPMeshInfo,
     FSDPMeshInfo,
     HSDPMeshInfo,
     is_bw,
@@ -315,7 +316,10 @@ class FSDPParamGroup:
             self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
             self._reshard_after_forward_event = None
 
-        world_size = self._all_gather_process_group.size()
+        if isinstance(self.mesh_info, FSDPMeshInfo):
+            world_size = self._all_gather_process_group.size()
+        else:
+            world_size = 1
         if world_size == 1:
             # can't skip due to early return in wait_for_unshard if
             # no self._all_gather_result
@@ -356,7 +360,10 @@ class FSDPParamGroup:
             if prev_all_gather_state := self.comm_ctx.all_gather_state:
                 self._wait_all_gather_streams_on_event(prev_all_gather_state.event)
                 self.comm_ctx.all_gather_state = None  # free the all-gather result
-        world_size = self._all_gather_process_group.size()
+        if isinstance(self.mesh_info, FSDPMeshInfo):
+            world_size = self._all_gather_process_group.size()
+        else:
+            world_size = 1
         if world_size == 1:
             # directly initialize unsharded parameters from sharded parameters
 
@@ -531,7 +538,11 @@ class FSDPParamGroup:
                     self.comm_ctx.reduce_scatter_state.event
                 )
             self.comm_ctx.reduce_scatter_state = None
-            all_reduce_pg = self._all_reduce_process_group if self._is_hsdp else None
+            all_reduce_pg = (
+                self._all_reduce_process_group
+                if isinstance(self.mesh_info, DDPMeshInfo)
+                else None
+            )
             all_reduce_stream: torch.cuda.Stream
             if all_reduce_pg is None and self._all_reduce_hook_stream is not None:
                 # this means the native HSDP is not enabled,
@@ -555,14 +566,22 @@ class FSDPParamGroup:
             ) = foreach_reduce(
                 fsdp_params_with_grad,
                 unsharded_grads,
-                self._reduce_scatter_process_group,
+                (
+                    self._reduce_scatter_process_group
+                    if isinstance(self.mesh_info, FSDPMeshInfo)
+                    else None  # pyre-fixme[6]
+                ),
                 self.comm_ctx.reduce_scatter_stream,
                 self._reduce_scatter_comm,
                 self._orig_dtype,
                 self._reduce_dtype,
                 self.device,
                 self.gradient_divide_factor,
-                self._all_reduce_process_group if self._is_hsdp else None,
+                (
+                    self._all_reduce_process_group
+                    if isinstance(self.mesh_info, DDPMeshInfo)
+                    else None
+                ),
                 all_reduce_stream,
                 self.all_reduce_grads,
                 self._partial_reduce_output,
@@ -776,9 +795,9 @@ class FSDPParamGroup:
 
     @property
     def _all_reduce_process_group(self) -> dist.ProcessGroup:
-        if not isinstance(self.mesh_info, HSDPMeshInfo):
+        if not isinstance(self.mesh_info, DDPMeshInfo):
             raise AssertionError(
-                f"Expected mesh_info to be HSDPMeshInfo, got {type(self.mesh_info)}"
+                f"Expected mesh_info to be DDPMeshInfo or HSDPMeshInfo, got {type(self.mesh_info)}"
             )
         return self.mesh_info.replicate_process_group
 

@@ -82,6 +82,18 @@ def update_global(x):
     return x * _variable
 
 
+def pos_only_fn(*args, **kwargs):
+    return _pos_only_fn(*args, **kwargs)
+
+
+def _pos_only_fn(a, b=3, /, **kwargs):
+    return (
+        a * b + kwargs.get("a", -13) * kwargs.get("b", 42),
+        "a" in kwargs,
+        "b" in kwargs,
+    )
+
+
 @contextlib.contextmanager
 def update_global_ctx(x):
     try:
@@ -940,6 +952,19 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         input = torch.randn(4)
         self.assertEqual(fn(input, [1, 2, 3]), input + 1)
         self.assertEqual(fn(input, (1, 2, 3)), input + 1)
+
+    def test_pos_only_args_with_same_name_in_star_kwargs(self):
+        opt_fn = torch.compile(pos_only_fn, backend="eager", fullgraph=True)
+        a = torch.randn(4)
+        b = torch.randn(4)
+        x = torch.randn(4)
+        y = torch.randn(4)
+        self.assertEqual(pos_only_fn(a), opt_fn(a))
+        self.assertEqual(pos_only_fn(a, a=x), opt_fn(a, a=x))
+        self.assertEqual(pos_only_fn(a, b=y), opt_fn(a, b=y))
+        self.assertEqual(pos_only_fn(a, b=b, a=x), opt_fn(a, b=b, a=x))
+        self.assertEqual(pos_only_fn(a, a=x, b=y), opt_fn(a, a=x, b=y))
+        self.assertEqual(pos_only_fn(a, b, a=x, b=y), opt_fn(a, b, a=x, b=y))
 
     @make_test
     def test_len_constant_misc_iterables(x):

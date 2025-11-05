@@ -143,7 +143,9 @@ class SGD(Optimizer):  # noqa: D101
 
             if group["momentum"] != 0:
                 # update momentum_buffers in state
-                for p, momentum_buffer in zip(params, momentum_buffer_list):
+                for p, momentum_buffer in zip(
+                    params, momentum_buffer_list, strict=True
+                ):
                     state = self.state[p]
                     state["momentum_buffer"] = momentum_buffer
 

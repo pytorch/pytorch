@@ -8,7 +8,7 @@ import os
 import sys
 import textwrap
 from itertools import chain, count
-from typing import Any, Callable, Optional, Protocol, TYPE_CHECKING, Union
+from typing import Any, Optional, Protocol, TYPE_CHECKING, Union
 
 import sympy
 
@@ -37,7 +37,7 @@ from .wrapper import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from ..graph import GraphLowering
 
@@ -2947,6 +2947,7 @@ if (!custom_op_wrapper) {
                 return functools.reduce(
                     lambda a, b: a | b,
                     [
+                        # pyrefly: ignore [missing-attribute]
                         node.node.get_stack_traces()
                         for node in node_schedule
                         if hasattr(node, "node") and node.node

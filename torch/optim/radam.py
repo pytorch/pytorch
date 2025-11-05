@@ -392,7 +392,7 @@ def _multi_tensor_radam(
         if not all(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
-            for p, step in zip(params, state_steps)
+            for p, step in zip(params, state_steps, strict=True)
         ):
             raise AssertionError(
                 f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
@@ -501,7 +501,8 @@ def _multi_tensor_radam(
 
             # TODO(mlazos): we should try and get a foreach_where op https://github.com/pytorch/pytorch/issues/117884
             rect = [
-                torch.where(rho_t > 5.0, n, 0.0) for n, rho_t in zip(num, rho_t_list)
+                torch.where(rho_t > 5.0, n, 0.0)
+                for n, rho_t in zip(num, rho_t_list, strict=True)
             ]
             del num
             del rho_t_list
@@ -544,11 +545,14 @@ def _multi_tensor_radam(
                 1 - beta1 ** _get_value(step) for step in grouped_state_steps
             ]
             unrect_step_size = [
-                (lr * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)
+                (lr * rect / bc) * -1
+                for rect, bc in zip(unrectified, bias_correction1, strict=True)
             ]
             bias_correction2 = [
                 ((1 - beta2 ** _get_value(step)) ** 0.5) * (lr * rect / bc) * -1
-                for step, rect, bc in zip(grouped_state_steps, rect, bias_correction1)
+                for step, rect, bc in zip(
+                    grouped_state_steps, rect, bias_correction1, strict=True
+                )
             ]
 
         buffer = torch._foreach_sqrt(grouped_exp_avg_sqs)
