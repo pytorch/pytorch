@@ -7164,6 +7164,39 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             },
         )
 
+    def test_checkpoint_with_side_effects_hopify(self):
+        """Test checkpoint with side effects using HOPify logic."""
+        from torch._dynamo.utils import _disable_side_effect_safety_checks_for_current_subtracer
+
+        def gn(x, z):
+            z.append(x.sin())
+            return torch.cos(torch.sin(torch.matmul(x, x) @ x))
+
+        def wrapped_gn(*args, **kwargs):
+            return _disable_side_effect_safety_checks_for_current_subtracer(
+                gn, *args, **kwargs
+            )
+
+        def fn(x):
+            z = []
+            out1 = torch.utils.checkpoint.checkpoint(
+                wrapped_gn,
+                x,
+                z,
+                use_reentrant=False,
+            )
+            return out1, z[0]
+
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        a = torch.rand(3, 3, requires_grad=True)
+        result = compiled_fn(a)
+
+        # Verify result has correct shape and grad_fn
+        self.assertEqual(result[0].shape, (3, 3))
+        self.assertEqual(result[1].shape, (3, 3))
+        self.assertTrue(result[0].requires_grad)
+        self.assertTrue(result[1].requires_grad)
+
 
 class TestCtx:
     def __init__(self):

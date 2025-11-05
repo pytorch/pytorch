@@ -2591,6 +2591,10 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from torch._dynamo.variables.ctx_manager import (
+            _EMPTY_GRAPH_MARKER,
+            extract_subgraph_and_wrap_with_hop,
+        )
         from torch._higher_order_ops.wrap import TagActivationCheckpoint
         from torch.utils.checkpoint import noop_context_fn
 
@@ -2610,37 +2614,46 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
 
         checkpoint_kwargs, gmod_kwargs = TagActivationCheckpoint.divide_kwargs(kwargs)
 
-        # Here we use checkpoint_kwargs (and not gmod kwargs). gmod_kwargs are
-        # already flattened above and managed inside the fx graph.
-        (
-            p_args,
-            _,
-            example_value,
-            _body_r,
-            out_spec,
-            checkpointed_gmod,
-            _,
-        ) = self.create_wrapped_node(
-            tx,
-            args[0],
-            args[1:],
-            gmod_kwargs,
-            "torch.utils.checkpoint.checkpoint",
-            under_activation_checkpoint=True,
+        # Use HOPify context manager logic instead of speculate_subgraph
+        # Step 1: Record the start marker node (like context manager "enter")
+        main_graph = tx.output.graph
+        last_node = None
+        for node in reversed(list(main_graph.nodes)):
+            last_node = node
+            break
+        start_marker_node = (
+            last_node if last_node is not None else _EMPTY_GRAPH_MARKER
         )
+
+        # Step 2: Call the function directly, which will trace into the main graph
+        fn_vt = args[0]
+        fn_args_vt = args[1:]
+
+        # Set the under_activation_checkpoint flag
+        orig_val = tx.output.current_tracer.under_activation_checkpoint
+        tx.output.current_tracer.under_activation_checkpoint = True
+        try:
+            output = fn_vt.call_function(tx, fn_args_vt, gmod_kwargs)
+        finally:
+            tx.output.current_tracer.under_activation_checkpoint = orig_val
+
+        # Step 3: Extract the subgraph (like context manager "exit")
+        _, checkpoint_kwargs_proxy = proxy_args_kwargs([], checkpoint_kwargs)
+
+        gmod_meta = {}
         if context_fn is not None:
-            checkpointed_gmod.meta["_checkpoint_context_fn"] = context_fn
+            gmod_meta["_checkpoint_context_fn"] = context_fn
 
-        _, checkpoint_kwargs = proxy_args_kwargs([], checkpoint_kwargs)
-
-        return _call_function_and_unflatten_output(
+        extract_subgraph_and_wrap_with_hop(
             tx,
+            start_marker_node,
+            "checkpoint_body",
             self.value,
-            p_args,
-            checkpoint_kwargs,
-            example_value,
-            out_spec,
+            checkpoint_kwargs_proxy,
+            gmod_meta,
         )
+
+        return output
 
 
 class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
