@@ -5,6 +5,7 @@ import traceback
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
+from torch._dynamo.device_interface import DeviceInterface
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import (
@@ -26,6 +27,10 @@ __all__ = ["DebugMode", "get_active_debug_mode"]
 REDISTRIBUTE_FUNC = "redistribute_input"
 _DISPATCH_RECORD_HOOKS: list[Callable] = []
 _DISPATCH_LOG_HOOKS: list[Callable] = []
+_IN_INDUCTOR_BENCHMARK = False
+_RECORD_TRITON_OUTPUTS = False
+_TRITON_OUTPUT_HASH_FN = None
+_TRITON_INPUT_HASH_FN = None
 
 
 def _stringify_shape(shape) -> str:
@@ -93,17 +98,18 @@ def default_hash_fn(t: torch.Tensor, use_scalar: bool = False) -> torch.Tensor:
     replacing NaN/inf values with fixed numbers, and then computing the L1 norm in float64 or complex128.
     This is used to generate a deterministic summary value for tensor comparison.
     """
-    if not (t.is_floating_point() or t.is_complex()):
-        t = t.float()
-    t = t.contiguous()
-    # Clean the tensor to handle NaN/inf values, then compute norm
-    t_clean = torch.nan_to_num(t, nan=0.0, posinf=1.0, neginf=-1.0)
+    with torch._C._DisablePythonDispatcher(), torch._C._DisableTorchDispatch():
+        if not (t.is_floating_point() or t.is_complex()):
+            t = t.float()
+        t = t.contiguous()
+        # Clean the tensor to handle NaN/inf values, then compute norm
+        t_clean = torch.nan_to_num(t, nan=0.0, posinf=1.0, neginf=-1.0)
 
-    dtype = torch.complex128 if t.is_complex() else torch.float64
-    out = t_clean.norm(p=1, dtype=dtype)
-    if use_scalar:
-        return out.item()
-    return out
+        dtype = torch.complex128 if t.is_complex() else torch.float64
+        out = t_clean.norm(p=1, dtype=dtype)
+        if use_scalar:
+            return out.item()
+        return out
 
 
 def _get_stack_trace() -> str:
@@ -303,6 +309,90 @@ class _NNModuleCall(_DebugCall):
         ]
 
 
+class _TritonKernelCall(_DebugCall):
+    """Triton kernel call from Inductor"""
+
+    def __init__(
+        self,
+        kernel_name: str,
+        kwargs: dict[str, Any],
+        call_depth: int,
+    ):
+        super().__init__(call_depth)
+        self.kernel_name = kernel_name
+        self.kwargs = kwargs
+        self.kwargs_str: Optional[str] = None
+
+        self.pre_hashes: Optional[dict[str, Any]] = None
+        self.post_hashes: Optional[dict[str, Any]] = None
+
+    def stringify_args(self, attributes: list[str]) -> None:
+        # Optionally hash kernel inputs before launch
+        global _TRITON_INPUT_HASH_FN
+        if hash_fn := _TRITON_INPUT_HASH_FN:
+            self.pre_hashes = {
+                k: hash_fn(v)
+                for k, v in self.kwargs.items()
+                if isinstance(v, torch.Tensor)
+            }
+
+        if self.kwargs:
+            self.kwargs_str = ", " + ", ".join(
+                f"{k}={_arg_to_str(v, attributes)}" for k, v in self.kwargs.items()
+            )
+        else:
+            self.kwargs_str = ""
+
+    def render(self, attributes: list[str]) -> str:
+        base_str = f"[triton] {self.kernel_name}({self.kwargs_str})"
+        if self.pre_hashes:
+            pre_hashes_str = ", ".join(f"{k}: {v}" for k, v in self.pre_hashes.items())
+            pre_hashes_str = (
+                "\n  "
+                + "  " * self.call_depth
+                + f"# pre-kernel hashes: {{{pre_hashes_str}}}"
+            )
+        else:
+            pre_hashes_str = ""
+        if self.post_hashes:
+            post_hashes_str = ", ".join(
+                f"{k}: {v}" for k, v in self.post_hashes.items()
+            )
+            post_hashes_str = (
+                "\n  "
+                + "  " * self.call_depth
+                + f"# post-kernel hashes: {{{post_hashes_str}}}"
+            )
+        else:
+            post_hashes_str = ""
+        return f"\n{base_str}{pre_hashes_str}{post_hashes_str}\n"
+
+    def finalize(self, device_interface: DeviceInterface):
+        # synchronize -> hash/store kernel results
+        # is this correct??
+        global _RECORD_TRITON_OUTPUTS, _TRITON_OUTPUT_HASH_FN
+        device_interface.synchronize(device_interface.current_device())
+        if _RECORD_TRITON_OUTPUTS:
+            self.record = {
+                "output": {
+                    k: v.clone() if isinstance(v, torch.Tensor) else v
+                    for k, v in self.kwargs.items()
+                }
+            }
+        if hash_fn := _TRITON_OUTPUT_HASH_FN:
+            self.post_hashes = {
+                k: hash_fn(v)
+                for k, v in self.kwargs.items()
+                if isinstance(v, torch.Tensor)
+            }
+
+        # don't store tensors
+        del self.kwargs
+
+    def __iter__(self):
+        yield from [self.kernel_name, (), self.kwargs_str, self.call_depth]
+
+
 def _run_hook(hook, *args):
     out = hook(*args)
     assert out is None or isinstance(out, dict)
@@ -389,6 +479,13 @@ class DebugMode(TorchDispatchMode):
         return True
 
     def _record_call(self, call):
+        global _IN_INDUCTOR_BENCHMARK
+        if _IN_INDUCTOR_BENCHMARK:
+            return
+
+        if str(call).startswith("profiler::_record_function"):
+            return
+
         if not self.store_original_args:
             call.stringify_args(self.record_tensor_attributes)
         self.operators.append(call)
@@ -518,6 +615,14 @@ class DebugMode(TorchDispatchMode):
         finally:
             self.call_depth -= 1
 
+    def record_triton_kernel(
+        self, kernel_name: str, kwargs: dict[str, Any]
+    ) -> _TritonKernelCall:
+        call = _TritonKernelCall(kernel_name, kwargs, self.call_depth + 1)
+        call.stringify_args(self.record_tensor_attributes)
+        self.operators.append(call)
+        return call
+
     def debug_string(self) -> str:
         with torch._C.DisableTorchFunction():
             result = ""
@@ -564,14 +669,19 @@ class DebugMode(TorchDispatchMode):
         """
 
         def dispatch_hook(func, types, args, kwargs, result):
-            with torch._C._DisablePythonDispatcher():
-                out = tree_map(
-                    lambda x: x.clone() if isinstance(x, torch.Tensor) else x, result
-                )
+            out = tree_map(
+                lambda x: x.clone() if isinstance(x, torch.Tensor) else x, result
+            )
             return {"output": out}
 
-        with DebugMode.dispatch_hooks(record_hook=dispatch_hook):
-            yield
+        global _RECORD_TRITON_OUTPUTS
+        try:
+            _old_record_triton = _RECORD_TRITON_OUTPUTS
+            _RECORD_TRITON_OUTPUTS = True
+            with DebugMode.dispatch_hooks(record_hook=dispatch_hook):
+                yield
+        finally:
+            _RECORD_TRITON_OUTPUTS = _old_record_triton
 
     @staticmethod
     @contextlib.contextmanager
@@ -589,10 +699,9 @@ class DebugMode(TorchDispatchMode):
             hash_fn = functools.partial(default_hash_fn, use_scalar=True)
 
         def _tree_hash(obj):
-            with torch._C._DisablePythonDispatcher():
-                return tree_map(
-                    lambda x: hash_fn(x) if isinstance(x, torch.Tensor) else None, obj
-                )
+            return tree_map(
+                lambda x: hash_fn(x) if isinstance(x, torch.Tensor) else None, obj
+            )
 
         def _dispatch_hash_hook(func, types, args, kwargs, result):
             if "empty" in str(func) or "profiler" in str(func):
@@ -607,8 +716,29 @@ class DebugMode(TorchDispatchMode):
                 return None
             return out
 
-        with DebugMode.dispatch_hooks(log_hook=_dispatch_hash_hook):
+        global _TRITON_INPUT_HASH_FN, _TRITON_OUTPUT_HASH_FN
+        try:
+            if hash_inputs:
+                _old_input_hfn = _TRITON_INPUT_HASH_FN
+                _TRITON_INPUT_HASH_FN = hash_fn
+            _old_output_hfn = _TRITON_OUTPUT_HASH_FN
+            _TRITON_OUTPUT_HASH_FN = hash_fn
+            with DebugMode.dispatch_hooks(log_hook=_dispatch_hash_hook):
+                yield
+        finally:
+            if hash_inputs:
+                _TRITON_INPUT_HASH_FN = _old_input_hfn  # type: ignore[assignment]
+            _TRITON_OUTPUT_HASH_FN = _old_output_hfn
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _benchmarking_inductor():
+        global _IN_INDUCTOR_BENCHMARK
+        try:
+            _IN_INDUCTOR_BENCHMARK = True
             yield
+        finally:
+            _IN_INDUCTOR_BENCHMARK = False
 
 
 def get_active_debug_mode() -> Optional[DebugMode]:
