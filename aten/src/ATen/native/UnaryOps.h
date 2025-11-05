@@ -112,17 +112,10 @@ DECLARE_DISPATCH(
 DECLARE_DISPATCH(
     void (*)(
         TensorIteratorBase&,
-        std::optional<double>,
-        std::optional<double>,
-        std::optional<double>),
+        const std::optional<Scalar>&,
+        const std::optional<Scalar>&,
+        const std::optional<Scalar>&),
     nan_to_num_stub)
-DECLARE_DISPATCH(
-    void (*)(
-        TensorIteratorBase&,
-        std::optional<c10::complex<double>>,
-        std::optional<c10::complex<double>>,
-        std::optional<c10::complex<double>>),
-    nan_to_num_complex_stub)
 DECLARE_DISPATCH(void (*)(TensorIteratorBase&, int64_t), round_decimals_stub)
 
 // Missing unary functions

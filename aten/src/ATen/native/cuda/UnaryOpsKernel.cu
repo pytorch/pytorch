@@ -273,22 +273,17 @@ C10_HOST_DEVICE static inline scalar_t _nan_to_num_replace_imag(
     -neg_inf_replacement_imag);
 }
 
-void nan_to_num_kernel_cuda(
+void nan_to_num_real_args_cuda(
     TensorIteratorBase& iter,
-    std::optional<double> nan,
-    std::optional<double> pos_inf,
-    std::optional<double> neg_inf) {
+    double nan,
+    double pos_inf,
+    double neg_inf) {
   if (isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "nan_to_num", [&]() {
       using value_t = scalar_t::value_type;
-      value_t nan_replacement = static_cast<value_t>(nan.value_or(0.));
-      value_t pos_inf_replacement = pos_inf.has_value()
-          ? static_cast<value_t>(pos_inf.value())
-          : std::numeric_limits<value_t>::max();
-      value_t neg_inf_replacement = neg_inf.has_value()
-          ? static_cast<value_t>(neg_inf.value())
-          : std::numeric_limits<value_t>::lowest();
-
+      value_t nan_replacement = static_cast<value_t>(nan);
+      value_t pos_inf_replacement = static_cast<value_t>(pos_inf);
+      value_t neg_inf_replacement = static_cast<value_t>(neg_inf);
       gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
         value_t res_real = _nan_to_num_replace(
           a.real(), nan_replacement, pos_inf_replacement, neg_inf_replacement);
@@ -299,14 +294,9 @@ void nan_to_num_kernel_cuda(
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "nan_to_num_cuda", [&]() {
-      scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
-      scalar_t pos_inf_replacement = pos_inf.has_value()
-          ? static_cast<scalar_t>(pos_inf.value())
-          : std::numeric_limits<scalar_t>::max();
-      scalar_t neg_inf_replacement = neg_inf.has_value()
-          ? static_cast<scalar_t>(neg_inf.value())
-          : std::numeric_limits<scalar_t>::lowest();
-
+      scalar_t nan_replacement = static_cast<scalar_t>(nan);
+      scalar_t pos_inf_replacement = static_cast<scalar_t>(pos_inf);
+      scalar_t neg_inf_replacement = static_cast<scalar_t>(neg_inf);
       gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
           return _nan_to_num_replace(
             a, nan_replacement, pos_inf_replacement, neg_inf_replacement);
@@ -315,21 +305,17 @@ void nan_to_num_kernel_cuda(
   }
 }
 
-void nan_to_num_complex_args_kernel_cuda(
+void nan_to_num_complex_args_cuda(
     TensorIteratorBase& iter,
-    std::optional<complex<double>> nan,
-    std::optional<complex<double>> pos_inf,
-    std::optional<complex<double>> neg_inf) {
+    complex<double> nan,
+    complex<double> pos_inf,
+    complex<double> neg_inf) {
   if (isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "nan_to_num", [&]() {
       using value_t = scalar_t::value_type;
-      auto nan_replacement = static_cast<scalar_t>(nan.value_or(scalar_t(0.0, 0.0)));
-      auto pos_inf_replacement = pos_inf.has_value()
-          ? static_cast<scalar_t>(pos_inf.value())
-          : scalar_t(std::numeric_limits<value_t>::max(), 0.0);
-      auto neg_inf_replacement = neg_inf.has_value()
-          ? static_cast<scalar_t>(neg_inf.value())
-          : scalar_t(std::numeric_limits<value_t>::lowest(), 0.0);
+      auto nan_replacement = static_cast<scalar_t>(nan);
+      auto pos_inf_replacement = static_cast<scalar_t>(pos_inf);
+      auto neg_inf_replacement = static_cast<scalar_t>(neg_inf);
       gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
         value_t res_real = _nan_to_num_replace_real(
           a.real(), a.imag(), nan_replacement.real(), nan_replacement.imag(), pos_inf_replacement.real(), pos_inf_replacement.imag(), neg_inf_replacement.real(), neg_inf_replacement.imag());
@@ -340,6 +326,41 @@ void nan_to_num_complex_args_kernel_cuda(
     });
   } else {
     TORCH_CHECK(false, "nan_to_num does not work with complex nan, pos_inf, or neg_inf and non-complex tensors. Expected complex tensor, but got ", iter.dtype());
+  }
+}
+
+void nan_to_num_kernel_cuda(
+    TensorIteratorBase& iter,
+    const std::optional<Scalar> &nan,
+    const std::optional<Scalar> &pos_inf,
+    const std::optional<Scalar> &neg_inf) {
+   // Check if any of the scalar parameters are complex
+  bool has_complex_scalar = (nan.has_value() && nan.value().isComplex()) ||
+      (pos_inf.has_value() && pos_inf.value().isComplex()) ||
+      (neg_inf.has_value() && neg_inf.value().isComplex());
+
+  if (has_complex_scalar) {
+    c10::complex<double> complex_nan = nan.has_value()
+        ? nan.value().toComplexDouble()
+        : c10::complex<double>(0., 0.);
+    c10::complex<double> complex_pos_inf = pos_inf.has_value()
+        ? pos_inf.value().toComplexDouble()
+        : c10::complex<double>(std::numeric_limits<double>::max(), 0.);
+    c10::complex<double> complex_neg_inf = neg_inf.has_value()
+        ? neg_inf.value().toComplexDouble()
+        : c10::complex<double>(std::numeric_limits<double>::lowest(), 0.);
+    nan_to_num_complex_args_cuda(iter, complex_nan, complex_pos_inf, complex_neg_inf);
+  } else {
+    double double_nan = nan.has_value()
+        ? nan.value().toDouble()
+        : 0.;
+    double double_pos_inf = pos_inf.has_value()
+        ? pos_inf.value().toDouble()
+        : std::numeric_limits<double>::max();
+    double double_neg_inf = neg_inf.has_value()
+        ? neg_inf.value().toDouble()
+        : std::numeric_limits<double>::lowest();
+    nan_to_num_real_args_cuda(iter, double_nan, double_pos_inf, double_neg_inf);
   }
 }
 
@@ -363,7 +384,6 @@ REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda)
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda)
 REGISTER_DISPATCH(sqrt_stub, &sqrt_kernel_cuda)
 REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel_cuda)
-REGISTER_DISPATCH(nan_to_num_complex_stub, &nan_to_num_complex_args_kernel_cuda)
 REGISTER_DISPATCH(frexp_stub, &frexp_kernel_cuda)
 
 } // namespace at::native
