@@ -711,7 +711,7 @@ struct Fp32PrecisonGuard {
       return ;
     }
     saved_precision = globalContext().float32Precision(target_backend, target_op);
-    changed = (new_precision == saved_precision);
+    changed = (new_precision != saved_precision);
     if (changed) {
       globalContext().setFloat32Precision(target_backend, target_op, new_precision);
     }
