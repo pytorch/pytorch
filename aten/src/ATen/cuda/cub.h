@@ -26,9 +26,7 @@ namespace detail {
 // it as an opaque type.
 // We use native integer types for 1/2/4/8-byte values to reduce
 // register usage in CUDA kernels. For sizes > 8 fall back to char array.
-template <int N> struct alignas(N) OpaqueType {
-  char data[N];
-};
+template <int N> struct alignas(N) OpaqueType { char data[N]; };
 template <> struct alignas(1) OpaqueType<1> { uint8_t data; };
 template <> struct alignas(2) OpaqueType<2> { uint16_t data; };
 template <> struct alignas(4) OpaqueType<4> { uint32_t data; };
