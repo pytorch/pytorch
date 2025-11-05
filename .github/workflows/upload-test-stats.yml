@@ -25,6 +25,7 @@ on:
       - inductor-rocm-mi300
       - mac-mps
       - linux-aarch64
+      - xpu
     types:
       - completed
 
