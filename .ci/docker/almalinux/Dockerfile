@@ -46,6 +46,10 @@ ADD ./common/install_cuda.sh install_cuda.sh
 COPY ./common/install_nccl.sh install_nccl.sh
 COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
 COPY ./common/install_cusparselt.sh install_cusparselt.sh
+COPY --from=conda /opt/conda /opt/conda
+ADD ./common/install_jax.sh install_jax.sh
+ADD ./common/common_utils.sh common_utils.sh
+COPY ./ci_commit_pins/jax.txt /ci_commit_pins/jax.txt
 ENV CUDA_HOME=/usr/local/cuda-${CUDA_VERSION}
 # Preserve CUDA_VERSION for the builds
 ENV CUDA_VERSION=${CUDA_VERSION}
@@ -55,18 +59,22 @@ ENV PATH=/usr/local/cuda-${CUDA_VERSION}/bin:$PATH
 FROM cuda as cuda12.6
 RUN bash ./install_cuda.sh 12.6
 ENV DESIRED_CUDA=12.6
+RUN bash ./install_jax.sh 12.6
 
 FROM cuda as cuda12.8
 RUN bash ./install_cuda.sh 12.8
 ENV DESIRED_CUDA=12.8
+RUN bash ./install_jax.sh 12.8
 
 FROM cuda as cuda12.9
 RUN bash ./install_cuda.sh 12.9
 ENV DESIRED_CUDA=12.9
+RUN bash ./install_jax.sh 12.9
 
 FROM cuda as cuda13.0
 RUN bash ./install_cuda.sh 13.0
 ENV DESIRED_CUDA=13.0
+RUN bash ./install_jax.sh 13.0
 
 FROM ${ROCM_IMAGE} as rocm
 ARG PYTORCH_ROCM_ARCH
