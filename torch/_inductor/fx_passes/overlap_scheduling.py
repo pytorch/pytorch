@@ -61,6 +61,19 @@ def estimate_collective_time(
     if (est := get_custom_estimation(n, custom_runtime_estimation)) is not None:
         return est
 
+    # Use benchmarking if configured
+    from torch._inductor import config
+    if config.aten_distributed_optimizations.benchmark_collectives:
+        from torch._inductor.fx_passes.node_runtime_estimation import (
+            benchmark_collective_with_cuda_events,
+        )
+        # Use cache during estimation (skip_cache_lookup=False)
+        runtime, _ = benchmark_collective_with_cuda_events(n, nruns=2, skip_cache_lookup=False)
+        if runtime is not None:
+            return runtime
+        # Fall through to analytical model if benchmarking failed
+
+    # Otherwise use analytical model
     return torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
         n, override_size
     )
@@ -109,6 +122,7 @@ def benchmark_node_with_cache_key(
     n: fx.Node,
     custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
 ) -> tuple[float, str | None]:
+    """Benchmark a compute node and return (runtime, cache_key)."""
     assert is_compute_node(n)
 
     from torch._dynamo.testing import rand_strided
@@ -359,16 +373,40 @@ class OverlapScheduler:
     def _align_compute_nodes_runtime_estimations_across_all_distributed_ranks(
         self,
     ) -> None:
-        log.info(
-            "Overlap scheduling: Aligning runtime estimations across all distributed ranks"
-        )
+        """Align runtime estimations across ranks (compute + collectives)."""
+        log.info("Overlap scheduling: Aligning runtime estimations across all distributed ranks")
+
+        # Benchmark compute nodes
         runtime_estimations_keys: list[str | None] = []
         runtime_estimations: list[float] = []
+        compute_key_count = 0
+
         for n in self.compute_nodes:
             val, key = benchmark_node_with_cache_key(n, self.custom_runtime_estimation)
             runtime_estimations.append(val)
             runtime_estimations_keys.append(key)
+            compute_key_count += 1
 
+        # Benchmark collectives if enabled
+        from torch._inductor import config
+        if config.aten_distributed_optimizations.benchmark_collectives:
+            from torch._inductor.fx_passes.node_runtime_estimation import (
+                benchmark_collective_with_cuda_events,
+                clear_collective_cache_once,
+            )
+
+            # Clear stale cache once per process
+            clear_collective_cache_once()
+
+            collective_nodes = [info.start_node for info in self.collective_info.values()]
+            for n in collective_nodes:
+                val, key = benchmark_collective_with_cuda_events(n, nruns=2, skip_cache_lookup=True)
+                # Skip if benchmarking failed (None)
+                if val is not None:
+                    runtime_estimations.append(val)
+                    runtime_estimations_keys.append(key)
+
+        # All gather and compute median
         import torch.distributed as dist
         from torch._subclasses.fake_tensor import unset_fake_temporarily
         from torch.distributed.distributed_c10d import _get_default_group
@@ -376,24 +414,25 @@ class OverlapScheduler:
         world_size = dist.get_world_size()
         pg = _get_default_group()
         with unset_fake_temporarily():
-            gathered_runtime_estimations: list[list[float]] = [
-                [] for _ in range(world_size)
-            ]
-            dist.all_gather_object(
-                gathered_runtime_estimations, runtime_estimations, pg
-            )
+            gathered_runtime_estimations: list[list[float]] = [[] for _ in range(world_size)]
+            dist.all_gather_object(gathered_runtime_estimations, runtime_estimations, pg)
             median_runtime_estimations = torch.median(
                 torch.tensor(gathered_runtime_estimations), dim=0
             ).values.tolist()
-        for key, median_runtime_estimation in zip(
-            runtime_estimations_keys, median_runtime_estimations
-        ):
+
+        # Cache medians (compute vs collective use different caches)
+        for idx, (key, median_runtime_estimation) in enumerate(zip(runtime_estimations_keys, median_runtime_estimations)):
             if key is None:
                 continue
-            set_cached_node_time(key, median_runtime_estimation)
-        log.info(
-            "Overlap scheduling: Runtime estimations across all distributed ranks were aligned"
-        )
+            if idx < compute_key_count:
+                # Compute node
+                set_cached_node_time(key, median_runtime_estimation)
+            else:
+                # Collective node
+                from torch._inductor.fx_passes.node_runtime_estimation import set_cached_runtime
+                set_cached_runtime(key, median_runtime_estimation)
+
+        log.info("Overlap scheduling: Runtime estimations aligned")
 
     def run(self) -> torch.fx.GraphModule:
         """Run the scheduling algorithm."""

@@ -893,6 +893,10 @@ class aten_distributed_optimizations:
         None
     )
 
+    # Benchmark collectives using CUDA events instead of analytical model
+    # When enabled, uses power-of-2 rounding, interpolation, and distributed sync
+    benchmark_collectives: bool = False
+
 
 def parallel_compile_enabled_internally() -> bool:
     """
