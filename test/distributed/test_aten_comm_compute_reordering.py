@@ -54,6 +54,7 @@ def apply_reordering_and_get_graph(graph, out_li) -> None:
         "max_compute_pre_fetch",
         "custom_runtime_estimation",
         "insert_overlap_deps",
+        "collective_estimator",
     )
     for key in config_keys:
         if (val := getattr(dist_opts, key)) is not None:
@@ -963,6 +964,11 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
         ):
+            # Clear any stale cache from previous tests
+            from torch._inductor.fx_passes.node_runtime_estimation import clear_collective_cache_once
+            clear_collective_cache_once.cache_clear()  # Reset the lru_cache
+            clear_collective_cache_once()  # Actually clear the cache
+
             inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
 
             with torch._inductor.config.patch(patches):
@@ -974,6 +980,8 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
                     "mm"
                 ).run(aten_graph_str)
 
+                # Test passes if compilation succeeded with benchmarking enabled
+                # Cache verification is tricky due to multiprocess test setup
                 correct = func(inputs)
                 self.assertTrue(same(out, correct))
 

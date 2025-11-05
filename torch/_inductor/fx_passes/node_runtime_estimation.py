@@ -32,12 +32,7 @@ def get_estimation_cache() -> Any:
 @lru_cache(maxsize=1)
 def clear_collective_cache_once() -> None:
     """Clear all collective benchmarks once per process (lru_cache ensures one-time)."""
-    from torch._inductor import config
-
-    if not config.aten_distributed_optimizations.benchmark_collectives:
-        return
-
-    get_estimation_cache().set_value("collective_benchmarking", value=None)
+    get_estimation_cache().set_value("collective_benchmarking", value={})
 
 
 def get_cached_runtime(key: str) -> Optional[float]:
@@ -53,11 +48,6 @@ def set_cached_runtime(key: str, value: float) -> None:
     cache = get_estimation_cache().lookup("collective_benchmarking") or {}
     cache[key] = value
     get_estimation_cache().set_value("collective_benchmarking", value=cache)
-
-
-# ============================================================================
-# Utilities
-# ============================================================================
 
 
 def get_hint(x: int | torch.SymInt) -> Optional[int]:
@@ -90,7 +80,6 @@ def _benchmark_collective_with_cuda_events_impl(
     n: torch.fx.Node,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-    benchmark_tensor: torch.Tensor,
     nruns: int,
 ) -> float | None:
     """
@@ -99,16 +88,9 @@ def _benchmark_collective_with_cuda_events_impl(
     """
     import torch.distributed as c10d
 
-    # Replace tensors in args/kwargs with benchmark_tensor
-    bench_args, bench_kwargs = torch.utils._pytree.tree_map_only(
-        torch.Tensor,
-        lambda t: benchmark_tensor,
-        (args, kwargs),
-    )
-
     # Warmup: call collective once and wait
     torch.cuda.synchronize()
-    result = n.target(*bench_args, **bench_kwargs)  # type: ignore[operator]
+    result = n.target(*args, **kwargs)  # type: ignore[operator]
     torch.ops._c10d_functional.wait_tensor(result)
 
     # Benchmark with CUDA events
@@ -121,7 +103,7 @@ def _benchmark_collective_with_cuda_events_impl(
         end_evt = torch.cuda.Event(enable_timing=True)
 
         start_evt.record()
-        result = n.target(*bench_args, **bench_kwargs)  # type: ignore[operator]
+        result = n.target(*args, **kwargs)  # type: ignore[operator]
         torch.ops._c10d_functional.wait_tensor(result)
         end_evt.record()
         end_evt.synchronize()
@@ -172,11 +154,12 @@ def benchmark_collective_with_cuda_events(
             actual_bytes = total_elems * t.dtype.itemsize
             actual_dtype = t.dtype
             actual_device = t.device
-        return t
+        else:
+            raise RuntimeError(f"should only be one input tensor to collective {n}")
 
     torch.utils._pytree.tree_map_only(torch.Tensor, extract_tensor_info, (args, kwargs))
 
-    if actual_bytes is None or actual_device is None or actual_bytes is None:
+    if actual_bytes is None or actual_device is None or actual_dtype is None:
         return None, ""
 
     # Find power-of-2 BYTE bounds
@@ -203,9 +186,16 @@ def benchmark_collective_with_cuda_events(
         # Create empty tensor for benchmarking
         benchmark_tensor = torch.empty(num_elements, dtype=dtype, device=actual_device)
 
+        # Replace all tensors in args/kwargs with benchmark_tensor
+        bench_args, bench_kwargs = torch.utils._pytree.tree_map_only(
+            torch.Tensor,
+            lambda t: benchmark_tensor,
+            (args, kwargs),
+        )
+
         # Benchmark using CUDA events
         runtime = _benchmark_collective_with_cuda_events_impl(
-            n, args, kwargs, benchmark_tensor, nruns
+            n, bench_args, bench_kwargs, nruns
         )
 
         if runtime is None:
@@ -216,7 +206,7 @@ def benchmark_collective_with_cuda_events(
         return runtime, key
 
     # If exact power-of-2 bytes, just benchmark it
-    if actual_bytes == lower_pow2_bytes or actual_bytes == upper_pow2_bytes:
+    if actual_bytes in (lower_pow2_bytes, upper_pow2_bytes):
         return benchmark_bytes(actual_bytes, actual_dtype)
 
     # Otherwise, benchmark bounds and interpolate
