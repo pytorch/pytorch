@@ -101,7 +101,7 @@ class FilterDataFramesPipe(DFIterDataPipe):
                 filter_res.append(self.filter_fn(df.iloc[i]))
 
         buffer = []
-        for df, res in zip(all_buffer, filter_res):
+        for df, res in zip(all_buffer, filter_res, strict=True):
             if res:
                 buffer.append(df)
                 if len(buffer) == size:

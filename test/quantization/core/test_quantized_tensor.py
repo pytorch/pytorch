@@ -586,7 +586,7 @@ class TestQuantizedTensor(TestCase):
         ]
         axis = 1
         device = torch.device('cuda')
-        for i in range(20):
+        for _ in range(20):
             for dtype, zero_type in dtype_and_zero_types:
                 r = torch.rand(2, 2) * 10
                 r[0, 0] = 2.5
@@ -765,7 +765,7 @@ class TestQuantizedTensor(TestCase):
                 qr = torch.quantize_per_tensor(r, scale, zero_point, dtype=dtype)
                 qr = qr.transpose(0, 1)
                 rqr = qr.dequantize()
-                # compare transpose + dequantized result with orignal transposed result
+                # compare transpose + dequantized result with original transposed result
                 self.assertTrue(np.allclose(r.cpu().numpy().transpose([1, 0, 2, 3]), rqr.cpu().numpy(), atol=2 / scale))
 
                 qr = torch.quantize_per_tensor(r, scale, zero_point, dtype=dtype)
@@ -1062,8 +1062,8 @@ class TestQuantizedTensor(TestCase):
         mask = torch.randint(0, 2, (numel, ), device=device)
         mask = mask.bool()
         x = torch.rand(numel, device=device)
-        qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point, dtype=qtype)
         for qtype, fill_with in itertools.product(types, fills):
+            qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point, dtype=qtype)
             q_masked_fill = qx.clone()
             q_masked_fill.masked_fill_(mask, fill_with)
             ref = qx.clone()
@@ -1113,7 +1113,7 @@ class TestQuantizedTensor(TestCase):
             zero_point = 10
             types = [torch.qint8, torch.quint8, torch.qint32]
             for qtype in types:
-                for i in range(3):
+                for _ in range(3):
                     m = random.randint(10, 20)
                     elems = random.randint(20000, 30000)
                     values = torch.rand(elems, device=device)
@@ -1210,7 +1210,7 @@ class TestQuantizedTensor(TestCase):
             if device == 'cpu':
                 self.assertFalse(torch.equal(b, c))
 
-            # a case can't view non-contiguos Tensor
+            # a case can't view non-contiguous Tensor
             a_int = torch.randint(0, 100, [1, 2, 3, 4], device=device, dtype=dtype)
             a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
             b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension

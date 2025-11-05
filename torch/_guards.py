@@ -65,15 +65,15 @@ CA_COMPILE_ID_PATTERN = re.compile(
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class CompileId:
-    frame_id: Optional[int]
+    frame_id: int | None
     # This id is per-frame, and counts how many times we've compiled this
     # frame.  This could have been a global id but having this be per-frame
     # gives you a better intuitive sense for how many recompiles have occurred
     # so far.
-    frame_compile_id: Optional[int]
+    frame_compile_id: int | None
 
     # torch.compiling a compiled autograd graph
-    compiled_autograd_id: Optional[int] = None
+    compiled_autograd_id: int | None = None
 
     # TODO: consider also tracking the recompilation count
     # See Note: Updating CompileId
@@ -210,8 +210,8 @@ class GuardBuilderBase:
 
 @dataclasses.dataclass(frozen=True)
 class SLoc:
-    framework_loc: Optional[Union[traceback.FrameSummary, str]]
-    maybe_user_loc: Optional[str]
+    framework_loc: traceback.FrameSummary | str | None
+    maybe_user_loc: str | None
 
     def __str__(self) -> str:
         floc = (
@@ -758,9 +758,7 @@ class HopDispatchSetCache:
 
         self.hop_cache_map = {invoke_subgraph: InvokeSubgraphCache()}
 
-    def get_cache(
-        self, op: torch._ops.HigherOrderOperator
-    ) -> Optional[HopSubgraphCache]:
+    def get_cache(self, op: torch._ops.HigherOrderOperator) -> HopSubgraphCache | None:
         if op not in self.hop_cache_map:
             return None
         return self.hop_cache_map[op]  # type: ignore[index]
@@ -794,12 +792,12 @@ class CompileContext:
         return _TLS.compile_context
 
     @staticmethod
-    def try_get() -> Optional[CompileContext]:
+    def try_get() -> CompileContext | None:
         return getattr(_TLS, "compile_context", None)
 
     def __init__(self, compile_id: Optional[CompileId]) -> None:
         assert compile_id is None or isinstance(compile_id, CompileId)
-        self.compile_id: Optional[CompileId] = compile_id
+        self.compile_id: CompileId | None = compile_id
         self.attempt = 0
         # Verbose ShapeEnv guards produced.
         self.shape_env_guards: list[str] = []
@@ -830,7 +828,7 @@ class TracingContext:
     """
 
     @staticmethod
-    def try_get() -> Optional[TracingContext]:
+    def try_get() -> TracingContext | None:
         return getattr(_TLS, "tracing_context", None)
 
     @staticmethod
@@ -874,7 +872,7 @@ class TracingContext:
         # careful not to accidentally induce guards on the SymInt if
         # you ever do change this in aot_autograd.py; you should check
         # on permutations preferentially.)
-        self.output_strides: Optional[list[Optional[tuple[int, ...]]]] = None
+        self.output_strides: list[tuple[int, ...] | None] | None = None
         # When this is True, whenever we encounter an int in Dynamo tracing,
         # we will (1) force unspec it and (2) force it as a size-like unbacked
         # integer.  This is currently used when processing certain lists of

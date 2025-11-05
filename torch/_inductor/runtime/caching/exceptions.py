@@ -151,3 +151,39 @@ class ValueUnPicklingError(ValueDecodingError):
         super().__init__(
             f"Failed to unpickle cache value from pickled value {pickled_value!r}."
         )
+
+
+class CustomParamsEncoderRequiredError(UserError):
+    pass
+
+
+class CustomResultEncoderRequiredError(UserError):
+    pass
+
+
+class CustomResultDecoderRequiredError(UserError):
+    pass
+
+
+class DeterministicCachingDisabledError(UserError):
+    pass
+
+
+class DeterministicCachingRequiresStrongConsistencyError(UserError):
+    pass
+
+
+class StrictDeterministicCachingKeyNotFoundError(UserError):
+    pass
+
+
+class DeterministicCachingInvalidConfigurationError(UserError):
+    pass
+
+
+class StrictDeterministicCachingInsertionError(UserError):
+    pass
+
+
+class DeterministicCachingIMCDumpConflictError(SystemError):
+    pass

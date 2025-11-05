@@ -423,7 +423,7 @@ def _single_tensor_adam(
                     if weight_decay.requires_grad:
                         grad = grad.addcmul_(param.clone(), weight_decay)
                     else:
-                        # pyrefly: ignore  # bad-argument-type
+                        # pyrefly: ignore [bad-argument-type]
                         grad = grad.add(param, alpha=weight_decay)
                 else:
                     grad = grad.add(param, alpha=weight_decay)
@@ -608,7 +608,7 @@ def _multi_tensor_adam(
         if not all(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
-            for p, step in zip(params, state_steps)
+            for p, step in zip(params, state_steps, strict=True)
         ):
             raise AssertionError(
                 f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."

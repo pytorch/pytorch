@@ -849,7 +849,9 @@ class _SymmetricMemory:
 
 class ProcessGroupXCCL(Backend):
     class Options(Backend.Options):
-        def __init__(self): ...
+        is_high_priority_stream: bool
+
+        def __init__(self, is_high_priority_stream: bool = False): ...
 
     def __init__(
         self,

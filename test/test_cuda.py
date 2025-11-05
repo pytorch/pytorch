@@ -1168,7 +1168,7 @@ print(t.is_pinned())
 
         stream_record = torch.cuda.Stream()
         with torch.cuda.stream(stream_record):
-            torch.cuda._sleep(int(50 * get_cycles_per_ms()))
+            torch.cuda._busy_wait_for_flag()
 
         view.record_stream(stream_record)
 
@@ -1181,6 +1181,7 @@ print(t.is_pinned())
 
         with torch.cuda.stream(stream_alloc):
             try_realloc = torch.cuda.FloatTensor([10, 10])
+        torch.cuda._clear_flag()
 
         self.assertNotEqual(try_realloc.data_ptr(), data_ptr)
 
@@ -4222,6 +4223,7 @@ class TestCudaMallocAsync(TestCase):
                 ss = torch.cuda.memory._snapshot()
 
                 trace_plot(ss)
+                trace_plot(ss, filter_freed=True)
                 segment_plot(ss)
                 text = json.dumps(ss)
 
@@ -4388,7 +4390,7 @@ class TestCudaMallocAsync(TestCase):
                 torch._C._cuda_clearCublasWorkspaces()
                 torch.cuda.memory.empty_cache()
                 torch.cuda.memory._set_memory_metadata("metadata test")
-                torch.cuda.memory._record_memory_history(context="all")
+                torch.cuda.memory._record_memory_history(context=context)
                 x = torch.rand(3, 4, device="cuda")
                 del x
                 torch.cuda.memory.empty_cache()
@@ -4782,7 +4784,7 @@ print(torch.cuda.get_allocator_backend())
                 total -= x.numel()
 
             choices = [alloc, free, torch.cuda.memory.empty_cache]
-            for i in range(N):
+            for _ in range(N):
                 while total >= 1024 * 1024 * 1024 / (4 * 10):
                     free()
                 (action,) = random.choices(choices, weights=[1, 1 if mem else 0, 0.1])
@@ -6965,7 +6967,8 @@ class TestCompileKernel(TestCase):
         with self.assertRaises(RuntimeError):
             kernel.set_shared_memory_config(excessive_shared_mem)
 
-    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @skipIfRocmArch(MI300_ARCH)
+    @tf32_on_and_off(0.005)
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_advanced(self):
         # Test matrix multiplication
@@ -7408,6 +7411,140 @@ class TestCudaDeviceParametrized(TestCase):
             work_stream.query(),
             "end_event.synchronize() completing should imply that work_stream is done",
         )
+
+
+class TestFXMemoryProfiler(TestCase):
+    """Tests for memory profiler augmentation with original stack traces."""
+
+    def collect_frames(
+        self, augmented_snapshot, collect_device_traces=True, collect_segments=True
+    ):
+        """Collects all frames that has node metadata from a memory snapshot."""
+        # Collect all frames with FX metadata
+        fx_frames = []
+
+        # Check device traces for FX debug fields
+        if collect_device_traces and "device_traces" in augmented_snapshot:
+            for trace_list in augmented_snapshot["device_traces"]:
+                for trace_entry in trace_list:
+                    if isinstance(trace_entry, dict) and "frames" in trace_entry:
+                        for frame in trace_entry["frames"]:
+                            if isinstance(frame, dict):
+                                # Check for FX debug fields
+                                if "fx_node_op" in frame or "fx_node_name" in frame:
+                                    fx_frames.append(frame)
+
+        # Check segments/blocks for FX debug fields
+        if collect_segments and "segments" in augmented_snapshot:
+            for segment in augmented_snapshot["segments"]:
+                if "blocks" in segment:
+                    for block in segment["blocks"]:
+                        if "frames" in block:
+                            for frame in block["frames"]:
+                                if isinstance(frame, dict):
+                                    if "fx_node_op" in frame or "fx_node_name" in frame:
+                                        fx_frames.append(frame)
+        return fx_frames
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @torch._dynamo.config.patch("enrich_profiler_metadata", True)
+    def test_fx_memory_profiler_augmentation(self):
+        """Test that memory snapshots are augmented with FX debug information."""
+
+        # Create a simple model
+        class MLPModule(nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                torch.manual_seed(5)
+                self.net1 = nn.Linear(10, 16, bias=True, device=device)
+                self.relu = nn.ReLU()
+                self.net2 = nn.Linear(16, 10, bias=True, device=device)
+
+            def forward(self, x):
+                a = self.net1(x)
+                b = self.relu(a)
+                c = self.net2(b)
+                return c
+
+        device = "cuda"
+        mod = MLPModule(device)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            torch.cuda.memory._record_memory_history()
+            compiled = torch.compile(mod, backend="aot_eager", fullgraph=True)
+            result = compiled(torch.randn(10, 10, device=device))
+            augmented_snapshot = torch.cuda.memory._snapshot(
+                augment_with_fx_traces=True
+            )
+            torch.cuda.memory._record_memory_history(enabled=None, clear_history=True)
+            torch.cuda.empty_cache()
+
+            fx_frames = self.collect_frames(augmented_snapshot)
+            if TEST_WITH_ROCM:
+                self.assertGreater(len(fx_frames), 0)
+            else:
+                self.assertEqual(len(fx_frames), 12)
+
+            for frame in fx_frames:
+                # Every FX frame should have both node_op and node_name
+                self.assertIn("fx_node_op", frame)
+                self.assertIn("fx_node_name", frame)
+                self.assertIn("fx_node_target", frame)
+                self.assertIn("fx_original_trace", frame)
+
+                self.assertIn(frame["fx_node_name"], ["addmm", "relu", "addmm_1"])
+                fx_node_name = frame["fx_node_name"]
+                if fx_node_name == "addmm":
+                    self.assertIn("a = self.net1(x)", frame["fx_original_trace"])
+                elif fx_node_name == "addmm_1":
+                    self.assertIn("c = self.net2(b)", frame["fx_original_trace"])
+                elif fx_node_name == "relu":
+                    self.assertIn("b = self.relu(a)", frame["fx_original_trace"])
+
+        # Test that when we have two graphs with the same src_code, they're not hashed
+        # to the same metadata
+        class MLPModule2(nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                torch.manual_seed(5)
+                self.net1 = nn.Linear(10, 16, bias=True, device=device)
+                self.relu = nn.ReLU()
+                self.net2 = nn.Linear(16, 10, bias=True, device=device)
+
+            def forward(self, x):
+                d = self.net1(x)
+                e = self.relu(d)
+                f = self.net2(e)
+                return f
+
+        mod = MLPModule2(device)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            torch.cuda.memory._record_memory_history()
+            compiled = torch.compile(mod, backend="aot_eager", fullgraph=True)
+            result = compiled(torch.randn(10, 10, device=device))
+            augmented_snapshot = torch.cuda.memory._snapshot(
+                augment_with_fx_traces=True
+            )
+            torch.cuda.memory._record_memory_history(enabled=None, clear_history=True)
+
+            # avoid collecting segments from previous run for unit test purpose
+            fx_frames = self.collect_frames(augmented_snapshot, collect_segments=False)
+            self.assertGreater(len(fx_frames), 0)
+
+            for frame in fx_frames:
+                # Every FX frame should have both node_op and node_name
+                self.assertIn("fx_node_op", frame)
+                self.assertIn("fx_node_name", frame)
+                self.assertIn("fx_node_target", frame)
+                self.assertIn("fx_original_trace", frame)
+
+                self.assertIn(frame["fx_node_name"], ["addmm", "relu", "addmm_1"])
+                fx_node_name = frame["fx_node_name"]
+                if fx_node_name == "addmm":
+                    self.assertIn("d = self.net1(x)", frame["fx_original_trace"])
+                elif fx_node_name == "addmm_1":
+                    self.assertIn("f = self.net2(e)", frame["fx_original_trace"])
+                elif fx_node_name == "relu":
+                    self.assertIn("e = self.relu(d)", frame["fx_original_trace"])
 
 
 instantiate_parametrized_tests(TestCuda)
