@@ -1985,6 +1985,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                     "bucket_reduce_scatters_fx_bucket_size_determinator": lambda _: 2,
                     "reorder_for_compute_comm_overlap": True,
                     "reorder_for_compute_comm_overlap_passes": [
+                        _reorder_communication_preserving_peak_memory,
                         sink_waits_iterative,
                         _reorder_communication_preserving_peak_memory,
                     ],
