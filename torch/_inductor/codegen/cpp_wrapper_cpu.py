@@ -1186,7 +1186,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             """
         )
 
-        wrapper_body = "input_tensors = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg, device='cpu') for arg in args]"
+        wrapper_body_parts = [
+            "input_tensors = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg, device='cpu') for arg in args]"
+        ]
         if V.graph.constants:
             # Append constants to the input args for cpp wrapper.
             # Python wrapper directly gets the value inside the wrapper call
@@ -1196,20 +1198,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
             ), "Expect all constants to be Tensor"
             constants_str = f"[{', '.join(V.graph.constants.keys())}]"
-            wrapper_body += f"""
+            wrapper_body_parts.append(f"""
                     constants_tensor = {constants_str}
                     input_tensors.extend(constants_tensor)
-            """
+            """)
         # Convert vector of at::Tensor to vector of AtenTensorHandle.
         # If we pass at::Tensor, the compilation will be too slow.
-        wrapper_body += """
+        wrapper_body_parts.append("""
                     input_handles = torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(input_tensors)
-        """
+        """)
         # Release the inputs for memory reuse.
-        wrapper_body += """
+        wrapper_body_parts.append("""
                     args.clear()
                     del input_tensors
-        """
+        """)
 
         # unwrap output tensor back to python scalar
         if all(x for x in self.output_is_tensor.values()):
@@ -1225,11 +1227,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 for i in range(len(V.graph.graph_outputs))
             ]
             outputs_str = f"[{', '.join(outputs)}]"
-        wrapper_body += f"""
+        wrapper_body_parts.append(f"""
                     output_handles = f(input_handles)
                     output_tensors = torch._C._aoti.alloc_tensors_by_stealing_from_void_ptrs(output_handles)
                     return {outputs_str}
-        """
+        """)
+
+        wrapper_body = "".join(wrapper_body_parts)
 
         # Wrap the func to support setting result._boxed_call = True
         result.splice(
@@ -1285,13 +1289,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));"
             ]
             if enable_kernel_profile:
-                stack_trace_str = 'R"('
+                stack_trace_str_parts = ['R"(']
                 if stack_traces:
                     for stack_trace in stack_traces:
                         for line in stack_trace.split("\n"):
-                            stack_trace_str += f"\n{line}"
-                        stack_trace_str += "\n"
-                stack_trace_str += ')"'
+                            stack_trace_str_parts.append(f"\n{line}")
+                        stack_trace_str_parts.append("\n")
+                stack_trace_str_parts.append(')"')
+                stack_trace_str = "".join(stack_trace_str_parts)
 
                 shim_fn_codes = [
                     "{",
@@ -1431,19 +1436,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
         cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
         inputs_wrapped = [str(x) for x in inputs]
-        line = f"{cpp_kernel_name}({output}, {','.join(inputs_wrapped)}"
+        line_parts = [f"{cpp_kernel_name}({output}, {','.join(inputs_wrapped)}"]
 
         if python_kernel_name.startswith("aten.scatter_reduce"):
-            line += f", {','.join(kwargs)}"
+            line_parts.append(f", {','.join(kwargs)}")
         else:
             if src_is_tensor:
                 if reduce:
-                    line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"
+                    line_parts.append(
+                        f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"
+                    )
             else:
                 assert reduce is None, (
                     "Expect reduce to be None for aten.scatter_ with scalar src"
                 )
-        line += ");"
+        line_parts.append(");")
+        line = "".join(line_parts)
         self.writeline(line)
 
     def _generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
@@ -2639,25 +2647,30 @@ if (!custom_op_wrapper) {
         num_args = len(raw_args)
         py_args_var = f"py_args_{next(self.arg_var_id)}"
         # First arg is always the python op name
-        lines = textwrap.dedent(
-            f"""
+        lines_parts = [
+            textwrap.dedent(
+                f"""
             RAIIPyObject {py_args_var}(PyTuple_New({num_args + 1}));
             if (!{py_args_var}) {{
                 throw std::runtime_error("PyTuple_New {py_args_var} failed");
             }}
             PyTuple_SetItem({py_args_var}, 0, PyUnicode_FromString("{python_kernel_name}"));
             """
-        )
+            )
+        ]
 
         for idx, (raw_arg, schema_arg) in enumerate(
             zip(raw_args, op_overload._schema.arguments)
         ):
-            lines += self.generate_py_arg(
-                py_args_var, idx + 1, raw_arg, schema_arg.real_type
+            lines_parts.append(
+                self.generate_py_arg(
+                    py_args_var, idx + 1, raw_arg, schema_arg.real_type
+                )
             )
 
-        lines += textwrap.dedent(
-            f"""
+        lines_parts.append(
+            textwrap.dedent(
+                f"""
             // Call the custom op in Python
             RAIIPyObject py_{buf_name}(PyObject_CallObject(custom_op_wrapper, {py_args_var}));
             if (!py_{buf_name}) {{
@@ -2667,17 +2680,24 @@ if (!custom_op_wrapper) {
                 throw std::runtime_error("PyObject_CallObject {python_kernel_name} failed");
             }}
             """
+            )
         )
 
         if len(output_args) == 1 and (output := output_args[0]) is not None:
             # result is a single tensor
-            lines += f"{output} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(py_{buf_name}.get(), NULL));\n"
+            lines_parts.append(
+                f"{output} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(py_{buf_name}.get(), NULL));\n"
+            )
         else:
             # result is a tuple of tensors
             for idx, output_arg in enumerate(output_args):
                 if output_arg is None:
                     continue
-                lines += f"{output_arg} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL));\n"  # noqa: B950
+                lines_parts.append(
+                    f"{output_arg} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL));\n"
+                )  # noqa: B950
+
+        lines = "".join(lines_parts)
 
         if raw_outputs:
             declarations_before_scope = [
@@ -2958,12 +2978,13 @@ if (!custom_op_wrapper) {
             else:
                 return OrderedSet()
 
-        stack_trace_str = 'R"('
+        stack_trace_str_parts = ['R"(']
         stack_traces = aggregate_stack_traces(node_schedule)
 
         for stack_trace in stack_traces:
             for line in stack_trace.split("\n"):
-                stack_trace_str += f"\n{line}"
-            stack_trace_str += "\n"
-        stack_trace_str += ')"'
+                stack_trace_str_parts.append(f"\n{line}")
+            stack_trace_str_parts.append("\n")
+        stack_trace_str_parts.append(')"')
+        stack_trace_str = "".join(stack_trace_str_parts)
         self.writeline(f'KernelContextGuard _ctx("{kernel_name}", {stack_trace_str});')
