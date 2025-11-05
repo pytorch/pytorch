@@ -83,6 +83,57 @@ def can_benchmark_collective() -> bool:
 # Collective Benchmarking
 # ============================================================================
 
+def _benchmark_collective_with_cuda_events_impl(
+    n: torch.fx.Node,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    benchmark_tensor: torch.Tensor,
+    nruns: int,
+) -> float | None:
+    """
+    Core benchmarking logic using CUDA events and barriers.
+    Returns runtime in ms or None on failure.
+    """
+    import torch.distributed as c10d
+    from torch.utils._python_dispatch import _disable_current_modes
+
+    # Replace tensors in args/kwargs using tree_map_only pattern
+    def to_benchmark_tensor(t: torch.Tensor) -> torch.Tensor:
+        return benchmark_tensor
+
+    with _disable_current_modes():
+        bench_args, bench_kwargs = torch.utils._pytree.tree_map_only(
+            torch.Tensor,
+            to_benchmark_tensor,
+            (args, kwargs),
+        )
+
+    # Warmup: call collective once
+    torch.cuda.synchronize()
+    try:
+        n.target(*bench_args, **bench_kwargs)  # type: ignore[operator]
+    except Exception:
+        return None
+
+    # Benchmark with CUDA events
+    comm_time = 0.0
+    for _ in range(nruns):
+        c10d.barrier()
+        torch.cuda.synchronize()
+
+        start_evt = torch.cuda.Event(enable_timing=True)
+        end_evt = torch.cuda.Event(enable_timing=True)
+
+        start_evt.record()
+        n.target(*bench_args, **bench_kwargs)  # type: ignore[operator]
+        end_evt.record()
+        end_evt.synchronize()
+
+        comm_time += start_evt.elapsed_time(end_evt)
+
+    return comm_time / nruns
+
+
 def benchmark_collective_with_cuda_events(
     n: torch.fx.Node,
     nruns: int = 2,
@@ -107,9 +158,9 @@ def benchmark_collective_with_cuda_events(
         return None, ""
 
     # Extract actual input size in BYTES (first tensor argument)
-    actual_bytes = None
-    actual_dtype = None
-    actual_device = None
+    actual_bytes: Optional[int] = None
+    actual_dtype: Optional[torch.dtype] = None
+    actual_device: Optional[torch.device] = None
 
     def extract_tensor_info(t: torch.Tensor) -> torch.Tensor:
         nonlocal actual_bytes, actual_dtype, actual_device
@@ -122,22 +173,22 @@ def benchmark_collective_with_cuda_events(
             for dim in shape:
                 total_elems *= dim
 
-            actual_bytes = total_elems * t.element_size()
+            actual_bytes = total_elems * t.dtype.itemsize
             actual_dtype = t.dtype
             actual_device = t.device
         return t
 
     torch.utils._pytree.tree_map_only(torch.Tensor, extract_tensor_info, (args, kwargs))
 
-    if actual_bytes is None:
+    if actual_bytes is None or actual_device is None or actual_bytes is None:
         return None, ""
 
     # Find power-of-2 BYTE bounds
-    lower_pow2_bytes = next_power_of_2(actual_bytes) // 2
     upper_pow2_bytes = next_power_of_2(actual_bytes)
+    lower_pow2_bytes = upper_pow2_bytes if upper_pow2_bytes == actual_bytes else upper_pow2_bytes // 2
 
     # Helper to benchmark a specific power-of-2 byte size
-    def benchmark_bytes(bytes_pow2: int, dtype: torch.dtype) -> tuple[float, str]:
+    def benchmark_bytes(bytes_pow2: int, dtype: torch.dtype) -> tuple[float | None, str]:
         # Cache key by BYTES (dtype-agnostic)
         key = f"{n.target}: ({bytes_pow2} bytes)"
 
@@ -147,57 +198,29 @@ def benchmark_collective_with_cuda_events(
 
         # Not in cache, need to benchmark
         # Calculate number of elements for this byte size
-        element_size = torch.tensor([], dtype=dtype).element_size()
-        num_elements = bytes_pow2 // element_size
+        num_elements = bytes_pow2 // dtype.itemsize
 
         # Create empty tensor for benchmarking
         benchmark_tensor = torch.empty(num_elements, dtype=dtype, device=actual_device)
 
-        # Replace tensors in args/kwargs using tree_map_only pattern
-        def to_benchmark_tensor(t: torch.Tensor) -> torch.Tensor:
-            return benchmark_tensor
+        # Benchmark using CUDA events
+        runtime = _benchmark_collective_with_cuda_events_impl(
+            n, args, kwargs, benchmark_tensor, nruns
+        )
 
-        with _disable_current_modes():
-            bench_args, bench_kwargs = torch.utils._pytree.tree_map_only(
-                torch.Tensor,
-                to_benchmark_tensor,
-                (args, kwargs),
-            )
-
-        # Warmup: call collective once
-        torch.cuda.synchronize()
-        try:
-            n.target(*bench_args, **bench_kwargs)  # type: ignore[operator]
-        except Exception:
-            # If direct invocation fails, return None
+        if runtime is None:
             return None, key
 
-        # Benchmark with CUDA events
-        comm_time = 0.0
-        for _ in range(nruns):
-            c10d.barrier()
-            torch.cuda.synchronize()
+        # Cache the result
+        set_cached_runtime(key, runtime)
+        return runtime, key
 
-            start_evt = torch.cuda.Event(enable_timing=True)
-            end_evt = torch.cuda.Event(enable_timing=True)
-
-            start_evt.record()
-            n.target(*bench_args, **bench_kwargs)  # type: ignore[operator]
-            end_evt.record()
-            end_evt.synchronize()
-
-            comm_time += start_evt.elapsed_time(end_evt)
-
-        runtime_ms = comm_time / nruns
-        return runtime_ms, key
-
-    # If exact power-of-2 bytes, just benchmark it
-    if actual_bytes == lower_pow2_bytes or actual_bytes == upper_pow2_bytes:
-        return benchmark_bytes(actual_bytes, actual_dtype)
-
-    # Otherwise, benchmark bounds and interpolate
     lower_runtime, lower_key = benchmark_bytes(lower_pow2_bytes, actual_dtype)
     upper_runtime, upper_key = benchmark_bytes(upper_pow2_bytes, actual_dtype)
+
+    # If either benchmark failed, return None
+    if lower_runtime is None or upper_runtime is None:
+        return None, ""
 
     # Linear interpolation
     ratio = (actual_bytes - lower_pow2_bytes) / (upper_pow2_bytes - lower_pow2_bytes)
@@ -205,5 +228,4 @@ def benchmark_collective_with_cuda_events(
 
     # Return key showing actual bytes (for tracking)
     actual_key = f"{n.target}: ({actual_bytes} bytes)"
-
     return interpolated, actual_key
