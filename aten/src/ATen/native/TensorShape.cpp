@@ -1712,8 +1712,8 @@ Tensor narrow_symint(
       start,
       ")")
 
-  auto cond1 = TORCH_GUARD_OR_FALSE(start < 0);
-  auto cond2 = TORCH_GUARD_OR_FALSE(start >= 0);
+  auto cond1 = TORCH_GUARD_OR_FALSE(start.sym_lt(0));
+  auto cond2 = TORCH_GUARD_OR_FALSE(start.sym_ge(0));
 
   if (cond1 || cond2) {
     if (cond1) {
@@ -1750,11 +1750,8 @@ Tensor narrow_symint(
       cur_size,
       ").");
 
-  if (TORCH_GUARD_OR_FALSE(start.sym_ge(0).sym_or(end.sym_ne(0)))) {
+  if (TORCH_GUARD_OR_FALSE(end.sym_ne(0))) {
     return at::slice_symint(self, dim, start, end, 1);
-  } else if (TORCH_GUARD_OR_FALSE(start.sym_lt(0))) {
-    // Avoid the complex symbolic expressions path for non-unbacked.
-    return at::slice_symint(self, dim, start + cur_size, end + cur_size, 1);
   } else {
     // Cannot statically determine the condition due to unbacked.
     // This is an interesting situation; when start is negative and
