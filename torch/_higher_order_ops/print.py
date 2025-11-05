@@ -73,3 +73,6 @@ def print_cpu(format_str: str, **kwargs: object) -> None:
     )
     # Use built-in print to avoid recursion with the HOP print
     builtins.print(format_str.format(**new_kwargs))
+
+print.fallthrough(torch._C.DispatchKey.AutogradCPU)
+print.fallthrough(torch._C.DispatchKey.AutogradCUDA)
