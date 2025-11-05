@@ -6365,12 +6365,18 @@ def meta_scaled_mm(
         n = mat2.size(1)
 
         is_blockwise_scaling = (
-            scale_a.dtype == torch.float8_e8m0fnu
-            and scale_b.dtype == torch.float8_e8m0fnu
-        ) or (
-            scale_a.dtype == torch.float8_e4m3fn
-            and scale_b.dtype == torch.float8_e4m3fn
-        )
+            (
+                scale_a.dtype == torch.float8_e8m0fnu
+                and scale_b.dtype == torch.float8_e8m0fnu
+            )
+            or (
+                scale_a.dtype == torch.float8_e4m3fn
+                and scale_b.dtype == torch.float8_e4m3fn
+            )
+        )  # note: this applies to blockwise scaling for non-FP8 types (FP8 accepts FP32 scales)
+
+        def ceil_div(a, b):
+            return (a + b - 1) // b
 
         if scale_a.numel() == 1 and scale_b.numel() == 1:
             # tensorwise scaling
@@ -6391,9 +6397,6 @@ def meta_scaled_mm(
                 block_size_k = 32
 
             block_size_mn = 128
-
-            def ceil_div(a, b):
-                return (a + b - 1) // b
 
             num_k_blocks = ceil_div(_k, block_size_k)
             padded_num_k_blocks = ceil_div(num_k_blocks, 4) * 4
@@ -6448,6 +6451,20 @@ def meta_scaled_mm(
                     scale_a.is_contiguous() and scale_b.is_contiguous(),
                     lambda: "Both scale_a and scale_b must be contiguous for rowwise scaling.",
                 )
+            elif (
+                scale_a.size(0) == m
+                and scale_a.size(1) == scale_b.size(0) == ceil_div(_k, 128)
+                and scale_b.size(1) == ceil_div(n, 128)
+            ):
+                # (BlockWise1x128, BlockWise128x128)
+                pass  # do nothing, but do not error
+            elif (
+                scale_a.size(0) == m
+                and scale_a.size(1) == scale_b.size(0) == ceil_div(_k, 128)
+                and scale_b.size(1) == n
+            ):
+                # (BlockWise1x128, BlockWise1x128)
+                pass  # do nothing, but do not error
             else:
                 # does not match any valid scaling type
                 torch._check(
@@ -6456,6 +6473,10 @@ def meta_scaled_mm(
                         "Invalid scaling configuration. "
                         "For tensorwise scaling, both scales should be scalar. "
                         f"For rowwise scaling, scale_a should be ({m}, 1), scale_b should be (1, {n}). "
+                        f"For (BlockWise1x128, BlockWise128x128), scale_a should be ({m}, {ceil_div(_k, 128)}), "
+                        + f"scale_b should be ({ceil_div(_k, 128)}, {ceil_div(n, 128)}). "
+                        f"For (BlockWise1x128, BlockWise1x128), scale_a should be ({m}, {ceil_div(_k, 128)}), "
+                        + f"scale_b should be ({ceil_div(_k, 128)}, {n}). "
                         f"Got scale_a.size()=({scale_a.size(0)}, {scale_a.size(1)}) "
                         f"and scale_b.size()=({scale_b.size(0)}, {scale_b.size(1)})"
                     ),

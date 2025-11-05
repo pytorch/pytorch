@@ -3534,7 +3534,7 @@ class RootGuardManager : public GuardManager {
 
   void add_no_tensor_aliasing_guard(
       std::shared_ptr<RelationalGuard> no_tensor_aliasing_guard) {
-    // stash a pointer to the _no_tensor_alising_guard
+    // stash a pointer to the _no_tensor_aliasing_guard
     _no_tensor_aliasing_guard = no_tensor_aliasing_guard;
     this->add_relational_guard_resetter(std::move(no_tensor_aliasing_guard));
   }

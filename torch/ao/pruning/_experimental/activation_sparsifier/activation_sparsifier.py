@@ -128,13 +128,15 @@ class ActivationSparsifier:
         # if features are not None, then feature_dim must not be None
         features, feature_dim = args["features"], args["feature_dim"]
         if features is not None:
-            assert feature_dim is not None, "need feature dim to select features"
+            if feature_dim is None:
+                raise AssertionError("need feature dim to select features")
 
         # all the *_fns should be callable
         fn_keys = ["aggregate_fn", "reduce_fn", "mask_fn"]
         for key in fn_keys:
             fn = args[key]
-            assert callable(fn), "function should be callable"
+            if not callable(fn):
+                raise AssertionError(f"{fn} must be callable")
 
     def _aggregate_hook(self, name):
         """Returns hook that computes aggregate of activations passing through."""
@@ -209,7 +211,8 @@ class ActivationSparsifier:
             - All the functions (fn) passed as argument will be called at a dim, feature level.
         """
         name = module_to_fqn(self.model, layer)
-        assert name is not None, "layer not found in the model"  # satisfy mypy
+        if name is None:
+            raise AssertionError("layer not found in the model")
 
         if name in self.data_groups:  # unregister layer if already present
             warnings.warn(
@@ -261,14 +264,15 @@ class ActivationSparsifier:
             Hence, if get_mask() is called before model.forward(), an
             error will be raised.
         """
-        assert name is not None or layer is not None, (
-            "Need at least name or layer obj to retrieve mask"
-        )
+        if name is None and layer is None:
+            raise AssertionError("Need at least name or layer obj to retrieve mask")
 
         if name is None:
-            assert layer is not None
+            if layer is None:
+                raise AssertionError("layer must be provided when name is None")
             name = module_to_fqn(self.model, layer)
-            assert name is not None, "layer not found in the specified model"
+            if name is None:
+                raise AssertionError("layer not found in the specified model")
 
         if name not in self.state:
             raise ValueError("Error: layer with the given name not found")
@@ -451,7 +455,8 @@ class ActivationSparsifier:
         for name, config in self.data_groups.items():
             # fetch layer
             layer = fqn_to_module(self.model, name)
-            assert layer is not None  # satisfy mypy
+            if layer is None:
+                raise AssertionError(f"layer {name} not found in the model")
 
             # if agg_mode is True, then layer in aggregate mode
             if "hook_state" in config and config["hook_state"] == "aggregate":

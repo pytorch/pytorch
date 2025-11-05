@@ -675,7 +675,7 @@ class inner_f(torch.nn.Module):
 
             # Verify buffer handling
             buffer_count = 0
-            for desc, (node, grad_node) in input_grad_nodes.items():
+            for desc, (node, _grad_node) in input_grad_nodes.items():
                 if isinstance(desc, BufferAOTInput):
                     buffer_count += 1
                     self.assertIsNotNone(node)
@@ -764,13 +764,13 @@ class inner_f(torch.nn.Module):
                 self.assertIn(node, named_params.values())
 
             # Check that param_grads contains the same parameter nodes
-            for desc, (param_node, grad_node) in param_grads.items():
+            for desc, (param_node, _grad_node) in param_grads.items():
                 self.assertIn(param_node, param_nodes)
                 self.assertEqual(param_node, named_params[desc.target])
 
             # Check that all_input_grads contains the parameter nodes
             param_count = 0
-            for desc, (input_node, grad_node) in all_input_grads.items():
+            for desc, (input_node, _grad_node) in all_input_grads.items():
                 if isinstance(desc, ParamAOTInput):
                     param_count += 1
                     self.assertIn(input_node, param_nodes)
@@ -1015,6 +1015,84 @@ class inner_f(torch.nn.Module):
         self.assertTrue("return foo(x, y)" in gm.print_readable(print_output=False))
         self.assertFalse("self._opoverload" in foo_node.meta.get("stack_trace", None))
         self.assertFalse("self._opoverload" in gm.print_readable(print_output=False))
+
+    def test_preserve_annotate_replay_view(self):
+        """Test stack trace and annotation are correct on nodes regenerated in functionalization"""
+
+        def _unpermute(out, input_shape, permuted_indices):
+            """
+            Unpermute operation from torchtitan MoE utils.
+            """
+            out_unpermuted = out.new_empty(input_shape)
+            out_unpermuted[permuted_indices, :] = out
+            out = out_unpermuted[:-1]
+            return out
+
+        class Module(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.input_shape = (5, 3)
+                self.permuted_indices = torch.tensor([2, 0, 3, 1])
+
+            def forward(self, x):
+                with fx_traceback.annotate({"pp_stage": 0}):
+                    routed_output = _unpermute(
+                        x, self.input_shape, self.permuted_indices
+                    )
+                return routed_output.cos()
+
+        inputs = (torch.randn(4, 3, requires_grad=True),)
+        model = Module()
+
+        graph_module = graph_capture(model, inputs, True)
+        custom_metadata = fx_traceback._get_custom_metadata(graph_module)
+        slice_nodes = graph_module.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.slice.Tensor
+        )
+        self.assertEqual(len(slice_nodes), 1)
+        slice_backward_nodes = graph_module.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.slice_backward.default
+        )
+        self.assertEqual(len(slice_backward_nodes), 1)
+        slice_node = slice_nodes[0]
+        slice_backward_node = slice_backward_nodes[0]
+
+        self.assertEqual(slice_node.meta["seq_nr"], slice_backward_node.meta["seq_nr"])
+        self.assertTrue("out = out_unpermuted[:-1]" in slice_node.meta["stack_trace"])
+        self.assertExpectedInline(
+            str(custom_metadata),
+            """\
+('call_function', 'new_empty', {'pp_stage': 0})
+('call_function', 'index_put', {'pp_stage': 0})
+('call_function', 'slice_2', {'pp_stage': 0})
+('call_function', 'slice_backward', {'pp_stage': 0})
+('call_function', 'index', {'pp_stage': 0})""",
+        )
+
+    def test_static_input_indices(self):
+        """Test basic linear module with aot_export_joint_with_descriptors"""
+
+        class SimpleLinear(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = SimpleLinear()
+        inputs = (torch.randn(4, 3),)
+        gm = _dynamo_graph_capture_for_export(model)(*inputs)
+        fake_mode = gm.meta.get("fake_mode", None)
+
+        with tracing(TracingContext(fake_mode)):
+            with ExitStack() as stack:
+                joint = aot_export_joint_with_descriptors(
+                    stack,
+                    gm,
+                    inputs,
+                )
+        self.assertEqual(joint._aot_state.fw_metadata.static_input_indices, [0, 1])
 
 
 if __name__ == "__main__":

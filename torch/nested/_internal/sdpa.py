@@ -438,7 +438,7 @@ def _view_as_dense(
 #     #     this is because needs_broadcast indicates that the batch_size is 1
 #     #     and hence there is only 1 value for seq_len
 #     # (2) The cum_seq_lens are given by [0, {*}_t.size(1), 2 * {*}_t.size(1),
-#     # ..., outut_batch_size * {*}_t.size(1)]
+#     # ..., output_batch_size * {*}_t.size(1)]
 #     # (3) Nnz_{*} is given by output_batch_size * {*}_t.size(1)
 
 #     if q_batch_size_needs_broadcast or not q_t.is_nested:
