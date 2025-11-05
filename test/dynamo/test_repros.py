@@ -48,6 +48,7 @@ from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
+    expectedFailureDynamic,
     rand_strided,
     same,
     skipIfNotPy312,
@@ -999,6 +1000,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def tearDown(self) -> None:
         self.exit_stack.close()
         super().tearDown()
+
+    def test_compiled_module_truthiness(self):
+        # Test with empty ModuleList
+        original_empty = nn.ModuleList()
+        compiled_empty = torch.compile(original_empty)
+        self.assertEqual(bool(original_empty), bool(compiled_empty))
+        self.assertFalse(bool(compiled_empty))
+        # Test with non-empty ModuleList
+        original_filled = nn.ModuleList([nn.Linear(10, 5)])
+        compiled_filled = torch.compile(original_filled)
+        self.assertEqual(bool(original_filled), bool(compiled_filled))
+        self.assertTrue(bool(compiled_filled))
 
     def guard_manager_clone_hook_fn(self, guard_manager_wrapper, f_locals, builder):
         root = guard_manager_wrapper.root
@@ -5748,7 +5761,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(func(x, 0), opt_func(x, 0))
 
     def test_grad(self):
-        # Write to `grad` or `_grad` should reflecte in reading from the other,
+        # Write to `grad` or `_grad` should reflective in reading from the other,
         # and should be codegen-ed.
         def fn(x, y):
             x._grad = y + 1
@@ -7442,6 +7455,93 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             "Guard fail reason: ",
             msg,
         )
+
+    @expectedFailureDynamic
+    def test_dynamo_default_lru_cache_behavior(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return x + 10
+
+        torch._dynamo.reset()
+        assert not torch._C._dynamo.eval_frame._debug_get_cache_entry_list(
+            fn._torchdynamo_orig_callable.__code__
+        )
+
+        # Step 1: Compile a static shapes graph
+        x = torch.randn(10, 10)
+        fn(x)
+        a = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(
+            fn._torchdynamo_orig_callable.__code__
+        )
+        self.assertEqual(len(a), 1)
+        static_shapes_cache_entry = a[0]
+
+        # Step 2: Compile a dynamic shapes graph
+        y = torch.randn(20, 20)
+        fn(y)
+        b = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(
+            fn._torchdynamo_orig_callable.__code__
+        )
+        self.assertEqual(len(b), 2)
+        self.assertEqual(b[1], static_shapes_cache_entry)
+        dynamic_shapes_cache_entry = b[0]
+
+        # Step 3: Run with Step 1's inputs
+        # LRU cache will match against dynamic shape graph first
+        fn(x)
+        c = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(
+            fn._torchdynamo_orig_callable.__code__
+        )
+        self.assertEqual(len(c), 2)
+        self.assertEqual(c[0], dynamic_shapes_cache_entry)
+        self.assertEqual(c[1], static_shapes_cache_entry)
+
+    @expectedFailureDynamic
+    def test_dynamo_disable_lru_cache_behavior(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return x + 10
+
+        def run():
+            torch._dynamo.reset()
+            assert not torch._C._dynamo.eval_frame._debug_get_cache_entry_list(
+                fn._torchdynamo_orig_callable.__code__
+            )
+
+            # Step 1: Compile a static shapes graph
+            x = torch.randn(10, 10)
+            fn(x)
+            a = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(
+                fn._torchdynamo_orig_callable.__code__
+            )
+            self.assertEqual(len(a), 1)
+            static_shapes_cache_entry = a[0]
+
+            # Step 2: Compile a dynamic shapes graph
+            y = torch.randn(20, 20)
+            fn(y)
+            b = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(
+                fn._torchdynamo_orig_callable.__code__
+            )
+            self.assertEqual(len(b), 2)
+            self.assertEqual(b[0], static_shapes_cache_entry)
+            dynamic_shapes_cache_entry = b[1]
+
+            # Step 3: Run with Step 1's inputs
+            # LRU cache is disabled, we should still have static entry first
+            fn(x)
+            c = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(
+                fn._torchdynamo_orig_callable.__code__
+            )
+            self.assertEqual(len(c), 2)
+            self.assertEqual(c[0], static_shapes_cache_entry)
+            self.assertEqual(c[1], dynamic_shapes_cache_entry)
+
+        try:
+            torch._C._dynamo.eval_frame._set_lru_cache(False)
+            run()
+        finally:
+            torch._C._dynamo.eval_frame._set_lru_cache(True)
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):

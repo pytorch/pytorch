@@ -17,7 +17,6 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._local_tensor import (
-    local_tensor_mode,
     LocalIntNode,
     LocalTensor,
     LocalTensorMode,
@@ -447,7 +446,7 @@ class DTensorTestBase(MultiProcessTestCase):
                 torch.cuda.current_device() if self.device_type == "cuda" else self.rank
             )
 
-        if self.device_type == "cpu" and torch._C._get_accelerator().type != "cpu":
+        if self.device_type == "cpu":
             # NOTE: when `device_id` is not None, barrier() will choose the accelerator
             # of the most pripority, which means if the test specifies to use CPU for
             # testing while CUDA is available on the host, the barrier() will use CUDA.
@@ -715,9 +714,6 @@ class LocalDTensorTestBase(DTensorTestBase):
         self.skipTest(msg)
 
     def _get_local_tensor_mode(self):
-        lm = local_tensor_mode()
-        if lm is not None:
-            breakpoint()
         return LocalTensorMode(frozenset(range(self.world_size)))
 
     def setUp(self) -> None:
@@ -818,3 +814,7 @@ def map_local_tensor_for_rank(tensor, rank, func):
 @maybe_run_for_local_tensor
 def map_local_for_rank(rank, func):
     return func(rank)
+
+
+def reduce_local_int(val, func):
+    return func(val.node._local_ints)

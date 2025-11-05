@@ -144,7 +144,7 @@ class BasePruningMethod(ABC):
 
         method = _get_composite_method(cls, module, name, *args, **kwargs)
         # at this point we have no forward_pre_hooks but we could have an
-        # active reparametrization of the tensor if another pruning method
+        # active reparameterization of the tensor if another pruning method
         # had been applied (in which case `method` would be a PruningContainer
         # and not a simple pruning method).
 

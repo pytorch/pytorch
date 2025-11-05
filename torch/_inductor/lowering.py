@@ -12,8 +12,8 @@ import os
 import textwrap
 import warnings
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable, Iterable, Sequence
+from typing import Any, cast, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -27,7 +27,7 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.utils import get_layout_constraint_tag
-from torch._prims_common import (  # pyrefly: ignore  # deprecated
+from torch._prims_common import (  # pyrefly: ignore  # deprecated; pyrefly: ignore [deprecated]
     canonicalize_dim,
     canonicalize_dims,
     check,
@@ -2490,11 +2490,18 @@ def inductor_randint(
 
 
 def _boundaries_helper(tb: TensorBox) -> tuple[str, sympy.Expr, sympy.Expr, sympy.Expr]:
+    # Calculate the maximum offset for the boundaries tensor
+    # For a strided tensor, this is sum((size[i] - 1) * stride[i]) + stride[-1]
+    # This ensures the mask check in bucketize_binary_search works correctly
+    # for both contiguous and non-contiguous tensors.
+    size = tb.get_size()
+    stride = tb.get_stride()
+    max_offset = sum((s - 1) * st for s, st in zip(size, stride)) + stride[-1]
     return (
         tb.get_name(),
-        tb.get_size()[-1],
-        tb.get_size()[0] * tb.get_stride()[0],
-        tb.get_stride()[-1],
+        size[-1],
+        max_offset,
+        stride[-1],
     )
 
 
@@ -3922,7 +3929,7 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
                     isinstance(indice, ir.StorageBox)
                     and isinstance(indice.data, ir.ExternKernel)
                     and getattr(indice.data, "fx_node", None)
-                    and indice.data.fx_node.target == torch.ops.aten.randperm.default
+                    and indice.data.fx_node.target is torch.ops.aten.randperm.default
                 )
             return False
 
