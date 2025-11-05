@@ -2145,6 +2145,8 @@ class ExternKernelChoice:
         # There is no src hash for ExternKernelChoice in the traditional sense
         # so we indicate this by returning None
         self.src_hash = None
+        # By default GraphModule is None for extern kernels if not set
+        self.gm = None
 
     def to_callable(self):
         return getattr(extern_kernels, self.name)
@@ -2317,6 +2319,7 @@ class ExternKernelCaller(ChoiceCaller):
         self.choice = choice
         self.kwargs = kwargs or {}
         self.has_out_variant = has_out_variant
+        self.gm = choice.gm
 
     def __str__(self) -> str:
         return f"ExternKernelCaller({self.choice.call_name()})"

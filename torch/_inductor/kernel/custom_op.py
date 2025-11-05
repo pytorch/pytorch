@@ -329,8 +329,8 @@ def autotune_custom_op(
         return_choice=True,
     )
 
-    # Apply inlining for fusion if winning_choice has graph; otherwise return result as-is(default impl)
-    if hasattr(winning_choice, "gm"):
+    # Apply inlining for fusion if winning_choice has graph; otherwise return result as-is(default fallback impl)
+    if winning_choice.gm is not None:
         log.debug(
             "Inlining winning choice: %s (name=%s)",
             getattr(winning_choice, "name", type(winning_choice).__name__),

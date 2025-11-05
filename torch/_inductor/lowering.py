@@ -7307,7 +7307,7 @@ def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, *operands):
     return list(map(TensorBox.create, result))  # type: ignore[call-overload]
 
 
-def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list):
+def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
     """Process nodes from a FX graph by executing them through V.graph.
 
     This is a common pattern for executing a subgraph's nodes:
@@ -7324,8 +7324,8 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list):
             V.graph.env[node] = args[i]
             continue
         elif node.op == "output":
-            args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
-            output = torch.fx.Interpreter.output(V.graph, node, args, kwargs)
+            output_args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
+            output = torch.fx.Interpreter.output(V.graph, node, output_args, kwargs)
         else:
             assert node not in V.graph.env
             V.graph.env[node] = V.graph.run_node(node)
