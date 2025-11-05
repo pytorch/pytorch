@@ -421,7 +421,7 @@ class _ExportPackage:
                     torch.save(t, path)
 
         # Detect if ROCm is being used
-        is_hip = bool(getattr(torch.version, "hip", None))
+        is_hip = torch.version.hip is not None
         cmake_file_str = _get_make_file(package_name, model_names, use_cuda, is_hip)
 
         with open(Path(base_directory) / "CMakeLists.txt", "w") as file:

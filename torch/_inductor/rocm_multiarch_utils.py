@@ -1,19 +1,14 @@
-# torch/_inductor/rocm_multiarch_utils.py
-
 """
 ROCm Multi-Architecture Support Utilities
 Compile LLVM IR to multi-arch bundles that HIP can load automatically.
 """
 
-import logging
 import os
 import subprocess
 from typing import Optional
 
+import torch
 from torch.utils.cpp_extension import _join_rocm_home, ROCM_HOME
-
-
-log = logging.getLogger(__name__)
 
 
 def get_rocm_compiler() -> str:
@@ -84,7 +79,6 @@ def get_rocm_target_archs() -> list[str]:
         archs = [arch.strip() for arch in env_archs.replace(";", ",").split(",")]
         archs = [arch for arch in archs if arch]
         if archs:
-            log.info(f"Using ROCm architectures from PYTORCH_ROCM_ARCH: {archs}")
             return archs
 
     # Try to get from inductor config
@@ -94,15 +88,12 @@ def get_rocm_target_archs() -> list[str]:
         if hasattr(config, "rocm") and hasattr(config.rocm, "target_archs"):
             archs = config.rocm.target_archs
             if archs:
-                log.info(f"Using ROCm architectures from config: {archs}")
                 return archs
-    except Exception as e:
-        log.debug(f"Could not read config.rocm.target_archs: {e}")
 
-    # Default to common MI300/MI450 architectures
-    default_archs = ["gfx90a", "gfx942", "gfx1100", "gfx1101"]
-    log.info(f"Using default ROCm architectures: {default_archs}")
-    return default_archs
+    except Exception:
+        pass
+
+    return torch.cuda.get_arch_list()
 
 
 def compile_llvm_ir_to_code_object(
@@ -120,15 +111,13 @@ def compile_llvm_ir_to_code_object(
         True if successful
     """
     if not os.path.exists(llvm_ir_path):
-        log.error(f"LLVM IR file not found: {llvm_ir_path}")
         return False
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     try:
         clang = get_rocm_compiler()
-    except RuntimeError as e:
-        log.error(str(e))
+    except RuntimeError:
         return False
 
     # Using clang and not hipcc since we are not compiling source code
@@ -144,19 +133,14 @@ def compile_llvm_ir_to_code_object(
     ]
 
     try:
-        log.debug(f"Compiling {target_arch}: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        subprocess.run(cmd, capture_output=True, text=True, check=True)
 
         if not os.path.exists(output_path):
-            log.error(f"Code object was not created: {output_path}")
             return False
 
-        log.info(f"Compiled {target_arch}: {output_path}")
         return True
 
-    except subprocess.CalledProcessError as e:
-        log.error(f"Failed to compile for {target_arch}")
-        log.error(f"  stderr: {e.stderr}")
+    except subprocess.CalledProcessError:
         return False
 
 
@@ -175,15 +159,13 @@ def create_multiarch_bundle(code_objects: dict, output_bundle_path: str) -> bool
         True if successful
     """
     if not code_objects:
-        log.error("No code objects to bundle")
         return False
 
     os.makedirs(os.path.dirname(output_bundle_path), exist_ok=True)
 
     try:
         bundler = get_rocm_bundler()
-    except RuntimeError as e:
-        log.error(str(e))
+    except RuntimeError:
         return False
 
     # Build targets and inputs lists for clang-offload-bundler
@@ -194,7 +176,6 @@ def create_multiarch_bundle(code_objects: dict, output_bundle_path: str) -> bool
 
     for arch, path in sorted(code_objects.items()):
         if not os.path.exists(path):
-            log.warning(f"Code object not found: {path}")
             continue
         # hipv4 = HIP version 4 code object format
         # amdgcn-amd-amdhsa = target triple for ROCm/HSA runtime
@@ -203,7 +184,6 @@ def create_multiarch_bundle(code_objects: dict, output_bundle_path: str) -> bool
         inputs.append(path)
 
     if len(inputs) == 1:  # Only host, no device code
-        log.error("No valid device code objects to bundle")
         return False
 
     cmd = [
@@ -221,24 +201,14 @@ def create_multiarch_bundle(code_objects: dict, output_bundle_path: str) -> bool
     cmd.append(f"--output={output_bundle_path}")
 
     try:
-        log.debug(f"Bundling: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        subprocess.run(cmd, capture_output=True, text=True, check=True)
 
         if not os.path.exists(output_bundle_path):
-            log.error(f"Bundle was not created: {output_bundle_path}")
             return False
 
-        bundle_size = os.path.getsize(output_bundle_path)
-        log.info(
-            f"Created multi-arch bundle: {output_bundle_path} ({bundle_size} bytes)"
-        )
-        log.info(f"Bundle contains architectures: {list(code_objects.keys())}")
         return True
 
-    except subprocess.CalledProcessError as e:
-        log.error("Failed to create bundle")
-        log.error(f"  Command: {' '.join(cmd)}")
-        log.error(f"  stderr: {e.stderr}")
+    except subprocess.CalledProcessError:
         return False
 
 
@@ -262,8 +232,6 @@ def compile_multiarch_bundle_from_llvm_ir(
         # Get architectures from environment variable or config
         target_archs = get_rocm_target_archs()
 
-    log.info(f"Compiling multi-arch bundle for {len(target_archs)} architectures")
-
     # Step 1: Compile LLVM IR to code object for each architecture
     code_objects = {}
     temp_dir = os.path.dirname(output_bundle_path)
@@ -277,13 +245,8 @@ def compile_multiarch_bundle_from_llvm_ir(
         # Compile with clang backend: LLVM IR → GPU machine code
         if compile_llvm_ir_to_code_object(llvm_ir_path, co_path, arch):
             code_objects[arch] = co_path
-        else:
-            # Partial failure: some architectures may not compile
-            # We continue with whatever architectures succeed
-            log.warning(f"Skipping {arch} due to compilation failure")
 
     if not code_objects:
-        log.error(f"Failed to compile any architectures for {kernel_name}")
         return False
 
     # Step 2: Bundle all code objects together
