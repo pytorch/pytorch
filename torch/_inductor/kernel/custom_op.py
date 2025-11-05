@@ -272,6 +272,7 @@ def autotune_custom_op(
     template = SubgraphTemplate(name=name)
     choices = template.generate_custom_op_choices(
         name=name,
+        # pyrefly: ignore [bad-argument-type]
         decompositions=decompositions,
         input_nodes=list(inputs),
         non_tensor_args=non_tensor_args,

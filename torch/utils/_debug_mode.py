@@ -118,6 +118,14 @@ def _get_stack_trace() -> str:
     return "".join(summary.format())
 
 
+def _maybe_get_autograd_trace() -> Optional[str]:
+    if torch._C._current_autograd_node() is not None:
+        tb = torch._C._current_autograd_node().metadata.get("traceback_")  # type: ignore[attr-defined]
+        if tb:
+            return "".join(tb)
+    return None
+
+
 class _DebugCall:
     """Base class for tracking operator calls in DebugMode"""
 
@@ -131,6 +139,7 @@ class _DebugCall:
         self.call_depth = call_depth
         if stack:
             self.stack_trace = _get_stack_trace()
+            self.fwd_stack_trace = _maybe_get_autograd_trace()
 
         # results from dispatch hooks
         self.record = record
@@ -364,6 +373,9 @@ class DebugMode(TorchDispatchMode):
         self.store_original_args = store_original_args
 
         # For stack trace recording, stores log call stack traces in .stack_trace.
+        # For backward graph nodes, will also store the corresponding forward stack traces in .fwd_stack_trace.
+        # NOTE: this is only available if autograd tracebacks are being set during the forward pass,
+        # e.g. via DebugMode(record_stack_trace=True), or torch.autograd.set_detect_anomaly().
         self.record_stack_trace = record_stack_trace
 
         self.operators = []
@@ -447,6 +459,12 @@ class DebugMode(TorchDispatchMode):
         super().__enter__()
         if self.record_nn_module:
             self.module_tracker.__enter__()  # type: ignore[attribute, union-attr]
+
+        if self.record_stack_trace:
+            self.anomaly_for_traces = torch.autograd.set_detect_anomaly(
+                True, check_nan=False
+            )
+            self.anomaly_for_traces.__enter__()
         return self
 
     # pyrefly: ignore [bad-override]
@@ -456,6 +474,8 @@ class DebugMode(TorchDispatchMode):
             self.module_tracker.__exit__()  # type: ignore[attribute, union-attr]
         if self.record_torchfunction:
             torch._C._pop_torch_function_stack()
+        if self.record_stack_trace:
+            self.anomaly_for_traces.__exit__(*args)
 
     def module_tracker_setup(self):
         from torch.distributed._tools.mod_tracker import ModTracker
