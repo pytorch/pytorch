@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 from torch._dynamo.testing import rand_strided
@@ -10,6 +10,7 @@ from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -106,6 +107,9 @@ class TestTritonDotReduction(TestCase):
         self._check_equal(f, (x, y))
         self._check_code(f, (x, y), 1, 1)
 
+    @skipIfXpu(
+        msg="Intel triton issue: https://github.com/intel/intel-xpu-backend-for-triton/issues/5394"
+    )
     def test_3mm_add(self):
         def f(x, y, z, w, r, t):
             return x @ y + z @ w + r @ t
@@ -152,6 +156,5 @@ if HAS_GPU:
     torch.set_default_device(GPU_TYPE)
 
 if __name__ == "__main__":
-    # TODO: support native matmul on xpu
-    if HAS_GPU and GPU_TYPE != "xpu":
+    if HAS_GPU:
         run_tests()

@@ -36,7 +36,7 @@ def get_public_overridable_apis(pytorch_root="/raid/rzou/pt/debug-cpu"):
     for module, module_name, src in public_docs:
         with open(f"{pytorch_root}/{src}") as f:
             lines = f.readlines()
-        # APIs eitehr begin with 4 spaces or ".. autofunction::"
+        # APIs either begin with 4 spaces or ".. autofunction::"
         api_lines1 = [line.strip() for line in lines if line.startswith(" " * 4)]
         api_lines2 = [
             line.strip()[len(".. autofunction:: ") :]

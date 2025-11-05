@@ -176,7 +176,7 @@ def infer_schema(
             schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor') :]}"
         seen_args.add(name)
         if param.default is inspect.Parameter.empty:
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             params.append(f"{schema_type} {name}")
         else:
             default_repr = None
@@ -194,7 +194,7 @@ def infer_schema(
                     f"Parameter {name} has an unsupported default value type {type(param.default)}. "
                     f"Please file an issue on GitHub so we can prioritize this."
                 )
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             params.append(f"{schema_type} {name}={default_repr}")
     if mutates_args != UNKNOWN_MUTATES:
         mutates_args_not_seen = set(mutates_args) - seen_args
@@ -221,7 +221,7 @@ def derived_types(
 ):
     result: list[tuple[Union[type, typing._SpecialForm, GenericAlias], str]] = [
         (base_type, cpp_type),
-        # pyrefly: ignore  # not-a-type
+        # pyrefly: ignore [not-a-type]
         (typing.Optional[base_type], f"{cpp_type}?"),
     ]
 
@@ -240,7 +240,7 @@ def derived_types(
     if optional_base_list:
         result.extend(
             (seq_typ, f"{cpp_type}?[]")
-            # pyrefly: ignore  # not-a-type
+            # pyrefly: ignore [not-a-type]
             for seq_typ in derived_seq_types(typing.Optional[base_type])
         )
     if optional_list_base:
@@ -252,7 +252,7 @@ def derived_types(
 
 
 def get_supported_param_types():
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     data: list[tuple[Union[type, typing._SpecialForm], str, bool, bool, bool]] = [
         # (python type, schema type, type[] variant, type?[] variant, type[]? variant
         (Tensor, "Tensor", True, True, False),
@@ -296,7 +296,7 @@ def parse_return(annotation, error_fn):
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."
             )
-        # pyrefly: ignore  # index-error
+        # pyrefly: ignore [index-error]
         return SUPPORTED_RETURN_TYPES[annotation]
 
     args = typing.get_args(annotation)

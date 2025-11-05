@@ -73,8 +73,7 @@ void upsample_bilinear2d_out_frame(
   const auto rwidth = area_pixel_compute_scale<float>(
       input_width, output_width, align_corners, scales_w);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  float output_scale = output.q_scale() / input.q_scale();
+  float output_scale = static_cast<float>(output.q_scale() / input.q_scale());
 
   const int64_t input_q_zero_point = input.q_zero_point();
   const int64_t output_q_zero_point = output.q_zero_point();

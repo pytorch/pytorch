@@ -447,6 +447,56 @@ def _floatx_unpacked_to_f32(x: Tensor, ebits: int, mbits: int) -> Tensor:
 def ceil_div(a, b):
     return (a + b - 1) // b
 
+# NVIDIA Blackwell HW requires scales for MX/NV blocked formats to be in a 128x4 tile layout,
+# with a weird 32x4x4 internal layout of that tile. If we want to take swizzled scales and use them
+# for non-gemm purposes (like testing), we need to de-swizzle them, then they can be applied much
+# more naturally.
+def from_blocked(input, input_scales, blocksize) -> torch.Tensor:
+    # Matrix is in a 128x4 pattern, internally blocked as 32x4x4 nonsense.
+    # Output should be [input.size(0, input.size(1) // blocksize] scales
+    output_scales = torch.zeros(
+        (input.size(0), input.size(1) // blocksize),
+        device=input.device,
+        dtype=input_scales.dtype,
+    )
+
+    # Swizzled scales are padded to tiles of 128x4, we need to replicate how that padding
+    # happened for offset purposes.
+    # There are K//blocksize scales, padded to groups of 4.
+    num_col_tiles = ceil_div(ceil_div(input.size(1), blocksize), 4)
+
+    # (Very) slow reference implementation using horrifying loops.
+    for i in range(input.size(0)):
+        for j in range(input.size(1) // blocksize):
+            # which 128x4 tile of scaling factors am I in
+            scale_tile_h = i // 128
+            scale_tile_w = j // 4
+
+            # There are (padded) input_scales.size(1) // 4 tiles along the w dim.
+            # So offset is 512 * (h_tile * tiles_per_row + tile_in_row)
+            tile_offset = 512 * (scale_tile_h * num_col_tiles + scale_tile_w)
+
+            # indices within the tile - use nomenclature directly from cublas docs
+            outer = i % 128  # "outer" in cublas docs
+            inner = j % 4    # "inner" in cublas docs
+
+            # Note: "offset" is given in terms of bytes, in cublas docs, but our scales are e8m0,
+            #       anyway, and so 1B == 1 value => use offset directly.
+            # Formula directly from cublas docs in 3.1.4.3.2
+            offset = tile_offset + (outer % 32) * 16 + (outer // 32) * 4 + inner
+
+            output_scales[i, j] = input_scales[offset]
+
+    return output_scales
+
+def from_blocked_format(x_mxfp8, scales_unswizzled, blocksize=32):
+    # expand scales
+    scales = torch.repeat_interleave(scales_unswizzled, blocksize, dim=1)
+
+    # de-scale and convert
+    x_f32 = x_mxfp8.to(torch.float) * scales.to(torch.float)
+    return x_f32.to(torch.bfloat16)
+
 def to_blocked(input_matrix) -> torch.Tensor:
     """
     Rearrange a large matrix by breaking it into blocks and applying the rearrangement pattern.
@@ -480,10 +530,37 @@ def to_blocked(input_matrix) -> torch.Tensor:
 
     return rearranged.flatten()
 
+
+def down_size(size):
+    assert size[-1] % 2 == 0, f"{size} last dim not divisible by two"
+    return (*size[:-1], size[-1] // 2)
+
+
+def pack_uint4(uint8_data) -> torch.Tensor:
+    # converting to uint8 for operations
+    shape = uint8_data.shape
+    assert shape[-1] % 2 == 0
+    uint8_data = uint8_data.contiguous().view(-1)
+    return (uint8_data[1::2] << 4 | uint8_data[::2]).view(down_size(shape))
+
+
+# exponent and mantissa bits of `torch.float4_e2m1fn_x2`
+FP4_EBITS, FP4_MBITS = 2, 1
+
+
+def _bfloat16_to_float4_e2m1fn_x2(x):
+    assert x.dtype == torch.bfloat16
+    x = _f32_to_floatx_unpacked(x.float(), FP4_EBITS, FP4_MBITS)
+    x = pack_uint4(x)
+    x = x.view(torch.float4_e2m1fn_x2)
+    return x
+
+
 # This function is extracted from https://github.com/pytorch/ao/blob/v0.12.0/torchao/prototype/mx_formats/mx_tensor.py#L142
-def to_mxfp8(
+def to_mxfp(
     data_hp: torch.Tensor,
     block_size: int = 32,
+    format: str = "mxfp8",
 ):
     assert data_hp.dtype in (
         torch.bfloat16,
@@ -504,8 +581,12 @@ def to_mxfp8(
     data_hp = data_hp.to(torch.float32)
     max_abs = max_abs.to(torch.float32)
 
-    F8E4M3_MAX = torch.finfo(torch.float8_e4m3fn).max  # 448.0
-    max_pos = F8E4M3_MAX
+    if format == "mxfp8":
+        F8E4M3_MAX = torch.finfo(torch.float8_e4m3fn).max  # 448.0
+        max_pos = F8E4M3_MAX
+    elif format == "mxfp4":
+        F4E2M1_MAX = 6.
+        max_pos = F4E2M1_MAX
 
     # RCEIL
     def _to_mx_rceil(
@@ -542,9 +623,15 @@ def to_mxfp8(
     scale_e8m0_biased, data_lp = _to_mx_rceil(data_hp, max_abs, max_pos)
 
     # cast to target dtype
-    data_lp = data_lp.to(torch.float8_e4m3fn)
-    # need to reshape at the end to help inductor fuse things
-    data_lp = data_lp.reshape(orig_shape)
+    if format == "mxfp8":
+        data_lp = data_lp.to(torch.float8_e4m3fn)
+        # need to reshape at the end to help inductor fuse things
+        data_lp = data_lp.reshape(orig_shape)
+    elif format == "mxfp4":
+        data_lp = _bfloat16_to_float4_e2m1fn_x2(data_lp.to(torch.bfloat16))
+        final_shape = list(orig_shape)
+        final_shape[-1] //= 2
+        data_lp = data_lp.reshape(final_shape)
 
     scale_e8m0_biased = scale_e8m0_biased.view(torch.float8_e8m0fnu)
     scale_e8m0_biased = scale_e8m0_biased.squeeze(-1)

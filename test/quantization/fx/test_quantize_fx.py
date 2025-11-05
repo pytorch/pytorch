@@ -204,7 +204,8 @@ import itertools
 import operator
 import unittest
 import io
-from typing import Callable, Optional
+from typing import Optional
+from collections.abc import Callable
 
 class BinaryOp(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
@@ -1221,7 +1222,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def checkSerDeser(model, is_dynamic):
                 for module_name in ("linear", "conv"):
                     if hasattr(model, module_name):
-                        # make sure seralization works
+                        # make sure serialization works
                         state_dict = copy.deepcopy(model.state_dict())
                         all_keys = _get_keys(module_name, is_dynamic)
                         for key in all_keys:
@@ -1484,7 +1485,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def checkSerDeser(model, is_dynamic):
                 module_name = "deconv"
                 if hasattr(model, module_name):
-                    # make sure seralization works
+                    # make sure serialization works
                     state_dict = copy.deepcopy(model.state_dict())
                     all_keys = _get_keys(module_name, is_dynamic)
                     for key in all_keys:
@@ -1569,7 +1570,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def checkSerDeser(model, is_dynamic):
                 module_name = "deconv"
                 if hasattr(model, module_name):
-                    # make sure seralization works
+                    # make sure serialization works
                     state_dict = copy.deepcopy(model.state_dict())
                     all_keys = _get_keys(module_name, is_dynamic)
                     for key in all_keys:
@@ -4672,13 +4673,13 @@ class TestQuantizeFx(QuantizationTestCase):
             m = prepare(m, {"": qconfig}, example_inputs=example_inputs)
             # check that there is a duplicated observer instance
             actpp_module_count = 0
-            for name, module in m.named_modules(remove_duplicate=False):
+            for module in m.modules(remove_duplicate=False):
                 if isinstance(module, actpp_module_class):
                     actpp_module_count += 1
             self.assertEqual(actpp_module_count, 2)
 
             actpp_module_count = 0
-            for name, module in m.named_modules():
+            for module in m.modules():
                 if isinstance(module, actpp_module_class):
                     actpp_module_count += 1
             self.assertEqual(actpp_module_count, 1)
@@ -5732,7 +5733,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 m = M().eval()
                 qconfig_dict = func(backend)
                 m = prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 1, 1, 1)))
-                for name, mod in m.named_modules():
+                for mod in m.modules():
                     if _is_activation_post_process(mod) and mod.dtype == torch.quint8:
                         if backend == "fbgemm":
                             lower_bnd = 0
@@ -9435,7 +9436,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             criterion = nn.CrossEntropyLoss()
             train_one_epoch(prepared, criterion, optimizer, [(input_value, output_value)], torch.device('cpu'), 1)
         else:
-            for i in range(10):
+            for _ in range(10):
                 prepared(input_value)
 
         # print('after observation root:', prepared.root)
@@ -9480,7 +9481,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 optimizer = torch.optim.SGD(qeager.parameters(), lr=0.0001)
                 train_one_epoch(qeager, criterion, optimizer, [(input_value, output_value)], torch.device('cpu'), 1)
             else:
-                for i in range(10):
+                for _ in range(10):
                     qeager(input_value)
 
             # print('ref after observation:', qeager)

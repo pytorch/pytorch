@@ -677,8 +677,8 @@ struct CachingHostAllocatorImpl {
   // size. This allows us to quickly find a free block of the right size.
   // We use deque to store per size free list and guard the list with its own
   // mutex.
-  alignas(hardware_destructive_interference_size) std::vector<FreeBlockList<B>> free_list_ =
-      std::vector<FreeBlockList<B>>(MAX_SIZE_INDEX);
+  alignas(hardware_destructive_interference_size) std::vector<FreeBlockList<B>>
+      free_list_{MAX_SIZE_INDEX};
 
   alignas(hardware_destructive_interference_size) std::mutex events_mutex_;
   std::deque<std::pair<E, B*>> events_; // event queue paired with block
