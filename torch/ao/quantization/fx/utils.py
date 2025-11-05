@@ -165,7 +165,8 @@ def get_qconv_prepack_op(conv_op: Callable) -> Callable:
         torch.nn.functional.conv_transpose3d: torch.ops.quantized.conv_transpose3d_prepack,
     }
     prepack_op = prepack_ops.get(conv_op)
-    assert prepack_op, f"Didn't find prepack op for {conv_op}"
+    if prepack_op is None:
+        raise AssertionError(f"Didn't find prepack op for {conv_op}")
     return prepack_op
 
 
@@ -214,7 +215,7 @@ def collect_producer_nodes(node: Node) -> Optional[list[Node]]:
                 # hit input, can't fold in this case
                 return None
             nodes.append(arg)
-            if not (arg.op == "call_function" and arg.target == getattr):
+            if not (arg.op == "call_function" and arg.target is getattr):
                 frontier.append(arg)
     return nodes
 
@@ -230,7 +231,8 @@ def graph_module_from_producer_nodes(
     Return:
       A graph module constructed from the producer nodes
     """
-    assert len(producer_nodes) > 0, "list of producer nodes can not be empty"
+    if len(producer_nodes) == 0:
+        raise AssertionError("list of producer nodes can not be empty")
     # since we traced back from node to getattr
     producer_nodes.reverse()
     graph = Graph()
@@ -300,7 +302,8 @@ def all_node_args_have_no_tensors(
     elif node.op == "placeholder":
         result = False
     elif node.op == "call_module":
-        assert isinstance(node.target, str)
+        if not isinstance(node.target, str):
+            raise AssertionError("node.target must be a string for call_module nodes")
         if _is_activation_post_process(modules[node.target]):
             result = all_node_args_have_no_tensors(node.args[0], modules, cache)  # type: ignore[arg-type]
     elif node.op == "call_module":
@@ -503,9 +506,10 @@ def _is_custom_module_lstm(
     """
     mod = _get_module(node, named_modules)
     if qconfig is not None and qhandler is not None:
-        assert isinstance(
+        if not isinstance(
             qhandler, torch.ao.quantization.fx.quantize_handler.QuantizeHandler
-        )  # type: ignore[attr-defined]
+        ):  # type: ignore[attr-defined]
+            raise AssertionError("qhandler must be a QuantizeHandler when provided")
         return (
             isinstance(mod, torch.nn.LSTM)
             and activation_is_statically_quantized(qconfig)
@@ -527,9 +531,10 @@ def _is_custom_module_mha(
     """
     mod = _get_module(node, named_modules)
     if qconfig is not None and qhandler is not None:
-        assert isinstance(
+        if not isinstance(
             qhandler, torch.ao.quantization.fx.quantize_handler.QuantizeHandler
-        )  # type: ignore[attr-defined]
+        ):  # type: ignore[attr-defined]
+            raise AssertionError("qhandler must be a QuantizeHandler when provided")
         return (
             isinstance(mod, torch.nn.MultiheadAttention)
             and activation_is_statically_quantized(qconfig)
@@ -701,7 +706,7 @@ def _maybe_get_custom_module_lstm_from_node_arg(
         return _is_custom_module_lstm(a, named_modules)
 
     def match_getitem(a):
-        return a.op == "call_function" and a.target == operator.getitem
+        return a.op == "call_function" and a.target is operator.getitem
 
     def match_tuple(a):
         return a.op == "call_function" and a.target is tuple
@@ -717,11 +722,11 @@ def _maybe_get_custom_module_lstm_from_node_arg(
                 return None
             # Match next arg, for tuple the arg is a tuple of a list, e.g. ([dq_1, other_node],)
             if i < len(match_pattern) - 1:
-                if match == match_tuple:
+                if match is match_tuple:
                     a = a.args[0][0]  # type: ignore[assignment,index]
                 else:
                     a = a.args[0]  # type: ignore[assignment]
-        # pyrefly: ignore  # bad-return
+        # pyrefly: ignore [bad-return]
         return a
 
     all_match_patterns = [
@@ -805,7 +810,7 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
                         find_patterns(
                             user, index_stack, current_pattern, matched_patterns, seen
                         )
-            elif user.op == "call_function" and user.target == operator.getitem:
+            elif user.op == "call_function" and user.target is operator.getitem:
                 if len(index_stack) > 0:
                     if user.args[1] == index_stack[-1]:
                         index_stack.pop()
@@ -826,11 +831,17 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
     for pattern in matched_patterns:
         first_tuple = pattern[0]
         last_getitem = pattern[-1]
-        assert first_tuple.op == "call_function" and first_tuple.target is tuple
-        assert (
+        if not (first_tuple.op == "call_function" and first_tuple.target is tuple):
+            raise AssertionError(
+                "first tuple node must be a call_function with target tuple"
+            )
+        if not (
             last_getitem.op == "call_function"
-            and last_getitem.target == operator.getitem
-        )
+            and last_getitem.target is operator.getitem
+        ):
+            raise AssertionError(
+                "last getitem node must be a call_function with target operator.getitem"
+            )
         last_getitem_index = last_getitem.args[1]
         new_input = first_tuple.args[0][last_getitem_index]  # type: ignore[index]
         for user in list(last_getitem.users.keys()):
@@ -847,7 +858,10 @@ def _get_observer_from_activation_post_process(
     if isinstance(activation_post_process, ObserverBase):
         return activation_post_process
     else:
-        assert isinstance(activation_post_process, FakeQuantizeBase)
+        if not isinstance(activation_post_process, FakeQuantizeBase):
+            raise AssertionError(
+                "activation_post_process must be an ObserverBase or FakeQuantizeBase"
+            )
         return activation_post_process.activation_post_process  # type: ignore[return-value]
 
 
@@ -890,7 +904,8 @@ def _qconfig_satisfies_dtype_config_constraints(
         if backend_quant_min is not None and backend_quant_max is not None:
             if app_quant_min is None or app_quant_max is None:
                 warnings.warn(
-                    f"QConfig {debug_string} must specify 'quant_min' and 'quant_max', ignoring {qconfig}"
+                    f"QConfig {debug_string} must specify 'quant_min' and 'quant_max', ignoring {qconfig}",
+                    stacklevel=2,
                 )
                 return False
             elif app_quant_min < backend_quant_min or app_quant_max > backend_quant_max:
@@ -898,20 +913,23 @@ def _qconfig_satisfies_dtype_config_constraints(
                     f"QConfig {debug_string} quantization range must fall within the backend's:\n"
                     f"QConfig range = ({app_quant_min}, {app_quant_max}), "
                     f"BackendConfig range = ({backend_quant_min}, {backend_quant_max}), "
-                    f"ignoring {qconfig}"
+                    f"ignoring {qconfig}",
+                    stacklevel=2,
                 )
                 return False
         # check scale min
         if backend_scale_min is not None:
             if app_scale_min is None:
                 warnings.warn(
-                    f"QConfig {debug_string} must specify 'eps', ignoring {qconfig}"
+                    f"QConfig {debug_string} must specify 'eps', ignoring {qconfig}",
+                    stacklevel=2,
                 )
                 return False
             if app_scale_min < backend_scale_min:
                 warnings.warn(
                     f"QConfig {debug_string} eps ({app_scale_min}) must be greater than or equal to "
-                    f"the backend's min scale value ({backend_scale_min}), ignoring {qconfig}"
+                    f"the backend's min scale value ({backend_scale_min}), ignoring {qconfig}",
+                    stacklevel=2,
                 )
                 return False
         # check fixed scale and zero point
@@ -935,7 +953,8 @@ def _qconfig_satisfies_dtype_config_constraints(
             ) and not isinstance(activation_post_process, FixedQParamsFakeQuantize):
                 warnings.warn(
                     f"QConfig must specify a FixedQParamsObserver or a FixedQParamsFakeQuantize "
-                    f"for fixed qparams ops, ignoring {qconfig}.\n{suggestion_str}"
+                    f"for fixed qparams ops, ignoring {qconfig}.\n{suggestion_str}",
+                    stacklevel=2,
                 )
                 return False
             if (
@@ -945,7 +964,8 @@ def _qconfig_satisfies_dtype_config_constraints(
                 warnings.warn(
                     f"QConfig fixed scale ({observer.scale}) and zero point ({observer.zero_point}) "
                     f"do not match the backend's ({backend_scale_exact_match} and {backend_zero_point_exact_match}), "
-                    f"ignoring {qconfig}.\n{suggestion_str}"
+                    f"ignoring {qconfig}.\n{suggestion_str}",
+                    stacklevel=2,
                 )
                 return False
         return True
@@ -960,7 +980,10 @@ def _qconfig_satisfies_dtype_config_constraints(
     satisfies_constraints = True
     if activation_post_process_ctr is not None:
         activation_post_process = activation_post_process_ctr()
-        assert _is_activation_post_process(activation_post_process)
+        if not _is_activation_post_process(activation_post_process):
+            raise AssertionError(
+                "activation_post_process must be an activation post process"
+            )
         # If dtypes don't match, don't check the activation_post_process and return True early
         if activation_post_process.dtype != dtype_with_constraints.dtype:
             return True

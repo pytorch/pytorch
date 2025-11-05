@@ -1147,10 +1147,16 @@ def _get_torch_related_args(
     else:
         libraries_dirs = []
         if config.aot_inductor.cross_target_platform == "windows":
-            assert config.aot_inductor.aoti_shim_library, (
+            aoti_shim_library = config.aot_inductor.aoti_shim_library
+
+            assert aoti_shim_library, (
                 "'config.aot_inductor.aoti_shim_library' must be set when 'cross_target_platform' is 'windows'."
             )
-            libraries.append(config.aot_inductor.aoti_shim_library)
+            if isinstance(aoti_shim_library, str):
+                libraries.append(aoti_shim_library)
+            else:
+                assert isinstance(aoti_shim_library, list)
+                libraries.extend(aoti_shim_library)
 
     if config.aot_inductor.cross_target_platform == "windows":
         assert config.aot_inductor.aoti_shim_library_path, (
@@ -1662,8 +1668,6 @@ def get_cpp_torch_device_options(
         torch_include_dirs=link_libtorch,
         cross_target_platform=config.aot_inductor.cross_target_platform,
     )
-    if not config.is_fbcode() and link_libtorch:
-        libraries += ["c10"]
     if device_type == "cuda":
         definitions.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
 
@@ -1671,13 +1675,13 @@ def get_cpp_torch_device_options(
             if config.is_fbcode() or not link_libtorch:
                 libraries += ["amdhip64"]
             else:
-                libraries += ["c10_hip", "torch_hip"]
+                libraries += ["torch_hip"]
             definitions.append(" __HIP_PLATFORM_AMD__")
         else:
             if config.is_fbcode() or not link_libtorch:
                 libraries += ["cuda"]
             else:
-                libraries += ["c10_cuda", "cuda", "torch_cuda"]
+                libraries += ["cuda", "torch_cuda"]
             if config.aot_inductor.cross_target_platform == "windows":
                 libraries += ["cudart"]
             _transform_cuda_paths(libraries_dirs)
@@ -1702,7 +1706,7 @@ def get_cpp_torch_device_options(
 
         libraries += ["ze_loader", "sycl"]
         if link_libtorch:
-            libraries += ["c10_xpu", "torch_xpu"]
+            libraries += ["torch_xpu"]
 
     if device_type == "mps":
         definitions.append(" USE_MPS")

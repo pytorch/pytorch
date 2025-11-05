@@ -1310,12 +1310,12 @@ def aot_dispatch_subclass(
     # See Note: [Partitioner handling for Subclasses, Part 2] for more info.
     meta_updated = run_functionalized_fw_and_collect_metadata(
         without_output_descs(metadata_fn),
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         flat_args_descs=primals_unwrapped_descs,
         static_input_indices=remapped_static_indices,
         keep_input_mutations=meta.keep_input_mutations,
         is_train=meta.is_train,
-        # pyrefly: ignore  # not-iterable
+        # pyrefly: ignore [not-iterable]
     )(*primals_unwrapped)
 
     subclass_meta.fw_metadata = meta_updated
@@ -1347,6 +1347,15 @@ def create_functional_call(
             maybe_disable_thunkify(),
         ):
             if isinstance(mod, torch.fx.GraphModule):
+                if kwargs:
+                    # Handle **kwargs. FX only natively supports positional
+                    # arguments (through placeholders).
+                    arg_list = list(args[params_len:])
+                    arg_list.extend(list(kwargs.values()))
+                    args = tuple(arg_list)
+                else:
+                    args = args[params_len:]
+
                 with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
                     warnings.filterwarnings(
                         "ignore", "Anomaly Detection has been enabled."
@@ -1355,9 +1364,7 @@ def create_functional_call(
                         fake_mode = detect_fake_mode()
                         assert fake_mode is not None
                         fake_mode.epoch += 1
-                        out = PropagateUnbackedSymInts(mod).run(
-                            *args[params_len:], **kwargs
-                        )
+                        out = PropagateUnbackedSymInts(mod).run(*args)
             else:
                 out = mod(*args[params_len:], **kwargs)
 

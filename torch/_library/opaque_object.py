@@ -173,7 +173,7 @@ def register_opaque_type(cls: Any, name: Optional[str] = None) -> None:
             f"Unable to accept name, {name}, for this opaque type as it contains a '.'"
         )
     _OPAQUE_TYPES[cls] = name
-    # pyrefly: ignore  # missing-attribute
+
     torch._C._register_opaque_type(name)
 
 
@@ -183,5 +183,5 @@ def is_opaque_type(cls: Any) -> bool:
     """
     if cls not in _OPAQUE_TYPES:
         return False
-    # pyrefly: ignore  # missing-attribute
+
     return torch._C._is_opaque_type_registered(_OPAQUE_TYPES[cls])

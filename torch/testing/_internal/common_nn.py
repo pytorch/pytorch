@@ -120,7 +120,9 @@ module_tests = [
         desc='no_bias',
         reference_fn=lambda i, p, _: torch.mm(i, p[0].t()),
         with_tf32=True,
-        tf32_precision=0.05 if TEST_WITH_ROCM else 0.005,
+        tf32_precision=0.005,
+        # ROCM: skipping tf32 test on gfx94 archs due to tolerance issue.
+        test_cuda=not (TEST_WITH_ROCM and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName),
         default_dtype=torch.double,
     ),
     dict(
@@ -2896,7 +2898,7 @@ def _multilabelmarginloss_reference(input, target):
 
     sum = 0
     for target_index in targets:
-        for i in range(0, len(input)):
+        for i in range(len(input)):
             if i not in targets:
                 sum += max(0, 1 - input[target_index] + input[i])
 
@@ -2914,7 +2916,7 @@ def multilabelmarginloss_reference(input, target, reduction='mean'):
     n = input.size(0)
     dim = input.size(1)
     output = input.new(n).zero_()
-    for i in range(0, n):
+    for i in range(n):
         output[i] = _multilabelmarginloss_reference(input[i], target[i])
 
     if reduction == 'mean':
@@ -2955,7 +2957,7 @@ def _multimarginloss_reference(input, target_idx, p, margin, weight):
         weight = input.new(len(input)).fill_(1)
 
     output = 0
-    for i in range(0, len(input)):
+    for i in range(len(input)):
         if i != target_idx:
             output += weight[target_idx] * (max(0, (margin - input[target_idx] + input[i])) ** p)
     return output
@@ -2972,7 +2974,7 @@ def multimarginloss_reference(input, target, p=1, margin=1, weight=None, reducti
     n = input.size(0)
     dim = input.size(1)
     output = input.new(n)
-    for x in range(0, n):
+    for x in range(n):
         output[x] = _multimarginloss_reference(input[x], target[x], p, margin, weight)
 
     if reduction == 'mean':
@@ -2987,7 +2989,7 @@ def multimarginloss_reference(input, target, p=1, margin=1, weight=None, reducti
 def cosineembeddingloss_reference(input1, input2, target, margin=0, reduction='mean'):
     def _cos(a, b):
         cos = a.new(a.size(0))
-        for i in range(0, a.size(0)):
+        for i in range(a.size(0)):
             cos[i] = (a[i] * b[i]).sum() / ((((a[i] * a[i]).sum() + 1e-12) * ((b[i] * b[i]).sum() + 1e-12)) ** 0.5)
         return cos
 

@@ -436,7 +436,6 @@ def load(
         print(ep(torch.randn(5)))
     """
     if isinstance(f, (str, os.PathLike)):
-        # pyrefly: ignore  # no-matching-overload
         f = os.fspath(f)
 
     extra_files = extra_files or {}
@@ -448,8 +447,8 @@ def load(
             f,
             expected_opset_version=expected_opset_version,
         )
-    except RuntimeError as e:
-        log.warning("Ran into the following error when deserializing: %s", e)
+    except RuntimeError:
+        log.warning("Ran into the following error when deserializing", exc_info=True)
         pt2_contents = PT2ArchiveContents({}, {}, {})
 
     if len(pt2_contents.exported_programs) > 0 or len(pt2_contents.extra_files) > 0:
@@ -501,10 +500,10 @@ def load(
             if file_info.filename == "serialized_exported_program.json":
                 serialized_exported_program = file_content
             elif file_info.filename == "serialized_state_dict.json":
-                warnings.warn("This version of file is deprecated")
+                warnings.warn("This version of file is deprecated", stacklevel=2)
                 serialized_state_dict = file_content
             elif file_info.filename == "serialized_constants.json":
-                warnings.warn("This version of file is deprecated")
+                warnings.warn("This version of file is deprecated", stacklevel=2)
                 serialized_constants = file_content
             elif file_info.filename == "serialized_state_dict.pt":
                 serialized_state_dict = file_content

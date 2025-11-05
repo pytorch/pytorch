@@ -147,13 +147,14 @@ class BaseListVariable(VariableTracker):
         if name == "__getitem__":
             from .tensor import TensorVariable
 
-            if len(args) != 1:
-                msg = ConstantVariable.create(
-                    f"{name} takes exactly one argument ({len(args)} given)"
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-                raise_observed_exception(TypeError, tx, args=[msg])
 
-            assert not kwargs and len(args) == 1
             if isinstance(args[0], TensorVariable):
                 value = get_fake_value(args[0].as_proxy().node, tx)
                 if value.constant is not None and value.constant.numel() == 1:
@@ -176,12 +177,22 @@ class BaseListVariable(VariableTracker):
 
             return self.getitem_const(tx, value)
         elif name == "__contains__":
-            if len(args) != 1 or kwargs:
-                raise_args_mismatch(tx, name)
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
         elif name == "index":
             if not len(args):
-                raise_args_mismatch(tx, name)
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
 
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.index),
@@ -190,7 +201,12 @@ class BaseListVariable(VariableTracker):
             )
         elif name == "count":
             if len(args) != 1:
-                raise_args_mismatch(tx, name)
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             return VariableTracker.build(tx, operator.countOf).call_function(
                 tx,
                 [self, args[0]],
@@ -198,7 +214,12 @@ class BaseListVariable(VariableTracker):
             )
         elif name in ("__add__", "__iadd__"):
             if kwargs or len(args) != 1:
-                raise_args_mismatch(tx, name)
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
 
             if type(self) is not type(args[0]):
                 tp_name = self.python_type_name()
@@ -215,7 +236,12 @@ class BaseListVariable(VariableTracker):
                 return self
         elif name in ("__mul__", "__imul__"):
             if kwargs or len(args) != 1:
-                raise_args_mismatch(tx, name)
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
 
             if not (args[0].is_python_constant() and args[0].python_type() is int):
                 msg = ConstantVariable.create(
@@ -232,7 +258,12 @@ class BaseListVariable(VariableTracker):
                 return self
         elif name in cmp_name_to_op_mapping:
             if len(args) != 1:
-                raise_args_mismatch(tx, name)
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
 
             left = self
             right = args[0]
@@ -263,6 +294,8 @@ class BaseListVariable(VariableTracker):
                 [variables.BuiltinVariable(cmp_name_to_op_mapping[name]), left, right],
                 {},
             )
+        elif name == "__iter__":
+            return ListIteratorVariable(self.items, mutation_type=ValueMutationNew())
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -441,9 +474,9 @@ class RangeVariable(BaseListVariable):
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> "VariableTracker":
-        if self.python_type() is not range:
-            return super().call_obj_hasattr(tx, name)
-        return variables.ConstantVariable.create(hasattr(range(0), name))
+        if self.python_type() is range:
+            return variables.ConstantVariable.create(name in range.__dict__)
+        return super().call_obj_hasattr(tx, name)
 
     def range_equals(self, other: "RangeVariable"):
         r0, r1 = self, other
@@ -543,16 +576,25 @@ class CommonListMethodsVariable(BaseListVariable):
         from .tensor import SymNodeVariable
 
         if name == "append" and self.is_mutable():
-            assert not kwargs
-            if len(args) != 1:
-                raise_args_mismatch(tx, name)
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             (arg,) = args
             tx.output.side_effects.mutation(self)
             self.items.append(arg)
             return ConstantVariable.create(None)
         elif name == "extend" and self.is_mutable():
-            if len(args) != 1 or kwargs:
-                raise_args_mismatch(tx, name)
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
 
             if not args[0].has_force_unpack_var_sequence(tx):
                 msg = ConstantVariable.create(f"{type(args[0])} object is not iterable")
@@ -565,7 +607,12 @@ class CommonListMethodsVariable(BaseListVariable):
             return ConstantVariable.create(None)
         elif name == "insert" and self.is_mutable():
             if kwargs or len(args) != 2:
-                raise_args_mismatch(tx, name)
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "2 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             idx, value = args
             if isinstance(idx, SymNodeVariable):
                 const_idx = idx.evaluate_expr()
@@ -575,9 +622,13 @@ class CommonListMethodsVariable(BaseListVariable):
             self.items.insert(const_idx, value)
             return ConstantVariable.create(None)
         elif name == "pop" and self.is_mutable():
-            assert not kwargs
             if kwargs or len(args) > 1:
-                raise_args_mismatch(tx, name)
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "at most 1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
 
             if len(self.items) == 0:
                 msg = ConstantVariable.create("pop from empty list")
@@ -592,7 +643,12 @@ class CommonListMethodsVariable(BaseListVariable):
             return self.items.pop(*[a.as_python_constant() for a in args])
         elif name == "clear" and self.is_mutable():
             if args or kwargs:
-                raise_observed_exception(TypeError, tx)
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
@@ -612,7 +668,8 @@ class CommonListMethodsVariable(BaseListVariable):
                 )
             )
         ):
-            assert not kwargs
+            if kwargs:
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             key, value = args
             tx.output.side_effects.mutation(self)
             if isinstance(key, SymNodeVariable):
@@ -637,7 +694,12 @@ class CommonListMethodsVariable(BaseListVariable):
             return ConstantVariable.create(None)
         elif name == "__delitem__" and self.is_mutable():
             if kwargs or len(args) != 1:
-                raise_args_mismatch(tx, name)
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
 
             tx.output.side_effects.mutation(self)
             if args[0].is_python_constant() and isinstance(
@@ -665,18 +727,33 @@ class CommonListMethodsVariable(BaseListVariable):
         elif name == "copy":
             # List copy() doesn't have args and kwargs
             if args or kwargs:
-                raise_args_mismatch(tx, name)
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             items = list(self.items)
             return self.modified(items, mutation_type=ValueMutationNew())
         elif name == "reverse" and self.is_mutable():
             if args or kwargs:
-                raise_args_mismatch(tx, name)
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             self.items.reverse()
             tx.output.side_effects.mutation(self)
             return ConstantVariable.create(None)
         elif name == "remove" and self.is_mutable():
-            if len(args) != 1 or kwargs:
-                raise_args_mismatch(tx, name)
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
 
             idx = self.call_method(tx, "index", args, kwargs)
             self.call_method(tx, "pop", [idx], {})
@@ -710,7 +787,12 @@ class ListVariable(CommonListMethodsVariable):
 
         if name == "__setitem__" and self.is_mutable():
             if kwargs or len(args) != 2:
-                raise_args_mismatch(tx, name)
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "2 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             key, value = args
 
             if not key.is_python_constant():
@@ -752,12 +834,14 @@ class ListVariable(CommonListMethodsVariable):
             return ConstantVariable.create(None)
 
         if name == "sort" and self.is_mutable():
-            assert len(args) == 0
+            if len(args) != 0:
+                raise_args_mismatch(tx, name, "0 args", f"{len(args)} args")
             key_fn_var = kwargs.pop("key", ConstantVariable.create(None))
             reverse = kwargs.pop(
                 "reverse", ConstantVariable.create(False)
             ).as_python_constant()
-            assert len(kwargs) == 0
+            if len(kwargs) != 0:
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
 
             if (
                 key_fn_var.is_python_constant()
@@ -808,7 +892,8 @@ class ListVariable(CommonListMethodsVariable):
             return ConstantVariable.create(None)
 
         if name == "__init__" and self.is_mutable():
-            assert not kwargs
+            if kwargs:
+                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             if len(args) == 0:
                 return ConstantVariable.create(None)
             elif len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
@@ -895,8 +980,13 @@ class DequeVariable(CommonListMethodsVariable):
             and args
             and args[0].is_python_constant()
         ):
-            assert len(args) == 2
-            assert not kwargs
+            if kwargs or len(args) != 2:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "2 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             key, value = args
             assert key.is_python_constant()
             assert isinstance(key.as_python_constant(), int)
@@ -916,8 +1006,13 @@ class DequeVariable(CommonListMethodsVariable):
             and len(args) > 0
             and args[0].has_force_unpack_var_sequence(tx)
         ):
-            assert len(args) == 1
-            assert not kwargs
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             # NOTE this is inefficient, but the alternative is to represent self.items
             # as a deque, which is a more intrusive change.
             args[0].force_apply_to_var_sequence(
@@ -926,20 +1021,35 @@ class DequeVariable(CommonListMethodsVariable):
             slice_within_maxlen = slice(None, maxlen)
             result = ConstantVariable.create(None)
         elif name == "popleft" and self.is_mutable():
-            assert not args
-            assert not kwargs
+            if kwargs or len(args) > 0:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             tx.output.side_effects.mutation(self)
             result, *self.items[:] = self.items
         elif name == "appendleft" and len(args) > 0 and self.is_mutable():
-            assert len(args) == 1
-            assert not kwargs
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             tx.output.side_effects.mutation(self)
             self.items[:] = [args[0], *self.items]
             slice_within_maxlen = slice(None, maxlen)
             result = ConstantVariable.create(None)
         elif name == "insert" and len(args) > 0 and self.is_mutable():
-            assert len(args) == 2
-            assert not kwargs
+            if kwargs or len(args) != 2:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "2 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             if maxlen is not None and len(self.items) == maxlen:
                 raise_observed_exception(
                     IndexError, tx, args=["deque already at its maximum size"]
@@ -955,6 +1065,13 @@ class DequeVariable(CommonListMethodsVariable):
         ):
             self.items[:] = self.items[slice_within_maxlen]
         return result
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
+        if self.python_type() is collections.deque:
+            return variables.ConstantVariable.create(name in collections.deque.__dict__)
+        return super().call_obj_hasattr(tx, name)
 
 
 class TupleVariable(BaseListVariable):
@@ -1115,11 +1232,23 @@ class SizeVariable(TupleVariable):
         kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name == "__getitem__":
-            assert not kwargs and len(args) == 1
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             out = self.get_item_dyn(tx, args[0])
             return out
         elif name == "numel":
-            assert not args and not kwargs
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             return self.numel(tx)
 
         return super().call_method(tx, name, args, kwargs)
@@ -1261,8 +1390,13 @@ class NamedTupleVariable(TupleVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__setattr__":
-            assert len(args) == 2
-            assert len(kwargs) == 0
+            if kwargs or len(args) != 2:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "2 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
             attr, value = args
             attr = attr.as_python_constant()
             if (
@@ -1283,15 +1417,7 @@ class NamedTupleVariable(TupleVariable):
         elif name == "_replace":
             # NamedTuple._replace should create a new instance with replaced fields
             if args:
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[
-                        ConstantVariable.create(
-                            "_replace() takes no positional arguments"
-                        )
-                    ],
-                )
+                raise_args_mismatch(tx, name, "0 args", f"{len(args)} args")
 
             # Get the field names for validation
             fields = self.fields()
@@ -1386,7 +1512,7 @@ class NamedTupleVariable(TupleVariable):
 
 
 class SliceVariable(VariableTracker):
-    def __init__(self, items, **kwargs) -> None:
+    def __init__(self, items, tx=None, **kwargs) -> None:
         items_to_map = items
         start, stop, step = [variables.ConstantVariable.create(None)] * 3
 
@@ -1399,18 +1525,24 @@ class SliceVariable(VariableTracker):
         else:
             raise AssertionError
 
-        if isinstance(start, variables.TensorVariable) or isinstance(
-            stop, variables.TensorVariable
-        ):
-            unimplemented_v2(
-                gb_type="Dynamic slicing with Tensor arguments",
-                context=f"SliceVariable start: {start}, stop: {stop}, step: {step}",
-                explanation="Creating slices with Tensor arguments is not supported. "
-                "e.g. `l[:x]`, where `x` is a 1-element tensor.",
-                hints=[
-                    *graph_break_hints.SUPPORTABLE,
-                ],
+        # Convert TensorVariable to SymIntVariable by calling .item()
+        # This decomposes a[:t] to u=t.item(); a[:u] at the dynamo level
+        if isinstance(start, variables.TensorVariable):
+            assert tx is not None, (
+                "tx is required when slice indices are TensorVariables"
             )
+            start = start.call_method(tx, "item", [], {})
+        if isinstance(stop, variables.TensorVariable):
+            assert tx is not None, (
+                "tx is required when slice indices are TensorVariables"
+            )
+            stop = stop.call_method(tx, "item", [], {})
+        if isinstance(step, variables.TensorVariable):
+            assert tx is not None, (
+                "tx is required when slice indices are TensorVariables"
+            )
+            step = step.call_method(tx, "item", [], {})
+
         self.items = (start, stop, step)
 
         super().__init__(**kwargs)
@@ -1461,6 +1593,7 @@ class ListIteratorVariable(IteratorVariable):
         # assert all(isinstance(x, VariableTracker) for x in items)
         self.items = items
         self.index = index
+        self.is_exhausted = False
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(length={len(self.items)}, index={repr(self.index)})"
@@ -1468,7 +1601,8 @@ class ListIteratorVariable(IteratorVariable):
     def next_variable(self, tx):
         assert self.is_mutable()
         old_index = self.index
-        if old_index >= len(self.items):
+        if old_index >= len(self.items) or self.is_exhausted:
+            self.is_exhausted = True
             raise_observed_exception(StopIteration, tx)
 
         tx.output.side_effects.mutation(self)
@@ -1490,15 +1624,19 @@ class ListIteratorVariable(IteratorVariable):
         return True
 
     def unpack_var_sequence(self, tx):
-        r = list(self.items[self.index :])
-        self.index = len(self.items)
-        return r
+        if self.is_exhausted:
+            return []
+        self.is_exhausted = True
+        return list(self.items[self.index :])
 
     def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         return self.unpack_var_sequence(tx)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        remaining_items = self.items[self.index :]
+        if not self.is_exhausted:
+            remaining_items = self.items[self.index :]
+        else:
+            remaining_items = []
         codegen.foreach(remaining_items)
         codegen.extend_output(
             [

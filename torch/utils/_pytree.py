@@ -36,6 +36,7 @@ from typing import (
     Optional,
     overload,
     Protocol,
+    TypeAlias,
     TypeVar,
     Union,
 )
@@ -52,6 +53,7 @@ __all__ = [
     "DumpableContext",
     "ToDumpableContextFn",
     "FromDumpableContextFn",
+    "PyTreeSpec",
     "TreeSpec",
     "LeafSpec",
     "keystr",
@@ -364,11 +366,15 @@ def register_dataclass(
 
     def _unflatten_fn(values: Iterable[Any], context: Context) -> Any:
         flat_names, none_names = context
-        return cls(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
+        return cls(
+            **dict(zip(flat_names, values, strict=True)), **dict.fromkeys(none_names)
+        )
 
     def _flatten_fn_with_keys(obj: Any) -> tuple[list[Any], Context]:
         flattened, (flat_names, _none_names) = _flatten_fn(obj)  # type: ignore[misc]
-        return [(GetAttrKey(k), v) for k, v in zip(flat_names, flattened)], flat_names
+        return [
+            (GetAttrKey(k), v) for k, v in zip(flat_names, flattened, strict=True)
+        ], flat_names
 
     _private_register_pytree_node(
         cls,
@@ -471,12 +477,13 @@ class ConstantNode:
 
 def _is_constant_holder(spec: "TreeSpec") -> bool:
     """Checks if the spec is from a pytree registered with register_constant"""
-    return isinstance(spec.context, ConstantNode)
+    return isinstance(spec._context, ConstantNode)
 
 
 def _retrieve_constant(spec: "TreeSpec") -> Any:
     """Given a spec from a pytree registered with register_constant, retrieves the constant"""
-    assert _is_constant_holder(spec)
+    if not _is_constant_holder(spec):
+        raise AssertionError("spec does not correspond to a registered constant pytree")
     return tree_unflatten([], spec)
 
 
@@ -602,6 +609,7 @@ def _private_register_pytree_node(
             warnings.warn(
                 f"{cls} is already registered as pytree node. "
                 "Overwriting the previous registration.",
+                stacklevel=2,
             )
 
         node_def = NodeDef(cls, flatten_fn, unflatten_fn, flatten_with_keys_fn)
@@ -708,7 +716,7 @@ class structseq(tuple[_T_co, ...]):
     def __new__(
         cls: type[Self],
         sequence: Iterable[_T_co],
-        # pyrefly: ignore  # bad-function-definition
+        # pyrefly: ignore [bad-function-definition]
         dict: dict[str, Any] = ...,
     ) -> Self:
         raise NotImplementedError
@@ -755,7 +763,7 @@ def _tuple_flatten_with_keys(
     d: tuple[T, ...],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _tuple_flatten(d)
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
@@ -769,7 +777,7 @@ def _list_flatten(d: list[T]) -> tuple[list[T], Context]:
 
 def _list_flatten_with_keys(d: list[T]) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _list_flatten(d)
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
@@ -785,12 +793,12 @@ def _dict_flatten_with_keys(
     d: dict[Any, T],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _dict_flatten(d)
-    # pyrefly: ignore  # bad-return
-    return [(MappingKey(k), v) for k, v in zip(context, values)], context
+    # pyrefly: ignore [bad-return]
+    return [(MappingKey(k), v) for k, v in zip(context, values, strict=True)], context
 
 
 def _dict_unflatten(values: Iterable[T], context: Context) -> dict[Any, T]:
-    return dict(zip(context, values))
+    return dict(zip(context, values, strict=True))
 
 
 def _namedtuple_flatten(d: NamedTuple) -> tuple[list[Any], Context]:
@@ -801,9 +809,12 @@ def _namedtuple_flatten_with_keys(
     d: NamedTuple,
 ) -> tuple[list[tuple[KeyEntry, Any]], Context]:
     values, context = _namedtuple_flatten(d)
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return (
-        [(GetAttrKey(field), v) for field, v in zip(context._fields, values)],
+        [
+            (GetAttrKey(field), v)
+            for field, v in zip(context._fields, values, strict=True)
+        ],
         context,
     )
 
@@ -851,15 +862,15 @@ def _ordereddict_flatten_with_keys(
     d: OrderedDict[Any, T],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _ordereddict_flatten(d)
-    # pyrefly: ignore  # bad-return
-    return [(MappingKey(k), v) for k, v in zip(context, values)], context
+    # pyrefly: ignore [bad-return]
+    return [(MappingKey(k), v) for k, v in zip(context, values, strict=True)], context
 
 
 def _ordereddict_unflatten(
     values: Iterable[T],
     context: Context,
 ) -> OrderedDict[Any, T]:
-    return OrderedDict((key, value) for key, value in zip(context, values))
+    return OrderedDict((key, value) for key, value in zip(context, values, strict=True))
 
 
 _odict_flatten = _ordereddict_flatten
@@ -876,8 +887,10 @@ def _defaultdict_flatten_with_keys(
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _defaultdict_flatten(d)
     _, dict_context = context
-    # pyrefly: ignore  # bad-return
-    return [(MappingKey(k), v) for k, v in zip(dict_context, values)], context
+    # pyrefly: ignore [bad-return]
+    return [
+        (MappingKey(k), v) for k, v in zip(dict_context, values, strict=True)
+    ], context
 
 
 def _defaultdict_unflatten(
@@ -899,17 +912,25 @@ def _defaultdict_serialize(context: Context) -> DumpableContext:
 
 
 def _defaultdict_deserialize(dumpable_context: DumpableContext) -> Context:
-    assert isinstance(dumpable_context, dict)
-    assert set(dumpable_context) == {
+    if not isinstance(dumpable_context, dict):
+        raise AssertionError("dumpable_context must be a dict")
+
+    expected_keys = {
         "default_factory_module",
         "default_factory_name",
         "dict_context",
     }
+    if set(dumpable_context) != expected_keys:
+        raise AssertionError(
+            f"dumpable_context keys must be {expected_keys}, got {set(dumpable_context)}"
+        )
 
     default_factory_module = dumpable_context["default_factory_module"]
     default_factory_name = dumpable_context["default_factory_name"]
-    assert isinstance(default_factory_module, str)
-    assert isinstance(default_factory_name, str)
+    if not isinstance(default_factory_module, str):
+        raise AssertionError("default_factory_module must be a string")
+    if not isinstance(default_factory_name, str):
+        raise AssertionError("default_factory_name must be a string")
     module = importlib.import_module(default_factory_module)
     default_factory = getattr(module, default_factory_name)
 
@@ -925,7 +946,7 @@ def _deque_flatten_with_keys(
     d: deque[T],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _deque_flatten(d)
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
@@ -1057,39 +1078,60 @@ def _is_leaf(tree: PyTree, is_leaf: Optional[Callable[[PyTree], bool]] = None) -
 
 
 # A TreeSpec represents the structure of a pytree. It holds:
-# "type": the type of root Node of the pytree
-# context: some context that is useful in unflattening the pytree
-# children_specs: specs for each child of the root Node
-# num_leaves: the number of leaves
-@dataclasses.dataclass(init=True, frozen=True, eq=True, repr=False)
+#   "type": the type of root Node of the pytree
+#   context: some context that is useful in unflattening the pytree
+#   children(): specs for each child of the root Node
+#   num_nodes: the total number of nodes
+#   num_leaves: the number of leaves
+#   num_children: the number of children of the root Node (i.e., len(children()))
+#   is_leaf(): whether the root Node is a leaf
+@dataclasses.dataclass(init=False, frozen=True, eq=True, repr=False)
 class TreeSpec:
     type: Any
-    context: Context
-    children_specs: list["TreeSpec"]
+    _context: Context
+    _children: list[Self]
 
     num_nodes: int = dataclasses.field(init=False)
     num_leaves: int = dataclasses.field(init=False)
     num_children: int = dataclasses.field(init=False)
 
+    def __init__(
+        self,
+        type: Any,
+        context: Context,  # keep for backward compatibility
+        children_specs: list[Self],  # keep for backward compatibility
+    ) -> None:
+        object.__setattr__(self, "type", type)
+        object.__setattr__(self, "_context", context)
+        object.__setattr__(self, "_children", children_specs)
+        self.__post_init__()
+
     def __post_init__(self) -> None:
-        num_nodes = sum((spec.num_nodes for spec in self.children_specs), start=1)
-        num_leaves = sum(spec.num_leaves for spec in self.children_specs)
-        num_children = len(self.children_specs)
+        if self.type is None:
+            assert self._context is None
+            assert len(self._children) == 0
+            num_nodes = 1
+            num_leaves = 1
+            num_children = 0
+        else:
+            num_nodes = sum((spec.num_nodes for spec in self._children), start=1)
+            num_leaves = sum(spec.num_leaves for spec in self._children)
+            num_children = len(self._children)
         object.__setattr__(self, "num_nodes", num_nodes)
         object.__setattr__(self, "num_leaves", num_leaves)
         object.__setattr__(self, "num_children", num_children)
 
     def __repr__(self, indent: int = 0) -> str:
-        repr_prefix: str = f"TreeSpec({self.type.__name__}, {self.context}, ["
+        repr_prefix: str = f"TreeSpec({self.type.__name__}, {self._context}, ["
         children_specs_str: str = ""
         if self.num_children > 0:
             indent += 2
-            children_specs_str += self.children_specs[0].__repr__(indent)
+            children_specs_str += self._children[0].__repr__(indent)
             children_specs_str += "," if self.num_children > 1 else ""
             children_specs_str += ",".join(
                 [
                     "\n" + " " * indent + child.__repr__(indent)
-                    for child in self.children_specs[1:]
+                    for child in self._children[1:]
                 ]
             )
         repr_suffix: str = f"{children_specs_str}])"
@@ -1101,15 +1143,35 @@ class TreeSpec:
         elif other.__class__ is self.__class__:
             if str(self.type) != str(other.type):
                 return False
-            if self.context != other.context:
+            if self._context != other._context:
                 return False
-            elif self.children_specs != other.children_specs:
+            elif self._children != other._children:
                 return False
             return True
         return NotImplemented
 
+    @property
+    def context(self) -> Context:
+        return self._context
+
+    @property
+    @deprecated(
+        "`treespec.children_specs` is deprecated. "
+        "Use `treespec.child(index)` to access a single child, "
+        "or `treespec.children()` to get all children.",
+        category=FutureWarning,
+    )
+    def children_specs(self) -> list[Self]:
+        return self._children
+
     def is_leaf(self) -> bool:
         return self.num_nodes == 1 and self.num_leaves == 1
+
+    def children(self) -> list[Self]:
+        return self._children.copy()
+
+    def child(self, index: int) -> Self:
+        return self._children[index]
 
     def flatten_up_to(self, tree: PyTree) -> list[PyTree]:
         def helper(treespec: TreeSpec, tree: PyTree, subtrees: list[PyTree]) -> None:
@@ -1132,7 +1194,7 @@ class TreeSpec:
                         f"Node arity mismatch; "
                         f"expected {treespec.num_children}, but got {len(children)}.",
                     )
-                if context != treespec.context:
+                if context != treespec._context:
                     raise ValueError(
                         f"Node context mismatch for custom node type {treespec.type!r}.",
                     )
@@ -1157,10 +1219,10 @@ class TreeSpec:
                 if both_standard_dict:
                     # dictionary types are compatible with each other
                     dict_context = (
-                        treespec.context
+                        treespec._context
                         if treespec.type is not defaultdict
                         # ignore mismatch of `default_factory` for defaultdict
-                        else treespec.context[1]
+                        else treespec._context[1]
                     )
                     expected_keys = dict_context
                     got_key_set = set(tree)
@@ -1181,13 +1243,13 @@ class TreeSpec:
                     children, context = flatten_fn(tree)
                     if (
                         node_type is not deque  # ignore mismatch of `maxlen` for deque
-                    ) and context != treespec.context:
+                    ) and context != treespec._context:
                         raise ValueError(
                             f"Node context mismatch for node type {treespec.type!r}; "
-                            f"expected {treespec.context!r}, but got {context!r}.",  # namedtuple type mismatch
+                            f"expected {treespec._context!r}, but got {context!r}.",  # namedtuple type mismatch
                         )
 
-            for subtree, subspec in zip(children, treespec.children_specs):
+            for subtree, subspec in zip(children, treespec._children, strict=True):
                 helper(subspec, subtree, subtrees)
 
         subtrees: list[PyTree] = []
@@ -1212,24 +1274,24 @@ class TreeSpec:
         start = 0
         end = 0
         child_pytrees = []
-        for child_spec in self.children_specs:
+        for child_spec in self._children:
             end += child_spec.num_leaves
             child_pytrees.append(child_spec.unflatten(leaves[start:end]))
             start = end
 
-        return unflatten_fn(child_pytrees, self.context)
+        return unflatten_fn(child_pytrees, self._context)
 
     def __hash__(self) -> int:
         node_type = self.type
         if node_type is defaultdict:
-            default_factory, dict_context = self.context
+            default_factory, dict_context = self._context
             hashable_context = (default_factory, tuple(dict_context))
         elif node_type in (dict, OrderedDict):
-            hashable_context = tuple(self.context)
+            hashable_context = tuple(self._context)
         elif node_type is None or node_type in BUILTIN_TYPES:
-            hashable_context = self.context
-        elif isinstance(self.context, ConstantNode):
-            hashable_context = self.context.value
+            hashable_context = self._context
+        elif isinstance(self._context, ConstantNode):
+            hashable_context = self._context.value
         else:
             # The context for user-defined node types might not be hashable.
             # Ignore it for hashing.
@@ -1237,20 +1299,26 @@ class TreeSpec:
             # same hash. This might increase the hash collision rate, but we
             # don't care about that.
             hashable_context = None
-        return hash((node_type, hashable_context, tuple(self.children_specs)))
+        return hash((node_type, hashable_context, tuple(self._children)))
+
+
+PyTreeSpec: TypeAlias = TreeSpec
 
 
 # NOTE: subclassing a dataclass is subtle. In order to enable reasoning about
 # this class with `dataclasses.fields`, etc., while having a simplified
 # constructor that takes no argument, we wrap with `dataclass(init=True, ...)`
 # again, with fields that have `init=False`.
+@deprecated(
+    "`isinstance(treespec, LeafSpec)` is deprecated, "
+    "use `isinstance(treespec, TreeSpec) and treespec.is_leaf()` instead.",
+    category=FutureWarning,
+)
 @dataclasses.dataclass(init=True, frozen=True, eq=False, repr=False)
 class LeafSpec(TreeSpec):
     type: Any = dataclasses.field(default=None, init=False)
-    context: Context = dataclasses.field(default=None, init=False)
-    children_specs: list["TreeSpec"] = dataclasses.field(
-        default_factory=list, init=False
-    )
+    _context: Context = dataclasses.field(default=None, init=False)
+    _children: list[Self] = dataclasses.field(default_factory=list, init=False)
 
     def __post_init__(self) -> None:
         # Override `__post_init__` for `num_leaves` derivation.
@@ -1264,7 +1332,36 @@ class LeafSpec(TreeSpec):
 
 # All leaves are equivalent, so represent with a single object to save on
 # object construction time
-_LEAF_SPEC = LeafSpec()
+with warnings.catch_warnings():
+    warnings.filterwarnings(
+        "ignore", category=FutureWarning, module=__name__, append=False
+    )
+    _LEAF_SPEC = LeafSpec()
+
+
+def treespec_leaf() -> LeafSpec:
+    """Make a treespec representing a leaf node."""
+    return _LEAF_SPEC
+
+
+def treespec_tuple(iterable: Iterable[TreeSpec] = (), /) -> TreeSpec:
+    """Make a tuple treespec from an iterable of child treespecs."""
+    children = list(iterable)
+    if any(not isinstance(child, TreeSpec) for child in children):
+        raise ValueError(f"Expected a tuple of TreeSpec values, got: {children!r}.")
+    return TreeSpec(tuple, None, children)
+
+
+def treespec_dict(
+    mapping: Union[Mapping[Any, TreeSpec], Iterable[tuple[Any, TreeSpec]]] = (),
+    /,
+    **kwargs: TreeSpec,
+) -> TreeSpec:
+    """Make a dict treespec from a dict of child treespecs."""
+    dct = dict(mapping, **kwargs)
+    if any(not isinstance(child, TreeSpec) for child in dct.values()):
+        raise ValueError(f"Expected a dictionary of TreeSpec values, got: {dct!r}.")
+    return TreeSpec(dict, list(dct.keys()), list(dct.values()))
 
 
 def tree_flatten(
@@ -1555,7 +1652,6 @@ def tree_map_only(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
-    # pyrefly: ignore  # no-matching-overload
     return tree_map(map_only(type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
 
 
@@ -1616,7 +1712,6 @@ def tree_map_only_(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
-    # pyrefly: ignore  # no-matching-overload
     return tree_map_(map_only(type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
 
 
@@ -1733,7 +1828,8 @@ def _broadcast_to_and_flatten(
     treespec: TreeSpec,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> Optional[list[Any]]:
-    assert isinstance(treespec, TreeSpec)
+    if not isinstance(treespec, TreeSpec):
+        raise AssertionError("treespec must be a TreeSpec")
 
     if tree_is_leaf(tree, is_leaf=is_leaf):
         return [tree] * treespec.num_leaves
@@ -1744,15 +1840,15 @@ def _broadcast_to_and_flatten(
         return None
 
     flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-    child_pytrees, ctx = flatten_fn(tree)
+    child_pytrees, context = flatten_fn(tree)
 
     # Check if the Node is different from the spec
-    if len(child_pytrees) != treespec.num_children or ctx != treespec.context:
+    if len(child_pytrees) != treespec.num_children or context != treespec._context:
         return None
 
     # Recursively flatten the children
     result: list[Any] = []
-    for child, child_spec in zip(child_pytrees, treespec.children_specs):
+    for child, child_spec in zip(child_pytrees, treespec._children, strict=True):
         flat = _broadcast_to_and_flatten(child, child_spec, is_leaf=is_leaf)
         if flat is not None:
             result += flat
@@ -1806,7 +1902,7 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
 
     if serialize_node_def.to_dumpable_context is None:
         try:
-            serialized_context = json.dumps(treespec.context, cls=EnumEncoder)
+            serialized_context = json.dumps(treespec._context, cls=EnumEncoder)
         except TypeError as e:
             raise TypeError(
                 "Unable to serialize context. "
@@ -1814,9 +1910,9 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
                 "custom serializer using _register_pytree_node."
             ) from e
     else:
-        serialized_context = serialize_node_def.to_dumpable_context(treespec.context)
+        serialized_context = serialize_node_def.to_dumpable_context(treespec._context)
 
-    child_schemas = [_treespec_to_json(child) for child in treespec.children_specs]
+    child_schemas = [_treespec_to_json(child) for child in treespec._children]
 
     return _TreeSpecSchema(serialized_type_name, serialized_context, child_schemas)
 
@@ -1829,7 +1925,7 @@ def enum_object_hook(obj: dict[str, Any]) -> Union[Enum, dict[str, Any]]:
         for attr in classname.split("."):
             enum_cls = getattr(enum_cls, attr)
         enum_cls = cast(type[Enum], enum_cls)
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         return enum_cls[obj["name"]]
     return obj
 
@@ -2054,9 +2150,9 @@ def tree_map_with_path(
         ``xs`` is the tuple of values at corresponding nodes in ``rests``.
     """
     keypath_leaves, treespec = tree_flatten_with_path(tree, is_leaf)
-    keypath_leaves = list(zip(*keypath_leaves))
+    keypath_leaves = list(zip(*keypath_leaves, strict=True))
     all_keypath_leaves = keypath_leaves + [treespec.flatten_up_to(r) for r in rests]
-    return treespec.unflatten(func(*xs) for xs in zip(*all_keypath_leaves))
+    return treespec.unflatten(func(*xs) for xs in zip(*all_keypath_leaves, strict=True))
 
 
 def keystr(kp: KeyPath) -> str:

@@ -165,7 +165,7 @@ ncclRedOpRAII getNcclReduceOp(
 }
 
 // Get a key string from device
-inline std::string getKeyFromDevice(at::Device& device) {
+inline std::string getKeyFromDevice(const at::Device& device) {
   return std::to_string(device.index());
 }
 
@@ -349,8 +349,7 @@ static void cacheAllocatorDeregisterHook(
 }
 
 static void attachAllocatorHooks() {
-  static c10::once_flag flag;
-  c10::call_once(flag, [] {
+  static auto flag [[maybe_unused]] = [] {
     // Attaching hooks fails if CUDACachingAllocator is not initialized, so
     // Init for CUDA is called (and is a no-op if CUDA is already
     // initialized).
@@ -359,7 +358,8 @@ static void attachAllocatorHooks() {
         &cacheAllocatorRegisterHook);
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
         &cacheAllocatorDeregisterHook);
-  });
+    return true;
+  }();
 }
 
 static std::
@@ -4770,6 +4770,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
   bool same_size = check_same_size(outputTensors_);
   if (same_size) {
     // Flatten a vector of tensors into a single, stacked tensor.
+    // we can handle only contiguous inputs, because we are
+    // just sending ptr and numel to nccl
+    inputTensor = inputTensor.contiguous();
     at::Tensor outputFlattened = newLikeFlat(outputTensors_);
 
     return collective(
@@ -4917,6 +4920,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
   bool same_size = check_same_size(inputTensors_);
   if (same_size) {
     // Flatten a vector of tensors into a single, stacked tensor.
+    outputTensor = outputTensor.contiguous();
     at::Tensor inputFlattened = newLikeFlat(inputTensors_);
 
     return collective(
@@ -5836,6 +5840,139 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
   LOG(INFO) << logPrefix() << "Allocated tensor of size " << size
             << " from memory pool";
   return tensor;
+}
+
+#ifdef NCCL_HAS_COMM_SHRINK
+c10::intrusive_ptr<Backend> ProcessGroupNCCL::shrink(
+    const std::vector<int64_t>& ranks_to_exclude,
+    int shrink_flags,
+    const c10::intrusive_ptr<Backend::Options>& opts_override) {
+  // Runtime version check with better error message
+  auto runtime_version = torch::cuda::nccl::version();
+  TORCH_CHECK(
+      runtime_version >= NCCL_VERSION(2, 27, 0),
+      "ProcessGroupNCCL::shrink requires NCCL version 2.27.0 or later. "
+      "Found version: ",
+      runtime_version);
+
+  // Early validation with detailed error messages
+  TORCH_CHECK_VALUE(
+      !ranks_to_exclude.empty(), "ranks_to_exclude cannot be empty");
+  TORCH_CHECK_VALUE(
+      static_cast<int>(ranks_to_exclude.size()) < size_,
+      "Cannot exclude all ranks (",
+      ranks_to_exclude.size(),
+      " >= ",
+      size_,
+      ")");
+
+  // Validate ranks and convert to int efficiently
+  std::vector<int> int_ranks_to_exclude;
+  int_ranks_to_exclude.reserve(ranks_to_exclude.size());
+  for (int64_t rank : ranks_to_exclude) {
+    TORCH_CHECK_VALUE(
+        rank >= 0 && rank < size_,
+        "Invalid rank ",
+        rank,
+        " for group size ",
+        size_);
+    int_ranks_to_exclude.push_back(static_cast<int>(rank));
+  }
+
+  // Get primary communicator with better error context
+  auto primary_device_index = guessDeviceId();
+  auto primary_device = at::Device(at::kCUDA, primary_device_index);
+  const auto primary_key = getKeyFromDevice(primary_device);
+
+  std::shared_ptr<NCCLComm> primary_comm = getNCCLComm(primary_key);
+  TORCH_CHECK(
+      primary_comm,
+      "Primary NCCL communicator for device ",
+      primary_device,
+      " (key: ",
+      primary_key,
+      ") is not initialized");
+
+  // Cache device index before shrink operation
+  at::DeviceIndex parent_device_index = primary_comm->getDeviceIndex();
+
+  ncclConfig_t* config = nullptr;
+  // Default to inheriting from parent options
+  bool high_priority_stream = options_->is_high_priority_stream;
+  if (opts_override) {
+    auto nccl_opts =
+        c10::static_intrusive_pointer_cast<ProcessGroupNCCL::Options>(
+            opts_override);
+    config = &nccl_opts->config;
+    // If user provided override options, honor is_high_priority_stream as well
+    high_priority_stream = nccl_opts->is_high_priority_stream;
+  }
+
+  std::shared_ptr<NCCLComm> shrunk_comm = NCCLComm::shrink(
+      primary_comm.get(),
+      int_ranks_to_exclude,
+      (config != nullptr ? config : &options_->config),
+      shrink_flags);
+
+  // Calculate new size and get NCCL-assigned rank
+  int new_size = size_ - static_cast<int>(ranks_to_exclude.size());
+  int new_rank = shrunk_comm->rank_;
+
+  // Create new ProcessGroupNCCL with optimized options cloning
+  auto new_store = store_->clone();
+  auto new_opts = ProcessGroupNCCL::Options::create(high_priority_stream);
+  new_opts->timeout = options_->timeout;
+  if (config != nullptr) {
+    new_opts->config = *config;
+  } else {
+    new_opts->config = options_->config;
+  }
+
+  auto new_pg = c10::make_intrusive<ProcessGroupNCCL>(
+      new_store, new_rank, new_size, new_opts);
+
+  // Set up the new process group with optimized device setup
+  new_pg->initializeDeviceStateForComm(
+      at::Device(at::kCUDA, parent_device_index), shrunk_comm);
+
+  return c10::static_intrusive_pointer_cast<Backend>(new_pg);
+}
+
+#else // !NCCL_HAS_COMM_SHRINK
+// Backend interface override: raise consistent error when shrink is
+// unsupported.
+c10::intrusive_ptr<Backend> ProcessGroupNCCL::shrink(
+    const std::vector<int64_t>& /*ranks_to_exclude*/,
+    int /*shrink_flags*/,
+    const c10::intrusive_ptr<Backend::Options>& /*opts_override*/) {
+  TORCH_CHECK(
+      false,
+      "ProcessGroupNCCL::shrink requires NCCL version 2.27.0 or later, "
+      "but PyTorch was built with an older version or without NCCL shrink support.");
+}
+
+#endif // NCCL_HAS_COMM_SHRINK
+
+void ProcessGroupNCCL::initializeDeviceStateForComm(
+    const at::Device& device,
+    std::shared_ptr<NCCLComm> comm) {
+  const auto key = getKeyFromDevice(device);
+  std::unique_lock<std::mutex> lock(mutex_);
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+
+  bool force_high = getCvarBool(TORCH_NCCL_HIGH_PRIORITY, false);
+  auto stream = at::cuda::getStreamFromPool(
+      options_->is_high_priority_stream || force_high);
+
+  devNCCLCommMap_[key] = comm;
+  ncclStreams_.emplace(key, stream);
+  ncclEvents_.emplace(key, at::cuda::CUDAEvent(cudaEventDisableTiming));
+  usedDeviceIdxs_.insert(device.index());
+
+  if (shouldAllCommunicatorsRegisterAllTensors()) {
+    std::lock_guard<std::mutex> map_lock(ncclCommMemPoolMapMutex);
+    ncclCommMemPoolMap.emplace(std::move(comm), MemPoolSet{});
+  }
 }
 
 } // namespace c10d
