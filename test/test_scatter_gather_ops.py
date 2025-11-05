@@ -6,7 +6,7 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
-    (parametrize, run_tests, TestCase, DeterministicGuard, TEST_WITH_ROCM)
+    (parametrize, run_tests, TestCase, DeterministicGuard, TEST_WITH_ROCM, serialTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA,
      toleranceOverride, tol,)
@@ -65,10 +65,12 @@ class TestScatterGather(TestCase):
             actual = torch.gather(src, 2, idx)
             self.assertEqual(actual, expected, atol=0, rtol=0)
 
+    @serialTest()
     @dtypes(torch.int8, torch.bfloat16)
     def test_gather_large(self, device, dtype):
         # test larger shapes to check vectorized implementation
-        for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100)):
+        for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100), (4, 4, 16384 * 8192)):
+            torch.cuda.empty_cache()
             src = make_tensor((m, k), device=device, dtype=dtype)
             alloc0 = torch.empty(src.nelement() * 2, device=device, dtype=dtype)
             discontig = alloc0.view(m, 2 * k)[:, ::2].copy_(src)
@@ -111,6 +113,8 @@ class TestScatterGather(TestCase):
                 self.assertEqual(res_ind, ref, atol=0, rtol=0)
                 res_gather = torch.gather(misaligned1, dim=dim, index=ind)
                 self.assertEqual(res_gather, ref, atol=0, rtol=0)
+            del src, alloc0, alloc1, alloc2
+            del discontig, misaligned, misaligned1
         # test gather along 1st dim that can accidentally trigger fast path
         # because due to index dimension in the gather dim being 1
         # an unexpected squashing in tensorIterator happens
