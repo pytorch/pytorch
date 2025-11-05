@@ -147,7 +147,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
             for group in self.value.param_groups:
                 for p in group["params"]:
-                    mark_static_address(p)
+                    mark_static_address(p, guard=True)
 
             self._set_capturable(tx)
 
@@ -240,7 +240,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         self.tensor_to_source = {}
 
         def mark_static(x):
-            mark_static_address(x)
+            mark_static_address(x, guard=True)
 
         tree_map_only(torch.Tensor, mark_static, self.value.state)
 
@@ -348,14 +348,14 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         if tensor_value in self.tensor_to_source:
             # mark these tensors as static for cudagraphs
-            mark_static_address(tensor_value)
+            mark_static_address(tensor_value, guard=True)
             source = self.tensor_to_source[tensor_value]
             self.static_tensor_names.add(tx.output.module_key_name(source.name()))
         elif tensor_value in self.grad_to_source:
             source = self.grad_to_source[tensor_value]
         else:
             # mark these tensors as static for cudagraphs
-            mark_static_address(tensor_value)
+            mark_static_address(tensor_value, guard=True)
 
             global_name = tx.store_global_weakref_by_id(GLOBAL_KEY_PREFIX, tensor_value)
             source = GlobalWeakRefSource(global_name)
