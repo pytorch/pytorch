@@ -413,14 +413,11 @@ class ViewAndMutationMeta:
 
     # length = # user inputs
     subclass_inp_meta: list[Union[PlainTensorMeta, SubclassCreationMeta]]
-    # So, the full set of outputs to the forward graph looks something like:
-    # (*mutated_inps, *user_outs, *intermediate_bases, *saved_for_bw_tensors)
-    # where the first 3 of those 4 can be subclasses
-    # (but not saved_for_bw tensors, since these are internal to the compiler
-    # and not user visible, so there's no point in wrapping/unwrapping them at runtime).
-    # This list contains subclass information on all of the fw graph outputs
-    # except for saved_for_bw_tensors.
-    subclass_fw_graph_out_meta: list[Union[PlainTensorMeta, SubclassCreationMeta]]
+    # Tuple of (user_outputs_meta, intermediate_bases_meta) used to compute subclass_fw_graph_out_meta
+    _subclass_meta_components: tuple[
+        list[Union[PlainTensorMeta, SubclassCreationMeta]],  # user outputs
+        list[Union[PlainTensorMeta, SubclassCreationMeta]],  # intermediate bases
+    ]
     # length = # backward graph inputs
     subclass_tangent_meta: list[Union[PlainTensorMeta, SubclassCreationMeta]]
     # TODO: we should kill this
@@ -625,6 +622,35 @@ class ViewAndMutationMeta:
         # this information.
         self.num_forward = self.num_forward_returns + self.num_outputs_rng_offset
 
+    @property
+    def subclass_fw_graph_out_meta(self) -> list[Union[PlainTensorMeta, SubclassCreationMeta]]:
+        """
+        Computes subclass metadata for forward graph outputs based on is_train and keep_input_mutations.
+        Forward outputs: (*mutated_inps, *user_outs, *intermediate_bases, *saved_for_bw_tensors)
+        where the first 3 can be subclasses. This property dynamically computes metadata for those 3.
+        """
+        result: list[Union[PlainTensorMeta, SubclassCreationMeta]] = []
+        user_outs_meta, intermediate_bases_meta = self._subclass_meta_components
+
+        # Add mutated inputs based on mode
+        if self.is_train or not self.keep_input_mutations:
+            for i, info in enumerate(self.input_info):
+                if info.mutation_type == MutationType.MUTATED_OUT_GRAPH:
+                    result.append(self.subclass_inp_meta[i])
+        else:
+            for i, info in enumerate(self.input_info):
+                if info.mutates_metadata:
+                    result.append(self.subclass_inp_meta[i])
+
+        # Add user outputs
+        result.extend(user_outs_meta)
+
+        # Add intermediate bases (training only)
+        if self.is_train:
+            result.extend(intermediate_bases_meta)
+
+        return result
+
     def make_runtime_safe(self):
         """
         There are various fields in ViewAndMutationMeta that aren't serializable. This function is called after all tracing
@@ -655,7 +681,12 @@ class ViewAndMutationMeta:
         for inp_meta in self.subclass_inp_meta:
             if isinstance(inp_meta, SubclassCreationMeta):
                 inp_meta.make_runtime_safe()
-        for inp_meta in self.subclass_fw_graph_out_meta:
+        # Process tuple components
+        user_outs_meta, intermediate_bases_meta = self._subclass_meta_components
+        for inp_meta in user_outs_meta:
+            if isinstance(inp_meta, SubclassCreationMeta):
+                inp_meta.make_runtime_safe()
+        for inp_meta in intermediate_bases_meta:
             if isinstance(inp_meta, SubclassCreationMeta):
                 inp_meta.make_runtime_safe()
         for inp_meta in self.subclass_tangent_meta:

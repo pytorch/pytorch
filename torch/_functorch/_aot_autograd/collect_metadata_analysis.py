@@ -859,7 +859,10 @@ from a multi-output view call"
             traced_tangents=traced_tangents,
             traced_tangents_descs=traced_tangents_descs,
             subclass_inp_meta=create_subclass_meta(flat_args),
-            subclass_fw_graph_out_meta=create_subclass_meta(fw_graph_outs),
+            _subclass_meta_components=(
+                create_subclass_meta(flat_f_outs),
+                create_subclass_meta(intermediate_bases),
+            ),
             subclass_tangent_meta=create_subclass_meta(
                 traced_tangents, count_symints=False, with_memory_format=True
             ),
