@@ -46,24 +46,20 @@ These headers are promised to be ABI stable across releases and adhere to a stro
 Unless absolutely necessary, we recommend the high-level C++ API in `torch/csrc/stable`
 which will handle all the rough edges of the C API for the user.
 
-## Migrating your kernel to the Libtorch stable ABI
+## Migrating your kernel to the LibTorch stable ABI
 
-Kernels that wish to use the Libtorch stable ABI must be registered via `STABLE_TORCH_LIBRARY`. For kernels that are registered
-via pybind, before using the stable ABI, it would be useful to migrate to register them via `TORCH_LIBRARY`.
+If you'd like your kernel to be ABI stable with LibTorch, meaning you'd the ability to build for one version and run on another, your kernel must only use the limited stable ABI. This following section goes through some steps of migrating an existing kernel and APIs we imagine you would need to swap over.
 
-Starting from a kernel that is registered via `TORCH_LIBRARY`, we must migrate the registration mechanism to `STABLE_TORCH_LIBRARY` in order to make the extension stable.
+Firstly, instead of registering kernels through `TORCH_LIBRARY`, LibTorch ABI stable kernels must be registered via `STABLE_TORCH_LIBRARY`. Note that, for the time being, implementations registered via `STABLE_TORCH_LIBRARY` must be boxed unlike `TORCH_LIBRARY`. See the simple example below or our docs on [Stack-based APIs](#stack-based-apis) for more details. For kernels that are registered via `pybind`, before using the stable ABI, it would be useful to migrate to register them via `TORCH_LIBRARY`.
 
-While previously your kernels might have included APIs from `<torch/*.h>` (for example, `<torch/all.h>`), they are now limited to including from the 3 categories of headers mentioned above (`torch/csrc/stable/*.h`, `torch/headeronly/*.h` and the stable C headers). This means that your extension can no longer use any utilities from the `at::` or `c10::` namespaces. We provide replacements for the APIs in these namespaces in `torch::stable` and `torch::headeronly`. To provide a couple examples of the necessary migrations:
+While previously your kernels might have included APIs from `<torch/*.h>` (for example, `<torch/all.h>`), they are now limited to including from the 3 categories of headers mentioned above (`torch/csrc/stable/*.h`, `torch/headeronly/*.h` and the stable C headers). This means that your extension should no longer use any utilities from the `at::` or `c10::` namespaces but instead use their replacements in `torch::stable` and `torch::headeronly`. To provide a couple examples of the necessary migrations:
 - all uses of `at::Tensor` must be replaced with `torch::stable::Tensor`
 - all uses of `TORCH_CHECK` must be replaced with `STD_TORCH_CHECK`
 - all uses of `at::kCUDA` must be replaced with `torch::headeronly::kCUDA` etc.
 - native functions such as `at::pad` must be replaced with `torch::stable::pad`
+- native functions that are called as Tensor methods (e.g., `Tensor.pad`) must be replaced with the ATen variant through `torch::stable::pad`. 
 
-Note that for the time being, implementations registered via `TORCH_STABLE_LIBRARY` must be boxed unlike `TORCH_LIBRARY`. See [Stack-based APIs](#stack-based-apis) or and the simple example below for more details.
-
-Note that native functions could previously be called as Tensor methods (e.g. `Tensor.pad`). With the stable ABI this is not currently possible and one must use the `torch::stable::` variant instead (e.g. `torch::stable::pad`).
-
-As mentioned above, the Libtorch stable ABI is still under development. If there is any API you would like to see added to the stable ABI, please file a request through a [new issue on the PyTorch repo](https://github.com/pytorch/pytorch/issues).
+As mentioned above, the LibTorch stable ABI is still under development. If there is any API or feature you would like to see added to the stable ABI/`torch::headeronly`/`torch::stable`, please file a request through a [new issue on the PyTorch repo](https://github.com/pytorch/pytorch/issues).
 
 Below is a simple example of migrating an existing kernel that uses `TORCH_LIBRARY` to the stable ABI (`TORCH_STABLE_LIBRARY`). For a larger end to end example you can take a look at the FA3 repository. Specifically the diff between [`flash_api.cpp`](https://github.com/Dao-AILab/flash-attention/blob/ad70a007e6287d4f7e766f94bcf2f9a813f20f6b/hopper/flash_api.cpp#L1) and the stable variant [`flash_api_stable.cpp`](https://github.com/Dao-AILab/flash-attention/blob/ad70a007e6287d4f7e766f94bcf2f9a813f20f6b/hopper/flash_api_stable.cpp#L1).
 
@@ -77,6 +73,7 @@ Below is a simple example of migrating an existing kernel that uses `TORCH_LIBRA
 
 namespace myops {
 
+// Simple kernel that adds a scalar value to each element of a tensor
 at::Tensor add_scalar(const at::Tensor& input, double scalar) {
   TORCH_CHECK(input.scalar_type() == at::kFloat, "Input must be float32");
 
@@ -144,7 +141,7 @@ STABLE_TORCH_LIBRARY(myops, m) {
 }
 
 // (7) Register CUDA implementation using STABLE_TORCH_LIBRARY_IMPL
-STABLE_TORCH_LIBRARY_IMPL(myops, CUDA, m) {
+STABLE_TORCH_LIBRARY_IMPL(myops, CompositeExplicitAutograd, m) {
   m.impl("add_scalar", &boxed_add_scalar);
 }
 
