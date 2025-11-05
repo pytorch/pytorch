@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import atexit
-import contextlib
 import functools
 import json
 import logging
@@ -14,7 +13,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time, time_ns
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
@@ -60,6 +59,8 @@ from torch.utils._triton import has_triton_package
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch._inductor.runtime.hints import HalideMeta
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
@@ -228,18 +229,6 @@ class CompiledTritonKernels:
             del CompiledTritonKernels._cache[key]
 
 
-@contextlib.contextmanager
-def async_compile_pool_manager():
-    """
-    Context manager to quiesce the subproc pool at the end of compilation, i.e.,
-    when dynamo is done.
-    """
-    try:
-        yield
-    finally:
-        AsyncCompile.quiesce()
-
-
 class AsyncCompile:
     """
     Utilities to compile in thread pools or subprocess pools (in the case of Triton).
@@ -275,7 +264,9 @@ class AsyncCompile:
         pool: AnyPool
         if config.worker_start_method == "subprocess":
             # Wrapper around ProcessPoolExecutor forks in a new process we control
-            pool = SubprocPool(get_compile_threads())
+            pool = SubprocPool(
+                get_compile_threads(), quiesce=config.quiesce_async_compile_pool
+            )
         else:
             if config.worker_start_method == "spawn":
                 # Avoid creating pools in the spawned subprocs themselves:
@@ -330,20 +321,6 @@ class AsyncCompile:
         if not cls._ready_future:
             cls._ready_future = cls.process_pool().submit(cls._get_ready)
         return cls._ready_future.done()
-
-    @classmethod
-    def quiesce(cls) -> None:
-        """
-        If using a SubprocPool, signal the sidecar process to shut down its
-        ProcessPoolExecutor.
-        """
-        # Don't inadvertently create a process pool if it doesn't already exist:
-        if not cls.process_pool.cache_info().currsize:
-            return
-        if config.quiesce_async_compile_pool:
-            pool = cls.process_pool()
-            if isinstance(pool, SubprocPool):
-                pool.quiesce()
 
     @classmethod
     def wakeup(cls) -> None:
@@ -617,6 +594,42 @@ class AsyncCompile:
                 )
 
             return CuteDSLKernelWrapper(getattr(mod, main_func_name), kernel_path=path)
+
+        if get_compile_threads() <= 1:
+            return task()
+        else:
+            future = self.submit(task)
+            return LambdaFuture(lambda: future.result())
+
+    def pallas(self, kernel_name: str, source_code: str):
+        """
+        Compile Pallas (JAX experimental) kernels.
+
+        Args:
+            kernel_name: Name of the kernel to be defined
+            source_code: Source code of the Pallas kernel, as a string
+
+        Note:
+            Pallas kernels are Python code that uses JAX and Pallas APIs.
+            We use the PyCodeCache to write the source code to a file and load it.
+        """
+        from torch._inductor.codegen.pallas import MAIN_SUFFIX, PallasKernelWrapper
+
+        kernel_code_log.info("Pallas Kernel:\n%s", source_code)
+
+        def task():
+            key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
+            mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
+
+            # Find our special entry point named function
+            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
+            if not hasattr(mod, main_func_name):
+                available = [name for name in dir(mod) if callable(getattr(mod, name))]
+                raise RuntimeError(
+                    f"Could not find Pallas main kernel function '{main_func_name}'. Available callables: {available}"
+                )
+
+            return PallasKernelWrapper(getattr(mod, main_func_name), kernel_path=path)
 
         if get_compile_threads() <= 1:
             return task()

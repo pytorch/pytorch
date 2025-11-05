@@ -4,8 +4,8 @@ import functools
 import itertools
 import logging
 import sys
-from collections.abc import Iterable
-from typing import Callable, Optional, Union
+from collections.abc import Callable, Iterable
+from typing import Optional, Union
 from unittest.mock import patch
 
 import sympy

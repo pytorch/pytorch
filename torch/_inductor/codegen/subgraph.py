@@ -1,6 +1,7 @@
 import itertools
 import logging
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Union
 
 import torch
 import torch._inductor.config as config
@@ -211,7 +212,7 @@ class SubgraphTemplate(KernelTemplate):
         decompositions: list[Callable[..., Any]],
         input_nodes: list[Buffer],
         non_tensor_args: list[dict[str, Any]],
-        default_impl: Optional[Callable[..., Any]] = None,
+        default_impl: Callable[..., Any] | None = None,
     ) -> list[SubgraphChoiceCaller]:
         """
         Generate multiple SubgraphChoiceCaller instances for custom op autotuning.
@@ -326,7 +327,7 @@ class SubgraphTemplate(KernelTemplate):
         input_nodes: list[Buffer],
         function_decomposition: Callable[..., Any],
         kwargs: dict[str, Any],
-        default_impl: Optional[Callable[..., Any]] = None,
+        default_impl: Callable[..., Any] | None = None,
     ) -> Layout:
         """Infer output layout for custom ops using the default implementation when available.
         Note that the Subgraph assumes custom ops return exactly one tensor output.
