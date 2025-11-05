@@ -736,6 +736,8 @@ class OutputGraph(OutputGraphCommon):
         # dynamo_flat_name_to_original_fqn mapping.
         self.used_inlined_inbuilt_modules_names: OrderedSet[str] = OrderedSet()
 
+        self.cached_tensor_vts: dict[int, VariableTracker] = {}
+
     def mark_bytecode_tracing_start(self) -> None:
         self.compiler_trace_stack.enter_context(
             dynamo_timed(
@@ -2994,6 +2996,7 @@ class SubgraphTracer(fx.Tracer):
             raise RuntimeError(
                 "Inference mode is supposed to be disabled during compilation. Please open an issue."
             )
+        # self.intermediate_tensor_vts: OrderedSet[VariableTracker] = OrderedSet()
 
     # preserve original meta if it is available
     def _maybe_preserve_original_meta(
@@ -3017,6 +3020,9 @@ class SubgraphTracer(fx.Tracer):
                         node.meta[field] = meta[field]
                 if "stack_trace" in meta:
                     node.meta["stack_trace"] = meta["stack_trace"]
+
+    # def record_tensor_vt(self, vt: VariableTracker) -> None:
+    #     self.intermediate_tensor_vts.add(vt)
 
     def create_proxy(
         self,

@@ -2785,20 +2785,26 @@ def wrap_fx_proxy_cls(
     target_cls, tx, proxy, example_value=None, subclass_type=None, **options
 ):
     if example_value is None:
-        return _wrap_fx_proxy(
+        out = _wrap_fx_proxy(
             target_cls, tx, proxy, example_value, subclass_type, **options
         )
     elif isinstance(example_value, torch.Tensor):
-        return _wrap_fx_preexisting_tensor(
+        out = _wrap_fx_preexisting_tensor(
             target_cls, tx, proxy, example_value, subclass_type, **options
         )
     else:
         # This will skip tracing an op and recursively reinvoke wrap_fx_proxy_cls on supported
         # data structures. In essence this just handles tracing some other value which may
         # contain Fake Tensors or is otherwise proxyable.
-        return handle_traced_output(
+        out = handle_traced_output(
             example_value, tx, proxy, options, subclass_type, target_cls
         )
+
+    # if isinstance(out, torch._dynamo.variables.TensorVariable):
+    #     tx.output.current_tracer.record_tensor_vt(out)
+    #     print("Adding new VT", out, out.proxy, id(out))
+
+    return out
 
 
 # This is 1 above (wrapping a preexisting tensor)
@@ -3159,9 +3165,22 @@ def construct_tensor_variable(
     Actually construct a tensor variable after all the pre-processing from
     wrapping a pre-existing or newly created tensor value.
     """
+    cached_tensor_vts = tx.output.cached_tensor_vts
+
+    if id(example_value) in cached_tensor_vts:
+        saved_vt = cached_tensor_vts[id(example_value)]
+        # Overwrite the existing proxy so that from now on, this VT always uses
+        # the new proxy
+        saved_vt.proxy = proxy
+
+        # Not sure why we need this
+        example_value = _clone_input(example_value, tx.fake_mode)
+        set_example_value(proxy.node, example_value)
+        return saved_vt
     # NB: In most (all?) cases, this does not actually do a clone.
     # (WARNING: this means that if we mutate metadata on the fake
     # tensor, the stored example value will update too!)
+    old_example_value = example_value
     example_value = _clone_input(example_value, tx.fake_mode)
     set_example_value(proxy.node, example_value)
     # We bind the unbacked symints in sizes/trdies of tensor lazily.
@@ -3171,7 +3190,9 @@ def construct_tensor_variable(
     if proxy.node.op != "placeholder":
         tx.output.current_tracer.track_produced_symints(example_value, proxy)
     options.update(get_specialized_props(target_cls, tx, example_value, subclass_type))
-    return target_cls(proxy, **options)
+    out = target_cls(proxy, **options)
+    cached_tensor_vts[id(old_example_value)] = out
+    return out
 
 
 def get_automatic_dynamic_shapes_mark_as():
