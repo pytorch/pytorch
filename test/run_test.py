@@ -785,9 +785,7 @@ def run_test_retries(
             if current_failure == f"'{test_file}'":
                 # Something failed consistently in the entire suite and we don't
                 # know how to skip only that one individual test, so stop here
-                print_to_file(
-                    "Entire suite failed consistently, stopping here"
-                )
+                print_to_file("Entire suite failed consistently, stopping here")
                 break
             sc_command = f"--scs={stepcurrent_key}"
             print_to_file(
