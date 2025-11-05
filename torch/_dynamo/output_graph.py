@@ -2996,7 +2996,7 @@ class SubgraphTracer(fx.Tracer):
             raise RuntimeError(
                 "Inference mode is supposed to be disabled during compilation. Please open an issue."
             )
-        # self.intermediate_tensor_vts: OrderedSet[VariableTracker] = OrderedSet()
+        self.intermediate_tensor_vts: OrderedSet[VariableTracker] = OrderedSet()
 
     # preserve original meta if it is available
     def _maybe_preserve_original_meta(
@@ -3021,8 +3021,8 @@ class SubgraphTracer(fx.Tracer):
                 if "stack_trace" in meta:
                     node.meta["stack_trace"] = meta["stack_trace"]
 
-    # def record_tensor_vt(self, vt: VariableTracker) -> None:
-    #     self.intermediate_tensor_vts.add(vt)
+    def record_tensor_vt(self, vt: VariableTracker) -> None:
+        self.intermediate_tensor_vts.add(vt)
 
     def create_proxy(
         self,

@@ -2800,9 +2800,8 @@ def wrap_fx_proxy_cls(
             example_value, tx, proxy, options, subclass_type, target_cls
         )
 
-    # if isinstance(out, torch._dynamo.variables.TensorVariable):
-    #     tx.output.current_tracer.record_tensor_vt(out)
-    #     print("Adding new VT", out, out.proxy, id(out))
+    if isinstance(out, torch._dynamo.variables.TensorVariable):
+        tx.output.current_tracer.record_tensor_vt(out)
 
     return out
 

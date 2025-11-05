@@ -1030,6 +1030,24 @@ def speculate_subgraph(
                         output, masks_to_filter_const_values
                     )
 
+                output_vts = {
+                    vt
+                    for vt in output.items
+                    if isinstance(vt, variables.TensorVariable)
+                }
+
+                # TODO - this should probably outside of should_flatten_outputs
+                # TODO - I think this will mess up the pytree_unflatten later
+                # on, when we undo the flattening for outputs.
+
+                # Force the extra outputs, the TensorVariable cache in
+                # output_graph.py will rewrite the proxy
+                extra_outputs = []
+                for out in subtracer.intermediate_tensor_vts:
+                    if out not in output_vts:
+                        extra_outputs.append(out)
+                output = TupleVariable(output.items + extra_outputs)
+
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
             # TODO: support pytree output
