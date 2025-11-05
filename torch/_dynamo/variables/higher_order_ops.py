@@ -260,13 +260,16 @@ def _call_function_and_unflatten_output(
         example_value=flat_example_value,
     )
 
-    # Reproxify the tensors to the graph output so that the tensor variables in
-    # the outer frame use the subgraph output.
+    # wrap_fx_proxy creates fresh variable trackers. However, the main program
+    # after the speculate subgraph can still use the original tensor vts that
+    # are still pointing to the nodes present in the subgraph. So, we reproxify
+    # the original tensor vts with the subgraph outputs. This way, whenever the
+    # outer graph uses an original vt, it uses the subgraph output.
     if body_r is not None:
-        for outer_graph_vt, inner_graph_vt in zip(body_r.items, flat_variable.items):
-            if isinstance(outer_graph_vt, variables.TensorVariable):
-                assert isinstance(inner_graph_vt, variables.TensorVariable)
-                outer_graph_vt.proxy = inner_graph_vt.proxy
+        for orig_vt, subgraph_vt in zip(body_r.items, flat_variable.items):
+            if isinstance(orig_vt, variables.TensorVariable):
+                assert isinstance(subgraph_vt, variables.TensorVariable)
+                orig_vt.proxy = subgraph_vt.proxy
 
     if ret_spec.masks_to_filter_const_values:
         from torch._dynamo.external_utils import insert_const_values_with_mask
