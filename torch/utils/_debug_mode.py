@@ -6,7 +6,6 @@ import weakref
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
-from torch._dynamo.device_interface import DeviceInterface
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import (
@@ -14,12 +13,13 @@ from torch.utils._python_dispatch import (
     _get_current_dispatch_mode_stack,
     TorchDispatchMode,
 )
-from torch.utils._pytree import tree_all, tree_map
+from torch.utils._pytree import keystr, tree_all, tree_map
 from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakIdRef
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.device_interface import DeviceInterface
     from torch.distributed._tools.mod_tracker import ModTracker
 
 
@@ -133,6 +133,13 @@ def default_hash_fn(t: torch.Tensor, use_scalar: bool = False) -> torch.Tensor:
         return out
 
 
+def _compute_rel_diff(hash1, hash2):
+    # Relative difference: |hash1 - hash2| / max(|hash1|, |hash2|, eps)
+    numerator = abs(hash1 - hash2)
+    denominator = max(abs(hash1), abs(hash2), 1e-10)
+    return numerator / denominator
+
+
 def _get_stack_trace() -> str:
     from torch.fx.experimental.symbolic_shapes import uninteresting_files
 
@@ -151,6 +158,16 @@ def _maybe_get_autograd_trace() -> Optional[str]:
         if tb:
             return "".join(tb)
     return None
+
+
+def _get_op_name(op) -> str:
+    if isinstance(op, torch._ops.OpOverload):
+        op_name = op.__qualname__
+    elif hasattr(op, "__module__") and hasattr(op, "__name__"):
+        op_name = f"{op.__module__}.{op.__name__}"
+    else:
+        op_name = str(op)
+    return op_name
 
 
 class _DebugCall:
@@ -377,7 +394,9 @@ class _TritonKernelCall(_DebugCall):
         self.pre_hashes: Optional[dict[str, Any]] = None
         self.post_hashes: Optional[dict[str, Any]] = None
 
-    def stringify_args(self, attributes: list[str]) -> None:
+    def stringify_args(
+        self, attributes: list[str], tensor_memo: Optional[TensorIdTracker] = None
+    ) -> None:
         # Optionally hash kernel inputs before launch
         global _TRITON_INPUT_HASH_FN
         if hash_fn := _TRITON_INPUT_HASH_FN:
@@ -388,8 +407,9 @@ class _TritonKernelCall(_DebugCall):
             }
 
         if self.kwargs:
-            self.kwargs_str = ", " + ", ".join(
-                f"{k}={_arg_to_str(v, attributes)}" for k, v in self.kwargs.items()
+            self.kwargs_str = ", ".join(
+                f"{k}={_arg_to_str(v, attributes, tensor_memo)}"
+                for k, v in self.kwargs.items()
             )
         else:
             self.kwargs_str = ""
@@ -416,9 +436,9 @@ class _TritonKernelCall(_DebugCall):
             )
         else:
             post_hashes_str = ""
-        return f"\n{base_str}{pre_hashes_str}{post_hashes_str}\n"
+        return f"{base_str}{pre_hashes_str}{post_hashes_str}\n"
 
-    def finalize(self, device_interface: DeviceInterface):
+    def finalize(self, device_interface: "DeviceInterface"):
         # synchronize -> hash/store kernel results
         # is this correct??
         global _RECORD_TRITON_OUTPUTS, _TRITON_OUTPUT_HASH_FN
@@ -469,6 +489,20 @@ def _run_dispatch_hooks(call: _DebugCall, func, types, args, kwargs, result) -> 
                 log.update(hook_out)
         if log:
             call.log = log
+
+
+def _get_call_name(call: _DebugCall) -> str:
+    """String identifying _DebugCall (e.g. func, kernel, module name)"""
+    if isinstance(call, _OpCall):
+        return _get_op_name(call.op)
+    elif isinstance(call, _TritonKernelCall):
+        return call.kernel_name
+    elif isinstance(call, _NNModuleCall):
+        return call.module_name
+    elif isinstance(call, _RedistributeCall):
+        return REDISTRIBUTE_FUNC
+    else:
+        return str(call)
 
 
 class DebugMode(TorchDispatchMode):
@@ -823,6 +857,160 @@ class DebugMode(TorchDispatchMode):
             yield
         finally:
             _IN_INDUCTOR_BENCHMARK = False
+
+    @property
+    def logs(self):
+        return [op for op in self.operators]
+
+    @staticmethod
+    def check_hash_mismatches(
+        logs1: list, logs2: list, compare_inputs: bool = False
+    ) -> list[dict]:
+        if len(logs1) != len(logs2):
+            raise ValueError(f"Log lengths don't match: {len(logs1)} vs {len(logs2)}")
+
+        difference_info = []
+        for i, (log1, log2) in enumerate(zip(logs1, logs2)):
+            # check call type
+            call1_type = type(log1).__name__
+            call2_type = type(log2).__name__
+            if call1_type != call2_type:
+                raise ValueError(
+                    f"Call types don't match at index {i}: {call1_type} vs {call2_type}"
+                )
+            call_type = call1_type
+
+            # check call name
+            op1_name, op2_name = _get_call_name(log1), _get_call_name(log2)
+            if op1_name != op2_name:
+                raise ValueError(
+                    f"Operator don't match at index {i}: {call_type}[{op1_name}] vs {call_type}[{op2_name}]"
+                )
+            op_name = op1_name
+
+            # check call depth
+            if log1.call_depth != log2.call_depth:
+                raise ValueError(
+                    f"Call depths for {call_type}[{op_name}] don't match at index {i}: {log1.call_depth} vs {log2.call_depth}"
+                )
+
+            # different checks for different call types
+
+            # Redistribute: call args should be the same
+            if isinstance(log1, _RedistributeCall):
+                if tuple(log1) != tuple(log2):
+                    raise ValueError(
+                        f"Redistribute calls don't match at index {i}: {log1} vs {log2}"
+                    )
+
+            # Triton kernel: same arg names, arg types
+            elif isinstance(log1, _TritonKernelCall):
+                if log1.kwargs_str != log2.kwargs_str:
+                    raise ValueError(
+                        f"Triton kernel call args don't match for {log1.kernel_name} at index {i}:\n\nlog1: {log1.kwargs_str}\n\nlog2: {log2.kwargs_str}"
+                    )
+
+                def compare_triton_hashes(hashes1, hashes2, is_input):
+                    assert set(hashes1.keys()) == set(hashes2.keys())  # type: ignore[union-attr]
+                    for key in hashes1.keys():
+                        if hashes1[key] != hashes2[key]:
+                            difference_info.append(
+                                {
+                                    "call_type": "triton kernel",
+                                    "call": op_name,
+                                    "arg_name": key,
+                                    "pytree_path": None,
+                                    "hash1": hashes1[key],
+                                    "hash2": hashes2[key],
+                                    "rel_diff": _compute_rel_diff(
+                                        hashes1[key], hashes2[key]
+                                    ),
+                                    "is_input_hash": is_input,
+                                }
+                            )
+
+                # check output hashes
+                has_post_1, has_post_2 = (
+                    log1.post_hashes is not None,
+                    log2.post_hashes is not None,
+                )
+                if has_post_1 != has_post_2:
+                    raise ValueError(
+                        f"Triton kernel post-hash presence inconsistent for {log1.kernel_name} at index {i}: log1 has post_hashes={has_post_1}, log2 has post_hashes={has_post_2}"
+                    )
+
+                if has_post_1:
+                    compare_triton_hashes(
+                        log1.post_hashes, log2.post_hashes, is_input=False
+                    )
+
+                # maybe check input hashes
+                if compare_inputs:
+                    has_pre_1, has_pre_2 = (
+                        log1.pre_hashes is not None,
+                        log2.pre_hashes is not None,
+                    )
+                    if has_pre_1 != has_pre_2:
+                        raise ValueError(
+                            f"Triton kernel pre-hash presence inconsistent for {log1.kernel_name} at index {i}: log1 has pre_hashes={has_pre_1}, log2 has pre_hashes={has_pre_2}"
+                        )
+
+                    if has_pre_1:
+                        compare_triton_hashes(
+                            log1.pre_hashes, log2.pre_hashes, is_input=True
+                        )
+
+            # regular log calls
+            elif isinstance(log1, _OpCall):
+
+                def compare_op_hashes(hashes1, hashes2, is_input):
+                    def _helper(keypath, hash1, hash2):
+                        if hash1 != hash2:
+                            difference_info.append(
+                                {
+                                    "call_type": "torch op",
+                                    "call": op_name,
+                                    "arg_name": None,
+                                    "pytree_path": keystr(keypath),
+                                    "hash1": hash1,
+                                    "hash2": hash2,
+                                    "rel_diff": _compute_rel_diff(hash1, hash2),
+                                    "is_input_hash": is_input,
+                                }
+                            )
+
+                # check output hashes
+                has_hash1 = log1.log is not None and "hash" in log1.log
+                has_hash2 = log2.log is not None and "hash" in log2.log
+                if has_hash1 != has_hash2:
+                    raise ValueError(
+                        f"Output hash presence inconsistent for triton kernel {call_type}[{op_name}] at index {i}: log1 has hash={has_hash1}, log2 has hash={has_hash2}"
+                    )
+
+                if has_hash1:
+                    compare_op_hashes(
+                        log1.log["hash"],  # type: ignore[union-attr]
+                        log2.log["hash"],
+                        is_input=False,
+                    )
+
+                # maybe check input hashes
+                if compare_inputs:
+                    has_hash1 = log1.log is not None and "input_hash" in log1.log
+                    has_hash2 = log2.log is not None and "input_hash" in log2.log
+                    if has_hash1 != has_hash2:
+                        raise ValueError(
+                            f"Input hash presence inconsistent for triton kernel {call_type}[{op_name}] at index {i}: log1 has input_hash={has_hash1}, log2 has input_hash={has_hash2}"
+                        )
+
+                    if has_hash1:
+                        compare_op_hashes(
+                            log1.log["input_hash"],  # type: ignore[union-attr]
+                            log2.log["input_hash"],
+                            is_input=True,
+                        )
+
+        return difference_info
 
 
 def get_active_debug_mode() -> Optional[DebugMode]:
