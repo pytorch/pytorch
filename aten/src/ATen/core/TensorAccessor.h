@@ -12,16 +12,16 @@
 
 namespace at {
 
-using c10::DefaultPtrTraits;
+using torch::headeronly::DefaultPtrTraits;
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  using c10::RestrictPtrTraits;
+  using torch::headeronly::RestrictPtrTraits;
 #endif
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using TensorAccessorBase = c10::detail::TensorAccessorBase<c10::IntArrayRef, T, N, PtrTraits, index_t>;
+using TensorAccessorBase = torch::headeronly::detail::TensorAccessorBase<c10::IntArrayRef, T, N, PtrTraits, index_t>;
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using TensorAccessor = c10::detail::TensorAccessor<c10::IntArrayRef, T, N, PtrTraits, index_t>;
+using TensorAccessor = torch::headeronly::detail::TensorAccessor<c10::IntArrayRef, T, N, PtrTraits, index_t>;
 
 namespace {
 
@@ -39,10 +39,10 @@ struct IndexBoundsCheck {
 }  // anonymous namespace
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using GenericPackedTensorAccessorBase = c10::detail::GenericPackedTensorAccessorBase<c10::IntArrayRef, T, N, PtrTraits, index_t>;
+using GenericPackedTensorAccessorBase = torch::headeronly::detail::GenericPackedTensorAccessorBase<c10::IntArrayRef, T, N, PtrTraits, index_t>;
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using GenericPackedTensorAccessor = c10::detail::GenericPackedTensorAccessor<c10::IntArrayRef, IndexBoundsCheck<N, index_t>, T, N, PtrTraits, index_t>;
+using GenericPackedTensorAccessor = torch::headeronly::detail::GenericPackedTensorAccessor<c10::IntArrayRef, IndexBoundsCheck<N, index_t>, T, N, PtrTraits, index_t>;
 
 // Can't put this directly into the macro function args because of commas
 #define AT_X GenericPackedTensorAccessor<T, N, PtrTraits, index_t>
