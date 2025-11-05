@@ -921,10 +921,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
 DEFINE_CACHING_PYTHON_IMPORT_GETTER(
     get_dtensor_class_impl,
-    py::module::import("torch")
-        .attr("distributed")
-        .attr("tensor")
-        .attr("DTensor"))
+    py::module::import("torch.distributed.tensor").attr("DTensor"))
 
 py::handle get_dtensor_class() {
   return get_dtensor_class_impl();
@@ -932,50 +929,38 @@ py::handle get_dtensor_class() {
 
 DEFINE_CACHING_PYTHON_IMPORT_GETTER(
     get_dtensor_spec_class,
-    py::module::import("torch")
-        .attr("distributed")
-        .attr("tensor")
+    py::module::import("torch.distributed.tensor")
         .attr("_dtensor_spec")
         .attr("DTensorSpec"))
 
 DEFINE_CACHING_PYTHON_IMPORT_GETTER(
     get_replicate_class,
-    py::module::import("torch")
-        .attr("distributed")
-        .attr("tensor")
+    py::module::import("torch.distributed.tensor")
         .attr("placement_types")
         .attr("Replicate"))
 
 DEFINE_CACHING_PYTHON_IMPORT_GETTER(
     get_tensor_meta_class,
-    py::module::import("torch")
-        .attr("distributed")
-        .attr("tensor")
+    py::module::import("torch.distributed.tensor")
         .attr("_dtensor_spec")
         .attr("TensorMeta"))
 
 DEFINE_CACHING_PYTHON_IMPORT_GETTER(
     get_dtensor_op_dispatcher,
-    py::module::import("torch")
-        .attr("distributed")
-        .attr("tensor")
+    py::module::import("torch.distributed.tensor")
         .attr("DTensor")
         .attr("_op_dispatcher"))
 
 DEFINE_CACHING_PYTHON_IMPORT_GETTER(
     get_dtensor_dispatch,
-    py::module::import("torch")
-        .attr("distributed")
-        .attr("tensor")
+    py::module::import("torch.distributed.tensor")
         .attr("DTensor")
         .attr("_op_dispatcher")
         .attr("_dispatch_fast_path_python_tail"))
 
 DEFINE_CACHING_PYTHON_IMPORT_GETTER(
     get_output_sharding_class,
-    py::module::import("torch")
-        .attr("distributed")
-        .attr("tensor")
+    py::module::import("torch.distributed.tensor")
         .attr("_op_schema")
         .attr("OutputSharding"))
 
@@ -1759,7 +1744,7 @@ static /*DTensorSpec*/ py::object try_replicate_spec_for_scalar_tensor(
   TORCH_CHECK(
       numel_is_one || allow_implicit_replication,
       py::str(op_call),
-      "got mixed torch.Tensor and DTensor, need to convert all torch.Tensor to DTensor before calling distributed operators!");
+      " got mixed torch.Tensor and DTensor, need to convert all torch.Tensor to DTensor before calling distributed operators!");
 
   // scalar tensor can be safely treated as replicated.
   const auto num_placements =
