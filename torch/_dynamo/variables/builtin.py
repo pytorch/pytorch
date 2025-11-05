@@ -773,7 +773,7 @@ class BuiltinVariable(VariableTracker):
 
                     method_name = "__ne__"
                     result.extend(
-                        [
+                        [  # pyrefly: ignore [bad-argument-type]
                             (
                                 (DataPtrVariable, VariableTracker),
                                 lambda tx, a, b, m=method_name: a.call_method(

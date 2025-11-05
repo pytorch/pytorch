@@ -14,6 +14,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_same_tensor_eq(self):
         """Test x.data_ptr() == x.data_ptr() returns True"""
+
         def fn(x):
             return x.data_ptr() == x.data_ptr()
 
@@ -24,6 +25,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_same_tensor_ne(self):
         """Test x.data_ptr() != x.data_ptr() returns False"""
+
         def fn(x):
             return x.data_ptr() != x.data_ptr()
 
@@ -36,6 +38,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_detach_eq(self):
         """Test detach() shares data_ptr (equality)"""
+
         def fn(x):
             return x.data_ptr() == x.detach().data_ptr()
 
@@ -46,6 +49,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_detach_eq_swapped(self):
         """Test detach() shares data_ptr (swapped operands)"""
+
         def fn(x):
             return x.detach().data_ptr() == x.data_ptr()
 
@@ -56,6 +60,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_detach_ne(self):
         """Test detach() shares data_ptr (inequality returns False)"""
+
         def fn(x):
             return x.data_ptr() != x.detach().data_ptr()
 
@@ -66,6 +71,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_view_eq(self):
         """Test view() shares data_ptr"""
+
         def fn(x):
             return x.data_ptr() == x.view_as(x).data_ptr()
 
@@ -76,6 +82,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_view_ne(self):
         """Test view() shares data_ptr (inequality returns False)"""
+
         def fn(x):
             return x.data_ptr() != x.view_as(x).data_ptr()
 
@@ -86,6 +93,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_reshape_eq(self):
         """Test reshape() shares data_ptr when contiguous"""
+
         def fn(x):
             return x.data_ptr() == x.reshape(-1).data_ptr()
 
@@ -96,6 +104,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_transpose_eq(self):
         """Test transpose() shares data_ptr (creates view)"""
+
         def fn(x):
             return x.data_ptr() == x.t().data_ptr()
 
@@ -108,6 +117,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_clone_eq(self):
         """Test clone() has different data_ptr (equality returns False)"""
+
         def fn(x):
             return x.data_ptr() == x.clone().data_ptr()
 
@@ -118,6 +128,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_clone_ne(self):
         """Test clone() has different data_ptr (inequality returns True)"""
+
         def fn(x):
             return x.data_ptr() != x.clone().data_ptr()
 
@@ -128,6 +139,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_different_tensors_eq(self):
         """Test different tensors have different data_ptr (equality)"""
+
         def fn(x, y):
             return x.data_ptr() == y.data_ptr()
 
@@ -139,6 +151,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_different_tensors_ne(self):
         """Test different tensors have different data_ptr (inequality)"""
+
         def fn(x, y):
             return x.data_ptr() != y.data_ptr()
 
@@ -152,6 +165,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_eq_int_parameter(self):
         """Test data_ptr() == with int parameter (matching)"""
+
         def fn(x, ptr_value):
             return x.data_ptr() == ptr_value
 
@@ -164,6 +178,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_eq_int_parameter_swapped(self):
         """Test data_ptr() == with int parameter (swapped operands)"""
+
         def fn(x, ptr_value):
             return ptr_value == x.data_ptr()
 
@@ -176,6 +191,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_ne_int_parameter_matching(self):
         """Test data_ptr() != with int parameter (matching pointer)"""
+
         def fn(x, ptr_value):
             return x.data_ptr() != ptr_value
 
@@ -188,6 +204,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_ne_int_parameter_different(self):
         """Test data_ptr() != with int parameter (different value)"""
+
         def fn(x, ptr_value):
             return x.data_ptr() != ptr_value
 
@@ -200,6 +217,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_ne_int_parameter_swapped(self):
         """Test data_ptr() != with int parameter (swapped operands)"""
+
         def fn(x, ptr_value):
             return ptr_value != x.data_ptr()
 
@@ -212,6 +230,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_eq_int_constant(self):
         """Test data_ptr() == with int constant"""
+
         def fn(x):
             return x.data_ptr() == 99999
 
@@ -222,6 +241,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_method_as_argument(self):
         """Test passing torch.Tensor.data_ptr method as function argument"""
+
         def fn(x, data_ptr_method):
             return x.data_ptr() == data_ptr_method(x)
 
@@ -234,6 +254,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_method_as_argument_ne(self):
         """Test passing torch.Tensor.data_ptr method as function argument with !="""
+
         def fn(x, y, data_ptr_method):
             return data_ptr_method(x) != data_ptr_method(y)
 
@@ -249,6 +270,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_full_slice_eq(self):
         """Test full slice x[:] shares data_ptr with x"""
+
         def fn(x):
             return x.data_ptr() == x[:].data_ptr()
 
@@ -259,6 +281,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_partial_slice_ne(self):
         """Test partial slice x[5:] has different data_ptr (different first element)"""
+
         def fn(x):
             return x.data_ptr() != x[5:].data_ptr()
 
@@ -269,6 +292,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_matrix_columns_ne(self):
         """Test different columns have different data_ptr (different first element)"""
+
         def fn(x):
             return x[:, 0].data_ptr() != x[:, 1].data_ptr()
 
@@ -281,6 +305,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_empty_tensors_eq(self):
         """Test two empty tensors both have data_ptr() == 0"""
+
         def fn(x, y):
             return x.data_ptr() == y.data_ptr()
 
@@ -292,6 +317,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_empty_vs_nonempty_ne(self):
         """Test empty vs non-empty tensor have different data_ptr"""
+
         def fn(x, y):
             return x.data_ptr() != y.data_ptr()
 
@@ -305,6 +331,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_mixed_eq_ne_operators(self):
         """Test mixing == and != operators in same function"""
+
         def fn(x):
             detached = x.detach()
             cloned = x.clone()
@@ -336,6 +363,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_chained_comparisons(self):
         """Test storing data_ptr() results and chaining comparisons"""
+
         def fn(x):
             a = x.data_ptr()
             b = x.detach().data_ptr()
@@ -350,6 +378,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_with_other_checks(self):
         """Test data_ptr() combined with stride and shape checks"""
+
         def fn(x):
             original = x
             detached = x.detach()
@@ -369,6 +398,7 @@ class DataPtrTests(TestCase):
 
     def test_data_ptr_no_graph_break(self):
         """Ensure data_ptr() comparisons don't cause graph breaks"""
+
         def fn(x):
             return x.data_ptr() == x.detach().data_ptr()
 
@@ -382,6 +412,7 @@ class DataPtrTests(TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_data_ptr_cuda(self):
         """Test data_ptr() comparisons work on CUDA tensors"""
+
         def fn(x):
             return (
                 x.data_ptr() == x.detach().data_ptr()

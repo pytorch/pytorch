@@ -88,7 +88,7 @@ def _data_ptr_functional_impl(mode: FunctionalTensorMode, tensor: Any) -> int:
 #
 # This avoids issues with polyfill's cmp_ne doing `not cmp_eq(a, b)` which causes
 # guard errors when the result is a tensor.
-_data_ptr_cmp_lib = torch.library.Library("_dynamo_data_ptr", "DEF")
+_data_ptr_cmp_lib = torch.library.Library("_dynamo_data_ptr", "DEF")  # noqa: TOR901
 
 _data_ptr_cmp_lib.define("eq(Tensor self, int ptr_value) -> Tensor")
 _data_ptr_cmp_lib.define("ne(Tensor self, int ptr_value) -> Tensor")
