@@ -1307,7 +1307,7 @@ endif()
 
 if(USE_MKLDNN_ACL)
   find_package(ACL REQUIRED)
-  target_include_directories(torch_cpu PRIVATE ${ACL_INCLUDE_DIRS})
+  target_include_directories(torch_cpu SYSTEM PRIVATE ${ACL_INCLUDE_DIRS})
 endif()
 
 target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
