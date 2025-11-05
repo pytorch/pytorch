@@ -1,12 +1,13 @@
 import os
+import shutil
 import traceback
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 from enum import Enum
+from functools import wraps
 from logging import getLogger
-from typing import Optional, TypeVar
+from typing import Optional, ParamSpec, TypeVar
 
 import torch
 from torch._utils_internal import signpost_event
@@ -14,7 +15,8 @@ from torch._utils_internal import signpost_event
 
 __all__ = [
     "AffinityMode",
-    "maybe_temporarily_apply_numa_binding_to_current_thread",
+    "maybe_wrap_command_args_with_numa_binding",
+    "maybe_wrap_with_numa_binding",
     "NumaOptions",
 ]
 
@@ -39,7 +41,7 @@ class NumaOptions:
 
     """
     If true, we will fall back to using the original command/entrypoint if we fail to compute
-    or apply NUMA bindings.
+    NUMA bindings.
 
     You should avoid using this option! It is only intended as a safety mechanism for facilitating
     mass rollouts of numa binding.
@@ -47,57 +49,122 @@ class NumaOptions:
     should_fall_back_if_binding_fails: bool = False
 
 
-@contextmanager
-def maybe_temporarily_apply_numa_binding_to_current_thread(
-    *, gpu_index: int, numa_options: Optional[NumaOptions]
-) -> Iterator[None]:
+def maybe_wrap_command_args_with_numa_binding(
+    command_args: tuple[str, ...],
+    *,
+    gpu_index: int,
+    numa_options: Optional[NumaOptions],
+) -> tuple[str, ...]:
     """
-    1. Applies NUMA binding to the current thread, suitable for the thread
-    which will be interacting with GPU gpu_index.
-    2. Resets to the original CPU affinity before exiting the context manager.
+    Wraps command arguments with numactl to apply NUMA CPU binding.
+
+    This function prepends numactl with appropriate CPU affinity flags to the
+    provided command arguments, binding the process to CPUs associated with
+    the specified GPU's NUMA node.
+
+    Args:
+        command_args: The original command arguments to wrap.
+        gpu_index: The index of the GPU that will be used by the subprocess.
+        numa_options: Configuration for NUMA binding behavior. If None, returns
+            the original command_args unchanged.
+
+    Returns:
+        Tuple of command arguments, potentially wrapped with numactl for NUMA binding.
+        Returns the original command_args if numa_options is None or if binding fails
+        and fallback is enabled.
     """
     if numa_options is None:
-        yield
-        return
+        return command_args
 
-    original_logical_cpu_indices = _get_allowed_cpu_indices_for_current_thread()
-    _apply_numa_binding_to_current_thread(
-        gpu_index=gpu_index, numa_options=numa_options
-    )
-    yield
-    _bind_current_thread_to_logical_cpus(
-        logical_cpu_indices=original_logical_cpu_indices
-    )
+    kwargs = {
+        "command_args": command_args,
+        "gpu_index": gpu_index,
+        "numa_options": asdict(numa_options),
+    }
+
+    try:
+        logical_cpu_indices = _get_validated_logical_cpus_to_bind_to(
+            gpu_index=gpu_index,
+            numa_options=numa_options,
+        )
+
+        wrapped_command_args = _assemble_numactl_command_args(
+            original_command_args=command_args,
+            logical_cpu_indices=logical_cpu_indices,
+        )
+        signpost_event(
+            category="numa_binding",
+            name="apply_success",
+            parameters={
+                **kwargs,
+                "wrapped_command": wrapped_command_args,
+            },
+        )
+        return wrapped_command_args
+    except Exception:
+        # pyrefly: ignore [bad-argument-type]
+        _handle_exception(numa_options=numa_options, logger_kwargs=kwargs)
+        return command_args
 
 
-def _apply_numa_binding_to_current_thread(
+_TParams = ParamSpec("_TParams")
+_TReturn = TypeVar("_TReturn")
+
+
+def maybe_wrap_with_numa_binding(
+    func: Callable[_TParams, _TReturn],
+    *,
+    gpu_index: int,
+    numa_options: Optional[NumaOptions],
+) -> Callable[_TParams, _TReturn]:
+    """
+    Wraps a function to apply NUMA CPU binding before execution.
+
+    This decorator applies NUMA CPU affinity to all threads in the current process
+    before calling the wrapped function, binding them to CPUs associated with the
+    specified GPU's NUMA node.
+
+    Args:
+        func: The function to wrap with NUMA binding.
+        gpu_index: The index of the GPU that will be used.
+        numa_options: Configuration for NUMA binding behavior. If None, returns
+            the original function unchanged.
+
+    Returns:
+        A wrapped function that applies NUMA binding before execution, or the
+        original function if numa_options is None.
+    """
+    if numa_options is None:
+        return func
+
+    @wraps(func)
+    def wrapped(*args: _TParams.args, **kwargs: _TParams.kwargs) -> _TReturn:
+        _maybe_apply_numa_binding_to_current_process(
+            gpu_index=gpu_index,
+            # pyrefly: ignore [bad-argument-type]
+            numa_options=numa_options,
+        )
+        return func(*args, **kwargs)
+
+    return wrapped
+
+
+def _maybe_apply_numa_binding_to_current_process(
     *, gpu_index: int, numa_options: NumaOptions
 ) -> None:
     kwargs = {
         "gpu_index": gpu_index,
         "numa_options": asdict(numa_options),
     }
-    logger.info("Attempting to apply NUMA binding, given input %r", kwargs)
 
     try:
-        logical_cpu_indices = _get_logical_cpus_to_bind_to(
-            gpu_index=gpu_index, numa_options=numa_options
-        )
-        logger.info(
-            "Computed logical_cpu_indices=%s for NUMA binding",
-            _get_ranges_str_from_ints(logical_cpu_indices),
+        logical_cpu_indices = _get_validated_logical_cpus_to_bind_to(
+            gpu_index=gpu_index,
+            numa_options=numa_options,
         )
 
-        _raise_if_logical_cpu_indices_invalid(logical_cpu_indices=logical_cpu_indices)
-        logger.info(
-            "Validated logical_cpu_indices=%s for NUMA binding",
-            _get_ranges_str_from_ints(logical_cpu_indices),
-        )
-
-        _bind_current_thread_to_logical_cpus(logical_cpu_indices=logical_cpu_indices)
-        logger.info(
-            "Successfully bound to logical_cpu_indices=%s for NUMA binding",
-            _get_ranges_str_from_ints(logical_cpu_indices),
+        _bind_all_threads_in_current_process_to_logical_cpus(
+            logical_cpu_indices=logical_cpu_indices
         )
 
         signpost_event(
@@ -109,33 +176,92 @@ def _apply_numa_binding_to_current_thread(
             },
         )
     except Exception:
-        signpost_event(
-            category="numa_binding",
-            name="apply_exception",
-            parameters={
-                **kwargs,
-                "traceback": traceback.format_exc(),
-            },
+        # pyrefly: ignore [bad-argument-type]
+        _handle_exception(numa_options=numa_options, logger_kwargs=kwargs)
+
+
+def _assemble_numactl_command_args(
+    *, original_command_args: tuple[str, ...], logical_cpu_indices: set[int]
+) -> tuple[str, ...]:
+    return (
+        "numactl",
+        f"--physcpubind={_get_ranges_str_from_ints(logical_cpu_indices)}",
+        *original_command_args,
+    )
+
+
+def _handle_exception(
+    *, numa_options: NumaOptions, logger_kwargs: dict[str, object]
+) -> None:
+    signpost_event(
+        category="numa_binding",
+        name="apply_exception",
+        parameters={
+            **logger_kwargs,
+            "traceback": traceback.format_exc(),
+        },
+    )
+    logger.exception("Failed to apply NUMA binding for input=%r", logger_kwargs)
+    if numa_options.should_fall_back_if_binding_fails:
+        logger.warning(
+            "Continuing executing without applying NUMA binding, despite exception %s",
+            traceback.format_exc(),
         )
-        logger.exception("Failed to apply NUMA binding for input=%r", kwargs)
-        if numa_options.should_fall_back_if_binding_fails:
-            logger.warning(
-                "Continuing executing without applying NUMA binding, despite exception %s",
-                traceback.format_exc(),
-            )
-            return None
-        raise
+        return
+    # This function is called within an except block, so silence the warning
+    # about raise without an exception.
+    raise  # noqa: PLE0704
 
 
-def _raise_if_logical_cpu_indices_invalid(*, logical_cpu_indices: set[int]) -> None:
+def _get_validated_logical_cpus_to_bind_to(
+    *,
+    gpu_index: int,
+    numa_options: NumaOptions,
+) -> set[int]:
+    logical_cpu_indices = _get_logical_cpus_to_bind_to(
+        gpu_index=gpu_index, numa_options=numa_options
+    )
+    _raise_if_binding_invalid(logical_cpu_indices=logical_cpu_indices)
+
+    return logical_cpu_indices
+
+
+def _raise_if_binding_invalid(*, logical_cpu_indices: set[int]) -> None:
+    # NOTE: numactl CLI is only actually necessary for the str entrypoint path,
+    # but for simplicity we will just check it no matter what.
+    if shutil.which("numactl") is None:
+        raise RuntimeError("numactl CLI is required for NUMA binding")
+
     if not logical_cpu_indices:
         raise RuntimeError("Must bind to a non-empty set of CPU indices")
 
 
-def _bind_current_thread_to_logical_cpus(*, logical_cpu_indices: set[int]) -> None:
-    # 0 represents the current thread
-    # pyrefly: ignore  # missing-attribute
+def _bind_all_threads_in_current_process_to_logical_cpus(
+    *, logical_cpu_indices: set[int]
+) -> None:
+    # Save the original affinity of the main thread before changing it
+    # pyrefly: ignore [missing-attribute]
+    original_main_thread_affinity = os.sched_getaffinity(0)  # type: ignore[attr-defined]
+
+    # 0 represents the current thread.
+    # This is outside the try/except because the main thread should always bind successfully.
+    # pyrefly: ignore [missing-attribute]
     os.sched_setaffinity(0, logical_cpu_indices)  # type: ignore[attr-defined]
+
+    for tid_str in os.listdir("/proc/self/task"):
+        try:
+            tid = int(tid_str)
+            # pyrefly: ignore [missing-attribute]
+            tid_affinity = os.sched_getaffinity(tid)  # type: ignore[attr-defined]
+
+            # Defensive check to ensure we do not overwrite affinity on any threads
+            # that have already had their affinity set elsewhere.
+            if tid_affinity == original_main_thread_affinity:
+                # pyrefly: ignore [missing-attribute]
+                os.sched_setaffinity(tid, logical_cpu_indices)  # type: ignore[attr-defined]
+        except Exception:
+            # Thread may have exited or otherwise become invalid
+            pass
 
 
 def _get_logical_cpus_to_bind_to(
@@ -545,5 +671,5 @@ def _get_numa_node_indices_for_socket_index(*, socket_index: int) -> set[int]:
 
 def _get_allowed_cpu_indices_for_current_thread() -> set[int]:
     # 0 denotes current thread
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     return os.sched_getaffinity(0)  # type:ignore[attr-defined]

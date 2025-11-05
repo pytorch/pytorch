@@ -167,6 +167,14 @@ def _pack_fp8_wrap(x):
     if not x.dtype.is_floating_point:
         return x
 
+    if type(x) is not torch.Tensor:
+        # Check only during compilation
+        # Test calls hooks to get reference output
+        ctx = torch._functorch._aot_autograd.graph_compile._get_saved_tensor_hook_context()
+        assert ctx["_fw_graph"] is not None
+        assert ctx["_bw_graph"] is not None
+        assert ctx["_node"] is not None
+
     return (x.dtype, x.to(torch.float8_e5m2))
 
 
@@ -176,6 +184,13 @@ def _unpack_fp8_wrap(x):
         return x
 
     dtype, tensor = x
+    if type(tensor) is not torch.Tensor:
+        # Check only during compilation
+        # Test calls hooks to get reference output
+        ctx = torch._functorch._aot_autograd.graph_compile._get_saved_tensor_hook_context()
+        assert ctx["_fw_graph"] is not None
+        assert ctx["_bw_graph"] is not None
+        assert ctx["_node"] is not None
     return tensor.to(dtype)
 
 
@@ -6399,7 +6414,7 @@ def forward(self, primals_1, primals_2, primals_3):
 
         # Important pieces of the graph:
         # - 4 total dense outputs.
-        #   This corresponds to the fact that each user fwd inpt (a, b)
+        #   This corresponds to the fact that each user fwd input (a, b)
         #   will get a gradient that is a TwoTensor subclass,
         #   so (mul_2, mul_3) will be wrapped into a.grad
         #   and (div_1, div_2) will be wrapped into b.grad
@@ -7356,7 +7371,6 @@ metadata incorrectly.
         aot_eager = torch.compile(backend="aot_eager")(fn)(x)
         self.assertEqual(eager, aot_eager, atol=0, rtol=0)
 
-    @unittest.expectedFailure
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_rms_norm(self):
         # Only CUDA rms norm fails to be decomposed
@@ -7555,7 +7569,7 @@ metadata incorrectly.
             (_inp, _tg3),
         ]
 
-        for i, (inp_fn, tg_fn) in enumerate(TEST_CASES):
+        for inp_fn, tg_fn in TEST_CASES:
             ref_x = inp_fn()
             x = ref_x.detach().clone().requires_grad_()
 
@@ -8395,7 +8409,7 @@ aot_autograd_module_failures = set(
         # implementation not traceable or that there is a bug in AOTAutograd.
         torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.eq compares a mask input
         # to a causal mask tensor, to see if Boolean is_causal should be set
-        # for TrnasformerEncoder layers, MHA and sdp custom kernels
+        # for TransformerEncoder layers, MHA and sdp custom kernels
         torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input
         # to a causal mask tensor, to see if Boolean is_causal should be set
         # for TransformerEncoder layers, MHA and sdp custom kernels

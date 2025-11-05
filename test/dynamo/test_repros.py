@@ -5760,7 +5760,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(func(x, 0), opt_func(x, 0))
 
     def test_grad(self):
-        # Write to `grad` or `_grad` should reflecte in reading from the other,
+        # Write to `grad` or `_grad` should reflective in reading from the other,
         # and should be codegen-ed.
         def fn(x, y):
             x._grad = y + 1

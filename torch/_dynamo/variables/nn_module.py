@@ -796,6 +796,10 @@ class NNModuleVariable(VariableTracker):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             return ConstantVariable.create(len(module))
+        elif name == "__iter__":
+            return ListIteratorVariable(
+                self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
+            )
         elif (
             name == "__contains__"
             and isinstance(module, (torch.nn.ModuleDict, torch.nn.ParameterDict))
