@@ -375,7 +375,7 @@ static py::object dispatch_on_subclass(
       }
     }
 
-    if (is_dtensor(arg)) {
+    if (!is_torch_function && is_dtensor(arg)) {
       if (opt_op && opt_stack) {
         ret = dispatchDTensorOp(
             *opt_op, torch_api_function, args, kwargs, opt_stack);
