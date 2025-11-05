@@ -17,13 +17,14 @@ using torch::headeronly::DefaultPtrTraits;
   using torch::headeronly::RestrictPtrTraits;
 #endif
 
+
 // The _ArrayRefCls argument is used to workaround an icx issue of not
 // recognizing c10::ArrayRef as a template.
-template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t, typename _ArrayRefCls=c10::IntArrayRef>
-using TensorAccessorBase = torch::headeronly::detail::TensorAccessorBase<_ArrayRefCls, T, N, PtrTraits, index_t>;
+template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+using TensorAccessorBase = torch::headeronly::detail::TensorAccessorBase<c10::ArrayRef, T, N, PtrTraits, index_t>;
 
-template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t, typename _ArrayRefCls=c10::IntArrayRef>
-using TensorAccessor = torch::headeronly::detail::TensorAccessor<_ArrayRefCls, T, N, PtrTraits, index_t>;
+template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+using TensorAccessor = torch::headeronly::detail::TensorAccessor<c10::ArrayRef, T, N, PtrTraits, index_t>;
 
 namespace {
 
@@ -40,11 +41,11 @@ struct IndexBoundsCheck {
 };
 }  // anonymous namespace
 
-template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t, typename _ArrayRefCls=c10::IntArrayRef>
-using GenericPackedTensorAccessorBase = torch::headeronly::detail::GenericPackedTensorAccessorBase<_ArrayRefCls, T, N, PtrTraits, index_t>;
+template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+using GenericPackedTensorAccessorBase = torch::headeronly::detail::GenericPackedTensorAccessorBase<IndexBoundsCheck<N, index_t>, T, N, PtrTraits, index_t>;
 
-template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t, typename _ArrayRefCls=c10::IntArrayRef>
-using GenericPackedTensorAccessor = torch::headeronly::detail::GenericPackedTensorAccessor<_ArrayRefCls, IndexBoundsCheck<N, index_t>, T, N, PtrTraits, index_t>;
+template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+using GenericPackedTensorAccessor = torch::headeronly::detail::GenericPackedTensorAccessor<c10::ArrayRef, IndexBoundsCheck<N, index_t>, T, N, PtrTraits, index_t>;
 
 // Can't put this directly into the macro function args because of commas
 #define AT_X GenericPackedTensorAccessor<T, N, PtrTraits, index_t>
