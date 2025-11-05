@@ -46,17 +46,26 @@ reorder_sink_runtime_estimations_non_comm_mult: float = 1.0
 # when overlap_comp >= (1 + extra_overlap_ratio) * comm_time
 # Allows to configure more aggressive overlap
 reorder_iterative_extra_comm_comp_overlap: float = 0.5
+# The sink waits reordering will stop to reorder
+# when overlap_comp >= (1 + extra_overlap_ratio) * comm_time
+# Allows to configure more aggressive sink waits
+sink_iterative_extra_comm_comp_overlap: float = 0.5
 
 # Allow reorder iterative pass to increase peak memory
 # up to peak_memory_before_pass * (1 + budget)
 reorder_iterative_peak_memory_budget: float = 0.2
+# Allow sink waits iterative pass to increase peak memory
+# up to peak_memory_before_pass * (1 + budget)
+sink_iterative_peak_memory_budget: float = 0.2
 
 # Experimental unsafe configuration that allows changing relative collectives order.
 # Must be used with runtime_estimations_align_across_all_distributed_ranks = True
 reorder_iterative_unsafe_collectives_reorder: bool = True
+sink_waits_iterative_unsafe_collectives_reorder: bool = True
 
 # Allow group and move other collectives during reordering
 reorder_iterative_group_with_collectives: bool = False
+sink_waits_iterative_swap_with_collectives: bool = False
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])
