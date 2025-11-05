@@ -12,7 +12,7 @@ import queue
 import torch
 from torch._utils import ExceptionWrapper
 
-from . import MP_STATUS_CHECK_INTERVAL
+from . import STATUS_CHECK_INTERVAL
 
 
 def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device) -> None:
@@ -25,7 +25,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device) -> None
 
     def do_one_step() -> None:
         try:
-            r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
+            r = in_queue.get(timeout=STATUS_CHECK_INTERVAL)
         except queue.Empty:
             return
         idx, data = r
@@ -39,7 +39,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device) -> None
             r = (idx, data)
         while not done_event.is_set():
             try:
-                out_queue.put(r, timeout=MP_STATUS_CHECK_INTERVAL)
+                out_queue.put(r, timeout=STATUS_CHECK_INTERVAL)
                 break
             except queue.Full:
                 continue

@@ -20,7 +20,7 @@ and Python will eventually call the handler registered below
 call checks all registered worker pids and raise proper error message to
 prevent main process from hanging waiting for data from worker.
 
-Additionally, at the beginning of each worker's `_utils.worker._worker_loop`,
+Additionally, at the beginning of each worker's `_utils.worker._process_worker_loop`,
 `_set_worker_signal_handlers` is called to register critical signal handlers
 (e.g., for SIGSEGV, SIGBUS, SIGFPE, SIGTERM) in C, which just prints an error
 message to stderr before triggering the default handler. So a message will also
