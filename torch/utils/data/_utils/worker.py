@@ -16,7 +16,7 @@ from typing import Optional, TYPE_CHECKING
 import torch
 from torch._utils import ExceptionWrapper
 
-from . import HAS_NUMPY, IS_WINDOWS, MP_STATUS_CHECK_INTERVAL, signal_handling
+from . import HAS_NUMPY, IS_WINDOWS, STATUS_CHECK_INTERVAL, signal_handling
 
 
 if TYPE_CHECKING:
@@ -76,30 +76,23 @@ _worker_info: Optional["WorkerInfo"] = None
 _thread_local_worker_info = threading.local()
 
 
+@dataclass(frozen=True)
 class WorkerInfo:
+    """Information about the current DataLoader worker process or thread.
+
+    Attributes:
+        id: The current worker id (0 to num_workers - 1)
+        num_workers: Total number of workers
+        seed: Random seed set for this worker
+        dataset: Copy of the dataset object in this worker
+        rng: RNG state container (set for thread workers only)
+    """
+
     id: int
     num_workers: int
     seed: int
     dataset: "Dataset"
-    __initialized = False
-
-    def __init__(self, **kwargs) -> None:
-        for k, v in kwargs.items():
-            if v is not None:
-                setattr(self, k, v)
-        self.__keys = tuple(kwargs.keys())
-        self.__initialized = True
-
-    def __setattr__(self, key, val) -> None:
-        if self.__initialized:
-            raise RuntimeError(
-                f"Cannot assign attributes to {self.__class__.__name__} objects"
-            )
-        return super().__setattr__(key, val)
-
-    def __repr__(self) -> str:
-        items = [f"{k}={getattr(self, k)}" for k in self.__keys]
-        return f"{self.__class__.__name__}({', '.join(items)})"
+    rng: Optional["_RNG"] = None
 
 
 def get_worker_info() -> WorkerInfo | None:
@@ -148,6 +141,24 @@ class _ResumeIteration:
     """Dummy class used to resume the fetching when worker reuse is enabled"""
 
     seed: int | None = None
+
+
+@dataclass(frozen=True)
+class _RNG:
+    """Container for thread-local random number generator state.
+
+    Used by thread workers to maintain separate RNG state per worker thread
+    to avoid race conditions.
+
+    Attributes:
+        random_generator: Python random.Random generator for this thread
+        torch_generator: PyTorch Generator for this thread
+        numpy_generator: NumPy Generator for this thread (None if numpy not available)
+    """
+
+    random_generator: random.Random
+    torch_generator: torch.Generator
+    numpy_generator: Optional[object] = None
 
 
 # The function `_generate_state` is adapted from `numpy.random.SeedSequence`
@@ -232,33 +243,6 @@ def _generate_state(base_seed, worker_id):
     return state
 
 
-def deep_copy_transforms(dataset, worker_id=None):
-    # Create a shallow copy of the dataset, then deep copy transforms
-    thread_dataset = copy.copy(dataset)
-
-    # Common transform attribute names to deep copy
-    transform_attrs = ["transform", "target_transform"]
-
-    try:
-        for attr_name in transform_attrs:
-            if hasattr(dataset, attr_name):
-                original_transform = getattr(dataset, attr_name)
-                if original_transform is not None:
-                    copied_transform = copy.deepcopy(original_transform)
-                    setattr(thread_dataset, attr_name, copied_transform)
-    except Exception as e:
-        import warnings
-
-        worker_prefix = f"Thread {worker_id}: " if worker_id is not None else ""
-        warnings.warn(
-            f"{worker_prefix}Failed to deep copy transform attributes ({e}). "
-            "Transforms may not be thread-safe. Consider implementing custom __deepcopy__ "
-            "method for your transform objects.",
-            RuntimeWarning,
-        )
-    return thread_dataset
-
-
 def _base_worker_loop(
     dataset_kind,
     dataset,
@@ -276,8 +260,7 @@ def _base_worker_loop(
     shared_rng=None,
     is_process=True,
     watchdog_constructor=None,
-    error_prefix="worker process",
-):
+ ) -> None:
     """
     Base worker loop with common functionality for both process and thread workers.
     """
@@ -288,6 +271,7 @@ def _base_worker_loop(
 
         init_exception = None
 
+        error_prefix = "worker process" if is_process else "worker thread"
         try:
             if init_fn is not None:
                 init_fn(worker_id)
@@ -314,7 +298,7 @@ def _base_worker_loop(
         # Main worker loop
         while watchdog is None or watchdog.is_alive():
             try:
-                r = index_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
+                r = index_queue.get(timeout=STATUS_CHECK_INTERVAL)
             except queue.Empty:
                 continue
             if isinstance(r, _ResumeIteration):
@@ -381,16 +365,10 @@ def _base_worker_loop(
             del data, idx, index, r  # save memory
     except KeyboardInterrupt:
         # Main process will raise KeyboardInterrupt anyways.
-        # TODO: Does this make sense for thread ?
         pass
 
-    # Process-specific cleanup
-    if is_process and done_event.is_set():
-        data_queue.cancel_join_thread()
-        data_queue.close()
 
-
-def _worker_loop(
+def _process_worker_loop(
     dataset_kind,
     dataset,
     index_queue,
@@ -465,8 +443,11 @@ def _worker_loop(
         shared_rng=shared_rng,
         is_process=True,
         watchdog_constructor=ManagerWatchdog,
-        error_prefix="worker process",
     )
+
+    if done_event.is_set():
+        data_queue.cancel_join_thread()
+        data_queue.close()
 
 
 def _thread_worker_loop(
@@ -496,28 +477,30 @@ def _thread_worker_loop(
     # Thread-local RNG setup to avoid race conditions with global state
     seed = base_seed + worker_id
 
-    thread_rng = threading.local()
-
     # Set up thread-local random generators
-    thread_rng.random_state = random.Random(seed)
-    thread_rng.torch_generator = torch.Generator()
-    thread_rng.torch_generator.manual_seed(seed)
+    random_generator = random.Random(seed)
+    torch_generator = torch.Generator()
+    torch_generator.manual_seed(seed)
 
+    numpy_generator = None
     if HAS_NUMPY:
         np_seed = _generate_state(base_seed, worker_id)
         import numpy as np
 
-        thread_rng.numpy_generator = np.random.default_rng(np_seed)
+        numpy_generator = np.random.default_rng(np_seed)
 
-    # Deep copy the dataset's transforms to avoid race conditions and shared state issues
-    dataset = deep_copy_transforms(dataset, worker_id)
+    rng = _RNG(
+        random_generator=random_generator,
+        torch_generator=torch_generator,
+        numpy_generator=numpy_generator,
+    )
 
     worker_info = WorkerInfo(
         id=worker_id,
         num_workers=num_workers,
         seed=seed,
         dataset=dataset,
-        thread_rng=thread_rng,  # not set for process workers
+        rng=rng,  # not set for process workers
     )
 
     _thread_local_worker_info.worker_info = worker_info
@@ -539,5 +522,4 @@ def _thread_worker_loop(
         persistent_workers=persistent_workers,
         is_process=False,
         watchdog_constructor=None,  # No watchdog needed for threads
-        error_prefix="worker thread",
     )
