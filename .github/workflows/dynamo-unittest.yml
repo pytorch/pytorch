@@ -38,7 +38,7 @@ jobs:
       opt_out_experiments: lf
 
   dynamo-build:
-    name: dynamo-build-py3.11
+    name: dynamo-build-py3_11
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     # strategy:
@@ -57,7 +57,7 @@ jobs:
     secrets: inherit
 
   dynamo-test:
-    name: dynamo-test-py3.11
+    name: dynamo-test-py3_11
     uses: ./.github/workflows/_linux-test.yml
     needs: dynamo-build
     # strategy:
