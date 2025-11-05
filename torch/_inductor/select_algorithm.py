@@ -3719,9 +3719,7 @@ class AlgorithmSelectorCache(PersistentCache):
             M, K = input_nodes[-2].get_size()[:2]
             N = input_nodes[-1].get_size()[-1]
 
-            out_dict = {
-                str((M, K, N)): [get_choice_info(choice) for choice in timings.keys()]
-            }
+            out_dict = {str((M, K, N)): [get_choice_info(choice) for choice in timings]}
 
             append_to_log(mm_filename, out_dict)
 

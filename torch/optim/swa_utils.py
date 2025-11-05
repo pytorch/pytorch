@@ -367,7 +367,7 @@ def update_bn(
 
     was_training = model.training
     model.train()
-    for module in momenta.keys():
+    for module in momenta:
         module.momentum = None
 
     for input in loader:
@@ -378,7 +378,7 @@ def update_bn(
 
         model(input)
 
-    for bn_module in momenta.keys():
+    for bn_module in momenta:
         bn_module.momentum = momenta[bn_module]
     model.train(was_training)
 
