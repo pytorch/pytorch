@@ -1655,7 +1655,7 @@ class OutputGraph(OutputGraphCommon):
             ):
                 vt = stack_values_flat[0]
                 if (
-                    isinstance(vt, torch._dynamo.variables.NamedTupleVariable)
+                    isinstance(vt, torch._dynamo.variables.NewNamedTupleVariable)
                     and vt.tuple_cls
                     is torch._dynamo.functional_export.ExportTracerOutput
                 ):

@@ -294,6 +294,7 @@ from .user_defined import (
     IntWrapperVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
+    NewNamedTupleVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedDictVariable,
@@ -766,11 +767,8 @@ class VariableBuilder:
                 )
                 for name in namedtuple_fields(type(value))
             ]
-            result = NamedTupleVariable(
-                # type: ignore[arg-type]
-                output,
-                tuple_cls=type(value),
-                source=self.source,
+            result = NewNamedTupleVariable(
+                output, tuple_cls=type(value), source=self.source
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
@@ -3259,7 +3257,9 @@ def handle_traced_output(
             ), (
                 f"expected {example_value.__class__.__module__} == torch.return_types or named tuple but got {type(example_value)}"
             )
-            return NamedTupleVariable(unpacked, example_value.__class__, **options)
+            return NewNamedTupleVariable(
+                unpacked, example_value.__class__, **options
+            )
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable.create(None, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
@@ -4063,7 +4063,7 @@ class SourcelessBuilder:
                 SourcelessBuilder.create(tx, getattr(value, name))
                 for name in namedtuple_fields(type(value))
             ]
-            return NamedTupleVariable(output, tuple_cls=type(value))
+            return NewNamedTupleVariable(output, tuple_cls=type(value))
         elif (
             isinstance(value, torch.SymInt)
             and value.node.expr in tx.output.bound_symbols

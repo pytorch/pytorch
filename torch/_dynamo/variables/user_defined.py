@@ -47,7 +47,11 @@ from torch._guards import Source, TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
 from .. import graph_break_hints, polyfills, variables
-from ..bytecode_transformation import create_call_function
+from ..bytecode_transformation import (
+    create_build_tuple,
+    create_call_function,
+    create_rot_n,
+)
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import (
     handle_observed_exception,
@@ -66,6 +70,7 @@ from ..source import (
     DataclassFieldsSource,
     DictGetItemSource,
     GetItemSource,
+    NamedTupleFieldsSource,
     RandomValueSource,
     TypeDictSource,
     TypeMROSource,
@@ -85,6 +90,7 @@ from ..utils import (
     is_wrapper_or_member_descriptor,
     istype,
     list_methods,
+    Lit,
     namedtuple_fields,
     object_has_getattribute,
     proxy_args_kwargs,
@@ -773,10 +779,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # Modify mutability of namedtuple for sourcelesss instantiations.
             from .base import AttributeMutationNew
 
-            return variables.NamedTupleVariable(
-                items_ret_type,
-                self.value,
-                mutation_type=AttributeMutationNew(),
+            return NewNamedTupleVariable(
+                items, self.value, mutation_type=AttributeMutationNew()
             )
         elif self.value is torch.Size:
             # This simulates `THPSize_pynew`, the C impl for `Size.__new__`.
@@ -2598,6 +2602,405 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         return isinstance(
             other, UserDefinedTupleVariable
         ) and self._tuple_vt.is_python_equal(other._tuple_vt)
+class NewNamedTupleVariable(UserDefinedTupleVariable):
+    """Handles both namedtuples and structseq objects.
+
+    Dynamic case: Regular namedtuples (collections.namedtuple)
+    Static case: Structseq (C-level struct sequences like
+        torch.return_types.*)
+    """
+    _nonvar_fields = {
+        "tuple_cls",
+        "dynamic_attributes",
+        *UserDefinedTupleVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        items: list[VariableTracker],
+        tuple_cls: type,
+        dynamic_attributes: Optional[dict[str, VariableTracker]] = None,
+        **kwargs,
+    ) -> None:
+        """Constructor signature matches the old NamedTupleVariable.
+
+        Args:
+            items: List of VariableTracker items (the tuple elements).
+            tuple_cls: The namedtuple/structseq class.
+            dynamic_attributes: Dict for dynamic attributes (subclass-only).
+            **kwargs: Standard VariableTracker kwargs (source, mutation_type,
+                etc.).
+        """
+        # Build tuple_vt from items
+        tuple_vt = variables.TupleVariable(
+            items,
+            mutation_type=kwargs.get('mutation_type', ValueMutationNew())
+        )
+
+        # Create a dummy value for UserDefinedTupleVariable
+        # We don't actually use self.value, but UserDefinedTupleVariable
+        # requires it. We'll use tuple_cls as a placeholder (Option 2 from
+        # the plan)
+        super().__init__(
+            value=tuple_cls,  # Dummy value
+            tuple_vt=tuple_vt,
+            init_args=None,
+            **kwargs
+        )
+
+        self.tuple_cls = tuple_cls
+        # Store initial dynamic attributes (if any) for as_python_constant/reconstruct
+        # Runtime dynamic attributes are tracked via side effects system
+        self.dynamic_attributes = (
+            dynamic_attributes if dynamic_attributes else {}
+        )
+        
+        # Debug: Verify NewNamedTupleVariable is being used
+        # This will print when the constructor is called during tracing
+        import torch._dynamo.config as config
+        if config.verbose and hasattr(config, 'debug'):
+            print(f"[DEBUG] NewNamedTupleVariable created for {tuple_cls.__name__}")
+
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslator"
+    ) -> list[VariableTracker]:
+        """Override to handle tuple_cls as placeholder value.
+
+        Since we use tuple_cls (a class) as placeholder for self.value in
+        Option 2, we need to override this method that checks
+        type(self.value).__iter__ in the parent class.
+
+        Args:
+            tx: InstructionTranslator instance.
+
+        Returns:
+            List of VariableTracker items from the tuple.
+        """
+        assert self._tuple_vt is not None
+        # For namedtuple/structseq, we can always unpack via _tuple_vt
+        # since tuple_cls subclasses tuple
+        return self._tuple_vt.unpack_var_sequence(tx)
+
+    def is_namedtuple(self) -> bool:
+        """Check if regular namedtuple (has _fields and _make).
+
+        Returns:
+            True if regular namedtuple, False if structseq.
+        """
+        return isinstance(
+            getattr(self.tuple_cls, "_fields", None), tuple
+        ) and callable(getattr(self.tuple_cls, "_make", None))
+
+    def is_structseq(self) -> bool:
+        """Check if structseq (NOT a regular namedtuple).
+
+        Returns:
+            True if structseq, False if regular namedtuple.
+        """
+        return not self.is_namedtuple()
+
+    def fields(self) -> tuple[str, ...]:
+        """Get field names from tuple_cls.
+
+        Returns:
+            Tuple of field names.
+        """
+        return namedtuple_fields(self.tuple_cls)
+
+    def as_python_constant(self):
+        """Convert to Python constant value.
+
+        Uses different construction patterns for structseq vs namedtuple:
+        - Structseq: `tuple_cls([items...])` - single iterable arg
+        - Namedtuple: `tuple_cls(*items)` - positional args
+
+        Returns:
+            Python constant value of the namedtuple/structseq.
+        """
+        if self.is_structseq():
+            # Structseq: single iterable argument
+            result = self.tuple_cls(
+                [x.as_python_constant() for x in self._tuple_vt.items]
+            )
+        else:
+            # Namedtuple: positional arguments
+            result = self.tuple_cls(
+                *[x.as_python_constant() for x in self._tuple_vt.items]
+            )
+
+        # Apply initial dynamic attributes (if any were set at construction)
+        # Runtime dynamic attributes are tracked via side effects system
+        for attr_name, attr_value in self.dynamic_attributes.items():
+            # Convert VariableTracker to Python constant if needed
+            if hasattr(attr_value, "as_python_constant"):
+                python_value = attr_value.as_python_constant()
+            else:
+                raise NotImplementedError(
+                    "Can not convert dynamic attribute without python "
+                    "constant value to python constant."
+                )
+            setattr(result, attr_name, python_value)
+
+        return result
+
+    def as_proxy(self):
+        """Convert to FX proxy for graph construction.
+
+        Uses different construction patterns for structseq vs namedtuple:
+        - Structseq: `tuple_cls([proxies...])` - single iterable arg
+        - Namedtuple: `tuple_cls(*proxies)` - positional args
+
+        Returns:
+            FX proxy representing the namedtuple/structseq.
+        """
+        assert self.python_type() is not SizeVariable
+        if self.is_structseq():
+            # Structseq: single iterable argument
+            return self.tuple_cls([x.as_proxy() for x in self._tuple_vt.items])
+        # Namedtuple: positional arguments
+        return self.tuple_cls(*[x.as_proxy() for x in self._tuple_vt.items])
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        """Generate bytecode to reconstruct the object.
+
+        Uses different reconstruction for structseq vs namedtuple:
+        - Structseq: Use `tuple_cls` directly as constructor
+        - Namedtuple: Use `tuple_cls._make` method
+
+        Args:
+            codegen: PyCodegen instance for generating bytecode.
+        """
+        if self.is_structseq():
+            # Structseq: use tuple_cls directly
+            create_fn = self.tuple_cls
+        else:
+            # Namedtuple: use _make method
+            create_fn = self.tuple_cls._make
+
+        codegen.add_push_null(
+            lambda: codegen.append_output(
+                codegen.create_load_const_unchecked(create_fn)
+            )
+        )
+        codegen.foreach(self._tuple_vt.items)
+        codegen.extend_output(
+            [
+                create_build_tuple(len(self._tuple_vt.items)),
+            ]
+            + create_call_function(1, False)
+        )
+
+        # Apply initial dynamic attributes after construction (if any)
+        # Runtime dynamic attributes are tracked via side effects system
+        for name, value in self.dynamic_attributes.items():
+            codegen.dup_top()
+            codegen(value)
+            codegen.extend_output(create_rot_n(2))
+            codegen.store_attr(name)
+
+    def var_getattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> VariableTracker:
+        """Handle attribute access (field names, methods, etc.).
+
+        Args:
+            tx: InstructionTranslator instance.
+            name: Attribute name to access.
+
+        Returns:
+            VariableTracker for the accessed attribute.
+        """
+        # Handle _fields attribute specially
+        if name == "_fields":
+            source = (
+                NamedTupleFieldsSource(self.source) if self.source else None
+            )
+            return VariableTracker.build(tx, self.fields(), source=source)
+
+        # Check dynamic attributes (stored via side effects)
+        # Parent class already checks this, but we check here first for field
+        # name mapping
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+            return tx.output.side_effects.load_attr(self, name)
+
+        # Check if it's a field name - map to tuple index for direct access
+        # This is in addition to the _tuplegetter descriptor handling in
+        # parent class
+        fields = self.fields()
+        if name in fields:
+            # Map field name to tuple index
+            field_index = fields.index(name)
+            return self._tuple_vt.items[field_index]
+
+        # Fall back to UserDefinedObjectVariable for methods, descriptors, etc.
+        # This leverages existing _tuplegetter handling! (lines 1512-1519 in
+        # user_defined.py)
+        return super().var_getattr(tx, name)
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> VariableTracker:
+        """Handle hasattr() calls.
+
+        Args:
+            tx: InstructionTranslator instance.
+            name: Attribute name to check.
+
+        Returns:
+            ConstantVariable with True/False indicating if attribute exists.
+        """
+        # Check if it's a field name
+        fields = self.fields()
+        if name in fields:
+            return variables.ConstantVariable.create(True)
+
+        # Check dynamic attributes (via side effects) and initial attributes
+        has_dynamic = (
+            tx.output.side_effects.has_pending_mutation_of_attr(self, name)
+            or name in self.dynamic_attributes
+        )
+
+        # Check class attributes (methods, etc.)
+        return variables.ConstantVariable.create(
+            has_dynamic or hasattr(self.tuple_cls, name)
+        )
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        """Handle method calls on the namedtuple/structseq.
+
+        Args:
+            tx: InstructionTranslator instance.
+            name: Method name.
+            args: Method arguments.
+            kwargs: Method keyword arguments.
+
+        Returns:
+            VariableTracker for the method result.
+        """
+        if name == "__setattr__":
+            if kwargs or len(args) != 2:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "2 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            attr_var, value = args
+            attr = attr_var.as_python_constant()
+
+            # Structseq is always immutable
+            if self.is_structseq():
+                raise_observed_exception(AttributeError, tx)
+
+            # Base namedtuple is immutable
+            if self.tuple_cls.__bases__ == (tuple,):
+                raise_observed_exception(AttributeError, tx)
+
+            # Fields are immutable
+            if attr in self.fields():
+                raise_observed_exception(AttributeError, tx)
+
+            # Subclass can have dynamic attributes
+            # Use UserDefinedObjectVariable's mutation tracking (via side
+            # effects). This already handles descriptor protocols and
+            # AttributeMutation tracking.
+            # method_setattr_standard expects VariableTracker for name, not string
+            return self.method_setattr_standard(tx, attr_var, value)
+
+        elif name == "_replace":
+            # NamedTuple._replace should create a new instance with replaced
+            # fields
+            if args:
+                raise_args_mismatch(tx, name, "0 args", f"{len(args)} args")
+
+            # Get the field names for validation
+            fields = self.fields()
+
+            # Start with current items (copy them)
+            new_items = list(self._tuple_vt.items)
+
+            # Replace fields specified in kwargs
+            for field_name, new_value in kwargs.items():
+                if field_name not in fields:
+                    raise_observed_exception(
+                        ValueError,
+                        tx,
+                        args=[
+                            variables.ConstantVariable.create(
+                                f"Got unexpected field name: '{field_name}'"
+                            )
+                        ],
+                    )
+
+                # Replace the item at the field's index
+                field_index = fields.index(field_name)
+                new_items[field_index] = new_value
+
+            # Create new instance with replaced fields
+            return NewNamedTupleVariable(
+                new_items, self.tuple_cls, self.dynamic_attributes
+            )
+
+        # Delegate tuple methods to _tuple_vt
+        method = self._maybe_get_baseclass_method(name)
+        if method in tuple_methods:
+            return self._tuple_vt.call_method(tx, name, args, kwargs)
+
+        # Fall back to UserDefinedObjectVariable
+        return super().call_method(tx, name, args, kwargs)
+
+    def python_type(self) -> type:
+        """Return the Python type.
+
+        Returns:
+            The namedtuple/structseq class.
+        """
+        return self.tuple_cls
+
+    def getitem_const(
+        self, tx: "InstructionTranslator", arg: VariableTracker
+    ) -> VariableTracker:
+        """Handle __getitem__ with constant index.
+
+        Args:
+            tx: InstructionTranslator instance.
+            arg: Index or slice to access.
+
+        Returns:
+            VariableTracker for the accessed item(s).
+        """
+        # Check if it's a SliceVariable (defined later in this file)
+        if isinstance(arg, SliceVariable):
+            # Slicing a namedtuple produces a tuple
+            return variables.TupleVariable(
+                self._tuple_vt.items[arg.as_python_constant()],
+                source=None,
+            )
+        return super().getitem_const(tx, arg)
+
+    def debug_repr(self) -> str:
+        """Debug representation of the namedtuple/structseq.
+
+        Returns:
+            String representation for debugging.
+        """
+        if self.is_structseq():
+            # Structseq: StructSequenceType(iterable)
+            return repr(
+                self.tuple_cls(
+                    [Lit(x.debug_repr()) for x in self._tuple_vt.items]
+                )
+            )
+        # Namedtuple: NamedTupleType(*iterable)
+        return repr(
+            self.tuple_cls(*(Lit(x.debug_repr()) for x in self._tuple_vt.items))
+        )
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):
