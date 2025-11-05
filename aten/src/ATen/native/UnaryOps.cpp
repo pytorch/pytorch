@@ -819,45 +819,8 @@ Tensor& nan_to_num_out(const Tensor& self,
     return result;
   }
 
-  // Check if any of the scalar parameters are complex
-  bool has_complex_scalar = false;
-  if (nan.has_value() && nan.value().isComplex()) {
-    has_complex_scalar = true;
-  } else if (pos_inf.has_value() && pos_inf.value().isComplex()) {
-    has_complex_scalar = true;
-  } else if (neg_inf.has_value() && neg_inf.value().isComplex()) {
-    has_complex_scalar = true;
-  }
-
-  if (has_complex_scalar) {
-    // Convert Scalar to complex<double>
-    std::optional<c10::complex<double>> complex_nan = nan.has_value()
-        ? std::make_optional(nan.value().toComplexDouble())
-        : std::nullopt;
-    std::optional<c10::complex<double>> complex_pos_inf = pos_inf.has_value()
-        ? std::make_optional(pos_inf.value().toComplexDouble())
-        : std::nullopt;
-    std::optional<c10::complex<double>> complex_neg_inf = neg_inf.has_value()
-        ? std::make_optional(neg_inf.value().toComplexDouble())
-        : std::nullopt;
-
-    auto iter = TensorIterator::unary_op(result, self);
-    nan_to_num_complex_stub(iter.device_type(), iter, complex_nan, complex_pos_inf, complex_neg_inf);
-  } else {
-    // Convert Scalar to double
-    std::optional<double> double_nan = nan.has_value()
-        ? std::make_optional(nan.value().toDouble())
-        : std::nullopt;
-    std::optional<double> double_pos_inf = pos_inf.has_value()
-        ? std::make_optional(pos_inf.value().toDouble())
-        : std::nullopt;
-    std::optional<double> double_neg_inf = neg_inf.has_value()
-        ? std::make_optional(neg_inf.value().toDouble())
-        : std::nullopt;
-
-    auto iter = TensorIterator::unary_op(result, self);
-    nan_to_num_stub(iter.device_type(), iter, double_nan, double_pos_inf, double_neg_inf);
-  }
+  auto iter = TensorIterator::unary_op(result, self);
+  nan_to_num_stub(iter.device_type(), iter, nan, pos_inf, neg_inf);
   return result;
 }
 
@@ -1045,7 +1008,6 @@ DEFINE_DISPATCH(special_ndtri_stub); // NOLINT(cppcoreguidelines-avoid-non-const
 DEFINE_DISPATCH(special_log_ndtr_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(neg_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(nan_to_num_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(nan_to_num_complex_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(polygamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(reciprocal_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(round_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
