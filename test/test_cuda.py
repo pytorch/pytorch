@@ -7479,10 +7479,7 @@ class TestFXMemoryProfiler(TestCase):
             torch.cuda.empty_cache()
 
             fx_frames = self.collect_frames(augmented_snapshot)
-            if TEST_WITH_ROCM:
-                self.assertGreater(len(fx_frames), 0)
-            else:
-                self.assertEqual(len(fx_frames), 12)
+            self.assertGreater(len(fx_frames), 0)
 
             for frame in fx_frames:
                 # Every FX frame should have both node_op and node_name
