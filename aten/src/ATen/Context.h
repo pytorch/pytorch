@@ -704,6 +704,32 @@ struct TORCH_API NoTF32Guard {
   bool changed = false;
 };
 
+template<Float32Backend target_backend, Float32Op target_op>
+struct Fp32PrecisonGuard {
+  Fp32PrecisonGuard(const Float32Precision new_precision) {
+    if (new_precision == Float32Precision::NONE) {
+      return ;
+    }
+    saved_precision = float32Precision(target_backend, target_op);
+    changed = (new_precision == saved_precision);
+    if (changed) {
+      setFloat32Precision(target_backend, target_op, new_precision);
+    }
+  }
+  Fp32PrecisonGuard(Fp32PrecisonGuard&& other) = delete;
+  Fp32PrecisonGuard(const Fp32PrecisonGuard&) = delete;
+  Fp32PrecisonGuard& operator=(const Fp32PrecisonGuard&) = delete;
+  Fp32PrecisonGuard& operator=(Fp32PrecisonGuard&&) = delete;
+  ~Fp32PrecisonGuard() {
+    if (changed) {
+      setFloat32Precision(target_backend, target_op, saved_precision);
+    }
+  }
+ private:
+  Float32Precision saved_precision;
+  bool changed = false;
+};
+
 struct TORCH_API ROCmBackwardPassGuard {
   ROCmBackwardPassGuard();
   ROCmBackwardPassGuard(ROCmBackwardPassGuard&& other) = delete;
