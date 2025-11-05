@@ -12,8 +12,6 @@
 
 namespace c10 {
 
-class SymInt;
-
 class C10_API SymBool {
  public:
   /*implicit*/ SymBool(bool b) : data_(b) {}
@@ -81,10 +79,6 @@ class C10_API SymBool {
     }
     return toSymNodeImplUnowned()->constant_bool();
   }
-
-  // Convert SymBool to SymInt (0 or 1)
-  // This is the C++ equivalent of Python's cast_symbool_to_symint_guardless
-  SymInt toSymInt() const;
 
   bool is_heap_allocated() const {
     return ptr_;
