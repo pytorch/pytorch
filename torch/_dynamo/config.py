@@ -516,6 +516,19 @@ debug_disable_compile_counter = False
 # torch._dynamo.utilsCompileTimeInstructionCounter.
 record_compile_time_instruction_count = False
 
+# Any context manager class that is included in this set will be generically
+# HOP-ified. The body of the ctx is captured in a subgraph and run under the ctx
+# during AOTAutograd. (Dynamo does not ever run __enter__ or __exit__.)
+#
+# WARNING: This is an experimental feature with many sharp edges.
+#
+# - The arguments to construct the ctx may only be constants.
+# - Returning something that is not None in __enter__ is not supported. e.g.
+#   the `with ctx as x:` pattern is not supported.
+# - TorchBind objects are not supported. We assume the dynamo-traced fx graph
+#   can only contain symints or tensor types.
+_enable_hopify_generic_context_manager: set[type] = set()
+
 
 def default_debug_dir_root() -> str:
     # [@compile_ignored: debug]

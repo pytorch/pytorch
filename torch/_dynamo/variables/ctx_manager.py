@@ -27,6 +27,7 @@ from contextlib import ExitStack
 from typing import TYPE_CHECKING, Union
 
 import torch._C
+import torch.fx.node
 from torch._guards import Guard
 
 from .. import graph_break_hints, variables
@@ -51,6 +52,10 @@ from .functions import (
     WrappedUserMethodVariable,
 )
 from .user_defined import UserDefinedObjectVariable
+
+
+# Sentinel to indicate the graph was empty when entering a context manager
+_EMPTY_GRAPH_MARKER = object()
 
 
 if TYPE_CHECKING:
@@ -165,6 +170,47 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
             **kwargs,
         )
         self.cm_obj = cm_obj
+        # Note [Hopifying Context Managers]
+        #
+        # If the context manager class has been added to a opt-in dynamo config,
+        # we will convert it into a generic context manager HOP. When the
+        # HOP is later called in AOTAutograd, it will run the captured
+        # graph under the ctx.
+        #
+        # How does this work?
+        # - On enter:
+        #   - Record the last node in the current FX graph (start_marker_node)
+        # - The body of the context manager traces directly into the main FX graph
+        # - On exit:
+        #   - Collect all nodes added to the graph since start_marker_node
+        #   - Track external inputs (nodes from before the context manager that
+        #     are used by nodes inside it)
+        #   - Create a new subgraph by copying the collected nodes
+        #   - Insert a call to wrap_generic in the main graph
+        #   - Transform the collected nodes in-place to become getitem operations
+        #     that extract results from the wrap_generic call
+        #
+        # Some notes:
+        #
+        # 1. Determining the inputs and outputs
+        #
+        # One trickiness here is that a HOP requires a function as input,
+        # but, unlike functions, context managers don't have explicit inputs and
+        # outputs. For inputs, we track external inputs by examining which nodes
+        # from outside the context manager are used inside it. For outputs, we
+        # return all moved nodes and rely on AOTAutograd to trace through the
+        # HOP and DCE any unnecessary ops.
+        #
+        # 2. Preserving VariableTracker proxies
+        #
+        # By transforming the original nodes in-place to become getitem operations,
+        # any proxies that pointed to those nodes continue to work correctly.
+        # The nodes still exist in the graph, they just now extract their values
+        # from the wrap_generic call instead of computing them directly.
+        self.hopify = (
+            cm_obj.__class__
+            in torch._dynamo.config._enable_hopify_generic_context_manager
+        )
 
     def module_name(self):
         return self.cm_obj.__module__
@@ -174,6 +220,24 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
 
     def enter(self, tx):
         source = None if self.source is None else AttrSource(self.source, "__enter__")
+
+        if self.hopify:
+            # Record where we are in the graph before we start tracing the context manager body
+            # We'll collect all nodes added after this point
+            graph = tx.output.graph
+            # Find the last node in the graph (walking backwards from the end)
+            # This could be a placeholder, which is fine
+            last_node = None
+            for node in reversed(list(graph.nodes)):
+                last_node = node
+                break
+            # Use sentinel if graph is empty
+            self.start_marker_node = (
+                last_node if last_node is not None else _EMPTY_GRAPH_MARKER
+            )
+            # This means we don't support the `with ctx() as obj:` syntax
+            return variables.ConstantVariable.create(None)
+
         return variables.UserMethodVariable(
             self.cm_obj.__enter__.__func__,
             self,
@@ -181,7 +245,107 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         ).call_function(tx, [], {})
 
     def exit(self, tx: "InstructionTranslator", *args):
+        # Avoid a circular import
+        from torch._higher_order_ops.wrap import wrap_generic
+
         source = None if self.source is None else AttrSource(self.source, "__exit__")
+
+        if self.hopify:
+            import operator
+
+            main_graph = tx.output.graph
+
+            # Step 1: Collect nodes added since enter() and track external inputs
+            nodes_to_move = []
+            external_inputs = []
+            external_input_set = set()
+            # If start_marker_node is the sentinel, start collecting immediately
+            started_collecting = self.start_marker_node is _EMPTY_GRAPH_MARKER
+            marker_found = self.start_marker_node is _EMPTY_GRAPH_MARKER
+
+            for node in main_graph.nodes:
+                if not started_collecting:
+                    if node == self.start_marker_node:
+                        started_collecting = True
+                        marker_found = True
+                    continue
+
+                if node.op in ("placeholder", "output"):
+                    continue
+
+                # Track external inputs while we collect
+                for arg in node.all_input_nodes:
+                    if arg not in external_input_set and arg not in nodes_to_move:
+                        external_inputs.append(arg)
+                        external_input_set.add(arg)
+
+                nodes_to_move.append(node)
+
+            # The start_marker_node should never be removed from the graph
+            assert marker_found, (
+                f"start_marker_node was not found in graph! start_marker_node={self.start_marker_node}"
+            )
+
+            # Step 2: Create new graph for the subgraph
+            new_graph = torch.fx.Graph()
+
+            # Create placeholders for external inputs
+            old_to_new = {}
+            for ext_input in external_inputs:
+                placeholder = new_graph.placeholder(ext_input.name)
+                placeholder.meta = ext_input.meta.copy()
+                old_to_new[ext_input] = placeholder
+
+            # Copy nodes to new graph
+            for node in nodes_to_move:
+                new_node = new_graph.node_copy(node, lambda n: old_to_new.get(n, n))
+                old_to_new[node] = new_node
+
+            # Output all moved nodes (empty tuple if no nodes)
+            new_graph.output(tuple(old_to_new[node] for node in nodes_to_move))
+
+            # Step 3: Create GraphModule for subgraph
+            gmod = torch.fx.GraphModule(tx.output.nn_modules, new_graph)
+            body_name = tx.output.install_subgraph(self.fn_name(), gmod)
+
+            # Store information to reconstruct the context manager
+            gmod.meta["_wrap_generic_cls_fqn"] = self.cls_fqn
+            gmod.meta["_wrap_generic_arg_values"] = self.arg_values
+            gmod.meta["_wrap_generic_kwarg_values"] = self.kwarg_values
+
+            # Step 4: Create the get_attr node and the call to wrap_generic
+            # Insert before the first moved node if any, otherwise just append
+            if nodes_to_move:
+                with main_graph.inserting_before(nodes_to_move[0]):
+                    get_attr_node = main_graph.get_attr(body_name)
+                    call_node = main_graph.call_function(
+                        wrap_generic,
+                        args=(get_attr_node,) + tuple(external_inputs),
+                    )
+            else:
+                # No nodes to move, just append at the end
+                get_attr_node = main_graph.get_attr(body_name)
+                call_node = main_graph.call_function(
+                    wrap_generic,
+                    args=(get_attr_node,) + tuple(external_inputs),
+                )
+
+            call_node.meta["example_value"] = tuple(
+                node.meta.get("example_value") for node in nodes_to_move
+            )
+
+            # Step 5: Transform old nodes in-place to become getitem nodes
+            # This way, any proxies pointing to them automatically point to the new nodes
+            for i, old_node in enumerate(nodes_to_move):
+                # Change the node to be a getitem of the call
+                old_node.target = operator.getitem
+                old_node.args = (call_node, i)
+                old_node.kwargs = {}
+                old_node.op = "call_function"
+
+            tx.active_generic_context_managers.pop()
+            return variables.ConstantVariable.create(None)
+
         x = variables.UserMethodVariable(
             self.cm_obj.__exit__.__func__,
             self,
