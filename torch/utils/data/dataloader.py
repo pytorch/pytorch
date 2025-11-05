@@ -825,11 +825,11 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
 
         if self._num_workers <= 0:
             raise AssertionError(
-                "num_workers must be greater than 0 for MultiProcessingDataLoaderIter"
+                "num_workers must be greater than 0 for _ParallelDataLoaderIter"
             )
         if self._prefetch_factor <= 0:
             raise AssertionError(
-                "prefetch_factor must be greater than 0 for MultiProcessingDataLoaderIter"
+                "prefetch_factor must be greater than 0 for _ParallelDataLoaderIter"
             )
 
         self._worker_init_fn = loader.worker_init_fn
@@ -934,7 +934,7 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
         for _ in range(self._prefetch_factor * self._num_workers):
             self._try_put_index()
 
-    def _try_get_data(self, timeout=_utils.MP_STATUS_CHECK_INTERVAL):
+    def _try_get_data(self, timeout=_utils.STATUS_CHECK_INTERVAL):
         # Tries to fetch data from `self._data_queue` once for a given timeout.
         # This can also be used as inner loop of fetching without timeout, with
         # the sender status as the loop condition.
@@ -1107,85 +1107,34 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
 
     def _shutdown_workers(self):
         """Common shutdown logic for both threading and multiprocessing implementations."""
-        # Check for early exit conditions (multiprocessing specific)
-        if hasattr(self, "_worker_pids_set") and (
-            _utils is None
-            or _utils.python_exit_status is True
-            or _utils.python_exit_status is None
-        ):
-            # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details.
-            # If Python is shutting down, do no-op.
-            return
-
         if not self._shutdown:
             self._shutdown = True
-            try:
-                # Exit `pin_memory_thread` first because exiting workers may leave
-                # corrupted data in `worker_result_queue` which `pin_memory_thread`
-                # reads from.
-                if hasattr(self, "_pin_memory_thread"):
-                    # Use hasattr in case error happens before we set the attribute.
-                    self._pin_memory_thread_done_event.set()
-                    # Send something to pin_memory_thread in case it is waiting
-                    # so that it can wake up and check `pin_memory_thread_done_event`
-                    self._worker_result_queue.put((None, None))
-                    self._pin_memory_thread.join()
-                    # Handle queue cleanup (multiprocessing specific)
-                    if hasattr(self._worker_result_queue, "cancel_join_thread"):
-                        self._worker_result_queue.cancel_join_thread()
-                        self._worker_result_queue.close()
+            # Exit `pin_memory_thread` first because exiting workers may leave
+            # corrupted data in `worker_result_queue` which `pin_memory_thread`
+            # reads from.
+            if hasattr(self, "_pin_memory_thread"):
+                # Use hasattr in case error happens before we set the attribute.
+                self._pin_memory_thread_done_event.set()
+                # Send something to pin_memory_thread in case it is waiting
+                # so that it can wake up and check `pin_memory_thread_done_event`
+                self._worker_result_queue.put((None, None))
+                self._pin_memory_thread.join()
 
-                # Exit workers now.
-                self._workers_done_event.set()
-                for worker_id in range(len(self._workers)):
-                    # Get number of workers from `len(self._workers)` instead of
-                    # `self._num_workers` in case we error before starting all
-                    # workers.
-                    # If we are using workers_status with persistent_workers
-                    # we have to shut it down because the worker is paused
-                    if self._persistent_workers or self._workers_status[worker_id]:
-                        self._mark_worker_as_unavailable(worker_id, shutdown=True)
+            # Exit workers now.
+            self._workers_done_event.set()
+            for worker_id in range(len(self._workers)):
+                # Get number of workers from `len(self._workers)` instead of
+                # `self._num_workers` in case we error before starting all
+                # workers.
+                # If we are using workers_status with persistent_workers
+                # we have to shut it down because the worker is paused
+                if self._persistent_workers or self._workers_status[worker_id]:
+                    self._mark_worker_as_unavailable(worker_id, shutdown=True)
 
-                # Join workers - multiprocessing uses timeout, threading doesn't
-                for w in self._workers:
-                    if hasattr(self._worker_result_queue, "cancel_join_thread"):
-                        # Multiprocessing: join with timeout
-                        w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
-                    else:
-                        # Threading: simple join
-                        w.join()
+            for w in self._workers:
+                w.join(timeout=_utils.STATUS_CHECK_INTERVAL)
 
-                # Cleanup index queues (multiprocessing specific)
-                if hasattr(self._worker_result_queue, "cancel_join_thread"):
-                    for q in self._index_queues:
-                        q.cancel_join_thread()
-                        q.close()
-
-            finally:
-                # Multiprocessing-specific cleanup
-                if hasattr(self, "_worker_pids_set"):
-                    # Even though all this function does is putting into queues that
-                    # we have called `cancel_join_thread` on, weird things can
-                    # happen when a worker is killed by a signal, e.g., hanging in
-                    # `Event.set()`. So we need to guard this with SIGCHLD handler,
-                    # and remove pids from the C side data structure only at the
-                    # end.
-                    #
-                    # FIXME: Unfortunately, for Windows, we are missing a worker
-                    #        error detection mechanism here in this function, as it
-                    #        doesn't provide a SIGCHLD handler.
-                    if self._worker_pids_set:
-                        _utils.signal_handling._remove_worker_pids(id(self))
-                        self._worker_pids_set = False
-                    for w in self._workers:
-                        if w.is_alive():
-                            # Existing mechanisms try to make the workers exit
-                            # peacefully, but in case that we unfortunately reach
-                            # here, which we shouldn't, (e.g., pytorch/pytorch#39570),
-                            # we kill the worker.
-                            w.terminate()
-
-    def __del__(self):
+    def __del__(self) -> None:
         self._shutdown_workers()
 
 
@@ -1197,16 +1146,15 @@ class _ThreadingDataLoaderIter(_ParallelDataLoaderIter):
     def __init__(self, loader):
         super().__init__(loader)
 
-        # Thread-based implementation uses standard Python queue
-        self._worker_result_queue = queue.Queue()
+        # Thread-based implementation uses standard Python queues
+        self._worker_result_queue = queue.SimpleQueue()
         self._shutdown = False
         self._workers_done_event = threading.Event()
 
         self._index_queues = []
         self._workers = []
         for i in range(self._num_workers):
-            # Thread-based implementation uses standard Python queue
-            index_queue = queue.Queue()
+            index_queue = queue.SimpleQueue()
             w = threading.Thread(
                 target=_utils.worker._thread_worker_loop,
                 args=(
@@ -1568,7 +1516,7 @@ class _MultiProcessingDataLoaderIter(_ParallelDataLoaderIter):
             # See sections (2) and (3b) above.
             index_queue.cancel_join_thread()
             w = multiprocessing_context.Process(
-                target=_utils.worker._worker_loop,
+                target=_utils.worker._process_worker_loop,
                 args=(
                     self._dataset_kind,
                     self._dataset,
@@ -1634,10 +1582,7 @@ class _MultiProcessingDataLoaderIter(_ParallelDataLoaderIter):
         self._worker_pids_set = True
         self._reset(loader, first_iter=True)
 
-    def _reset(self, loader, first_iter=False) -> None:
-        super()._reset(loader, first_iter)
-
-    def _try_get_data(self, timeout=_utils.MP_STATUS_CHECK_INTERVAL):
+    def _try_get_data(self, timeout=_utils.STATUS_CHECK_INTERVAL):
         # Tries to fetch data from `self._data_queue` once for a given timeout.
         # This can also be used as inner loop of fetching without timeout, with
         # the sender status as the loop condition.
@@ -1792,11 +1737,54 @@ class _MultiProcessingDataLoaderIter(_ParallelDataLoaderIter):
     # 3. Run the script with the `send` option in the second shell:
     # (shell2) ./test_socket.py sock_tmp 1017 send
 
+    def _shutdown_workers(self):
+        # Check for early exit conditions
+        if (
+            _utils is None
+            or _utils.python_exit_status is True
+            or _utils.python_exit_status is None
+        ):
+            # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details.
+            # If Python is shutting down, do no-op.
+            return
+
+        # Call parent class shutdown logic (common to both threading and multiprocessing)
+        super()._shutdown_workers()
+
+        try:
+            if hasattr(self, "_pin_memory_thread"):
+                self._worker_result_queue.cancel_join_thread()
+                self._worker_result_queue.close()
+
+            for q in self._index_queues:
+                q.cancel_join_thread()
+                q.close()
+        finally:
+            # Even though we call `cancel_join_thread` on multiprocessing queues,
+            # weird things can happen when a worker is killed by a signal,
+            # e.g., hanging in `Event.set()`. So we need to guard this with SIGCHLD handler,
+            # and remove pids from the C side data structure only at the
+            # end.
+            #
+            # FIXME: Unfortunately, for Windows, we are missing a worker
+            #        error detection mechanism here in this function, as it
+            #        doesn't provide a SIGCHLD handler.
+            if self._worker_pids_set:
+                _utils.signal_handling._remove_worker_pids(id(self))
+                self._worker_pids_set = False
+            for w in self._workers:
+                if w.is_alive():
+                    # Existing mechanisms try to make the workers exit
+                    # peacefully, but in case that we unfortunately reach
+                    # here, which we shouldn't, (e.g., pytorch/pytorch#39570),
+                    # we kill the worker.
+                    w.terminate()
+
     # staticmethod is used to remove reference to `_MultiProcessingDataLoaderIter`
     @staticmethod
     def _clean_up_worker(w) -> None:
         try:
-            w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
+            w.join(timeout=_utils.STATUS_CHECK_INTERVAL)
         finally:
             if w.is_alive():
                 w.terminate()
