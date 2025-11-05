@@ -103,7 +103,6 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
-from .user_defined import NewNamedTupleVariable
 from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
@@ -149,6 +148,7 @@ from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
     FrozenDataClassVariable,
     MutableMappingVariable,
+    NewNamedTupleVariable,
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedDictVariable,
