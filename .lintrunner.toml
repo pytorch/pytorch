@@ -1849,6 +1849,7 @@ command = [
     '--lintrunner',
 ]
 include_patterns = [  # A dummy, we ignore it
-    'torch/__init__.py',
+    'torch/**/*.py',
+    'torch/**/*.pyi',
 ]
 is_formatter = false
