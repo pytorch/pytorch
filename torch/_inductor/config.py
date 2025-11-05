@@ -693,11 +693,6 @@ benchmark_epilogue_fusion = (
 # Take how many of the top triton kernels to benchmark epilogue
 max_epilogue_benchmarked_choices = 1
 
-# Enable inline fusion for subgraphs (custom_op, mm.py decomposek, etc.)
-# Only effective when benchmark_epilogue_fusion=False (immediate autotune path)
-# When True, inline the winning subgraph choice to IR nodes for epilogue fusion
-enable_inline_subgraph_fusion = False
-
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
