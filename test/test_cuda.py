@@ -7469,6 +7469,7 @@ class TestFXMemoryProfiler(TestCase):
         device = "cuda"
         mod = MLPModule(device)
         with tempfile.TemporaryDirectory() as tmpdir:
+            torch.cuda.memory.empty_cache()
             torch.cuda.memory._record_memory_history()
             compiled = torch.compile(mod, backend="aot_eager", fullgraph=True)
             result = compiled(torch.randn(10, 10, device=device))
