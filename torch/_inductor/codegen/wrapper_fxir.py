@@ -4,8 +4,8 @@ import logging
 import operator
 import textwrap
 from collections import Counter
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, Union
 
 import sympy
 
@@ -949,7 +949,9 @@ class FxConverter:
             from triton.runtime import driver
 
             log.info("Autotuning Triton kernel %s at compile time.", kernel_name)
+            # pyrefly: ignore  # missing-attribute
             device = driver.active.get_current_device()
+            # pyrefly: ignore  # missing-attribute
             stream = driver.active.get_current_stream(device)
 
             def node_to_tuning_arg(arg: Any) -> Any:

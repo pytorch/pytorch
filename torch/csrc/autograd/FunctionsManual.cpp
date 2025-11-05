@@ -6503,7 +6503,7 @@ Tensor rms_norm_jvp(
   Tensor rstd_t;
   if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
       input_t._is_zerotensor()) {
-    rstd_t = -rstd_p.pow(3) * (input_t) * (input_p);
+    rstd_t = -rstd_p.pow(3) * input_t * input_p;
   } else {
     rstd_t = input_t * input_p;
     rstd_t *= -rstd_p.pow(3);
@@ -6514,7 +6514,7 @@ Tensor rms_norm_jvp(
   Tensor result_t;
   if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
       input_t._is_zerotensor()) {
-    result_t = (input_t)*rstd_p + (input_p)*rstd_t;
+    result_t = input_t * rstd_p + input_p * rstd_t;
   } else {
     result_t = input_t * rstd_p;
     auto temp = input_p * rstd_t;
@@ -6558,7 +6558,7 @@ Tensor rms_norm_rstd_jvp(
   Tensor rstd_t;
   if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
       input_t._is_zerotensor()) {
-    rstd_t = -rstd_p.pow(3) * (input_t) * (input_p);
+    rstd_t = -rstd_p.pow(3) * input_t * input_p;
   } else {
     rstd_t = input_t * input_p;
     rstd_t *= -rstd_p.pow(3);
