@@ -1000,7 +1000,10 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
     import inspect
 
     if isinstance(mod, torch.nn.Module):
-        mod = mod.forward
+        if len(mod._forward_pre_hooks) == 0 and len(mod._forward_hooks) == 0:
+            mod = mod.forward
+        else:
+            mod = mod.__call__
     if hasattr(mod, "__self__"):
         # pyrefly: ignore [missing-attribute]
         return mod.__func__, mod.__self__

@@ -415,6 +415,15 @@ class TestDTensorDebugMode(TestCase):
         aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])""",
         )
 
+        with DebugMode(record_stack_trace=True) as debug_mode:
+            out = mod(inp).sum()
+            out.backward()
+
+        sum_op = [
+            op for op in debug_mode.operators if str(op.op) == "aten.sum.dim_IntList"
+        ][-1]
+        self.assertTrue("self.l2(self.l1(x))" in sum_op.fwd_stack_trace)
+
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
 
