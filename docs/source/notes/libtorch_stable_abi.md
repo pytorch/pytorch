@@ -49,7 +49,7 @@ which will handle all the rough edges of the C API for the user.
 ## Migrating your kernel to the Libtorch stable ABI
 
 Kernels that wish to use the Libtorch stable ABI must be registered via `STABLE_TORCH_LIBRARY`. For kernels that are registered
-via pybind, before using the stable ABI, it would be useful to migrate to register them `TORCH_LIBRARY`.
+via pybind, before using the stable ABI, it would be useful to migrate to register them via `TORCH_LIBRARY`.
 
 Starting from a kernel that is registered via `TORCH_LIBRARY`, we must migrate the registration mechanism to `STABLE_TORCH_LIBRARY` in order to make the extension stable.
 
