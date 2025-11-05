@@ -221,6 +221,15 @@ def tf32_enabled():
         torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
 
 
+@contextlib.contextmanager
+def math_sdp_precision(target_precision: str):
+    saved_precision = torch.backends.cuda.math_sdp.fp32_precision
+    try:
+        torch.backends.cuda.math_sdp.fp32_precision = target_precision
+        yield
+    finally:
+        torch.backends.cuda.math_sdp.fp32_precision = saved_precision
+
 # This is a wrapper that wraps a test to run this test twice, one with
 # allow_tf32=True, another with allow_tf32=False. When running with
 # allow_tf32=True, it will use reduced precision as specified by the
