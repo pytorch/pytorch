@@ -18,10 +18,10 @@ using c10::DefaultPtrTraits;
 #endif
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using TensorAccessorBase = c10::detail::TensorAccessorBase<IntArrayRef, T, N, PtrTraits, index_t>;
+using TensorAccessorBase = c10::detail::TensorAccessorBase<c10::IntArrayRef, T, N, PtrTraits, index_t>;
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using TensorAccessor = c10::detail::TensorAccessor<IntArrayRef, T, N, PtrTraits, index_t>;
+using TensorAccessor = c10::detail::TensorAccessor<c10::IntArrayRef, T, N, PtrTraits, index_t>;
 
 namespace {
 
@@ -39,10 +39,10 @@ struct IndexBoundsCheck {
 }  // anonymous namespace
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using GenericPackedTensorAccessorBase = c10::detail::GenericPackedTensorAccessorBase<IntArrayRef, T, N, PtrTraits, index_t>;
+using GenericPackedTensorAccessorBase = c10::detail::GenericPackedTensorAccessorBase<c10::IntArrayRef, T, N, PtrTraits, index_t>;
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using GenericPackedTensorAccessor = c10::detail::GenericPackedTensorAccessor<IntArrayRef, IndexBoundsCheck<N, index_t>, T, N, PtrTraits, index_t>;
+using GenericPackedTensorAccessor = c10::detail::GenericPackedTensorAccessor<c10::IntArrayRef, IndexBoundsCheck<N, index_t>, T, N, PtrTraits, index_t>;
 
 // Can't put this directly into the macro function args because of commas
 #define AT_X GenericPackedTensorAccessor<T, N, PtrTraits, index_t>
