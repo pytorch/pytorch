@@ -3059,5 +3059,508 @@
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
       ]
     }
+  ],
+  "GB0300": [
+    {
+      "Gb_type": "HOP: non torch.Tensor leaf",
+      "Context": "args types: {[type(a.realize()) for a in args]}",
+      "Explanation": "Expected all leaves to be of torch.Tensor type.",
+      "Hints": []
+    }
+  ],
+  "GB0301": [
+    {
+      "Gb_type": "HOP: non-callable variable",
+      "Context": "arg name: {arg_name}, func_var type: {str(func_var)}",
+      "Explanation": "{arg_name} should be a callable but is of type {str(func_var)}.",
+      "Hints": []
+    }
+  ],
+  "GB0302": [
+    {
+      "Gb_type": "torch.while_loop: improper args/kwargs",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "torch.while_loop expects 4 positional arguments (got {len(args)}) and no keyword arguments (got {len(kwargs)}) Usage: while_loop(cond_fn, body_fn, operands)",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0303": [
+    {
+      "Gb_type": "torch.while_loop: improper additional_inputs",
+      "Context": "str(additional_inputs)",
+      "Explanation": "Expected additional_inputs to be a list/tuple but got {additional_inputs.python_type()}",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0304": [
+    {
+      "Gb_type": "invalid set_subgraph_inputs and sub_kwargs settings",
+      "Context": "set_subgraph_inputs: {set_subgraph_inputs}, sub_kwargs: {sub_kwargs}",
+      "Explanation": "`sub_kwargs` cannot be used when `set_subgraph_inputs` is not set to 'automatic'.",
+      "Hints": [
+        "Use `set_subgraph_inputs='automatic'` when passing `sub_kwargs`.",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0305": [
+    {
+      "Gb_type": "unsupported HigherOrderOperator",
+      "Context": "str(value)",
+      "Explanation": "Unable to create higher order operator variable for {value.__name__}.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0306": [
+    {
+      "Gb_type": "unsupported HigherOrderOperator function call",
+      "Context": "str(self.value)",
+      "Explanation": "Unable to trace calling higher order operator variable for {self.value.__name__}.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0307": [
+    {
+      "Gb_type": "torch.while_loop: unsupported cond_fn return type",
+      "Context": "str(cond_r)",
+      "Explanation": "Expected cond_fn to return a scalar tensor or a bool but got {cond_r_meta.shape}.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0308": [
+    {
+      "Gb_type": "torch.cond: improper args/kwargs",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "torch.cond expects 4 positional arguments (got {len(args)}) and no keyword arguments (got {len(kwargs)}) Usage: cond(pred, cond_fn, body_fn, operands)",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0309": [
+    {
+      "Gb_type": "torch.cond: improper predicate",
+      "Context": "str(pred)",
+      "Explanation": "Expected `pred` to be a bool or a boolean tensor with a single item but got {str(type(pred))} with original python type {str(pred.python_type())}.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0310": [
+    {
+      "Gb_type": "torch.cond: improper operands",
+      "Context": "str(operands)",
+      "Explanation": "Expected `operands` to be a list/tuple but got {operands.python_type()}.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0311": [
+    {
+      "Gb_type": "torch.cond: improper operands contents",
+      "Context": "str(operands)",
+      "Explanation": "Expected `operands` to be a list/tuple of pytrees that only consists of tensor leaves.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0312": [
+    {
+      "Gb_type": "torch.cond: differing branch outputs",
+      "Context": "true_spec: {true_spec.treespec}, false_spec: {false_spec.treespec}, same_spec: {same_spec}",
+      "Explanation": "Expected branches to return the same pytree structure.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0313": [
+    {
+      "Gb_type": "HOP body output unsupported",
+      "Context": "non-tensor outputs: {non_tensor_output}",
+      "Explanation": "HigherOrderOperator body's output must consist of tensors or ints/bools only but got {out.python_type()}.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0314": [
+    {
+      "Gb_type": "torch.associative_scan: improper xs",
+      "Context": "str(xs)",
+      "Explanation": "Expected xs to be a list/tuple but got {xs.python_type()}",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0315": [
+    {
+      "Gb_type": "torch.associative_scan: improper additional_inputs",
+      "Context": "str(additional_inputs)",
+      "Explanation": "Expected additional_inputs to be a list/tuple but got {additional_inputs.python_type()}",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0316": [
+    {
+      "Gb_type": "torch.associative_scan: zero-sized tensor",
+      "Context": "str(xs_vars[0])",
+      "Explanation": "associative_scan() operator doesn't support zero-sized tensors during tracing.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0317": [
+    {
+      "Gb_type": "torch.associative_scan: combine_fn improper number of leaves",
+      "Context": "str(_combine_treespec.as_python_constant())",
+      "Explanation": "combine_fn needs to produce one pytree for the output but combine_fn produces the pytree {_combine_treespec.as_python_constant()}.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0318": [
+    {
+      "Gb_type": "torch.associative_scan: mismatched input/output tree structure",
+      "Context": "xs: {xs_treespec.as_python_constant()}, output: {_combine_treespec.as_python_constant()}",
+      "Explanation": "The tree structure of the xs and the outs of the combine_fn are are expected to be identical, but got xs: {xs_treespec.as_python_constant()} vs output: {_combine_treespec.as_python_constant()}.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0319": [
+    {
+      "Gb_type": "torch.scan: improper xs",
+      "Context": "str(xs)",
+      "Explanation": "Expected xs to be a list/tuple but got {xs.python_type()}",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0320": [
+    {
+      "Gb_type": "torch.scan: improper init",
+      "Context": "str(init)",
+      "Explanation": "Expected init to be a list/tuple with at least one element but got {init.python_type()}",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0321": [
+    {
+      "Gb_type": "torch.scan: no init leaves",
+      "Context": "",
+      "Explanation": "Expected init leaves.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0322": [
+    {
+      "Gb_type": "torch.scan: improper additional_inputs",
+      "Context": "str(additional_inputs)",
+      "Explanation": "Expected additional_inputs to be a list/tuple but got {additional_inputs.python_type()}",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0323": [
+    {
+      "Gb_type": "torch.scan: zero-sized tensor",
+      "Context": "str(xs_vars[0])",
+      "Explanation": "associative_scan() operator doesn't support zero-sized tensors during tracing.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0324": [
+    {
+      "Gb_type": "torch.map: kwargs not supported",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "torch.map expects no keyword arguments (got {len(kwargs)})",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0325": [
+    {
+      "Gb_type": "torch.map: improper inputs",
+      "Context": "str(sample_shape)",
+      "Explanation": "torch.map doesn't support scalar or non-zero sized tensors during tracing.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0326": [
+    {
+      "Gb_type": "executorch_call_delegate: kwargs not supported",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "executorch_call_delegate expects no keyword arguments (got {len(kwargs)})",
+      "Hints": []
+    }
+  ],
+  "GB0327": [
+    {
+      "Gb_type": "torch.func.functional_call capture is disabled",
+      "Context": "",
+      "Explanation": "torch.func.functional_call capture is disabled",
+      "Hints": [
+        "Set `torch._dynamo.config.inline_inbuilt_nn_modules=True` to enable."
+      ]
+    }
+  ],
+  "GB0328": [
+    {
+      "Gb_type": "WrapHigherOrderVariable: kwargs unexpected",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "kwargs should have been flattened into lifted args.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0329": [
+    {
+      "Gb_type": "wrap_with_set_grad_enabled: unexpected kwargs",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "wrap_with_set_grad_enabled expects no keyword arguments (got {len(kwargs)}).",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0330": [
+    {
+      "Gb_type": "wrap_with_set_grad_enabled: non-constant grad_enabled",
+      "Context": "str(grad_enabled)",
+      "Explanation": "wrap_with_set_grad_enabled expects grad_enabled argument to be a constant.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0331": [
+    {
+      "Gb_type": "wrap_with_set_grad_enabled: unexpected freevars",
+      "Context": "str(body_lifted_freevars)",
+      "Explanation": "wrap_with_set_grad_enabled expects no freevars.",
+      "Hints": []
+    }
+  ],
+  "GB0332": [
+    {
+      "Gb_type": "wrap_with_autocast: unexpected kwargs",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "wrap_with_autocast expects no keyword arguments (got {len(kwargs)}).",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0333": [
+    {
+      "Gb_type": "wrap_with_autocast: unexpected freevars",
+      "Context": "str(body_lifted_freevars)",
+      "Explanation": "wrap_with_autocast expects no freevars.",
+      "Hints": []
+    }
+  ],
+  "GB0334": [
+    {
+      "Gb_type": "hints_wrapper: improper args/kwargs",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "hints_wrapper expects 3 positional arguments (got {len(args)}) and 1 keyword argument (got {len(kwargs)}). Usage: hints_wrapper(body_fn, args, kwargs, hints=...). args is expected to be list/tuple and kwargs is expected to be a dict.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0335": [
+    {
+      "Gb_type": "out_dtype: unexpected kwargs",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "out_dtype expects no keyword arguments (got {len(kwargs)}).",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0336": [
+    {
+      "Gb_type": "strict_mode: unexpected kwargs",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "strict_mode higher order op expects no keyword arguments (got {len(kwargs)}).",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0337": [
+    {
+      "Gb_type": "invoke_subgraph: kwargs unexpected",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "kwargs should have been flattened into lifted args.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0338": [
+    {
+      "Gb_type": "torch.while_loop: infinite loop detected",
+      "Context": "str(cond_r)",
+      "Explanation": "Infinite loop detected because while_loop's cond_fn always returns the same value {pred}.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0339": [
+    {
+      "Gb_type": "torch.cond: unsupported branch return type",
+      "Context": "str(ret_val)",
+      "Explanation": "Expected branches to return a possibly nested pytree of tensors or constant ints.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0340": [
+    {
+      "Gb_type": "torch.associative_scan: improper args",
+      "Context": "args: {args}",
+      "Explanation": "torch.associative_scan expects 2 positional arguments (got {len(args)}) Usage: associative_scan(combine_fn, xs)",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0341": [
+    {
+      "Gb_type": "torch.scan: improper combine_fn",
+      "Context": "str(combine_fn_var)",
+      "Explanation": "Expected combine_fn to be wrapped as functools.partial in scan user-facing api or a graph module if we're re-exporting but got {combine_fn_var.python_type()}.",
+      "Hints": [
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
+  "GB0342": [
+    {
+      "Gb_type": "torch.scan: improper combine_fn number of returns",
+      "Context": "str(combine_result_vars)",
+      "Explanation": "Expect combine_fn to return a tuple (next_carry, y) but got {combine_result_vars}.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0343": [
+    {
+      "Gb_type": "wrap_with_autocast: expected constant arg",
+      "Context": "str(args)",
+      "Explanation": "wrap_with_autocast expects device_type, dtype, enabled, and cache_enabled arguments to be constants.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0344": [
+    {
+      "Gb_type": "strict_mode: improper args",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "strict_mode higher order op expects flat inputs (list/tuple/dict)",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0345": [
+    {
+      "Gb_type": "autograd.Function.apply: non-function or method forward",
+      "Context": "str(self.fwd_graph)",
+      "Explanation": "Expected forward function to be a function or method.",
+      "Hints": []
+    }
+  ],
+  "GB0346": [
+    {
+      "Gb_type": "autograd.Function.apply: _materialize_non_diff_grads mutation",
+      "Context": "",
+      "Explanation": "Mutations to autograd.Function.ctx._materialize_non_diff_grads are not supported.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0347": [
+    {
+      "Gb_type": "autograd.Function.apply: non-function or method backward",
+      "Context": "str(self.bwd_graph)",
+      "Explanation": "Expected backward function to be a function or method.",
+      "Hints": []
+    }
+  ],
+  "GB0348": [
+    {
+      "Gb_type": "cannot unwrap variable for check_meta_consistency",
+      "Context": "str(var)",
+      "Explanation": "Expected {var} to be TensorVariable, SymNodeVariable, or ConstantVariable",
+      "Hints": []
+    }
+  ],
+  "GB0349": [
+    {
+      "Gb_type": "torch.cond: unsupported branch return type (constant non-int)",
+      "Context": "str(ret_val)",
+      "Explanation": "Constants returned from branches must be ints.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0350": [
+    {
+      "Gb_type": "HOP body taking non-Tensor as input",
+      "Context": "str(sub_args)",
+      "Explanation": "{description} with body that accepts non-Tensors as input. Got type {a.python_type()} at index {idx}.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0351": [
+    {
+      "Gb_type": "autograd.Function.apply: non-function or method backward (2)",
+      "Context": "str(self.bwd_graph)",
+      "Explanation": "Expected backward function to be a function or method.",
+      "Hints": []
+    }
   ]
 }
