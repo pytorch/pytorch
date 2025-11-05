@@ -243,17 +243,6 @@ autosummary_filename_map = {
 }
 
 coverage_ignore_functions = [
-    # torch
-    "typename",
-    # torch.cuda._sanitizer
-    "zip_arguments",
-    "zip_by_key",
-    # torch.distributed.autograd
-    "is_available",
-    # torch.distributed.checkpoint.state_dict
-    "gc_context",
-    # torch.distributed.elastic.events
-    "record_rdzv_event",
     # torch.distributed.elastic.metrics
     "initialize_metrics",
     # torch.distributed.elastic.rendezvous.registry
