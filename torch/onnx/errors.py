@@ -44,7 +44,7 @@ class UnsupportedOperatorError(OnnxExporterError):
             )
         else:
             msg = (
-                "ONNX export failed on an operator with unrecognized namespace {op_name}. "
+                f"ONNX export failed on an operator with unrecognized namespace {name}. "
                 "If you are trying to export a custom operator, make sure you registered it with "
                 "the right domain and version."
             )

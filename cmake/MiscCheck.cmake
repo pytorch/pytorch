@@ -2,24 +2,6 @@ include(CheckCXXSourceCompiles)
 include(CheckCXXCompilerFlag)
 include(CMakePushCheckState)
 
-# ---[ Check if we want to turn off deprecated warning due to glog.
-if(USE_GLOG)
-  cmake_push_check_state(RESET)
-  set(CMAKE_REQUIRED_FLAGS "-std=c++17")
-  CHECK_CXX_SOURCE_COMPILES(
-      "#include <glog/stl_logging.h>
-      int main(int argc, char** argv) {
-        return 0;
-      }" CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING
-      FAIL_REGEX ".*-Wno-deprecated.*")
-
-  if(NOT CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING AND NOT MSVC)
-    message(STATUS "Turning off deprecation warning due to glog.")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated")
-  endif()
-  cmake_pop_check_state()
-endif()
-
 # ---[ Check if the compiler has AVX/AVX2 support. We only check AVX2.
 if(NOT INTERN_BUILD_MOBILE)
   find_package(AVX) # checks AVX and AVX2
@@ -30,46 +12,6 @@ if(NOT INTERN_BUILD_MOBILE)
     set(CAFFE2_PERF_WITH_AVX2 1)
   endif()
 endif()
-# ---[ Check if the compiler has AVX512 support.
-cmake_push_check_state(RESET)
-if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  # We could've used MSVC's hidden option /arch:AVX512 that defines __AVX512F__,
-  # __AVX512DQ__, and __AVX512VL__, and /arch:AVX512F that defines __AVX512F__.
-  # But, we chose not to do that not to rely on hidden options.
-  set(CMAKE_REQUIRED_FLAGS "/D__AVX512F__ /D__AVX512DQ__ /D__AVX512VL__")
-else()
-  # We only consider the case where all of avx512f, avx512dq, and avx512vl are
-  # supported.
-  # Platforms where avx512f is supported by not avx512dq and avx512vl as of
-  # Jan 15 2019 : linux_manywheel_2.7mu_cpu_build and
-  # linux_conda_3.7_cu100_build
-  set(CMAKE_REQUIRED_FLAGS "-mavx512f -mavx512dq -mavx512vl")
-endif()
-CHECK_CXX_SOURCE_COMPILES(
-    "#if defined(_MSC_VER)
-     #include <intrin.h>
-     #else
-     #include <immintrin.h>
-     #endif
-     // check avx512f
-     __m512 addConstant(__m512 arg) {
-       return _mm512_add_ps(arg, _mm512_set1_ps(1.f));
-     }
-     // check avx512dq
-     __m512 andConstant(__m512 arg) {
-       return _mm512_and_ps(arg, _mm512_set1_ps(1.f));
-     }
-     int main() {
-       __m512i a = _mm512_set1_epi32(1);
-       __m256i ymm = _mm512_extracti64x4_epi64(a, 0);
-       ymm = _mm256_abs_epi64(ymm); // check avx512vl
-       __mmask16 m = _mm512_cmp_epi32_mask(a, a, _MM_CMPINT_EQ);
-       __m512i r = _mm512_andnot_si512(a, a);
-     }" CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
-if(CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
-  message(STATUS "Current compiler supports avx512f extension. Will build fbgemm.")
-endif()
-cmake_pop_check_state()
 
 # ---[ Checks if compiler supports -fvisibility=hidden
 check_cxx_compiler_flag("-fvisibility=hidden" COMPILER_SUPPORTS_HIDDEN_VISIBILITY)

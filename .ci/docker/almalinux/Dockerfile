@@ -64,8 +64,13 @@ FROM cuda as cuda12.9
 RUN bash ./install_cuda.sh 12.9
 ENV DESIRED_CUDA=12.9
 
+FROM cuda as cuda13.0
+RUN bash ./install_cuda.sh 13.0
+ENV DESIRED_CUDA=13.0
+
 FROM ${ROCM_IMAGE} as rocm
-ENV PYTORCH_ROCM_ARCH="gfx900;gfx906;gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201"
+ARG PYTORCH_ROCM_ARCH
+ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 ADD ./common/install_mkl.sh install_mkl.sh
 RUN bash ./install_mkl.sh && rm install_mkl.sh
 ENV MKLROOT /opt/intel
@@ -76,10 +81,10 @@ ADD ./common/install_mnist.sh install_mnist.sh
 RUN bash ./install_mnist.sh
 
 FROM base as all_cuda
-COPY --from=cuda11.8  /usr/local/cuda-11.8 /usr/local/cuda-11.8
 COPY --from=cuda12.6  /usr/local/cuda-12.6 /usr/local/cuda-12.6
 COPY --from=cuda12.8  /usr/local/cuda-12.8 /usr/local/cuda-12.8
 COPY --from=cuda12.9  /usr/local/cuda-12.9 /usr/local/cuda-12.9
+COPY --from=cuda13.0  /usr/local/cuda-13.0 /usr/local/cuda-13.0
 
 # Final step
 FROM ${BASE_TARGET} as final

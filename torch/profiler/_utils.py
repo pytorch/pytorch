@@ -211,6 +211,7 @@ class BasicEvaluation:
             # Find latest cuda kernel event
             if hasattr(event, "start_us"):
                 start_time = event.start_us() * 1000
+                # pyrefly: ignore [missing-attribute]
                 end_time = (event.start_us() + event.duration_us()) * 1000
                 # Find current spawned cuda kernel event
                 if event in kernel_mapping and kernel_mapping[event] is not None:
@@ -335,7 +336,7 @@ class BasicEvaluation:
             event_list = [
                 event
                 for _, event in sorted(
-                    zip(heuristic_score_list, event_list),
+                    zip(heuristic_score_list, event_list, strict=True),
                     key=operator.itemgetter(0),
                     reverse=True,
                 )

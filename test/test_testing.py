@@ -12,7 +12,8 @@ import re
 import subprocess
 import sys
 import unittest.mock
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 from collections.abc import Iterator
 
 import torch
@@ -2351,7 +2352,7 @@ class TestImports(TestCase):
             # fail, so just set CWD to this script's directory
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
 
-    # The test is flaky on ROCm and has been open and close multiple times
+    # The test is flaky on ROCm/XPU and has been open and close multiple times
     # https://github.com/pytorch/pytorch/issues/110040
     @skipIfRocm
     def test_circular_dependencies(self) -> None:
@@ -2366,6 +2367,7 @@ class TestImports(TestCase):
                            "torch.onnx._internal",  # depends on onnx-script
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._inductor.codegen.cuda",  # depends on cutlass
+                           "torch._inductor.codegen.cutedsl",  # depends on cutlass
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
                            "torch.distributed.examples",  # requires CUDA and torchvision
                            "torch.distributed.tensor.examples",  # example scripts

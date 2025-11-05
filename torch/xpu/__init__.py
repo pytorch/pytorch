@@ -9,8 +9,9 @@ This package is lazily initialized, so you can always import it, and use
 
 import threading
 import traceback
+from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch._C
@@ -75,6 +76,17 @@ def is_bf16_supported(including_emulation: bool = True) -> bool:
         including_emulation
         or torch.xpu.get_device_properties().has_bfloat16_conversions
     )
+
+
+def is_tf32_supported() -> bool:
+    r"""Return a bool indicating if the current XPU device supports dtype tf32."""
+    if not is_available():
+        return False
+    # On Intel Xe architecture and newer, TF32 operations can be accelerated
+    # through DPAS (Dot Product Accumulate Systolic) instructions. Therefore,
+    # TF32 support can be determined by checking whether the device supports
+    # subgroup matrix multiply-accumulate operations.
+    return torch.xpu.get_device_properties().has_subgroup_matrix_multiply_accumulate
 
 
 def is_initialized():
@@ -233,22 +245,22 @@ def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
             (default).
 
     Returns:
-        Dict[str, Any]: the xpu capability dictionary of the device
+        dict[str, Any]: the xpu capability dictionary of the device
     """
     props = get_device_properties(device)
-    # pybind service attributes are no longer needed and their presence breaks
-    # the further logic related to the serialization of the created dictionary.
-    # In particular it filters out `<bound method PyCapsule._pybind11_conduit_v1_ of _XpuDeviceProperties..>`
-    # to fix Triton tests.
-    # This field appears after updating pybind to 2.13.6.
+    # Only keep attributes that are safe for dictionary serialization.
+    serializable_types = (int, float, bool, str, type(None), list, tuple, dict)
     return {
-        prop: getattr(props, prop)
-        for prop in dir(props)
-        if not prop.startswith(("__", "_pybind11_"))
+        key: value
+        for key in dir(props)
+        if not key.startswith("__")
+        and isinstance((value := getattr(props, key)), serializable_types)
     }
 
 
-def get_device_properties(device: Optional[_device_t] = None) -> _XpuDeviceProperties:
+def get_device_properties(
+    device: Optional[_device_t] = None,
+) -> _XpuDeviceProperties:  # pyrefly: ignore  # not-a-type
     r"""Get the properties of a device.
 
     Args:
@@ -282,6 +294,22 @@ def _get_device(device: Union[int, str, torch.device]) -> torch.device:
     return device
 
 
+def can_device_access_peer(device: _device_t, peer: _device_t) -> bool:
+    r"""Query whether a device can access a peer device's memory.
+
+    Args:
+        device (torch.device or int or str): selected device.
+        peer (torch.device or int or str): peer device to query access to.
+
+    Returns:
+        bool: ``True`` if ``device`` can access ``peer``, ``False`` otherwise.
+    """
+    _lazy_init()
+    device = _get_device_index(device, optional=True)
+    peer = _get_device_index(peer, optional=True)
+    return torch._C._xpu_canDeviceAccessPeer(device, peer)
+
+
 class StreamContext:
     r"""Context-manager that selects a given stream.
 
@@ -300,7 +328,7 @@ class StreamContext:
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if self.idx is None:
-            self.idx = -1
+            self.idx = -1  # pyrefly: ignore [bad-assignment]
 
     def __enter__(self):
         cur_stream = self.stream
@@ -493,6 +521,7 @@ def _get_rng_state_offset(device: Union[int, str, torch.device] = "xpu") -> int:
 # import here to avoid circular import
 from .memory import (
     empty_cache,
+    get_per_process_memory_fraction,
     max_memory_allocated,
     max_memory_reserved,
     mem_get_info,
@@ -502,6 +531,7 @@ from .memory import (
     memory_stats_as_nested_dict,
     reset_accumulated_memory_stats,
     reset_peak_memory_stats,
+    set_per_process_memory_fraction,
 )
 from .random import (
     get_rng_state,
@@ -520,6 +550,7 @@ __all__ = [
     "Event",
     "Stream",
     "StreamContext",
+    "can_device_access_peer",
     "current_device",
     "current_stream",
     "default_generators",
@@ -532,6 +563,7 @@ __all__ = [
     "get_device_name",
     "get_device_properties",
     "get_gencode_flags",
+    "get_per_process_memory_fraction",
     "get_rng_state",
     "get_rng_state_all",
     "get_stream_from_external",
@@ -540,6 +572,7 @@ __all__ = [
     "is_available",
     "is_bf16_supported",
     "is_initialized",
+    "is_tf32_supported",
     "manual_seed",
     "manual_seed_all",
     "max_memory_allocated",
@@ -554,6 +587,7 @@ __all__ = [
     "seed",
     "seed_all",
     "set_device",
+    "set_per_process_memory_fraction",
     "set_rng_state",
     "set_rng_state_all",
     "set_stream",

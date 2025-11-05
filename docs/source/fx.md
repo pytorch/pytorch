@@ -1093,6 +1093,9 @@ The set of leaf modules can be customized by overriding
 ```{eval-rst}
 .. autofunction:: torch.fx.replace_pattern
 ```
+```{eval-rst}
+.. autofunction:: torch.fx.traceback.annotate
+```
 
 <!-- The experimental and passes submodules are missing docs. -->
 <!-- Adding it here for coverage but this doesn't add anything to the -->
@@ -1166,6 +1169,7 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.passes.operator_support
 .. py:module:: torch.fx.passes.param_fetch
 .. py:module:: torch.fx.passes.pass_manager
+.. py:module:: torch.fx.passes.regional_inductor
 .. py:module:: torch.fx.passes.reinplace
 .. py:module:: torch.fx.passes.runtime_assert
 .. py:module:: torch.fx.passes.shape_prop

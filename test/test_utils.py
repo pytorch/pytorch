@@ -3,7 +3,6 @@
 
 import os
 import random
-import re
 import shutil
 import subprocess
 import sys
@@ -21,8 +20,6 @@ import torch.utils.cpp_extension
 import torch.utils.data
 from torch._utils import try_import
 from torch._utils_internal import deprecated
-from torch.autograd._functions.utils import check_onnx_broadcast
-from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -54,7 +51,7 @@ from torch.utils.data import DataLoader
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -635,151 +632,6 @@ class TestDataLoaderUtils(TestCase):
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 
 
-@unittest.skipIf(
-    "SKIP_TEST_BOTTLENECK" in os.environ.keys(), "SKIP_TEST_BOTTLENECK is set"
-)
-class TestBottleneck(TestCase):
-    def _run(self, command, timeout=30):
-        """Returns (return-code, stdout, stderr)"""
-        import subprocess
-
-        p = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            shell=True,
-        )
-        try:
-            output, err = p.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            p.kill()
-            output, err = p.communicate()
-        rc = p.returncode
-        output_str = output.decode("ascii")
-        err_str = err.decode("ascii")
-        return (rc, output_str, err_str)
-
-    def _run_bottleneck(self, test_file, scriptargs=""):
-        curdir = os.path.dirname(os.path.abspath(__file__))
-        filepath = f"{curdir}/{test_file}"
-        if scriptargs != "":
-            scriptargs = f" {scriptargs}"
-        rc, out, err = self._run(
-            f"{sys.executable} -m torch.utils.bottleneck {filepath}{scriptargs}"
-        )
-        return rc, out, err
-
-    def _check_run_args(self):
-        # Check that this fails due to missing args
-        rc, out, err = self._run_bottleneck("bottleneck_test/test_args.py")
-        self.assertEqual(
-            rc,
-            2,
-            atol=0,
-            rtol=0,
-            msg=self._fail_msg("Missing args should error", out + err),
-        )
-
-        # This should succeed
-        rc, out, err = self._run_bottleneck(
-            "bottleneck_test/test_args.py", "--foo foo --bar bar"
-        )
-        self.assertEqual(
-            rc,
-            0,
-            atol=0,
-            rtol=0,
-            msg=self._fail_msg("Should pass args to script", out + err),
-        )
-
-    def _fail_msg(self, msg, output):
-        return f"{msg}, output was:\n{output}"
-
-    def _check_environment_summary(self, output):
-        results = re.search("Environment Summary", output)
-        self.assertIsNotNone(
-            results, self._fail_msg("Should have Environment Summary", output)
-        )
-
-        # Up to five lines away from the heading, there should be the version number
-        results = re.search(
-            r"Environment Summary.*(\n.*){,5}\nPyTorch \d+\.\d+", output
-        )
-        self.assertIsNotNone(
-            results, self._fail_msg("Should have PyTorch version", output)
-        )
-
-    def _check_cprof_summary(self, output):
-        results = re.search("cProfile output", output)
-        self.assertIsNotNone(
-            results, self._fail_msg("Should have cProfile output", output)
-        )
-
-        # This assumes that after the cProfile output section we have
-        # the autograd profiler output
-        results = re.search(
-            r"cProfile output.*(\n.*){6,50}\n.*autograd profiler output", output
-        )
-        self.assertIsNotNone(
-            results,
-            self._fail_msg(
-                "Distance between cProfile and autograd prof out not in [6, 50] lines",
-                output,
-            ),
-        )
-
-    def _check_autograd_summary(self, output):
-        results = re.search("autograd profiler output", output)
-        self.assertIsNotNone(
-            results, self._fail_msg("Should have autograd profiler output", output)
-        )
-
-        # This assumes that after the autograd profiler output is the end of the
-        # output.
-        results = re.search(r"autograd profiler output.*(\n.*){6,100}", output)
-        self.assertIsNotNone(
-            results,
-            self._fail_msg(
-                "Distance between autograd prof output and end of output not in [6, 100] lines",
-                output,
-            ),
-        )
-
-    def _check_cuda(self, output):
-        if HAS_CUDA:
-            results = re.search("CUDA mode", output)
-            self.assertIsNotNone(
-                results, self._fail_msg("Should tell users CUDA", output)
-            )
-        else:
-            results = re.search("CUDA mode", output)
-            self.assertIsNone(
-                results, self._fail_msg("Should not tell users about CUDA", output)
-            )
-
-    @unittest.skipIf(HAS_CUDA, "CPU-only test")
-    def test_bottleneck_cpu_only(self):
-        rc, out, err = self._run_bottleneck("bottleneck_test/test.py")
-        self.assertEqual(rc, 0, msg=f"Run failed with\n{err}")
-
-        self._check_run_args()
-        self._check_environment_summary(out)
-        self._check_autograd_summary(out)
-        self._check_cprof_summary(out)
-        self._check_cuda(out)
-
-    @unittest.skipIf(not HAS_CUDA, "No CUDA")
-    def test_bottleneck_cuda(self):
-        rc, out, err = self._run_bottleneck("bottleneck_test/test_cuda.py")
-        self.assertEqual(rc, 0, msg=f"Run failed with\n{err}")
-
-        self._check_run_args()
-        self._check_environment_summary(out)
-        self._check_autograd_summary(out)
-        self._check_cprof_summary(out)
-        self._check_cuda(out)
-
-
 from torch.utils.collect_env import get_pretty_env_info
 
 
@@ -790,65 +642,6 @@ class TestCollectEnv(TestCase):
         self.assertTrue(info_output.count("\n") >= 17)
 
 
-class TestONNXUtils(TestCase):
-    def test_prepare_onnx_paddings(self):
-        sizes = [2, 3, 4]
-        pad = [1, 2, 3, 4]
-        paddings = _prepare_onnx_paddings(len(sizes), pad)
-        self.assertEqual(paddings, [0, 3, 1, 0, 4, 2])
-
-    def test_check_onnx_broadcast(self):
-        def try_check_onnx_broadcast(dims1, dims2, expect_broadcast, expect_fail):
-            broadcast = True
-            fail = False
-            try:
-                broadcast = check_onnx_broadcast(dims1, dims2)
-            except ValueError:
-                fail = True
-            self.assertEqual(broadcast, expect_broadcast)
-            self.assertEqual(fail, expect_fail)
-
-        # Case 1, check the case when len(dims1) < len(dims2) and numel(dims2) > 1
-        dims1 = [3, 4]
-        dims2 = [2, 3, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, True)
-
-        # Case 2, check the case when len(dims1) < len(dims2) and numel(dims2) == 1
-        dims1 = [3, 4]
-        dims2 = [1, 1, 1]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-        # Case 3, check the case when len(dims1) > len(dims2) and numel(dims2) == 1
-        dims1 = [1, 1]
-        dims2 = [1]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-        # Case 4, check the case when len(dims1) > len(dims2) and dims1[x:] == dims2
-        dims1 = [2, 3, 4]
-        dims2 = [3, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-        # Case 5, check the case when len(dims1) > len(dims2), but dims1[x:] != dims2
-        dims1 = [2, 3, 4]
-        dims2 = [1, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, True)
-
-        # Case 6, check the equal case, no broadcast
-        dims1 = [3, 4]
-        dims2 = [3, 4]
-        try_check_onnx_broadcast(dims1, dims2, False, False)
-
-        # Case 7, check the case when len(dims1) == len(dims2), but dims1 != dims2
-        dims1 = [3, 4]
-        dims2 = [1, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, True)
-
-        # Case 8, check the case when len(dims1) == len(dims2) and numel(s2) == 1
-        dims1 = [3, 4]
-        dims2 = [1, 1]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-
 class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python  # noqa: F401
@@ -856,7 +649,9 @@ class TestHipify(TestCase):
 
 class TestHipifyTrie(TestCase):
     def setUp(self):
-        self.trie = torch.utils.hipify.hipify_python.Trie()
+        from torch.utils.hipify import hipify_python
+
+        self.trie = hipify_python.Trie()
 
     def test_add_and_search_trie(self):
         self.trie.add("banana")

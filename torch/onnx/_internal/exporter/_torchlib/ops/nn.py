@@ -1,11 +1,12 @@
 """torch.ops.aten operators under the `core` module."""
 # mypy: disable-error-code="misc,arg-type,type-arg,valid-type,assignment,return-value,type-var,operator,no-untyped-def,index"
+# pyrefly: ignore-errors
 # ruff: noqa: TCH001,TCH002
 # flake8: noqa: B950
 
 from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, Sequence, TYPE_CHECKING
 
 from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
     opset20 as op20,
@@ -23,9 +24,6 @@ if TYPE_CHECKING:
     from onnxscript.values import Opset
 
 aten = torch.ops.aten
-
-_INT64_MAX = 9223372036854775807
-_INT64_MIN = -9223372036854775808
 
 
 @onnx_impl(aten.gelu.default, trace_only=True, opset_introduced=20)
@@ -50,9 +48,9 @@ def aten_group_norm(
 
     c = op21.Shape(input, start=1, end=2)
     if weight is None:
-        weight = op21.ConstantOfShape(c, value=ir.tensor(1.0, dtype=input.dtype))
+        weight = op21.ConstantOfShape(c, value=ir.tensor([1.0], dtype=input.dtype))
     if bias is None:
-        bias = op21.ConstantOfShape(c, value=ir.tensor(0.0, dtype=input.dtype))
+        bias = op21.ConstantOfShape(c, value=ir.tensor([0.0], dtype=input.dtype))
     return op21.GroupNormalization(
         input, weight, bias, epsilon=eps, num_groups=num_groups
     )
@@ -61,7 +59,7 @@ def aten_group_norm(
 @onnx_impl(aten.rms_norm.default, trace_only=True, opset_introduced=23)
 def aten_rms_norm(
     input: TFloat,
-    normalized_shape: list[int],
+    normalized_shape: Sequence[int],
     weight: Optional[TFloat] = None,
     eps: Optional[float] = None,
 ) -> TFloat:
@@ -80,7 +78,9 @@ def aten_rms_norm(
 
     # Create weight tensor if not provided
     if weight is None:
-        weight = op23.Constant(value=ir.tensor(1.0, dtype=input.dtype))
+        weight = op23.ConstantOfShape(
+            op23.Shape(input), value=ir.tensor([1], dtype=input.dtype)
+        )
 
     return op23.RMSNormalization(input, weight, axis=axis, epsilon=eps)
 
@@ -170,6 +170,9 @@ def aten_scaled_dot_product_attention_23(
     if is_causal:
         attn_mask = _causal_attention_mask(query, key, op23)
 
+    if enable_gqa:
+        key, value = _attention_repeat_kv_for_group_query(query, key, value, op23)
+
     if attn_mask is None:
         return _aten_scaled_dot_product_attention_no_mask_onnx(
             query, key, value, scale, dropout_p, op23
@@ -178,6 +181,67 @@ def aten_scaled_dot_product_attention_23(
     return _aten_scaled_dot_product_attention_float_mask_onnx(
         query, key, value, attn_mask, scale, dropout_p, op23
     )
+
+
+def _attention_repeat_kv_for_group_query(
+    query: TFloat, key: TFloat, value: TFloat, op: Opset
+) -> tuple[TFloat, TFloat]:
+    """Expand key and value for group query attention.
+
+    repeat_interleave is applied on key and value to match the number of heads in query.
+
+    Args:
+        query: Tensor of shape [B, q_num_heads, q_S, E]
+        key: Tensor of shape [B, k_num_heads, kv_S, E]
+        value: Tensor of shape [B, v_num_heads, kv_S, E]
+
+    Returns:
+        Tuple of (expanded_key, expanded_value) where:
+            - expanded_key: Tensor of shape [B, q_num_heads, kv_S, E]
+            - expanded_value: Tensor of shape [B, q_num_heads, kv_S, E
+    """
+
+    assert (
+        query.shape[1] > key.shape[1] == value.shape[1]
+        and query.shape[1] % key.shape[1] == 0
+    ), (
+        "SDPA (GQA or MQA) requires q_num_heads > kv_num_heads & q_num_heads % kv_num_heads == 0"
+    )
+
+    # NOTE: QKV are expected to be 4D tensors
+
+    batch_size = op.Shape(query, start=0, end=1)  # [B]
+    q_num_heads = op.Shape(query, start=1, end=2)  # [Hq]
+    kv_num_heads = op.Shape(key, start=1, end=2)  # [Hk]
+    qk_head_size = op.Shape(key, start=3, end=4)  # [Dk]
+    v_head_size = op.Shape(value, start=3, end=4)  # [Dv]
+    new_kv_seq_len = op.Shape(key, start=2, end=3)  # [T]
+
+    interleave_dim = op.Div(q_num_heads, kv_num_heads)  # Hq / Hk
+    two = op.Constant(value_int=2)
+    k_unsqueezed = op.Unsqueeze(key, two)  # [B, Hk, 1, T, Dk]
+    v_unsqueezed = op.Unsqueeze(value, two)  # [B, Hv, 1, T, Dv]
+
+    k_expand_shape = op.Concat(
+        batch_size, kv_num_heads, interleave_dim, new_kv_seq_len, qk_head_size, axis=0
+    )
+    k_expand = op.Expand(k_unsqueezed, k_expand_shape)
+    v_expand_shape = op.Concat(
+        batch_size, kv_num_heads, interleave_dim, new_kv_seq_len, v_head_size, axis=0
+    )
+    v_expand = op.Expand(v_unsqueezed, v_expand_shape)
+
+    k_attention_shape = op.Concat(
+        batch_size, q_num_heads, new_kv_seq_len, qk_head_size, axis=0
+    )
+    v_attention_shape = op.Concat(
+        batch_size, q_num_heads, new_kv_seq_len, v_head_size, axis=0
+    )
+
+    expanded_key = op.Reshape(k_expand, k_attention_shape)
+    expanded_value = op.Reshape(v_expand, v_attention_shape)
+
+    return expanded_key, expanded_value
 
 
 def _attention_scale(query: TFloat, op: Opset) -> TFloat:

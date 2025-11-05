@@ -37,6 +37,7 @@ from torch.distributed.tensor._ops.utils import (
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorOpTestBase,
     DTensorTestBase,
     with_comms,
@@ -536,7 +537,7 @@ class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
     def test_replicate_strategy_placement(self, mock_select_strategy):
         costs_from__select_strategy = []
 
-        def mock_select_func(strategy):
+        def mock_select_func(strategy, op_schema=None):
             """function copied from _select_strategy but with cost capturing"""
             nonlocal costs_from__select_strategy
             if len(strategy.strategies) == 1:
@@ -643,6 +644,16 @@ class TestStrategyHashing(DTensorTestBase):
             out2, _ = torch.sort(sharded_dtensor, dim=1)
         self.assertEqual(out1.full_tensor(), out2.full_tensor())
 
+
+DistTensorReplicateStrategyRegistrationTestWithLocalTensor = (
+    create_local_tensor_test_class(
+        DistTensorReplicateStrategyRegistrationTest,
+    )
+)
+
+TestStrategyHashingWithLocalTensor = create_local_tensor_test_class(
+    TestStrategyHashing,
+)
 
 if __name__ == "__main__":
     run_tests()

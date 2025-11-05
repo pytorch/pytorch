@@ -28,6 +28,15 @@ endif()
 # Find CUDA.
 find_package(CUDA)
 if(NOT CUDA_FOUND)
+  # If user explicitly set USE_CUDA=1, error out instead of falling back
+  if(_USE_CUDA_EXPLICITLY_SET AND USE_CUDA)
+    message(FATAL_ERROR
+      "PyTorch: CUDA was explicitly requested (USE_CUDA=1) but cannot be found. "
+      "Please check your CUDA installation, ensure CUDA toolkit is installed, "
+      "and that CUDA_HOME or CMAKE_CUDA_COMPILER is set correctly. "
+      "If you want to build without CUDA, please set USE_CUDA=0.")
+  endif()
+
   message(WARNING
     "PyTorch: CUDA cannot be found. Depending on whether you are building "
     "PyTorch or a PyTorch dependent library, the next warning / error will "
@@ -282,9 +291,15 @@ endif()
 # cufft
 add_library(caffe2::cufft INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-    set_property(
-        TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cufft_static_nocallback)
+    if(CUDA_VERSION VERSION_LESS_EQUAL 12.9)
+      set_property(
+          TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
+          CUDA::cufft_static_nocallback)
+    else()
+      set_property(
+          TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
+          CUDA::cufft_static)
+    endif()
 else()
     set_property(
         TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES

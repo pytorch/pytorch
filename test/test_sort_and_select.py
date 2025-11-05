@@ -179,7 +179,7 @@ class TestSortAndSelect(TestCase):
     def test_complex_unsupported_cpu(self):
         x = torch.tensor([3.0 + 2j, 4.0 + 3j])
         with self.assertRaisesRegex(
-            ValueError, "Sort currently does not support complex dtypes on CPU."
+            RuntimeError, " Sort does not support complex dtypes on CPU"
         ):
             torch.sort(input=x)
 
