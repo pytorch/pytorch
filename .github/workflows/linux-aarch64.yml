@@ -58,3 +58,14 @@ jobs:
       docker-image: ${{ needs.linux-jammy-aarch64-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-build.outputs.test-matrix }}
     secrets: inherit
+
+  linux-jammy-aarch64-py3_10-clang21-build:
+    name: linux-jammy-aarch64-py3.10-clang21
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
+      build-environment: linux-jammy-aarch64-py3.10-clang21
+      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-clang21
+      runner: linux.arm64.m7g.4xlarge
+    secrets: inherit
