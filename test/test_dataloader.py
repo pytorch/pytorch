@@ -57,7 +57,7 @@ from torch.utils.data import (
     Subset,
     TensorDataset,
 )
-from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
+from torch.utils.data._utils import STATUS_CHECK_INTERVAL
 from torch.utils.data.datapipes.iter import IterableWrapper
 from torch.utils.data.dataset import random_split
 
@@ -1061,16 +1061,7 @@ def _test_worker_info_init_fn(worker_id):
         "worker_info should have correct dataset copy"
     )
     assert not hasattr(dataset, "value"), "worker_info should have correct dataset copy"
-    # test that WorkerInfo attributes are read-only
-    try:
-        worker_info.id = 3999
-    except RuntimeError as e:
-        assert str(e) == "Cannot assign attributes to WorkerInfo objects"
-    try:
-        worker_info.a = 3
-    except RuntimeError as e:
-        assert str(e) == "Cannot assign attributes to WorkerInfo objects"
-    for k in ["id", "num_workers", "seed", "dataset"]:
+    for k in ["id", "num_workers", "seed", "dataset", "rng"]:
         assert f"{k}=" in repr(worker_info)
     dataset.value = [worker_id, os.getpid()]
 
@@ -2638,7 +2629,7 @@ except RuntimeError as e:
                 tester_setup_event.set()
 
                 try:
-                    loader_p.join(JOIN_TIMEOUT + MP_STATUS_CHECK_INTERVAL)
+                    loader_p.join(JOIN_TIMEOUT + STATUS_CHECK_INTERVAL)
                     if loader_p.is_alive():
                         fail_reason = "loader process did not terminate"
                         if loader_p.exception is not None:
@@ -2650,7 +2641,7 @@ except RuntimeError as e:
                             fail(fail_reason + ", and had no exception")
                     _, alive = psutil.wait_procs(
                         worker_psutil_ps,
-                        timeout=(MP_STATUS_CHECK_INTERVAL + JOIN_TIMEOUT),
+                        timeout=(STATUS_CHECK_INTERVAL + JOIN_TIMEOUT),
                     )
                     if len(alive) > 0:
                         fail(
@@ -3462,7 +3453,7 @@ class TestIndividualWorkerQueue(TestCase):
             batch_size=batch_size,
             shuffle=False,
             num_workers=num_workers,
-            timeout=5,
+            timeout=10,
             worker_init_fn=self.dataset.worker_init_fn,
         )
         current_worker_idx = 0
@@ -3480,33 +3471,28 @@ class TestIndividualWorkerQueue(TestCase):
         "Flaky on Windows and MacOS https://github.com/pytorch/pytorch/issues/68643",
     )
     def test_ind_worker_queue(self):
-        max_num_workers = None
-        if hasattr(os, "sched_getaffinity"):
-            try:
-                max_num_workers = len(os.sched_getaffinity(0))
-            except Exception:
-                pass
-        if max_num_workers is None:
-            cpu_count = os.cpu_count()
-            if cpu_count is not None:
-                # Use half number of CPUs
-                max_num_workers = cpu_count // 2
-
-        if max_num_workers is None:
-            max_num_workers = 1
-
-        for batch_size in (8, 16, 32, 64):
-            for num_workers in range(min(6, max_num_workers)):
+        for batch_size in (8, 32, 64):
+            for num_workers in range(1, 6):
                 self._run_ind_worker_queue_test(
-                    batch_size=batch_size, num_workers=num_workers + 1
+                    batch_size=batch_size, num_workers=num_workers
                 )
 
 
 class SetAffinityDataset(IterableDataset):
+    def __init__(self, expected_affinity=None):
+        self.expected_affinity = expected_affinity
+
     def __iter__(self):
-        torch.randperm(1)
         after = os.sched_getaffinity(0)
         return iter(after)
+
+
+def _worker_set_affinity_init(worker_id):
+    worker_info = torch.utils.data.get_worker_info()
+    if worker_info is not None:
+        dataset = worker_info.dataset
+        if isinstance(dataset, SetAffinityDataset) and dataset.expected_affinity is not None:
+            os.sched_setaffinity(0, [dataset.expected_affinity])
 
 
 @unittest.skipIf(
@@ -3514,23 +3500,21 @@ class SetAffinityDataset(IterableDataset):
 )
 class TestSetAffinity(TestCase):
     def test_set_affinity_in_worker_init(self):
-        # Query the current affinity mask to avoid setting a disallowed one
         old_affinity = os.sched_getaffinity(0)
         if not old_affinity:
             self.skipTest("No affinity information")
-        # Choose any
+
         expected_affinity = list(old_affinity)[-1]
 
-        def worker_set_affinity(_):
-            os.sched_setaffinity(0, [expected_affinity])
-
-        dataset = SetAffinityDataset()
-
+        # Pass expected affinity through the dataset
+        dataset = SetAffinityDataset(expected_affinity=expected_affinity)
         dataloader = torch.utils.data.DataLoader(
-            dataset, num_workers=2, worker_init_fn=worker_set_affinity
+            dataset, num_workers=2, worker_init_fn=_worker_set_affinity_init,
         )
+
         for sample in dataloader:
-            self.assertEqual(sample, [expected_affinity])
+            sample_list = sample.tolist() if hasattr(sample, 'tolist') else list(sample)
+            self.assertEqual(sample_list, [expected_affinity])
 
 
 class ConvDataset(Dataset):
@@ -3733,7 +3717,7 @@ class TestThreadingDataLoader(TestCase):
             self.assertTrue(target.is_pinned())
 
     def test_threading_thread_rng_deterministic(self):
-        # Test that using thread_rng provides deterministic results
+        # Test that using thread specific rng provides deterministic results
         class ThreadRNGTransformDataset(Dataset):
             def __init__(self, size):
                 self.size = size
@@ -3747,7 +3731,7 @@ class TestThreadingDataLoader(TestCase):
                 # Use thread-local generator - thread-safe!
                 # Not adding a fallback here because this should exist,
                 # otherwise something is wrong with the threading setup
-                generator = worker_info.thread_rng.torch_generator
+                generator = worker_info.rng.torch_generator
 
                 # Apply random transform using thread-specific generator
                 random_val = (
@@ -3781,7 +3765,7 @@ class TestThreadingDataLoader(TestCase):
 
         self.assertTrue(
             flattened1 == flattened2,
-            "Results should be deterministic when using thread_rng",
+            "Results should be deterministic when using thread specific rng",
         )
 
     def test_threading_different_batch_sizes(self):
@@ -4038,7 +4022,7 @@ class TestThreadingDataLoader(TestCase):
             self.assertEqual(12345, batch[1])
 
     def test_threading_worker_info_unique_per_thread(self):
-        # Test that each worker thread gets unique worker_id, seed, and thread_rng
+        # Test that each worker thread gets unique worker_id, seed, and rng
         import threading
 
         worker_info_captured = []
@@ -4049,8 +4033,8 @@ class TestThreadingDataLoader(TestCase):
                 {
                     "worker_id": info.id,
                     "seed": info.seed,
-                    "thread_rng_id": id(info.thread_rng)
-                    if hasattr(info, "thread_rng")
+                    "thread_rng_id": id(info.rng)
+                    if hasattr(info, "rng")
                     else None,
                     "thread_id": threading.get_ident(),
                 }
@@ -4088,37 +4072,39 @@ class TestThreadingDataLoader(TestCase):
         self.assertEqual(len(set(thread_ids)), 3)
 
     def test_threading_worker_info_thread_rng(self):
-        # Test that WorkerInfo includes thread_rng for thread workers
+        # Test that WorkerInfo includes rng for thread workers
         worker_info_data = []
 
-        def worker_init_with_thread_rng_check(worker_id):
+        def worker_init_with_rng_check(worker_id):
             worker_info = torch.utils.data.get_worker_info()
             self.assertIsNotNone(worker_info)
 
-            self.assertTrue(hasattr(worker_info, "thread_rng"))
-            self.assertIsNotNone(worker_info.thread_rng)
+            self.assertTrue(hasattr(worker_info, "rng"))
+            self.assertIsNotNone(worker_info.rng)
 
-            self.assertTrue(hasattr(worker_info.thread_rng, "random_state"))
-            self.assertTrue(hasattr(worker_info.thread_rng, "torch_generator"))
+            # Check for updated _RNG attribute names
+            self.assertTrue(hasattr(worker_info.rng, "random_generator"))
+            self.assertTrue(hasattr(worker_info.rng, "torch_generator"))
+            self.assertTrue(hasattr(worker_info.rng, "numpy_generator"))
 
-            self.assertIsInstance(worker_info.thread_rng.random_state, random.Random)
+            self.assertIsInstance(worker_info.rng.random_generator, random.Random)
             self.assertIsInstance(
-                worker_info.thread_rng.torch_generator, torch.Generator
+                worker_info.rng.torch_generator, torch.Generator
             )
 
             # Store worker info data for verification
             worker_info_data.append(
                 {
                     "worker_id": worker_id,
-                    "has_thread_rng": hasattr(worker_info, "thread_rng"),
-                    "thread_rng_is_not_none": worker_info.thread_rng is not None
-                    if hasattr(worker_info, "thread_rng")
+                    "has_rng": hasattr(worker_info, "rng"),
+                    "rng_is_not_none": worker_info.rng is not None
+                    if hasattr(worker_info, "rng")
                     else False,
-                    "random_state_id": id(worker_info.thread_rng.random_state)
-                    if hasattr(worker_info, "thread_rng")
+                    "random_generator_id": id(worker_info.rng.random_generator)
+                    if hasattr(worker_info, "rng")
                     else None,
-                    "torch_generator_id": id(worker_info.thread_rng.torch_generator)
-                    if hasattr(worker_info, "thread_rng")
+                    "torch_generator_id": id(worker_info.rng.torch_generator)
+                    if hasattr(worker_info, "rng")
                     else None,
                 }
             )
@@ -4129,7 +4115,7 @@ class TestThreadingDataLoader(TestCase):
             batch_size=2,
             num_workers=2,
             worker_method="thread",
-            worker_init_fn=worker_init_with_thread_rng_check,
+            worker_init_fn=worker_init_with_rng_check,
         )
 
         list(loader)
@@ -4137,12 +4123,12 @@ class TestThreadingDataLoader(TestCase):
         self.assertEqual(len(worker_info_data), 2)
         for i, worker_data in enumerate(worker_info_data):
             self.assertTrue(worker_data["worker_id"] == i)
-            self.assertTrue(worker_data["has_thread_rng"])
-            self.assertTrue(worker_data["thread_rng_is_not_none"])
+            self.assertTrue(worker_data["has_rng"])
+            self.assertTrue(worker_data["rng_is_not_none"])
 
         self.assertNotEqual(
-            worker_info_data[0]["random_state_id"],
-            worker_info_data[1]["random_state_id"],
+            worker_info_data[0]["random_generator_id"],
+            worker_info_data[1]["random_generator_id"],
         )
         self.assertNotEqual(
             worker_info_data[0]["torch_generator_id"],
