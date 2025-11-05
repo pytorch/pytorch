@@ -155,7 +155,6 @@ class ItertoolsVariable(VariableTracker):
 
             result = []
             try:
-                # pyrefly: ignore [unbound-name]
                 for k, v in itertools.groupby(seq, key=keyfunc):
                     result.append(
                         variables.TupleVariable(

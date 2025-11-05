@@ -23,7 +23,6 @@ import operator
 import textwrap
 import traceback
 import types
-from collections.abc import Sequence
 from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
@@ -632,7 +631,7 @@ class TensorVariable(VariableTracker):
         self,
         tx,
         name,
-        args: Sequence[VariableTracker],
+        args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from .builder import SourcelessBuilder, VariableBuilder

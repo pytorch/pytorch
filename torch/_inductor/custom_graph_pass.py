@@ -1,8 +1,9 @@
 import hashlib
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from functools import lru_cache
-from typing import Any, Optional, TypeAlias, Union
+from typing import Any, Callable, Optional, Union
+from typing_extensions import TypeAlias
 
 import torch.fx.graph
 

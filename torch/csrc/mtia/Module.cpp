@@ -19,10 +19,7 @@ struct _MTIAGraph {
 
   _MTIAGraph(bool keep_graph = false)
       : handle_(at::detail::getMTIAHooks().mtiagraphCreate(keep_graph)) {}
-
-  ~_MTIAGraph() {
-    at::detail::getMTIAHooks().mtiagraphDestroy(handle_);
-  }
+  ~_MTIAGraph() = default;
 
   void capture_begin(at::MempoolId_t pool) {
     at::detail::getMTIAHooks().mtiagraphCaptureBegin(handle_, pool);

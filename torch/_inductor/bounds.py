@@ -1,8 +1,7 @@
 import logging
 import operator
-from collections.abc import Callable
 from functools import partial
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import sympy
 from sympy import Expr

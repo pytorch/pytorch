@@ -165,6 +165,8 @@ def check_files(
             errors = result.get("errors", [])
         else:
             errors = []
+        # For now filter out deprecated warnings and only report type errors as warnings
+        # until we remove mypy
         errors = [error for error in errors if error["name"] != "deprecated"]
         rc = [
             LintMessage(
@@ -176,9 +178,9 @@ def check_files(
                 line=error["line"],
                 char=error["column"],
                 code=code,
-                severity=LintSeverity.ADVICE
-                if error["name"] == "deprecated"
-                else LintSeverity.ERROR,
+                severity=LintSeverity.ADVICE,
+                # uncomment and replace when we switch to pyrefly
+                # severity=LintSeverity.ADVICE if error["name"] == "deprecated" else LintSeverity.ERROR,
                 original=None,
                 replacement=None,
             )

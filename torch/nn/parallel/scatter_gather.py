@@ -58,10 +58,7 @@ def scatter(inputs, target_gpus, dim=0):
         if _is_namedtuple(obj):
             # pyrefly: ignore [no-matching-overload]
             return [
-                # pyrefly: ignore [no-matching-overload]
-                type(obj)(*args)
-                # pyrefly: ignore  # no-matching-overload
-                for args in zip(*map(scatter_map, obj), strict=False)
+                type(obj)(*args) for args in zip(*map(scatter_map, obj), strict=False)
             ]
         if isinstance(obj, tuple) and len(obj) > 0:
             # pyrefly: ignore [no-matching-overload]
@@ -72,10 +69,7 @@ def scatter(inputs, target_gpus, dim=0):
         if isinstance(obj, dict) and len(obj) > 0:
             # pyrefly: ignore [no-matching-overload]
             return [
-                # pyrefly: ignore [no-matching-overload]
-                type(obj)(i)
-                # pyrefly: ignore  # no-matching-overload
-                for i in zip(*map(scatter_map, obj.items()), strict=False)
+                type(obj)(i) for i in zip(*map(scatter_map, obj.items()), strict=False)
             ]
         return [obj for _ in target_gpus]
 

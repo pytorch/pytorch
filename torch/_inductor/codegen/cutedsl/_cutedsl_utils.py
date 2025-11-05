@@ -1,5 +1,4 @@
 # mypy: disable-error-code=import-not-found
-# pyrefly: ignore [import-error]
 import cutlass.cute as cute
 
 

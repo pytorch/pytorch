@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import itertools
-from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from unittest.mock import patch
 
 import sympy

@@ -1,8 +1,7 @@
 import json
 import os
-from collections.abc import Callable
 from functools import partial
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import torch
 from torch._inductor.autoheuristic.autoheuristic_utils import (

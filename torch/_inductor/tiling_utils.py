@@ -1,8 +1,7 @@
 import dataclasses
 import itertools
 from collections import Counter, defaultdict
-from collections.abc import Callable
-from typing import Literal, Optional, overload, TYPE_CHECKING, TypeVar, Union
+from typing import Callable, Literal, Optional, overload, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 

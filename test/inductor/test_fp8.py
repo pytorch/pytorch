@@ -794,16 +794,14 @@ class TestFP8Lowering(TestCase):
         _get_torch_cuda_version() < (12, 9),
         "cuBLAS blockwise scaling added in CUDA 12.9",
     )
-    @parametrize("shape", ((16, 256, 256), (1024, 512, 1024)))
-    @parametrize("use_fast_accum", (False, True))
     @parametrize(
-        "scaling_block_sizes", ((1, 128, 128, 128), (1, 128, 1, 128))
-    )  # (BlockWise1x128, BlockWise128x128), (BlockWise1x128, BlockWise1x128)
-    def test_main_loop_scaling(
+        "shape", ((16, 256, 256), (1024, 512, 1024))
+    )  # TODO (jananisriram): add scaling recipe overrides for shapes like (16, 256, 64) and (256, 16, 64)
+    @parametrize("use_fast_accum", (False, True))
+    def test_blockwise1x128_blockwise128x128_scaling(
         self,
         shape: tuple[int, int, int],
         use_fast_accum: bool,
-        scaling_block_sizes: tuple[int, int, int, int],
     ):
         # Only bf16 output type is supported for non-tensorwise scaling, not fp32
         dtype: torch.dtype = torch.bfloat16
@@ -816,28 +814,20 @@ class TestFP8Lowering(TestCase):
         w = torch.randn(N, K, dtype=dtype, device=device)
         bias = None
 
-        am, ak, bn, bk = scaling_block_sizes
-
         # quantize weight (prior to inference)
         w_fp8, w_inverse_scale = _quantize_blockwise(
-            w, dtype_float8, block_outer=bn, block_inner=bk
+            w, dtype_float8, block_outer=128, block_inner=128
         )
         w_t_fp8 = w_fp8.t()
-        if (bn, bk) == (1, 128):
-            w_inverse_scale = (
-                w_inverse_scale.t().contiguous().t().t()
-            )  # 1x128 blocks need scales to be outer-dim-major
-        else:
-            w_inverse_scale = w_inverse_scale.t()  # scale_b should be (1, N)
+        w_inverse_scale = w_inverse_scale.t()  # scale_b should be (1, N)
 
         # quantize input x
         x_fp8, x_inverse_scale = _quantize_blockwise(
-            x, dtype_float8, block_outer=am, block_inner=ak
+            x, dtype_float8, block_outer=1, block_inner=128
         )
-        if (am, ak) == (1, 128):
-            x_inverse_scale = (
-                x_inverse_scale.t().contiguous().t()
-            )  # 1x128 blocks need scales to be outer-dim-major
+        x_inverse_scale = (
+            x_inverse_scale.t().contiguous().t()
+        )  # 1x128 blocks need scales to be outer-dim-major
 
         def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
             y = torch._scaled_mm(
@@ -882,15 +872,9 @@ class TestFP8Lowering(TestCase):
         FileCheck().check(
             f"SCALE_RECIPE_A : tl.constexpr = {ScalingType.BlockWise1x128.value}"
         ).run(code[0])
-
-        if (bn, bk) == (1, 128):
-            check_scale_recipe_b = ScalingType.BlockWise1x128.value
-        else:
-            check_scale_recipe_b = ScalingType.BlockWise128x128.value
         FileCheck().check(
-            f"SCALE_RECIPE_B : tl.constexpr = {check_scale_recipe_b}"
+            f"SCALE_RECIPE_B : tl.constexpr = {ScalingType.BlockWise128x128.value}"
         ).run(code[0])
-
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
