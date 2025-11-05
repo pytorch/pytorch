@@ -91,13 +91,13 @@ from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
-    LeafSpec,
     register_constant,
     tree_flatten,
     tree_map,
     tree_unflatten,
     TreeSpec,
     treespec_dumps,
+    treespec_leaf,
     treespec_loads,
 )
 
@@ -7791,7 +7791,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         dt = MyDataClass(x=3, y=4)
         flat, spec = tree_flatten(dt)
-        self.assertTrue(spec, LeafSpec())
+        self.assertTrue(spec, treespec_leaf())
         self.assertTrue(len(flat) == 1)
 
         torch.export.register_dataclass(
@@ -7802,7 +7802,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         flat, spec = tree_flatten(dt)
         self.assertEqual(
             spec,
-            TreeSpec(MyDataClass, [["x", "y"], ["z"]], [LeafSpec(), LeafSpec()]),
+            TreeSpec(
+                MyDataClass, [["x", "y"], ["z"]], [treespec_leaf(), treespec_leaf()]
+            ),
         )
         self.assertEqual(flat, [3, 4])
 
@@ -7835,7 +7837,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             TreeSpec(
                 MyOtherDataClass,
                 [["x", "y", "z"], []],
-                [LeafSpec(), LeafSpec(), LeafSpec()],
+                [treespec_leaf(), treespec_leaf(), treespec_leaf()],
             ),
         )
         self.assertEqual(flat, [3, 4, None])
@@ -16744,6 +16746,74 @@ def forward(self, q, k, v):
         result_strict = ep_strict.module()(*inp)
 
         self.assertEqual(result_non_strict, result_strict)
+
+    def test_tril_dynamic_diagonal(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                x_len = x.shape[0]
+                y_len = y.shape[0]
+                mask = torch.ones(x_len, y_len, dtype=torch.bool, device=x.device)
+                mask = mask.tril(diagonal=y_len - x_len)
+                return mask
+
+        x = torch.randn(3, 4)
+        y = torch.randn(5, 4)
+        x_len = Dim("x_len", min=1, max=64)
+        y_len = Dim("y_len", min=1, max=64)
+        ep = export(
+            Module(),
+            (x, y),
+            dynamic_shapes={
+                "x": {0: x_len},
+                "y": {0: y_len},
+            },
+        )
+        eager_out = Module()(x, y)
+        exported_out = ep.module()(x, y)
+        self.assertEqual(eager_out, exported_out)
+        self.assertEqual(exported_out.shape, (3, 5))
+        x2 = torch.randn(4, 4)
+        y2 = torch.randn(7, 4)
+        eager_out2 = Module()(x2, y2)
+        exported_out2 = ep.module()(x2, y2)
+        self.assertEqual(eager_out2, exported_out2)
+        self.assertEqual(exported_out2.shape, (4, 7))
+        expected_mask = torch.ones(3, 5, dtype=torch.bool).tril(diagonal=2)
+        self.assertEqual(eager_out, expected_mask)
+
+    def test_triu_dynamic_diagonal(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                x_len = x.shape[0]
+                y_len = y.shape[0]
+                mask = torch.ones(x_len, y_len, dtype=torch.bool, device=x.device)
+                mask = mask.triu(diagonal=y_len - x_len)
+                return mask
+
+        x = torch.randn(3, 4)
+        y = torch.randn(5, 4)
+        x_len = Dim("x_len", min=1, max=64)
+        y_len = Dim("y_len", min=1, max=64)
+        ep = export(
+            Module(),
+            (x, y),
+            dynamic_shapes={
+                "x": {0: x_len},
+                "y": {0: y_len},
+            },
+        )
+        eager_out = Module()(x, y)
+        exported_out = ep.module()(x, y)
+        self.assertEqual(eager_out, exported_out)
+        self.assertEqual(exported_out.shape, (3, 5))
+        x2 = torch.randn(4, 4)
+        y2 = torch.randn(7, 4)
+        eager_out2 = Module()(x2, y2)
+        exported_out2 = ep.module()(x2, y2)
+        self.assertEqual(eager_out2, exported_out2)
+        self.assertEqual(exported_out2.shape, (4, 7))
+        expected_mask = torch.ones(3, 5, dtype=torch.bool).triu(diagonal=2)
+        self.assertEqual(eager_out, expected_mask)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")

@@ -106,56 +106,6 @@ def check_pyrefly_installed(code: str) -> list[LintMessage]:
         ]
 
 
-def check_nightly_run(code: str) -> list[LintMessage]:
-    """Check if make setup-env has been run successfully.
-
-    This checks for the presence of pytorch-nightly.pth file that is created
-    when installing nightly binaries and type stubs.
-    """
-    import site
-    from pathlib import Path
-
-    try:
-        site_packages = Path(site.getsitepackages()[0])
-        pth_file = site_packages / "pytorch-nightly.pth"
-
-        if not pth_file.exists():
-            return [
-                LintMessage(
-                    path=None,
-                    line=None,
-                    char=None,
-                    code=code,
-                    severity=LintSeverity.WARNING,
-                    name="nightly-wheel-not-run",
-                    original=None,
-                    replacement=None,
-                    description=(
-                        "pytorch-nightly.pth not found. "
-                        "You may need to run make setup-env "
-                        "to install nightly binaries and type stubs."
-                    ),
-                )
-            ]
-        return []
-    except Exception as e:
-        return [
-            LintMessage(
-                path=None,
-                line=None,
-                char=None,
-                code=code,
-                severity=LintSeverity.ERROR,
-                name="command-failed",
-                original=None,
-                replacement=None,
-                description=(
-                    f" Could not check for pytorch-nightly {e.__class__.__name__}:\n{e}"
-                ),
-            )
-        ]
-
-
 def in_github_actions() -> bool:
     return bool(os.getenv("GITHUB_ACTIONS"))
 
@@ -215,8 +165,6 @@ def check_files(
             errors = result.get("errors", [])
         else:
             errors = []
-        # For now filter out deprecated warnings and only report type errors as warnings
-        # until we remove mypy
         errors = [error for error in errors if error["name"] != "deprecated"]
         rc = [
             LintMessage(
@@ -228,9 +176,9 @@ def check_files(
                 line=error["line"],
                 char=error["column"],
                 code=code,
-                severity=LintSeverity.ADVICE,
-                # uncomment and replace when we switch to pyrefly
-                # severity=LintSeverity.ADVICE if error["name"] == "deprecated" else LintSeverity.ERROR,
+                severity=LintSeverity.ADVICE
+                if error["name"] == "deprecated"
+                else LintSeverity.ERROR,
                 original=None,
                 replacement=None,
             )
@@ -296,11 +244,6 @@ def main() -> None:
         level=logging.INFO,
         stream=sys.stderr,
     )
-
-    nightly_check = check_nightly_run(args.code)
-    if len(nightly_check) != 0:
-        print(json.dumps(nightly_check[0]._asdict()), flush=True)
-        return
 
     lint_messages = check_pyrefly_installed(args.code) + check_files(
         args.code, args.config

@@ -765,7 +765,9 @@ class Node(_NodeBase):
                 if node.op == "call_function" and node.is_impure(impure_random):
                     return True
                 if (
+                    # pyrefly: ignore [invalid-argument]
                     node.op == "call_module"
+                    # pyrefly: ignore [not-callable]
                     and (submodule := module.get_submodule(node.target))
                     and isinstance(submodule, torch.fx.GraphModule)
                 ):
