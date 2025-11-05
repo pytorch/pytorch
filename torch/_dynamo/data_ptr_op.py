@@ -23,16 +23,11 @@ from torch._subclasses import FakeTensorMode
 from torch._subclasses.functional_tensor import FunctionalTensorMode
 
 
-# Fake pointer base value (high value to avoid collision with user constants)
-_FAKE_PTR_BASE = 1_000_000
-
-# Global state for generating unique fake pointers
-_storage_to_fake_ptr: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
-_next_storage_id = 0
-
-
 def _get_fake_data_ptr(tensor: torch.Tensor) -> int:
     """Generate a unique fake data pointer for a tensor.
+
+    Uses id(storage) to create deterministic fake pointers based on storage identity.
+    This avoids non-deterministic behavior from global counters.
 
     Args:
         tensor: The tensor to get a fake pointer for
@@ -40,18 +35,13 @@ def _get_fake_data_ptr(tensor: torch.Tensor) -> int:
     Returns:
         A unique fake pointer value (or 0 for empty tensors)
     """
-    global _next_storage_id
-
     storage = tensor.untyped_storage()
 
     if storage.size() == 0:
         return 0
 
-    if storage not in _storage_to_fake_ptr:
-        _next_storage_id += 1
-        _storage_to_fake_ptr[storage] = _next_storage_id * _FAKE_PTR_BASE
-
-    base_ptr = _storage_to_fake_ptr[storage]
+    # Use id(storage) as the base pointer - deterministic and unique per storage
+    base_ptr = id(storage)
     offset = tensor.storage_offset() * tensor.element_size()
 
     return base_ptr + offset
