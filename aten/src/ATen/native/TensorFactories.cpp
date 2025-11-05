@@ -11,7 +11,6 @@
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TracerMode.h>
-#include <ATen/core/Generator.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/UnaryOps.h>
 #include <c10/core/ScalarType.h>
@@ -1090,7 +1089,6 @@ Tensor& rand_out(
 
 Tensor rand_like(
     const Tensor& self,
-    std::optional<Generator> generator,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,
@@ -1102,24 +1100,7 @@ Tensor rand_like(
           pin_memory);
 
   auto result = at::empty_like(self, options, optional_memory_format);
-  return result.uniform_(0, 1, std::move(generator));
-}
-
-Tensor rand_like(
-    const Tensor& self,
-    std::optional<ScalarType> dtype,
-    std::optional<Layout> layout,
-    std::optional<Device> device,
-    std::optional<bool> pin_memory,
-    std::optional<c10::MemoryFormat> optional_memory_format) {
-  return native::rand_like(
-      self,
-      static_cast<std::optional<Generator>>(std::nullopt),
-      dtype,
-      layout,
-      device,
-      pin_memory,
-      optional_memory_format);
+  return result.uniform_(0, 1, std::nullopt);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randint ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1216,9 +1197,7 @@ Tensor& randint_out(
 
 Tensor randint_like(
     const Tensor& self,
-    int64_t low,
     int64_t high,
-    std::optional<Generator> generator,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,
@@ -1230,7 +1209,29 @@ Tensor randint_like(
           pin_memory);
 
   auto result = at::empty_like(self, options, optional_memory_format);
-  return result.random_(low, high, std::move(generator));
+  return result.random_(0, high, std::nullopt);
+}
+
+Tensor randint_like(
+    const Tensor& self,
+    const Tensor& high,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+      high.numel() == 1 && high.ndimension() == 0 && high.device().is_cpu(),
+      "high must be a scalar tensor and on CPU");
+  int64_t high_scalar = high.item<int64_t>();
+  return at::native::randint_like(
+      self,
+      high_scalar,
+      dtype,
+      layout,
+      device,
+      pin_memory,
+      optional_memory_format);
 }
 
 Tensor randint_like(
@@ -1242,108 +1243,13 @@ Tensor randint_like(
     std::optional<Device> device,
     std::optional<bool> pin_memory,
     std::optional<c10::MemoryFormat> optional_memory_format) {
-  return native::randint_like(
-      self,
-      low,
-      high,
-      static_cast<std::optional<Generator>>(std::nullopt),
-      dtype,
-      layout,
-      device,
-      pin_memory,
-      optional_memory_format);
-}
-
-Tensor randint_like(
-    const Tensor& self,
-    int64_t high,
-    std::optional<ScalarType> dtype,
-    std::optional<Layout> layout,
-    std::optional<Device> device,
-    std::optional<bool> pin_memory,
-    std::optional<c10::MemoryFormat> optional_memory_format) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  return native::randint_like(
-      self,
-      0,
-      high,
-      static_cast<std::optional<Generator>>(std::nullopt),
-      dtype,
-      layout,
-      device,
-      pin_memory,
-      optional_memory_format);
-}
+  TensorOptions options =
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
 
-Tensor randint_like(
-    const Tensor& self,
-    int64_t high,
-    std::optional<Generator> generator,
-    std::optional<ScalarType> dtype,
-    std::optional<Layout> layout,
-    std::optional<Device> device,
-    std::optional<bool> pin_memory,
-    std::optional<c10::MemoryFormat> optional_memory_format) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  return native::randint_like(
-      self,
-      0,
-      high,
-      generator,
-      dtype,
-      layout,
-      device,
-      pin_memory,
-      optional_memory_format);
-}
-
-Tensor randint_like(
-    const Tensor& self,
-    const Tensor& high,
-    std::optional<ScalarType> dtype,
-    std::optional<Layout> layout,
-    std::optional<Device> device,
-    std::optional<bool> pin_memory,
-    std::optional<c10::MemoryFormat> optional_memory_format) {
-  TORCH_CHECK(
-      high.numel() == 1 && high.ndimension() == 0 && high.device().is_cpu(),
-      "high must be a scalar tensor and on CPU");
-  int64_t high_scalar = high.item<int64_t>();
-  return at::native::randint_like(
-      self,
-      0,
-      high_scalar,
-      static_cast<std::optional<Generator>>(std::nullopt),
-      dtype,
-      layout,
-      device,
-      pin_memory,
-      optional_memory_format);
-}
-
-Tensor randint_like(
-    const Tensor& self,
-    const Tensor& high,
-    std::optional<Generator> generator,
-    std::optional<ScalarType> dtype,
-    std::optional<Layout> layout,
-    std::optional<Device> device,
-    std::optional<bool> pin_memory,
-    std::optional<c10::MemoryFormat> optional_memory_format) {
-  TORCH_CHECK(
-      high.numel() == 1 && high.ndimension() == 0 && high.device().is_cpu(),
-      "high must be a scalar tensor and on CPU");
-  int64_t high_scalar = high.item<int64_t>();
-  return at::native::randint_like(
-      self,
-      0,
-      high_scalar,
-      generator,
-      dtype,
-      layout,
-      device,
-      pin_memory,
-      optional_memory_format);
+  auto result = at::empty_like(self, options, optional_memory_format);
+  return result.random_(low, high, std::nullopt);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randn ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1421,7 +1327,6 @@ Tensor& normal_out(
 
 Tensor randn_like(
     const Tensor& self,
-    std::optional<Generator> generator,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,
@@ -1433,24 +1338,7 @@ Tensor randn_like(
           pin_memory);
 
   auto result = at::empty_like(self, options, optional_memory_format);
-  return result.normal_(0, 1, std::move(generator));
-}
-
-Tensor randn_like(
-    const Tensor& self,
-    std::optional<ScalarType> dtype,
-    std::optional<Layout> layout,
-    std::optional<Device> device,
-    std::optional<bool> pin_memory,
-    std::optional<c10::MemoryFormat> optional_memory_format) {
-  return native::randn_like(
-      self,
-      static_cast<std::optional<Generator>>(std::nullopt),
-      dtype,
-      layout,
-      device,
-      pin_memory,
-      optional_memory_format);
+  return result.normal_(0, 1, std::nullopt);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randperm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

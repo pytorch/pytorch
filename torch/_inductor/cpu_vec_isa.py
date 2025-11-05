@@ -7,8 +7,7 @@ import re
 import subprocess
 import sys
 import warnings
-from collections.abc import Callable
-from typing import Any, Union
+from typing import Any, Callable, Union
 
 import torch
 from torch._inductor import config

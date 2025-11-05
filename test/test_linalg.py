@@ -10004,18 +10004,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         A = torch.ones(n, n, dtype=dtype, device=device)
         B = torch.rand(n, dtype=dtype, device=device)
         C = torch.matmul(A, B)
-
-        # due to large N ( 50_000 ), accumulation and assosiativity errors can occur
-        # therefore we calculate appropriate rtol and atol based on N and machine epsilon.
-        
-        b_sum_f32 = B.float().sum() # compute sum, ensure f32 accumulation
-        safety_factor = 3
-        eps = torch.finfo(dtype).eps
-        u = eps / 2.0         # unit roundoff for dtype
-        rtol = min(5e-2, max(eps, safety_factor * u * math.sqrt(n)))   # ~ O(u * sqrt(N)) with small safety factor
-        atol = rtol * b_sum_f32.abs().item()
-
-        self.assertEqual(C, b_sum_f32.to(dtype).expand(B.shape), atol=atol, rtol=rtol)
+        self.assertEqual(C, B.sum().expand(B.shape))
 
     @onlyCUDA
     @largeTensorTest("40GB")

@@ -11,7 +11,7 @@ import math
 import operator
 import textwrap
 from collections import Counter
-from typing import Any, Generic, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeVar
 
 import sympy
@@ -40,8 +40,6 @@ from ..dependencies import MemoryDep, StarDep, WeakDep
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from ..ir import IRNode
 
 from ..optimize_indexing import indexing_dtype_strength_reduction
@@ -1620,7 +1618,6 @@ class SIMDScheduling(BaseScheduling):
 
         split_size = _pick_split_size()
 
-        # pyrefly: ignore [bad-assignment]
         metrics.codegen_mix_order_reduction += 1
 
         assert V.graph.sizevars.statically_known_gt(

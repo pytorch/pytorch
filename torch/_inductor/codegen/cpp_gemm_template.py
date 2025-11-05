@@ -2,9 +2,8 @@
 import contextlib
 import logging
 import math
-from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, cast, Optional, TypeVar, Union
+from typing import Any, Callable, cast, Optional, TypeVar, Union
 from unittest.mock import patch
 
 import torch
