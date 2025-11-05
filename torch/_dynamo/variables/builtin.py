@@ -2595,6 +2595,7 @@ class BuiltinVariable(VariableTracker):
             (
                 variables.TensorVariable,
                 variables.NamedTupleVariable,
+                variables.NewNamedTupleVariable,
                 variables.ConstantVariable,
                 variables.DistributedVariable,
                 variables.UserDefinedClassVariable,
@@ -2689,6 +2690,7 @@ class BuiltinVariable(VariableTracker):
             (
                 variables.PlacementVariable,
                 variables.NamedTupleVariable,
+                variables.NewNamedTupleVariable,
                 variables.UserDefinedObjectVariable,
                 variables.NestedUserFunctionVariable,
                 variables.ExceptionVariable,
