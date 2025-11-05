@@ -3,6 +3,8 @@
 // safe.
 #if defined(USE_CUDNN) || defined(USE_ROCM)
 #include <torch/csrc/utils/pybind.h>
+#include <ATen/detail/CUDAHooksInterface.h>
+
 
 #include <tuple>
 
@@ -32,11 +34,7 @@ version_tuple getRuntimeVersion() {
 }
 
 size_t getVersionInt() {
-#ifndef USE_STATIC_CUDNN
-  return cudnnGetVersion();
-#else
-  return CUDNN_VERSION;
-#endif
+  return at::detail::getCUDAHooks().versionRuntimeCuDNN();
 }
 
 } // namespace
