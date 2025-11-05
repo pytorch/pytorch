@@ -226,8 +226,10 @@ class PythonCode:
     # Values in global scope during execution of `src_def`.
     globals: dict[str, Any]
     # Optional mapping from the forward function's line number to
-    # node index.
+    # node index. Line number starts at the prologue (i.e. forward()).
     _lineno_map: Optional[dict[int, Optional[int]]]
+    # The line number of prologue in fn_code
+    _prologue_start: int = 0
 
 
 def _format_target(base: str, target: str) -> str:
@@ -645,6 +647,15 @@ class CodeGen:
 
             if verbose:
                 # override annotation with more detailed information
+                try:
+                    from torch.distributed.tensor._api import DTensor, DTensorSpec
+
+                    dtensorspec_format_shard_order_str = (
+                        DTensorSpec.format_shard_order_str
+                    )
+                except ModuleNotFoundError:
+                    DTensor = None  # type: ignore[assignment,misc]
+                    dtensorspec_format_shard_order_str = None
                 from torch.fx.experimental.proxy_tensor import py_sym_types
                 from torch.fx.passes.shape_prop import TensorMetadata
 
@@ -675,6 +686,16 @@ class CodeGen:
                     core = _tensor_annotation(meta_val)
                     if is_plain:
                         maybe_type_annotation = f': "{core}"'
+                    elif type(meta_val) is DTensor:
+                        assert dtensorspec_format_shard_order_str is not None
+                        dtensor_meta = dtensorspec_format_shard_order_str(
+                            meta_val._spec.placements,  # type: ignore[attr-defined]
+                            meta_val._spec.shard_order,  # type: ignore[attr-defined]
+                        )
+                        cls = meta_val.__class__.__name__
+                        maybe_type_annotation = (
+                            f': "{cls}({core}, {dim_green(dtensor_meta)})"'
+                        )
                     else:
                         cls = meta_val.__class__.__name__
                         maybe_type_annotation = f': "{cls}({core})"'
@@ -854,7 +875,14 @@ class CodeGen:
 
 {prologue}
 {code}"""
-        return PythonCode(fn_code, globals_, _lineno_map=lineno_map)
+        # The +4 accounts for the empty lines before prologue in fn_code
+        prologue_start = wrap_stmts.count("\n") + 4
+        return PythonCode(
+            fn_code,
+            globals_,
+            _lineno_map=lineno_map,
+            _prologue_start=prologue_start,
+        )
 
 
 # Ideally, we'd like to refactor all of the pytree logic into this codegen

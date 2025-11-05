@@ -2707,6 +2707,7 @@ def to_subclass(t: Any, cls: type) -> Any:
 dict_getitem = dict.__getitem__
 
 
+@torch.fx.wrap
 def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
     # Call dict(d) to prevent calling overridden __iter__/keys
     dict_class = dict
