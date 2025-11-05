@@ -105,11 +105,11 @@ jobs:
           done
 
       - name: Clean up disk space before running MacOS workflow
-        uses: pytorch/test-infra/.github/actions/check-disk-space@main
+        uses: pytorch/test-infra/.github/actions/check-disk-space@release/2.9
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.9
 
       - name: Get workflow job id
         id: get-job-id
@@ -119,7 +119,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
-        uses: pytorch/test-infra/.github/actions/setup-python@main
+        uses: pytorch/test-infra/.github/actions/setup-python@release/2.9
         with:
           python-version: ${{ inputs.python-version }}
           pip-requirements-file: .github/requirements/pip-requirements-macOS.txt
@@ -257,7 +257,7 @@ jobs:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
 
       - name: Upload the benchmark results
-        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@release/2.9
         with:
           benchmark-results-dir: test/test-reports
           dry-run: false
@@ -287,4 +287,4 @@ jobs:
       - name: Clean up disk space
         if: always()
         continue-on-error: true
-        uses: pytorch/test-infra/.github/actions/check-disk-space@main
+        uses: pytorch/test-infra/.github/actions/check-disk-space@release/2.9
