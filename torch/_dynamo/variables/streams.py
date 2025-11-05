@@ -1,5 +1,6 @@
 import collections
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import torch
 from torch._dynamo.variables.dicts import ConstDictVariable
