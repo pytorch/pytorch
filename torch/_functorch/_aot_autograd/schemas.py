@@ -632,15 +632,16 @@ class ViewAndMutationMeta:
         result: list[Union[PlainTensorMeta, SubclassCreationMeta]] = []
         user_outs_meta, intermediate_bases_meta = self._subclass_meta_components
 
-        # Add mutated inputs based on mode
-        if self.is_train or not self.keep_input_mutations:
-            for i, info in enumerate(self.input_info):
-                if info.mutation_type == MutationType.MUTATED_OUT_GRAPH:
-                    result.append(self.subclass_inp_meta[i])
-        else:
-            for i, info in enumerate(self.input_info):
-                if info.mutates_metadata:
-                    result.append(self.subclass_inp_meta[i])
+        # Add mutated inputs based on mode (only if we have subclass input metadata)
+        if len(self.subclass_inp_meta) > 0:
+            if self.is_train or not self.keep_input_mutations:
+                for i, info in enumerate(self.input_info):
+                    if info.mutation_type == MutationType.MUTATED_OUT_GRAPH:
+                        result.append(self.subclass_inp_meta[i])
+            else:
+                for i, info in enumerate(self.input_info):
+                    if info.mutates_metadata:
+                        result.append(self.subclass_inp_meta[i])
 
         # Add user outputs
         result.extend(user_outs_meta)
