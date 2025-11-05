@@ -67,8 +67,8 @@ def estimate_collective_time(
         from torch._inductor.fx_passes.node_runtime_estimation import (
             benchmark_collective_with_cuda_events,
         )
-        # Use cache during estimation (skip_cache_lookup=False)
-        runtime, _ = benchmark_collective_with_cuda_events(n, nruns=2, skip_cache_lookup=False)
+        # Use cache during estimation
+        runtime, _ = benchmark_collective_with_cuda_events(n, nruns=2)
         if runtime is not None:
             return runtime
         # Fall through to analytical model if benchmarking failed
@@ -400,7 +400,7 @@ class OverlapScheduler:
 
             collective_nodes = [info.start_node for info in self.collective_info.values()]
             for n in collective_nodes:
-                val, key = benchmark_collective_with_cuda_events(n, nruns=2, skip_cache_lookup=True)
+                val, key = benchmark_collective_with_cuda_events(n, nruns=2)
                 # Skip if benchmarking failed (None)
                 if val is not None:
                     runtime_estimations.append(val)

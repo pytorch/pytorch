@@ -6,7 +6,6 @@ Cache structure: LocalCache["collective_benchmarking"]["{op}: ({bytes} bytes)"] 
 from __future__ import annotations
 
 import functools
-import itertools
 from functools import lru_cache
 from typing import Any, Optional
 
@@ -87,7 +86,6 @@ def can_benchmark_collective() -> bool:
 def benchmark_collective_with_cuda_events(
     n: torch.fx.Node,
     nruns: int = 2,
-    skip_cache_lookup: bool = False,
 ) -> tuple[float | None, str]:
     """
     Benchmark collective with CUDA events. Returns (runtime_ms, cache_key) or (None, "") on failure.
@@ -113,25 +111,23 @@ def benchmark_collective_with_cuda_events(
     actual_dtype = None
     actual_device = None
 
-    for arg in itertools.chain(args, kwargs.values()):
-        if isinstance(arg, torch.Tensor):
-            shape = [get_hint(dim) for dim in arg.shape]
+    def extract_tensor_info(t: torch.Tensor) -> torch.Tensor:
+        nonlocal actual_bytes, actual_dtype, actual_device
+        if actual_bytes is None:
+            shape = [get_hint(dim) for dim in t.shape]
             if any(s is None for s in shape):
-                return None, ""
+                return t
 
             total_elems = 1
             for dim in shape:
                 total_elems *= dim
 
-            # Convert to bytes
-            element_size = arg.element_size()
-            total_bytes = total_elems * element_size
+            actual_bytes = total_elems * t.element_size()
+            actual_dtype = t.dtype
+            actual_device = t.device
+        return t
 
-            if actual_bytes is None:
-                actual_bytes = total_bytes
-                actual_dtype = arg.dtype
-                actual_device = arg.device
-            break
+    torch.utils._pytree.tree_map_only(torch.Tensor, extract_tensor_info, (args, kwargs))
 
     if actual_bytes is None:
         return None, ""
@@ -146,9 +142,8 @@ def benchmark_collective_with_cuda_events(
         key = f"{n.target}: ({bytes_pow2} bytes)"
 
         # Check persistent cache
-        if not skip_cache_lookup:
-            if (cached := get_cached_runtime(key)) is not None:
-                return cached, key
+        if (cached := get_cached_runtime(key)) is not None:
+            return cached, key
 
         # Not in cache, need to benchmark
         # Calculate number of elements for this byte size

@@ -943,6 +943,38 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             correct = func(inputs_a, inputs_b, ranks=ranks)
             self.assertTrue(same(out, correct))
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_collective_benchmarking_with_real_pg(self):
+        """Test collective benchmarking with real process group (falls back on fake)."""
+
+        def func(a):
+            ar = _functional_collectives.all_reduce(a, "sum", "0")
+            b = torch.matmul(a, a)
+            return torch.matmul(ar, b)
+
+        patches = {
+            **get_patches(),
+            "aten_distributed_optimizations.benchmark_collectives": True,
+        }
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
+
+            with torch._inductor.config.patch(patches):
+                compiled = torch.compile(func)
+                out, aten_graph_str = run_and_get_aten_graph(compiled, inputs)
+
+                # Verify wait_tensor is sinked (scheduling worked)
+                FileCheck().check("all_reduce").check("mm").check("wait_tensor").check("mm").run(aten_graph_str)
+
+                correct = func(inputs)
+                self.assertTrue(same(out, correct))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
