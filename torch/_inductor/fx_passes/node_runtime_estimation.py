@@ -71,7 +71,7 @@ def can_benchmark_collective() -> bool:
 
     if not c10d.is_initialized():
         return False
-    
+
     pg = c10d.distributed_c10d._get_default_group()
     if torch.distributed.distributed_c10d.get_backend(pg) == "fake":
         return False
@@ -103,12 +103,10 @@ def _benchmark_collective_with_cuda_events_impl(
         (args, kwargs),
     )
 
-    # Warmup: call collective once
+    # Warmup: call collective once and wait
     torch.cuda.synchronize()
-    try:
-        n.target(*bench_args, **bench_kwargs)  # type: ignore[operator]
-    except Exception:
-        return None
+    result = n.target(*bench_args, **bench_kwargs)  # type: ignore[operator]
+    torch.ops._c10d_functional.wait_tensor(result)
 
     # Benchmark with CUDA events
     comm_time = 0.0
@@ -120,7 +118,8 @@ def _benchmark_collective_with_cuda_events_impl(
         end_evt = torch.cuda.Event(enable_timing=True)
 
         start_evt.record()
-        n.target(*bench_args, **bench_kwargs)  # type: ignore[operator]
+        result = n.target(*bench_args, **bench_kwargs)  # type: ignore[operator]
+        torch.ops._c10d_functional.wait_tensor(result)
         end_evt.record()
         end_evt.synchronize()
 
@@ -209,10 +208,14 @@ def benchmark_collective_with_cuda_events(
         set_cached_runtime(key, runtime)
         return runtime, key
 
+    # If exact power-of-2 bytes, just benchmark it
+    if actual_bytes == lower_pow2_bytes or actual_bytes == upper_pow2_bytes:
+        return benchmark_bytes(actual_bytes, actual_dtype)
+
+    # Otherwise, benchmark bounds and interpolate
     lower_runtime, lower_key = benchmark_bytes(lower_pow2_bytes, actual_dtype)
     upper_runtime, upper_key = benchmark_bytes(upper_pow2_bytes, actual_dtype)
 
-    # If either benchmark failed, return None
     if lower_runtime is None or upper_runtime is None:
         return None, ""
 

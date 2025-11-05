@@ -73,7 +73,7 @@ if torch._C._has_mkldnn:
             packed_weight_node = weight_node
             assert packed_weight_node.target == mkldnn._reorder_linear_weight
             transpose_weight_node = packed_weight_node.args[0]
-            assert transpose_weight_node.target == aten.permute.default
+            assert transpose_weight_node.target is aten.permute.default
             return transpose_weight_node
 
         def pack_conv_weight(
@@ -1213,13 +1213,13 @@ if torch._C._has_mkldnn:
 
         linear_node = match.output_node()
         # mkldnn linear only supports beta=1or0 and alpha=1
-        if linear_node.target == aten.addmm.default:
+        if linear_node.target is aten.addmm.default:
             alpha = linear_node.kwargs.get("alpha", 1.0)
             beta = linear_node.kwargs.get("beta", 1.0)
             if (beta != 0.0 and beta != 1.0) or alpha != 1.0:
                 return False
         # weight_idx is 1 for aten.mm and is 2 for aten.addmm
-        weight_idx = 2 if linear_node.target == aten.addmm.default else 1
+        weight_idx = 2 if linear_node.target is aten.addmm.default else 1
         if not is_const_or_cat_by_const(linear_node.args[weight_idx]):
             return False
         input_meta_value = linear_node.args[weight_idx - 1].meta.get("val")
@@ -1437,17 +1437,17 @@ if torch._C._has_mkldnn:
         def linear(match, *args, **kwargs):
             graph = match.graph
             linear_node = match.output_node()
-            input = args[0] if linear_node.target == aten.mm.default else args[1]
+            input = args[0] if linear_node.target is aten.mm.default else args[1]
             bias = (
                 None
-                if linear_node.target == aten.mm.default
+                if linear_node.target is aten.mm.default
                 or (
-                    linear_node.target == aten.addmm.default
+                    linear_node.target is aten.addmm.default
                     and linear_node.kwargs.get("beta", 1.0) == 0.0
                 )
                 else args[0]
             )
-            weight = args[1] if linear_node.target == aten.mm.default else args[2]
+            weight = args[1] if linear_node.target is aten.mm.default else args[2]
             device_type = input.meta.get("val").device.type
             mkldnn_device_op = _get_mkldnn_device_op(device_type)
             with graph.inserting_before(linear_node):

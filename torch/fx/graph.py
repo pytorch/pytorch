@@ -226,8 +226,10 @@ class PythonCode:
     # Values in global scope during execution of `src_def`.
     globals: dict[str, Any]
     # Optional mapping from the forward function's line number to
-    # node index.
+    # node index. Line number starts at the prologue (i.e. forward()).
     _lineno_map: Optional[dict[int, Optional[int]]]
+    # The line number of prologue in fn_code
+    _prologue_start: int = 0
 
 
 def _format_target(base: str, target: str) -> str:
@@ -645,6 +647,15 @@ class CodeGen:
 
             if verbose:
                 # override annotation with more detailed information
+                try:
+                    from torch.distributed.tensor._api import DTensor, DTensorSpec
+
+                    dtensorspec_format_shard_order_str = (
+                        DTensorSpec.format_shard_order_str
+                    )
+                except ModuleNotFoundError:
+                    DTensor = None  # type: ignore[assignment,misc]
+                    dtensorspec_format_shard_order_str = None
                 from torch.fx.experimental.proxy_tensor import py_sym_types
                 from torch.fx.passes.shape_prop import TensorMetadata
 
@@ -675,6 +686,16 @@ class CodeGen:
                     core = _tensor_annotation(meta_val)
                     if is_plain:
                         maybe_type_annotation = f': "{core}"'
+                    elif type(meta_val) is DTensor:
+                        assert dtensorspec_format_shard_order_str is not None
+                        dtensor_meta = dtensorspec_format_shard_order_str(
+                            meta_val._spec.placements,  # type: ignore[attr-defined]
+                            meta_val._spec.shard_order,  # type: ignore[attr-defined]
+                        )
+                        cls = meta_val.__class__.__name__
+                        maybe_type_annotation = (
+                            f': "{cls}({core}, {dim_green(dtensor_meta)})"'
+                        )
                     else:
                         cls = meta_val.__class__.__name__
                         maybe_type_annotation = f': "{cls}({core})"'
@@ -854,7 +875,14 @@ class CodeGen:
 
 {prologue}
 {code}"""
-        return PythonCode(fn_code, globals_, _lineno_map=lineno_map)
+        # The +4 accounts for the empty lines before prologue in fn_code
+        prologue_start = wrap_stmts.count("\n") + 4
+        return PythonCode(
+            fn_code,
+            globals_,
+            _lineno_map=lineno_map,
+            _prologue_start=prologue_start,
+        )
 
 
 # Ideally, we'd like to refactor all of the pytree logic into this codegen
@@ -933,24 +961,25 @@ class _PyTreeCodeGen(CodeGen):
             return "\n    " + "".join(x + "; " for x in has_annotation) + "\n"
 
     def gen_var_bindings(self, fn_args, free_vars, expanded_def) -> str:
+        in_spec = self.pytree_info.in_spec
         # when kwargs is present, in_spec is tuple(args, kwargs)
         has_args_kwargs_tuple = (
-            self.pytree_info.in_spec.type is tuple
-            and self.pytree_info.in_spec.num_children == 2
-            and self.pytree_info.in_spec.children_specs[0].type is tuple
-            and self.pytree_info.in_spec.children_specs[1].type is dict
+            in_spec.type is tuple
+            and in_spec.num_children == 2
+            and in_spec.child(0).type is tuple
+            and in_spec.child(1).type is dict
         )
         fn_kwargs = "{}"
         fn_signature = f"[{', '.join(fn_args)}], self._in_spec"
         if has_args_kwargs_tuple:
-            count_args = self.pytree_info.in_spec.children_specs[0].num_children
+            count_args = in_spec.child(0).num_children
             fn_args = self.pytree_info.orig_args[:count_args]
             fn_kwargs = (
                 "{"
                 + ", ".join(
                     f"'{k}':{v}"
                     for k, v in zip(
-                        self.pytree_info.in_spec.children_specs[1].context,
+                        in_spec.child(1).context,
                         self.pytree_info.orig_args[count_args:],
                     )
                 )

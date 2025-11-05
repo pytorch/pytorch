@@ -421,6 +421,7 @@ class OverlapScheduler:
             ).values.tolist()
 
         # Cache medians (compute vs collective use different caches)
+        collective_benchmarks = {}
         for idx, (key, median_runtime_estimation) in enumerate(zip(runtime_estimations_keys, median_runtime_estimations)):
             if key is None:
                 continue
@@ -431,6 +432,40 @@ class OverlapScheduler:
                 # Collective node
                 from torch._inductor.fx_passes.node_runtime_estimation import set_cached_runtime
                 set_cached_runtime(key, median_runtime_estimation)
+
+                # Get analytical estimates for comparison
+                collective_node = collective_nodes[idx - compute_key_count]
+
+                # Inductor analytical model (bandwidth formulas)
+                analytical_inductor = torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
+                    collective_node, None, use_nccl_estimator=False
+                )
+
+                # NCCL's built-in estimator
+                analytical_nccl = torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
+                    collective_node, None, use_nccl_estimator=True
+                )
+
+                collective_benchmarks[key] = {
+                    "benchmarked_ms": median_runtime_estimation,
+                    "analytical_inductor_ms": analytical_inductor,
+                    "analytical_nccl_ms": analytical_nccl,
+                }
+
+        # Emit tlparse artifact with collective benchmarks
+        if collective_benchmarks:
+            from torch._logging import trace_structured
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "node_runtime_estimation",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: {
+                    "world_size": world_size,
+                    "collective_benchmarks": collective_benchmarks,
+                },
+            )
 
         log.info("Overlap scheduling: Runtime estimations aligned")
 
@@ -771,12 +806,12 @@ class OverlapScheduler:
         if not torch._inductor.config.test_configs.assume_bucketing_reduces_latency:
             return False
 
-        key = bucket_key(node)
+        key = bucket_key(node, mode="custom_ops_multidtype")
         if key is None:
             return False
 
         for in_flight_coll in self.in_flight.keys():
-            if bucket_key(in_flight_coll) == key:
+            if bucket_key(in_flight_coll, mode="custom_ops_multidtype") == key:
                 return True
 
         return False

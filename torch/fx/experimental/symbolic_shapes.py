@@ -2658,7 +2658,9 @@ class _ShapeGuardPrinter(abc.ABC):
         Convert a sympy Symbol to its source representation.
 
         This method looks up the symbol in symbol_to_source mapping and returns
-        the string representation of its first source.
+        the string representation of its first source. If the symbol is not in
+        symbol_to_source (which can happen when symbols appear in guard expressions
+        through simplification or substitution), it falls back to var_to_sources.
 
         Args:
             expr: The sympy Symbol to convert
@@ -2667,24 +2669,30 @@ class _ShapeGuardPrinter(abc.ABC):
             String representation of the symbol's source
 
         Raises:
-            AssertionError: If the symbol is not found in symbol_to_source
+            AssertionError: If the symbol is not found in either mapping
         """
         assert isinstance(expr, sympy.Symbol), str(type(expr))
 
-        def repr_symbol_to_source() -> str:
-            return repr(
-                {
-                    symbol: [s.name() for s in sources]
-                    for symbol, sources in self.symbol_to_source.items()
-                }
-            )
+        # Try symbol_to_source first, fall back to var_to_sources if not found
+        if source := self.symbol_to_source.get(expr):
+            return self.print_source(source[0])
+        elif source := self.var_to_sources.get(expr):
+            return self.print_source(source[0])
+        else:
 
-        assert self.symbol_to_source.get(expr), (
-            f"{expr} (could be from {[s.name() for s in self.var_to_sources[expr]]}) "
-            f"not in {repr_symbol_to_source()}.  If this assert is failing, it could be "
-            "due to the issue described in https://github.com/pytorch/pytorch/pull/90665"
-        )
-        return self.print_source(self.symbol_to_source[expr][0])
+            def repr_sources(src: Mapping[sympy.Symbol, list[Source]]) -> str:
+                return repr(
+                    {
+                        symbol: [s.name() for s in sources]
+                        for symbol, sources in src.items()
+                    }
+                )
+
+            raise RuntimeError(
+                f"{expr} not in {repr_sources(self.symbol_to_source)} or "
+                f"{repr_sources(self.var_to_sources)}.  This could be due to "
+                "the issue described in https://github.com/pytorch/pytorch/pull/90665"
+            )
 
     @abc.abstractmethod
     def print_source(self, source: Source) -> str:

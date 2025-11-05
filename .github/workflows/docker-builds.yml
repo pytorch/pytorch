@@ -67,6 +67,7 @@ jobs:
           pytorch-linux-jammy-py3.12-halide,
           pytorch-linux-jammy-xpu-n-1-py3,
           pytorch-linux-jammy-xpu-n-py3,
+          pytorch-linux-jammy-xpu-n-py3-inductor-benchmarks,
           pytorch-linux-jammy-py3-clang18-asan,
           pytorch-linux-jammy-py3-clang12-onnx,
           pytorch-linux-jammy-linter,
@@ -77,6 +78,8 @@ jobs:
         ]
         include:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11
+            runner: linux.arm64.m7g.4xlarge
+          - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-clang21
             runner: linux.arm64.m7g.4xlarge
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11-inductor-benchmarks
             runner: linux.arm64.m7g.4xlarge

@@ -92,13 +92,49 @@ BFLOAT16_AVAILABLE = torch.cuda.is_available() and (
     torch.version.cuda is not None or torch.version.hip is not None
 )
 
-from logging_utils import (
-    configure as _log_configure,
-    log_test_info,
-    log_test_success,
-    log_test_validation,
-    log_test_warning,
-)
+
+_start_time = time.time()
+_logger = logging.getLogger(__name__)
+
+
+def _ts():
+    return time.time() - _start_time
+
+
+def configure(level=logging.INFO, force=False):
+    try:
+        logging.basicConfig(
+            level=level,
+            format="%(asctime)s %(name)s %(levelname)s: %(message)s",
+            force=force,
+        )
+    except TypeError:
+        logging.basicConfig(
+            level=level, format="%(asctime)s %(name)s %(levelname)s: %(message)s"
+        )
+
+
+def log_test_info(rank, message):
+    _logger.info("[%7.3fs][Rank %s] %s", _ts(), rank, message)
+
+
+def log_test_success(rank, message):
+    _logger.info("[%7.3fs][Rank %s] ✅ %s", _ts(), rank, message)
+
+
+def log_test_validation(rank, message):
+    _logger.info("[%7.3fs][Rank %s] ✓ %s", _ts(), rank, message)
+
+
+def log_test_warning(rank, message):
+    _logger.warning("[%7.3fs][Rank %s] ⚠️ %s", _ts(), rank, message)
+
+
+def log_test_error(rank, message):
+    _logger.error("[%7.3fs][Rank %s] ✗ %s", _ts(), rank, message)
+
+
+_log_configure = configure
 
 
 _log_configure(level=logging.INFO, force=True)

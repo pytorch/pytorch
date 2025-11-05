@@ -2040,7 +2040,7 @@ class TestCompositeCompliance(TestCase):
 
             # Convert strided tensor inputs to COW tensors and make copies of
             # all inputs
-            for idx, arg in enumerate(args_raw):
+            for arg in args_raw:
                 if is_strided_tensor(arg):
                     args_copy.append(arg.detach().clone())
                     args.append(torch._lazy_clone(arg))
