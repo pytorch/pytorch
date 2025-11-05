@@ -740,6 +740,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             fields = namedtuple_fields(self.value)  # type: ignore[arg-type]
             # check if this a quasi-namedtuple or a real one
             if self.value.__module__ == "torch.return_types":
+                # Structseq objects (torch.return_types.*) are tuples, not namedtuples
+                # Use TupleVariable for them
                 if kwargs or len(args) != 1:
                     raise_args_mismatch(
                         tx,
@@ -747,11 +749,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         "1 args and 0 kwargs",
                         f"{len(args)} args and {len(kwargs)} kwargs",
                     )
-                items_ret_type: list[VariableTracker] = args[
-                    0
-                ].force_unpack_var_sequence(tx)
+                items = args[0].force_unpack_var_sequence(tx)
+                # Structseq objects are just tuples - use TupleVariable
+                return variables.TupleVariable(items)
             else:
-                field_defaults = self.value._field_defaults  # type: ignore[attr-defined]
+                # Real namedtuples - use NewNamedTupleVariable
+                field_defaults = self.value._field_defaults
 
                 items = list(args)
                 # pyrefly: ignore[bad-argument-type]
@@ -2656,10 +2659,7 @@ class NewNamedTupleVariable(UserDefinedTupleVariable):
         )
         
         # Debug: Verify NewNamedTupleVariable is being used
-        # This will print when the constructor is called during tracing
-        import torch._dynamo.config as config
-        if config.verbose and hasattr(config, 'debug'):
-            print(f"[DEBUG] NewNamedTupleVariable created for {tuple_cls.__name__}")
+        print(f"[NewNamedTupleVariable] Created for {tuple_cls.__name__} with {len(items)} items")
 
     def unpack_var_sequence(
         self, tx: "InstructionTranslator"
@@ -2706,6 +2706,26 @@ class NewNamedTupleVariable(UserDefinedTupleVariable):
             Tuple of field names.
         """
         return namedtuple_fields(self.tuple_cls)
+
+    def _is_method_overridden(self, method_name: str) -> bool:
+        """Check if a method is overridden in the NamedTuple subclass.
+
+        Args:
+            method_name: The name of the method to check.
+
+        Returns:
+            True if the method is overridden in the subclass, False otherwise.
+        """
+        # For _replace, collections.namedtuple always adds it to __dict__
+        # but we want to intercept the default implementation. Only allow
+        # tracing if the user has explicitly overridden it. Since detecting
+        # user overrides is complex, we default to not overridden (False)
+        # which means we'll intercept it.
+        if not hasattr(self.tuple_cls, method_name):
+            return False
+        # For now, we intercept _replace by default. If needed, we can add
+        # more sophisticated detection of user overrides in the future.
+        return False
 
     def as_python_constant(self):
         """Convert to Python constant value.
@@ -2822,6 +2842,16 @@ class NewNamedTupleVariable(UserDefinedTupleVariable):
         # name mapping
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
+
+        # Handle _replace specially BEFORE checking fields and BEFORE
+        # parent class can wrap it as UserMethodVariable
+        # This prevents tracing into the actual Python _replace method
+        if name == "_replace" and not self._is_method_overridden("_replace"):
+            # Return GetAttrVariable which will call obj.call_method when invoked
+            # This routes to our call_method handler instead of tracing the Python code
+            from ..source import AttrSource
+            source = AttrSource(self.source, name) if self.source else None
+            return variables.GetAttrVariable(self, name, source=source)
 
         # Check if it's a field name - map to tuple index for direct access
         # This is in addition to the _tuplegetter descriptor handling in
