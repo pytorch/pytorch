@@ -4,12 +4,14 @@ r"""This package adds support for device memory management implemented in CUDA."
 import collections
 import contextlib
 import ctypes
+import os
 import pickle
+import re
 import sys
 import warnings
 from inspect import signature
-from typing import Any, Literal, Optional, TYPE_CHECKING
-from typing_extensions import deprecated
+from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypedDict
+from typing_extensions import deprecated, NotRequired
 
 import torch
 from torch import _C
@@ -27,6 +29,60 @@ from ._memory_viz import memory as _memory, segments as _segments
 
 if TYPE_CHECKING:
     from torch.types import Device
+
+
+# Type definitions for memory profiler
+class _Frame(TypedDict):
+    """Frame information from memory profiler snapshots."""
+
+    filename: str
+    line: int
+    name: str
+    # Fields added by FX augmentation (optional)
+    fx_node_op: NotRequired[str]
+    fx_node_name: NotRequired[str]
+    fx_node_target: NotRequired[str]
+    fx_original_trace: NotRequired[str]
+
+
+class _Block(TypedDict):
+    """Memory block information."""
+
+    size: int
+    requested_size: int
+    address: int
+    state: str
+    frames: list[_Frame]
+
+
+class _Segment(TypedDict):
+    """Memory segment information."""
+
+    address: int
+    total_size: int
+    stream: int
+    segment_type: str
+    allocated_size: int
+    active_size: int
+    blocks: list[_Block]
+
+
+class _TraceEntry(TypedDict):
+    """Memory trace entry information."""
+
+    action: str
+    addr: NotRequired[int]
+    frames: list[_Frame]
+    size: int
+    stream: int
+    device_free: NotRequired[int]
+
+
+class _Snapshot(TypedDict):
+    """Memory snapshot structure."""
+
+    segments: list[_Segment]
+    device_traces: NotRequired[list[list[_TraceEntry]]]
 
 
 __all__ = [
@@ -772,7 +828,7 @@ def list_gpu_processes(device: "Device" = None) -> str:
             import pynvml  # type: ignore[import]
         except ModuleNotFoundError:
             return "pynvml module not found, please install nvidia-ml-py"
-        # pyrefly: ignore  # import-error
+        # pyrefly: ignore [import-error,missing-module-attribute]
         from pynvml import NVMLError_DriverNotLoaded
 
         try:
@@ -855,7 +911,7 @@ def _record_memory_history_legacy(
     _C._cuda_record_memory_history_legacy(  # type: ignore[call-arg]
         enabled,
         record_context,
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         trace_alloc_max_entries,
         trace_alloc_record_context,
         record_context_cpp,
@@ -964,7 +1020,120 @@ def _record_memory_history_impl(
 _record_memory_history.__signature__ = signature(_record_memory_history_impl)  # type: ignore[attr-defined]
 
 
-def _snapshot(device: "Device" = None):
+def _augment_frames(frames: list[_Frame]) -> int:
+    """
+    Augment a list of frames with FX debug information.
+
+    Args:
+        frames: List of frame dictionaries to augment
+
+    Returns:
+        The count of frames that were augmented.
+    """
+    from torch.fx.graph_module import FX_GRAPH_MODULE_FILE_PREFIX
+
+    # Regex pattern to match FX generated files
+    _FX_GENERATED_PATTERN = re.compile(
+        rf"{re.escape(FX_GRAPH_MODULE_FILE_PREFIX)}.*\.py$"
+    )
+
+    count = 0
+    if not frames:
+        return count
+
+    for frame in frames:
+        if "filename" in frame and "line" in frame:
+            filename = frame["filename"]
+            lineno = frame["line"]
+
+            # Check if this looks like an FX generated file
+            if not _FX_GENERATED_PATTERN.search(os.path.basename(filename)):
+                continue
+
+            # Look up metadata from the global registry
+            from torch.fx.traceback import _FX_METADATA_REGISTRY
+
+            metadata = _FX_METADATA_REGISTRY.get(filename)
+            if metadata is None:
+                continue
+
+            lineno_map = metadata.get("lineno_map", {})
+            node_metadata = metadata.get("node_metadata", {})
+            prologue_start = metadata.get("prologue_start", 0)
+
+            # Get the node index for this line
+            node_idx = lineno_map.get(lineno - prologue_start)
+
+            if node_idx is not None and node_idx in node_metadata:
+                node_info = node_metadata[node_idx]
+                original_trace = node_info.get("stack_trace")
+                node_op = node_info.get("op")
+                node_name = node_info.get("name")
+                node_target = node_info.get("target")
+
+                # Always add node metadata
+                frame["fx_node_op"] = node_op
+                frame["fx_node_name"] = node_name
+                frame["fx_node_target"] = str(node_target)
+
+                # Add original trace if available
+                if original_trace:
+                    frame["fx_original_trace"] = original_trace
+
+                count += 1
+
+    return count
+
+
+def _augment_memory_snapshot_stack_traces(
+    snapshot: str | _Snapshot,
+) -> _Snapshot:
+    """
+    Augment a memory snapshot with original source stack traces from FX metadata.
+
+    IMPORTANT: This function reads from a global in-memory registry (_FX_METADATA_REGISTRY)
+    that is populated during graph module compilation. It must be called in the same
+    Python process where the FX graphs were compiled. It cannot be used to augment
+    snapshots loaded from disk in a different process.
+
+    Args:
+        snapshot: Either a memory snapshot dict or path to a snapshot pickle file
+
+    Returns:
+        The augmented snapshot dictionary with fx_node_op, fx_node_name,
+        fx_original_trace, and fx_node_info fields added to frames
+    """
+
+    snapshot_dict: _Snapshot
+    if isinstance(snapshot, str):
+        # Load the memory snapshot
+        with open(snapshot, "rb") as f:
+            snapshot_dict = cast(_Snapshot, pickle.load(f))
+    else:
+        snapshot_dict = snapshot
+
+    # Process stack traces in the snapshot
+    augmented_count = 0
+
+    # Process blocks in segments (for regular allocations)
+    if "segments" in snapshot_dict:
+        for segment in snapshot_dict["segments"]:
+            if "blocks" in segment:
+                for block in segment["blocks"]:
+                    if "frames" in block:
+                        augmented_count += _augment_frames(block["frames"])
+
+    # Process device traces (for memory history)
+    if "device_traces" in snapshot_dict:
+        for trace_list in snapshot_dict["device_traces"]:
+            for trace_entry in trace_list:
+                if isinstance(trace_entry, dict) and "frames" in trace_entry:
+                    augmented_count += _augment_frames(trace_entry["frames"])
+
+    return snapshot_dict
+
+
+def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
     """Save a snapshot of CUDA memory state at the time it was called.
 
     The state is represented as a dictionary with the following structure.
@@ -1012,6 +1181,11 @@ def _snapshot(device: "Device" = None):
             filename: str
             line: int
             name: str
+            # Optional FX debug fields (present when augment_with_fx_traces=True
+            # and the frame corresponds to FX-generated code)
+            fx_node_op: str  # FX node operation type (e.g., 'call_function', 'output')
+            fx_node_name: str  # FX node name (e.g., 'linear', 'relu_1')
+            fx_original_trace: str  # Original model source code stack trace
 
 
         class TraceEntry(TypedDict):
@@ -1041,13 +1215,23 @@ def _snapshot(device: "Device" = None):
             device_free: int  # only present for OOM, the amount of
             # memory cuda still reports to be free
 
+    Args:
+        device: Device to capture snapshot for. If None, captures for current device.
+        augment_with_fx_traces: If True, augment stack trace frames with FX debug information
+                                that maps generated FX code back to original model source code.
+                                This adds fx_node_op, fx_node_name, fx_original_trace, and
+                                fx_node_info fields to Frame objects. Default: False.
+
     Returns:
         The Snapshot dictionary object
     """
-    return _C._cuda_memorySnapshot(None)
+    s = _C._cuda_memorySnapshot(None)
+    if augment_with_fx_traces:
+        s = _augment_memory_snapshot_stack_traces(s)  # type: ignore[assignment, arg-type]
+    return s
 
 
-def _dump_snapshot(filename="dump_snapshot.pickle"):
+def _dump_snapshot(filename="dump_snapshot.pickle", augment_with_fx_traces=False):
     """
     Save a pickled version of the `torch.memory._snapshot()` dictionary to a file.
 
@@ -1059,8 +1243,14 @@ def _dump_snapshot(filename="dump_snapshot.pickle"):
 
     Args:
         filename (str, optional): Name of the file to create. Defaults to "dump_snapshot.pickle".
+        augment_with_fx_traces (bool, optional): If True, augment the snapshot with FX debug information
+                                                  before dumping. This maps generated FX code stack traces
+                                                  back to original model source code. Defaults to False.
+        verbose (bool, optional): If True and augment_with_fx_traces is True, print verbose debug output
+                                  during augmentation. Defaults to False.
     """
-    s = _snapshot()
+    s = _snapshot(augment_with_fx_traces=augment_with_fx_traces)
+
     with open(filename, "wb") as f:
         pickle.dump(s, f)
 
@@ -1076,7 +1266,7 @@ def _set_memory_metadata(metadata: str):
         metadata (str): Custom metadata string to attach to allocations.
                        Pass an empty string to clear the metadata.
     """
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     torch._C._cuda_setMemoryMetadata(metadata)
 
 
@@ -1087,7 +1277,7 @@ def _get_memory_metadata() -> str:
     Returns:
         str: The current metadata string, or empty string if no metadata is set.
     """
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     return torch._C._cuda_getMemoryMetadata()
 
 
@@ -1110,7 +1300,7 @@ def _save_memory_usage(filename="output.svg", snapshot=None):
     category=FutureWarning,
 )
 def _set_allocator_settings(env: str):
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     return torch._C._accelerator_setAllocatorSettings(env)
 
 

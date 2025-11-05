@@ -705,7 +705,7 @@ class TestTensorExprFuser(BaseTestClass):
                 #    d = to_bf16(to_fp32(a) + to_fp32(b) + to_fp32(c))
                 # Hence, we simulate NNC computation by feeding fp32 tensors and converting
                 # the result tensor back to bf16. The simulation could avoid the numeric
-                # deviation to simplify the result comprasion
+                # deviation to simplify the result comparison
                 y = warmup_and_run_forward(traced, rand_a.float(), rand_b.float())
                 if torch_fn not in cmp_fns:
                     y = y.bfloat16()
@@ -1216,7 +1216,7 @@ class TestTensorExprFuser(BaseTestClass):
         @torch.jit.script
         def test(x: torch.Tensor, y: torch.Tensor, z: int) -> torch.Tensor:
             b = y
-            for i in range(z):
+            for _ in range(z):
                 a = x + y
                 b = b + y
             return b
