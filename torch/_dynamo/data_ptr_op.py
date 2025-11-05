@@ -14,8 +14,8 @@ The comparison operations use CompositeExplicitAutograd dispatch to decompose in
 primitive operations at runtime while maintaining correct tracing behavior.
 """
 
-from typing import Any
 import weakref
+from typing import Any
 
 import torch
 from torch._prims import _make_prim, RETURN_TYPE

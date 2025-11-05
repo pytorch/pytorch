@@ -770,16 +770,21 @@ class BuiltinVariable(VariableTracker):
                 # with int parameters via torch.ops._dynamo_data_ptr.ne custom op.
                 if op in (operator.ne,):
                     from .tensor import DataPtrVariable
+
                     method_name = "__ne__"
                     result.extend(
                         [
                             (
                                 (DataPtrVariable, VariableTracker),
-                                lambda tx, a, b, m=method_name: a.call_method(tx, m, [b], {}),
+                                lambda tx, a, b, m=method_name: a.call_method(
+                                    tx, m, [b], {}
+                                ),
                             ),
                             (
                                 (VariableTracker, DataPtrVariable),
-                                lambda tx, a, b, m=method_name: b.call_method(tx, m, [a], {}),
+                                lambda tx, a, b, m=method_name: b.call_method(
+                                    tx, m, [a], {}
+                                ),
                             ),
                         ]
                     )

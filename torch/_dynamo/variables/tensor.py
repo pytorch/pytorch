@@ -1858,15 +1858,14 @@ class DataPtrVariable(VariableTracker):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        
         compare_ops = {
-            '__eq__': {
-                'func': operator.eq,
-                'dynamo_op': torch.ops._dynamo_data_ptr.eq.default,
+            "__eq__": {
+                "func": operator.eq,
+                "dynamo_op": torch.ops._dynamo_data_ptr.eq.default,
             },
-            '__ne__': {
-                'func': operator.ne,
-                'dynamo_op': torch.ops._dynamo_data_ptr.ne.default,
+            "__ne__": {
+                "func": operator.ne,
+                "dynamo_op": torch.ops._dynamo_data_ptr.ne.default,
             },
         }
 
@@ -1876,15 +1875,16 @@ class DataPtrVariable(VariableTracker):
             proxy_args = None
 
             if isinstance(other, DataPtrVariable):
-                proxy_target = compare_ops[name]['func']
+                proxy_target = compare_ops[name]["func"]
                 proxy_args = (self.proxy, other.proxy)
 
             elif isinstance(other, ConstantVariable):
-                proxy_target = compare_ops[name]['dynamo_op']
+                proxy_target = compare_ops[name]["dynamo_op"]
                 proxy_args = (self.from_tensor.as_proxy(), other.as_python_constant())
 
             if proxy_target and proxy_args:
                 from .builder import wrap_fx_proxy
+
                 proxy = tx.output.create_proxy(
                     "call_function",
                     proxy_target,
