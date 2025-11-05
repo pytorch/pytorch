@@ -6,8 +6,7 @@ import math
 import os
 from functools import partial
 from threading import Lock
-from typing import Any, TYPE_CHECKING
-from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -59,7 +58,7 @@ class BaseConfig:
     block_k: int
     num_stages: int
     num_warps: int
-    hint_override: int | None = None
+    hint_override: Optional[int] = None
 
 
 @dataclasses.dataclass
@@ -528,7 +527,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
         Finalizes configs after scaling, applying additional constraints.
         """
-        used: OrderedSet[tuple[int | None, ...]] = OrderedSet()
+        used: OrderedSet[tuple[Optional[int], ...]] = OrderedSet()
 
         max_mm_configs = config.test_configs.max_mm_configs
 
@@ -537,7 +536,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             num_warps = min(conf.num_warps, conf.block_m * conf.block_n // 256)
 
             # Construct key for finding duplicate configs
-            key: tuple[int | None, ...] = (
+            key: tuple[Optional[int], ...] = (
                 conf.block_m,
                 conf.block_n,
                 conf.block_k,
@@ -574,7 +573,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         scale: float,
         has_int8_tensor: bool,
         exclude: Callable[[sympy.Integer, sympy.Integer, sympy.Integer], bool],
-        hint_override: int | None = None,
+        hint_override: Optional[int] = None,
     ) -> list[BaseConfig]:
         """
         Scales and filters matrix multiplication configs based on input size.
@@ -637,7 +636,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
     def _get_exceeding_shared_memory_checker(
         self,
-    ) -> Callable[[BaseConfig, int], bool] | None:
+    ) -> Optional[Callable[[BaseConfig, int], bool]]:
         """
         Returns a function that checks whether a given configuration exceeds the available shared memory for the device.
         If the device does not report available shared memory, returns None.
@@ -1607,9 +1606,9 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         Convert config lists to template kwargs.
         This replaces the logic from choices.get_mm_configs and inlines mm_options.
         """
-        assert isinstance(
-            kernel_inputs, MMKernelInputs
-        ), f"{self.__class__.__name__} requires MMKernelInputs"
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            f"{self.__class__.__name__} requires MMKernelInputs"
+        )
         input_nodes = kernel_inputs.nodes()
         if len(input_nodes) < 2:
             raise ValueError(f"Need at least 2 input tensors, got {len(input_nodes)}")
@@ -1763,9 +1762,9 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
         """
         Generate TMA template configs by calling super and adding TMA-specific options.
         """
-        assert isinstance(
-            kernel_inputs, MMKernelInputs
-        ), "TMATemplateConfigMixin requires MMKernelInputs"
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            "TMATemplateConfigMixin requires MMKernelInputs"
+        )
         mat1, mat2 = kernel_inputs.mat1mat2()
         tma_opts = {
             "A_ROW_MAJOR": not mat1.layout.is_transposed(),
@@ -1831,9 +1830,9 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         """
         for scaled_mm, we need to unsqueeze scale tensors, and bias
         """
-        assert isinstance(
-            kernel_inputs, MMKernelInputs
-        ), "Expect MMKernelInputs for scaled MM"
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            "Expect MMKernelInputs for scaled MM"
+        )
         inputs = super().adjust_kernel_inputs(kernel_inputs, op_name)
         nodes = inputs.nodes()
         mat_a, mat_b, scale_a, scale_b, *bias = nodes
@@ -1870,9 +1869,9 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         kernel_inputs = self.adjust_kernel_inputs(kernel_inputs, op_name)
         input_nodes = kernel_inputs.nodes()
         # Initial assertion from mm_common.scaled_mm_options
-        assert (
-            len(input_nodes) >= 4
-        ), f"scaled_mm requires at least 4 inputs, got {len(input_nodes)}"
+        assert len(input_nodes) >= 4, (
+            f"scaled_mm requires at least 4 inputs, got {len(input_nodes)}"
+        )
 
         # Extract scale tensors (typically scale_a and scale_b are input_nodes[2] and input_nodes[3])
         scale_a = input_nodes[2]
@@ -1896,9 +1895,9 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             f"or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
         )
 
-        assert isinstance(
-            kernel_inputs, MMKernelInputs
-        ), f"{self.__class__.__name__} requires MMKernelInputs"
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            f"{self.__class__.__name__} requires MMKernelInputs"
+        )
 
         if not self._valid(kernel_inputs):
             return
@@ -1933,9 +1932,9 @@ class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
         }
 
     def _valid(self, kernel_inputs: KernelInputs) -> bool:
-        assert isinstance(
-            kernel_inputs, MMKernelInputs
-        ), "Expect MMKernelInputs for ScaledMMConfigMixin"
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            "Expect MMKernelInputs for ScaledMMConfigMixin"
+        )
         _, _, k = kernel_inputs.mnk_symbolic()
         if V.graph.sizevars.guard_or_false(sympy.Le(k, 16)):
             # Triton crashes however uncommon for real workloads
