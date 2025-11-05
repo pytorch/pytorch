@@ -498,6 +498,7 @@ def generate_ttir(
         # pyrefly: ignore  # missing-attribute
         codegen_fns = backend.get_codegen_implementation(*codegen_args)
         module_map = backend.get_module_map()
+        # pyrefly: ignore[missing-argument,bad-argument-type]
         ttir_module = src.make_ir(options, codegen_fns, module_map, context)
     else:
         codegen_args = [options] if get_codegen_implementation_sig_params == 1 else []
