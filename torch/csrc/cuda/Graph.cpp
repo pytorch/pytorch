@@ -48,7 +48,8 @@ void THCPGraph_init(PyObject* module) {
                   "Unknown capture error mode. Expected `global`, `thread_local`, or `relaxed`, got ",
                   capture_error_mode);
             }
-            return self.capture_begin(pool, capture_mode);
+            self.capture_begin(pool, capture_mode);
+            return;
           },
           py::arg("pool"),
           py::arg("capture_error_mode"),
@@ -66,7 +67,7 @@ void THCPGraph_init(PyObject* module) {
             // We've unwrapped Python object to C++ object,
             // so we could release GIL before calling into C++
             py::gil_scoped_release release;
-            return self.register_generator_state(generator);
+            self.register_generator_state(generator);
           },
           py::arg("generator"))
       .def(
