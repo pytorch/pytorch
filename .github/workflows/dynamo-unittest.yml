@@ -65,7 +65,6 @@ jobs:
     #     python-version: ['3.10', '3.11', '3.12', '3.13']
     with:
       build-environment: linux-jammy-py3.11-clang12
-      # docker-image: ${{ needs.dynamo-build.outputs.docker-image }}
-      docker-image: ${{ needs.dynamo-build-py3_11.outputs.docker-image }}
+      docker-image: ${{ needs.dynamo-build.outputs.docker-image }}
       test-matrix: ${{ needs.dynamo-build.outputs.test-matrix }}
     secrets: inherit
