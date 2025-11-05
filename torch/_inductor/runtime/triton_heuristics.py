@@ -3586,13 +3586,24 @@ def user_autotune(
     )
 
 
-def foreach(triton_meta, num_warps, filename=None, inductor_meta=None):
+def foreach(triton_meta, filename=None, inductor_meta=None):
     """
     Compile a triton foreach kernel
     """
+    configs = []
+
+    # Naive autotuning path for num_warps
+    if not (
+        inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise")
+    ):
+        configs.append(triton.Config({}, num_stages=1, num_warps=8))
+    else:
+        for warps in [1, 2, 4, 8]:
+            configs.append(triton.Config({}, num_stages=1, num_warps=warps))
+
     return cached_autotune(
         None,
-        [triton.Config({}, num_stages=1, num_warps=num_warps)],
+        configs,
         triton_meta=triton_meta,
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,
