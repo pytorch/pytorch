@@ -46,6 +46,109 @@ These headers are promised to be ABI stable across releases and adhere to a stro
 Unless absolutely necessary, we recommend the high-level C++ API in `torch/csrc/stable`
 which will handle all the rough edges of the C API for the user.
 
+## Migrating your kernel to the libtorch stable ABI
+
+Kernels that wish to use the libtorch stable abi must be registered via `STABLE_TORCH_LIBRARY`. For kernels that are registered
+via pybind, before using the stable ABI, it would be useful to migrate to register them `TORCH_LIBRARY`.
+
+Starting from a kernel that is registered via `TORCH_LIBRARY`, we must migrate the registration mechanism to `STABLE_TORCH_LIBRARY` in order to make the extension stable.
+
+While previously your kernels might have included APIs from `<torch/*.h>` (for example, `<torch/all.h>`), they are now limited to including from the 3 categories of headers mentioned above (`torch/csrc/stable/*.h`, `torch/headeronly/*.h` and the stable C headers).
+
+This means that your extension can no longer use any utilities from the `at::` or `c10::` namespaces. We provide replacements for the APIs in these namespaces in `torch::stable` and `torch::headeronly`. To provide a couple examples of the necessary migrations:
+- all uses of `at::Tensor` must be replaced with `torch::stable::Tensor`
+- all uses of `TORCH_CHECK` must be replaced with `STD_TORCH_CHECK`
+- all uses of `at::kCUDA` must be replaced with `torch::headeronly::kCUDA` etc.
+- native functions such as `at::pad` must be replaced with `torch::stable::pad`
+
+Note that for the time being, implementations registered via `TORCH_STABLE_LIBRARY` must be boxed unlike `TORCH_LIBRARY`. See [Stack-based APIs](#stack-based-apis) or and the simple example below for more details.
+
+Note that native functions could previously be called as Tensor methods (e.g. Tensor.pad),
+but with the stable ABI this is not currently possible and one must use the `torch::stable::` variant instead (e.g. `torch::stable::pad`).
+
+Below is a simple example of migrating an existing kernel that uses `TORCH_STABLE_LIBRARY` to the stable ABI. For a larger end to end example you can take a look at the FA3 repository. Specifically the diff between [`flash_api.cpp`](https://github.com/Dao-AILab/flash-attention/blob/ad70a007e6287d4f7e766f94bcf2f9a813f20f6b/hopper/flash_api.cpp#L1) and the stable variant [`flash_api_stable.cpp`](https://github.com/Dao-AILab/flash-attention/blob/ad70a007e6287d4f7e766f94bcf2f9a813f20f6b/hopper/flash_api_stable.cpp#L1).
+
+
+### Original Version with `TORCH_LIBRARY`
+
+```cpp
+// original_kernel.cpp - Using TORCH_LIBRARY (not stable ABI)
+#include <torch/torch.h>
+#include <ATen/ATen.h>
+
+namespace myops {
+
+at::Tensor add_scalar(const at::Tensor& input, double scalar) {
+  TORCH_CHECK(input.scalar_type() == at::kFloat, "Input must be float32");
+
+  return input.add(scalar);
+}
+
+// Register the operator
+TORCH_LIBRARY(myops, m) {
+  m.def("add_scalar(Tensor input, float scalar) -> Tensor", &add_scalar);
+}
+
+// Register CUDA implementation
+TORCH_LIBRARY_IMPL(myops, CUDA, m) {
+  m.impl("add_scalar", &add_scalar);
+}
+
+} // namespace myops
+```
+
+### Migrated Version with `STABLE_TORCH_LIBRARY`
+
+```cpp
+// stable_kernel.cpp - Using STABLE_TORCH_LIBRARY (stable ABI)
+#include <torch/csrc/stable/library.h>
+#include <torch/csrc/stable/tensor_struct.h>
+#include <torch/csrc/stable/ops.h>
+#include <torch/csrc/stable/stableivalue_conversions.h>
+#include <torch/headeronly/core/ScalarType.h>
+#include <torch/headeronly/macros/Macros.h>
+
+namespace myops {
+
+// Simple kernel that adds a scalar value to each element of a tensor
+torch::stable::Tensor add_scalar(const torch::stable::Tensor& input, double scalar) {
+  // use STD_TORCH_CHECK instead of TORCH_CHECK
+  STD_TORCH_CHECK(
+      // use torch::headeronly::kFloat instead of at:kFloat
+      input.scalar_type() == torch::headeronly::kFloat,
+      "Input must be float32");
+
+  // Use stable ops namespace instead of input.add
+  return torch::stable::add(input, scalar);
+}
+
+// Boxed wrapper required for STABLE_TORCH_LIBRARY
+void boxed_add_scalar(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  // Extract arguments from stack using `to<T>`
+  auto input = torch::stable::to<torch::stable::Tensor>(stack[0]);
+  auto scalar = torch::stable::to<double>(stack[1]);
+
+  // Call the actual kernel
+  auto result = add_scalar(input, scalar);
+
+  // Put result back on stack using `from()`
+  // Stack slot 0 now holds the return value
+  stack[0] = torch::stable::from(result);
+}
+
+// Register the operator using STABLE_TORCH_LIBRARY
+STABLE_TORCH_LIBRARY(myops, m) {
+  m.def("add_scalar(Tensor input, float scalar) -> Tensor", &boxed_add_scalar);
+}
+
+// Register CUDA implementation using STABLE_TORCH_LIBRARY_IMPL
+STABLE_TORCH_LIBRARY_IMPL(myops, CUDA, m) {
+  m.impl("add_scalar", &boxed_add_scalar);
+}
+
+} // namespace myops
+```
+
 
 ## How are objects passed across the ABI boundary when interacting with the dispatcher?
 
