@@ -441,7 +441,7 @@ class GraphModule(torch.nn.Module):
         )
 
     @requires_cuda
-    def test_run_opcheck(self):
+    def test_run_opcheck_fork_join(self):
         from torch._dynamo.variables.streams import fork_stream, join_stream
         from torch.library import opcheck
 
@@ -458,6 +458,30 @@ class GraphModule(torch.nn.Module):
             for args in sample_inputs:
                 opcheck(fork_stream, args)
                 opcheck(join_stream, args)
+        finally:
+            torch.accelerator.set_stream(original_stream)
+            reset_user_object_tracking()
+
+    @requires_cuda
+    def test_run_opcheck_wait_record(self):
+        from torch._dynamo.variables.streams import record_event, wait_event
+        from torch.library import opcheck
+
+        original_stream = torch.accelerator.current_stream()
+        try:
+            s0 = torch.Stream()
+            s1 = torch.Stream()
+            e0 = torch.Event()
+            e1 = torch.Event()
+            store_user_object_weakrefs(s0, s1, e0, e1)
+
+            sample_inputs = [
+                (2, 0),
+                (3, 1),
+            ]
+            for args in sample_inputs:
+                opcheck(wait_event, args)
+                opcheck(record_event, args)
         finally:
             torch.accelerator.set_stream(original_stream)
             reset_user_object_tracking()
