@@ -617,6 +617,23 @@ class TestRegionalOutputCode(torch._inductor.test_case.TestCase):
         self.assertIsNotNone(post_compiled)
         self.assertIsNotNone(post_compiled._graph_module)  # Now deserialized
 
+    def test_regional_inductor_unbacked_expr(self):
+        class Model(torch.nn.Module):
+            def forward(self, c):
+                d = torch.concat([c, c], dim=0)
+                with fx_traceback.annotate( {"compile_with_inductor": "my_region"}):
+                    d = d + 1
+                return c, d
+        device = "cuda"
+        model = Model()
+        c = torch.randn((64, 32), device=device)
+        torch._dynamo.decorators.mark_unbacked(c, 0)
+
+        torch.compile(
+            model,
+            backend=aot_eager_regional_inductor(serialize=False),
+            fullgraph=True,
+        )(c)
 
 if __name__ == "__main__":
     run_tests()
