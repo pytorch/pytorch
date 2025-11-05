@@ -1157,7 +1157,9 @@ class NativeOpSchema {
   }
 
  private:
-  const c10::OperatorHandle& op_;
+  // It would *not* be correct to store this by reference, because we
+  // have no guarantees about its lifetime. This class is cheap anyway.
+  c10::OperatorHandle op_;
   std::size_t hash_;
   // Subtle point: consider clamp.Tensor(Tensor self, Tensor?
   // min=None, Tensor? max=None). The invocations clamp(t1, None, t2)
