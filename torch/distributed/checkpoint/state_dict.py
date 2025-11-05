@@ -1007,7 +1007,14 @@ def _split_optim_state_dict(
                     raise AssertionError(f"Expected list, got {type(params)}")
                 params.append(fqn)
                 if param.requires_grad:
-                    state[fqn] = cast(DictValueType, optim_state_dict[_STATE])[fqn]
+                    if fqn in cast(DictValueType, optim_state_dict[_STATE]):
+                        state[fqn] = cast(DictValueType, optim_state_dict[_STATE])[fqn]
+                    elif info.strict:
+                        raise RuntimeError(
+                            f"Missing optimizer state for parameter '{fqn}' in checkpoint. "
+                            "The parameter requires gradients but has no saved optimizer state. "
+                            "To load anyway, use StateDictOptions(strict=False)."
+                        )
                 for loaded_param_group in cast(
                     ListDictValueType, optim_state_dict[_PG]
                 ):
