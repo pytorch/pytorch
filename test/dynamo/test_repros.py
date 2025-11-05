@@ -7150,48 +7150,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                 0, sys.monitoring.events.PY_START, old_callback
             )
 
-    def test_312_local_cell_overlap(self):
-        keys = range(10)
-        allowed = [0, 1, 2, 3]
-
-        def fn(x):
-            x = x + 1
-            torch._dynamo.graph_break()
-            key = [key for key in keys if key in allowed]
-
-            def inner():
-                nonlocal key
-
-            return x + key[0]
-
-        self.assertEqual(
-            fn(torch.ones(3)), torch.compile(fn, backend="eager")(torch.ones(3))
-        )
-
-    def test_311_resume_block_keyerror(self):
-        # https://github.com/pytorch/pytorch/issues/162313
-        flag = True
-
-        def fn(x):
-            x = x + 1
-            torch._dynamo.graph_break()
-            x = x + 2
-            if flag:
-                with torch.no_grad():
-                    torch._dynamo.graph_break()
-                x = x + 4
-            else:
-                with torch.no_grad():
-                    torch._dynamo.graph_break()
-                x = x + 8
-            return x + 16
-
-        inp = torch.ones(3)
-        opt_fn = torch.compile(fn, backend="eager")
-        self.assertEqual(fn(inp), opt_fn(inp))
-        flag = False
-        self.assertEqual(fn(inp), opt_fn(inp))
-
     def test_unbind_copy_out(self):
         def f(eye, out):
             torch.unbind_copy(eye, out=out)
