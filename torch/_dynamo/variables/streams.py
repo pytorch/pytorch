@@ -10,6 +10,7 @@ from torch.fx import Proxy
 from .. import graph_break_hints
 from ..bytecode_transformation import create_call_function
 from ..exc import TYPE_CHECKING, unimplemented_v2
+from ..graph_bytecode_inputs import get_external_object_by_index
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import FxTracebackAnnotateVariable
@@ -27,42 +28,77 @@ from torch._library.custom_ops import custom_op
 Tensor = torch.Tensor
 
 
+def _get_stream_by_index(index: int) -> torch.Stream:
+    stream = get_external_object_by_index(index)
+    assert isinstance(stream, torch.Stream), (
+        f"Fork/join stream expected a stream object at index {index}"
+    )
+    return stream
+
+
+def _get_event_by_index(index: int) -> torch.Event:
+    event = get_external_object_by_index(index)
+    assert isinstance(event, torch.Event), (
+        f"Record/wait event expected an event object at index {index}"
+    )
+    return event
+
+
 @custom_op("streams::fork", mutates_args=())
 def fork_stream(
-    from_index: int,
-    from_device: torch.device,
+    from_index: int,  # kept to make stream transitions clearer
     to_index: int,
-    to_device: torch.device,
 ) -> None:
-    pass
+    torch.accelerator.set_stream(_get_stream_by_index(to_index))
 
 
 @fork_stream.register_fake
 def _(
-    from_index: int,
-    from_device: torch.device,
+    from_index: int,  # kept to make stream transitions clearer
     to_index: int,
-    to_device: torch.device,
 ) -> None:
     pass
 
 
 @custom_op("streams::join", mutates_args=())
-def join_stream(
-    from_index: int,
-    from_device: torch.device,
-    to_index: int,
-    to_device: torch.device,
-) -> None:
-    pass
+def join_stream(from_index: int, to_index: int) -> None:
+    torch.accelerator.set_stream(_get_stream_by_index(to_index))
 
 
 @join_stream.register_fake
 def _(
     from_index: int,
-    from_device: torch.device,
     to_index: int,
-    to_device: torch.device,
+) -> None:
+    pass
+
+
+@custom_op("streams::record_event", mutates_args=())
+def record_event(event_index: int, stream_index: int) -> None:
+    event = _get_event_by_index(event_index)
+    stream = _get_stream_by_index(stream_index)
+    stream.record_event(event)
+
+
+@record_event.register_fake
+def _(
+    event_index: int,
+    stream_index: int,
+) -> None:
+    pass
+
+
+@custom_op("streams::wait_event", mutates_args=())
+def wait_event(event_index: int, stream_index: int) -> None:
+    event = _get_event_by_index(event_index)
+    stream = _get_stream_by_index(stream_index)
+    stream.wait_event(event)
+
+
+@wait_event.register_fake
+def _(
+    event_index: int,
+    stream_index: int,
 ) -> None:
     pass
 
