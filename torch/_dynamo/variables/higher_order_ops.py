@@ -262,8 +262,11 @@ def _call_function_and_unflatten_output(
 
     # Reproxify the tensors to the graph output so that the tensor variables in
     # the outer frame use the subgraph output.
-    for outer_graph_vt, inner_graph_vt in zip(body_r.items, flat_variable.items):
-        outer_graph_vt.proxy = inner_graph_vt.proxy
+    if body_r is not None:
+        for outer_graph_vt, inner_graph_vt in zip(body_r.items, flat_variable.items):
+            if isinstance(outer_graph_vt, variables.TensorVariable):
+                assert isinstance(inner_graph_vt, variables.TensorVariable)
+                outer_graph_vt.proxy = inner_graph_vt.proxy
 
     if ret_spec.masks_to_filter_const_values:
         from torch._dynamo.external_utils import insert_const_values_with_mask
@@ -1766,7 +1769,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             {},
             None,
             OutputSpec(xs_treespec),
-            combine_result,
+            None,
         )
 
 
@@ -1973,7 +1976,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             {},
             None,
             _combine_spec,
-            combine_result,
+            None,
         )
 
 
