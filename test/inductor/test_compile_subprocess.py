@@ -182,7 +182,7 @@ class TestSubprocess(TestCase):
         @torch.compile(fullgraph=True, backend="inductor")
         def model_add(x, y):
             out = x
-            for i in range(500):
+            for _ in range(500):
                 out = torch.add(out, y)
             return out
 

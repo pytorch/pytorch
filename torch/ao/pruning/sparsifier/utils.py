@@ -53,9 +53,10 @@ def swap_module(
         # respect device affinity when swapping modules
         # pyrefly: ignore [bad-argument-type]
         devices = {p.device for p in chain(mod.parameters(), mod.buffers())}
-        assert len(devices) <= 1, (
-            f"swap_module only works with cpu or single-device CUDA modules, but got devices {devices}"
-        )
+        if len(devices) > 1:
+            raise AssertionError(
+                f"swap_module only works with cpu or single-device CUDA modules, but got devices {devices}"
+            )
         device = next(iter(devices)) if len(devices) > 0 else None
         if device:
             new_mod.to(device)
@@ -129,7 +130,10 @@ class FakeSparsity(nn.Module):
         self.register_buffer("mask", mask)
 
     def forward(self, x):
-        assert self.mask.shape == x.shape
+        if self.mask.shape != x.shape:
+            raise AssertionError(
+                f"mask shape ({self.mask.shape}) must match x shape ({x.shape})"
+            )
         return self.mask * x
 
     def state_dict(self, *args, **kwargs):

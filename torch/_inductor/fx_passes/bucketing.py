@@ -2,7 +2,8 @@ import collections
 import logging
 import operator
 from collections import defaultdict
-from typing import Any, Callable, Literal, TypeAlias
+from collections.abc import Callable
+from typing import Any, Literal, TypeAlias
 
 import torch
 import torch.distributed as dist
@@ -51,9 +52,12 @@ def _ar_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
     return (group_name, reduce_op, dtype)
 
 
-def bucket_key(node: torch.fx.Node) -> object | None:
+def bucket_key(node: torch.fx.Node, mode: BucketMode | None = None) -> object | None:
     if is_all_gather_into_tensor(node):
-        return _ag_group_key(node)
+        group_key_fn = (
+            _ag_group_key_multidtype if mode and "multidtype" in mode else _ag_group_key
+        )
+        return group_key_fn(node)
     elif is_reduce_scatter_tensor(node):
         return _rs_group_key(node)
     elif is_all_reduce_tensor(node):
@@ -119,28 +123,28 @@ def bucket_reduce_scatter(
 def is_all_gather_into_tensor(node: torch.fx.Node) -> bool:  # type: ignore[arg-type]
     return (
         node.op == "call_function"
-        and node.target == torch.ops._c10d_functional.all_gather_into_tensor.default
+        and node.target is torch.ops._c10d_functional.all_gather_into_tensor.default
     )
 
 
 def is_reduce_scatter_tensor(node: torch.fx.Node) -> bool:
     return (
         node.op == "call_function"
-        and node.target == torch.ops._c10d_functional.reduce_scatter_tensor.default
+        and node.target is torch.ops._c10d_functional.reduce_scatter_tensor.default
     )
 
 
 def is_wait_tensor(node: torch.fx.Node) -> bool:
     return (
         node.op == "call_function"
-        and node.target == torch.ops._c10d_functional.wait_tensor.default
+        and node.target is torch.ops._c10d_functional.wait_tensor.default
     )
 
 
 def is_all_reduce_tensor(node: torch.fx.Node) -> bool:
     return (
         node.op == "call_function"
-        and node.target == torch.ops._c10d_functional.all_reduce.default
+        and node.target is torch.ops._c10d_functional.all_reduce.default
     )
 
 
@@ -727,7 +731,7 @@ def process_collective_bucket(
             is_all_gather_into_tensor(n)
             and isinstance(node_in, torch.fx.Node)  # Add type check
             and node_in.op == "call_function"
-            and node_in.target == torch.ops.prims.convert_element_type.default
+            and node_in.target is torch.ops.prims.convert_element_type.default
             and len(node_in.users) == 1
         ):
             ag_node_to_pre_nodes[n].append(node_in)

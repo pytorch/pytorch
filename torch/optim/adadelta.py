@@ -266,7 +266,7 @@ def _single_tensor_adadelta(
         if not all(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
-            for p, step in zip(params, state_steps)
+            for p, step in zip(params, state_steps, strict=True)
         ):
             raise AssertionError(
                 f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
@@ -276,7 +276,7 @@ def _single_tensor_adadelta(
         lr = _to_scalar(lr)
 
     for param, grad, square_avg, acc_delta, step in zip(
-        params, grads, square_avgs, acc_deltas, state_steps
+        params, grads, square_avgs, acc_deltas, state_steps, strict=True
     ):
         step += 1
         grad = grad if not maximize else -grad
@@ -329,7 +329,7 @@ def _multi_tensor_adadelta(
         if not all(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
-            for p, step in zip(params, state_steps)
+            for p, step in zip(params, state_steps, strict=True)
         ):
             raise AssertionError(
                 f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
