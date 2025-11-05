@@ -234,7 +234,7 @@ void InputBuffer::add(
 
   TORCH_INTERNAL_ASSERT(opt_consumer_stream && opt_producer_stream);
 
-  if (*opt_consumer_stream != *opt_producer_stream &&
+  if (fn != nullptr && *opt_consumer_stream != *opt_producer_stream &&
       dynamic_cast<AccumulateGrad*>(fn) &&
       at::globalContext().warnOnAccumulateGradStreamMismatch()) {
     TORCH_WARN_ONCE(
