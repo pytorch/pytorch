@@ -53,44 +53,50 @@ fi
 cuda_version_nodot=$(echo $CUDA_VERSION | tr -d '.')
 EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
 
-case ${CUDA_VERSION} in
-    #removing sm_50-sm_60 as these architectures are deprecated in CUDA 12.8/9 and will be removed in future releases
-    #however we would like to keep sm_70 architecture see: https://github.com/pytorch/pytorch/issues/157517
-    12.8)
-        TORCH_CUDA_ARCH_LIST="8.0;8.6;9.0;10.0;12.0"
-        # sm50-70 should not be added to AArch64 cuda arch list. 162455
-        if [[ $GPU_ARCH_TYPE != *"aarch64"* ]]; then
-            TORCH_CUDA_ARCH_LIST="7.0;7.5;${TORCH_CUDA_ARCH_LIST}"
-        fi
-        ;;
-    12.9)
-        if [[ $GPU_ARCH_TYPE == *"aarch64"* ]]; then
-            TORCH_CUDA_ARCH_LIST="8.0;8.6;9.0;10.0;12.0+PTX"
-            if [[ "$PACKAGE_TYPE" == "libtorch" ]]; then
-                TORCH_CUDA_ARCH_LIST="8.0;9.0;10.0;12.0+PTX"
-            fi
-        else
+if [[ $GPU_ARCH_TYPE == *"aarch64"* ]]; then
+    export MAX_JOBS=5
+    export BLAS="NVPL"
+
+    if [[ "$GPU_ARCH_VERSION" == *"12.6"* ]]; then
+        export TORCH_CUDA_ARCH_LIST="8.0;9.0"
+    elif [[ "$GPU_ARCH_VERSION" == *"12.8"* ]]; then
+        export TORCH_CUDA_ARCH_LIST="8.0;9.0;10.0;12.0"
+    elif [[ "$GPU_ARCH_VERSION" == *"12.9"* ]]; then
+        export TORCH_CUDA_ARCH_LIST="8.0;9.0;10.0;12.0"
+    elif [[ "$GPU_ARCH_VERSION" == *"13.0"* ]]; then
+        export TORCH_CUDA_ARCH_LIST="8.0;9.0;10.0;11.0;12.0+PTX"
+    fi
+
+    if [[ "$DESIRED_CUDA" == *"13"* ]]; then
+        # Bundle ptxas into the cu13 wheel, see https://github.com/pytorch/pytorch/issues/163801
+        export BUILD_BUNDLE_PTXAS=1
+    fi
+else
+    case ${CUDA_VERSION} in
+        #removing sm_50-sm_60 as these architectures are deprecated in CUDA 12.8/9 and will be removed in future releases
+        #however we would like to keep sm_70 architecture see: https://github.com/pytorch/pytorch/issues/157517
+        12.8)
+            TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0"
+            ;;
+        12.9)
             TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0+PTX"
             # WAR to resolve the ld error in libtorch build with CUDA 12.9
             if [[ "$PACKAGE_TYPE" == "libtorch" ]]; then
                 TORCH_CUDA_ARCH_LIST="7.5;8.0;9.0;10.0;12.0+PTX"
             fi
-        fi
-        ;;
-    13.0)
-        TORCH_CUDA_ARCH_LIST="8.0;8.6;9.0;10.0;12.0+PTX"
-        if [[ $GPU_ARCH_TYPE != *"aarch64"* ]]; then
-            TORCH_CUDA_ARCH_LIST="7.5;${TORCH_CUDA_ARCH_LIST}"
-        fi
-        ;;
-    12.6)
-        TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6;9.0"
-        ;;
-    *)
-        echo "unknown cuda version $CUDA_VERSION"
-        exit 1
-        ;;
-esac
+            ;;
+        13.0)
+            TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0+PTX"
+            ;;
+        12.6)
+            TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6;9.0"
+            ;;
+        *)
+            echo "unknown cuda version $CUDA_VERSION"
+            exit 1
+            ;;
+    esac
+fi
 
 export TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 echo "${TORCH_CUDA_ARCH_LIST}"
@@ -138,7 +144,6 @@ if [[ $GPU_ARCH_TYPE == *"aarch64"* ]]; then
         "libarm_compute_graph.so"
     )
 fi
-
 
 # CUDA_VERSION 12.*, 13.*
 if [[ $CUDA_VERSION == 12* || $CUDA_VERSION == 13* ]]; then

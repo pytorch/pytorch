@@ -84,13 +84,6 @@ if [[ $GPU_ARCH_TYPE == *"aarch64"* ]]; then
     export USE_MKLDNN=ON
     export USE_MKLDNN_ACL=ON
     export ACL_ROOT_DIR="/acl"
-    if [[ $GPU_ARCH_TYPE == "cuda-aarch64" ]]; then
-        export MAX_JOBS=5
-        export BLAS="NVPL"
-    else
-        export BLAS="OpenBLAS"
-        export OpenBLAS_HOME="/opt/OpenBLAS"
-    fi
 fi
 
 mkdir -p /tmp/$WHEELHOUSE_DIR
@@ -362,7 +355,7 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
     # create Manylinux 2_28 tag this needs to happen before regenerate the RECORD
     if [[ $MANYLINUX_TAG == "manylinux_2_28" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
         wheel_file=$(echo $(basename $pkg) | sed -e 's/-cp.*$/.dist-info\/WHEEL/g')
-        sed -i -e s#linux_#"${MANYLINUX_TAG}_"# $wheel_file;
+        sed -i -e s#linux_#"${MANYLINUX_TAG}"# $wheel_file;
     fi
 
     # regenerate the RECORD file with new hashes

@@ -50,18 +50,22 @@ DEPS_SONAME=(
 )
 
 if [[ $GPU_ARCH_TYPE == *"aarch64"* ]]; then
+    export BLAS="OpenBLAS"
+    export OpenBLAS_HOME="/opt/OpenBLAS"
+
     DEPS_LIST+=(
         "/opt/OpenBLAS/lib/libopenblas.so.0"
         "/acl/build/libarm_compute.so"
         "/acl/build/libarm_compute_graph.so"
+        "/usr/lib64/libgfortran.so.5"
     )
     DEPS_SONAME+=(
         "libopenblas.so.0"
         "libarm_compute.so"
         "libarm_compute_graph.so"
+        "libgfortran.so"
     )
 fi
-
 
 rm -rf /usr/local/cuda*
 
