@@ -529,22 +529,17 @@ inline c10::complex<scalar_t> _nan_to_num_replace(
   return a;
 }
 
-static void nan_to_num_kernel(
+static void nan_to_num_real_args(
     TensorIteratorBase& iter,
-    std::optional<double> nan,
-    std::optional<double> pos_inf,
-    std::optional<double> neg_inf) {
+    double nan,
+    double pos_inf,
+    double neg_inf) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "nan_to_num", [&]() {
     using value_t = c10::scalar_value_type<scalar_t>::type;
-    value_t nan_replacement = static_cast<value_t>(nan.value_or(0.));
-    value_t pos_inf_replacement = pos_inf.has_value()
-        ? static_cast<value_t>(pos_inf.value())
-        : std::numeric_limits<value_t>::max();
-    value_t neg_inf_replacement = neg_inf.has_value()
-        ? static_cast<value_t>(neg_inf.value())
-        : std::numeric_limits<value_t>::lowest();
+    value_t nan_replacement = static_cast<value_t>(nan);
+    value_t pos_inf_replacement = static_cast<value_t>(pos_inf);
+    value_t neg_inf_replacement = static_cast<value_t>(neg_inf);
     using vec_t = Vectorized<scalar_t>;
-
     cpu_kernel_vec(iter, [=](scalar_t a) -> scalar_t {
       return _nan_to_num_replace(a, nan_replacement, pos_inf_replacement, neg_inf_replacement);
     }, [=](vec_t a) -> vec_t {
@@ -553,27 +548,58 @@ static void nan_to_num_kernel(
   });
 }
 
-static void nan_to_num_complex_args_kernel(
+static void nan_to_num_complex_args(
     TensorIteratorBase& iter,
-    std::optional<complex<double>> nan,
-    std::optional<complex<double>> pos_inf,
-    std::optional<complex<double>> neg_inf) {
+    complex<double> nan,
+    complex<double> pos_inf,
+    complex<double> neg_inf) {
   if (isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "nan_to_num", [&]() {
-      using value_t = c10::scalar_value_type<scalar_t>::type;
-      scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(scalar_t(0.0, 0.0)));
-      scalar_t pos_inf_replacement = pos_inf.has_value()
-          ? static_cast<scalar_t>(pos_inf.value())
-          : scalar_t(std::numeric_limits<value_t>::max(), 0.0);
-      scalar_t neg_inf_replacement = neg_inf.has_value()
-          ? static_cast<scalar_t>(neg_inf.value())
-          : scalar_t(std::numeric_limits<value_t>::lowest(), 0.0);
+      scalar_t nan_replacement = static_cast<scalar_t>(nan);
+      scalar_t pos_inf_replacement = static_cast<scalar_t>(pos_inf);
+      scalar_t neg_inf_replacement = static_cast<scalar_t>(neg_inf);
       cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
         return _nan_to_num_replace(a, nan_replacement, pos_inf_replacement, neg_inf_replacement);
       });
     });
   } else {
     TORCH_CHECK(false, "nan_to_num does not work with complex nan, pos_inf, or neg_inf and non-complex tensors. Expected complex tensor, but got ", iter.dtype());
+  }
+}
+
+static void nan_to_num_kernel(
+    TensorIteratorBase& iter,
+    const std::optional<Scalar> &nan,
+    const std::optional<Scalar> &pos_inf,
+    const std::optional<Scalar> &neg_inf) {
+
+  // Check if any of the scalar parameters are complex
+  bool has_complex_scalar = (nan.has_value() && nan.value().isComplex()) ||
+      (pos_inf.has_value() && pos_inf.value().isComplex()) ||
+      (neg_inf.has_value() && neg_inf.value().isComplex());
+
+  if (has_complex_scalar) {
+    c10::complex<double> complex_nan = nan.has_value()
+        ? nan.value().toComplexDouble()
+        : c10::complex<double>(0., 0.);
+    c10::complex<double> complex_pos_inf = pos_inf.has_value()
+        ? pos_inf.value().toComplexDouble()
+        : c10::complex<double>(std::numeric_limits<double>::max(), 0.);
+    c10::complex<double> complex_neg_inf = neg_inf.has_value()
+        ? neg_inf.value().toComplexDouble()
+        : c10::complex<double>(std::numeric_limits<double>::lowest(), 0.);
+    nan_to_num_complex_args(iter, complex_nan, complex_pos_inf, complex_neg_inf);
+  } else {
+    double double_nan = nan.has_value()
+        ? nan.value().toDouble()
+        : 0.;
+    double double_pos_inf = pos_inf.has_value()
+        ? pos_inf.value().toDouble()
+        : std::numeric_limits<double>::max();
+    double double_neg_inf = neg_inf.has_value()
+        ? neg_inf.value().toDouble()
+        : std::numeric_limits<double>::lowest();
+    nan_to_num_real_args(iter, double_nan, double_pos_inf, double_neg_inf);
   }
 }
 
@@ -881,7 +907,6 @@ REGISTER_DISPATCH(sinc_stub, &CPU_CAPABILITY::sinc_kernel)
 REGISTER_DISPATCH(bitwise_not_stub, &CPU_CAPABILITY::bitwise_not_kernel)
 REGISTER_DISPATCH(logical_not_stub, &CPU_CAPABILITY::logical_not_kernel)
 REGISTER_DISPATCH(nan_to_num_stub, &CPU_CAPABILITY::nan_to_num_kernel)
-REGISTER_DISPATCH(nan_to_num_complex_stub, &CPU_CAPABILITY::nan_to_num_complex_args_kernel)
 REGISTER_DISPATCH(conj_physical_stub, &CPU_CAPABILITY::conj_kernel)
 REGISTER_DISPATCH(rsqrt_stub, &CPU_CAPABILITY::rsqrt_kernel)
 REGISTER_DISPATCH(frac_stub, &CPU_CAPABILITY::frac_kernel)
