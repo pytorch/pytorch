@@ -2,9 +2,8 @@
 // This file should only be compiled if this condition holds, so it should be
 // safe.
 #if defined(USE_CUDNN) || defined(USE_ROCM)
-#include <torch/csrc/utils/pybind.h>
 #include <ATen/detail/CUDAHooksInterface.h>
-
+#include <torch/csrc/utils/pybind.h>
 
 #include <tuple>
 
