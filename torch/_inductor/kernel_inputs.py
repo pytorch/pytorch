@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from typing import Any, Optional, TYPE_CHECKING
+from abc import ABC, abstractmethod
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.config
 from torch._inductor import ir
 from torch._inductor.virtualized import V
+
+from .ir import FixedLayout, FlexibleLayout, Layout
 
 
 if TYPE_CHECKING:
@@ -14,22 +17,30 @@ if TYPE_CHECKING:
     import sympy
 
 
-class KernelInputs:
+class KernelInputs(ABC):
     """
     Class to store and provide access to input nodes for kernels.
     This class takes in a tuple of input nodes and provides methods to access
     information about these nodes, such as their device type and device.
     """
 
-    def __init__(self, input_nodes: list[Any]):
+    def __init__(
+        self,
+        input_nodes: list[Any],
+        scalars: Optional[dict[str, Union[float, int]]] = None,
+        out_dtype: Optional[torch.dtype] = None,
+    ):
         """
         Initialize with a tuple of input nodes.
 
         Args:
             input_nodes: A tuple of input nodes to store
+            out_dtype: Optional output dtype to store
         """
         self._input_nodes = input_nodes
         self._device_name: Optional[str] = None
+        self._scalars = scalars if scalars is not None else {}
+        self._out_dtype = out_dtype
         assert len(input_nodes) > 0, "Expected at least one input node"
 
     def nodes(self, reorder: Optional[Sequence[int]] = None) -> list[Any]:
@@ -49,6 +60,16 @@ class KernelInputs:
             f"Reorder length mismatch: {len(self._input_nodes)} vs {len(reorder)}"
         )
         return [self._input_nodes[i] for i in reorder]
+
+    @property
+    def count(self) -> int:
+        """
+        Get the number of input nodes.
+
+        Returns:
+            The number of input nodes
+        """
+        return len(self._input_nodes)
 
     @property
     def device_type(self) -> Optional[str]:
@@ -153,6 +174,38 @@ class KernelInputs:
         """
         return self._input_nodes[idx].get_dtype()
 
+    @abstractmethod
+    def out_dtype(self) -> torch.dtype:
+        """
+        Get the output dtype, whether passed in or inferred from the nodes
+
+        Returns:
+            The output dtype
+        """
+
+    def get_scalar(self, name: str) -> Union[float, int]:
+        """
+        Get the scalar value for a given name.
+
+        Args:
+            name: Name of the scalar to get
+
+        Returns:
+            The scalar value
+        """
+        assert name in self._scalars, f"Scalar {name} not found, but required"
+        return self._scalars[name]
+
+    @abstractmethod
+    def output_layout(self, flexible: bool = True) -> Layout:
+        """
+        Abstract method to handle output layout generation.
+
+        Args:
+            out_dtype: Optional output dtype. If not provided, infer from inputs
+            flexible: If True, return FlexibleLayout, otherwise FixedLayout
+        """
+
 
 class MMKernelInputs(KernelInputs):
     """
@@ -160,14 +213,21 @@ class MMKernelInputs(KernelInputs):
     Provides additional methods to access M, N, K dimensions.
     """
 
-    def __init__(self, input_nodes: list[Any], mat1_idx: int = -2, mat2_idx: int = -1):
+    def __init__(
+        self,
+        input_nodes: list[Any],
+        scalars: Optional[dict[str, Union[float, int]]] = None,
+        out_dtype: Optional[torch.dtype] = None,
+        mat1_idx: int = -2,
+        mat2_idx: int = -1,
+    ):
         """
         Initialize with a tuple of input nodes.
 
         By default, we assume the last 2 input nodes are mat1 and mat2, but
         the caller can adjust when necessary
         """
-        super().__init__(input_nodes)
+        super().__init__(input_nodes, scalars, out_dtype)
         # for mm, we need at least 2 nodes, and we need to know which nodes
         # are the main matrixes e.g. addmm is (bias, mat1, mat2) whereas others
         # might be (mat1, mat2, scale), etc.
@@ -211,6 +271,47 @@ class MMKernelInputs(KernelInputs):
         k0 = mat2.get_size()[-2]  # K from second-to-last dimension of mat2
         V.graph.sizevars.check_equals(k, k0)
         return (m, n, k)
+
+    def out_dtype(self) -> torch.dtype:
+        """
+        Get the output dtype, whether passed in or inferred from the nodes
+
+        Returns:
+            The output dtype
+        """
+        if self._out_dtype is not None:
+            return self._out_dtype
+        return self.mat1mat2()[0].get_dtype()
+
+    def output_layout(self, flexible: bool = True) -> Layout:
+        """
+        Handle output layout generation for matrix multiplication.
+
+        Args:
+            out_dtype: Optional output dtype. If not provided, infer from inputs
+            flexible: If True, return FlexibleLayout, otherwise FixedLayout
+        """
+        mat1, mat2 = self.mat1mat2()
+        out_dtype = self.out_dtype()
+        # NOTE: taken from mm_common.mm_args
+        *b1, m, k1 = mat1.get_size()
+        *b2, k2, n = mat2.get_size()
+        b = [V.graph.sizevars.check_equals_and_simplify(a, b) for a, b in zip(b1, b2)]
+        size = [*b, m, n]
+        if flexible:
+            return FlexibleLayout(self.device(), out_dtype, size)
+        else:
+            return FixedLayout(self.device(), out_dtype, size)
+
+    def mat1mat2(self) -> tuple[Any, Any]:
+        """
+        Get the mat1 and mat2 nodes.
+
+        Returns:
+            A tuple of (mat1, mat2) nodes
+        """
+        nodes = self.nodes()
+        return nodes[self._mat1_idx], nodes[self._mat2_idx]
 
     def mnk_hinted(self) -> tuple[int, int, int]:
         """

@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ATen/core/CachingHostAllocator.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
 

@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import re
-from typing import Callable, Optional, Union
+from collections.abc import Callable
+from typing import Optional, Union
 
 import torch.fx
 from torch.fx.node import map_arg
@@ -129,6 +130,10 @@ def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
             new_node = gm.graph.node_copy(inline_node, replacement_fn)
         replacement_mapping[inline_node] = new_node
 
+    # Explicitly remove the module that was just inlined,
+    # this module may contain impure ops so cannot be dead code eliminated,
+    # this module is unneeded as it's just inlined back to main graph.
+    gm.graph.erase_node(call_mod_node_to_replace)
     gm.graph.eliminate_dead_code()
 
 
@@ -164,6 +169,9 @@ def split_const_subgraphs(
     attributes on the module prior to running the non-constant portion of the
     graph.
     """
+
+    import sympy
+
     if not isinstance(module, torch.fx.GraphModule):
         mod_traced = torch.fx.symbolic_trace(module)
     else:
@@ -192,6 +200,10 @@ def split_const_subgraphs(
 
         # Skip folding side-effectful functions
         if node.is_impure():
+            continue
+
+        # Skip folding nodes that have symbolic fill_value
+        if isinstance(node.kwargs.get("fill_value", None), sympy.Expr):
             continue
 
         # Must be a constant foldable node at this point.

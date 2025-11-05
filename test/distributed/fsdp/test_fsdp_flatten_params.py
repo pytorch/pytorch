@@ -44,8 +44,11 @@ class TestFlattenParams(FSDPTest):
         return 1
 
     def _get_default_config(self):
+        device_type = (
+            acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+        )
         return {
-            "device": torch.device("cuda"),
+            "device": torch.device(device_type),
             "sharding_strategy": HandleShardingStrategy.FULL_SHARD,
             "offload_params": False,
             "mp_param_dtype": None,

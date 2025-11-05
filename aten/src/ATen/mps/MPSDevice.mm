@@ -1,7 +1,5 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <c10/util/CallOnce.h>
-
 #include <ATen/mps/IndexKernels.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSDevice.h>
@@ -9,9 +7,6 @@
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 
 namespace at::mps {
-
-static std::unique_ptr<MPSDevice> mps_device;
-static c10::once_flag mpsdev_init;
 
 static inline MTLLanguageVersion getMetalLanguageVersion(const id<MTLDevice>& device) {
   // MPS Advanced Indexing needs at least Metal 2.0 (support for Argument Buffers and function constants)
@@ -21,8 +16,8 @@ static inline MTLLanguageVersion getMetalLanguageVersion(const id<MTLDevice>& de
 }
 
 MPSDevice* MPSDevice::getInstance() {
-  c10::call_once(mpsdev_init, [] { mps_device = std::unique_ptr<MPSDevice>(new MPSDevice()); });
-  return mps_device.get();
+  static MPSDevice mps_device;
+  return &mps_device;
 }
 
 MPSDevice::~MPSDevice() {
@@ -85,10 +80,36 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
   }
 }
 
+std::string MPSDevice::getName() const {
+  @autoreleasepool {
+    return [[_mtl_device name] UTF8String];
+  }
+}
+
+unsigned MPSDevice::getCoreCount() const {
+  io_iterator_t iterator = 0;
+  io_registry_entry_t entry = 0;
+  int core_count = 0;
+  auto matchingDict = IOServiceMatching("AGXAccelerator");
+  TORCH_INTERNAL_ASSERT(matchingDict, "Failed to create matching dict");
+  const auto status = IOServiceGetMatchingServices(kIOMainPortDefault, matchingDict, &iterator);
+  TORCH_INTERNAL_ASSERT(status == KERN_SUCCESS);
+  while ((entry = IOIteratorNext(iterator)) != 0) {
+    auto property = IORegistryEntryCreateCFProperty(entry, CFSTR("gpu-core-count"), kCFAllocatorDefault, 0);
+    auto found = CFNumberGetValue(static_cast<CFNumberRef>(property), kCFNumberIntType, &core_count);
+    CFRelease(property);
+    IOObjectRelease(entry);
+    if (found) {
+      break;
+    }
+  }
+  IOObjectRelease(iterator);
+  return core_count;
+}
+
 at::Allocator* GetMPSAllocator(bool useSharedAllocator) {
   return getIMPSAllocator(useSharedAllocator);
 }
-
 bool is_available() {
   return MPSDevice::getInstance()->device() != nil;
 }

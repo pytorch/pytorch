@@ -1,7 +1,7 @@
 #pragma once
 
+#include <c10/core/AllocatorConfig.h>
 #include <c10/core/CachingDeviceAllocator.h>
-#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
@@ -118,7 +118,8 @@ struct TraceEntry {
       MempoolId_t mempool,
       approx_time_t time,
       std::shared_ptr<GatheredContext> context = nullptr,
-      std::string compile_context = "")
+      std::string compile_context = "",
+      std::string user_metadata = "")
       : action_(action),
         device_(device),
         addr_(addr),
@@ -126,7 +127,8 @@ struct TraceEntry {
         stream_(stream),
         size_(size),
         mempool_(std::move(mempool)),
-        compile_context_(std::move(compile_context)) {
+        compile_context_(std::move(compile_context)),
+        user_metadata_(std::move(user_metadata)) {
     time_.approx_t_ = time;
   }
   Action action_;
@@ -137,7 +139,8 @@ struct TraceEntry {
   size_t size_;
   MempoolId_t mempool_;
   trace_time_ time_{};
-  std::string compile_context_{};
+  std::string compile_context_;
+  std::string user_metadata_;
 };
 
 // Calls made by record_function will save annotations
@@ -163,6 +166,7 @@ struct AllocatorConfigInfo {
   bool expandable_segments;
   bool release_lock_on_malloc;
   bool pinned_use_host_register;
+  bool graph_capture_record_stream_reuse;
   std::string last_allocator_settings;
   std::vector<size_t> roundup_power2_divisions;
 };
@@ -202,6 +206,14 @@ struct ShareableHandle {
   std::string handle;
 };
 
+struct StreamSegmentSize {
+  StreamSegmentSize(cudaStream_t s, bool small, size_t sz)
+      : stream(s), is_small_pool(small), total_size(sz) {}
+  cudaStream_t stream;
+  bool is_small_pool;
+  size_t total_size;
+};
+
 class CUDAAllocator : public DeviceAllocator {
  public:
   virtual void* raw_alloc(size_t nbytes) = 0;
@@ -210,6 +222,8 @@ class CUDAAllocator : public DeviceAllocator {
   virtual void init(int device_count) = 0;
   virtual double getMemoryFraction(c10::DeviceIndex device) = 0;
   virtual void setMemoryFraction(double fraction, c10::DeviceIndex device) = 0;
+  virtual std::vector<StreamSegmentSize> getExpandableSegmentSizes(
+      c10::DeviceIndex device) = 0;
   virtual void enable(bool value) = 0;
   virtual bool isEnabled() const = 0;
   virtual void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) = 0;
@@ -286,6 +300,10 @@ class CUDAAllocator : public DeviceAllocator {
       const std::vector<std::pair<std::string, std::string>>& /*md*/) {}
   virtual void pushCompileContext(std::string& md) {}
   virtual void popCompileContext() {}
+  virtual void setUserMetadata(const std::string& metadata) {}
+  virtual std::string getUserMetadata() {
+    return "";
+  }
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
 
   // Attached AllocatorTraceTracker callbacks will be called while the
@@ -349,11 +367,11 @@ inline void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
 }
 
 inline void raw_delete(void* ptr) {
-  return get()->raw_delete(ptr);
+  get()->raw_delete(ptr);
 }
 
 inline void init(int device_count) {
-  return get()->init(device_count);
+  get()->init(device_count);
 }
 
 inline double getMemoryFraction(c10::DeviceIndex device) {
@@ -361,15 +379,20 @@ inline double getMemoryFraction(c10::DeviceIndex device) {
 }
 
 inline void setMemoryFraction(double fraction, c10::DeviceIndex device) {
-  return get()->setMemoryFraction(fraction, device);
+  get()->setMemoryFraction(fraction, device);
+}
+
+inline std::vector<StreamSegmentSize> getExpandableSegmentSizes(
+    c10::DeviceIndex device) {
+  return get()->getExpandableSegmentSizes(device);
 }
 
 inline void emptyCache(MempoolId_t mempool_id = {0, 0}) {
-  return get()->emptyCache(mempool_id);
+  get()->emptyCache(mempool_id);
 }
 
 inline void enable(bool value) {
-  return get()->enable(value);
+  get()->enable(value);
 }
 
 inline bool isEnabled() {
@@ -377,7 +400,7 @@ inline bool isEnabled() {
 }
 
 inline void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) {
-  return get()->cacheInfo(device, largestBlock);
+  get()->cacheInfo(device, largestBlock);
 }
 
 inline void* getBaseAllocation(void* ptr, size_t* size) {
@@ -385,7 +408,7 @@ inline void* getBaseAllocation(void* ptr, size_t* size) {
 }
 
 inline void recordStream(const DataPtr& dataPtr, CUDAStream stream) {
-  return get()->recordStream(dataPtr, stream);
+  get()->recordStream(dataPtr, stream);
 }
 
 inline c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
@@ -394,11 +417,11 @@ inline c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
 }
 
 inline void resetAccumulatedStats(c10::DeviceIndex device) {
-  return get()->resetAccumulatedStats(device);
+  get()->resetAccumulatedStats(device);
 }
 
 inline void resetPeakStats(c10::DeviceIndex device) {
-  return get()->resetPeakStats(device);
+  get()->resetPeakStats(device);
 }
 
 inline SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0}) {
@@ -435,21 +458,21 @@ inline void recordHistory(
     size_t alloc_trace_max_entries,
     RecordContext when,
     bool clearHistory) {
-  return get()->recordHistory(
+  get()->recordHistory(
       enabled, context_recorder, alloc_trace_max_entries, when, clearHistory);
 }
 
 inline void recordAnnotation(
     const std::vector<std::pair<std::string, std::string>>& md) {
-  return get()->recordAnnotation(md);
+  get()->recordAnnotation(md);
 }
 
 inline void pushCompileContext(std::string& md) {
-  return get()->pushCompileContext(md);
+  get()->pushCompileContext(md);
 }
 
 inline void popCompileContext() {
-  return get()->popCompileContext();
+  get()->popCompileContext();
 }
 
 inline bool isHistoryEnabled() {
@@ -465,15 +488,15 @@ inline bool checkPoolLiveAllocations(
 }
 
 inline void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
-  return get()->attachOutOfMemoryObserver(std::move(observer));
+  get()->attachOutOfMemoryObserver(std::move(observer));
 }
 
 inline void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {
-  return get()->attachAllocatorTraceTracker(std::move(tracker));
+  get()->attachAllocatorTraceTracker(std::move(tracker));
 }
 
 inline void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
-  return get()->releasePool(device, mempool_id);
+  get()->releasePool(device, mempool_id);
 }
 inline void createOrIncrefPool(
     c10::DeviceIndex device,
@@ -517,7 +540,15 @@ inline cudaError_t memcpyAsync(
 inline void enablePeerAccess(
     c10::DeviceIndex dev,
     c10::DeviceIndex dev_to_access) {
-  return get()->enablePeerAccess(dev, dev_to_access);
+  get()->enablePeerAccess(dev, dev_to_access);
+}
+
+inline void setUserMetadata(const std::string& metadata) {
+  get()->setUserMetadata(metadata);
+}
+
+inline std::string getUserMetadata() {
+  return get()->getUserMetadata();
 }
 
 } // namespace c10::cuda::CUDACachingAllocator
@@ -538,8 +569,7 @@ struct C10_CUDA_API MemPool {
   MemPool(
       CUDACachingAllocator::CUDAAllocator* allocator = nullptr,
       bool is_user_created = true,
-      bool use_on_oom = false,
-      bool symmetric = false);
+      bool use_on_oom = false);
   MemPool(const MemPool&) = delete;
   MemPool(MemPool&&) = default;
   MemPool& operator=(const MemPool&) = delete;
@@ -547,7 +577,6 @@ struct C10_CUDA_API MemPool {
   ~MemPool();
 
   MempoolId_t id();
-  bool is_symmetric();
   CUDACachingAllocator::CUDAAllocator* allocator();
   int use_count();
   c10::DeviceIndex device();
@@ -559,7 +588,6 @@ struct C10_CUDA_API MemPool {
   CUDACachingAllocator::CUDAAllocator* allocator_;
   bool is_user_created_;
   MempoolId_t id_;
-  bool symmetric_;
   c10::DeviceIndex device_;
 };
 

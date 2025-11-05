@@ -12,7 +12,7 @@ cases*/
 
 static constexpr auto bfloat16_type_string = "__nv_bfloat16";
 
-#if defined(USE_ROCM)
+#if defined(USE_ROCM) && ROCM_VERSION < 70000
 static auto type_declarations_template = at::jit::CodeTemplate(R"(
 ${HalfHeader}
 ${BFloat16Header}
@@ -261,12 +261,19 @@ typedef __half half;
 #endif
 
 #if defined(USE_ROCM)
+
+#if ROCM_VERSION >= 70000
+#define BF16_UINT32_DEF "typedef unsigned int uint32_t;\n"
+#else
+#define BF16_UINT32_DEF ""
+#endif
+
 constexpr auto bfloat16_support_literal =
     R"(
 #ifndef __align__
 #define __align__(x) __attribute__((aligned(x)))
 #endif
-
+)" BF16_UINT32_DEF R"(
 typedef struct __align__(2) {
   unsigned short x;
 }

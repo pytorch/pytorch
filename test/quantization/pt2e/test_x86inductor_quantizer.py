@@ -17,7 +17,7 @@ from torch.ao.quantization.quantizer.x86_inductor_quantizer import (
     QUANT_ANNOTATION_KEY,
     X86InductorQuantizer,
 )
-from torch.export import export_for_training
+from torch.export import export
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     QuantizationTestCase,
@@ -332,7 +332,7 @@ class TestHelperModules:
         ) -> None:
             super().__init__()
             self.linear = nn.Linear(4, 4, bias=use_bias)
-            if postop == nn.GELU:
+            if postop is nn.GELU:
                 self.postop = postop(approximate=post_op_algo)
             else:
                 self.postop = postop(inplace=inplace_postop)
@@ -668,7 +668,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
 
         # program capture
         m = copy.deepcopy(m_eager)
-        m = export_for_training(m, example_inputs, strict=True).module()
+        m = export(m, example_inputs, strict=True).module()
 
         # QAT Model failed to deepcopy
         export_model = m if is_qat else copy.deepcopy(m)
@@ -2344,7 +2344,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         )
         example_inputs = (torch.randn(2, 2),)
         m = M().eval()
-        m = export_for_training(m, example_inputs, strict=True).module()
+        m = export(m, example_inputs, strict=True).module()
         m = prepare_pt2e(m, quantizer)
         # Use a linear count instead of names because the names might change, but
         # the order should be the same.
@@ -2464,11 +2464,11 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
         }
         node_list = [
-            # Q/DQ for first lienar
+            # Q/DQ for first linear
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.linear.default,
-            # Q/DQ for second lienar
+            # Q/DQ for second linear
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.linear.default,

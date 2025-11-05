@@ -6,6 +6,7 @@ import builtins
 import collections
 import contextlib
 import copy
+import gc
 import functools
 import inspect
 import io
@@ -19,6 +20,7 @@ import traceback
 import types
 import typing
 import unittest
+import weakref
 import warnings
 from math import sqrt
 from torch.multiprocessing import Process
@@ -35,7 +37,8 @@ from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from copy import deepcopy
 from collections import namedtuple
-from typing import Any, Callable, NamedTuple, Optional, Union
+from typing import Any, NamedTuple, Optional, Union
+from collections.abc import Callable
 
 import torch
 
@@ -201,7 +204,7 @@ def side_effect_func(x: torch.Tensor):
 class TestFX(JitTestCase):
     def setUp(self):
         super().setUp()
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations
@@ -768,6 +771,7 @@ class TestFX(JitTestCase):
         gm = GraphModule(tracer.root, graph)
         expected = {1: 2, 2: 3, 3: 4, 4: 5}
         self.assertTrue(set(expected.items()).issubset(set(gm._lineno_map.items())))
+        self.assertEqual(gm._prologue_start, 4)
 
         # test custom codegen
         def transform_code(code):
@@ -777,6 +781,7 @@ class TestFX(JitTestCase):
         gm.recompile()
         expected = {2: 2, 3: 3, 4: 4, 5: 5}
         self.assertTrue(set(expected.items()).issubset(set(gm._lineno_map.items())))
+        self.assertEqual(gm._prologue_start, 4)
 
     def test_graph_unique_names_manual(self):
         graph: torch.fx.Graph = torch.fx.Graph()
@@ -1623,6 +1628,25 @@ class TestFX(JitTestCase):
 
         self.assertTrue(neg not in relu.users)
 
+    @skipIfTorchDynamo("Dynamo does not free right away")
+    def test_prepend_does_not_leak(self):
+        g = Graph()
+        x = g.placeholder("x")
+        relu = g.call_function(torch.relu, (x,))
+        neg = g.call_function(torch.neg, (x,))
+
+        relu.prepend(neg)
+
+        ref = weakref.ref(neg)
+        g.erase_node(neg)
+        del g
+        del x
+        del relu
+        del neg
+        gc.collect()
+
+        self.assertIsNone(ref())
+
     def test_remove_uses_with_custom_filter(self):
         g: torch.fx.Graph = Graph()
         x: torch.fx.Node = g.placeholder("x")
@@ -2010,6 +2034,31 @@ class TestFX(JitTestCase):
         self.assertEqual(interpreter.run(input), gm(input))
         self.assertEqual(interpreter.run(input), m(input))
 
+    def test_interpreter_boxed_run_argument_validation(self):
+        class AddModule(torch.nn.Module):
+            def forward(self, lhs, rhs):
+                return lhs + rhs
+
+        gm = torch.fx.symbolic_trace(AddModule())
+        interpreter = Interpreter(gm)
+
+        lhs = torch.tensor(1.0)
+        rhs = torch.tensor(2.0)
+        good_args = [lhs.clone(), rhs.clone()]
+        result = interpreter.boxed_run(good_args)
+        torch.testing.assert_close(result, lhs + rhs)
+        self.assertEqual(good_args, [])
+
+        extra_args = [lhs.clone(), rhs.clone(), torch.tensor(3.0)]
+        with self.assertRaisesRegex(RuntimeError, "extra arguments"):
+            interpreter.boxed_run(extra_args)
+        self.assertEqual(len(extra_args), 3)
+
+        missing_args = [lhs.clone()]
+        with self.assertRaisesRegex(RuntimeError, "missing arguments"):
+            interpreter.boxed_run(missing_args)
+        self.assertEqual(len(missing_args), 1)
+
     def test_interpreter_other_graph(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -2343,7 +2392,7 @@ class TestFX(JitTestCase):
 
         g = torch.fx.Graph()
         x = g.placeholder("x")
-        for i in range(depth):
+        for _ in range(depth):
             x = g.call_function(torch.relu, (x,))
         g.output(x)
 
@@ -3583,7 +3632,7 @@ class TestFX(JitTestCase):
 
         class LeafTracerNotB(Tracer):
             def is_leaf_module(self, module, name):
-                return False if "b" in name else True
+                return "b" not in name
 
         # Recompile calls added "for fun", since they
         # chain __call__ wrappers.
@@ -3784,25 +3833,6 @@ class TestFX(JitTestCase):
         scripted(x, y)
 
         FileCheck().check("Tuple[()]").check("Tuple[str, Tuple[()]]").run(scripted.code)
-
-    @unittest.skipIf(
-        IS_WINDOWS, "Python Windows bug? https://bugs.python.org/issue45108"
-    )
-    @unittest.skipIf(sys.version_info >= (3, 10), "Does not work on Python-3.10")
-    def test_assert(self):
-        def f(x):
-            assert x > 1
-            return x + 1
-
-        try:
-            torch.fx.proxy.TracerBase.trace_asserts = True
-            traced = symbolic_trace(f)
-        finally:
-            torch.fx.proxy.TracerBase.trace_asserts = False
-
-        self.assertEqual(f(2), traced(2))
-        with self.assertRaises(AssertionError):
-            traced(0)
 
     def test_pytree(self):
         # Used to test that you can use your own placeholder class
@@ -4195,7 +4225,7 @@ def run_getitem_target():
 
 class TestOperatorSignatures(JitTestCase):
     def setUp(self):
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations
@@ -4238,7 +4268,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         super().setUp()
         self.maxDiff = None
 
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations
@@ -4594,7 +4624,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 class TestFunctionalTracing(JitTestCase):
     def setUp(self):
         super().setUp()
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations
@@ -4819,7 +4849,6 @@ class TestFunctionalTracing(JitTestCase):
         def functional_test(self):
             if (
                 func_name in self.UNTRACEABLE_FUNCTIONALS_PY38
-                and sys.version_info >= (3, 8)
                 and sys.version_info < (3, 12)
             ):
                 exc, err = self.UNTRACEABLE_FUNCTIONALS_PY38[func_name]
