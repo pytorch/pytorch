@@ -710,10 +710,10 @@ struct Fp32PrecisonGuard {
     if (new_precision == Float32Precision::NONE) {
       return ;
     }
-    saved_precision = float32Precision(target_backend, target_op);
+    saved_precision = globalContext().float32Precision(target_backend, target_op);
     changed = (new_precision == saved_precision);
     if (changed) {
-      setFloat32Precision(target_backend, target_op, new_precision);
+      globalContext().setFloat32Precision(target_backend, target_op, new_precision);
     }
   }
   Fp32PrecisonGuard(Fp32PrecisonGuard&& other) = delete;
@@ -722,7 +722,7 @@ struct Fp32PrecisonGuard {
   Fp32PrecisonGuard& operator=(Fp32PrecisonGuard&&) = delete;
   ~Fp32PrecisonGuard() {
     if (changed) {
-      setFloat32Precision(target_backend, target_op, saved_precision);
+      globalContext().setFloat32Precision(target_backend, target_op, saved_precision);
     }
   }
  private:
