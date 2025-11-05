@@ -110,6 +110,7 @@ from .utils import (
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
     should_assume_input_aligned,
+    should_fallback_by_default,
     SUPPORTED_MKLDNN_DEVICES,
     ValueWithLineMap,
 )
@@ -1628,6 +1629,7 @@ class GraphLowering(torch.fx.Interpreter):
                         "inductor", "lowerings", lambda: repr(n)
                     )
                 )
+                or should_fallback_by_default(n)
             ):
                 debug("fallback_handler")
                 result = fallback_handler(n.target, add_to_fallback_set=False)(

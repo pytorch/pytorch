@@ -550,6 +550,29 @@ cutedsl_enable_autotuning: bool = (
     os.environ.get("CUTEDSL_ENABLE_AUTOTUNING", "0") == "1"
 )
 
+
+# Fall back to ATen for all ops by default, except for fx nodes with special
+# annotations. Different from default inductor mode that fuses all nodes,
+# this config enables an opt-in mode that only fuse for user-specified nodes.
+# The motivation is to provide guaranteed numeric correctness and better
+# control.
+fallback_by_default: bool = False
+
+
+# When False, skip decompositions unless for fx nodes with special annotations.
+use_decomposition: bool = True
+
+
+# Use dead code elimination
+use_dce: bool = True
+
+
+# Use fx graph passes
+use_pre_grad_passes: bool = True
+use_joint_graph_passes: bool = True
+use_post_grad_passes: bool = True
+
+
 # DEPRECATED. This setting is ignored.
 autotune_fallback_to_aten = False
 
@@ -1352,6 +1375,10 @@ class triton:
         env_name_force="TORCHINDUCTOR_CUDAGRAPH_OR_ERROR",
         default=False,
     )
+
+    # reorder nodes to minimize the number of graph partitions while
+    # not incurring large memory overhead
+    reorder_for_reducing_graph_partitions: bool = True
 
     # assertions on the fast path
     fast_path_cudagraph_asserts = False

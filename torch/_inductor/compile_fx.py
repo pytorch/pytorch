@@ -508,6 +508,9 @@ def _recursive_pre_grad_passes(
         log_pt2_compile_event=True,
         dynamo_compile_column_us="pre_grad_pass_time_us",
     ):
+        if not config.use_pre_grad_passes:
+            return gm
+
         add_passes = config.add_pre_grad_passes
         remove_passes = config.remove_pre_grad_passes
         for subgraph_name in _get_subgraph_names(gm):
@@ -526,6 +529,9 @@ def _recursive_joint_graph_passes(
         log_pt2_compile_event=True,
         dynamo_compile_column_us="joint_graph_pass_time_us",
     ):
+        if not config.use_joint_graph_passes:
+            return
+
         # invoke_subgraph already runs the _recursive_joint_graph_passes.  In
         # AOTAutograd, `run_joint_graph_passes_on_hops` partitions the
         # invoke_subgraph HOP before calling the partitioner on the outer graph.
@@ -544,6 +550,9 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
         log_pt2_compile_event=True,
         dynamo_compile_column_us="post_grad_pass_time_us",
     ):
+        if not config.use_post_grad_passes:
+            return
+
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
             _recursive_post_grad_passes(subgraph, is_inference)
@@ -2633,6 +2642,9 @@ def _compile_fx_main(
         decompositions = (
             decompositions if decompositions is not None else select_decomp_table()
         )
+
+        if not config.use_decomposition:
+            decompositions = None
 
         def fw_compiler_base(
             gm: GraphModule,
