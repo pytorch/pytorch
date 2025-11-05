@@ -2124,7 +2124,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 adjust_profiler_step=True
             ),
         ) as prof:
-            for i in range(5):
+            for _ in range(5):
                 self._step_helper_func(prof)
         with TemporaryFileName(mode="w+") as fname:
             prof.export_chrome_trace(fname)

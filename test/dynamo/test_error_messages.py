@@ -427,17 +427,29 @@ from user code:
             optree.tree_flatten_with_path(d)
             return torch.sin(x)
 
+        def post_munge(s):
+            s = re.sub(
+                r"optree\.\S*\.flatten_with_path",
+                "optree.<path>.flatten_with_path",
+                s,
+            )
+            return re.sub(
+                r"qualname: \S*flatten_with_path",
+                "qualname: <path>.flatten_with_path",
+                s,
+            )
+
         fn(torch.randn(4))
         self.assertEqual(len(counters["graph_break"]), 1)
         first_graph_break = next(iter(counters["graph_break"].keys()))
         self.assertExpectedInline(
-            first_graph_break,
+            post_munge(first_graph_break),
             """\
 Attempted to call function marked as skipped
-  Explanation: Dynamo cannot trace optree C/C++ function optree._C.PyCapsule.flatten_with_path.
+  Explanation: Dynamo cannot trace optree C/C++ function optree.<path>.flatten_with_path.
   Hint: Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py
 
-  Developer debug context: module: optree._C, qualname: PyCapsule.flatten_with_path, skip reason: <missing reason>
+  Developer debug context: module: optree._C, qualname: <path>.flatten_with_path, skip reason: <missing reason>
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html""",
         )
@@ -1540,7 +1552,7 @@ cannot resume from torch._dynamo.step_unsupported()
 
   Developer debug context:
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0283.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0284.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
