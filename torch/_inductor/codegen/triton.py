@@ -5417,7 +5417,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 @triton.jit
             """
         elif self.inside_reduction:
+            from torch._inductor.runtime.hints import ReductionHint
             reduction_hint = self.features.get_reduction_hint()
+            tiling_scores = self.tiling_scores
+            if (
+                reduction_hint == ReductionHint.DEFAULT
+                and tiling_scores is not None
+                and "x" in tiling_scores
+                and "r0_" in tiling_scores
+            ):
+                r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
+                if V.graph.sizevars.statically_known_true(r_coalesce_ratio >= 8):
+                    reduction_hint = ReductionHint.INNER
             heuristics_line = f"""
                 @triton_heuristics.{self._get_heuristic()}(
                     size_hints={size_hints!r},
