@@ -514,9 +514,7 @@ std::vector<Tensor> make_tensor_clones_and_call_foreach(Tensor t1, Tensor t2) {
   Tensor t1_2 = my_clone(t1);
   Tensor t2_1 = my_clone(t2);
   Tensor t2_2 = my_clone(t2);
-  auto l1 = torch::headeronly::HeaderOnlyArrayRef<Tensor>({t1_1, t2_1});
-  auto l2 = torch::headeronly::HeaderOnlyArrayRef<Tensor>({t1_2, t2_2});
-  return my__foreach_mul(l1, l2);
+  return my__foreach_mul({t1_1, t2_1}, {t1_2, t2_2});
 }
 
 void boxed_make_tensor_clones_and_call_foreach(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {

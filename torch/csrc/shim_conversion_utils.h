@@ -8,13 +8,11 @@
 
 inline std::vector<StableIValue>* list_handle_to_list_pointer(
     StableListHandle handle) {
-  TORCH_WARN("in list_handle_to_list_pointer")
   return reinterpret_cast<std::vector<StableIValue>*>(handle);
 }
 
 inline StableListHandle list_pointer_to_list_handle(
     std::vector<StableIValue>* list_ptr) {
-  TORCH_WARN("in list_pointer_to_list_handle")
   return reinterpret_cast<StableListHandle>(list_ptr);
 }
 
