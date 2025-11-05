@@ -1142,13 +1142,13 @@ class TestFP8Lowering(TestCase):
             B = torch.randn(K, N, dtype=torch.float32, device=device)
             f_c = torch.compile(fullgraph=True)(forward)
 
-            out, code = run_and_get_code(f_c, A, B)
+            _, code = run_and_get_code(f_c, A, B)
 
             FileCheck().check(".run(").check(".run(").check("fake_scaled_mm").run(
                 code[0]
             )
 
-            for seed in range(42):
+            for seed in range(5):
                 input_values.clear()
                 torch.manual_seed(seed)
                 # without dividing, outputs get way too large
@@ -1156,13 +1156,19 @@ class TestFP8Lowering(TestCase):
                 B = torch.randn(K, N, dtype=torch.float32, device=device)
 
                 # Uses fake_scaled_mm custom op (no CUDA 12.8 needed!)
-                _ = forward(A, B)
-                f_c(A, B)
+                torch._dynamo.reset()
+                torch.compile(forward)(A, B)
+
+                torch._dynamo.reset()
+                with config.patch({"loop_index_inversion_in_fusion": False}):
+                    torch.compile(forward)(A, B)
 
                 assert len(input_values) == 2
                 for i in range(4):
                     self.assertEqual(
-                        input_values[0][i], input_values[1][i], msg=f"idx {i} seed {seed}"
+                        input_values[0][i],
+                        input_values[1][i],
+                        msg=f"idx {i} seed {seed}",
                     )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)

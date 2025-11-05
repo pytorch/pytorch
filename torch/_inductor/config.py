@@ -678,10 +678,10 @@ loop_ordering_after_fusion: bool = (
 # When trying to fuse two nodes, one with:
 # a[contiguous_writes] = fn(...)
 # and another node:
-# b[contiguous_writes] = a[discontiguous_writes]
+# b[contiguous_writes] = a[discontiguous_reads]
 # If b is unary, and we can figure out an inverse formula for
 # discontiguous writes, invert b as :
-# b[inverse(discontiguous_writes)] = a[contiguou_writes]
+# b[inverse(discontiguous_writes)] = a[contiguous_reads]
 # so that the nodes can fuse. for more details: https://gist.github.com/eellison/6f9f4a7ec10a860150b15b719f9285a9
 loop_index_inversion_in_fusion: bool = True
 
