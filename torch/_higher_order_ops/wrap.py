@@ -134,6 +134,45 @@ class DynamoBypassingWrapper(HigherOrderOperator):
 dynamo_bypassing_wrapper = DynamoBypassingWrapper()
 
 
+class WrapGeneric(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("wrap_generic")
+
+    def __call__(
+        self,
+        gmod,
+        *args,
+        **kwargs,
+    ):
+        # Dynamo already traces the body of HigherOrderOp beforehand when it
+        # so no need to trace into it.
+        import importlib
+
+        import torch._dynamo  # noqa: F401
+        from torch._dynamo import disable
+
+        # Reconstruct the context manager from the fqn and the args/kwargs
+        # I wonder if this still works if the context manager is defined in
+        # some local scope.
+        cls_fqn = gmod.meta["_wrap_generic_cls_fqn"]
+        module_path, attribute = cls_fqn.rsplit(".", 1)
+        module = importlib.import_module(module_path)
+        cls = getattr(module, attribute)
+        arg_values = gmod.meta["_wrap_generic_arg_values"]
+        kwarg_values = gmod.meta["_wrap_generic_kwarg_values"]
+        ctx = cls(*arg_values, **kwarg_values)
+
+        @disable
+        def wrapper():
+            with ctx:
+                return gmod(*args, **kwargs)
+
+        return wrapper()
+
+
+wrap_generic = WrapGeneric()
+
+
 class WrapActivationCheckpoint(HigherOrderOperator):
     """
     This operator is used to wrap torch.utils.checkpoint. This avoids
