@@ -3741,6 +3741,11 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
 
         super().__init__()
 
+        root = self.get_root_graph()
+        # Only generate auto-tuning block in the main graph
+        self.kernel_autotune_defs = root.kernel_autotune_defs
+        self.kernel_autotune_calls = root.kernel_autotune_calls
+
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of
         # the subgraph.
@@ -3833,3 +3838,16 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         #         V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
         #     )
         self.parent_wrapper.write_get_raw_stream_header_once()
+
+    @cache_on_self
+    def get_root_graph(self) -> PythonWrapperCodegen:
+        root: PythonWrapperCodegen | SubgraphPythonWrapperCodegen = self
+        while isinstance(root, SubgraphPythonWrapperCodegen):
+            root = root.parent_wrapper
+
+        assert isinstance(root, PythonWrapperCodegen)
+        return root
+
+    def generate_and_run_autotune_block(self):
+        # Only execute auto-tuning block in the main graph
+        pass

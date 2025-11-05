@@ -4101,6 +4101,41 @@ if HAS_CUDA_AND_TRITON:
             compiled_out = compiled_foo(x)
             self.assertEqual(eager_out, compiled_out)
 
+        # Use autotune_at_compile_time=True to test standalone_compile
+        @parametrize("autotune_at_compile_time", [True])
+        @config.patch("graph_partition", True)
+        def test_graph_partition_kernel_reuse(self, autotune_at_compile_time):
+            def foo(x):
+                # partition 1
+                x1 = x @ x
+                y1 = x1 + 1
+                z_cpu = y1.cpu() + 1
+                # partition 2
+                x2 = z_cpu.to("cuda") @ z_cpu.to("cuda")
+                y2 = x2 + 1
+                return y1, y2
+
+            with config.patch(
+                "triton.autotune_at_compile_time", autotune_at_compile_time
+            ):
+                compiled_foo = torch.compile(foo)
+                x = torch.randn((20, 20), device="cuda")
+                eager_out = foo(x)
+                compiled_out, code = run_and_get_code(compiled_foo, x)
+                self.assertEqual(eager_out, compiled_out)
+
+                # auto-tuning block should only appear once. We generate auto-tuning code
+                # for all the kernels no matter if they are defined in the main graph or
+                # subgraph, to avoid the overhead of executing multiple auto-tuning code blocks.
+                FileCheck().check_count(
+                    "Compile-time auto-tuning block", 1, exactly=True
+                ).run(code[0])
+                # triton_poi_fused_add_0 should appear twice, first in the auto-tuning block,
+                # and then in the main code block
+                FileCheck().check_count(
+                    "def triton_poi_fused_add_0", 2, exactly=True
+                ).run(code[0])
+
         def test_meta_tensor(self):
             def foobar(x, y):
                 return x * 2, y * 3
