@@ -248,7 +248,7 @@ void binary_kernel_reduce(TensorIteratorBase& iter, ops_t ops, init_t init) {
 }
 
 template <typename func_t, typename vec_func_t, typename ident_t = double>
-void binary_kernel_reduce_vec(TensorIteratorBase& iter, func_t op, vec_func_t vop, ident_t ident = ident_t(0)) {
+void binary_kernel_reduce_vec(TensorIteratorBase& iter, func_t op, vec_func_t vop, ident_t ident = static_cast<ident_t>(0)) {
   using traits = binary_function_traits<func_t>;
   static_assert(
     all_same<
