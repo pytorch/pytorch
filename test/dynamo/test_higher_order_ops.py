@@ -7166,7 +7166,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
     def test_checkpoint_with_side_effects_hopify(self):
         """Test checkpoint with side effects using HOPify logic."""
-        from torch._dynamo.utils import _disable_side_effect_safety_checks_for_current_subtracer
+        from torch._dynamo.utils import (
+            _disable_side_effect_safety_checks_for_current_subtracer,
+        )
 
         def gn(x, z):
             z.append(x.sin())

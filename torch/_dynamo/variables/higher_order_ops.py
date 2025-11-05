@@ -2621,9 +2621,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         for node in reversed(list(main_graph.nodes)):
             last_node = node
             break
-        start_marker_node = (
-            last_node if last_node is not None else _EMPTY_GRAPH_MARKER
-        )
+        start_marker_node = last_node if last_node is not None else _EMPTY_GRAPH_MARKER
 
         # Step 2: Call the function directly, which will trace into the main graph
         fn_vt = args[0]
