@@ -3459,7 +3459,8 @@ class BaseHOPVariable(WrapHigherOrderVariable):
             p_args,
             p_kwargs,
             flat_example_value,
-            treespec.body_r,
+            treespec,
+            body_r,
         )
 
 
