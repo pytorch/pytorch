@@ -132,6 +132,7 @@ from .source import (
     CodeSource,
     ConstantSource,
     ConstDictKeySource,
+    CurrentStreamSource,
     DataclassFieldsSource,
     DefaultsSource,
     DictGetItemSource,
@@ -1450,6 +1451,13 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, CurrentStreamSource):
+            out = root_guard_manager.lambda_manager(
+                python_lambda=lambda _: get_current_stream(source.device),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, GradSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.grad_manager(
@@ -2112,7 +2120,6 @@ class GuardBuilder(GuardBuilderBase):
             if not are_inline_hooks(hooks):
                 return None
 
-            pack_hook, unpack_hook = hooks
             return tuple(map(id, hooks))
 
         guard_hooks_ids = hooks_ids_fn(get_hooks())

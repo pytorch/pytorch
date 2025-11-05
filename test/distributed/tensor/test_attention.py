@@ -20,18 +20,18 @@ from torch.distributed.tensor.experimental._attention import (
     _cp_options,
     _disable_context_parallel_dispatcher,
     _enable_context_parallel_dispatcher,
+    _HeadTailLoadBalancer,
     _is_causal_behavior,
+    _LoadBalancer,
+    _PerDocumentHeadTailLoadBalancer,
+    _PTRRLoadBalancer,
     _RotateMethod,
     context_parallel,
     context_parallel_unshard,
     set_rotate_method,
 )
-from torch.distributed.tensor.experimental._cp_custom_ops import flex_cp_allgather
-from torch.distributed.tensor.experimental._load_balancer import (
-    _HeadTailLoadBalancer,
-    _LoadBalancer,
-    _PerDocumentHeadTailLoadBalancer,
-    _PTRRLoadBalancer,
+from torch.distributed.tensor.experimental._context_parallel._cp_custom_ops import (
+    flex_cp_allgather,
 )
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend

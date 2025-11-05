@@ -732,12 +732,12 @@ class OverlapScheduler:
         if not torch._inductor.config.test_configs.assume_bucketing_reduces_latency:
             return False
 
-        key = bucket_key(node)
+        key = bucket_key(node, mode="custom_ops_multidtype")
         if key is None:
             return False
 
         for in_flight_coll in self.in_flight.keys():
-            if bucket_key(in_flight_coll) == key:
+            if bucket_key(in_flight_coll, mode="custom_ops_multidtype") == key:
                 return True
 
         return False

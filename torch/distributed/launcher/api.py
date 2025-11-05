@@ -233,8 +233,9 @@ def launch_agent(
         "  log_dir                  : %(log_dir)s\n"
         "  metrics_cfg              : %(metrics_cfg)s\n"
         "  event_log_handler        : %(event_log_handler)s\n"
-        "  numa_options             : %(numa_options)s\n",
-        "  duplicate_stdout_filters : %(duplicate_stdout_filters)s\n",
+        "  numa_options             : %(numa_options)s\n"
+        "  signals_to_handle        : %(signals_to_handle)s\n"
+        "  duplicate_stdout_filters : %(duplicate_stdout_filters)s\n"
         "  duplicate_stderr_filters : %(duplicate_stderr_filters)s\n",
         {
             "entrypoint": entrypoint_name,
