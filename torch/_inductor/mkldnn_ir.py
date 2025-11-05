@@ -711,7 +711,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.onednn.qconv2d_pointwise.binary,
+            op_overload=torch.ops.onednn.qconv2d_pointwise.binary_tensor,
             cpp_kernel_name=(
                 f"aoti_torch_{self.device_type}__qconv2d_pointwise_binary_tensor"
             ),
