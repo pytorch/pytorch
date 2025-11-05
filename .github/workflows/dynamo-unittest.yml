@@ -59,13 +59,14 @@ jobs:
   dynamo-test:
     name: dynamo-test-py${{ matrix.python-version }}
     uses: ./.github/workflows/_linux-test.yml
-    needs: dynamo-build
+    needs: dynamo-build-py${{ matrix.python-version }}
     strategy:
       matrix:
         python-version: ['3.10', '3.11', '3.12', '3.13']
     with:
       build-environment: linux-jammy-py${{ matrix.python-version }}-clang12
       # docker-image: ${{ needs.dynamo-build.outputs.docker-image }}
-      docker-image: ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang12
+      docker-image: ${{ needs.dynamo-build-py${{ matrix.python-version }}.outputs.docker-image }}
+      # docker-image: ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang12
       test-matrix: ${{ needs.dynamo-build.outputs.test-matrix }}
     secrets: inherit
