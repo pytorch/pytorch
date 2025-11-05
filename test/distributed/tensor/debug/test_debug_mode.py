@@ -42,22 +42,24 @@ class TestDTensorDebugMode(TestCase):
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
         y_dtensor = DTensor.from_local(y, mesh, [Shard(0)], run_check=False)
 
-        with DebugMode(record_torchfunction=True) as debug_mode:
+        with DebugMode(
+            record_torchfunction=True, record_ids=True, record_output=True
+        ) as debug_mode:
             torch.mm(x_dtensor, y_dtensor).sum()
 
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
-  torch.mm(dt: f32[8, 8]| S(0), dt: f32[8, 32]| S(0))
-    aten::mm(dt: f32[8, 8]| S(0), dt: f32[8, 32]| S(0))
+  torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$6: f32[8, 32]| S(0)
+    aten::mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))
       redistribute_input(1, S(0) -> R)
-        redistribute_input(t: f32[1, 32], trace: S(0)->R)
-          _c10d_functional::all_gather_into_tensor(t: f32[1, 32], 8, 0)
-          _c10d_functional::wait_tensor(t: f32[8, 32])
-      aten::mm(t: f32[1, 8], t: f32[8, 32])
-  <method 'sum' of 'torch._C.TensorBase' objects>(dt: f32[8, 32]| S(0))
-    aten::sum(dt: f32[8, 32]| S(0))
-      aten::sum(t: f32[1, 32])""",
+        redistribute_input(t$2: f32[1, 32], trace: S(0)->R)
+          _c10d_functional::all_gather_into_tensor(t$2: f32[1, 32], 8, 0)  ->  t$3: f32[8, 32]
+          _c10d_functional::wait_tensor(t$3: f32[8, 32])  ->  t$3: f32[8, 32]
+      aten::mm(t$4: f32[1, 8], t$3: f32[8, 32])  ->  t$5: f32[1, 32]
+  <method 'sum' of 'torch._C.TensorBase' objects>(dt$6: f32[8, 32]| S(0))  ->  dt$8: f32[]| P
+    aten::sum(dt$6: f32[8, 32]| S(0))
+      aten::sum(t$5: f32[1, 32])  ->  t$7: f32[]""",
         )
 
         self.assertTrue(isinstance(debug_mode.operators[0], _OpCall))

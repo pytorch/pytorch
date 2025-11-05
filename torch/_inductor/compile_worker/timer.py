@@ -17,7 +17,7 @@ class Timer:
         self.background_thread: Optional[Thread] = None
         self.last_called: Optional[float] = None
         self.duration = duration
-        self.sleep_time = 60
+        self.sleep_time = duration / 2
         self.call = call
         self.exit = False
 
