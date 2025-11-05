@@ -3593,6 +3593,7 @@ float ProcessGroupNCCL::endTimeEstimate() {
 #ifdef NCCL_SIM_INFO_INITIALIZER
   ncclSimInfo_t simInfo = NCCL_SIM_INFO_INITIALIZER;
   C10D_NCCL_CHECK(ncclGroupSimulateEnd(&simInfo), std::nullopt);
+  --ncclActiveGroupCounter_;
   return simInfo.estimatedTime;
 #else
   TORCH_CHECK(
