@@ -10,8 +10,7 @@ from functools import lru_cache
 from typing import Any, Optional
 
 import torch
-from torch._dynamo.utils import dynamo_timed
-from torch._logging import getArtifactLogger, trace_structured
+from torch._logging import getArtifactLogger
 
 
 # Setup logger for artifact logging
@@ -22,9 +21,11 @@ log = getArtifactLogger(__name__, "node_runtime_estimation")
 # Cache (following overlap_scheduling.py)
 # ============================================================================
 
+
 @functools.cache
 def get_estimation_cache() -> Any:
     from torch._inductor.codecache import LocalCache
+
     return LocalCache()
 
 
@@ -58,6 +59,7 @@ def set_cached_runtime(key: str, value: float) -> None:
 # Utilities
 # ============================================================================
 
+
 def get_hint(x: int | torch.SymInt) -> Optional[int]:
     if isinstance(x, int):
         return x
@@ -82,6 +84,7 @@ def can_benchmark_collective() -> bool:
 # ============================================================================
 # Collective Benchmarking
 # ============================================================================
+
 
 def _benchmark_collective_with_cuda_events_impl(
     n: torch.fx.Node,
@@ -178,10 +181,14 @@ def benchmark_collective_with_cuda_events(
 
     # Find power-of-2 BYTE bounds
     upper_pow2_bytes = next_power_of_2(actual_bytes)
-    lower_pow2_bytes = upper_pow2_bytes if upper_pow2_bytes == actual_bytes else upper_pow2_bytes // 2
+    lower_pow2_bytes = (
+        upper_pow2_bytes if upper_pow2_bytes == actual_bytes else upper_pow2_bytes // 2
+    )
 
     # Helper to benchmark a specific power-of-2 byte size
-    def benchmark_bytes(bytes_pow2: int, dtype: torch.dtype) -> tuple[float | None, str]:
+    def benchmark_bytes(
+        bytes_pow2: int, dtype: torch.dtype
+    ) -> tuple[float | None, str]:
         # Cache key by BYTES (dtype-agnostic)
         key = f"{n.target}: ({bytes_pow2} bytes)"
 

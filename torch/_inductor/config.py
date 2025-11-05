@@ -910,9 +910,10 @@ class aten_distributed_optimizations:
         None
     )
 
-    # Benchmark collectives using CUDA events instead of analytical model
-    # When enabled, uses power-of-2 rounding, interpolation, and distributed sync
-    benchmark_collectives: bool = False
+    # Method for estimating collective runtime
+    # "analytical": Use bandwidth formulas (default)
+    # "benchmark": Use CUDA events with power-of-2 rounding and interpolation
+    collective_estimator: Literal["analytical", "benchmark"] = "analytical"
 
 
 def parallel_compile_enabled_internally() -> bool:

@@ -954,7 +954,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
 
         patches = {
             **get_patches(),
-            "aten_distributed_optimizations.benchmark_collectives": True,
+            "aten_distributed_optimizations.collective_estimator": "benchmark",
         }
 
         with _dynamo_dist_per_rank_init(
@@ -970,7 +970,9 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
                 out, aten_graph_str = run_and_get_aten_graph(compiled, inputs)
 
                 # Verify wait_tensor is sinked (scheduling worked)
-                FileCheck().check("all_reduce").check("mm").check("wait_tensor").check("mm").run(aten_graph_str)
+                FileCheck().check("all_reduce").check("mm").check("wait_tensor").check(
+                    "mm"
+                ).run(aten_graph_str)
 
                 correct = func(inputs)
                 self.assertTrue(same(out, correct))
