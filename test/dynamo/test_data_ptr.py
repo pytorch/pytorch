@@ -3,17 +3,17 @@
 import unittest
 
 import torch
-import torch._dynamo.testing
+from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class DataPtrTests(TestCase):
     """Test data_ptr() comparison operations with torch.compile"""
 
-    def test_data_ptr_same_tensor(self):
-        """Test comparing data_ptr() of the same tensor"""
+    # ========== Basic Equality Tests ==========
 
+    def test_data_ptr_same_tensor_eq(self):
+        """Test x.data_ptr() == x.data_ptr() returns True"""
         def fn(x):
             return x.data_ptr() == x.data_ptr()
 
@@ -22,67 +22,326 @@ class DataPtrTests(TestCase):
         self.assertTrue(opt_fn(x))
         self.assertEqual(fn(x), opt_fn(x))
 
-    def test_data_ptr_detach(self):
-        """Test that detach() shares the same data_ptr"""
-
+    def test_data_ptr_same_tensor_ne(self):
+        """Test x.data_ptr() != x.data_ptr() returns False"""
         def fn(x):
-            detached = x.detach()
-            return x.data_ptr() == detached.data_ptr()
-
-        x = torch.randn(4, 4)
-        opt_fn = torch.compile(fn, fullgraph=True)
-        self.assertTrue(opt_fn(x))
-        self.assertEqual(fn(x), opt_fn(x))
-
-    def test_data_ptr_view(self):
-        """Test that view() shares the same data_ptr"""
-
-        def fn(x):
-            viewed = x.view_as(x)
-            return x.data_ptr() == viewed.data_ptr()
-
-        x = torch.randn(4, 4)
-        opt_fn = torch.compile(fn, fullgraph=True)
-        self.assertTrue(opt_fn(x))
-        self.assertEqual(fn(x), opt_fn(x))
-
-    def test_data_ptr_clone(self):
-        """Test that clone() has a different data_ptr"""
-
-        def fn(x):
-            cloned = x.clone()
-            return x.data_ptr() == cloned.data_ptr()
+            return x.data_ptr() != x.data_ptr()
 
         x = torch.randn(4, 4)
         opt_fn = torch.compile(fn, fullgraph=True)
         self.assertFalse(opt_fn(x))
         self.assertEqual(fn(x), opt_fn(x))
 
-    def test_data_ptr_inequality(self):
-        """Test data_ptr() != operator"""
+    # ========== Aliasing Tests (views share storage) ==========
 
+    def test_data_ptr_detach_eq(self):
+        """Test detach() shares data_ptr (equality)"""
         def fn(x):
-            cloned = x.clone()
-            return x.data_ptr() != cloned.data_ptr()
+            return x.data_ptr() == x.detach().data_ptr()
 
         x = torch.randn(4, 4)
         opt_fn = torch.compile(fn, fullgraph=True)
         self.assertTrue(opt_fn(x))
         self.assertEqual(fn(x), opt_fn(x))
 
-    def test_data_ptr_mixed_comparison(self):
-        """Test multiple data_ptr() comparisons in one function"""
+    def test_data_ptr_detach_eq_swapped(self):
+        """Test detach() shares data_ptr (swapped operands)"""
+        def fn(x):
+            return x.detach().data_ptr() == x.data_ptr()
 
+        x = torch.randn(4, 4)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertTrue(opt_fn(x))
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_data_ptr_detach_ne(self):
+        """Test detach() shares data_ptr (inequality returns False)"""
+        def fn(x):
+            return x.data_ptr() != x.detach().data_ptr()
+
+        x = torch.randn(4, 4)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertFalse(opt_fn(x))
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_data_ptr_view_eq(self):
+        """Test view() shares data_ptr"""
+        def fn(x):
+            return x.data_ptr() == x.view_as(x).data_ptr()
+
+        x = torch.randn(4, 4)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertTrue(opt_fn(x))
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_data_ptr_view_ne(self):
+        """Test view() shares data_ptr (inequality returns False)"""
+        def fn(x):
+            return x.data_ptr() != x.view_as(x).data_ptr()
+
+        x = torch.randn(4, 4)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertFalse(opt_fn(x))
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_data_ptr_reshape_eq(self):
+        """Test reshape() shares data_ptr when contiguous"""
+        def fn(x):
+            return x.data_ptr() == x.reshape(-1).data_ptr()
+
+        x = torch.randn(4, 4)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertTrue(opt_fn(x))
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_data_ptr_transpose_eq(self):
+        """Test transpose() shares data_ptr (creates view)"""
+        def fn(x):
+            return x.data_ptr() == x.t().data_ptr()
+
+        x = torch.randn(4, 4)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertTrue(opt_fn(x))
+        self.assertEqual(fn(x), opt_fn(x))
+
+    # ========== Clone Tests (different storage) ==========
+
+    def test_data_ptr_clone_eq(self):
+        """Test clone() has different data_ptr (equality returns False)"""
+        def fn(x):
+            return x.data_ptr() == x.clone().data_ptr()
+
+        x = torch.randn(4, 4)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertFalse(opt_fn(x))
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_data_ptr_clone_ne(self):
+        """Test clone() has different data_ptr (inequality returns True)"""
+        def fn(x):
+            return x.data_ptr() != x.clone().data_ptr()
+
+        x = torch.randn(4, 4)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertTrue(opt_fn(x))
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_data_ptr_different_tensors_eq(self):
+        """Test different tensors have different data_ptr (equality)"""
+        def fn(x, y):
+            return x.data_ptr() == y.data_ptr()
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertFalse(opt_fn(x, y))
+        self.assertEqual(fn(x, y), opt_fn(x, y))
+
+    def test_data_ptr_different_tensors_ne(self):
+        """Test different tensors have different data_ptr (inequality)"""
+        def fn(x, y):
+            return x.data_ptr() != y.data_ptr()
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertTrue(opt_fn(x, y))
+        self.assertEqual(fn(x, y), opt_fn(x, y))
+
+    # ========== Int Parameter Comparisons ==========
+
+    def test_data_ptr_eq_int_parameter(self):
+        """Test data_ptr() == with int parameter (matching)"""
+        def fn(x, ptr_value):
+            return x.data_ptr() == ptr_value
+
+        x = torch.randn(4, 4)
+        actual_ptr = x.data_ptr()
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertTrue(opt_fn(x, actual_ptr))
+        self.assertEqual(fn(x, actual_ptr), opt_fn(x, actual_ptr))
+
+    def test_data_ptr_eq_int_parameter_swapped(self):
+        """Test data_ptr() == with int parameter (swapped operands)"""
+        def fn(x, ptr_value):
+            return ptr_value == x.data_ptr()
+
+        x = torch.randn(4, 4)
+        actual_ptr = x.data_ptr()
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertTrue(opt_fn(x, actual_ptr))
+        self.assertEqual(fn(x, actual_ptr), opt_fn(x, actual_ptr))
+
+    def test_data_ptr_ne_int_parameter_matching(self):
+        """Test data_ptr() != with int parameter (matching pointer)"""
+        def fn(x, ptr_value):
+            return x.data_ptr() != ptr_value
+
+        x = torch.randn(4, 4)
+        actual_ptr = x.data_ptr()
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertFalse(opt_fn(x, actual_ptr))
+        self.assertEqual(fn(x, actual_ptr), opt_fn(x, actual_ptr))
+
+    def test_data_ptr_ne_int_parameter_different(self):
+        """Test data_ptr() != with int parameter (different value)"""
+        def fn(x, ptr_value):
+            return x.data_ptr() != ptr_value
+
+        x = torch.randn(4, 4)
+        wrong_ptr = x.data_ptr() + 1000
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertTrue(opt_fn(x, wrong_ptr))
+        self.assertEqual(fn(x, wrong_ptr), opt_fn(x, wrong_ptr))
+
+    def test_data_ptr_ne_int_parameter_swapped(self):
+        """Test data_ptr() != with int parameter (swapped operands)"""
+        def fn(x, ptr_value):
+            return ptr_value != x.data_ptr()
+
+        x = torch.randn(4, 4)
+        wrong_ptr = x.data_ptr() + 1000
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertTrue(opt_fn(x, wrong_ptr))
+        self.assertEqual(fn(x, wrong_ptr), opt_fn(x, wrong_ptr))
+
+    def test_data_ptr_eq_int_constant(self):
+        """Test data_ptr() == with int constant"""
+        def fn(x):
+            return x.data_ptr() == 99999
+
+        x = torch.randn(10)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertFalse(opt_fn(x))
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_data_ptr_method_as_argument(self):
+        """Test passing torch.Tensor.data_ptr method as function argument"""
+        def fn(x, data_ptr_method):
+            return x.data_ptr() == data_ptr_method(x)
+
+        x = torch.randn(4, 4)
+        ptr_method = torch.Tensor.data_ptr
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertTrue(opt_fn(x, ptr_method))
+        self.assertEqual(fn(x, ptr_method), opt_fn(x, ptr_method))
+
+    def test_data_ptr_method_as_argument_ne(self):
+        """Test passing torch.Tensor.data_ptr method as function argument with !="""
+        def fn(x, y, data_ptr_method):
+            return data_ptr_method(x) != data_ptr_method(y)
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+        ptr_method = torch.Tensor.data_ptr
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertTrue(opt_fn(x, y, ptr_method))
+        self.assertEqual(fn(x, y, ptr_method), opt_fn(x, y, ptr_method))
+
+    # ========== Slice/Offset Tests ==========
+
+    def test_data_ptr_full_slice_eq(self):
+        """Test full slice x[:] shares data_ptr with x"""
+        def fn(x):
+            return x.data_ptr() == x[:].data_ptr()
+
+        x = torch.randn(10)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertTrue(opt_fn(x))
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_data_ptr_partial_slice_ne(self):
+        """Test partial slice x[5:] has different data_ptr (different first element)"""
+        def fn(x):
+            return x.data_ptr() != x[5:].data_ptr()
+
+        x = torch.randn(10)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertTrue(opt_fn(x))
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_data_ptr_matrix_columns_ne(self):
+        """Test different columns have different data_ptr (different first element)"""
+        def fn(x):
+            return x[:, 0].data_ptr() != x[:, 1].data_ptr()
+
+        x = torch.randn(5, 5)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertTrue(opt_fn(x))
+        self.assertEqual(fn(x), opt_fn(x))
+
+    # ========== Empty Tensor Tests ==========
+
+    def test_data_ptr_empty_tensors_eq(self):
+        """Test two empty tensors both have data_ptr() == 0"""
+        def fn(x, y):
+            return x.data_ptr() == y.data_ptr()
+
+        empty1 = torch.tensor((), dtype=torch.float32)
+        empty2 = torch.tensor((), dtype=torch.float32)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertTrue(opt_fn(empty1, empty2))
+        self.assertEqual(fn(empty1, empty2), opt_fn(empty1, empty2))
+
+    def test_data_ptr_empty_vs_nonempty_ne(self):
+        """Test empty vs non-empty tensor have different data_ptr"""
+        def fn(x, y):
+            return x.data_ptr() != y.data_ptr()
+
+        empty = torch.tensor((), dtype=torch.float32)
+        nonempty = torch.randn(10)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertTrue(opt_fn(empty, nonempty))
+        self.assertEqual(fn(empty, nonempty), opt_fn(empty, nonempty))
+
+    # ========== Mixed Operations ==========
+
+    def test_data_ptr_mixed_eq_ne_operators(self):
+        """Test mixing == and != operators in same function"""
         def fn(x):
             detached = x.detach()
             cloned = x.clone()
             viewed = x.view_as(x)
 
-            same_as_detached = x.data_ptr() == detached.data_ptr()
-            diff_from_clone = x.data_ptr() != cloned.data_ptr()
-            same_as_view = x.data_ptr() == viewed.data_ptr()
+            # These should be True
+            same_eq_detached = x.data_ptr() == detached.data_ptr()
+            same_eq_view = x.data_ptr() == viewed.data_ptr()
+            diff_ne_clone = x.data_ptr() != cloned.data_ptr()
 
-            return same_as_detached and diff_from_clone and same_as_view
+            # These should be False
+            same_ne_detached = x.data_ptr() != detached.data_ptr()
+            same_ne_view = x.data_ptr() != viewed.data_ptr()
+            diff_eq_clone = x.data_ptr() == cloned.data_ptr()
+
+            return (
+                same_eq_detached
+                and same_eq_view
+                and diff_ne_clone
+                and not same_ne_detached
+                and not same_ne_view
+                and not diff_eq_clone
+            )
+
+        x = torch.randn(4, 4)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertTrue(opt_fn(x))
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_data_ptr_chained_comparisons(self):
+        """Test storing data_ptr() results and chaining comparisons"""
+        def fn(x):
+            a = x.data_ptr()
+            b = x.detach().data_ptr()
+            c = x.clone().data_ptr()
+
+            return (a == b) and (a != c) and (b != c)
 
         x = torch.randn(4, 4)
         opt_fn = torch.compile(fn, fullgraph=True)
@@ -90,8 +349,7 @@ class DataPtrTests(TestCase):
         self.assertEqual(fn(x), opt_fn(x))
 
     def test_data_ptr_with_other_checks(self):
-        """Test data_ptr() combined with stride and shape checks (original repro)"""
-
+        """Test data_ptr() combined with stride and shape checks"""
         def fn(x):
             original = x
             detached = x.detach()
@@ -107,234 +365,33 @@ class DataPtrTests(TestCase):
         self.assertTrue(opt_fn(x))
         self.assertEqual(fn(x), opt_fn(x))
 
+    # ========== Graph Break Tests ==========
+
     def test_data_ptr_no_graph_break(self):
         """Ensure data_ptr() comparisons don't cause graph breaks"""
-
         def fn(x):
-            detached = x.detach()
-            return x.data_ptr() == detached.data_ptr()
+            return x.data_ptr() == x.detach().data_ptr()
 
         x = torch.randn(4, 4)
         counter = CompileCounter()
         opt_fn = torch._dynamo.optimize(counter, nopython=True)(fn)
         result = opt_fn(x)
         self.assertTrue(result)
-        self.assertEqual(counter.frame_count, 1)  # Single graph, no breaks
-
-    def test_data_ptr_reshape_aliasing(self):
-        """Test that reshape() can share data_ptr when contiguous"""
-
-        def fn(x):
-            # reshape should share storage when x is contiguous
-            reshaped = x.reshape(-1)
-            return x.data_ptr() == reshaped.data_ptr()
-
-        x = torch.randn(4, 4)  # contiguous
-        opt_fn = torch.compile(fn, fullgraph=True)
-        self.assertTrue(opt_fn(x))
-        self.assertEqual(fn(x), opt_fn(x))
-
-    def test_data_ptr_transpose_aliasing(self):
-        """Test that transpose() shares data_ptr (creates view)"""
-
-        def fn(x):
-            transposed = x.t()
-            return x.data_ptr() == transposed.data_ptr()
-
-        x = torch.randn(4, 4)
-        opt_fn = torch.compile(fn, fullgraph=True)
-        self.assertTrue(opt_fn(x))
-        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(counter.frame_count, 1)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_data_ptr_cuda(self):
         """Test data_ptr() comparisons work on CUDA tensors"""
-
         def fn(x):
-            detached = x.detach()
-            cloned = x.clone()
             return (
-                x.data_ptr() == detached.data_ptr()
-                and x.data_ptr() != cloned.data_ptr()
+                x.data_ptr() == x.detach().data_ptr()
+                and x.data_ptr() != x.clone().data_ptr()
             )
 
         x = torch.randn(4, 4, device="cuda")
         opt_fn = torch.compile(fn, fullgraph=True)
         self.assertTrue(opt_fn(x))
         self.assertEqual(fn(x), opt_fn(x))
-
-    def test_data_ptr_slice_aliasing(self):
-        """Test that slicing shares data_ptr (offset may differ)"""
-
-        def fn(x):
-            # Full slice should have same data_ptr
-            sliced = x[:]
-            return x.data_ptr() == sliced.data_ptr()
-
-        x = torch.randn(4, 4)
-        opt_fn = torch.compile(fn, fullgraph=True)
-        self.assertTrue(opt_fn(x))
-        self.assertEqual(fn(x), opt_fn(x))
-
-    def test_data_ptr_as_strided_aliasing(self):
-        """Test that as_strided shares data_ptr"""
-
-        def fn(x):
-            # as_strided with same shape and stride should share storage
-            strided = torch.as_strided(x, x.shape, x.stride())
-            return x.data_ptr() == strided.data_ptr()
-
-        x = torch.randn(4, 4)
-        opt_fn = torch.compile(fn, fullgraph=True)
-        self.assertTrue(opt_fn(x))
-        self.assertEqual(fn(x), opt_fn(x))
-
-    def test_data_ptr_inplace_op_preserves(self):
-        """Test that in-place operations preserve data_ptr"""
-
-        def fn(x):
-            original_ptr_matches = x.data_ptr() == x.data_ptr()
-            x.add_(1)
-            ptr_after_inplace = x.data_ptr() == x.data_ptr()
-            return original_ptr_matches and ptr_after_inplace
-
-        x = torch.randn(4, 4)
-        opt_fn = torch.compile(fn, fullgraph=True)
-        self.assertTrue(opt_fn(x))
-
-    def test_data_ptr_comparison_to_int_constant_works(self):
-        """
-        Verify that returning NotImplemented allows comparisons with int
-        constants to complete via Python's comparison protocol fallback.
-        """
-
-        def fn(x):
-            # DataPtrVariable.__eq__(ConstantVariable) returns NotImplemented,
-            # which allows Python's protocol to handle the comparison
-            return x.data_ptr() == 99999
-
-        x = torch.randn(10)
-        opt_fn = torch.compile(fn, fullgraph=True)
-        self.assertFalse(opt_fn(x))
-        self.assertEqual(fn(x), opt_fn(x))
-
-    def test_data_ptr_slice_different_first_element(self):
-        """
-        Test data_ptr() returns address of first element.
-        x[5:] shares storage with x, but its first element is x's 5th element.
-        """
-
-        def fn(x):
-            sliced = x[5:]
-            return x.data_ptr() == sliced.data_ptr()
-
-        x = torch.randn(10)
-        opt_fn = torch.compile(fn, fullgraph=True)
-        # False: different first elements despite shared storage
-        self.assertFalse(opt_fn(x))
-        self.assertEqual(fn(x), opt_fn(x))
-
-    def test_data_ptr_slice_inequality(self):
-        """Test that slices with different offsets are properly detected as unequal"""
-
-        def fn(x):
-            sliced = x[5:]
-            return x.data_ptr() != sliced.data_ptr()
-
-        x = torch.randn(10)
-        opt_fn = torch.compile(fn, fullgraph=True)
-        # Should be True - different offsets!
-        self.assertTrue(opt_fn(x))
-        self.assertEqual(fn(x), opt_fn(x))
-
-    def test_data_ptr_matrix_columns_different_first_element(self):
-        """
-        Different columns start at different elements.
-        m[:, 0] first element is m[0,0]
-        m[:, 1] first element is m[0,1]
-        """
-
-        def fn(x):
-            col0 = x[:, 0]  # First element at offset 0
-            col1 = x[:, 1]  # First element at offset 1
-            return col0.data_ptr() == col1.data_ptr()
-
-        x = torch.randn(5, 5)
-        opt_fn = torch.compile(fn, fullgraph=True)
-        # False: columns start at different elements
-        self.assertFalse(opt_fn(x))
-        self.assertEqual(fn(x), opt_fn(x))
-
-    def test_data_ptr_full_slice_same_first_element(self):
-        """
-        Full slice x[:] and x both start at the same first element.
-        Both point to x[0].
-        """
-
-        def fn(x):
-            full_slice = x[:]
-            # Both x and x[:] start at x[0]
-            return x.data_ptr() == full_slice.data_ptr()
-
-        x = torch.randn(10)
-        opt_fn = torch.compile(fn, fullgraph=True)
-        # True: same first element (both at offset 0)
-        self.assertTrue(opt_fn(x))
-        self.assertEqual(fn(x), opt_fn(x))
-
-    def test_data_ptr_empty_tensors_both_null(self):
-        """Two empty tensors both have data_ptr() == 0"""
-
-        def fn(x, y):
-            return x.data_ptr() == y.data_ptr()
-
-        empty1 = torch.tensor((), dtype=torch.float32)
-        empty2 = torch.tensor((), dtype=torch.float32)
-        opt_fn = torch.compile(fn, fullgraph=True)
-        self.assertTrue(opt_fn(empty1, empty2))
-        self.assertEqual(fn(empty1, empty2), opt_fn(empty1, empty2))
-
-    def test_data_ptr_empty_vs_nonempty(self):
-        """Empty tensor (data_ptr==0) vs non-empty should be False"""
-
-        def fn(x, y):
-            return x.data_ptr() == y.data_ptr()
-
-        empty = torch.tensor((), dtype=torch.float32)
-        nonempty = torch.randn(10)
-        opt_fn = torch.compile(fn, fullgraph=True)
-        self.assertFalse(opt_fn(empty, nonempty))
-        self.assertEqual(fn(empty, nonempty), opt_fn(empty, nonempty))
-
-    def test_data_ptr_zero_sized_multidim(self):
-        """Zero-sized multi-dimensional tensors have data_ptr() == 0"""
-
-        def fn(x):
-            return x.data_ptr() == x.data_ptr()
-
-        zero_sized = torch.empty(5, 0)
-        opt_fn = torch.compile(fn, fullgraph=True)
-        self.assertTrue(opt_fn(zero_sized))
-        self.assertEqual(fn(zero_sized), opt_fn(zero_sized))
-
-    def test_data_ptr_comparison_to_tensor(self):
-        """
-        Test that data_ptr() (int) compared to tensor produces a boolean tensor.
-        This is an edge case - comparing an int to a tensor produces a tensor result.
-        """
-
-        def fn(x, y):
-            # Comparing data_ptr (int) to tensor produces boolean tensor
-            result = x.data_ptr() == y
-            # Convert to scalar for testing purposes
-            return result.all().item()
-
-        x = torch.randn(4, 4)
-        y = torch.randn(4, 4)
-        opt_fn = torch.compile(fn, fullgraph=True)
-        # data_ptr (int) should never equal any element in tensor
-        self.assertFalse(opt_fn(x, y))
-        self.assertEqual(fn(x, y), opt_fn(x, y))
 
 
 if __name__ == "__main__":
