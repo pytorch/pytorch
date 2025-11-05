@@ -22,16 +22,6 @@ aten = torch.ops.aten
 
 from torch.library import custom_op
 
-
-# ---- host helpers ----
-def _compute_grid_x(nelem: int, block: int, device_index: int) -> int:
-    prop = torch.cuda.get_device_properties(device_index)
-    blocks_per_sm = prop.max_threads_per_multi_processor // block
-    max_blocks = prop.multi_processor_count * blocks_per_sm
-    need_blocks = (nelem + block - 1) // block
-    return min(max_blocks, need_blocks)
-
-
 def _shape_to_offset(size, device: torch.device) -> int:
     nelem = 1
     for s in size:
@@ -60,7 +50,7 @@ def _reserve_offset(device: torch.device, used_offset: int) -> int:
 
 @custom_op("custom_op::rand_eager_offset", mutates_args={})
 def rand_eager_offset(offset: int, device: torch.device) -> torch.Tensor:
-    base = _reserve_offset(device, int(offset))
+    base = _reserve_offset(device, offset)
     out = torch.empty(1, dtype=torch.int64, device=device)
     out.fill_(int(base))
     return out
@@ -68,7 +58,7 @@ def rand_eager_offset(offset: int, device: torch.device) -> torch.Tensor:
 
 @custom_op("custom_op::rand_eager_offsets", mutates_args={})
 def rand_eager_offsets(offsets: list[int], device: torch.device) -> torch.Tensor:
-    bases = [int(_reserve_offset(device, int(off))) for off in offsets]
+    bases = [_reserve_offset(device, off) for off in offsets]
     cpu = torch.tensor(bases, dtype=torch.int64).pin_memory()
     out = torch.empty_like(cpu, device=device)
     out.copy_(cpu, non_blocking=True)

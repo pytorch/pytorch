@@ -2433,7 +2433,6 @@ def inductor_lookup_seed(seeds, index):
 
 
 def get_seed_and_threads_per_round(x_device_index: int, nelem: int):
-    UNROLL = 4
     prop = torch.cuda.get_device_properties(x_device_index)
     threads_per_round = (
         prop.multi_processor_count * prop.max_threads_per_multi_processor
