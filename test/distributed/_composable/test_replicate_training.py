@@ -108,84 +108,70 @@ class TestReplicateRegisteredParams(FSDPTestMultiThread):
         """Tests the parameter registration after forward."""
         device = torch.device(device_type.type, 0)
         # Single Replicate group
-        for reshard_after_forward in (True, False, None):
-            torch.manual_seed(42)
-            model = MLP(3, device)
-            # Since seed is per process, not per thread, we broadcast to ensure
-            # the same parameters across ranks
-            for param in model.parameters():
-                dist.broadcast(param, src=0)
-            ref_model = copy.deepcopy(model)
-            replicate(model, reshard_after_forward=reshard_after_forward)  # root only
-            inp = torch.randn((2, 3), device=device_type.type)
-            self._assert_dtensor_params(model.parameters())
-            self._assert_same_params(model.parameters(), ref_model.parameters())
-            model(inp)
-            if reshard_after_forward:
-                self._assert_dtensor_params(model.parameters())
-            else:
-                self._assert_tensor_params(model.parameters())
-            self._assert_same_params(model.parameters(), ref_model.parameters())
-            model.reshard()  # however, we can manually reshard
-            self._assert_dtensor_params(model.parameters())
-            self._assert_same_params(model.parameters(), ref_model.parameters())
+        torch.manual_seed(42)
+        model = MLP(3, device)
+        # Since seed is per process, not per thread, we broadcast to ensure
+        # the same parameters across ranks
+        for param in model.parameters():
+            dist.broadcast(param, src=0)
+        ref_model = copy.deepcopy(model)
+        replicate(model)  # root only
+        inp = torch.randn((2, 3), device=device_type.type)
+        self._assert_dtensor_params(model.parameters())
+        self._assert_same_params(model.parameters(), ref_model.parameters())
+        model(inp)
+        self._assert_tensor_params(model.parameters())
+        self._assert_same_params(model.parameters(), ref_model.parameters())
+        model.reshard()  # however, we can manually reshard
+        self._assert_dtensor_params(model.parameters())
+        self._assert_same_params(model.parameters(), ref_model.parameters())
 
         # Multiple Replicate groups
-        for reshard_after_forward in (True, False, None):
-            torch.manual_seed(42)
-            model = nn.Sequential(MLP(3, device), MLP(3, device))
-            for param in model.parameters():
-                dist.broadcast(param, src=0)
-            ref_model = copy.deepcopy(model)
-            replicate(model[0].in_proj, reshard_after_forward=reshard_after_forward)
-            replicate(model[0].out_proj, reshard_after_forward=reshard_after_forward)
-            replicate(model, reshard_after_forward=reshard_after_forward)
+        torch.manual_seed(42)
+        model = nn.Sequential(MLP(3, device), MLP(3, device))
+        for param in model.parameters():
+            dist.broadcast(param, src=0)
+        ref_model = copy.deepcopy(model)
+        replicate(model[0].in_proj)
+        replicate(model[0].out_proj)
+        replicate(model)
 
-            self._assert_dtensor_params(model.parameters())
-            self._assert_same_params(model.parameters(), ref_model.parameters())
-            model(inp)
-            non_root_params = list(model[0].in_proj.parameters()) + list(
-                model[0].out_proj.parameters()
-            )
-            root_params = list(set(model.parameters()) - set(non_root_params))
-            if reshard_after_forward is None:
-                self._assert_dtensor_params(non_root_params)
-                self._assert_tensor_params(root_params)
-            elif reshard_after_forward:
-                self._assert_dtensor_params(non_root_params)
-                self._assert_dtensor_params(root_params)
-            else:
-                self._assert_tensor_params(non_root_params)
-                self._assert_tensor_params(root_params)
-            self._assert_same_params(model.parameters(), ref_model.parameters())
-            for module in model.modules():
-                if isinstance(module, FSDPModule):
-                    module.reshard()  # however, we can manually reshard
-            self._assert_dtensor_params(model.parameters())
-            self._assert_same_params(model.parameters(), ref_model.parameters())
+        self._assert_dtensor_params(model.parameters())
+        self._assert_same_params(model.parameters(), ref_model.parameters())
+        model(inp)
+        non_root_params = list(model[0].in_proj.parameters()) + list(
+            model[0].out_proj.parameters()
+        )
+        root_params = list(set(model.parameters()) - set(non_root_params))
+        self._assert_tensor_params(non_root_params)
+        self._assert_tensor_params(root_params)
+        self._assert_same_params(model.parameters(), ref_model.parameters())
+        for module in model.modules():
+            if isinstance(module, FSDPModule):
+                module.reshard()  # however, we can manually reshard
+        self._assert_dtensor_params(model.parameters())
+        self._assert_same_params(model.parameters(), ref_model.parameters())
 
     @skip_if_lt_x_gpu(1)
     def test_param_registration_after_backward(self):
         """Tests the parameter registration after backward."""
         device = torch.device(device_type.type, 0)
         # Single Replicate group
-        for reshard_after_forward in (True, False):
-            model = MLP(8, device)
-            replicate(model, reshard_after_forward=reshard_after_forward)  # root only
-            inp = torch.randn((2, 8), device=device_type.type)
-            self._assert_dtensor_params(model.parameters())
-            model(inp).sum().backward()
-            self._assert_dtensor_params(model.parameters())
+        model = MLP(8, device)
+        replicate(model)  # root only
+        inp = torch.randn((2, 8), device=device_type.type)
+        self._assert_dtensor_params(model.parameters())
+        model(inp).sum().backward()
+        self._assert_dtensor_params(model.parameters())
 
         # Multiple Replicate groups
-        for reshard_after_forward in (True, False):
-            model = MLP(8, device)
-            replicate(model.in_proj, reshard_after_forward=reshard_after_forward)
-            replicate(model.out_proj, reshard_after_forward=reshard_after_forward)
-            replicate(model, reshard_after_forward=reshard_after_forward)
-            self._assert_dtensor_params(model.parameters())
-            model(inp).sum().backward()
-            self._assert_dtensor_params(model.parameters())
+        model = MLP(8, device)
+        replicate(model.in_proj)
+        replicate(model.out_proj)
+        replicate(model)
+        self._assert_dtensor_params(model.parameters())
+        model(inp).sum().backward()
+        self._assert_dtensor_params(model.parameters())
 
     def _assert_tensor_params(self, params: Iterable[nn.Parameter]):
         # need to iterate over the list multiple times
@@ -287,14 +273,11 @@ class TestReplicate1DTrainingCore(FSDPTest):
                     [(7, 15), (15, 3)],
                     [(16, 17), (17, 8)],
                 ],
-                "use_shard_placement_fn": [False],
             },
             self._test_train_parity_single_group,
         )
 
-    def _test_train_parity_single_group(
-        self, lin_shapes: list[tuple[int, int]], use_shard_placement_fn: bool
-    ):
+    def _test_train_parity_single_group(self, lin_shapes: list[tuple[int, int]]):
         torch.manual_seed(42)
         model = nn.Sequential(
             nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
@@ -333,7 +316,6 @@ class TestReplicate1DTrainingCore(FSDPTest):
         """
         self.run_subtests(
             {
-                "reshard_after_forward": [True, False],
                 "test_device_type": [device_type.type],
                 "offload_policy": [OffloadPolicy()],
                 "delay_after_forward": [False, True],
@@ -354,7 +336,6 @@ class TestReplicate1DTrainingCore(FSDPTest):
         """
         self.run_subtests(
             {
-                "reshard_after_forward": [True],  # save CI time
                 "offload_policy": [
                     CPUOffloadPolicy(pin_memory=True),
                     CPUOffloadPolicy(pin_memory=False),
@@ -371,7 +352,6 @@ class TestReplicate1DTrainingCore(FSDPTest):
 
     def _test_train_parity_multi_group(
         self,
-        reshard_after_forward: Union[bool, int],
         offload_policy: OffloadPolicy,
         test_device_type: str,
         delay_after_forward: bool,
@@ -405,13 +385,12 @@ class TestReplicate1DTrainingCore(FSDPTest):
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         mesh = init_device_mesh(
             test_device_type,
-            (self.world_size, 1),
-            mesh_dim_names=("replicate", "shard"),
+            (self.world_size,),
+            mesh_dim_names=("replicate",),
         )
         fully_shard_fn = functools.partial(
             replicate,
-            device_mesh=mesh,
-            reshard_after_forward=reshard_after_forward,
+            mesh=mesh,
             offload_policy=offload_policy,
         )
         for module in model.modules():
@@ -527,12 +506,10 @@ class TestReplicate1DTrainingCore(FSDPTest):
         Tests parity when running a module that participates multiple
         times in forward.
         """
-        self.run_subtests(
-            {"reshard_after_forward": [True, False]},
-            self._test_multi_forward_module,
-        )
 
-    def _test_multi_forward_module(self, reshard_after_forward: Union[bool, int]):
+        self._test_multi_forward_module()
+
+    def _test_multi_forward_module(self):
         class MultiForwardModule(nn.Module):
             def __init__(self, device: torch.device):
                 super().__init__()
@@ -687,7 +664,6 @@ class TestReplicateTrainingCompose(FSDPTest):
         """
         self.run_subtests(
             {
-                "reshard_after_forward": [True, False],
                 "checkpoint_impl": ["composable", "utils", "wrapper"],
                 "module_grouping": ["block", "mem_eff", "mem_eff_weight_tied"],
                 "test_device_type": [device_type.type],
@@ -697,7 +673,6 @@ class TestReplicateTrainingCompose(FSDPTest):
 
     def _test_train_parity_with_activation_checkpointing(
         self,
-        reshard_after_forward: Union[bool, int],
         checkpoint_impl: str,
         module_grouping: str,
         test_device_type: str,
@@ -740,12 +715,11 @@ class TestReplicateTrainingCompose(FSDPTest):
         # Apply Replicate
         device_mesh = init_device_mesh(
             test_device_type,
-            (self.world_size, 1),
-            mesh_dim_names=("replicate", "shard"),
+            (self.world_size,),
+            mesh_dim_names=("replicate",),
         )
         fsdp_kwargs = {
-            "reshard_after_forward": reshard_after_forward,
-            "device_mesh": device_mesh,
+            "mesh": device_mesh,
         }
         if module_grouping == "mem_eff":
             assert model_args.n_layers == 3
@@ -809,7 +783,6 @@ class TestReplicateSharedParams(FSDPTest):
     def test_train_parity_with_shared_params(self):
         self.run_subtests(
             {
-                "reshard_after_forward": [False, True],
                 "use_activation_checkpointing": [False, True],
             },
             self._test_train_shared_params,
@@ -817,7 +790,6 @@ class TestReplicateSharedParams(FSDPTest):
 
     def _test_train_shared_params(
         self,
-        reshard_after_forward: bool,
         use_activation_checkpointing: bool,
     ):
         torch.manual_seed(42)
@@ -830,8 +802,8 @@ class TestReplicateSharedParams(FSDPTest):
             if isinstance(module, TransformerBlock):
                 if use_activation_checkpointing:
                     checkpoint(module)
-                replicate(module, reshard_after_forward=reshard_after_forward)
-        replicate(model, reshard_after_forward=reshard_after_forward)
+                replicate(module)
+        replicate(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         torch.manual_seed(42 + self.rank + 1)
@@ -868,11 +840,11 @@ class TestReplicateGradientAccumulation(FSDPTest):
         with/without resharding after backward.
         """
 
-        shard_size, replicate_size = 1, self.world_size
+        replicate_size = self.world_size
         meshes = init_device_mesh(
             device_type.type,
-            (replicate_size, shard_size),
-            mesh_dim_names=("replicate", "shard"),
+            (replicate_size,),
+            mesh_dim_names=("replicate",),
         )
         self.run_subtests(
             {
@@ -928,8 +900,7 @@ class TestReplicateGradientAccumulation(FSDPTest):
         ref_model = copy.deepcopy(model).to(device_type)
         replicate_fn = functools.partial(
             replicate,
-            device_mesh=mesh,
-            reshard_after_forward=reshard_after_forward,
+            mesh=mesh,
             offload_policy=offload_policy,
         )
         for mlp in model[1:]:
@@ -1040,8 +1011,8 @@ class TestReplicateGradientAccumulation(FSDPTest):
         ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
         for module in model.modules():
             if isinstance(module, TransformerBlock):
-                replicate(module, reshard_after_forward=False)
-        replicate(model, reshard_after_forward=False)
+                replicate(module)
+        replicate(model)
         optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
 
         num_microbatches = 3
@@ -1145,8 +1116,8 @@ class TestReplicateTPTraining(FSDPTest):
     def init_global_mesh(self) -> DeviceMesh:
         return init_device_mesh(
             device_type.type,
-            (2, 1, 2),
-            mesh_dim_names=("dp_replicate", "dp_shard", "tp"),
+            (2, 2),
+            mesh_dim_names=("dp_replicate", "tp"),
         )
 
     @skip_if_lt_x_gpu(8)
@@ -1154,7 +1125,6 @@ class TestReplicateTPTraining(FSDPTest):
         global_mesh = self.init_global_mesh()
         self.run_subtests(
             {
-                "reshard_after_forward": [False, True],
                 "use_activation_checkpointing": [False, True],
                 "mlp_dim": [3, 5, 16, 17],
                 "foreach": [False],
@@ -1165,12 +1135,11 @@ class TestReplicateTPTraining(FSDPTest):
     def _test_replicate_tp(
         self,
         global_mesh: DeviceMesh,
-        reshard_after_forward: bool,
         use_activation_checkpointing: bool,
         mlp_dim: int,
         foreach: bool,
     ):
-        dp_mesh, tp_mesh = global_mesh["dp_replicate", "dp_shard"], global_mesh["tp"]
+        dp_mesh, tp_mesh = global_mesh["dp_replicate"], global_mesh["tp"]
         dp_pg = dp_mesh._flatten().get_group()  # used for `replicate()`
 
         torch.manual_seed(42)
@@ -1197,8 +1166,8 @@ class TestReplicateTPTraining(FSDPTest):
                 continue
             if use_activation_checkpointing:
                 checkpoint(module)
-            replicate(module, device_mesh=dp_mesh)
-        replicate(model, device_mesh=dp_mesh)
+            replicate(module, mesh=dp_mesh)
+        replicate(model, mesh=dp_mesh)
 
         # Checking parameters match orig model is critical to validate .full_tensor correctly replicates the
         # strided-sharded layers.
@@ -1229,11 +1198,9 @@ class TestReplicateTPTraining(FSDPTest):
 
         for _, p in model.named_parameters():
             self.assertIsInstance(p, DTensor)
-            self.assertEqual(p.device_mesh.ndim, 3)
-            self.assertEqual(len(p.placements), 3)
-            self.assertEqual(
-                p.device_mesh.mesh_dim_names, ("dp_replicate", "dp_shard", "tp")
-            )
+            self.assertEqual(p.device_mesh.ndim, 2)
+            self.assertEqual(len(p.placements), 2)
+            self.assertEqual(p.device_mesh.mesh_dim_names, ("dp_replicate", "tp"))
 
 
 if __name__ == "__main__":
