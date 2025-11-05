@@ -968,6 +968,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # rid of these workarounds here and in `GetAttrVariable`.
         self.attrs_directly_modifed_on_dict = set()
 
+        import torch.utils._pytree as pytree
+
+        self.is_pytree_constant_class = pytree.is_constant_class(self.value_type)
+        if pytree.is_constant_class(self.value_type) and self.source:
+            install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
+
     def __str__(self) -> str:
         inner = self.value_type.__name__
         if inner in [
@@ -989,12 +995,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return self.value_type
 
     def as_python_constant(self):
-        import torch.utils._pytree as pytree
-
-        if pytree.is_constant_class(self.value_type):
-            if self.source is not None:
-                install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
-                return self.value
+        if self.is_pytree_constant_class and self.source:
+            # NOTE pytree constants created in the torch.compile region will
+            # NOT be guarded (even though they have a source set)
+            return self.value
             # TODO else try reconstructing the object by, e.g., leveraging side
             # effects and `as_python_constant`.
         return super().as_python_constant()
