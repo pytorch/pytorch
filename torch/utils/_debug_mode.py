@@ -2,7 +2,6 @@
 import contextlib
 import functools
 import traceback
-import weakref
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
@@ -15,7 +14,6 @@ from torch.utils._python_dispatch import (
 )
 from torch.utils._pytree import tree_all, tree_map
 from torch.utils._traceback import CapturedTraceback
-from torch.utils.weak import WeakIdRef
 
 
 if TYPE_CHECKING:
@@ -58,48 +56,29 @@ def _stringify_dtensor_spec(spec) -> str:
     return DTensorSpec.format_shard_order_str(spec.placements, spec.shard_order)
 
 
-class TensorIdTracker:
-    def __init__(self):
-        self.tensor_memo: dict[WeakIdRef, int] = {}
-        self.next_tensor_id = 0
-
-    def _id(self, tensor) -> int:
-        with torch._C._DisablePythonDispatcher():
-            o = WeakIdRef(tensor)
-
-            def del_memo():
-                self.tensor_memo.pop(o, None)
-
-            weakref.finalize(tensor, del_memo)
-            if o not in self.tensor_memo:
-                self.tensor_memo[o] = self.next_tensor_id
-                self.next_tensor_id += 1
-            return self.tensor_memo[o]
-
-
-def _tensor_debug_string(tensor, attributes, tensor_memo=None) -> str:
+def _tensor_debug_string(tensor, attributes) -> str:
     """Convert tensor to debug string representation."""
 
     if isinstance(tensor, torch.Tensor):
         tensor_debug_str = f"{dtype_abbrs[tensor.dtype]}{_stringify_shape(tensor.shape)}{_stringify_attributes(tensor, attributes)}"
-        id_str = f"${tensor_memo._id(tensor)}" if tensor_memo is not None else ""
+
         if isinstance(tensor, torch.distributed.tensor.DTensor):
             # omitted device mesh
-            return f"dt{id_str}: {tensor_debug_str}| {_stringify_dtensor_spec(tensor._spec)}"
+            return f"dt: {tensor_debug_str}| {_stringify_dtensor_spec(tensor._spec)}"
         elif isinstance(tensor, FakeTensor):
-            return f"ft{id_str}: {tensor_debug_str}"
+            return f"ft: {tensor_debug_str}"
         else:
-            return f"t{id_str}: {tensor_debug_str}"
+            return f"t: {tensor_debug_str}"
     else:
         raise RuntimeError(f"Unsupported tensor type: {type(tensor)}")
 
 
-def _arg_to_str(arg, attributes, tensor_memo=None) -> str:
+def _arg_to_str(arg, attributes) -> str:
     from torch.distributed.tensor._dtensor_spec import DTensorSpec
 
     def to_str(x):
         if isinstance(x, torch.Tensor):
-            return _tensor_debug_string(x, attributes, tensor_memo)
+            return _tensor_debug_string(x, attributes)
         elif isinstance(x, DTensorSpec):
             return _stringify_dtensor_spec(x)
         return x
@@ -165,29 +144,14 @@ class _DebugCall:
         # results from dispatch hooks
         self.record = record
         self.log = log
-        self.output_str: Optional[str] = None
 
-    def stringify_args(
-        self, attributes: list[str], tensor_memo: Optional[TensorIdTracker] = None
-    ) -> None:
+    def stringify_args(self, attributes: list[str]) -> None:
         """
         To reduce memory consumption, this method stringifies args/kwargs, stores the result, and deletes original args/kwargs.
         """
         raise NotImplementedError(
             "Subclasses must implement stringify_args(), even if no-op"
         )
-
-    def stringify_output(
-        self,
-        output: Any,
-        attributes: list[str],
-        tensor_memo: Optional[TensorIdTracker] = None,
-    ) -> None:
-        """Store stringified version of call output in self.output_str"""
-        if tree_all(lambda x: x is None, output):
-            return
-        output_str = tree_map(lambda x: _arg_to_str(x, attributes, tensor_memo), output)
-        self.output_str = f"  ->  {str(output_str)}"
 
     def render(self, attributes: list[str]) -> str:
         raise NotImplementedError("Subclasses must implement string render()")
@@ -215,16 +179,11 @@ class _OpCall(_DebugCall):
         self.args_str: Optional[str] = None
         self.kwargs_str: Optional[str] = None
 
-    def stringify_args(
-        self, attributes: list[str], tensor_memo: Optional[TensorIdTracker] = None
-    ) -> None:
-        self.args_str = ", ".join(
-            _arg_to_str(arg, attributes, tensor_memo) for arg in self.args
-        )
+    def stringify_args(self, attributes: list[str]) -> None:
+        self.args_str = ", ".join(_arg_to_str(arg, attributes) for arg in self.args)
         if self.kwargs:
             self.kwargs_str = ", " + ", ".join(
-                f"{k}={_arg_to_str(v, attributes, tensor_memo)}"
-                for k, v in self.kwargs.items()
+                f"{k}={_arg_to_str(v, attributes)}" for k, v in self.kwargs.items()
             )
         else:
             self.kwargs_str = ""
@@ -256,8 +215,6 @@ class _OpCall(_DebugCall):
 
         base_str = f"{op_name}({args_str}{kwargs_str})"
 
-        if self.output_str:
-            base_str += self.output_str
         if self.log:
             base_str += f"  # {self.log}"
         return base_str
@@ -290,10 +247,8 @@ class _RedistributeCall(_DebugCall):
 
         self.arg_str: Optional[str] = None
 
-    def stringify_args(
-        self, attributes: list[str], tensor_memo: Optional[TensorIdTracker] = None
-    ) -> None:
-        self.arg_str = f"{_arg_to_str(self.arg, attributes, tensor_memo)}"
+    def stringify_args(self, attributes: list[str]) -> None:
+        self.arg_str = f"{_arg_to_str(self.arg, attributes)}"
         del self.arg
 
     def render(self, attributes: list[str]) -> str:
@@ -308,11 +263,7 @@ class _RedistributeCall(_DebugCall):
             src_placement_str = _arg_to_str(self.src_placement, attributes)
             dst_placement_str = _arg_to_str(self.dst_placement, attributes)
             placement_str = f"{src_placement_str} -> {dst_placement_str}"
-
-        base_str = f"{REDISTRIBUTE_FUNC}({arg_str}, {placement_str})"
-        if self.output_str:
-            base_str += self.output_str
-        return base_str
+        return f"{REDISTRIBUTE_FUNC}({arg_str}, {placement_str})"
 
     def __iter__(self):
         # for BC; tuple(self) returns (op, placement info, kwargs, call_depth)
@@ -337,9 +288,7 @@ class _NNModuleCall(_DebugCall):
         super().__init__(call_depth, stack=stack)
         self.module_name = module_name
 
-    def stringify_args(
-        self, attributes: list[str], tensor_memo: Optional[TensorIdTracker] = None
-    ) -> None:
+    def stringify_args(self, attributes: list[str]) -> None:
         pass  # nothing to stringify
 
     def render(self, attributes: list[str]) -> str:
@@ -392,8 +341,6 @@ class DebugMode(TorchDispatchMode):
         record_nn_module=False,
         store_original_args=False,
         record_stack_trace=False,
-        record_output=False,
-        record_ids=False,
     ):
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
@@ -431,24 +378,8 @@ class DebugMode(TorchDispatchMode):
         # e.g. via DebugMode(record_stack_trace=True), or torch.autograd.set_detect_anomaly().
         self.record_stack_trace = record_stack_trace
 
-        # Records call outputs in logs (e.g. for __torch_dispatch__, __torch_function__, redistribute_input)
-        self.record_output: bool = record_output
-
-        # Annotates string dumps with graph-style tensor ids, e.g. op($1, $2) -> $3.
-        self.record_ids: bool = record_ids
-
-        self.reset()
-
-    def reset(self):
         self.operators = []
         self.call_depth = 0
-        self._tensor_memo = TensorIdTracker()
-        self._output_info: dict[int, object] = {}
-
-    def _track_op_output(self, op_index, result):
-        """Assign IDs to output tensors and store in output_info"""
-        # self._track_tensor_ids(result)
-        self._output_info[op_index] = result
 
     # Without this override, running torch.compile under DebugMode
     # will force torch.compile to always use the “eager” backend
@@ -459,35 +390,20 @@ class DebugMode(TorchDispatchMode):
 
     def _record_call(self, call):
         if not self.store_original_args:
-            call.stringify_args(
-                self.record_tensor_attributes,
-                self._tensor_memo if self.record_ids else None,
-            )
+            call.stringify_args(self.record_tensor_attributes)
         self.operators.append(call)
-
-    def _record_call_output(self, call, output):
-        if not self.record_output:
-            return
-        call.stringify_output(
-            output,
-            self.record_tensor_attributes,
-            self._tensor_memo if self.record_ids else None,
-        )
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
 
-        call = _OpCall(
-            func, args, kwargs, self.call_depth, stack=self.record_stack_trace
+        self._record_call(
+            _OpCall(func, args, kwargs, self.call_depth, stack=self.record_stack_trace)
         )
-        self._record_call(call)
 
         try:
             self.call_depth += 1
-            result = func(*args, **kwargs)
-            self._record_call_output(call, result)
-            return result
+            return func(*args, **kwargs)
         finally:
             self.call_depth -= 1
 
@@ -529,13 +445,13 @@ class DebugMode(TorchDispatchMode):
 
         result = func(*args, **kwargs)
         if call:
-            self._record_call_output(call, result)
             _run_dispatch_hooks(call, func, types, args, kwargs, result)
 
         return result
 
     def __enter__(self):
-        self.reset()
+        self.operators = []
+        self.call_depth = 0
 
         if self.record_torchfunction:
             torch._C._push_on_torch_function_stack(self)
