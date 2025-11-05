@@ -333,7 +333,7 @@ def list_mode_options(
     mode_options: dict[str, dict[str, bool]] = {
         "default": {},
         # lite backend for opt-in optimizations
-        "light": {
+        "lite": {
             "fallback_by_default": True,
             "use_dce": False,
             "allow_buffer_reuse": False,
@@ -342,10 +342,10 @@ def list_mode_options(
             "triton.reorder_for_reducing_graph_partitions": False,
             "use_pre_grad_passes": False,
             "use_joint_graph_passes": False,
-            "use_post_grad_passes": True,
-            "aten_distributed_optimizations.enable_overlap_scheduling": True,
+            "use_post_grad_passes": False,
+            # "aten_distributed_optimizations.enable_overlap_scheduling": True,
             "use_decomposition": False,
-            "triton.cudagraphs": True,
+            # "triton.cudagraphs": True,
         },
         # enable cudagraphs
         "reduce-overhead": {
