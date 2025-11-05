@@ -1642,9 +1642,17 @@ class SkipFunctionVariable(VariableTracker):
             skip_frame_msg = kwargs.get("msg")
             if skip_frame_msg:
                 skip_frame_msg = skip_frame_msg.as_python_constant()
-            raise SkipFrame(
                 f"Skip frame due to `torch._dynamo.skip_frame()`. Message: {skip_frame_msg}"
+            frame_info = (
+                f"{getattr(tx.f_code, 'co_name', '<unknown>')} "
+                f"({getattr(tx.f_code, 'co_filename', '<unknown>')} "
+                f"line {getattr(tx.f_code, 'co_firstlineno', 0)})"
             )
+            msg = (
+                f"torch.compile intentionally decided to skip the frame {frame_info} and fall back to eager.\n"
+                f"Reason: Skip frame due to `torch._dynamo.skip_frame()`. Message: {skip_frame_msg}"
+            )
+            raise SkipFrame(msg)
         elif self.value is torch._dynamo.step_unsupported:
             raise StepUnsupported
         else:

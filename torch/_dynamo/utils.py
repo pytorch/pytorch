@@ -2253,7 +2253,8 @@ def skip_frame_if_in_functorch_mode(val: torch.Tensor) -> None:
         # This will be GradTrackingTensor/BatchedTensor/etc
         functorch_subclass_name = re.sub(r"\(.*", "", repr(val))
         raise SkipFrame(
-            f"torch.compile cannot be run in context: {functorch_subclass_name}"
+            f"torch.compile intentionally decided to skip the frame and fall back to eager.\n"
+            f"Reason: torch.compile cannot be run in context: {functorch_subclass_name}"
         ) from e
 
 

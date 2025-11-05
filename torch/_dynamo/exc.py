@@ -802,5 +802,14 @@ def format_error_msg(
 ) -> str:
     if config.verbose:
         return format_error_msg_verbose(exc, code, record_filename, frame)
-    return f"WON'T CONVERT {code.co_name} {code.co_filename}\
- line {code.co_firstlineno} \ndue to: \n{format_exc()}"
+    exc_msg = str(exc.args[0]) if exc.args else str(exc)
+    frame_info = (
+        f"{getattr(code, 'co_name', '<unknown>')} "
+        f"({getattr(code, 'co_filename', '<unknown>')} "
+        f"line {getattr(code, 'co_firstlineno', 0)})"
+    )
+    msg = (
+        f"torch.compile will skip tracing the frame {frame_info} and fall back to eager.\n"
+        f"Reason: {exc_msg}"
+    )
+    return msg

@@ -228,6 +228,81 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         self.assertEqual(f4(torch.zeros(3)), torch.zeros(3) + 255)
         self.assertEqual(len(torch._dynamo.utils.counters["graph_break"]), 2)
 
+    def test_skip_frame_nested_with_context_manager(self):
+        global f1, f2
+
+        class CtxMgr:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                pass
+
+        def f1(x):
+            x = x + 1
+            with CtxMgr():
+                if x.sum() > 0:
+                    x = x + 2
+            return x + 4
+
+        def f2(x):
+            return f1(x + 8) + 16
+
+        result = torch.compile(f2, backend="eager")(torch.randn(3))
+        expected = f2(torch.randn(3))
+        self.assertEqual(result.shape, expected.shape)
+
+    def test_skip_frame_message_in_nested_calls(self):
+        global f1, f2, f3
+
+        class CtxMgr:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                pass
+
+        def f1(x):
+            with CtxMgr():
+                assert x is not None
+            return x + 1
+
+        def f2(x):
+            return f1(x + 2) + 4
+
+        def f3(x):
+            return f2(x + 8) + 16
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f3)
+        x = torch.randn(3)
+        result = opt_fn(x)
+        expected = f3(x)
+        self.assertEqual(result.shape, expected.shape)
+
+    def test_skip_frame_with_loop_nested(self):
+        global f1, f2
+
+        class CtxMgr:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                pass
+
+        def f1(x):
+            for i in range(2):
+                with CtxMgr():
+                    if x.sum() > i:
+                        x = x + 1
+            return x
+
+        def f2(x):
+            return f1(x + 4) + 8
+
+        result = torch.compile(f2, backend="eager")(torch.randn(3))
+        self.assertIsNotNone(result)
+
     def test_supported_ctx_manager(self):
         global check, check_disabled, f1, f2, f3
 

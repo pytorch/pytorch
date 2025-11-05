@@ -1870,7 +1870,7 @@ class ConvertFrame:
                 raise
 
             soft_fail = isinstance(e, Unsupported)
-
+            code = frame.f_code
             # This is a soft failure. In the sense, the code path reaches here
             # when we do not support graph breaks on bytecodes like LOAD_ATTR,
             # BUILD_SET etc. In such case, we can fallback to eager without
@@ -1885,7 +1885,17 @@ class ConvertFrame:
                         user_stack_formatted = "".join(
                             traceback.format_list(user_stack)
                         )
-                        user_stack_trace = f"Graph break: skip: from user code at:\n{user_stack_formatted}"
+                        frame_info = (
+                            f"{getattr(code, 'co_name', '<unknown>')} "
+                            f"({getattr(code, 'co_filename', '<unknown>')} "
+                            f"line {getattr(code, 'co_firstlineno', 0)})"
+                        )
+                        user_stack_trace = (
+                            "Graph break: torch.compile cannot properly resume from this graph break, which results in a skip.\n"
+                            f"torch.compile will skip tracing the frame {frame_info} and fall back to eager.\n"
+                            "The graph break occurred in the following user code:\n"
+                            f"{user_stack_formatted}"
+                        )
                         torch._logging.trace_structured(
                             "artifact",
                             metadata_fn=lambda: {
@@ -1894,10 +1904,18 @@ class ConvertFrame:
                             },
                             payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc()}",
                         )
-                        graph_break_log.debug(
-                            user_stack_trace,
-                            exc_info=True,
-                        )
+                        if config.verbose:
+                            graph_break_log.debug(
+                                user_stack_trace,
+                                exc_info=True,
+                                stack_info=True,
+                            )
+                        else:
+                            graph_break_log.debug(
+                                user_stack_trace,
+                                exc_info=True,
+                                stack_info=False,
+                            )
 
             if not config.suppress_errors and not soft_fail:
                 raise
