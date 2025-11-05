@@ -88,7 +88,6 @@ def dedup_dispatch(
         ```
         import torch
         import torch.distributed._symmetric_memory as symm_mem
-        from torch.nn.parallel.moe import dedup_dispatch
 
         allocator = symm_mem.get_mempool_allocator(device)
         mempool = torch.cuda.MemPool(allocator)

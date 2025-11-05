@@ -1288,7 +1288,7 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
         mempool = torch.cuda.MemPool(allocator)
 
         # Dedup dispatch
-        from torch.nn.parallel.moe import dedup_dispatch
+        from torch.nn.moe._dispatch import dedup_dispatch
 
         # A ratio between worst-case output buffer size versus input seqlen
         out_len_ratio = n_experts
