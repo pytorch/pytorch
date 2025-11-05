@@ -7008,6 +7008,16 @@ class ShapeEnv:
                         ok = len(free_unbacked_symbols(new_var)) == 0
                         if ok:
                             self._set_replacement(free[0], new_var, "solve")
+
+            except NotImplementedError:
+                pass
+        else:
+            # expression has mod.
+            mod_expr = next(iter(expr.atoms(Mod)))
+            try:
+                r = try_solve(expr, mod_expr, floordiv_inequality=False)
+                if r is not None and r[1] == 0:
+                    self._add_divisible(mod_expr)
             except NotImplementedError:
                 pass
         return
