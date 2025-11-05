@@ -58,7 +58,7 @@ jobs:
   dynamo-py3_10-test:
     name: dynamo-test-py3_10
     uses: ./.github/workflows/_linux-test.yml
-    needs: dynamo-py-3_10-build
+    needs: dynamo-py3_10-build
     with:
       build-environment: linux-jammy-py3.10-clang12
       docker-image: ${{ needs.dynamo-build.outputs.docker-image }}
@@ -86,7 +86,7 @@ jobs:
   dynamo-py3_11-test:
     name: dynamo-test-py3_11
     uses: ./.github/workflows/_linux-test.yml
-    needs: dynamo-py-3_11-build
+    needs: dynamo-py3_11-build
     with:
       build-environment: linux-jammy-py3.11-clang12
       docker-image: ${{ needs.dynamo-build.outputs.docker-image }}
@@ -114,7 +114,7 @@ jobs:
   dynamo-py3_12-test:
     name: dynamo-test-py3_12
     uses: ./.github/workflows/_linux-test.yml
-    needs: dynamo-py-3_12-build
+    needs: dynamo-py3_12-build
     with:
       build-environment: linux-jammy-py3.12-clang12
       docker-image: ${{ needs.dynamo-build.outputs.docker-image }}
@@ -142,7 +142,7 @@ jobs:
   dynamo-py3_13-test:
     name: dynamo-test-py3_13
     uses: ./.github/workflows/_linux-test.yml
-    needs: dynamo-py-3_13-build
+    needs: dynamo-py3_13-build
     with:
       build-environment: linux-jammy-py3.13-clang12
       docker-image: ${{ needs.dynamo-build.outputs.docker-image }}
