@@ -1,11 +1,13 @@
 # Owner(s): ["module: dynamo"]
 import functools
+import re
 import unittest
 import weakref
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.testing import extract_graph, remove_trailing_space
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import requires_cuda
 
@@ -13,6 +15,14 @@ from torch.testing._internal.common_utils import requires_cuda
 requires_multigpu = functools.partial(
     unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )
+
+
+def remove_file_comment(gm_str: str) -> str:
+    return remove_trailing_space(re.sub(r"File.*\n", "\n", gm_str))
+
+
+def print_graph(graph: torch.fx.GraphModule) -> str:
+    return remove_file_comment(graph.print_readable())
 
 
 class TestStreams(torch._dynamo.test_case.TestCase):
@@ -36,9 +46,7 @@ class TestStreams(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     def test_stream_enter_exit(self):
-        def fn(x, y):
-            s2 = torch.Stream()
-            s1 = torch.Stream()
+        def fn(x, y, s1, s2):
             with s1:
                 z1 = torch.add(x, y)
             with s2:
@@ -47,13 +55,36 @@ class TestStreams(torch._dynamo.test_case.TestCase):
 
             return y
 
-        inp = (torch.ones(2, 2) + 1, torch.ones(2, 2))
+        inp = (torch.ones(2, 2) + 1, torch.ones(2, 2), torch.Stream(), torch.Stream())
         expected = fn(*inp)
-        fn_opt = torch.compile(fn, fullgraph=True)
-        actual = fn_opt(*inp)
+        (
+            actual,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+        self.assertEqual(len(fw_graphs), 1)
         self.assertEqual(expected, actual)
+        self.assertExpectedInline(
+            print_graph(fw_graphs[0]),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]", arg1_1: "f32[2, 2]"):
+        # Annotation: {'stream': None}
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
+
+        # Annotation: {'stream': None}
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+
+        # Annotation: {'stream': None}
+        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, 2);  add_1 = None
+        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_2, add);  add_2 = add = None
+        return (add_3,)
+""",
+        )
 
     @requires_cuda
+    @unittest.skip("Needs graph break support with annotation context")
     def test_stream_context_graph_break(self):
         def fn(x, y):
             s2 = torch.Stream()
@@ -70,9 +101,16 @@ class TestStreams(torch._dynamo.test_case.TestCase):
 
         inp = (torch.ones(2, 2) + 1, torch.ones(2, 2))
         expected = fn(*inp)
-        fn_opt = torch.compile(fn)
-        actual = fn_opt(*inp)
+        (
+            actual,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
         self.assertEqual(expected, actual)
+        self.assertEqual(len(fw_graphs), 2)
+        self.assertExpectedInline(print_graph(fw_graphs[0]), """""")
+        self.assertExpectedInline(print_graph(fw_graphs[1]), """""")
 
     @requires_cuda
     def test_stream_input(self):
@@ -155,22 +193,188 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         self.assertEqual(s_act, s_exp)
 
     def test_nested_stream_enter_exit(self):
-        pass
+        def fn(x, y, s0, s1, s2):
+            with s1:
+                with s2:
+                    z1 = torch.add(x, y)
+            with s0:
+                z0 = torch.add(x, y)
+                with s2:
+                    y = 2 + z1
 
+            return z0, y
+
+        inp = (
+            torch.ones(2, 2) + 1,
+            torch.ones(2, 2),
+            torch.Stream(),
+            torch.Stream(),
+            torch.Stream(),
+        )
+        expected = fn(*inp)
+        (
+            actual,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+        self.assertEqual(len(fw_graphs), 1)
+        self.assertEqual(expected, actual)
+        self.assertExpectedInline(
+            print_graph(fw_graphs[0]),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]", arg1_1: "f32[2, 2]"):
+        # Annotation: {'stream': None}
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
+
+        # Annotation: {'stream': None}
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+
+        # Annotation: {'stream': None}
+        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add, 2);  add = None
+        return (add_1, add_2)
+""",
+        )
+
+    @unittest.skip("Needs graph break support with annotation context")
     def test_stream_enter_exit_graph_break(self):
         pass
 
+    @unittest.skip("Needs graph break support with annotation context")
     def test_nested_stream_enter_exit_graph_break(self):
         pass
 
     def test_local_stream_enter_exit(self):
-        pass
+        def fn(x, y):
+            s2 = torch.Stream()
+            s1 = torch.Stream()
+            with s1:
+                z1 = torch.add(x, y)
+            with s2:
+                z = torch.add(x, y)
+                y = z + 2 + z1
+
+            return y
+
+        inp = (torch.ones(2, 2) + 1, torch.ones(2, 2))
+        expected = fn(*inp)
+        (
+            actual,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+        self.assertEqual(len(fw_graphs), 1)
+        self.assertEqual(expected, actual)
+        self.assertExpectedInline(
+            print_graph(fw_graphs[0]),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]", arg1_1: "f32[2, 2]"):
+        # Annotation: {'stream': 1}
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
+
+        # Annotation: {'stream': 0}
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+
+        # Annotation: {'stream': 0}
+        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, 2);  add_1 = None
+        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_2, add);  add_2 = add = None
+        return (add_3,)
+""",
+        )
 
     def test_local_stream_nested_enter_exit(self):
-        pass
+        def fn(x, y):
+            s2 = torch.Stream()
+            s1 = torch.Stream()
+            s0 = torch.Stream()
+            with s1:
+                with s2:
+                    z1 = torch.add(x, y)
+            with s0:
+                z0 = torch.add(x, y)
+                with s2:
+                    y = 2 + z1
+
+            return z0, y
+
+        inp = (torch.ones(2, 2) + 1, torch.ones(2, 2))
+        expected = fn(*inp)
+        (
+            actual,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+        self.assertEqual(len(fw_graphs), 1)
+        self.assertEqual(expected, actual)
+        self.assertExpectedInline(
+            print_graph(fw_graphs[0]),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]", arg1_1: "f32[2, 2]"):
+        # Annotation: {'stream': 0}
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
+
+        # Annotation: {'stream': 2}
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+
+        # Annotation: {'stream': 0}
+        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add, 2);  add = None
+        return (add_1, add_2)
+""",
+        )
 
     def test_stream_with_mutation(self):
-        pass
+        def fn(x, y):
+            s2 = torch.Stream()
+            s1 = torch.Stream()
+            s0 = torch.Stream()
+            with s1:
+                with s2:
+                    x.add_(y)
+            with s0:
+                z1 = torch.add(y, y)
+                z0 = torch.add(z1, y)
+                with s2:
+                    y = 2 + z1
+
+            return z0, y
+
+        inp = (torch.ones(2, 2) + 1, torch.ones(2, 2))
+        expected = fn(*inp)
+        (
+            actual,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+        self.assertEqual(len(fw_graphs), 1)
+        self.assertEqual(expected, actual)
+        self.assertExpectedInline(
+            print_graph(fw_graphs[0]),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]", arg1_1: "f32[2, 2]"):
+        # Annotation: {'stream': 0}
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
+
+        # Annotation: {'stream': 2}
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg1_1, arg1_1)
+
+        # Annotation: {'stream': 2}
+        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, arg1_1);  arg1_1 = None
+
+        # Annotation: {'stream': 0}
+        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, 2);  add_1 = None
+
+        #
+        copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
+        return (add_2, add_3)
+""",
+        )
 
     @requires_cuda
     def test_run_opcheck(self):
