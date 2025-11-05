@@ -53,6 +53,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     tf32_on_and_off,
     tf32_enabled,
+    math_sdp_precision,
 )
 
 if TEST_FAIRSEQ:
@@ -3412,6 +3413,7 @@ class TestSDPACudaOnly(NNTestCase):
     )
     @parametrize("scale", [None, "l1"])
     @tf32_enabled()
+    @math_sdp_precision("ieee")
     def test_mem_efficient_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                        head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
                                                        scale: str):
@@ -3527,6 +3529,7 @@ class TestSDPACudaOnly(NNTestCase):
     )
     @parametrize("scale", [None, "l1"])
     @tf32_enabled()
+    @math_sdp_precision("ieee")
     def test_mem_efficient_attention_attn_mask_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int,
                                                                  seq_len_k: int, head_dim: int, is_causal: bool,
                                                                  dropout_p: float, dtype: torch.dtype,
@@ -3640,6 +3643,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("enable_gqa", [True, False])
     @parametrize("n_heads", [[16, 8], [10, 2]])
     @tf32_enabled()
+    @math_sdp_precision("ieee")
     def test_flash_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
                                                scale: str, enable_gqa: bool, n_heads: list[int]):
@@ -3785,6 +3789,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("scale", [None, "l1"])
     @parametrize("fused_kernel", PLATFORM_SPECIFIC_SDPA)
     @tf32_enabled()
+    @math_sdp_precision("ieee")
     def test_fused_attention_vs_math_ref_grads_cudagraph(self, device, batch_size: int,
                                                          seq_len_q: int, seq_len_k: int,
                                                          head_dim: int,
@@ -4099,6 +4104,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("dtype", [torch.float16])
     @parametrize("scale", [None, "l1"])
     @parametrize("is_causal", [True, False])
+    @math_sdp_precision("ieee")
     def test_flash_attention_vs_math_ref_grads_nestedtensor(self, device, batch_size: int, max_seq_len_q: int, max_seq_len_kv: int,
                                                             head_dim: int, dropout_p: float, dtype: torch.dtype,
                                                             scale: str, is_causal: bool):
