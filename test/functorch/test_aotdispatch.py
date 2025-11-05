@@ -167,6 +167,14 @@ def _pack_fp8_wrap(x):
     if not x.dtype.is_floating_point:
         return x
 
+    if type(x) is not torch.Tensor:
+        # Check only during compilation
+        # Test calls hooks to get reference output
+        ctx = torch._functorch._aot_autograd.graph_compile._get_saved_tensor_hook_context()
+        assert ctx["_fw_graph"] is not None
+        assert ctx["_bw_graph"] is not None
+        assert ctx["_node"] is not None
+
     return (x.dtype, x.to(torch.float8_e5m2))
 
 
@@ -176,6 +184,13 @@ def _unpack_fp8_wrap(x):
         return x
 
     dtype, tensor = x
+    if type(tensor) is not torch.Tensor:
+        # Check only during compilation
+        # Test calls hooks to get reference output
+        ctx = torch._functorch._aot_autograd.graph_compile._get_saved_tensor_hook_context()
+        assert ctx["_fw_graph"] is not None
+        assert ctx["_bw_graph"] is not None
+        assert ctx["_node"] is not None
     return tensor.to(dtype)
 
 
@@ -7356,7 +7371,6 @@ metadata incorrectly.
         aot_eager = torch.compile(backend="aot_eager")(fn)(x)
         self.assertEqual(eager, aot_eager, atol=0, rtol=0)
 
-    @unittest.expectedFailure
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_rms_norm(self):
         # Only CUDA rms norm fails to be decomposed

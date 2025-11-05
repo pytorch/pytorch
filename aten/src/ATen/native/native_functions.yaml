@@ -2602,12 +2602,16 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: exp.out
   variants: function, method
+  dispatch:
+    SparseCPU, SparseCUDA, SparseMPS: exp_sparse
   tags: [core, pointwise]
 
 - func: exp_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured_delegate: exp.out
   variants: function, method
+  dispatch:
+    SparseCPU, SparseCUDA, SparseMPS: exp_sparse_
   tags: pointwise
 
 - func: exp.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
@@ -2616,6 +2620,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS, MTIA: exp_out
+    SparseCPU, SparseCUDA, SparseMPS: exp_sparse_out
   tags: pointwise
 
 - func: exp2(Tensor self) -> Tensor
@@ -4795,6 +4800,12 @@
     CompositeExplicitAutograd: rand_like
   autogen: rand_like.out
 
+- func: rand_like.generator(Tensor self, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  tags: nondeterministic_seeded
+  dispatch:
+    CompositeExplicitAutograd: rand_like
+  autogen: rand_like.generator_out
+
 - func: randint(SymInt high, SymInt[] size, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
@@ -4843,6 +4854,14 @@
     CompositeExplicitAutograd: randint_like
   autogen: randint_like.out
 
+- func: randint_like.generator(Tensor self, SymInt high, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  tags: nondeterministic_seeded
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: randint_like
+  autogen: randint_like.generator_out
+
 - func: randint_like.Tensor(Tensor self, Tensor high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
@@ -4851,6 +4870,14 @@
     CompositeExplicitAutograd: randint_like
   autogen: randint_like.Tensor_out
 
+- func: randint_like.Tensor_generator(Tensor self, Tensor high, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  tags: nondeterministic_seeded
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: randint_like
+  autogen: randint_like.Tensor_generator_out
+
 - func: randint_like.low_dtype(Tensor self, SymInt low, SymInt high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
@@ -4858,6 +4885,14 @@
     # non-differentiable so NonFunctional doesn't apply
     CompositeExplicitAutograd: randint_like
   autogen: randint_like.low_dtype_out
+
+- func: randint_like.low_generator_dtype(Tensor self, SymInt low, SymInt high, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  tags: nondeterministic_seeded
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: randint_like
+  autogen: randint_like.low_generator_dtype_out
 
 - func: randn(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: [core, nondeterministic_seeded]
@@ -4898,6 +4933,14 @@
     # non-differentiable so NonFunctional doesn't apply
     CompositeExplicitAutograd, CompositeImplicitAutogradNestedTensor: randn_like
   autogen: randn_like.out
+
+- func: randn_like.generator(Tensor self, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  tags: nondeterministic_seeded
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd, CompositeImplicitAutogradNestedTensor: randn_like
+  autogen: randn_like.generator_out
 
 - func: randperm(SymInt n, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: [core, nondeterministic_seeded]
@@ -8865,11 +8908,11 @@
   autogen: bitwise_right_shift.Scalar_Tensor_out
   tags: pointwise
 
-- func: tril_(Tensor(a!) self, int diagonal=0) -> Tensor(a!)
+- func: tril_(Tensor(a!) self, SymInt diagonal=0) -> Tensor(a!)
   structured_delegate: tril.out
   variants: method
 
-- func: triu_(Tensor(a!) self, int diagonal=0) -> Tensor(a!)
+- func: triu_(Tensor(a!) self, SymInt diagonal=0) -> Tensor(a!)
   structured_delegate: triu.out
   variants: method
 
@@ -8993,25 +9036,25 @@
 - func: cross(Tensor self, Tensor other, int? dim=None) -> Tensor
   variants: method, function
 
-- func: triu.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
+- func: triu.out(Tensor self, SymInt diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
     CPU: triu_cpu
     CUDA: triu_cuda
     MPS: triu_mps_out
 
-- func: triu(Tensor self, int diagonal=0) -> Tensor
+- func: triu(Tensor self, SymInt diagonal=0) -> Tensor
   structured_delegate: triu.out
   variants: method, function
 
-- func: tril.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
+- func: tril.out(Tensor self, SymInt diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
     CPU: tril_cpu
     CUDA: tril_cuda
     MPS: tril_mps_out
 
-- func: tril(Tensor self, int diagonal=0) -> Tensor
+- func: tril(Tensor self, SymInt diagonal=0) -> Tensor
   structured_delegate: tril.out
   variants: method, function
 
@@ -15095,7 +15138,7 @@
     CPU: _scaled_dot_product_flash_attention_cpu
   tags: nondeterministic_seeded
 
-- func: _scaled_dot_product_fused_attention_overrideable(Tensor query, Tensor key, Tensor value, Tensor? attn_bias=None, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None, bool compute_log_sumexp=True) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
+- func: _scaled_dot_product_fused_attention_overrideable(Tensor query, Tensor key, Tensor value, Tensor? attn_bias=None, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   dispatch:
     CompositeExplicitAutograd: _scaled_dot_product_fused_attention_overrideable
     XPU: _scaled_dot_product_fused_attention_overrideable_xpu
@@ -15119,7 +15162,6 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: _scaled_dot_product_fused_attention_overrideable_backward
-    XPU: _scaled_dot_product_fused_attention_overrideable_backward_xpu
 
 - func: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)
   dispatch:
