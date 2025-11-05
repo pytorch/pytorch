@@ -63,6 +63,8 @@ Note that for the time being, implementations registered via `TORCH_STABLE_LIBRA
 
 Note that native functions could previously be called as Tensor methods (e.g. `Tensor.pad`). With the stable ABI this is not currently possible and one must use the `torch::stable::` variant instead (e.g. `torch::stable::pad`).
 
+As mentioned above, the Libtorch stable ABI is still under development. If there is any API you would like to see added to the stable ABI, please file a request through a [new issue on the PyTorch repo](https://github.com/pytorch/pytorch/issues).
+
 Below is a simple example of migrating an existing kernel that uses `TORCH_LIBRARY` to the stable ABI (`TORCH_STABLE_LIBRARY`). For a larger end to end example you can take a look at the FA3 repository. Specifically the diff between [`flash_api.cpp`](https://github.com/Dao-AILab/flash-attention/blob/ad70a007e6287d4f7e766f94bcf2f9a813f20f6b/hopper/flash_api.cpp#L1) and the stable variant [`flash_api_stable.cpp`](https://github.com/Dao-AILab/flash-attention/blob/ad70a007e6287d4f7e766f94bcf2f9a813f20f6b/hopper/flash_api_stable.cpp#L1).
 
 
