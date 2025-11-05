@@ -47,9 +47,11 @@ else:
         get_process_group_ranks,
         get_rank,
         get_world_size,
+        GroupMember,
         init_process_group,
         is_initialized,
         new_group,
+        PrefixStore,
         ProcessGroup,
         split_group,
     )
@@ -327,8 +329,32 @@ else:
             default_initialized = is_initialized()
             # TODO: think about how to allow pg options to be passed to world group
             # or mesh dimension groups
-            if not default_initialized:
+            use_torch_comms = int(os.environ.get("USE_TORCH_COMMS", 0))
+            if not default_initialized and not use_torch_comms:
                 init_process_group()
+            elif use_torch_comms:
+                backend = os.environ.get("TORCH_COMMS_BACKEND", "")
+                if not backend:
+                    raise RuntimeError("TORCH_COMMS_BACKEND is not set.")
+                import torchcomms
+                from torchcomms.device_mesh import (
+                    _create_torchcomm_process_group,
+                    _get_store_for_pg,
+                )
+
+                comm = torchcomms.new_comm(
+                    backend,
+                    torch.device(self._device_type),
+                    name="default_world_comm",
+                )
+                global_pg = _create_torchcomm_process_group(
+                    comm=comm,
+                    group_name=comm.get_name(),
+                    prefix_store=PrefixStore("default", _get_store_for_pg()),
+                    global_ranks_mapping=None,  # Will use default mapping
+                )
+                GroupMember.WORLD = global_pg
+                global_pg._comm = comm
 
             world_size = get_world_size()
             if self._layout.numel() > world_size:
@@ -380,6 +406,7 @@ else:
             rank_map: torch.Tensor,
             dim_name: str,
             backend_override: BackendConfig,
+            parent_pg: Optional[ProcessGroup] = None,
         ) -> Optional[str]:
             # Generate a 2D global mesh tensor for the current dim for PG creation.
             pg_ranks_by_dim = sub_layout.nest().remap_to_tensor(rank_map)
@@ -396,12 +423,18 @@ else:
             group_desc = f"mesh_{dim_name}"
 
             dim_group = None
+            use_torch_comms = int(os.environ.get("USE_TORCH_COMMS", 0))
             default_group = _get_default_group()
 
             # Early return if there is only one sub_layout in the mesh layout.
-            if sub_layout.numel() == get_world_size() and backend_override == (
-                None,
-                None,
+            if (
+                sub_layout.numel() == get_world_size()
+                and backend_override
+                == (
+                    None,
+                    None,
+                )
+                and not use_torch_comms
             ):
                 # Append the default pg to the first dim groups only if the default pg is compatible with `self._device_type`.
                 # Otherwise, create new pg.
@@ -417,6 +450,38 @@ else:
                     else default_group
                 )
                 return dim_group.group_name  # type: ignore[union-attr]
+
+            if use_torch_comms:
+                parent_pg = parent_pg or default_group
+                if hasattr(parent_pg, "_comm"):
+                    raise RuntimeError(
+                        "parent_pg should have _comm attribute in order to call split for torchcomms"
+                    )
+                comm = parent_pg._comm
+                sub_comm = comm.split(pg_ranks_by_dim.tolist(), group_desc)
+                from torchcomms.device_mesh import (
+                    _create_torchcomm_process_group,
+                    _get_store_for_pg,
+                )
+
+                global_ranks = None
+                for dim_mesh in pg_ranks_by_dim:
+                    subgroup_ranks = dim_mesh.tolist()
+                    if get_rank() in subgroup_ranks:
+                        global_ranks = subgroup_ranks
+                        break
+                assert global_ranks is not None
+                global_ranks_mapping = {
+                    global_ranks[i]: i for i in range(comm.get_size())
+                }
+                pg = _create_torchcomm_process_group(
+                    comm=sub_comm,
+                    group_name=comm.get_name(),
+                    prefix_store=PrefixStore(group_desc, _get_store_for_pg()),
+                    global_ranks_mapping=global_ranks_mapping,  # Will use default mapping
+                )
+                pg._comm = sub_comm
+                return pg.group_name
 
             # If bound_device_id exists, it means the nccl communicator has been eagerly initialized
             # so that we can use `split_group` to create subgroups through `ncclCommSplit`.
@@ -475,16 +540,24 @@ else:
             rank_map: torch.Tensor,
             mesh_dim_names: Optional[tuple[str, ...]],
             backend_override: tuple[BackendConfig, ...],
+            parent_pg_name: Optional[str] = None,
         ) -> list[str]:
             # group_name associated with each mesh dimension, each
             # mesh dimension should have one sub-group per rank
             dim_group_names: list[str] = []
+            parent_pg = None
+            if not parent_pg_name:
+                parent_pg = _resolve_process_group(parent_pg_name)
             # create sub pgs base on the mesh argument specified
             for dim in range(len(layout)):
                 dim_name = mesh_dim_names[dim] if mesh_dim_names else f"dim_{dim}"
                 dim_group_names.append(
                     DeviceMesh._init_one_process_group(  # type: ignore[arg-type]
-                        layout[dim], rank_map, dim_name, backend_override[dim]
+                        layout[dim],
+                        rank_map,
+                        dim_name,
+                        backend_override[dim],
+                        parent_pg,
                     )
                 )
             if any(n is None for n in dim_group_names):
@@ -1135,6 +1208,7 @@ else:
                     root_mesh._rank_map,
                     mesh_dim_names,
                     backend_override,
+                    self._dim_group_names[dim],
                 )
                 res_mesh._dim_group_names = dim_group_names
 
