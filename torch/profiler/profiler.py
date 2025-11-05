@@ -499,7 +499,7 @@ def schedule(
 
     def schedule_fn(step: int) -> ProfilerAction:
         if step < 0:
-            raise AssertionError("Step must be non-negative")
+            raise AssertionError(f"Step must be non-negative. Got {step}.")
         if step < skip_first:
             return ProfilerAction.NONE
         else:
@@ -523,7 +523,10 @@ def schedule(
             )
 
     if wait < 0 or warmup < 0 or active <= 0 or repeat < 0 or skip_first < 0:
-        raise AssertionError("Invalid profiler schedule arguments")
+        raise AssertionError(
+            f"Invalid profiler schedule arguments. Got wait={wait} (need >= 0), warmup={warmup} (need >= 0), "
+            f"active={active} (need > 0), repeat={repeat} (need >= 0), skip_first={skip_first} (need >= 0)."
+        )
     if warmup == 0:
         warn(
             "Profiler won't be using warmup, this can skew profiler results",
