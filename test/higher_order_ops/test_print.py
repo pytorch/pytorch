@@ -64,8 +64,10 @@ class TestHopPrint(TestCase):
         class M(torch.nn.Module):
             def forward(self, x):
                 torch._higher_order_ops.print("moo {x} {y}", x=1, y=2)
+                torch._higher_order_ops.print("moo {x}", x=x)
                 res = x + x
                 torch._higher_order_ops.print("moo {x} {y}", x=1, y=2)
+                torch._higher_order_ops.print("yeehop {x}", x=x.shape[0])
                 return (res,)
 
         inputs = (torch.randn(3),)
@@ -78,8 +80,10 @@ class TestHopPrint(TestCase):
             """\
 def forward(self, arg0_1):
     print_1 = torch.ops.higher_order.print('moo {x} {y}', {'x': 1, 'y': 2});  print_1 = None
+    print_2 = torch.ops.higher_order.print('moo {x}', {'x': arg0_1});  print_2 = None
     add = torch.ops.aten.add.Tensor(arg0_1, arg0_1);  arg0_1 = None
-    print_2 = torch.ops.higher_order.print('moo {x} {y}', {'x': 1, 'y': 2});  print_2 = None
+    print_3 = torch.ops.higher_order.print('moo {x} {y}', {'x': 1, 'y': 2});  print_3 = None
+    print_4 = torch.ops.higher_order.print('yeehop {x}', {'x': 3});  print_4 = None
     return (add,)""",
         )
 
