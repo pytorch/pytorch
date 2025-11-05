@@ -28,8 +28,6 @@ from torch.utils._foreach_utils import (
 )
 
 
-explicit_mode = False
-
 # All public APIs from dtensor package
 __all__ = [
     "DTensor",

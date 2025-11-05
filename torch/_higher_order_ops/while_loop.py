@@ -54,7 +54,7 @@ class WhileLoopOp(HigherOrderOperator):
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def gen_schema(self, cond_fn, body_fn, carried_inputs, additional_inputs):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
@@ -316,7 +316,7 @@ def while_loop_dense(
 
     if stack_output:
         outs: list[torch.Tensor] = []
-        for i, out in enumerate(outputs):
+        for out in outputs:
             outs.append(torch.stack(out, dim=0))
         return tuple(outs)
 
@@ -431,7 +431,7 @@ def while_loop_tracing(
             elif isinstance(x, torch.Tensor):
                 x = x.clone()
                 if hasattr(x, "constant") and x.constant is not None:
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     x.constant = None
             return x
 
@@ -454,7 +454,7 @@ def while_loop_tracing(
 
         next_name = None
         i = 0
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         while not next_name:
             candidate = f"while_loop_cond_graph_{i}"
             if hasattr(proxy_mode.tracer.root, candidate):
@@ -660,7 +660,7 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
 #
 #     gx = gy0 * bw(y0, x),
 #
-# where gy0 denotes the graident of loss with respect to y0, and bw(y0, x) denotes the graident of y0 with
+# where gy0 denotes the gradient of loss with respect to y0, and bw(y0, x) denotes the gradient of y0 with
 # respect to x. Note that bw can be computed from forward body_fn easily using torch.autograd.grad.
 # We could substitute the unknowns gy0, gy1, ..., with chain rule until gy4:
 #
@@ -699,7 +699,7 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
 
 class WhileLoopAutogradOp(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(
         ctx,
         cond_fn,
@@ -729,7 +729,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
         ctx.additional_inputs = additional_inputs
         ctx.fw_outputs = fw_outputs
         loop_count = None
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         for out in fw_outputs:
             if isinstance(out, torch.Tensor):
                 if loop_count is not None:
@@ -769,7 +769,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
         # Note [Handle inputs that're not differentiable]
         # When a forward input is non-differentiable e.g. a symint or an integer tensor, their gradients
         # will be None. However, we don't want to return None in the subgraph because this complicates the
-        # inductor codegen, where we need to do a non-unform treatment for None and tensors.
+        # inductor codegen, where we need to do a non-uniform treatment for None and tensors.
         # So we set up masks and filter the None gradients so that only tensors are returned from each step.
         carries_tensor_masks = [
             bool(isinstance(t, torch.Tensor) and t.dtype.is_floating_point)
@@ -883,7 +883,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
             while_loop_op(
                 cond_gm,
                 body_gm,
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 (
                     init_idx,
                     *init_grad_carries,

@@ -58,6 +58,7 @@ from ..exc import (
     raise_observed_exception,
     unimplemented_v2,
 )
+from ..graph_bytecode_inputs import get_external_object_by_index
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -94,7 +95,7 @@ from ..utils import (
     unpatched_nn_module_getattr,
 )
 from .base import raise_type_error_exc, ValueMutationNew, VariableTracker
-from .dicts import DefaultDictVariable
+from .dicts import ConstDictVariable, DefaultDictVariable
 from .lists import SizeVariable
 
 
@@ -809,14 +810,44 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
                 args = [stacked]
 
-            tensor_variable = wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    self.value,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
-            )
+            if issubclass(self.value, torch.Stream):
+                from .constant import ConstantVariable
+                from .lists import TupleVariable
+
+                # Register newly created stream for reconstruction
+                var_kwargs = ConstDictVariable(
+                    {ConstantVariable(k): v for k, v in kwargs.items()}
+                )
+                var_args = TupleVariable(list(args))
+                stream = self.value(
+                    *(var_args.as_python_constant()),
+                    **(var_kwargs.as_python_constant()),
+                )
+                from ..graph_bytecode_inputs import register_graph_created_object
+                from .streams import StreamVariable
+
+                ind = register_graph_created_object(
+                    stream,
+                    StreamVariable.make_construct_in_graph_stream_fn(
+                        var_args, var_kwargs
+                    ),
+                )
+                tensor_variable = wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function", get_external_object_by_index, (ind,), {}
+                    ),
+                    user_obj_index=ind,
+                )
+            else:
+                tensor_variable = wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        self.value,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                )
 
             return tensor_variable
         elif self.value is random.Random:
