@@ -55,9 +55,10 @@ class SignalHandlingTest(TestCase):
             mock_threading.main_thread.return_value
         )
         mock_pcontext = MagicMock(spec=PContext)
-        # Mock the _stdout_tail and _stderr_tail attributes
-        mock_pcontext._stdout_tail = MagicMock()
-        mock_pcontext._stderr_tail = MagicMock()
+        # Mock the stdout_tail and stderr_tail
+        mock_stdout_tail = MagicMock()
+        mock_stderr_tail = MagicMock()
+        mock_pcontext._tail_logs = [mock_stdout_tail, mock_stderr_tail]
 
         # Remove environment variable if it exists to test default behavior
         if "TORCHELASTIC_SIGNALS_TO_HANDLE" in os.environ:
@@ -84,8 +85,8 @@ class SignalHandlingTest(TestCase):
         # Verify _start was called
         mock_pcontext._start.assert_called_once()
         # Verify _stdout_tail.start() and _stderr_tail.start() were called
-        mock_pcontext._stdout_tail.start.assert_called_once()
-        mock_pcontext._stderr_tail.start.assert_called_once()
+        mock_stdout_tail.start.assert_called_once()
+        mock_stderr_tail.start.assert_called_once()
 
     @patch("torch.distributed.elastic.multiprocessing.api.threading")
     @patch("torch.distributed.elastic.multiprocessing.api.signal")
@@ -99,9 +100,10 @@ class SignalHandlingTest(TestCase):
             mock_threading.main_thread.return_value
         )
         mock_pcontext = MagicMock(spec=PContext)
-        # Mock the _stdout_tail and _stderr_tail attributes
-        mock_pcontext._stdout_tail = MagicMock()
-        mock_pcontext._stderr_tail = MagicMock()
+        # Mock the stdout_tail and stderr_tail
+        mock_stdout_tail = MagicMock()
+        mock_stderr_tail = MagicMock()
+        mock_pcontext._tail_logs = [mock_stdout_tail, mock_stderr_tail]
 
         # Set custom signals in the environment variable
         os.environ["TORCHELASTIC_SIGNALS_TO_HANDLE"] = "SIGTERM,SIGUSR1,SIGUSR2"
@@ -139,9 +141,10 @@ class SignalHandlingTest(TestCase):
             mock_threading.main_thread.return_value
         )
         mock_pcontext = MagicMock(spec=PContext)
-        # Mock the _stdout_tail and _stderr_tail attributes
-        mock_pcontext._stdout_tail = MagicMock()
-        mock_pcontext._stderr_tail = MagicMock()
+        # Mock the stdout_tail and stderr_tail
+        mock_stdout_tail = MagicMock()
+        mock_stderr_tail = MagicMock()
+        mock_pcontext._tail_logs = [mock_stdout_tail, mock_stderr_tail]
 
         # Set invalid signals in the environment variable
         os.environ["TORCHELASTIC_SIGNALS_TO_HANDLE"] = "SIGTERM,INVALID_SIGNAL"
@@ -180,9 +183,10 @@ class SignalHandlingTest(TestCase):
             mock_threading.main_thread.return_value
         )
         mock_pcontext = MagicMock(spec=PContext)
-        # Mock the _stdout_tail and _stderr_tail attributes
-        mock_pcontext._stdout_tail = MagicMock()
-        mock_pcontext._stderr_tail = MagicMock()
+        # Mock the stdout_tail and stderr_tail
+        mock_stdout_tail = MagicMock()
+        mock_stderr_tail = MagicMock()
+        mock_pcontext._tail_logs = [mock_stdout_tail, mock_stderr_tail]
 
         # Set signals including ones not supported on Windows
         os.environ["TORCHELASTIC_SIGNALS_TO_HANDLE"] = "SIGTERM,SIGHUP,SIGUSR1"
@@ -234,9 +238,10 @@ class SignalHandlingTest(TestCase):
         mock_threading.current_thread.return_value = MagicMock()  # Not the main thread
         mock_threading.main_thread.return_value = MagicMock()
         mock_pcontext = MagicMock(spec=PContext)
-        # Mock the _stdout_tail and _stderr_tail attributes
-        mock_pcontext._stdout_tail = MagicMock()
-        mock_pcontext._stderr_tail = MagicMock()
+        # Mock the stdout_tail and stderr_tail
+        mock_stdout_tail = MagicMock()
+        mock_stderr_tail = MagicMock()
+        mock_pcontext._tail_logs = [mock_stdout_tail, mock_stderr_tail]
 
         # Call the start method
         PContext.start(mock_pcontext)
@@ -262,9 +267,10 @@ class SignalHandlingTest(TestCase):
             mock_threading.main_thread.return_value
         )
         mock_pcontext = MagicMock(spec=PContext)
-        # Mock the _stdout_tail and _stderr_tail attributes
-        mock_pcontext._stdout_tail = MagicMock()
-        mock_pcontext._stderr_tail = MagicMock()
+        # Mock the stdout_tail and stderr_tail
+        mock_stdout_tail = MagicMock()
+        mock_stderr_tail = MagicMock()
+        mock_pcontext._tail_logs = [mock_stdout_tail, mock_stderr_tail]
 
         # Set environment variable to include SIGUSR1 and SIGUSR2
         os.environ["TORCHELASTIC_SIGNALS_TO_HANDLE"] = "SIGUSR1,SIGUSR2"
@@ -323,8 +329,8 @@ class SignalHandlingTest(TestCase):
         # Verify _start was called
         mock_pcontext._start.assert_called_once()
         # Verify _stdout_tail.start() and _stderr_tail.start() were called
-        mock_pcontext._stdout_tail.start.assert_called_once()
-        mock_pcontext._stderr_tail.start.assert_called_once()
+        mock_stdout_tail.start.assert_called_once()
+        mock_stderr_tail.start.assert_called_once()
 
 
 if __name__ == "__main__":

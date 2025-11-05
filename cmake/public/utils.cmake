@@ -383,7 +383,7 @@ function(torch_compile_options libname)
       -Wno-strict-aliasing
       )
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      list(APPEND private_compile_options -Wredundant-move)
+      list(APPEND private_compile_options -Wredundant-move -Wno-interference-size)
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       list(APPEND private_compile_options -Wextra-semi -Wmove)
@@ -438,10 +438,6 @@ function(torch_compile_options libname)
     target_compile_options(${libname} PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=hidden>)
   endif()
-
-  # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
-  target_compile_options(${libname} PRIVATE
-      $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-O2>)
 
 endfunction()
 

@@ -263,19 +263,20 @@ def _single_tensor_adadelta(
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
-        assert all(
+        if not all(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
-            for p, step in zip(params, state_steps)
-        ), (
-            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-        )
+            for p, step in zip(params, state_steps, strict=True)
+        ):
+            raise AssertionError(
+                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            )
 
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
 
     for param, grad, square_avg, acc_delta, step in zip(
-        params, grads, square_avgs, acc_deltas, state_steps
+        params, grads, square_avgs, acc_deltas, state_steps, strict=True
     ):
         step += 1
         grad = grad if not maximize else -grad
@@ -317,20 +318,22 @@ def _multi_tensor_adadelta(
     capturable: bool,
     has_complex: bool,
 ):
-    assert not differentiable, "_foreach ops don't support autograd"
+    if differentiable:
+        raise AssertionError("_foreach ops don't support autograd")
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
-        assert all(
+        if not all(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
-            for p, step in zip(params, state_steps)
-        ), (
-            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-        )
+            for p, step in zip(params, state_steps, strict=True)
+        ):
+            raise AssertionError(
+                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            )
 
     if len(params) == 0:
         return

@@ -419,6 +419,7 @@ class Unpickler:
                 inst = self.stack[-1]
                 if type(inst) is torch.Tensor:
                     # Legacy unpickling
+                    # pyrefly: ignore [not-iterable]
                     inst.set_(*state)
                 elif type(inst) is torch.nn.Parameter:
                     inst.__setstate__(state)
@@ -554,7 +555,8 @@ class Unpickler:
                         f"Detected pickle protocol {self.proto} in the checkpoint, which was "
                         "not the default pickle protocol used by `torch.load` (2). The weights_only "
                         "Unpickler might not support all instructions implemented by this protocol, "
-                        "please file an issue for adding support if you encounter this."
+                        "please file an issue for adding support if you encounter this.",
+                        stacklevel=2,
                     )
             elif key[0] == STOP[0]:
                 rc = self.stack.pop()

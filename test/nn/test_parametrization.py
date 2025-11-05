@@ -1395,7 +1395,7 @@ class TestNNParametrization(NNTestCase):
                     eval_out0 = wrapped_m(input)
                     # assert eval gives same result as last training iteration
                     self.assertEqual(eval_out0, last_train_out)
-                    # assert doing more iteartion in eval don't change things
+                    # assert doing more iteration in eval don't change things
                     self.assertEqual(eval_out0, wrapped_m(input))
                     self.assertEqual(last_train_u, spectral_norm_m._u)
                     self.assertEqual(last_train_v, spectral_norm_m._v)
@@ -1440,7 +1440,7 @@ class TestNNParametrization(NNTestCase):
 
         class SplitAndCat(nn.Module):
             def right_inverse(self, x):
-                # split the tensor in two halfs
+                # split the tensor in two halves
                 return torch.split(x, x.shape[1] // 2)
 
             def forward(self, x0, x1):

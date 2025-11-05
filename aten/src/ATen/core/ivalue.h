@@ -624,7 +624,14 @@ struct TORCH_API IValue final {
   IValue(const c10::SymBool& i) {
     if (auto mi = i.maybe_as_bool()) {
       tag = Tag::Bool;
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
       payload.u.as_int = *mi;
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+      /* due to byteorder if value assigned as_int, as_bool actually is not set correctly */
+      payload.u.as_bool = *mi;
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
     } else {
       tag = Tag::SymBool;
       payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();
@@ -847,7 +854,7 @@ struct TORCH_API IValue final {
   IValue(std::optional<T> v);
   template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(c10::OptionalArrayRef<T> v);
-  IValue(std::nullopt_t);
+  IValue(std::nullopt_t /*unused*/);
 
   // ClassType
   IValue(c10::intrusive_ptr<ivalue::Object> v);
@@ -1169,7 +1176,7 @@ struct TORCH_API IValue final {
   using HashIdentityIValueMap =
       std::unordered_map<IValue, IValue, HashIdentityIValue, CompIdentityIValues>;
 
-  // Chechs if this and rhs has a subvalues in common.
+  // Checks if this and rhs has a subvalues in common.
   // [t1,t2] and [t2, t3] returns true.
   bool overlaps(const IValue& rhs) const;
 

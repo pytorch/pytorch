@@ -699,7 +699,7 @@ Examples:
 
   TORCH_LOGS_OUT=/tmp/output.txt will output the logs to /tmp/output.txt as
   well. This is useful when the output is long.
-"""  # flake8: noqa: B950
+"""
     msg = f"""
 TORCH_LOGS Info
 {examples}
@@ -1207,7 +1207,7 @@ def safe_grad_filter(message, category, filename, lineno, file=None, line=None) 
 def user_warning_filter(
     message, category, filename, lineno, file=None, line=None
 ) -> bool:
-    return category != UserWarning
+    return category is not UserWarning
 
 
 @contextlib.contextmanager

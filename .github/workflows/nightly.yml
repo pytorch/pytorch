@@ -41,7 +41,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11
     secrets: inherit

@@ -35,7 +35,7 @@ jobs:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-jammy-xpu-n-1-py3.10
       docker-image-name: ci-image:pytorch-linux-jammy-xpu-n-1-py3
-      runner: linux.12xlarge
+      runner: linux.c7i.12xlarge
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 6, runner: "linux.idc.xpu" },
@@ -56,17 +56,21 @@ jobs:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-jammy-xpu-n-py3.10
       docker-image-name: ci-image:pytorch-linux-jammy-xpu-n-py3
-      runner: linux.12xlarge
+      runner: linux.c7i.12xlarge
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 8, runner: "linux.idc.xpu" },
-          { config: "default", shard: 2, num_shards: 8, runner: "linux.idc.xpu" },
-          { config: "default", shard: 3, num_shards: 8, runner: "linux.idc.xpu" },
-          { config: "default", shard: 4, num_shards: 8, runner: "linux.idc.xpu" },
-          { config: "default", shard: 5, num_shards: 8, runner: "linux.idc.xpu" },
-          { config: "default", shard: 6, num_shards: 8, runner: "linux.idc.xpu" },
-          { config: "default", shard: 7, num_shards: 8, runner: "linux.idc.xpu" },
-          { config: "default", shard: 8, num_shards: 8, runner: "linux.idc.xpu" },
+          { config: "default", shard: 1, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 2, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 3, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 4, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 5, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 6, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 7, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 8, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 9, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 10, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 11, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 12, num_shards: 12, runner: "linux.idc.xpu" },
         ]}
     secrets: inherit
 

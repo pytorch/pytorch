@@ -60,7 +60,7 @@ class MultiHeadAttentionLayer(nn.Module):
 # Taken from https://github.com/facebookresearch/dlrm/blob/master/dlrm_s_pytorch.py
 def create_mlp(ln, sigmoid_layer):
     layers = nn.ModuleList()
-    for i in range(0, len(ln) - 1):
+    for i in range(len(ln) - 1):
         n = ln[i]
         m = ln[i + 1]
 
@@ -139,7 +139,7 @@ def fork_wait_graph_exception(input1, input2):
 
 def loop_graph(a, b, iters: int):
     c = a + b * 2
-    for i in range(iters):
+    for _ in range(iters):
         c = c + b
         c *= 2
         c -= a

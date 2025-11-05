@@ -115,6 +115,7 @@ node_start_tokens = {
     ast.Continue: "continue",
 }
 
+# pyrefly: ignore [no-matching-overload]
 pretty_node_names.update(
     {
         ast.AsyncFunctionDef: "async function definitions",
@@ -125,6 +126,7 @@ pretty_node_names.update(
     }
 )
 
+# pyrefly: ignore [no-matching-overload]
 node_start_tokens.update(
     {
         ast.AsyncFunctionDef: "async def",
@@ -135,6 +137,7 @@ node_start_tokens.update(
     }
 )
 
+# pyrefly: ignore [no-matching-overload]
 pretty_node_names.update(
     {
         ast.AnnAssign: "annotated assignments",
@@ -711,7 +714,7 @@ class StmtBuilder(Builder):
 
         # Disallow type annotations on instance attributes outside of __init__
         if (
-            type(stmt.target) == ast.Attribute
+            type(stmt.target) is ast.Attribute
             and stmt.target.value.id == "self"  # type: ignore[attr-defined]
             and ctx.funcname != "__init__"
         ):
@@ -859,6 +862,7 @@ class ExprBuilder(Builder):
         ast.RShift: ">>",
     }
 
+    # pyrefly: ignore [unsupported-operation]
     binop_map[ast.MatMult] = "@"
 
     unop_map = {
@@ -1220,6 +1224,7 @@ class ExprBuilder(Builder):
                 s += "{}"
                 args.append(build_expr(ctx, value.value))
             elif isinstance(value, ast.Constant):
+                # pyrefly: ignore [unsupported-operation]
                 s += value.value
             else:
                 raise NotSupportedError(r, "Unsupported value in JoinedStr")

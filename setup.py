@@ -156,6 +156,10 @@
 #   USE_ROCM_KERNEL_ASSERT=1
 #     Enable kernel assert in ROCm platform
 #
+#   USE_LAYERNORM_FAST_RECIPROCAL
+#     If set, enables the use of builtin functions for fast reciprocals (1/x) w.r.t.
+#     layer normalization. Default: enabled.
+#
 #   USE_ROCM_CK_GEMM=1
 #     Enable building CK GEMM backend in ROCm platform
 #
@@ -225,7 +229,7 @@
 #
 #   USE_MIMALLOC
 #      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
-#      By default, It is only enabled on Windows.
+#      By default, It is only enabled on Windows and AArch64.
 #
 #   BUILD_LIBTORCH_WHL
 #      Builds libtorch.so and its dependencies as a wheel
@@ -1102,7 +1106,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 continue
             self.copy_file(source_lib, target_lib)
             # Delete old rpath and add @loader_lib to the rpath
-            # This should prevent delocate from attempting to package another instance
+            # This should prevent deallocate from attempting to package another instance
             # of OpenMP library in torch wheel as well as loading two libomp.dylib into
             # the address space, as libraries are cached by their unresolved names
             install_name_tool_args = [

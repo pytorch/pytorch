@@ -68,6 +68,8 @@ _IS_LINUX = sys.platform.startswith("linux")
 _IS_MACOS = sys.platform.startswith("darwin")
 _IS_WINDOWS = sys.platform == "win32"
 
+MINGW_GXX = "x86_64-w64-mingw32-g++"
+
 SUBPROCESS_DECODE_ARGS = (locale.getpreferredencoding(),) if _IS_WINDOWS else ()
 
 log = logging.getLogger(__name__)
@@ -333,9 +335,9 @@ def check_msvc_cl_language_id(compiler: str) -> None:
 
 
 @functools.cache
-def check_mingw_win32_flavor(compiler: str) -> None:
+def check_mingw_win32_flavor(compiler: str) -> str:
     """
-    Check if MinGW `compiler` exists and whether it is the win32 flavor (instead of posix flavor).
+    Check if MinGW `compiler` exists and return it's flavor (win32 or posix).
     """
     try:
         out = subprocess.check_output(
@@ -346,10 +348,22 @@ def check_mingw_win32_flavor(compiler: str) -> None:
     except Exception as e:
         raise RuntimeError(f"Failed to run {compiler} -v") from e
 
+    flavor: str | None = None
     for line in out.splitlines():
         if "Thread model" in line:
-            if line.split(":")[1].strip().lower() != "win32":
-                raise RuntimeError(f"Compiler: {compiler} is not win32 flavor.")
+            flavor = line.split(":", 1)[-1].strip().lower()
+
+    if flavor is None:
+        raise RuntimeError(
+            f"Cannot determine the flavor of {compiler} (win32 or posix). No Thread model found in {compiler} -v"
+        )
+
+    if flavor not in ("win32", "posix"):
+        raise RuntimeError(
+            f"Only win32 and pofix flavor of {compiler} is supported. The flavor is {flavor}"
+        )
+
+    return flavor
 
 
 def get_cpp_compiler() -> str:
@@ -358,7 +372,7 @@ def get_cpp_compiler() -> str:
         and sys.platform != "win32"
     ):
         # we're doing cross-compilation
-        compiler = "x86_64-w64-mingw32-g++"
+        compiler = MINGW_GXX
         if not config.aot_inductor.package_cpp_only:
             check_mingw_win32_flavor(compiler)
         return compiler
@@ -579,9 +593,7 @@ def _create_if_dir_not_exist(path_dir: str) -> None:
             Path(path_dir).mkdir(parents=True, exist_ok=True)
         except OSError as exc:  # Guard against race condition
             if exc.errno != errno.EEXIST:
-                raise RuntimeError(  # noqa: TRY200 (Use `raise from`)
-                    f"Fail to create path {path_dir}"
-                )
+                raise RuntimeError(f"Fail to create path {path_dir}") from exc
 
 
 def _remove_dir(path_dir: str) -> None:
@@ -921,8 +933,6 @@ def _get_shared_cflags(do_link: bool) -> list[str]:
         # This causes undefined symbols to behave the same as linux
         return ["shared", "fPIC", "undefined dynamic_lookup"]
     flags = []
-    if config.aot_inductor.cross_target_platform == "windows":
-        flags.extend(["static-libstdc++", "static-libgcc", "fPIC"])
     if do_link:
         flags.append("shared")
 
@@ -962,6 +972,11 @@ def get_cpp_options(
         ldflags.append("flto=thin")
 
     passthrough_args.append(" ".join(extra_flags))
+
+    if config.aot_inductor.cross_target_platform == "windows":
+        passthrough_args.extend(["-static-libstdc++", "-static-libgcc"])
+        if check_mingw_win32_flavor(MINGW_GXX) == "posix":
+            passthrough_args.append("-Wl,-Bstatic -lwinpthread -Wl,-Bdynamic")
 
     return (
         definitions,
@@ -1132,15 +1147,23 @@ def _get_torch_related_args(
     else:
         libraries_dirs = []
         if config.aot_inductor.cross_target_platform == "windows":
-            assert config.aot_inductor.aoti_shim_library, (
+            aoti_shim_library = config.aot_inductor.aoti_shim_library
+
+            assert aoti_shim_library, (
                 "'config.aot_inductor.aoti_shim_library' must be set when 'cross_target_platform' is 'windows'."
             )
-            assert config.aot_inductor.aoti_shim_library_path, (
-                "'config.aot_inductor.aoti_shim_library_path' must be set to the path of the AOTI shim library",
-                " when 'cross_target_platform' is 'windows'.",
-            )
-            libraries.append(config.aot_inductor.aoti_shim_library)
-            libraries_dirs.append(config.aot_inductor.aoti_shim_library_path)
+            if isinstance(aoti_shim_library, str):
+                libraries.append(aoti_shim_library)
+            else:
+                assert isinstance(aoti_shim_library, list)
+                libraries.extend(aoti_shim_library)
+
+    if config.aot_inductor.cross_target_platform == "windows":
+        assert config.aot_inductor.aoti_shim_library_path, (
+            "'config.aot_inductor.aoti_shim_library_path' must be set to the path of the AOTI shim library",
+            " when 'cross_target_platform' is 'windows'.",
+        )
+        libraries_dirs.append(config.aot_inductor.aoti_shim_library_path)
 
     if _IS_WINDOWS:
         libraries.append("sleef")
@@ -1385,10 +1408,19 @@ def _get_libstdcxx_args() -> tuple[list[str], list[str]]:
     return lib_dir_paths, libs
 
 
-def get_mmap_self_macro(use_mmap_weights: bool) -> list[str]:
+def get_mmap_self_macro(
+    use_mmap_weights: bool, use_mmap_weights_external: bool
+) -> list[str]:
     macros = []
+
+    if use_mmap_weights and use_mmap_weights_external:
+        raise RuntimeError(
+            "Only one of use_mmap_weights and use_mmap_weights_external should be true"
+        )
     if use_mmap_weights:
         macros.append(" USE_MMAP_SELF")
+    elif use_mmap_weights_external:
+        macros.append(" USE_MMAP_EXTERNAL")
     return macros
 
 
@@ -1408,6 +1440,7 @@ def get_cpp_torch_options(
     aot_mode: bool,
     use_relative_path: bool,
     use_mmap_weights: bool,
+    use_mmap_weights_external: bool,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
     """
     This function is used to get the build args of torch related build options.
@@ -1456,7 +1489,7 @@ def get_cpp_torch_options(
 
     fb_macro_passthrough_args = _use_fb_internal_macros()
 
-    mmap_self_macros = get_mmap_self_macro(use_mmap_weights)
+    mmap_self_macros = get_mmap_self_macro(use_mmap_weights, use_mmap_weights_external)
     caching_allocator_macros = get_caching_allocator_macro()
 
     definitions = (
@@ -1513,6 +1546,7 @@ class CppTorchOptions(CppOptions):
         compile_only: bool = False,
         use_relative_path: bool = False,
         use_mmap_weights: bool = False,
+        use_mmap_weights_external: bool = False,
         shared: bool = True,
         extra_flags: Sequence[str] = (),
         compiler: str = "",
@@ -1548,6 +1582,7 @@ class CppTorchOptions(CppOptions):
             aot_mode=aot_mode,
             use_relative_path=use_relative_path,
             use_mmap_weights=use_mmap_weights,
+            use_mmap_weights_external=use_mmap_weights_external,
         )
 
         _append_list(self._definitions, torch_definitions)
@@ -1633,8 +1668,6 @@ def get_cpp_torch_device_options(
         torch_include_dirs=link_libtorch,
         cross_target_platform=config.aot_inductor.cross_target_platform,
     )
-    if not config.is_fbcode() and link_libtorch:
-        libraries += ["c10"]
     if device_type == "cuda":
         definitions.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
 
@@ -1642,13 +1675,13 @@ def get_cpp_torch_device_options(
             if config.is_fbcode() or not link_libtorch:
                 libraries += ["amdhip64"]
             else:
-                libraries += ["c10_hip", "torch_hip"]
+                libraries += ["torch_hip"]
             definitions.append(" __HIP_PLATFORM_AMD__")
         else:
             if config.is_fbcode() or not link_libtorch:
                 libraries += ["cuda"]
             else:
-                libraries += ["c10_cuda", "cuda", "torch_cuda"]
+                libraries += ["cuda", "torch_cuda"]
             if config.aot_inductor.cross_target_platform == "windows":
                 libraries += ["cudart"]
             _transform_cuda_paths(libraries_dirs)
@@ -1673,7 +1706,7 @@ def get_cpp_torch_device_options(
 
         libraries += ["ze_loader", "sycl"]
         if link_libtorch:
-            libraries += ["c10_xpu", "torch_xpu"]
+            libraries += ["torch_xpu"]
 
     if device_type == "mps":
         definitions.append(" USE_MPS")
@@ -1725,6 +1758,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
         compile_only: bool = False,
         use_relative_path: bool = False,
         use_mmap_weights: bool = False,
+        use_mmap_weights_external: bool = False,
         shared: bool = True,
         extra_flags: Sequence[str] = (),
         min_optimize: bool = False,
@@ -1738,6 +1772,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
             compile_only=compile_only,
             use_relative_path=use_relative_path,
             use_mmap_weights=use_mmap_weights,
+            use_mmap_weights_external=use_mmap_weights_external,
             extra_flags=extra_flags,
             min_optimize=min_optimize,
             precompiling=precompiling,

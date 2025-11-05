@@ -29,7 +29,7 @@
                                                             secondaryTensor:(MPSGraphTensor*)secondaryTensor
                                                                        name:(NSString*)name {
   // As of MacOS-15.1 m..imumWithNanPropagation is only defined for floating types and calling it with integral
-  // agruments results in
+  // arguments results in
   //  /AppleInternal/Library/BuildRoots/c7c74b64-74b4-11ef-aeda-9635a580fe0d/Library/Caches/com.apple.xbs/Sources/MetalPerformanceShaders/MPSCore/Utility/MPSKernelDAG.mm:805:
   //  failed assertion `Error getting visible function: (null) Function isNaN_u8_i8 was not found in the library'
   if (([primaryTensor dataType] & MPSDataTypeFloatBit) == 0) {
@@ -42,7 +42,7 @@
                                                             secondaryTensor:(MPSGraphTensor*)secondaryTensor
                                                                        name:(NSString*)name {
   // As of MacOS-15.1 m..imumWithNanPropagation is only defined for floating types and calling it with integral
-  // agruments results in
+  // arguments results in
   //  /AppleInternal/Library/BuildRoots/c7c74b64-74b4-11ef-aeda-9635a580fe0d/Library/Caches/com.apple.xbs/Sources/MetalPerformanceShaders/MPSCore/Utility/MPSKernelDAG.mm:805:
   //  failed assertion `Error getting visible function: (null) Function isNaN_u8_i8 was not found in the library'
   if (([primaryTensor dataType] & MPSDataTypeFloatBit) == 0) {
@@ -439,6 +439,22 @@ static void check_mps_shape(MPSShape* shape) {
   }
 }
 
+bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI) {
+  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  if ((!tensor.is_contiguous() || tensor.storage_offset()) && useMPSStridedAPI && is_macOS_15_0_or_newer) {
+    auto storage_numel = tensor.storage().nbytes() / tensor.element_size() - tensor.storage_offset();
+    if (storage_numel > std::numeric_limits<int32_t>::max()) {
+      return true;
+    }
+  }
+  for (auto size : tensor.sizes()) {
+    if (size > std::numeric_limits<int32_t>::max()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 MPSNDArray* getMPSNDArray(const TensorBase& t, MPSShape* sizes, MPSShape* strides) {
   id<MTLBuffer> srcBuf = getMTLBufferStorage(t);
 
@@ -523,7 +539,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
 
   static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
   // Use gather kernel to solve strides for macOS < 15.0
-  // Starting with macOS 15.0, MPS supports native strides direclty in the kernels
+  // Starting with macOS 15.0, MPS supports native strides directly in the kernels
   if (!is_macOS_15_0_or_newer || !useMPSStridedAPI) {
     if ((!src.is_contiguous() || src.storage_offset()) && gatherTensorData) {
       Tensor emptyShell = Tensor();
@@ -696,7 +712,7 @@ Tensor wrapped_scalar_tensor_mps(const Scalar& scalar, const Device device) {
   } else if (scalar.isBoolean()) {
     tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kBool));
   } else if (scalar.isComplex()) {
-    tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kComplexDouble));
+    tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kComplexFloat));
   } else {
     TORCH_INTERNAL_ASSERT(scalar.isIntegral(false));
     tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kLong));
@@ -915,6 +931,22 @@ std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
 std::shared_ptr<MetalKernelFunction> MetalShaderLibrary::getKernelFunction(const std::string& name) {
   auto [cpl, func] = getLibraryPipelineState(getLibrary(), name);
   return std::make_shared<MetalKernelFunction>(cpl, func);
+}
+
+MetalKernelFunction* MetalShaderLibrary::getCachedKernelFunctionPtr(const std::string& name) {
+  // Check if kernel is already cached
+  auto it = kernelCache.find(name);
+  if (it != kernelCache.end()) {
+    return it->second.get();
+  }
+
+  // Create new kernel function and cache it
+  auto [cpl, func] = getLibraryPipelineState(getLibrary(), name);
+  auto kernel = std::make_unique<MetalKernelFunction>(cpl, func);
+  MetalKernelFunction* raw_ptr = kernel.get();
+  kernelCache[name] = std::move(kernel);
+
+  return raw_ptr;
 }
 
 class BundledShaderLibary : public MetalShaderLibrary {

@@ -82,7 +82,7 @@ if TYPE_CHECKING:
 # This causes an issue in the multithreading test because we check all events
 # in that test with their tids. The events that correspond to these lingering
 # threads all have TID of (uint64_t)(-1) which is invalid.
-# The work around is turnning off monitoring thread when tqdm is loaded.
+# The work around is turning off monitoring thread when tqdm is loaded.
 # Since these are unit tests, it is safe to turn off monitor thread.
 try:
     import tqdm
@@ -109,7 +109,7 @@ class TestProfilerCUDA(TestCase):
         t = torch.rand(1, 1).cuda()
         p = psutil.Process()
         last_rss = collections.deque(maxlen=5)
-        for outer_idx in range(10):
+        for _ in range(10):
             with _profile(use_cuda=True):
                 for _ in range(1024):
                     t = torch.mm(t, t)
@@ -529,7 +529,7 @@ class TestProfiler(TestCase):
                 found_mm = True
             if "gemm" in e.name.lower() or "Cijk" in e.name:
                 found_gemm = True
-            if "memcpy" in e.name.lower():
+            if "memcpy" in e.name.lower() or "__amd_rocclr_copyBuffer" in e.name:
                 found_memcpy = True
         if use_cuda:
             self.assertTrue(found_gemm)
@@ -1054,7 +1054,7 @@ class TestProfiler(TestCase):
             schedule=torch.profiler.schedule(wait=1, warmup=1, active=2),
             on_trace_ready=trace_handler,
         ) as p:
-            for idx in range(8):
+            for _ in range(8):
                 self.payload(use_cuda=use_cuda)
                 p.step()
 
@@ -1144,14 +1144,14 @@ class TestProfiler(TestCase):
             # See https://github.com/pytorch/pytorch/issues/88446
             optimizer_step()
 
-        for idx in range(niters):
+        for _ in range(niters):
             run_batch()
 
         with profile(
             activities=supported_activities(),
             schedule=torch.profiler.schedule(wait=1, warmup=1, active=2),
         ) as p:
-            for idx in range(niters):
+            for _ in range(niters):
                 run_batch()
                 p.step()
 
@@ -1508,7 +1508,7 @@ class TestProfiler(TestCase):
         )
         inputs = torch.randn(40, 16, 18, 260)
         uint32_max = 2**32 - 1
-        for i in range(5):
+        for _ in range(5):
             with profile() as prof:
                 model(inputs)
             for event in prof.profiler.kineto_results.events():
@@ -1930,7 +1930,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         event_list.table()
 
     def _check_all_gpu_present(self, gpu_dict, max_gpu_count):
-        for i in range(0, max_gpu_count):
+        for i in range(max_gpu_count):
             self.assertEqual(gpu_dict["GPU " + str(i)], 1)
 
     # Do json sanity testing. Checks that all events are between profiler start and end
@@ -2023,7 +2023,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         WAIT_TIME = 10
         with profile() as p:
             with torch.profiler.record_function("test_span"):
-                for i in range(WAIT_TIME):
+                for _ in range(WAIT_TIME):
                     torch.rand(4, 4)
                     time.sleep(1)
         events = p.events()
@@ -2072,7 +2072,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             ),
             acc_events=acc_events,
         ) as prof:
-            for i in range(100):
+            for _ in range(100):
                 torch.add(1, 2)
                 prof.step()
         # print(prof.key_averages())
@@ -2124,7 +2124,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 adjust_profiler_step=True
             ),
         ) as prof:
-            for i in range(5):
+            for _ in range(5):
                 self._step_helper_func(prof)
         with TemporaryFileName(mode="w+") as fname:
             prof.export_chrome_trace(fname)
@@ -2139,8 +2139,8 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                         step_helper_funcs.append(event)
             self.assertEqual(len(prof_steps), 5)
             self.assertEqual(len(step_helper_funcs), 5)
-            for i in range(0, len(step_helper_funcs)):
-                for j in range(0, len(step_helper_funcs)):
+            for i in range(len(step_helper_funcs)):
+                for j in range(len(step_helper_funcs)):
                     self.assertTrue(
                         not self._partial_overlap(prof_steps[i], step_helper_funcs[j])
                     )
@@ -3161,7 +3161,7 @@ aten::mm""",
         r.seed(1)
         text_sections = get_text_sections()
         addrs = []
-        for i in range(200):
+        for _ in range(200):
             s = r.randrange(0, len(text_sections))
             start, size = text_sections[s]
             addr = r.randrange(start, start + size)

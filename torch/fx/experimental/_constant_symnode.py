@@ -41,6 +41,12 @@ class ConstantIntNode:
     def _graph_repr(self) -> str:
         return self._str()
 
+    def add(self, other: Any) -> Any:
+        return other.add(self)
+
+    def sub(self, other: Any) -> Any:
+        return other.neg().add(self.val)
+
     def mul(self, other: Any) -> Any:
         return other.mul(self)
 
@@ -66,4 +72,7 @@ class ConstantIntNode:
         return False
 
     def constant_int(self) -> int:
+        return self.val
+
+    def guard_int(self, file: str, line: int) -> int:
         return self.val

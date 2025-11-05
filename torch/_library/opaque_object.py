@@ -1,9 +1,26 @@
-from typing import Any
+from typing import Any, NewType, Optional
 
 import torch
 
+from .fake_class_registry import FakeScriptObject, register_fake_class
 
-OPAQUE_OBJ_TYPE = "__torch__.torch.classes.aten.OpaqueObject"
+
+@register_fake_class("aten::OpaqueObject")
+class FakeOpaqueObject:
+    def __init__(self) -> None:
+        pass
+
+    @classmethod
+    def __obj_unflatten__(cls, flattened_ctx: dict[str, Any]) -> None:
+        raise RuntimeError(
+            "FakeOpaqueObject should not be created through __obj_unflatten__ "
+            "and should be special handled. Please file an issue to Github."
+        )
+
+
+OpaqueTypeStr = "__torch__.torch.classes.aten.OpaqueObject"
+
+OpaqueType = NewType("OpaqueType", torch._C.ScriptObject)
 
 
 def make_opaque(payload: Any = None) -> torch._C.ScriptObject:
@@ -78,9 +95,18 @@ def get_payload(opaque_object: torch._C.ScriptObject) -> Any:
         payload (Any): The Python object stored in the opaque object. This can
         be set with `set_payload()`.
     """
+    if isinstance(opaque_object, FakeScriptObject):
+        raise ValueError(
+            "get_payload: this function was called with a FakeScriptObject "
+            "implying that you are calling get_payload inside of a fake kernel."
+            "The fake kernel should not depend on the contents of the "
+            "OpaqueObject at all, so we're erroring out. If you need this"
+            "functionality, consider creating a custom TorchBind Object instead"
+            "(but note that this is more difficult)."
+        )
     if not (
         isinstance(opaque_object, torch._C.ScriptObject)
-        and opaque_object._type().qualified_name() == OPAQUE_OBJ_TYPE
+        and opaque_object._type().qualified_name() == OpaqueTypeStr
     ):
         type_ = (
             opaque_object._type().qualified_name()
@@ -101,9 +127,19 @@ def set_payload(opaque_object: torch._C.ScriptObject, payload: Any) -> None:
         torch._C.ScriptObject: The opaque object that stores the given Python object.
         payload (Any): The Python object to store in the opaque object.
     """
+    if isinstance(opaque_object, FakeScriptObject):
+        raise ValueError(
+            "set_payload: this function was called with a FakeScriptObject "
+            "implying that you are calling get_payload inside of a fake kernel."
+            "The fake kernel should not depend on the contents of the "
+            "OpaqueObject at all, so we're erroring out. If you need this"
+            "functionality, consider creating a custom TorchBind Object instead"
+            "(but note that this is more difficult)."
+        )
+
     if not (
         isinstance(opaque_object, torch._C.ScriptObject)
-        and opaque_object._type().qualified_name() == OPAQUE_OBJ_TYPE
+        and opaque_object._type().qualified_name() == OpaqueTypeStr
     ):
         type_ = (
             opaque_object._type().qualified_name()
@@ -114,3 +150,38 @@ def set_payload(opaque_object: torch._C.ScriptObject, payload: Any) -> None:
             f"Tried to get the payload from a non-OpaqueObject of type `{type_}`"
         )
     torch._C._set_opaque_object_payload(opaque_object, payload)
+
+
+_OPAQUE_TYPES: dict[Any, str] = {}
+
+
+def register_opaque_type(cls: Any, name: Optional[str] = None) -> None:
+    """
+    Registers the given type as an opaque type which allows this to be consumed
+    by a custom operator.
+
+    Args:
+        cls (type): The class to register as an opaque type.
+        name (str): A unique qualified name of the type.
+    """
+    if name is None:
+        name = cls.__name__
+
+    if "." in name:
+        # The schema_type_parser will break up types with periods
+        raise ValueError(
+            f"Unable to accept name, {name}, for this opaque type as it contains a '.'"
+        )
+    _OPAQUE_TYPES[cls] = name
+
+    torch._C._register_opaque_type(name)
+
+
+def is_opaque_type(cls: Any) -> bool:
+    """
+    Checks if the given type is an opaque type.
+    """
+    if cls not in _OPAQUE_TYPES:
+        return False
+
+    return torch._C._is_opaque_type_registered(_OPAQUE_TYPES[cls])

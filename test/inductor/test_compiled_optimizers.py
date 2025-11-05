@@ -201,14 +201,17 @@ KERNEL_COUNT_OVERRIDES = {
     "test_adamw_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
     "test_adamw_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
     "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
-    "test_adamw_tensor_lr_tensor_betas_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
     "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamw_tensor_lr_tensor_betas_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamw_tensor_lr_tensor_betas_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
     "test_adamw_tensor_lr_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
     "test_adamw_tensor_lr_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
     "test_adam_tensor_lr_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
     "test_adam_tensor_lr_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
     "test_adam_tensor_lr_tensor_betas_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adam_tensor_lr_tensor_betas_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
     "test_adam_tensor_lr_tensor_betas_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adam_tensor_lr_tensor_betas_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
     "test_adam_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
     "test_adam_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
     "test_adadelta_tensor_lr_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
@@ -247,9 +250,9 @@ KERNEL_COUNT_OVERRIDES = {
     "test_adamax_tensor_lr_weight_decay_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
     "test_adamax_tensor_lr_weight_decay_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
     "test_asgd_tensor_lr_weight_decay_maximize_capturable_cuda": lambda x: assert_expected_inline(x, """5"""),
-    "test_asgd_tensor_lr_weight_decay_maximize_capturable_xpu": lambda x: assert_expected_inline(x, """8"""),
+    "test_asgd_tensor_lr_weight_decay_maximize_capturable_xpu": lambda x: assert_expected_inline(x, """5"""),
     "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),  # noqa: B950
-    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_xpu": lambda x: assert_expected_inline(x, """9"""),  # noqa: B950
+    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),  # noqa: B950
     "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_cuda": lambda x: assert_expected_inline(x, """6"""),
     "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_xpu": lambda x: assert_expected_inline(x, """6"""),
     "test_sgd_tensor_lr_cpu": lambda x: assert_expected_inline(x, """2"""),
@@ -289,7 +292,7 @@ def build_opt_kwarg_db():
 
                 has_tensor_lr = False
                 for key, val in kwargs.items():
-                    if (not key == "lr" and not key == "betas") and (
+                    if (key != "lr" and key != "betas") and (
                         not isinstance(val, bool) or (isinstance(val, bool) and val)
                     ):
                         name += "_" + key
@@ -436,7 +439,7 @@ def make_test(
     closure=None,
     scheduler_cls=None,
     kernel_count=2,
-    device="cuda",
+    device=GPU_TYPE,
     **kwargs,
 ):
     @config.patch("score_fusion_memory_threshold", 1)
@@ -450,7 +453,7 @@ def make_test(
                 stack.enter_context(config.patch({"triton.cudagraphs": True}))
 
             kwargs_compiled = deepcopy(kwargs)
-            if isinstance(kwargs.get("lr", None), torch.Tensor):
+            if isinstance(kwargs.get("lr"), torch.Tensor):
                 kwargs["lr"] = kwargs["lr"].to(device)
                 kwargs_compiled["lr"] = kwargs_compiled["lr"].to(device)
 

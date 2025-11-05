@@ -1,11 +1,14 @@
 # Owner(s): ["module: inductor"]
 
 from unittest import skipIf
+from unittest.mock import Mock
 
 import torch
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
+from torch._inductor.dependencies import Dep, ReadWrites
+from torch._inductor.scheduler import BaseSchedulerNode, Scheduler
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
@@ -15,6 +18,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
+from torch.utils._ordered_set import OrderedSet
 
 
 def FlopCounterMode(*args, **kwargs):
@@ -132,8 +136,81 @@ class TestScheduler(TestCase):
             counters["inductor"]["flop_count"] = 0
         torch._logging.set_logs()
 
+    def test_fusion_prevent_too_many_reads_and_writes_prevents_fusion(self):
+        """Test that fusion is prevented when unique I/O buffers exceed threshold"""
+        # Setup: Create nodes with many unique I/O buffers
+        # node1: reads [A, B, C], writes [D]
+        # node2: reads [D, E, F], writes [G]
+        # D becomes internal (node2 reads node1's write)
+        # After fusion: unique I/O = {A, B, C, E, F, G} = 6 buffers
+        scheduler = Mock(spec=Scheduler)
+        scheduler.can_buffer_be_removed_through_fusion = Mock(return_value=False)
 
-instantiate_device_type_tests(TestScheduler, globals())
+        node1 = self._create_mock_node(
+            name="node1", reads=["A", "B", "C"], writes=["D"]
+        )
+        node2 = self._create_mock_node(
+            name="node2", reads=["D", "E", "F"], writes=["G"]
+        )
+
+        # Execute: Check with threshold of 5 (should prevent fusion since 6 > 5)
+        result = Scheduler.fusion_prevent_too_many_reads_and_writes(
+            scheduler, node1, node2, threshold=5
+        )
+
+        # Assert: Fusion should be prevented (6 unique buffers > 5 threshold)
+        self.assertTrue(result)
+
+    def test_fusion_prevent_too_many_reads_and_writes_allows_fusion(self):
+        """Test that fusion is allowed when intermediate buffers are removed"""
+        # Setup: Create nodes where node2 reads node1's output
+        # node1: reads [A, B], writes [C]
+        # node2: reads [C, D], writes [E]
+        # C becomes internal (node2 reads node1's write)
+        # After fusion: unique I/O = {A, B, D, E} = 4 buffers
+        scheduler = Mock(spec=Scheduler)
+        scheduler.can_buffer_be_removed_through_fusion = Mock(return_value=False)
+
+        node1 = self._create_mock_node(name="node1", reads=["A", "B"], writes=["C"])
+        node2 = self._create_mock_node(name="node2", reads=["C", "D"], writes=["E"])
+
+        # Execute: Check with threshold of 5 (should allow fusion since 4 <= 5)
+        result = Scheduler.fusion_prevent_too_many_reads_and_writes(
+            scheduler, node1, node2, threshold=5
+        )
+
+        # Assert: Fusion should be allowed (4 unique buffers <= 5 threshold)
+        self.assertFalse(result)
+
+    def _create_mock_node(self, name: str, reads: list[str], writes: list[str]) -> Mock:
+        """Helper method to create a mock scheduler node with specified reads/writes"""
+        node = Mock(spec=BaseSchedulerNode)
+        node.get_name = Mock(return_value=name)
+        node.get_nodes = Mock(return_value=[node])
+
+        # Create mock Dep objects for reads and writes
+        read_deps = OrderedSet()
+        for read_name in reads:
+            dep = Mock(spec=Dep)
+            dep.name = read_name
+            read_deps.add(dep)
+
+        write_deps = OrderedSet()
+        for write_name in writes:
+            dep = Mock(spec=Dep)
+            dep.name = write_name
+            write_deps.add(dep)
+
+        # Create mock ReadWrites object
+        read_writes = Mock(spec=ReadWrites)
+        read_writes.reads = read_deps
+        read_writes.writes = write_deps
+
+        node.read_writes = read_writes
+        return node
+
+
+instantiate_device_type_tests(TestScheduler, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

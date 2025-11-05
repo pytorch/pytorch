@@ -133,9 +133,8 @@ def from_dlpack(
         if device is not None:
             if isinstance(device, str):
                 device = torch.device(device)
-            assert isinstance(device, torch.device), (
-                f"from_dlpack: unsupported device type: {type(device)}"
-            )
+            if not isinstance(device, torch.device):
+                raise AssertionError(f"from_dlpack: unsupported device type: {type(device)}")
             kwargs["dl_device"] = torch._C._torchDeviceToDLDevice(device)
 
         ext_device = ext_tensor.__dlpack_device__()
@@ -163,10 +162,10 @@ def from_dlpack(
             dlpack = ext_tensor.__dlpack__(**kwargs)
 
     else:
-        assert device is None and copy is None, (
-            "device and copy kwargs not supported when ext_tensor is "
-            "already a DLPack capsule."
-        )
+        if device is not None or copy is not None:
+            raise AssertionError(
+                "device and copy kwargs not supported when ext_tensor is already a DLPack capsule."
+            )
         # Old versions just call the converter
         dlpack = ext_tensor
     return torch._C._from_dlpack(dlpack)

@@ -46,7 +46,9 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
 
  public:
   // Public for now...
-  explicit SparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta);
+  explicit SparseTensorImpl(
+      at::DispatchKeySet /*key_set*/,
+      const caffe2::TypeMeta /*data_type*/);
 
   void release_resources() override;
 
@@ -229,14 +231,14 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
   }
 
   void resize_(int64_t sparse_dim, int64_t dense_dim, ArrayRef<int64_t> size) {
-    return _resize_(sparse_dim, dense_dim, size);
+    _resize_(sparse_dim, dense_dim, size);
   }
 
   void resize_(
       int64_t sparse_dim,
       int64_t dense_dim,
       ArrayRef<c10::SymInt> size) {
-    return _resize_(sparse_dim, dense_dim, size);
+    _resize_(sparse_dim, dense_dim, size);
   }
 
   // NOTE: this function will resize the sparse tensor and also set `indices`
@@ -384,8 +386,8 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
 
  private:
   explicit SparseTensorImpl(
-      at::DispatchKeySet,
-      const caffe2::TypeMeta,
+      at::DispatchKeySet /*key_set*/,
+      const caffe2::TypeMeta /*data_type*/,
       at::Tensor indices,
       at::Tensor values);
 
