@@ -17,7 +17,6 @@ RUN yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl 
 # Just add everything as a safe.directory for git since these will be used in multiple places with git
 RUN git config --global --add safe.directory '*'
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
-ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
 
 # cmake-3.18.4 from pip
 RUN yum install -y python3-pip && \
@@ -53,7 +52,6 @@ ENV CUDA_HOME=/usr/local/cuda-${CUDA_VERSION}
 ENV CUDA_VERSION=${CUDA_VERSION}
 # Make things in our path by default
 ENV PATH=/usr/local/cuda-${CUDA_VERSION}/bin:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
-ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
 
 
 FROM cuda as cuda12.6
@@ -84,7 +82,7 @@ RUN yum -y update && \
     yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl zlib-devel openssl-devel yum-utils autoconf automake make gcc-toolset-${DEVTOOLSET_VERSION}-gcc gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran gcc-toolset-${DEVTOOLSET_VERSION}-gdb
 RUN git config --global --add safe.directory '*'
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
-ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
+
 # cmake-3.18.4 from pip
 RUN yum install -y python3-pip && \
     python3 -mpip install cmake==3.18.4 && \
