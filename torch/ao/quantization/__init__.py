@@ -25,7 +25,7 @@ from .pt2e.export_utils import (
     _move_exported_model_to_train as move_exported_model_to_train,
 )
 
-# pyrefly: ignore  # deprecated
+# pyrefly: ignore [deprecated]
 from .qconfig import *  # noqa: F403
 from .qconfig_mapping import *  # noqa: F403
 from .quant_type import *  # noqa: F403
@@ -235,9 +235,10 @@ class _DerivedObserverOrFakeQuantize(ObserverBase):
         from .utils import is_per_channel
 
         if is_per_channel(self.qscheme):
-            assert self.ch_axis is not None, (
-                "Must provide a valid ch_axis if qscheme is per channel"
-            )
+            if self.ch_axis is None:
+                raise AssertionError(
+                    "Must provide a valid ch_axis if qscheme is per channel"
+                )
 
     def forward(self, x: Tensor) -> Tensor:
         return x

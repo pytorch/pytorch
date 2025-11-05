@@ -132,7 +132,7 @@ def _make_export_case(m, name, configs):
             m.__doc__ is not None
         ), f"Could not find description or docstring for export case: {m}"
         configs = {**configs, "description": m.__doc__}
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     return ExportCase(**{**configs, "model": m, "name": name})
 
 

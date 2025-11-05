@@ -344,7 +344,7 @@ class TestFakeQuantizeOps(TestCase):
         maxi = 255
         mini = 0
 
-        for i in range(20):
+        for _ in range(20):
             X1 = torch.randn(5, 5).to(torch.float16)
             Y1 = torch.fake_quantize_per_tensor_affine(X1, scale, zero, mini, maxi)
             Y1r = _fake_quantize_per_tensor_affine_reference(X1, scale, zero, mini, maxi)
@@ -770,7 +770,7 @@ class TestFakeQuantizeOps(TestCase):
         mini = 0
         maxi = 255
 
-        for i in range(20):
+        for _ in range(20):
             X1 = torch.randn(4, 5).to(torch.float16)
             Y1 = torch.fake_quantize_per_channel_affine(X1, scale, zero, axis, mini, maxi)
             Y1r = _fake_quantize_per_channel_affine_reference(X1, scale, zero, axis, mini, maxi)
@@ -1028,7 +1028,7 @@ class TestFakeQuantizeOps(TestCase):
             zero_types = [torch.int]
         devices = [torch.device('cpu'), torch.device('cuda')] if torch.cuda.is_available() else [torch.device('cpu')]
         axis = 1
-        for i in range(20):
+        for _ in range(20):
             for torch_type, float_type, device, zero_type in itertools.product(torch_types, float_types, devices, zero_types):
                 X = torch.randn(3, 3, device=device).to(float_type)
                 scales = (10 * torch.randn(3, device=device)).abs()

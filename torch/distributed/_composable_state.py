@@ -15,7 +15,8 @@ _module_state_mapping: weakref.WeakKeyDictionary[
 
 def _insert_module_state(module: nn.Module, state: _State) -> None:
     global _module_state_mapping
-    assert module not in _module_state_mapping, f"Inserting {module} more than once."
+    if module in _module_state_mapping:
+        raise AssertionError(f"Inserting {module} more than once.")
     _module_state_mapping[module] = weakref.ref(state)
 
 
@@ -31,7 +32,7 @@ def _get_module_state(module: nn.Module) -> Optional[_State]:
     """
     global _module_state_mapping
     if isinstance(module, _State):
-        # pyrefly: ignore  # redundant-cast
+        # pyrefly: ignore [redundant-cast]
         return cast(_State, module)
     else:
         # https://github.com/pytorch/pytorch/issues/107054

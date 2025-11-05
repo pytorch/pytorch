@@ -876,7 +876,7 @@ inline Variable make_variable_non_differentiable_view(
         /*version_counter=*/impl::version_counter(base),
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     data_impl_copy->set_autograd_meta(nullptr);
-    return Variable(data_impl_copy);
+    return Variable(std::move(data_impl_copy));
   }
   return Variable();
 }
@@ -935,7 +935,7 @@ inline Variable make_variable(
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     data_impl_copy->set_autograd_meta(std::make_unique<AutogradMeta>(
         data_impl_copy.get(), false, std::move(gradient_edge)));
-    return Variable(data_impl_copy);
+    return Variable(std::move(data_impl_copy));
   }
   return Variable();
 }

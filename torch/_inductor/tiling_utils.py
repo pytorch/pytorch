@@ -1,7 +1,8 @@
 import dataclasses
 import itertools
 from collections import Counter, defaultdict
-from typing import Callable, Literal, Optional, overload, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable
+from typing import Literal, Optional, overload, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 
@@ -126,7 +127,7 @@ def solve_for_tiling(expr: sympy.Expr) -> Optional[sympy.Expr]:
 
     # For the purposes of tiling/coalesced access, approximate ModularIndexing and FloorDiv
     # then check later
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     eq_1_expr_simplified = eq_1_expr.replace(ModularIndexing, indexing_div_rep).replace(
         FloorDiv, indexing_div_rep
     )
@@ -425,7 +426,7 @@ def apply_var_mapping(
         new_ranges, norm_pw_vars + norm_red_vars, strict=True
     ):
         range_vars = []
-        for i in range(len(new_range)):
+        for _ in range(len(new_range)):
             range_vars.append(flat_vars[count])
             count += 1
 
@@ -477,7 +478,6 @@ def extract_normalized_read_writes(
     (norm_pw_vars, norm_red_vars), ranges = index_vars_no_squeeze(
         pw_splits, red_splits, prefix="n"
     )
-    node = node
 
     for n in list(node.get_nodes()):
         if not isinstance(n, torch._inductor.scheduler.SchedulerNode):

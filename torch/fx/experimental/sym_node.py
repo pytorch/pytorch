@@ -1678,6 +1678,8 @@ def _make_user_magic(method, user_type):
     def get_constant(x: Union[SymInt, int, SymFloat, float, SymBool, bool]):
         if isinstance(x, (int, float, bool)):
             return x
+        if isinstance(x, SymInt):
+            return x.node.guard_int("", 0)
         if isinstance(x, SymBool):
             return x.node.guard_bool("", 0)
         raise AssertionError("expect to be called with constant SymBools")
@@ -1869,7 +1871,7 @@ def _make_user_magic(method, user_type):
             setattrs(user_type, f"__r{method_name}__", rbinary_magic_impl)
 
 
-for method, func in magic_methods.items():  # type: ignore[assignment]
+for method in magic_methods.keys():  # type: ignore[assignment]
     if method in only_bool_magic_methods:
         _make_user_magic(method, SymBool)
         continue

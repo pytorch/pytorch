@@ -1711,6 +1711,29 @@ Tensor narrow_symint(
       "], but got ",
       start,
       ")")
+
+  auto cond1 = TORCH_GUARD_OR_FALSE(start < 0);
+  auto cond2 = TORCH_GUARD_OR_FALSE(start >= 0);
+
+  if (cond1 || cond2) {
+    if (cond1) {
+      start = start + cur_size;
+    }
+
+    TORCH_SYM_CHECK(
+        start.sym_le(cur_size - length),
+        "start (",
+        start,
+        ") + length (",
+        length,
+        ") exceeds dimension size (",
+        cur_size,
+        ").");
+    return at::slice_symint(self, dim, start, start + length, 1);
+  }
+
+  // Unbacked start handling!
+
   // Bounds check without converting start:
   // - If start < 0: need (start + cur_size) + length <= cur_size, i.e., start +
   // length <= 0

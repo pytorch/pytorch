@@ -107,9 +107,12 @@ class _ToTorchTensor(torch.autograd.Function):
         )
 
         return (
+            # pyrefly: ignore [bad-argument-type]
             DTensor(
+                # pyrefly: ignore [bad-argument-count]
                 grad_output,
                 grad_spec,
+                # pyrefly: ignore [unexpected-keyword]
                 requires_grad=grad_output.requires_grad,
             ),
             None,
@@ -175,11 +178,14 @@ class _FromTorchTensor(torch.autograd.Function):
         )
 
         # We want a fresh Tensor object that shares memory with the input tensor
+        # pyrefly: ignore [bad-argument-type]
         dist_tensor = DTensor(
+            # pyrefly: ignore [bad-argument-count]
             input.view_as(input),
             dist_spec,
             # requires_grad of the dist tensor depends on if input
             # requires_grad or not
+            # pyrefly: ignore [unexpected-keyword]
             requires_grad=input.requires_grad,
         )
         return dist_tensor
@@ -304,9 +310,12 @@ class DTensor(torch.Tensor):
             spec.placements,
             tensor_meta=unflatten_tensor_meta,
         )
+        # pyrefly: ignore [bad-argument-type]
         return DTensor(
+            # pyrefly: ignore [bad-argument-count]
             local_tensor,
             unflatten_spec,
+            # pyrefly: ignore [unexpected-keyword]
             requires_grad=requires_grad,
         )
 
@@ -820,9 +829,12 @@ def distribute_tensor(
             dtype=tensor.dtype,
         ),
     )
+    # pyrefly: ignore [bad-argument-type]
     return DTensor(
+        # pyrefly: ignore [bad-argument-count]
         local_tensor.requires_grad_(tensor.requires_grad),
         spec,
+        # pyrefly: ignore [unexpected-keyword]
         requires_grad=tensor.requires_grad,
     )
 
@@ -955,7 +967,7 @@ def distribute_module(
     if partition_fn is None:
         # if partition_fn not specified, we by default replicate
         # all module params/buffers
-        for name, submod in module.named_modules():
+        for submod in module.modules():
             replicate_module_params_buffers(submod, device_mesh)
     else:
         # apply partition_fun to submodules
@@ -1048,10 +1060,10 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     )
 
     # initialize the local tensor
-    if init_op == torch.full:
+    if init_op is torch.full:
         fill_value = kwargs.pop("fill_value", 0)
         local_tensor = init_op(local_shape, fill_value, **kwargs)
-    elif init_op == torch.rand or init_op == torch.randn:
+    elif init_op is torch.rand or init_op is torch.randn:
         # this tensor meta is not used except `shape`
         dtype = kwargs.get("dtype", torch.get_default_dtype())
 
@@ -1077,9 +1089,12 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
         ),
     )
 
+    # pyrefly: ignore [bad-argument-type]
     return DTensor(
+        # pyrefly: ignore [bad-argument-count]
         local_tensor,
         spec,
+        # pyrefly: ignore [unexpected-keyword]
         requires_grad=kwargs["requires_grad"],
     )
 

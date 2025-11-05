@@ -8,7 +8,7 @@ from .expanded_weights_impl import ExpandedWeight
 
 def is_batch_first(expanded_args_and_kwargs):
     batch_first = None
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     for arg in expanded_args_and_kwargs:
         if not isinstance(arg, ExpandedWeight):
             continue
@@ -32,7 +32,7 @@ def standard_kwargs(kwarg_names, expanded_args):
     expanded_args_without_kwargs = expanded_args[
         : len(expanded_args) - len(kwarg_names)
     ]
-    expanded_kwargs = dict(zip(kwarg_names, kwarg_values))
+    expanded_kwargs = dict(zip(kwarg_names, kwarg_values, strict=True))
     return expanded_args_without_kwargs, expanded_kwargs
 
 

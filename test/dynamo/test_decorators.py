@@ -2,6 +2,7 @@
 import functools
 import operator
 import os
+import re
 import unittest.mock as mock
 from unittest.mock import patch
 
@@ -1472,6 +1473,30 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out1, inp + 2)
         self.assertEqual(out2, inp + 2)
 
+    def test_fail_on_recompile_shows_guard_details(self):
+        @torch.compile(backend="eager", dynamic=False)
+        def f(x):
+            return x + 1
+
+        f(torch.ones(4))
+        f(torch.ones(5))
+
+        def post_munge(s):
+            return re.sub(r"line number: \d+", "line number: N", s)
+
+        with torch.compiler.set_stance("fail_on_recompile"):
+            f(torch.ones(4))
+            self.assertExpectedInlineMunged(
+                RuntimeError,
+                lambda: f(torch.ones(7)),
+                """\
+Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: 'test_decorators.py', function name: 'f', line number: N
+    triggered by the following guard failure(s):
+    - 0/0: tensor 'x' size mismatch at index 0. expected 4, actual 7
+    - 0/1: tensor 'x' size mismatch at index 0. expected 5, actual 7""",  # noqa: B950
+                post_munge=post_munge,
+            )
+
     def test_set_stance_fail_on_recompile_with_disable(self):
         @torch.compiler.disable
         def inner(x):
@@ -2038,6 +2063,23 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             return 1
 
         self.assertEqual(f(), 1)
+
+    def test_error_on_graph_break_nonempty_checkpoint(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            x = x + 1
+            x = x + 1
+            x = x + 1
+            with torch._dynamo.error_on_graph_break(True):
+                torch._dynamo.graph_break()
+            return x + 1
+
+        with self.assertRaises(Unsupported):
+            fn(torch.ones(3))
+
+        self.assertEqual(cnts.frame_count, 0)
 
     def test_nested_compile_fullgraph(self):
         # Test that fullgraph=True cannot be toggled back by fullgraph=False

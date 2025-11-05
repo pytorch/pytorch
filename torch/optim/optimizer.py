@@ -62,7 +62,7 @@ def _use_grad_for_differentiable(func: Callable[_P, _T]) -> Callable[_P, _T]:
     def _use_grad(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         import torch._dynamo
 
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         self = cast(Optimizer, args[0])  # assume first positional arg is `self`
         prev_grad = torch.is_grad_enabled()
         try:
@@ -136,13 +136,13 @@ def _disable_dynamo_if_unsupported(
             if torch.compiler.is_compiling() and (
                 not kwargs.get("capturable", False)
                 and has_state_steps
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 and (arg := args[state_steps_ind])
                 and isinstance(arg, Sequence)
                 and arg[0].is_cuda
                 or (
                     "state_steps" in kwargs
-                    # pyrefly: ignore  # unsupported-operation
+                    # pyrefly: ignore [unsupported-operation]
                     and (kwarg := kwargs["state_steps"])
                     and isinstance(kwarg, Sequence)
                     and kwarg[0].is_cuda
@@ -362,18 +362,18 @@ class Optimizer:
 
     _optimizer_step_pre_hooks: dict[int, OptimizerPreHook]
     _optimizer_step_post_hooks: dict[int, OptimizerPostHook]
-    # pyrefly: ignore  # not-a-type
+    # pyrefly: ignore [not-a-type]
     _optimizer_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
     _optimizer_state_dict_post_hooks: (
-        # pyrefly: ignore  # not-a-type
+        # pyrefly: ignore [not-a-type]
         'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
     )
     _optimizer_load_state_dict_pre_hooks: (
-        # pyrefly: ignore  # not-a-type
+        # pyrefly: ignore [not-a-type]
         'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
     )
     _optimizer_load_state_dict_post_hooks: (
-        # pyrefly: ignore  # not-a-type
+        # pyrefly: ignore [not-a-type]
         'OrderedDict[int, Callable[["Optimizer"], None]]'
     )
 
@@ -398,7 +398,6 @@ class Optimizer:
         self.state: defaultdict[torch.Tensor, Any] = defaultdict(dict)
         self.param_groups: list[dict[str, Any]] = []
 
-        # pyrefly: ignore  # no-matching-overload
         param_groups = list(params)
         if len(param_groups) == 0:
             raise ValueError("optimizer got an empty parameter list")
@@ -484,7 +483,8 @@ class Optimizer:
                 warnings.warn(
                     "This instance was constructed with capturable=True or some of all the param_groups came with capturable=True, "
                     "but step() is running without CUDA graph capture. If you never intend to graph-capture this "
-                    "instance, capturable=True can impair performance, and you should set capturable=False."
+                    "instance, capturable=True can impair performance, and you should set capturable=False.",
+                    stacklevel=2,
                 )
                 self._warned_capturable_if_run_uncaptured = True
 
@@ -522,7 +522,7 @@ class Optimizer:
                                 f"{func} must return None or a tuple of (new_args, new_kwargs), but got {result}."
                             )
 
-                # pyrefly: ignore  # invalid-param-spec
+                # pyrefly: ignore [invalid-param-spec]
                 out = func(*args, **kwargs)
                 self._optimizer_step_code()
 
@@ -780,7 +780,8 @@ class Optimizer:
         # UNLESS fused or capturable, see note [special device hosting for step]
         fused = False
         capturable = False
-        assert param_groups is not None
+        if param_groups is None:
+            raise AssertionError("Expected param_groups to be set")
         for pg in param_groups:
             if param_id in pg["params"]:
                 fused = pg.get("fused", False)
@@ -940,7 +941,9 @@ class Optimizer:
             )
         param_lens = (len(g["params"]) for g in groups)
         saved_lens = (len(g["params"]) for g in saved_groups)
-        if any(p_len != s_len for p_len, s_len in zip(param_lens, saved_lens)):
+        if any(
+            p_len != s_len for p_len, s_len in zip(param_lens, saved_lens, strict=True)
+        ):
             raise ValueError(
                 "loaded state dict contains a parameter group "
                 "that doesn't match the size of optimizer's group"
@@ -951,6 +954,7 @@ class Optimizer:
             zip(
                 chain.from_iterable(g["params"] for g in saved_groups),
                 chain.from_iterable(g["params"] for g in groups),
+                strict=True,
             )
         )
 
@@ -960,9 +964,9 @@ class Optimizer:
                 return Optimizer._process_value_according_to_param_policy(
                     param,
                     value,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     param_id,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     param_groups,
                     key,
                 )
@@ -975,7 +979,7 @@ class Optimizer:
                 }
             elif isinstance(value, Iterable):
                 return type(value)(
-                    # pyrefly: ignore  # bad-argument-count
+                    # pyrefly: ignore [bad-argument-count]
                     _cast(param, v, param_id=param_id, param_groups=param_groups)
                     for v in value
                 )  # type: ignore[call-arg]
@@ -1004,7 +1008,9 @@ class Optimizer:
                 new_group["param_names"] = group["param_names"]
             return new_group
 
-        param_groups = [update_group(g, ng) for g, ng in zip(groups, saved_groups)]
+        param_groups = [
+            update_group(g, ng) for g, ng in zip(groups, saved_groups, strict=True)
+        ]
         self.__setstate__({"state": state, "param_groups": param_groups})
 
         for post_hook in self._optimizer_load_state_dict_post_hooks.values():
@@ -1057,12 +1063,18 @@ class Optimizer:
                             if not foreach or p.grad.is_sparse:
                                 p.grad.zero_()
                             else:
-                                assert per_device_and_dtype_grads is not None
+                                if per_device_and_dtype_grads is None:
+                                    raise AssertionError(
+                                        "Expected per_device_and_dtype_grads to be set"
+                                    )
                                 per_device_and_dtype_grads[p.grad.device][
                                     p.grad.dtype
                                 ].append(p.grad)
             if foreach:
-                assert per_device_and_dtype_grads is not None
+                if per_device_and_dtype_grads is None:
+                    raise AssertionError(
+                        "Expected per_device_and_dtype_grads to be set"
+                    )
                 for per_dtype_grads in per_device_and_dtype_grads.values():
                     for grads in per_dtype_grads.values():
                         torch._foreach_zero_(grads)
