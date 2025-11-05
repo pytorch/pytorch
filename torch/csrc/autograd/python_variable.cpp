@@ -1106,13 +1106,6 @@ static c10::SymDimVector tuple_to_symintlist(PyObject* obj) {
   return res;
 }
 
-static constexpr c10::DispatchKeySet after_Python_keyset =
-    c10::DispatchKeySet(c10::DispatchKeySet::FULL) ^
-    (c10::DispatchKeySet(
-         c10::DispatchKeySet::FULL_AFTER,
-         c10::DispatchKey::Python) |
-     c10::DispatchKeySet(c10::DispatchKey::Python));
-
 // As a Python object, DTensorSpec can be stored directly within
 // IValue, but doing so is inefficient -- it requires a
 // heap-allocated, reference counted intermediate
@@ -1281,11 +1274,6 @@ py::object dispatchDTensorOp(
     py::handle args,
     py::handle kwargs,
     torch::jit::Stack* stack) {
-  // We're called from dispatch and the dispatcher drops the GIL.
-  py::gil_scoped_acquire guard;
-  // Match pythonFallback's dispatch key behavior.
-  c10::impl::ExcludeDispatchKeyGuard exclude_guard(after_Python_keyset);
-
   py::object cached_sharding;
   const auto op_dispatcher = get_dtensor_op_dispatcher();
   {

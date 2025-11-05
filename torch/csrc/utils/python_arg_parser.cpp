@@ -4,6 +4,7 @@
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
@@ -12,6 +13,7 @@
 #include <ATen/ATen.h>
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/TracerMode.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/util/irange.h>
 
 #include <sstream>
@@ -373,9 +375,30 @@ static py::object dispatch_on_subclass(
       }
     }
 
-    if (opt_op && opt_stack && is_dtensor(arg)) {
-      ret = dispatchDTensorOp(
-          *opt_op, torch_api_function, args, kwargs, opt_stack);
+    if (is_dtensor(arg)) {
+      if (opt_op && opt_stack) {
+        ret = dispatchDTensorOp(
+            *opt_op, torch_api_function, args, kwargs, opt_stack);
+      } else {
+        // Slow path -- reconstruct C++ data structures since they were not
+        // provided.
+        auto schema = py::cast<FunctionSchema>(
+            py::handle(torch_api_function).attr("_schema"));
+        auto opt_op_handle =
+            c10::Dispatcher::singleton().findOp(schema.operator_name());
+        TORCH_CHECK(
+            opt_op_handle.has_value(),
+            "could not look up op for ",
+            schema.operator_name());
+        const auto& op_handle = *opt_op_handle;
+        auto stack = torch::jit::createStackForSchema(
+            op_handle.schema(),
+            py::reinterpret_borrow<py::args>(args),
+            py::reinterpret_borrow<py::kwargs>(kwargs),
+            std::nullopt);
+        ret = dispatchDTensorOp(
+            op_handle, torch_api_function, args, kwargs, &stack);
+      }
     } else {
       ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
           torch_function.ptr(),
