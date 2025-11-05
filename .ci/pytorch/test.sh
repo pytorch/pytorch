@@ -380,7 +380,6 @@ test_lazy_tensor_meta_reference_disabled() {
 test_dynamo_core() {
   time python test/run_test.py \
     --dynamo-core \
-    --dry-run \
     --verbose \
     --upload-artifacts-while-running
   assert_git_not_dirty
