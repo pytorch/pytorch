@@ -2258,7 +2258,7 @@ static inline int PyUnstable_TryIncRef(PyObject *op)
 #endif
         return 1;
     }
-    
+
     // _Py_TryIncRefShared()
     Py_ssize_t shared = _Py_atomic_load_ssize_relaxed(&op->ob_ref_shared);
     for (;;) {
