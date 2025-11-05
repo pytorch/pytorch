@@ -93,7 +93,7 @@ jobs:
       - linux-jammy-cuda12_8-py3_10-gcc11-build
       - target-determination
     with:
-      timeout-minutes: 360
+      timeout-minutes: 400
       build-environment: linux-jammy-cuda12.8-py3.10-gcc11
       docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.test-matrix }}
