@@ -670,10 +670,11 @@ class AsyncCompile:
                 scope[key] = kernel
             except BrokenProcessPool as e:
                 raise RuntimeError(
-                    "A compilation subprocess exited unexpectedly. This "
+                    f"A compilation subprocess exited unexpectedly. This "
                     "is likely due to a crash. To facilitate debugging, "
                     "you can re-run with TORCHINDUCTOR_COMPILE_THREADS=1 "
                     "to cause compilation to occur in the main process."
+                    "key: {key}, result: {result}"
                 ) from e
             pbar.update(1)
 
