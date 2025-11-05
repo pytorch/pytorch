@@ -1858,44 +1858,41 @@ class DataPtrVariable(VariableTracker):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if name == "__eq__" and len(args) == 1:
+        
+        compare_ops = {
+            '__eq__': {
+                'func': operator.eq,
+                'dynamo_op': torch.ops._dynamo_data_ptr.eq.default,
+            },
+            '__ne__': {
+                'func': operator.ne,
+                'dynamo_op': torch.ops._dynamo_data_ptr.ne.default,
+            },
+        }
+
+        if name in compare_ops.keys() and len(args) == 1:
             other = args[0]
-            if not isinstance(other, DataPtrVariable):
-                # Comparing a data_ptr (int) to a non-data_ptr value
-                # If comparing to a tensor, it's always False
-                if isinstance(other, TensorVariable):
-                    return variables.ConstantVariable.create(False)
-                # For other types (e.g., int constants), return NotImplemented
-                # to allow Python's comparison protocol to handle it
-                return variables.ConstantVariable.create(NotImplemented)
+            proxy_target = None
+            proxy_args = None
 
-            # Runtime approach: Insert the comparison into the graph
-            from .builder import wrap_fx_proxy
+            if isinstance(other, DataPtrVariable):
+                proxy_target = compare_ops[name]['func']
+                proxy_args = (self.proxy, other.proxy)
 
-            proxy = tx.output.create_proxy(
-                "call_function",
-                operator.eq,
-                (self.as_proxy(), other.as_proxy()),
-                {},
-            )
-            return wrap_fx_proxy(tx, proxy)
+            elif isinstance(other, ConstantVariable):
+                proxy_target = compare_ops[name]['dynamo_op']
+                proxy_args = (self.from_tensor.as_proxy(), other.as_python_constant())
 
-        if name == "__ne__" and len(args) == 1:
-            other = args[0]
-            if not isinstance(other, DataPtrVariable):
-                if isinstance(other, TensorVariable):
-                    return variables.ConstantVariable.create(True)
-                return variables.ConstantVariable.create(NotImplemented)
+            if proxy_target and proxy_args:
+                from .builder import wrap_fx_proxy
+                proxy = tx.output.create_proxy(
+                    "call_function",
+                    proxy_target,
+                    proxy_args,
+                    {},
+                )
+                return wrap_fx_proxy(tx, proxy)
 
-            # Runtime approach: Insert the comparison into the graph
-            from .builder import wrap_fx_proxy
-
-            proxy = tx.output.create_proxy(
-                "call_function",
-                operator.ne,
-                (self.as_proxy(), other.as_proxy()),
-                {},
-            )
-            return wrap_fx_proxy(tx, proxy)
+            return variables.ConstantVariable.create(NotImplemented)
 
         return super().call_method(tx, name, args, kwargs)

@@ -763,6 +763,27 @@ class BuiltinVariable(VariableTracker):
                     ]
                 )
 
+                # Special handling for DataPtrVariable comparisons
+                # The polyfill cmp_ne does: `not cmp_eq(a, b)` which causes a guard error
+                # when the result is a tensor (from custom ops). We bypass the polyfill by
+                # directly calling DataPtrVariable's __ne__ method which handles comparisons
+                # with int parameters via torch.ops._dynamo_data_ptr.ne custom op.
+                if op in (operator.ne,):
+                    from .tensor import DataPtrVariable
+                    method_name = "__ne__"
+                    result.extend(
+                        [
+                            (
+                                (DataPtrVariable, VariableTracker),
+                                lambda tx, a, b, m=method_name: a.call_method(tx, m, [b], {}),
+                            ),
+                            (
+                                (VariableTracker, DataPtrVariable),
+                                lambda tx, a, b, m=method_name: b.call_method(tx, m, [a], {}),
+                            ),
+                        ]
+                    )
+
                 def handler(
                     tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
                 ) -> VariableTracker:
