@@ -2982,6 +2982,25 @@ class NewNamedTupleVariable(UserDefinedTupleVariable):
                 new_items, self.tuple_cls, self.dynamic_attributes
             )
 
+        # Handle __getitem__ explicitly - delegate to tuple
+        if name == "__getitem__":
+            if kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"1 args and {len(kwargs)} kwargs",
+                )
+            if len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and 0 kwargs",
+                )
+            # Delegate to tuple's __getitem__ via _tuple_vt
+            return self._tuple_vt.call_method(tx, name, args, kwargs)
+
         # Delegate tuple methods to _tuple_vt
         method = self._maybe_get_baseclass_method(name)
         if method in tuple_methods:
