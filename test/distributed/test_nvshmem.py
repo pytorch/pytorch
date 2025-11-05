@@ -1070,7 +1070,8 @@ class HierRouter(nn.Module):
         )  # [seqlen, e]
         tmp_scores = scores.masked_fill(~score_mask.bool(), 0.0)  # [seqlen, e]
         _, topk_idx = torch.topk(tmp_scores, k=self.topk_experts, dim=-1, sorted=False)
-        return group_idx, topk_idx
+        topk_weight = scores.gather(1, topk_idx)  # [seqlen, topk]
+        return group_idx, topk_idx, topk_weight
 
 
 @requires_nvshmem()
@@ -1241,12 +1242,13 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
 
         seqlen = 128
         x = torch.rand(seqlen, hid_dim, device=self.device)
-        topk_node_idx, topk_expert_idx = router(x)
+        topk_node_idx, topk_expert_idx, topk_weight = router(x)
 
         node_in_range = topk_node_idx < n_groups
         expert_in_range = topk_expert_idx < n_experts
         self.assertTrue(torch.all(node_in_range))
         self.assertTrue(torch.all(expert_in_range))
+        self.assertTrue(topk_weight.shape == (seqlen, topk_experts))
 
     def test_dedup_a2a(self) -> None:
         """
@@ -1282,7 +1284,7 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
         # Decision includes topk nodes and topk experts.
         # topk experts may not evenly distribute among topk nodes.
         # topk expert indices are global expert indices.
-        topk_node_idx, topk_expert_idx = router(inp)
+        topk_node_idx, topk_expert_idx, topk_weight = router(inp)
 
         allocator = symm_mem.get_mempool_allocator(self.device)
         mempool = torch.cuda.MemPool(allocator)
@@ -1303,6 +1305,7 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
                 self.intra_group,
                 out_len_ratio,
                 align,
+                topk_weight,
             )
 
         # Compare results of two runs to make sure MemPool is not messing up tensors
@@ -1344,6 +1347,7 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
             topk_indices_intranode_out,
             inter_plan,
             intra_plan,
+            topk_weight_out,
             _inter_out,
             _recv_intra_inp_splits,
         ) = rv3
