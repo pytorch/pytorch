@@ -157,6 +157,7 @@ constexpr DispatchKeySet kKeysToPropagateToWrapper({
   DispatchKey::Negative,
   DispatchKey::Conjugate,
   DispatchKey::XLA,
+  DispatchKey::XPU,
   DispatchKey::CUDA,
   DispatchKey::CPU,
   DispatchKey::PrivateUse1,
