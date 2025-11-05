@@ -1,6 +1,7 @@
 import itertools
 import logging
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Union
 
 import torch
 import torch._inductor.config as config
@@ -111,11 +112,11 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 bm_func([*sym_inputs, *args])
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(lambda: bm_func([*sym_inputs, *args]))
-
-        if self.layout.device.type == "cpu":
-            return benchmarker.benchmark_cpu(lambda: bm_func([*sym_inputs, *args]))
-        else:
-            return benchmarker.benchmark_gpu(lambda: bm_func([*sym_inputs, *args]))
+        return benchmarker.benchmark(
+            # Shallow clone args since bm_func may clear args
+            lambda: bm_func([*sym_inputs, *args]),
+            device=benchmarker.infer_device(*sym_inputs, *args),
+        )
 
     def hash_key(self) -> str:
         return "-".join(
@@ -211,7 +212,7 @@ class SubgraphTemplate(KernelTemplate):
         decompositions: list[Callable[..., Any]],
         input_nodes: list[Buffer],
         non_tensor_args: list[dict[str, Any]],
-        default_impl: Optional[Callable[..., Any]] = None,
+        default_impl: Callable[..., Any] | None = None,
     ) -> list[SubgraphChoiceCaller]:
         """
         Generate multiple SubgraphChoiceCaller instances for custom op autotuning.
@@ -326,7 +327,7 @@ class SubgraphTemplate(KernelTemplate):
         input_nodes: list[Buffer],
         function_decomposition: Callable[..., Any],
         kwargs: dict[str, Any],
-        default_impl: Optional[Callable[..., Any]] = None,
+        default_impl: Callable[..., Any] | None = None,
     ) -> Layout:
         """Infer output layout for custom ops using the default implementation when available.
         Note that the Subgraph assumes custom ops return exactly one tensor output.
