@@ -116,11 +116,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
             **kwargs,
         )
 
-    def __init__(
-        self,
-        stream: Optional["StreamVariable"],
-        **kwargs: dict[str, Any],
-    ) -> None:
+    def __init__(self, stream: Optional["StreamVariable"], **kwargs: Any) -> None:
         self.stream = stream
         super().__init__(
             target_values={"stream": self.get_stream().user_object_index},
@@ -129,14 +125,16 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
         )
 
     def enter(
-        self, tx: "InstructionTranslator", *args: tuple[Any]
-    ) -> "VariableTracker":
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         # to stream, from stream is the order of the arguments
         # we are entering the target, and leaving the initial stream
         tx.symbolic_stream_state.enter_stream(self.get_stream())
         return super().enter(tx)
 
-    def exit(self, tx: "InstructionTranslator", *args: tuple[Any]) -> "VariableTracker":
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         # to stream, from stream is the order of the arguments
         # we are leaving the target, and entering the initial stream
         tx.symbolic_stream_state.exit_stream()
@@ -182,7 +180,7 @@ class StreamVariable(StreamContextVariable):
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> "VariableTracker":
+    ) -> VariableTracker:
         assert hasattr(self.value, name), f"no stream method found named {name}"
 
         from ..utils import cmp_name_to_op_mapping, proxy_args_kwargs

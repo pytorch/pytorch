@@ -17,7 +17,6 @@ from enum import auto, Enum
 from itertools import chain
 from typing import (
     Any,
-    Callable,
     cast,
     ClassVar,
     Generic,
@@ -71,7 +70,7 @@ from ..virtualized import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, MutableMapping, Sequence
+    from collections.abc import Callable, Iterator, MutableMapping, Sequence
 
     from torch.fx import GraphModule
 
@@ -511,6 +510,7 @@ def init_backend_registration() -> None:
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
     from .mps import MetalScheduling
+    from .pallas import PallasScheduling
     from .python_wrapper_mtia import PythonWrapperMtia
     from .triton import TritonScheduling
     from .wrapper import PythonWrapperCodegen
@@ -537,6 +537,7 @@ def init_backend_registration() -> None:
         cuda_backends = {
             "triton": CUDACombinedScheduling,
             "halide": HalideScheduling,
+            "pallas": PallasScheduling,
         }
         register_backend_for_device(
             "cuda",
