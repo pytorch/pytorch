@@ -607,10 +607,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_fma(self, tx: "InstructionTranslator", *args, **kwargs):
             if len(args) != 3 or kwargs:
                 return None
-            
-            x, y, z = args
 
             if any(isinstance(arg, variables.TensorVariable) for arg in args):
+                x, y, z = args
                 try:
                     # Use inductor FMA if available
                     from torch._inductor.inductor_prims import fma as inductor_fma
