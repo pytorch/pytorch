@@ -301,6 +301,12 @@ static py::object maybe_get_registered_torch_dispatch_rule(
   return result;
 }
 
+static bool is_dtensor(PyObject* obj) {
+  const py::handle dtensor = get_dtensor_class();
+  return (PyObject*)Py_TYPE(obj) == dtensor.ptr() ||
+      py::isinstance(py::handle(obj), dtensor);
+}
+
 // NB: Invariant: if you run this function, you MUST test if the returned
 // py::object is nullptr, as this will occur WITHOUT error condition being set.
 // And if an error happens, this function is responsible for throwing a C++
@@ -313,8 +319,8 @@ static py::object dispatch_on_subclass(
     PyObject* torch_api_function,
     bool is_torch_function,
     const char* torch_function_name_str,
-    std::optional<c10::impl::TorchDispatchModeKey> maybe_mode_key =
-        std::nullopt) {
+    const c10::OperatorHandle* opt_op,
+    torch::jit::Stack* opt_stack) {
   py::object ret;
   for (auto& arg : overloaded_args) {
     py::object torch_function =
@@ -367,13 +373,18 @@ static py::object dispatch_on_subclass(
       }
     }
 
-    ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
-        torch_function.ptr(),
-        torch_api_function,
-        py_types.ptr(),
-        args,
-        kwargs,
-        NULL));
+    if (opt_op && opt_stack && is_dtensor(arg)) {
+      ret = dispatchDTensorOp(
+          *opt_op, torch_api_function, args, kwargs, opt_stack);
+    } else {
+      ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
+          torch_function.ptr(),
+          torch_api_function,
+          py_types.ptr(),
+          args,
+          kwargs,
+          NULL));
+    }
     if (ret.ptr() == nullptr) {
       throw python_error();
     }
@@ -480,6 +491,28 @@ auto handle_torch_function_no_python_arg_parser(
     PyObject* torch_api_function,
     const char* module_name,
     TorchFunctionName torch_function_name) -> PyObject* {
+  return handle_torch_function_no_python_arg_parser(
+      overloaded_args,
+      args,
+      kwargs,
+      func_name,
+      torch_api_function,
+      module_name,
+      nullptr,
+      nullptr,
+      torch_function_name);
+}
+
+auto handle_torch_function_no_python_arg_parser(
+    at::ArrayRef<PyObject*> overloaded_args,
+    PyObject* args,
+    PyObject* kwargs,
+    const char* func_name,
+    PyObject* torch_api_function,
+    const char* module_name,
+    const c10::OperatorHandle* opt_op,
+    torch::jit::Stack* opt_stack,
+    TorchFunctionName torch_function_name) -> PyObject* {
   const char* torch_function_name_str = nullptr;
   switch (torch_function_name) {
     case TorchFunctionName::TorchFunction:
@@ -579,7 +612,9 @@ auto handle_torch_function_no_python_arg_parser(
         py_types,
         torch_api_function,
         is_torch_function,
-        torch_function_name_str);
+        torch_function_name_str,
+        opt_op,
+        opt_stack);
     if (curr_ret.ptr() != nullptr) {
       ret = curr_ret;
     }
