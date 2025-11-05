@@ -2,7 +2,7 @@
 import functools
 import operator
 from functools import reduce
-from typing import Any, TYPE_CHECKING
+from typing import Any, Callable
 
 import torch
 from torch._dynamo.utils import counters
@@ -33,10 +33,6 @@ from .quantization import (
     _register_quantization_weight_pack_pass,
     _register_woq_lowerings,
 )
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 
 if torch._C._has_mkldnn:

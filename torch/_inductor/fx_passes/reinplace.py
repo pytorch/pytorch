@@ -3,10 +3,10 @@ import itertools
 import logging
 import operator
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 import torch
 import torch.fx.node

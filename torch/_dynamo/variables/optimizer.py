@@ -22,8 +22,7 @@ optimizer-specific optimizations and safety guarantees.
 
 import logging
 import weakref
-from collections.abc import Iterable
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Iterable, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.variables.tensor import TensorVariable

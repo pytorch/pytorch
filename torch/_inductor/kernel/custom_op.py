@@ -2,8 +2,7 @@
 
 import functools
 import logging
-from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 from torch._inductor.codegen.subgraph import SubgraphTemplate

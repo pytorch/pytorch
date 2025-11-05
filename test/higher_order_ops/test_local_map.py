@@ -4,9 +4,8 @@
 
 import functools
 import unittest
-from collections.abc import Callable
 from contextlib import contextmanager, ExitStack
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import torch
 import torch._dynamo
