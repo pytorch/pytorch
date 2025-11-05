@@ -3745,6 +3745,8 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # Only generate auto-tuning block in the main graph
         self.kernel_autotune_defs = root.kernel_autotune_defs
         self.kernel_autotune_calls = root.kernel_autotune_calls
+        # Only store kernel src to name mapping in the main graph
+        self.src_to_kernel = root.src_to_kernel
 
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of
