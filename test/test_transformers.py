@@ -132,7 +132,7 @@ def _check_equal(
     if golden.is_cuda and golden.dtype == torch.float32:
         assert torch.backends.cuda.math_sdp.fp32_precision == "ieee", (
             "Testing script error: FP32 golden tensor must be calculated with IEEE"
-            " precision"
+            " precision. Add @math_sdp_precision('ieee') to related tests to fix it."
         )
 
     # Compute error between golden
