@@ -113,7 +113,7 @@ def get_source_partitions(
                 # get_attr nodes won't be output nodes
                 continue
 
-            for user in node.users.keys():
+            for user in node.users:
                 if user not in nodes:
                     output_nodes.add(node)
 
@@ -157,7 +157,7 @@ def check_subgraphs_connected(
     """
 
     for node in reversed(subgraph1.nodes):
-        for user in node.users.keys():
+        for user in node.users:
             if user in subgraph2.nodes:
                 return True
     return False
