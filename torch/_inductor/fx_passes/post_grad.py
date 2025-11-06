@@ -5,7 +5,8 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -1505,15 +1506,45 @@ def view_to_reshape(gm):
         nd.target = torch.ops.aten.reshape.default
 
 
+# Relevant for addmm and (add + mm)/(mm + add)
+# Follows the dispatch logic for cuBLASLt at
+# aten/src/ATen/native/cuda/Blas.cpp::isInputCompliesAddmmCudaLt
+def _cublaslt_can_fuse_bias_epilogue(inp, mat1, mat2):
+    if config.max_autotune_gemm:
+        return False
+
+    # match the dispatch logic for cuBLASLT at aten/src/ATen/native/cuda/Blas.cpp
+    if not (
+        inp.is_cuda
+        and (inp.dim() == 1 or inp.squeeze().dim == 1)
+        and inp.is_contiguous()
+    ):
+        return False
+
+    if not (mat1.dim() == 2 and mat2.dim() == 2):
+        return False
+
+    if inp.size(0) != mat2.size(1):
+        return False
+
+    if inp.dtype != mat1.dtype or inp.dtype != mat2.dtype:
+        return False
+
+    return True
+
+
 def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
         return False
 
-    return has_uses_tagged_as(
-        match.output_node(),
-        (torch.Tag.pointwise, torch.Tag.reduction),
-    )
+    if has_uses_tagged_as(
+        match.output_node(), (torch.Tag.pointwise, torch.Tag.reduction)
+    ):
+        return True
+    else:
+        args_val = (arg.meta["val"] for arg in (inp, *match.args))
+        return not _cublaslt_can_fuse_bias_epilogue(*args_val)
 
 
 @register_graph_pattern(
@@ -1530,26 +1561,13 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
     match.replace_by_example(repl, [inp, mat1, mat2])
 
 
-def is_valid_addmm_fusion(match):
-    mat1, mat2 = match.args
+def can_fuse_bias_in_addmm(match):
     inp = match.kwargs["inp"]
 
     if not (
         isinstance(inp, torch.fx.Node) and isinstance(inp.meta["val"], torch.Tensor)
     ):
         return False  # Input is a number
-
-    in_shape = inp.meta["val"].shape
-    mm_shape = mat1.meta["val"].shape[0], mat2.meta["val"].shape[1]
-    matched = is_expandable_to(in_shape, mm_shape)
-    if not matched:
-        return False  # Shape mismatch
-
-    inp_dtype = inp.meta["val"].dtype
-
-    # aten cublas integration assumes equal dtypes
-    if inp_dtype != mat1.meta["val"].dtype or inp_dtype != mat2.meta["val"].dtype:
-        return False
 
     return not should_prefer_unfused_addmm(match)
 
@@ -1562,7 +1580,7 @@ def is_valid_addmm_fusion(match):
     ),
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[2],
-    extra_check=is_valid_addmm_fusion,
+    extra_check=can_fuse_bias_in_addmm,
 )
 @register_graph_pattern(
     CallFunction(
@@ -1572,7 +1590,7 @@ def is_valid_addmm_fusion(match):
     ),
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[2],
-    extra_check=is_valid_addmm_fusion,
+    extra_check=can_fuse_bias_in_addmm,
 )
 def addmm(match, mat1, mat2, *, inp):
     def repl(inp, mat1, mat2):
