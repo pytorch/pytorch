@@ -114,6 +114,23 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.shape, (4, 2, 2))
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(isinstance(z, FakeTensor))
+            
+    def test_deepcopy_real_vs_meta_tensor_behaviour(self):
+        # deepcopy(meta tensor) should succeed
+        with FakeTensorMode():
+            meta_tensor = torch.empty(2,2, device="meta")
+            result = copy.deepcopy(meta_tensor)
+            self.assertIsInstance(result, torch.Tensor)
+            self.assertEqual(result.device.type, "meta")
+            self.assertEqual(list(result.size()), [2,2])
+            
+        # deepcopy(real_tensor) should raise NotImplementedError
+        with FakeTensorMode():
+            real_tensor = torch.empty(2, 2, device="cpu")
+            with self.assertRaisesRegex(
+                NotImplementedError, "deepcopy.*real tensor"
+            ):
+                copy.deepcopy(real_tensor)
 
     def test_custom_op_fallback(self):
         from torch.library import impl, Library
