@@ -372,6 +372,7 @@ def _generate_dynamic_configs(
         ValueError: If config_generator returns empty list
     """
     import inspect
+
     from torch._inductor.virtualized import V
 
     # Extract parameter names from custom op signature
@@ -406,7 +407,7 @@ def _generate_dynamic_configs(
             f"Input shapes: {shapes_dict}"
         )
 
-    return configs
+    return list(configs)
 
 
 def register_custom_op_autotuning(
@@ -482,22 +483,22 @@ def register_custom_op_autotuning(
     op_overload = custom_op._opoverload
     default_impl = custom_op._init_fn
 
-    # Process static configs if provided (at registration time)
-    processed_configs = None
+    # Process and validate static configs at registration time
+    static_configs = None
     if configs is not None:
         if not isinstance(configs, (list, tuple)):
             raise TypeError(f"configs must be a list or tuple, got {type(configs)}")
 
-        processed_configs = []
+        static_configs = []
         for cfg in configs:
             if isinstance(cfg, CustomOpConfig):
-                processed_configs.append(cfg)
+                static_configs.append(cfg)
             else:
                 raise TypeError(
                     f"Each config must be a CustomOpConfig object, got {type(cfg)}"
                 )
 
-        if not processed_configs:
+        if not static_configs:
             raise ValueError("At least one config must be provided")
 
     if name is None:
@@ -509,13 +510,14 @@ def register_custom_op_autotuning(
         # Extract tensor inputs and non-tensor parameters (runtime kwargs)
         tensor_inputs, runtime_kwargs = _extract_tensor_inputs(args, kwargs)
 
-        # Resolve configs (either dynamic or static)
+        # Get configs: either generate dynamically or use static configs
         if config_generator is not None:
             configs_to_use = _generate_dynamic_configs(
                 tensor_inputs, config_generator, default_impl, name
             )
         else:
-            configs_to_use = processed_configs
+            assert static_configs is not None
+            configs_to_use = static_configs
 
         # Prepare decompositions and kwargs for autotuning
         decompositions = []
