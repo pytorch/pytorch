@@ -344,6 +344,10 @@ graph():
 
         class YoloMode(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                def random_fn(func, *args, **kwargs):
+                    return func(*args, **kwargs)
+
+                random_fn(func, *args, **kwargs)
                 out = torch.compile(torch.add, backend=backend2, fullgraph=True)(
                     args[0], args[1]
                 )

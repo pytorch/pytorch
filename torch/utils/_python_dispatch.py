@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import contextlib
 import functools
-import inspect
+import types
 import warnings
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, cast, Optional, overload, Protocol, TYPE_CHECKING, Union
+from typing import cast, Optional, overload, Protocol, TYPE_CHECKING, Union
 from typing_extensions import TypeIs
 
 import torch
@@ -115,6 +115,11 @@ class TorchDispatchMode:
         self.old_without_ignore_compile_internals_dispatch_mode_flags: deque[bool] = (
             deque()
         )
+        # Wrap the unbound method from the class, then bind it to self
+        wrapped = torch._disable_dynamo(
+            self.__class__.__torch_dispatch__, recursive=True
+        )
+        self.__torch_dispatch__ = types.MethodType(wrapped, self)
 
     def _lazy_init_old_dispatch_mode_flags(self):
         if not hasattr(self, "old_dispatch_mode_flags"):
@@ -130,23 +135,6 @@ class TorchDispatchMode:
                 bool
             ] = deque()
 
-    def __init_subclass__(cls, **kwargs):
-        """
-        Automatically wrap __torch_dispatch__ with recursive dynamo disable for all subclasses.
-        This ensures that compilation is disabled within dispatch modes and any functions
-        they call.
-        """
-        super().__init_subclass__(**kwargs)
-
-        # Check if the subclass defines its own __torch_dispatch__
-        if "__torch_dispatch__" in cls.__dict__:
-            raw = inspect.getattr_static(cls, "__torch_dispatch__")
-            # _disable doesn't work on classmethods. This later fails in runtime anyways
-            if not isinstance(raw, classmethod):
-                wrapped = torch._disable_dynamo(raw, recursive=True)
-                cast(Any, cls).__torch_dispatch__ = wrapped
-
-    @torch._disable_dynamo
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError
 
