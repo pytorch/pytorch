@@ -6,6 +6,7 @@ from typing import Optional, Union
 
 import torch.distributed as dist
 from torch.distributed.checkpoint._async_executor import _AsyncCheckpointExecutor
+from torch.distributed.checkpoint._enums import Collectives
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 from torch.distributed.checkpoint.planner import SavePlanner
 from torch.distributed.checkpoint.storage import StorageWriter
@@ -19,7 +20,7 @@ def save_wrapper(
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
     no_dist: bool = False,
-    use_collectives: bool = True,
+    use_collectives: Union[bool, Collectives] = Collectives.ALL,
 ) -> Future:
     from torch.distributed.checkpoint.state_dict_saver import save
 
@@ -54,7 +55,7 @@ class _ThreadBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
         planner: Optional[SavePlanner] = None,
         process_group: Optional[dist.ProcessGroup] = None,
         no_dist: bool = False,
-        use_collectives: bool = True,
+        use_collectives: Union[bool, Collectives] = Collectives.ALL,
     ) -> Future:
         f: Future = self._executor.submit(
             save_wrapper,

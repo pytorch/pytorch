@@ -12,6 +12,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.distributed import PrefixStore, TCPStore
 from torch.distributed.checkpoint._async_executor import _AsyncCheckpointExecutor
+from torch.distributed.checkpoint._enums import Collectives
 from torch.distributed.checkpoint.logger import _dcp_method_logger, _init_logger
 from torch.distributed.checkpoint.metadata import Metadata, STATE_DICT_TYPE
 from torch.distributed.checkpoint.planner import SavePlanner
@@ -46,7 +47,7 @@ class _AsyncCheckpointRequest:
     storage_writer: Optional[StorageWriter] = None
     planner: Optional[SavePlanner] = None
     no_dist: bool = False
-    use_collectives: bool = True
+    use_collectives: Union[bool, Collectives] = Collectives.ALL
 
 
 @dataclass(init=False)
@@ -177,7 +178,7 @@ class _AsyncCheckpointProcess:
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
         no_dist: bool = False,
-        use_collectives: bool = True,
+        use_collectives: Union[bool, Collectives] = Collectives.ALL,
     ) -> Metadata:
         # Create a unique identifier to locate requests/responses
         # from the checkpoint daemon process.
@@ -204,7 +205,7 @@ class _AsyncCheckpointProcess:
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
         no_dist: bool = False,
-        use_collectives: bool = True,
+        use_collectives: Union[bool, Collectives] = Collectives.ALL,
     ) -> Metadata:
         from torch.distributed.checkpoint.state_dict_saver import save
 
@@ -332,7 +333,7 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
         planner: Optional[SavePlanner] = None,
         process_group: Optional[dist.ProcessGroup] = None,
         no_dist: bool = False,
-        use_collectives: bool = True,
+        use_collectives: Union[bool, Collectives] = Collectives.ALL,
     ) -> Metadata:
         global _CHECKPOINT_PROCESS
         if _CHECKPOINT_PROCESS is None:
@@ -380,7 +381,7 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
         planner: Optional[SavePlanner] = None,
         process_group: Optional[dist.ProcessGroup] = None,
         no_dist: bool = False,
-        use_collectives: bool = True,
+        use_collectives: Union[bool, Collectives] = Collectives.ALL,
     ) -> Future:
         """
         NOTE:

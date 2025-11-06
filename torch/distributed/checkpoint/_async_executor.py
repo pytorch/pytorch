@@ -6,6 +6,7 @@ from concurrent.futures import Future
 from typing import Optional, Union
 
 import torch.distributed as dist
+from torch.distributed.checkpoint._enums import Collectives
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 from torch.distributed.checkpoint.planner import SavePlanner
 from torch.distributed.checkpoint.storage import StorageWriter
@@ -22,7 +23,7 @@ class _AsyncCheckpointExecutor(abc.ABC):
         planner: Optional[SavePlanner] = None,
         process_group: Optional[dist.ProcessGroup] = None,
         no_dist: bool = False,
-        use_collectives: bool = True,
+        use_collectives: Union[bool, Collectives] = Collectives.ALL,
     ) -> Future:
         """
         Execute the checkpoint save request asynchronously.

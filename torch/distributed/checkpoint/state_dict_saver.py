@@ -21,6 +21,7 @@ from torch.distributed.checkpoint._async_process_executor import (
 from torch.distributed.checkpoint._async_thread_executor import (
     _ThreadBasedAsyncCheckpointExecutor,
 )
+from torch.distributed.checkpoint._enums import Collectives
 from torch.distributed.checkpoint._storage_utils import _storage_setup
 from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
 from torch.distributed.checkpoint.logger import _dcp_method_logger
@@ -44,6 +45,7 @@ __all__ = [
     "async_save",
     "AsyncCheckpointerType",
     "AsyncSaveResponse",
+    "Collectives",
 ]
 
 
@@ -92,7 +94,7 @@ def save(
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
     no_dist: bool = False,
-    use_collectives: bool = True,
+    use_collectives: Union[bool, Collectives] = Collectives.ALL,
 ) -> Metadata:
     """
     Save a distributed model in SPMD style.
@@ -146,9 +148,12 @@ def save(
             If ``True``, this function will assume the intent is to load
             a checkpoint on a single rank/process.
             (Default: ``False``)
-        use_collectives (bool): If ``False``, this function will assume the intent is to save
-            a checkpoint without using cross-rank synchronization.
-            (Default: ``True``)
+        use_collectives (Union[bool, Collectives]): Specifies the level of collective operations to use.
+            (Default: ``Collectives.ALL``)
+            - Collectives.ALL or True: Use collectives for both planning and metadata
+            - Collectives.PLANNING_ONLY: Use collectives only for planning
+            - Collectives.METADATA_ONLY: Use collectives only for metadata
+            - Collectives.NONE or False: No collectives used
             This configuration is experimental and should be used with caution.
             It will change the format of the saved checkpoint and may not be backward compatible.
 
@@ -178,6 +183,10 @@ def save(
         each rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
+
+    # Convert bool to Collectives enum for backward compatibility
+    if isinstance(use_collectives, bool):
+        use_collectives = Collectives.ALL if use_collectives else Collectives.NONE
 
     no_dist = no_dist or (not dist.is_available()) or (not dist.is_initialized())
     if no_dist:
@@ -226,7 +235,7 @@ def async_save(
     async_checkpointer_type: AsyncCheckpointerType = AsyncCheckpointerType.THREAD,
     async_stager: Optional[AsyncStager] = None,
     no_dist: bool = False,
-    use_collectives: bool = True,
+    use_collectives: Union[bool, Collectives] = Collectives.ALL,
 ) -> Union[Future, AsyncSaveResponse]:
     """Asynchronous version of ``save``. This code first de-stages the state_dict on to the
     staging storage (defaults to CPU memory), and then calls the `save` in a separate thread.
@@ -263,7 +272,11 @@ def async_save(
             If ``True``, this function will assume the intent is to save
             a checkpoint on a single rank/process.
             (Default: ``False``)
-        use_collectives: If False, Save the checkpoint without rank coordination. (Default: ``True``)
+        use_collectives: Specifies the level of collective operations to use. (Default: ``Collectives.ALL``)
+            - Collectives.ALL or True: Use collectives for both planning and metadata
+            - Collectives.PLANNING_ONLY: Use collectives only for planning
+            - Collectives.METADATA_ONLY: Use collectives only for metadata
+            - Collectives.NONE or False: No collectives used
             This configuration is experimental and should be used with caution.
             It will change the format of the saved checkpoint and may not be backward compatible.
 
@@ -290,6 +303,10 @@ def async_save(
 
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint.async_save")
+
+    # Convert bool to Collectives enum for backward compatibility
+    if isinstance(use_collectives, bool):
+        use_collectives = Collectives.ALL if use_collectives else Collectives.NONE
 
     if dist.is_available() and dist.is_initialized():
         pg = process_group or _get_default_group()
@@ -389,7 +406,7 @@ def _save_state_dict(
     coordinator_rank: int = 0,
     no_dist: bool = False,
     planner: Optional[SavePlanner] = None,
-    use_collectives: bool = True,
+    use_collectives: Collectives = Collectives.ALL,
 ) -> Metadata:
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save_state_dict")
 
@@ -453,7 +470,7 @@ def _save_state_dict(
         return all_local_plans
 
     central_plan: Optional[SavePlan] = None
-    if use_collectives:
+    if use_collectives in (Collectives.ALL, Collectives.PLANNING_ONLY):
         central_plan = distW.reduce_scatter("plan", local_step, global_step)
     else:
         local_plan: SavePlan = local_step()
@@ -479,7 +496,7 @@ def _save_state_dict(
         storage_writer.finish(metadata=global_metadata, results=all_results)
         return global_metadata
 
-    if use_collectives:
+    if use_collectives in (Collectives.ALL, Collectives.METADATA_ONLY):
         metadata = distW.all_reduce("write", write_data, finish_checkpoint)
     else:
         write_results: list[WriteResult] = write_data()
