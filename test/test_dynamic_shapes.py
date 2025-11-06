@@ -4465,9 +4465,11 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         res = f(x, start, 0)
         self.assertEqual(res.shape, torch.Size([0]))
 
+    @skipIfTorchDynamo()
     @torch.fx.experimental._config.patch("backed_size_oblivious", True)
     def test_backed_size_oblivious_broadcast(self):
         cnt = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
 
         def func(a, b):
             torch.broadcast_shapes(a.size(), b.size())
