@@ -266,7 +266,30 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-shared-with-deps-debug-upload-r2:  # Uploading
+  libtorch-cpu-shared-with-deps-debug-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cpu-shared-with-deps-debug-test
+    with:
+      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      LIBTORCH_CONFIG: debug
+      LIBTORCH_VARIANT: shared-with-deps
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.10"
+      build_name: libtorch-cpu-shared-with-deps-debug
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+
+libtorch-cpu-shared-with-deps-debug-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -515,7 +538,31 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda12_6-shared-with-deps-debug-upload-r2:  # Uploading
+  libtorch-cuda12_6-shared-with-deps-debug-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cuda12_6-shared-with-deps-debug-test
+    with:
+      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu126
+      GPU_ARCH_VERSION: "12.6"
+      GPU_ARCH_TYPE: cuda
+      LIBTORCH_CONFIG: debug
+      LIBTORCH_VARIANT: shared-with-deps
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.10"
+      build_name: libtorch-cuda12_6-shared-with-deps-debug
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+
+libtorch-cuda12_6-shared-with-deps-debug-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -765,7 +812,31 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda12_8-shared-with-deps-debug-upload-r2:  # Uploading
+  libtorch-cuda12_8-shared-with-deps-debug-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cuda12_8-shared-with-deps-debug-test
+    with:
+      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu128
+      GPU_ARCH_VERSION: "12.8"
+      GPU_ARCH_TYPE: cuda
+      LIBTORCH_CONFIG: debug
+      LIBTORCH_VARIANT: shared-with-deps
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.10"
+      build_name: libtorch-cuda12_8-shared-with-deps-debug
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+
+libtorch-cuda12_8-shared-with-deps-debug-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1015,7 +1086,31 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda13_0-shared-with-deps-debug-upload-r2:  # Uploading
+  libtorch-cuda13_0-shared-with-deps-debug-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cuda13_0-shared-with-deps-debug-test
+    with:
+      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
+      GPU_ARCH_TYPE: cuda
+      LIBTORCH_CONFIG: debug
+      LIBTORCH_VARIANT: shared-with-deps
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.10"
+      build_name: libtorch-cuda13_0-shared-with-deps-debug
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+
+libtorch-cuda13_0-shared-with-deps-debug-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
