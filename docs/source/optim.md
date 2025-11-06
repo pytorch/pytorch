@@ -547,8 +547,11 @@ Decay is a parameter between 0 and 1 that controls how fast the averaged paramet
 {func}`torch.optim.swa_utils.get_ema_multi_avg_fn` returns a function that applies the following EMA equation to the weights:
 
 ```{math}
-W^\textrm{EMA}_{t+1} = \alpha W^\textrm{EMA}_{t} + (1 - \alpha) W^\textrm{model}_t
+W_0^\textrm{EMA} &= W_0^\textrm{model} \\
+W_{t+1}^\textrm{EMA} &= \alpha W_t^\textrm{EMA} + (1 - \alpha) W_{t+1}^\textrm{model}
 ```
+
+The initial EMA weights are set equal to the initial model weights, and at each subsequent step t+1, the EMA weights are updated using the current EMA weights and the current model weights.
 
 where alpha is the EMA decay.
 
