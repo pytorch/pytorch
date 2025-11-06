@@ -1197,8 +1197,8 @@ class NativeShardingPropagatorCache {
     return py::object();
   }
 
-  void insert(const NativeOpSchema& op_schema, py::object output_sharding) {
-    auto [it, inserted] = repr_.emplace(op_schema, std::move(output_sharding));
+  void insert(NativeOpSchema&& op_schema, py::object output_sharding) {
+    auto [it, inserted] = repr_.emplace(std::move(op_schema), std::move(output_sharding));
     TORCH_INTERNAL_ASSERT(
         inserted,
         "tried to insert already-present element in NativeShardingPropagatorCache!");
@@ -1312,7 +1312,7 @@ py::object dispatchDTensorOp(
     cached_sharding = sharding;
     if (opt_native_op_schema.has_value()) {
       native_sharding_propagator_cache->insert(
-          *opt_native_op_schema, std::move(sharding));
+          std::move(*opt_native_op_schema), std::move(sharding));
     }
   }
   py_op_info.attr(dtensor_interned_strings.output_sharding) = cached_sharding;
@@ -1439,10 +1439,10 @@ static bool DTensor_OpSchema_recompute_comparison_key_impl(
     PyObject* self,
     const py::tuple& args_schema) {
   const py::handle self_handle = py::handle(self);
-  const py::handle schema_info =
+  const auto schema_info =
       self_handle.attr(dtensor_interned_strings.schema_info);
   NativeRuntimeSchemaInfo native_info = unpack_runtime_schema_info(
-      checked_not(schema_info.ptr()) ? py::handle() : schema_info,
+      checked_not(schema_info.ptr()) ? py::handle() : py::handle(schema_info),
       args_schema.size());
   c10::SmallVector<py::object, 8> args_to_hash;
   size_t idx = 0;
@@ -1680,7 +1680,7 @@ enum class TensorFlavor {
 
 static std::pair<TensorFlavor, py::object> check_for_dtensor_or_tensor(
     const c10::IValue& iv) {
-  if (!iv.isTensor()) {
+  if (!iv.isTensor() || !iv.toTensor().defined()) {
     return {TensorFlavor::NON_TENSOR, py::object()};
   }
 
@@ -1772,10 +1772,11 @@ static /*DTensorSpec*/ py::object try_replicate_spec_for_scalar_tensor(
           .ptr());
 }
 
-// May return nullptr, in which case there was no runtime schema info.
-static PyObject* get_runtime_schema_info_for_op(py::handle py_op) {
+// May return unset object, in which case there was no runtime schema
+// info.
+static py::object get_runtime_schema_info_for_op(py::handle py_op) {
   const auto op_dispatcher = get_dtensor_op_dispatcher();
-  const py::handle sharding_propagator =
+  const auto sharding_propagator =
       op_dispatcher.attr(dtensor_interned_strings.sharding_propagator);
   const py::dict op_to_schema_info = py::reinterpret_borrow<py::dict>(
       sharding_propagator.attr(dtensor_interned_strings.op_to_schema_info));
@@ -1785,7 +1786,7 @@ static PyObject* get_runtime_schema_info_for_op(py::handle py_op) {
   if (!runtime_schema_info && PyErr_Occurred()) {
     throw py::error_already_set();
   }
-  return runtime_schema_info;
+  return py::reinterpret_borrow<py::object>(runtime_schema_info);
 }
 
 static bool contains_any_symint(const py::tuple& tup) {
@@ -1821,7 +1822,7 @@ static std::optional<NativeOpSchema> create_native_op_schema(
   // fused schema part of unwrap_to_op_info + recompute_comparison_key,
   // operating on IValues instead of Python stuff.
 
-  PyObject* runtime_schema_info = get_runtime_schema_info_for_op(py_op);
+  py::object runtime_schema_info = get_runtime_schema_info_for_op(py_op);
   if (runtime_schema_info &&
       checked_istrue(py::handle(runtime_schema_info)
                          .attr(dtensor_interned_strings.needs_pytree)
@@ -1855,6 +1856,13 @@ static std::optional<NativeOpSchema> create_native_op_schema(
               arg = c10::ivalue::Tuple::create(c10::ArrayRef<c10::IValue>(
                   &(*list.begin()).get(), list.size()));
             }
+          } else if (arg.isTensor() && !arg.toTensor().defined()) {
+            // Coerce undefined Tensor to None, just as we do when
+            // converting IValues to PyObject. Otherwise comparison
+            // doesn't work. (undefined Tensors can get here because
+            // check_for_dtensor_or_tensor calls them non-Tensors, but
+            // doesn't have a way to do the coercion for us.)
+            arg = c10::IValue();
           }
           comparison_key_hash =
               c10::hash_combine(comparison_key_hash, c10::IValue::hash(arg));
