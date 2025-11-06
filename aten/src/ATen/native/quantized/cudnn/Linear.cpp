@@ -26,7 +26,7 @@ int register_linear_params();
 
 // TODO: there is a table from input dtype and weight dtype to operator dtype,
 // we can derive the operator dtype based on input dtype
-cudnn_frontend::MatMulDesc_v8 getLinearDescriptor(cudnnDataType_t dataType) {
+static cudnn_frontend::MatMulDesc_v8 getLinearDescriptor(cudnnDataType_t dataType) {
   return cudnn_frontend::MatMulDescBuilder()
     .setMathPrecision(dataType)
     .build();

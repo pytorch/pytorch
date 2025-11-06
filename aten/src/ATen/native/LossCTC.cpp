@@ -133,7 +133,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
   using target_t = typename std::conditional_t<target_scalar_type == kInt, int, int64_t>;
 
   Tensor neg_log_likelihood, log_alpha;
-  size_t tg_target_stride;
+  size_t tg_target_stride = 0;
   std::vector<int64_t> tg_batch_offsets;
 
   if (targets.scalar_type() == kLong) {

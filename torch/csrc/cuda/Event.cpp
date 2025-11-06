@@ -201,7 +201,7 @@ static PyMethodDef THCPEvent_methods[] = {
     {(char*)"ipc_handle", THCPEvent_ipc_handle, METH_NOARGS, nullptr},
     {nullptr}};
 
-PyTypeObject THCPEventType = {
+static PyTypeObject THCPEventType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._CudaEventBase", /* tp_name */
     sizeof(THCPEvent), /* tp_basicsize */

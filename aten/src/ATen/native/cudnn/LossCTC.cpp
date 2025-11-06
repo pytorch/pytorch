@@ -217,7 +217,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(
   Tensor grad = at::empty_like(log_probs_t, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   TensorDescriptor grad_desc{grad};
 
-  size_t workspace_size;
+  size_t workspace_size = 0;
   AT_CUDNN_CHECK(cudnnGetCTCLossWorkspaceSize(
       handle,
       log_probs_desc.desc(),
@@ -315,7 +315,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
   Tensor grad = at::empty_like(log_probs_t, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   TensorDescriptor grad_desc{grad};
 
-  size_t workspace_size;
+  size_t workspace_size = 0;
   AT_CUDNN_CHECK(cudnnGetCTCLossWorkspaceSize_v8(
       handle,
       algo,

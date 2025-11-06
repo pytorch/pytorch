@@ -25,7 +25,7 @@ namespace at::native {
 
 std::vector<int64_t> infer_dense_strides_dim_last(const Tensor & self, int64_t dim);
 
-void fillSliceWithIndex(const Tensor& t, int64_t dim) {
+static void fillSliceWithIndex(const Tensor& t, int64_t dim) {
   if (t.numel()) {
     auto sizes = DimVector(t.dim(), 1);
     sizes[dim] = t.sizes()[dim];
@@ -38,7 +38,7 @@ void fillSliceWithIndex(const Tensor& t, int64_t dim) {
 // We perform a segmented sort in cub with inputs that have
 // more than 1024/2048 elements along the selected dimension.
 // Otherwise, we do an inplace bitonic sort (see sortKeyValueInplace).
-void sort_cuda_kernel(
+static void sort_cuda_kernel(
     const TensorBase& self_base,
     const TensorBase& values_base,
     const TensorBase& indices_base,

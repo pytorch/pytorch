@@ -239,7 +239,7 @@ inline void slow_conv3d_shape_check(
       output_width,
       "). Output size is too small");
 
-  uint64_t kernel_product;
+  uint64_t kernel_product = 0;
   TORCH_CHECK(
     !c10::mul_overflows(kernel_height, kernel_width, &kernel_product),
     "Kernel height x width product is too large: kernel_height=",

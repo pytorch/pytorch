@@ -51,6 +51,7 @@ static void* device_nvtxRangeStart(const char* msg, std::intptr_t stream) {
   return handle;
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void initNvtxBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 

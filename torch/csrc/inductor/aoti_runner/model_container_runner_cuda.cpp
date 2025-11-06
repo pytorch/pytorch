@@ -46,7 +46,9 @@ std::unique_ptr<AOTIModelContainerRunner> create_aoti_runner_cuda(
 }
 } // namespace
 
-RegisterAOTIModelRunner register_cuda_runner("cuda", &create_aoti_runner_cuda);
+static RegisterAOTIModelRunner register_cuda_runner(
+    "cuda",
+    &create_aoti_runner_cuda);
 
 } // namespace torch::inductor
 #endif

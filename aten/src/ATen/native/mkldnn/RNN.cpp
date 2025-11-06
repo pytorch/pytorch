@@ -104,17 +104,7 @@ struct RNNParams {
       int64_t num_layers_,
       bool bidirectional,
       bool batch_first_,
-      bool train_) {
-    mode = static_cast<ideep::rnn_kind>(mode_);
-    batch_first = batch_first_;
-    seq_length = input.size(0);
-    mini_batch = input.size(1);
-    input_size = input.size(2);
-    hidden_size = hidden_size_;
-    num_directions = bidirectional ? 2 : 1;
-    num_layers = num_layers_;
-    train = train_;
-    batch_sizes = batch_sizes_;
+      bool train_) : mode(static_cast<ideep::rnn_kind>(mode_)), seq_length(input.size(0)), mini_batch(input.size(1)), input_size(input.size(2)), hidden_size(hidden_size_), num_directions(bidirectional ? 2 : 1), num_layers(num_layers_), batch_first(batch_first_), train(train_) , batch_sizes(batch_sizes_) {
     if (mode == ideep::rnn_kind::LSTM) {
       num_gates = 4;
       num_bias_gates = 4;

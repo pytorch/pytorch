@@ -13,7 +13,7 @@ constexpr int64_t MAX_GRID_SIZE = 65535LL;
 
 namespace at::native {
 
-void mode_kernel_impl(
+static void mode_kernel_impl(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,
