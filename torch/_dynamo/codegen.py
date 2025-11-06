@@ -38,7 +38,7 @@ from .bytecode_transformation import (
     create_rot_n,
     Instruction,
 )
-from .exc import IncorrectUsage, unimplemented
+from .exc import unimplemented
 from .source import AttrSource, ChainedSource, DictGetItemSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
@@ -245,8 +245,11 @@ class PyCodegen:
         if value.is_realized() and isinstance(
             value, ContextlibContextManagerLocalGeneratorObjectVariable
         ):
-            raise IncorrectUsage(
-                "NYI: Returning a @contextmanager object from a torch.compile function"
+            unimplemented(
+                gb_type="returning_contextmanager_from_compile",
+                context="Attempting to return a @contextmanager object from a torch.compile function",
+                explanation="Returning a @contextmanager object from a torch.compile function is not yet implemented",
+                hints=["Consider refactoring to avoid returning context managers from compiled functions"],
             )
 
         # Dynamo normally prefers codegen from source to account for aliasing.
