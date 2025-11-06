@@ -594,6 +594,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
     def create_constant_mask(self, entry) -> str:
         x = entry.prefix
+        if entry.tensor_dim is None:
+            sizestr = self.dense_size_str()
+            return f"{x}mask = tl.full({sizestr}, True, tl.int1)"
         sizes = ["None"] * self.triton_tensor_ndim()
         sizes[entry.tensor_dim] = ":"
         suffix = ", ".join(sizes)
