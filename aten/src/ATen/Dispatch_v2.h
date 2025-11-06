@@ -89,16 +89,9 @@
       AT_WRAP(BODY),                          \
       __VA_ARGS__)
 
-// Helper macros, kept for BC:
-#define AT_WRAP(...) __VA_ARGS__
-#define AT_EXPAND(X) X
-
 // Unused helper macros, kept for BC:
 #define AT_AP_VAR(N, T, ...) \
   AT_EXPAND(AT_CONCAT(AT_AP, AT_NUM_ARGS(__VA_ARGS__))(AT_WRAP(N), __VA_ARGS__))
-
-#define AT_CONCAT(a, b) AT_CONCAT_AUX(a, b)
-#define AT_CONCAT_AUX(a, b) a##b
 
 // Ensure we never have too many scalar types for the expansion here to
 // support.  To bump this, you must regenerate the macros below.
