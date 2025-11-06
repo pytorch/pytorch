@@ -7415,7 +7415,9 @@ for shape in [(1,), ()]:
             # Under this context, we will enforce that two backward are disjoint
             # even if retain_graph=True.
             out.sum().backward(retain_graph=True)
-            with self.assertRaisesRegex(RuntimeError, "was already unpacked once"):
+            with self.assertRaisesRegex(
+                RuntimeError, "Performing two backward calls that overlap"
+            ):
                 out.sum().backward()
 
     def test_checkpoint_detects_non_determinism(self):
