@@ -2923,7 +2923,6 @@ def _reduction_configs(
     # for correctness
     if not torch.version.hip and not is_fbcode():
         outer_config = outer_config_opt()
-
     configs = []
 
     if inductor_meta.get("add_persistent_rblock") and loads_and_red <= 8:
@@ -2946,7 +2945,10 @@ def _reduction_configs(
     elif reduction_hint == ReductionHint.INNER:
         return configs + [contiguous_config]
     elif reduction_hint == ReductionHint.OUTER:
-        return configs + [outer_config]
+        outer_configs = configs + [outer_config]
+        for c in outer_configs:
+            c.kwargs["NUM_STAGES"] = 1
+        return outer_configs
     elif reduction_hint == ReductionHint.OUTER_TINY:
         return configs + [tiny_config]
 
@@ -3422,8 +3424,12 @@ def persistent_reduction(
                     newc = copy.deepcopy(c)
                     newc.num_warps *= 2
                     new_configs.append(newc)
-
         configs = unique_configs(new_configs)
+
+    if inductor_meta.get("reduction_hint", None) == ReductionHint.OUTER:
+        for c in configs:
+            c.kwargs["NUM_STAGES"] = 1
+
 
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
     return cached_autotune(

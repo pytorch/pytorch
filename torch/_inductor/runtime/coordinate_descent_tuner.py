@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from torch.utils._ordered_set import OrderedSet
 
-from .hints import TRITON_MAX_BLOCK
+from .hints import TRITON_MAX_BLOCK, ReductionHint
 from .runtime_utils import red_text, triton_config_to_hashable
 
 
@@ -122,6 +122,9 @@ class CoordescTuner:
         if self.is_native_matmul:
             out.append("num_stages")
             out.remove("ZBLOCK")  # ZBLOCK=1 always in native matmul
+        if self.inductor_meta.get("reduction_hint", None) == ReductionHint.OUTER:
+            out.append("NUM_STAGES")
+
 
         return [f for f in out if f not in self.frozen_fields]
 
@@ -152,9 +155,14 @@ class CoordescTuner:
         returned as it's own neighbour.
         """
         assert radius >= 1
+        if name == "NUM_STAGES":
+            # we see cases that
+            # NUM_STAGES=1 is better than NUM_STAGES=2
+            # while NUM_STAGES=1 is worse than NUM_STAGES=3
+            radius = max(radius, 2)
 
         def update(cur_val, inc=True):
-            if name == "num_stages":
+            if name == ["num_stages", "NUM_STAGES"]:
                 if inc:
                     return cur_val + 1
                 else:
@@ -242,7 +250,7 @@ class CoordescTuner:
         Return a tuple of (compare_result, candidate_timing).
         compare_result is true iff candidate_config is better.
         """
-        log.debug("Try config %s", candidate_config)
+        log.error("Try config %s", candidate_config)
         try:
             candidate_timing = self.call_func(func, candidate_config)
         except Exception as e:
@@ -250,7 +258,7 @@ class CoordescTuner:
             return False, float("inf")
 
         if self.has_improvement(best_timing, candidate_timing):
-            log.debug(
+            log.error(
                 "Tune from %s %f -> %s %f",
                 best_config,
                 best_timing,
@@ -272,6 +280,9 @@ class CoordescTuner:
         if baseline_timing is None:
             baseline_timing = self.call_func(func, baseline_config)
 
+        reduction_hint = self.inductor_meta.get("reduction_hint", None)
+        if reduction_hint != ReductionHint.OUTER or len(baseline_config.kwargs) != 2:
+            return baseline_config
         log.debug("= Do coordinate descent tuning for %s =", self.name)
         log.debug(
             "%s: Baseline Config %s, baseline timing %f",
@@ -327,7 +338,7 @@ class CoordescTuner:
                         old_best_timing / best_timing,
                     )
 
-        log.debug(
+        log.error(
             "%s: Improve from %s %f -> %s %f, %.3fx",
             self.name,
             baseline_config,
