@@ -106,6 +106,9 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
     } else if (key == "graph_capture_record_stream_reuse") {
       i = parseGraphCaptureRecordStreamReuse(tokenizer, i);
       used_native_specific_option = true;
+    } else if (key == "per_process_memory_fraction") {
+      i = parsePerProcessMemoryFraction(tokenizer, i);
+      used_native_specific_option = true;
     } else {
       const auto& keys =
           c10::CachingAllocator::AcceleratorAllocatorConfig::getKeys();
@@ -143,6 +146,18 @@ size_t CUDAAllocatorConfig::parseGraphCaptureRecordStreamReuse(
     size_t i) {
   tokenizer.checkToken(++i, ":");
   m_graph_capture_record_stream_reuse = tokenizer.toBool(++i);
+  return i;
+}
+
+double CUDAAllocatorConfig::parsePerProcessMemoryFraction(
+    const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+    size_t i) {
+  tokenizer.checkToken(++i, ":");
+  double val_env = tokenizer.toDouble(++i);
+  TORCH_CHECK_VALUE(
+      val_env >= 0.0 && val_env <= 1.0,
+      "per_process_memory_fraction is invalid, set it in [0.0, 1.0]");
+  m_per_process_memory_fraction = val_env;
   return i;
 }
 
