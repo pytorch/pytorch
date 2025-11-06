@@ -4768,6 +4768,10 @@ def build_stream(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Stream:
     return torch._C.Stream(*args, **kwargs)
 
 
+def build_event(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Event:
+    return torch._C.Event(*args, **kwargs)
+
+
 class CompileTimeInstructionCounter:
     _counter: int = 0
     _id: int = -1
