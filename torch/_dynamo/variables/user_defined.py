@@ -2879,7 +2879,31 @@ class NewNamedTupleVariable(UserDefinedTupleVariable):
             field_index = fields.index(name)
             return self._tuple_vt.items[field_index]
 
-        # Fall back to UserDefinedObjectVariable for methods, descriptors, etc.
+        # Handle user-defined methods specially
+        # Since self.value is tuple_cls (a class), not an instance, we need to
+        # manually check for methods and bind them to self (the instance)
+        try:
+            subobj = inspect.getattr_static(self.tuple_cls, name)
+        except AttributeError:
+            subobj = None
+
+        # If it's a function type (user-defined method), bind it to self
+        if isinstance(subobj, types.FunctionType):
+            # Check if it's actually a method by trying to get it from an instance
+            # We need to create a dummy instance to check, but we can use
+            # getattr_static on the class to see if it's a method
+            # For namedtuples, methods defined in the class are instance methods
+            from ..source import AttrSource
+
+            source_fn = None
+            if self.source:
+                source_fn = AttrSource(self.source, name)
+            # Bind the method to self (the instance VariableTracker)
+            return variables.UserMethodVariable(
+                subobj, self, source_fn=source_fn, source=self.source
+            )
+
+        # Fall back to UserDefinedObjectVariable for other attributes, descriptors, etc.
         # This leverages existing _tuplegetter handling! (lines 1512-1519 in
         # user_defined.py)
         return super().var_getattr(tx, name)
