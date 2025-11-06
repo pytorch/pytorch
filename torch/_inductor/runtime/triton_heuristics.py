@@ -1327,7 +1327,7 @@ class CachingAutotuner(KernelInterface):
         debug_call = None
         if debug_mode:
             arg_names = list(self.triton_meta.get("signature", {}).keys())
-            kernel_kwargs = {name: arg for name, arg in zip(arg_names, args)}
+            kernel_kwargs = dict(zip(arg_names, args))
             kernel_kwargs.update(kwargs)
             debug_call = debug_mode.record_triton_kernel(
                 kernel_name=self.fn.__name__, kwargs=kernel_kwargs

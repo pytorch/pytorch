@@ -860,7 +860,7 @@ class DebugMode(TorchDispatchMode):
 
     @property
     def logs(self):
-        return [op for op in self.operators]
+        return list(self.operators)
 
     @staticmethod
     def check_hash_mismatches(
@@ -907,7 +907,8 @@ class DebugMode(TorchDispatchMode):
             elif isinstance(log1, _TritonKernelCall):
                 if log1.kwargs_str != log2.kwargs_str:
                     raise ValueError(
-                        f"Triton kernel call args don't match for {log1.kernel_name} at index {i}:\n\nlog1: {log1.kwargs_str}\n\nlog2: {log2.kwargs_str}"
+                        f"Triton kernel call args don't match for {log1.kernel_name} at index {i}:"
+                        f"\n\nlog1: {log1.kwargs_str}\n\nlog2: {log2.kwargs_str}"
                     )
 
                 def compare_triton_hashes(hashes1, hashes2, is_input):
@@ -936,7 +937,8 @@ class DebugMode(TorchDispatchMode):
                 )
                 if has_post_1 != has_post_2:
                     raise ValueError(
-                        f"Triton kernel post-hash presence inconsistent for {log1.kernel_name} at index {i}: log1 has post_hashes={has_post_1}, log2 has post_hashes={has_post_2}"
+                        f"Triton kernel post-hash presence inconsistent for {log1.kernel_name} "
+                        f"at index {i}: log1 has post_hashes={has_post_1}, log2 has post_hashes={has_post_2}"
                     )
 
                 if has_post_1:
@@ -952,7 +954,8 @@ class DebugMode(TorchDispatchMode):
                     )
                     if has_pre_1 != has_pre_2:
                         raise ValueError(
-                            f"Triton kernel pre-hash presence inconsistent for {log1.kernel_name} at index {i}: log1 has pre_hashes={has_pre_1}, log2 has pre_hashes={has_pre_2}"
+                            f"Triton kernel pre-hash presence inconsistent for {log1.kernel_name} "
+                            f"at index {i}: log1 has pre_hashes={has_pre_1}, log2 has pre_hashes={has_pre_2}"
                         )
 
                     if has_pre_1:
@@ -984,7 +987,8 @@ class DebugMode(TorchDispatchMode):
                 has_hash2 = log2.log is not None and "hash" in log2.log
                 if has_hash1 != has_hash2:
                     raise ValueError(
-                        f"Output hash presence inconsistent for triton kernel {call_type}[{op_name}] at index {i}: log1 has hash={has_hash1}, log2 has hash={has_hash2}"
+                        f"Output hash presence inconsistent for triton kernel {call_type}[{op_name}] "
+                        f"at index {i}: log1 has hash={has_hash1}, log2 has hash={has_hash2}"
                     )
 
                 if has_hash1:
@@ -1000,7 +1004,8 @@ class DebugMode(TorchDispatchMode):
                     has_hash2 = log2.log is not None and "input_hash" in log2.log
                     if has_hash1 != has_hash2:
                         raise ValueError(
-                            f"Input hash presence inconsistent for triton kernel {call_type}[{op_name}] at index {i}: log1 has input_hash={has_hash1}, log2 has input_hash={has_hash2}"
+                            f"Input hash presence inconsistent for triton kernel {call_type}[{op_name}] "
+                            f"at index {i}: log1 has input_hash={has_hash1}, log2 has input_hash={has_hash2}"
                         )
 
                     if has_hash1:

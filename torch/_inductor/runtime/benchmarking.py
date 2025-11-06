@@ -190,7 +190,8 @@ class Benchmarker:
         else:
             _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
 
-        with DebugMode._benchmarking_inductor():  # only record runtime kernels
+        # Surfacing all kernels during autotuning is super noisy; filtering these out.
+        with DebugMode._benchmarking_inductor():
             if inferred_device == torch.device("cpu"):
                 return self.benchmark_cpu(_callable, **kwargs)
             # TODO(nmacchioni): For non-CPU functions we default to using the GPU-specific benchmarking
