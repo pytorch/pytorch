@@ -486,6 +486,22 @@ class GraphModule(torch.nn.Module):
             torch.accelerator.set_stream(original_stream)
             reset_user_object_tracking()
 
+    def test_is_marked_side_effectful(self):
+        self.assertIn(
+            torch.ops.streams.fork.default, torch.fx.node._side_effectful_functions
+        )
+        self.assertIn(
+            torch.ops.streams.join.default, torch.fx.node._side_effectful_functions
+        )
+        self.assertIn(
+            torch.ops.streams.wait_event.default,
+            torch.fx.node._side_effectful_functions,
+        )
+        self.assertIn(
+            torch.ops.streams.record_event.default,
+            torch.fx.node._side_effectful_functions,
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
