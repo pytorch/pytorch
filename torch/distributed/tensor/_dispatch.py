@@ -9,7 +9,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
-from torch._C import DispatchKey, DispatchKeySet
+from torch._library.utils import fill_defaults
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpInfo, OpSchema, OutputSpecType
@@ -33,6 +33,33 @@ except ImportError:
 
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
+
+
+def as_strided_handler(
+    op_call: torch._ops.OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+):
+    args, kwargs = fill_defaults(op_call._schema, args, kwargs)
+    assert not kwargs
+    tensor, size, stride, storage_offset = args
+    if (
+        tensor.size() == tuple(size)
+        and tensor.stride() == tuple(stride)
+        and (storage_offset is None or tensor.storage_offset() == storage_offset)
+    ):
+        return torch.ops.aten.alias.default(tensor)
+    raise RuntimeError("as_strided not supported with DTensor")
+
+
+def is_same_size_handler(
+    op_call: torch._ops.OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> bool:
+    lhs = cast(torch.Tensor, args[0])
+    rhs = cast(torch.Tensor, args[1])
+    return lhs.shape == rhs.shape
 
 
 def found_inf_reduce_handler(
@@ -108,9 +135,11 @@ class OpDispatcher:
             aten.bernoulli_.float,
         }
         self._custom_op_handlers = {
+            aten.is_same_size.default: is_same_size_handler,
             aten.convolution.default: convolution_handler,
             aten.convolution_backward.default: convolution_backward_handler,
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
+            aten.as_strided.default: as_strided_handler,
         }
 
     # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
@@ -125,16 +154,6 @@ class OpDispatcher:
     def _allow_implicit_replication(self, value: bool) -> None:
         return torch._C._set_dtensor_allow_implicit_replication(value)
 
-    def custom_op_handler(
-        self,
-        op_call: torch._ops.OpOverload,
-        args: tuple[object, ...],
-        kwargs: dict[str, object],
-    ) -> object:
-        # op_call is required to have a custom op handler; intentionally letting an
-        # exception get raised if not.
-        return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
-
     def _propagate_op_sharding_non_cached_dispatch_slow_path(
         self,
         op_call: torch._ops.OpOverload,
@@ -148,7 +167,7 @@ class OpDispatcher:
             )
         except NotImplementedError:
             if torch._C._dispatch_has_kernel_for_dispatch_key(
-                op_call.name(), DispatchKey.CompositeImplicitAutograd
+                op_call.name(), torch._C.DispatchKey.CompositeImplicitAutograd
             ):
                 # When running under inference mode, CompositeImplicitAutograd ops show up in __torch_dispatch__,
                 # so we manually decompose them, here
@@ -161,19 +180,6 @@ class OpDispatcher:
             raise RuntimeError(
                 f"{e}\n\nSharding propagation failed for {op_info.schema}"
             ) from e
-
-    def dispatch(
-        self,
-        op_call: torch._ops.OpOverload,
-        args: tuple[object, ...],
-        kwargs: dict[str, object],
-    ) -> object:
-        # Leave a working implementation (this will hit the DTensor dispatch key) here
-        # so that any code that thinks it can use this will still work.
-        #
-        # TODO: add RecordFunction to make it clearer in profiles when this slow path is
-        # being hit?
-        return op_call.redispatch(DispatchKeySet(DispatchKey.DTensor), *args, **kwargs)
 
     def _dispatch_fast_path_python_tail(
         self,

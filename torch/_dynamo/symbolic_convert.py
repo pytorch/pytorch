@@ -171,6 +171,7 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+from .variables.streams import SymbolicStreamState
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.torch_function import (
     SymbolicTorchFunctionState,
@@ -433,12 +434,15 @@ class BlockStackEntry:
         else:
             return ReenterWith(self.stack_index - 1)
 
-    def exit(self, tx: InstructionTranslatorBase, is_graph_break: bool) -> None:
+    def exit(
+        self, tx: InstructionTranslatorBase, is_graph_break: bool
+    ) -> VariableTracker | None:
         assert self.with_context is not None
         if (
             is_graph_break and self.with_context.exit_on_graph_break()
         ) or not is_graph_break:
             return self.with_context.exit(tx)  # type: ignore[arg-type]
+        return None
 
 
 class SpeculationLogDivergence(AssertionError):
@@ -1104,6 +1108,7 @@ class InstructionTranslatorBase(
     symbolic_locals: dict[str, VariableTracker]
     symbolic_globals: dict[str, VariableTracker]
     symbolic_torch_function_state: SymbolicTorchFunctionState
+    symbolic_stream_state: SymbolicStreamState
     post_prune_cell_and_freevars: Optional[dict[str, VariableTracker]]
     stack: list[VariableTracker]
     instruction_pointer: Optional[int]
@@ -3315,7 +3320,7 @@ class InstructionTranslatorBase(
         obj = self.stack[-inst.arg]
         assert isinstance(obj, SetVariable)
         assert obj.is_mutable()
-        obj.call_method(self, "add", [v], {})
+        obj.call_method(self, "add", [v], {})  # type: ignore[arg-type]
 
     def SET_UPDATE(self, inst: Instruction) -> None:
         v = self.pop()
@@ -3324,7 +3329,7 @@ class InstructionTranslatorBase(
         obj = self.stack[-inst.arg]
         assert isinstance(obj, SetVariable)
         assert obj.is_mutable()
-        obj.call_method(self, "update", [v], {})
+        obj.call_method(self, "update", [v], {})  # type: ignore[arg-type]
 
     def LIST_APPEND(self, inst: Instruction) -> None:
         v = self.pop()
@@ -3632,7 +3637,7 @@ class InstructionTranslatorBase(
         obj = self.stack[-inst.arg].realize()
         assert isinstance(obj, ConstDictVariable)
         assert obj.is_mutable()
-        obj.call_method(self, "update", [v], {})
+        obj.call_method(self, "update", [v], {})  # type: ignore[arg-type]
 
     DICT_UPDATE = DICT_MERGE
 
@@ -3858,7 +3863,7 @@ class InstructionTranslatorBase(
             else:
                 self.block_stack.append(BlockStackEntry(inst, target, len(self.stack)))
 
-        return ctx.enter(self)
+        return ctx.enter(self)  # type: ignore[arg-type]
 
     @staticmethod
     def unsupported_ctx_graph_break(ctx: VariableTracker) -> NoReturn:
@@ -4243,6 +4248,7 @@ class InstructionTranslatorBase(
         symbolic_locals: dict[str, VariableTracker],
         symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
+        symbolic_stream_state: SymbolicStreamState,
         f_code: types.CodeType,
         export: bool,
         inline_depth: int,
@@ -4262,6 +4268,7 @@ class InstructionTranslatorBase(
         self.symbolic_locals = symbolic_locals
         self.symbolic_globals = symbolic_globals
         self.symbolic_torch_function_state = symbolic_torch_function_state
+        self.symbolic_stream_state = symbolic_stream_state
         # used to keep cell/freevars alive after pruning symbolic_locals (prune_dead_locals)
         # in order to generate any nested closures
         self.post_prune_cell_and_freevars = None
@@ -4416,6 +4423,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             # A global var is inserted only after a STORE_GLOBAL happens to it
             symbolic_globals={},
             symbolic_torch_function_state=None,  # type: ignore[arg-type] # set below
+            symbolic_stream_state=None,  # type: ignore[arg-type] # set below
             f_code=f_code,
             export=export,
             inline_depth=0,
@@ -4519,6 +4527,8 @@ class InstructionTranslator(InstructionTranslatorBase):
             self.symbolic_torch_function_state = SymbolicTorchFunctionState(
                 torch_function_mode_stack
             )
+
+            self.symbolic_stream_state = SymbolicStreamState()
 
             if export:
                 # export gets confused if we never realize unused inputs
@@ -4846,6 +4856,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 sub_locals,
                 parent.symbolic_globals,
                 parent.symbolic_torch_function_state,
+                parent.symbolic_stream_state,
                 func,
             )
         else:
@@ -4857,6 +4868,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 sub_locals,
                 parent.symbolic_globals,
                 parent.symbolic_torch_function_state,
+                parent.symbolic_stream_state,
                 # pyrefly: ignore [bad-argument-type]
                 func,
             )
@@ -4940,6 +4952,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         symbolic_locals: dict[str, VariableTracker],
         symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
+        symbolic_stream_state: SymbolicStreamState,
         funcvar: BaseUserFunctionVariable,
     ) -> None:
         f_globals = funcvar.get_globals()  # type: ignore[attr-defined]
@@ -4973,6 +4986,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             symbolic_locals=symbolic_locals,
             symbolic_globals=symbolic_globals,
             symbolic_torch_function_state=symbolic_torch_function_state,
+            symbolic_stream_state=symbolic_stream_state,
             instructions=instructions,
             code_options={k: getattr(code, k) for k in get_code_keys()},
             f_code=code,

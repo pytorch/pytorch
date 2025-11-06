@@ -1914,6 +1914,7 @@ class TestSDPAFailureModes(NNTestCase):
                     q, k, v, None, 0.0, is_causal=True))
 
     @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
     def test_mem_eff_attention_fail_with_batch_size_geq_65536(self):
         batch_size = 2**16
         query = torch.rand([batch_size, 2, 2, 8], device='cuda', dtype=torch.float16, requires_grad=True)
@@ -1935,6 +1936,7 @@ class TestSDPAFailureModes(NNTestCase):
         self.assertEqual(value.grad, v_cpu.grad, atol=2e-3, rtol=1e-4)
 
     @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
     def test_mem_eff_attention_fail_with_batch_size_geq_65536_error(self):
         query = torch.rand([2**16, 2, 2, 8], device='cuda', dtype=torch.float16)
         key = torch.rand([2**16, 2, 2, 8], device='cuda', dtype=torch.float16)
@@ -1948,6 +1950,7 @@ class TestSDPAFailureModes(NNTestCase):
 
     @largeTensorTest("15GB", "cuda")
     @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
     def test_mem_eff_attention_large_seq_len_uniform_attention(self):
         device = torch.device("cuda")
         dtype = torch.bfloat16
@@ -2847,6 +2850,30 @@ class TestSDPACudaOnly(NNTestCase):
         with torch.nn.attention.sdpa_kernel([SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION]):
             out = torch.nn.functional.scaled_dot_product_attention(q, q, q, dropout_p=0.5)
             out.backward(grad)
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    def test_cudnn_attention_broken_166211(self):
+        # https://github.com/pytorch/pytorch/issues/166211#issue-3551350377
+        shape = (20, 4, 4, 32)
+        scale = 10
+        for i in range(100):
+            q = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
+            k = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
+            v = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
+            q.requires_grad = True
+            k.requires_grad = True
+            v.requires_grad = True
+
+            grad_attn_output = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
+
+            with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.CUDNN_ATTENTION):
+                attn_output = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+                dq, dk, dv = torch.autograd.grad(outputs=attn_output, inputs=(q, k, v), grad_outputs=grad_attn_output)
+
+            self.assertFalse(dq.isnan().any())
+            self.assertFalse(dk.isnan().any())
+            self.assertFalse(dv.isnan().any())
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
