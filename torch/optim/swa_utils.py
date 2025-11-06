@@ -43,7 +43,9 @@ def get_ema_multi_avg_fn(decay=0.999):
         )
 
     @torch.no_grad()
-    def ema_update(ema_param_list: PARAM_LIST, current_param_list: PARAM_LIST, _):
+    def ema_update(
+        ema_param_list: PARAM_LIST, current_param_list: PARAM_LIST, _
+    ) -> None:
         # foreach lerp only handles float and complex
         if torch.is_floating_point(ema_param_list[0]) or torch.is_complex(
             ema_param_list[0]
@@ -64,7 +66,7 @@ def get_swa_multi_avg_fn():
         averaged_param_list: PARAM_LIST,
         current_param_list: PARAM_LIST,
         num_averaged: Union[Tensor, int],
-    ):
+    ) -> None:
         # foreach lerp only handles float and complex
         if torch.is_floating_point(averaged_param_list[0]) or torch.is_complex(
             averaged_param_list[0]
@@ -227,7 +229,7 @@ class AveragedModel(Module):
             Callable[[PARAM_LIST, PARAM_LIST, Union[Tensor, int]], None]
         ] = None,
         use_buffers=False,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         super().__init__()
         if avg_fn is not None and multi_avg_fn is not None:
             raise AssertionError(
@@ -247,7 +249,7 @@ class AveragedModel(Module):
         """Forward pass."""
         return self.module(*args, **kwargs)
 
-    def update_parameters(self, model: Module):
+    def update_parameters(self, model: Module) -> None:
         """Update model parameters."""
         self_param = (
             # pyrefly: ignore [bad-argument-type]
@@ -329,7 +331,7 @@ def update_bn(
     loader: Iterable[Any],
     model: Module,
     device: Optional[Union[int, torch.device]] = None,
-):
+) -> None:
     r"""Update BatchNorm running_mean, running_var buffers in the model.
 
     It performs one pass over data in `loader` to estimate the activation
@@ -434,7 +436,7 @@ class SWALR(LRScheduler):
         anneal_epochs=10,
         anneal_strategy: Literal["cos", "linear"] = "cos",
         last_epoch=-1,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         swa_lrs = _format_param("swa_lr", optimizer, swa_lr)
         for swa_lr, group in zip(swa_lrs, optimizer.param_groups, strict=True):
             group["swa_lr"] = swa_lr
@@ -516,7 +518,7 @@ class SWALR(LRScheduler):
             for group, lr in zip(self.optimizer.param_groups, prev_lrs, strict=True)
         ]
 
-    def _set_anneal_func(self, anneal_strategy: Literal["cos", "linear"]):
+    def _set_anneal_func(self, anneal_strategy: Literal["cos", "linear"]) -> None:
         self._anneal_strategy = anneal_strategy
         if anneal_strategy == "cos":
             self.anneal_func = self._cosine_anneal
