@@ -18,7 +18,7 @@ from .triton import TritonScheduling
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from typing_extensions import TypeAlias
+    from typing import TypeAlias
 
     from sympy import Expr
 
@@ -122,6 +122,9 @@ class CUDACombinedScheduling(BaseScheduling):
             return self._triton_scheduling.codegen_template(
                 template_node, epilogue_nodes, prologue_nodes
             )
+
+    def codegen_mix_order_reduction(self, node):
+        return self._triton_scheduling.codegen_mix_order_reduction(node)
 
     def codegen_node(self, node: Union[FusedSchedulerNode, SchedulerNode]) -> None:
         return self._triton_scheduling.codegen_node(node)

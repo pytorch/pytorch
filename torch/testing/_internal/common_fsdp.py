@@ -157,7 +157,7 @@ def _assert_module_states(
     assert rank0_states is not None  # mypy
     for state in olist[1:]:
         assert state is not None  # mypy
-        for (_, p1), (_, p2) in zip(rank0_states, state):
+        for (_, p1), (_, p2) in zip(rank0_states, state, strict=True):
             assert_fn(p1, p2)
 
 
@@ -1135,7 +1135,9 @@ def check_sharded_parity(
     prefixes_to_ignore: tuple[str, ...] = (),
 ):
     for (replicated_name, replicated_param), (sharded_name, sharded_param) in zip(
-        replicated_module.named_parameters(), sharded_module.named_parameters()
+        replicated_module.named_parameters(),
+        sharded_module.named_parameters(),
+        strict=True,
     ):
         clean_sharded_name = sharded_name
         for prefix in prefixes_to_ignore:
@@ -1549,7 +1551,9 @@ def compiled_fsdp_test(compile_compute_on_module: Optional[type] = None):
             original_fully_shard: Any = torch.distributed.fsdp.fully_shard
             for mode in FullyShardMode:
                 if mode != FullyShardMode.EAGER and not has_triton():
-                    warnings.warn("Inductor on GPU needs Triton and recent GPU arch")
+                    warnings.warn(
+                        "Inductor on GPU needs Triton and recent GPU arch", stacklevel=2
+                    )
                     continue
                 # barrier to ensure thread reading the same value
                 original_skip_fsdp_hooks = torch._dynamo.config.skip_fsdp_hooks

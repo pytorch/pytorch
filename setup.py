@@ -156,6 +156,10 @@
 #   USE_ROCM_KERNEL_ASSERT=1
 #     Enable kernel assert in ROCm platform
 #
+#   USE_LAYERNORM_FAST_RECIPROCAL
+#     If set, enables the use of builtin functions for fast reciprocals (1/x) w.r.t.
+#     layer normalization. Default: enabled.
+#
 #   USE_ROCM_CK_GEMM=1
 #     Enable building CK GEMM backend in ROCm platform
 #
@@ -624,6 +628,37 @@ def mirror_files_into_torchgen() -> None:
             shutil.copytree(orig_path, new_path)
             continue
         raise RuntimeError("Check the file paths in `mirror_files_into_torchgen()`")
+
+
+def mirror_inductor_external_kernels() -> None:
+    """
+    Copy external kernels into Inductor so they are importable.
+    """
+    paths = [
+        (
+            CWD / "torch/_inductor/kernel/vendored_templates/cutedsl_grouped_gemm.py",
+            CWD
+            / "third_party/cutlass/examples/python/CuTeDSL/blackwell/grouped_gemm.py",
+        ),
+    ]
+    for new_path, orig_path in paths:
+        # Create the dirs involved in new_path if they don't exist
+        if not new_path.exists():
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Copy the files from the orig location to the new location
+        if orig_path.is_file():
+            shutil.copyfile(orig_path, new_path)
+            continue
+        if orig_path.is_dir():
+            if new_path.exists():
+                # copytree fails if the tree exists already, so remove it.
+                shutil.rmtree(new_path)
+            shutil.copytree(orig_path, new_path)
+            continue
+        raise RuntimeError(
+            "Check the file paths in `mirror_inductor_external_kernels()`"
+        )
 
 
 # ATTENTION: THIS IS AI SLOP
@@ -1102,7 +1137,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 continue
             self.copy_file(source_lib, target_lib)
             # Delete old rpath and add @loader_lib to the rpath
-            # This should prevent delocate from attempting to package another instance
+            # This should prevent deallocate from attempting to package another instance
             # of OpenMP library in torch wheel as well as loading two libomp.dylib into
             # the address space, as libraries are cached by their unresolved names
             install_name_tool_args = [
@@ -1612,6 +1647,8 @@ def main() -> None:
     if RUN_BUILD_DEPS:
         build_deps()
 
+    mirror_inductor_external_kernels()
+
     (
         ext_modules,
         cmdclass,
@@ -1645,6 +1682,7 @@ def main() -> None:
         "_inductor/codegen/aoti_runtime/*.cpp",
         "_inductor/script.ld",
         "_inductor/kernel/flex/templates/*.jinja",
+        "_inductor/kernel/templates/*.jinja",
         "_export/serde/*.yaml",
         "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",

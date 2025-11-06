@@ -130,7 +130,7 @@ class NodeExecutionTracker:
 
 class PatternSafetyChecker:
     """
-    Validates safety of pattern replacements in FX graphs with mutations.
+    Validates safety of pattern replacements in FX graphs.
     """
 
     def __init__(self, graph: torch.fx.Graph) -> None:
@@ -294,7 +294,7 @@ class PatternSafetyChecker:
 
         # Check each pair
         for t1, t2 in combinations(pattern_escaping, 2):
-            # Only check pairs where at least one is globally escaping (cached check)
+            # Only check pairs where at least one is globally escaping
             t1_is_escaping = t1 in self.escaping_nodes
             t2_is_escaping = t2 in self.escaping_nodes
 
@@ -316,7 +316,7 @@ class PatternSafetyChecker:
 
             # Rule 2 & 3: only compute if new aliasing detected
             if not pattern_aliased and repl_aliased:
-                # Rule 2: block new aliasing between two globally escaping nodes (reuse cached checks)
+                # Rule 2: block new aliasing between two globally escaping nodes
                 if t1_is_escaping and t2_is_escaping:
                     return False
 

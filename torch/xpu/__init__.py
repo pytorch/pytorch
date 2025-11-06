@@ -245,13 +245,12 @@ def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
             (default).
 
     Returns:
-        Dict[str, Any]: the xpu capability dictionary of the device
+        dict[str, Any]: the xpu capability dictionary of the device
     """
     props = get_device_properties(device)
     # Only keep attributes that are safe for dictionary serialization.
     serializable_types = (int, float, bool, str, type(None), list, tuple, dict)
     return {
-        # pyrefly: ignore  # unbound-name
         key: value
         for key in dir(props)
         if not key.startswith("__")
@@ -329,7 +328,7 @@ class StreamContext:
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if self.idx is None:
-            self.idx = -1  # pyrefly: ignore  # bad-assignment
+            self.idx = -1  # pyrefly: ignore [bad-assignment]
 
     def __enter__(self):
         cur_stream = self.stream
@@ -522,6 +521,7 @@ def _get_rng_state_offset(device: Union[int, str, torch.device] = "xpu") -> int:
 # import here to avoid circular import
 from .memory import (
     empty_cache,
+    get_per_process_memory_fraction,
     max_memory_allocated,
     max_memory_reserved,
     mem_get_info,
@@ -531,6 +531,7 @@ from .memory import (
     memory_stats_as_nested_dict,
     reset_accumulated_memory_stats,
     reset_peak_memory_stats,
+    set_per_process_memory_fraction,
 )
 from .random import (
     get_rng_state,
@@ -562,6 +563,7 @@ __all__ = [
     "get_device_name",
     "get_device_properties",
     "get_gencode_flags",
+    "get_per_process_memory_fraction",
     "get_rng_state",
     "get_rng_state_all",
     "get_stream_from_external",
@@ -585,6 +587,7 @@ __all__ = [
     "seed",
     "seed_all",
     "set_device",
+    "set_per_process_memory_fraction",
     "set_rng_state",
     "set_rng_state_all",
     "set_stream",

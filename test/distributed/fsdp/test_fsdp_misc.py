@@ -514,18 +514,17 @@ class TestFSDPMiscMultiProcess(FSDPTest):
     def test_fsdp_cpu_training(self):
         """Tests FSDP training on CPU."""
         gloo_pg = dist.new_group(backend="gloo")
-        for ss in [  # noqa: F841
+        for ss in [
             ShardingStrategy.NO_SHARD,
             ShardingStrategy.FULL_SHARD,
             ShardingStrategy.SHARD_GRAD_OP,
-            ShardingStrategy.HYBRID_SHARD,
-            ShardingStrategy._HYBRID_SHARD_ZERO2,
         ]:
             torch.manual_seed(42)
             model = MyModel()
             ref_model = DDP(deepcopy(model), process_group=gloo_pg)
             model = FSDP(
                 model,
+                sharding_strategy=ss,
                 auto_wrap_policy=always_wrap_policy,
                 process_group=gloo_pg,
                 device_id=torch.device("cpu"),

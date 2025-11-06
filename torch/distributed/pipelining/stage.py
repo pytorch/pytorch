@@ -155,7 +155,7 @@ class _PipelineStageBase(ABC):
         self.submod = submodule
         self.stage_index = stage_index
         self.num_stages = num_stages
-        # pyrefly: ignore  # read-only
+        # pyrefly: ignore [read-only]
         self.device = device
         self.group = group
 
@@ -252,7 +252,7 @@ class _PipelineStageBase(ABC):
         self._outputs_meta = tuple(outputs_meta)  # type: ignore[assignment]
 
     def get_outputs_meta(self) -> tuple[torch.Tensor, ...]:
-        """Get the output metadata (meta tensors) reprensenting the outputs of this stage"""
+        """Get the output metadata (meta tensors) representing the outputs of this stage"""
         assert self._outputs_meta is not None, (
             "Attempted to get_outputs_meta() without configuring output meta"
         )
@@ -664,6 +664,7 @@ class _PipelineStageBase(ABC):
         fwd_chunk_id: int,
         args: tuple[Any, ...],
         kwargs: Optional[dict[str, Any]] = None,
+        save_forward_output: bool = True,
     ):
         """
         Perform forward pass on the stage with one microbatch.
@@ -703,9 +704,8 @@ class _PipelineStageBase(ABC):
 
         # Prepare for final output merge or reduction
         # Output chunks is only used for the last stage since we only merge the output of the last stage
-        if self.is_last:
+        if self.is_last and save_forward_output:
             self.output_chunks.append(output)
-
         # Save activations and inputs for backward
         flat_args = flatten_args(composite_args)
         flat_kwargs = flatten_args(composite_kwargs)
@@ -723,7 +723,7 @@ class _PipelineStageBase(ABC):
         )
         self._validate_fwd_outputs(output_tuple)
 
-        # We return the original user-provied output, not normalized to tuple.
+        # We return the original user-provided output, not normalized to tuple.
         # See [Note: pipeline model output type]
         return output
 
@@ -978,7 +978,14 @@ class _PipelineStageBase(ABC):
 
         return ops
 
-    def _post_backward(self, grad_scale_factor: int):
+    def perform_reduce_grad(self, grad_scale_factor: int):
+        """
+        Called as a part of schedule IR.
+        REDUCE_GRAD action is scheduled after all microbatches W, B actions.
+
+        Currently contains "post_backward" functionality for FSDP.
+        We can try to extract post_backward in a separate IR action in future.
+        """
         # Manually call post backward for FSDP
         if isinstance(self.submod, FSDPModule):
             fsdp_module = self.submod
@@ -1001,7 +1008,8 @@ class _PipelineStageBase(ABC):
             distributed_state._root_post_backward_final_callback()
         # Call gradient scaling at the end of the backward pass
         # NOTE: this must happen after FSDP post_backward is FSDP is enabled
-        self.scale_grads(grad_scale_factor)
+        if grad_scale_factor != 1:
+            self.scale_grads(grad_scale_factor)
 
 
 class _PipelineStage(_PipelineStageBase):
@@ -1188,7 +1196,7 @@ class _PipelineStage(_PipelineStageBase):
             #   No need to send back to rank 0
             # - If user.target is stage_backward:
             #   No need to send assuming submod output is stored locally or
-            #   should be re-calucated in case of activation checkpointing
+            #   should be re-calculated in case of activation checkpointing
             return None
 
     def _create_act_send_info(self):

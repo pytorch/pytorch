@@ -8,16 +8,18 @@
 #include <torch/csrc/stable/stableivalue_conversions.h>
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/headeronly/core/ScalarType.h>
+#include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/shim_utils.h>
 
-namespace torch::stable {
+HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
 using torch::headeronly::ScalarType;
 
 inline ScalarType Tensor::scalar_type() const {
   int32_t dtype;
   TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(ath_.get(), &dtype));
-  return to<ScalarType>(from(dtype));
+  return torch::stable::detail::to<ScalarType>(
+      torch::stable::detail::from(dtype));
 }
 
-} // namespace torch::stable
+HIDDEN_NAMESPACE_END(torch, stable)

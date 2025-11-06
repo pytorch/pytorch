@@ -46,7 +46,7 @@ import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
-from typing import Any, Callable, Optional, TypeVar, Union
+from typing import Any, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
@@ -176,6 +176,10 @@ except ModuleNotFoundError:
 
 
 if typing.TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torch.utils.weak import WeakIdKeyDictionary
+
     from .backends.registry import CompilerFn
     from .package import CompilePackage
     from .repro.after_dynamo import WrapBackendDebug
@@ -471,7 +475,7 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         try:
             prof.enable()
             start_ts = time.time()
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             retval = prof.runcall(func, *args, **kwargs)
             profile_latency = time.time() - start_ts
             prof.disable()
@@ -878,12 +882,15 @@ class DynamoOutput:
             strict_error=strict_error,
         )
 
-    def graph_capture_output(self) -> GraphCaptureOutput:
+    def graph_capture_output(
+        self, argdefs: Optional[tuple[Any, ...]] = None
+    ) -> GraphCaptureOutput:
         output_graph = self.tracer_output.output_graph
         assert output_graph is not None
         return GraphCaptureOutput(
             OutputGraphCommon(
                 output_graph.dump_guards_state(),
+                output_graph.import_sources,
                 output_graph.shape_env,
                 output_graph.export_metadata,
                 output_graph.tracked_fakes_id_to_source,
@@ -891,6 +898,8 @@ class DynamoOutput:
             output_graph.import_sources,
             output_graph.traced_code,
             self.bytecode,
+            self.tracer_output.closure,
+            argdefs,
         )
 
 
@@ -909,6 +918,7 @@ class BackendInput:
     graph_module: torch.fx.GraphModule
     example_inputs: Any
     fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+    tensor_to_context: WeakIdKeyDictionary
 
 
 @dataclass
@@ -921,6 +931,8 @@ class GraphCaptureOutput:
     import_sources: dict[str, str]
     traced_code: list[CodeType]
     bytecode: CodeType
+    closure: Optional[tuple[Any, ...]]
+    argdefs: Optional[tuple[Any, ...]]
 
     def build_guards(
         self,
@@ -957,6 +969,28 @@ class CaptureOutput:
     # BackendInput can be None when dynamo didn't compile any graph (no tensor op)
     backend_input: Optional[BackendInput]
 
+    def forward_callable(self) -> Callable[..., Any]:
+        import importlib
+
+        # TODO code sharing
+        import_sources = self.graph_capture_output.output_graph.import_sources
+        assert self.backend_input is not None
+        backend_id = self.backend_input.backend_id
+        import_sources = {
+            alias: importlib.import_module(module_name)
+            for alias, module_name in import_sources.items()
+        }
+        f_globals = {
+            **import_sources,
+            backend_id: self.backend_input.graph_module,
+        }
+        return types.FunctionType(
+            self.graph_capture_output.bytecode,
+            f_globals,
+            closure=self.graph_capture_output.closure,
+            argdefs=self.graph_capture_output.argdefs,
+        )
+
 
 def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
     """
@@ -966,9 +1000,12 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
     import inspect
 
     if isinstance(mod, torch.nn.Module):
-        mod = mod.forward
+        if len(mod._forward_pre_hooks) == 0 and len(mod._forward_hooks) == 0:
+            mod = mod.forward
+        else:
+            mod = mod.__call__
     if hasattr(mod, "__self__"):
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         return mod.__func__, mod.__self__
     elif inspect.isfunction(mod):
         return mod, None
@@ -1015,6 +1052,7 @@ def _get_frame(
         f_locals,
         builtins.__dict__,
         closure=fn.__closure__ or (),  # type: ignore[arg-type]
+        argdefs=fn.__defaults__,
     )
 
 
@@ -1064,6 +1102,7 @@ class FrameInfo:
     locals: dict[str, object]
     builtins: dict[str, object]
     closure: tuple[CellType]
+    argdefs: Optional[tuple[Any, ...]]
 
 
 def _fullgraph_capture_frame(
@@ -1080,11 +1119,13 @@ def _fullgraph_capture_frame(
         gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
     ) -> torch.fx.GraphModule:
         nonlocal backend_input
-        fake_mode = TracingContext.get().fake_mode
+        tracing_context = TracingContext.get()
+        fake_mode = tracing_context.fake_mode
+        tensor_to_context = tracing_context.tensor_to_context
         assert fake_mode is not None
         assert isinstance(gm.meta["backend_id"], str)
         backend_input = BackendInput(
-            gm.meta["backend_id"], gm, example_inputs, fake_mode
+            gm.meta["backend_id"], gm, example_inputs, fake_mode, tensor_to_context
         )
         return gm
 
@@ -1111,11 +1152,11 @@ def _fullgraph_capture_frame(
         while cur_exn.__cause__ is not None:
             cur_exn.__cause__.with_traceback(None)
             cur_exn = cur_exn.__cause__
-        # pyrefly: ignore  # invalid-inheritance
+        # pyrefly: ignore [invalid-inheritance]
         raise e.with_traceback(None) from e.__cause__  # User compiler error
 
     return CaptureOutput(
-        dynamo_output.graph_capture_output(),
+        dynamo_output.graph_capture_output(frame.argdefs),
         backend_input,
     )
 
@@ -1135,7 +1176,7 @@ def compile_frame(  # type: ignore[return]
     frame_state: Optional[dict[str, Union[int, FrameStateSizeEntry]]] = None,
     distributed_state: Optional[DistributedState] = None,
     package: Optional[CompilePackage] = None,
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
 ) -> DynamoOutput:
     """
     A helper function taking a frame and backend, then return the generated bytecode
@@ -1210,7 +1251,7 @@ def compile_frame(  # type: ignore[return]
         except exc.SkipFrame as e:
             if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
                 TensorifyState.clear()
-            log.debug(
+            log.debug(  # noqa: G200
                 "Skipping frame %s %s \
                 %s %s",
                 e,
@@ -1244,7 +1285,6 @@ def _compile(
     # in the case of normal and exception code paths
     convert_frame_box: Optional[ConvertFrameBox] = None,
 ) -> ConvertFrameReturn:
-    from torch._inductor.async_compile import async_compile_pool_manager
     from torch.fx.experimental.validator import (
         BisectValidationException,
         ValidationException,
@@ -1438,7 +1478,6 @@ def _compile(
     with (
         _use_lazy_graph_module(config.use_lazy_graph_module),
         compile_context(CompileContext(compile_id)),
-        async_compile_pool_manager(),
         chromium_event_timed(
             "dynamo", reset_event_log_on_exit=True, log_pt2_compile_event=True
         ),

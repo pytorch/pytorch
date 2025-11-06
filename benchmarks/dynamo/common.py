@@ -1751,8 +1751,8 @@ def maybe_snapshot_memory(should_snapshot_memory, suffix):
                         f"{output_filename.rstrip('.csv')}_{suffix}.pickle",
                     )
                 )
-            except Exception as e:
-                log.error("Failed to save memory snapshot, %s", e)
+            except Exception:
+                log.exception("Failed to save memory snapshot")
 
             torch.cuda.memory._record_memory_history(enabled=None)
 
@@ -1835,6 +1835,10 @@ class BenchmarkRunner:
 
     @property
     def skip_models_for_cuda(self):
+        return set()
+
+    @property
+    def skip_models_for_xpu(self):
         return set()
 
     @property
@@ -2284,9 +2288,11 @@ class BenchmarkRunner:
                     )
                 ):
                     is_same = False
-            except Exception:
+            except Exception as e:
                 # Sometimes torch.allclose may throw RuntimeError
-                is_same = False
+                exception_string = str(e)
+                accuracy_status = f"fail_exception: {exception_string}"
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             if not is_same:
                 accuracy_status = "eager_two_runs_differ"
@@ -2403,9 +2409,11 @@ class BenchmarkRunner:
                     force_max_multiplier=force_max_multiplier,
                 ):
                     is_same = False
-            except Exception:
+            except Exception as e:
                 # Sometimes torch.allclose may throw RuntimeError
-                is_same = False
+                exception_string = str(e)
+                accuracy_status = f"fail_exception: {exception_string}"
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             if not is_same:
                 if self.args.skip_accuracy_check:
@@ -3923,6 +3931,8 @@ def run(runner, args, original_dir=None):
             runner.skip_models.update(runner.skip_models_for_cpu_aarch64)
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
+    elif args.devices == ["xpu"]:
+        runner.skip_models.update(runner.skip_models_for_xpu)
 
     if not args.multiprocess:
         runner.skip_models.update(runner.skip_multiprocess_models)
@@ -4060,7 +4070,7 @@ def run(runner, args, original_dir=None):
         else:
             optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = (
-            speedup_experiment if not args.backend == "torchao" else latency_experiment
+            speedup_experiment if args.backend != "torchao" else latency_experiment
         )
         if args.accuracy:
             output_filename = f"accuracy_{args.backend}.csv"

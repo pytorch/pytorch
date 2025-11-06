@@ -31,11 +31,10 @@ import logging
 import sys
 import traceback
 import types
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from types import FunctionType
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
-from unittest.mock import patch
 from weakref import WeakKeyDictionary
 
 import torch
@@ -69,7 +68,6 @@ from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
-    counters,
     identity,
     is_function,
     is_wrapper_or_member_descriptor,
@@ -79,6 +77,7 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     AttributeMutationNew,
+    raise_type_error_exc,
     ValueMutationNew,
     VariableTracker,
 )
@@ -155,27 +154,32 @@ def bind_args_cached(func, tx, fn_source, args, kwargs):
     rem_kw = dict(kwargs)
 
     # 1) Bind all positional (pos-only + pos-or-kw)
+    # 1.1) Apply pos-defaults first (maybe overridden later)
+    for name, idx in spec.pos_default_map.items():
+        default_source = None
+        if fn_source and not (
+            ConstantVariable.is_literal(spec.defaults[idx])
+            and config.skip_guards_on_constant_func_defaults
+        ):
+            default_source = DefaultsSource(fn_source, idx)
+        ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
+    # 1.2) Fill in provided positional args
     for i, name in enumerate(spec.all_pos_names):
         if i < len(args):
+            # Maybe override pos-defaults applied above
             ba[name] = wrap_bound_arg(tx, args[i])
-        elif name in rem_kw:
-            if name in spec.posonly_names:
-                raise_observed_exception(
-                    TypeError,
-                    tx,
-                    args=[ConstantVariable.create(f"{name} is positional-only")],
-                )
+        elif name in rem_kw and (
+            # `kwargs` can have the same key as a pos-only arg `name`.
+            # If this case happens, we should not consume the `name` here and
+            # keep it in `kwargs`:
+            #   >>> def fn(a, /, **kwargs): return (a, kwargs)
+            #   >>> fn(1, a=2)
+            #   (1, {'a': 2})
+            name not in spec.posonly_names
+        ):
+            # Maybe override pos-defaults applied above
             ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
-        elif name in spec.pos_default_map:
-            idx = spec.pos_default_map[name]
-            default_source = None
-            if fn_source and not (
-                ConstantVariable.is_literal(spec.defaults[idx])
-                and config.skip_guards_on_constant_func_defaults
-            ):
-                default_source = DefaultsSource(fn_source, idx)
-            ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
-        else:
+        elif name not in ba:
             raise_observed_exception(
                 TypeError,
                 tx,
@@ -712,8 +716,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # Hierarchically, tx can be seen as the parent of the inline tracer
             # created on call_function. Any exception needs to be propagated to tx
             # for Dynamo to behave correctly
-            with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
-                return tracer.inline_call_()
+            return tracer.inline_call_()
         except ObservedException as e:
             tracer.generator_exhausted = True
             raise e
@@ -723,8 +726,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
         except Unsupported as e:
             torch._dynamo.eval_frame.skip_code(self.get_code())
             raise SkipFrame from e
-        finally:
-            counters["unimplemented"] |= counters["inline_call"]
 
     def call_obj_hasattr(self, tx, name):
         if name in self.python_type().__dict__:
@@ -1320,8 +1321,20 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def const_getattr(self, tx, name):
         if name == "__name__":
-            return self.fn_name.as_python_constant()
+            return self.get_name()
+        if name == "__code__":
+            return self.get_code()
+        if name == "__defaults__":
+            d = getattr(self, "defaults", None)
+            return d.as_python_constant() if d else None
         return super().const_getattr(tx, name)
+
+    def call_obj_hasattr(self, tx: "InstructionTranslator", name):
+        if name == "__code__":
+            return variables.ConstantVariable.create(hasattr(self, "code"))
+        if name == "__defaults__":
+            return variables.ConstantVariable.create(hasattr(self, "defaults"))
+        return super().call_obj_hasattr(tx, name)
 
     def has_self(self):
         return False
@@ -1485,6 +1498,8 @@ class SkipFunctionVariable(VariableTracker):
                 )
 
             guard_on_source.make_guard(GuardBuilder.CLOSURE_MATCH)
+        elif inspect.isbuiltin(value):
+            install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         elif not is_wrapper_or_member_descriptor(value):
             # These descriptors are not guaranteed to return the same object on
             # attribute lookup. They are unlikely to be changed, so we can skip
@@ -1991,7 +2006,7 @@ class PolyfilledFunctionVariable(VariableTracker):
 
     @classmethod
     def create_with_source(cls, value, source):
-        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+        install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
 
         return cls(value, source=source)
 
@@ -2093,8 +2108,8 @@ class PolyfilledFunctionVariable(VariableTracker):
             return self.call_function(tx, args, kwargs)
 
         method = getattr(self.fn, name, None)
-        assert method is not None, f"Member {name} not found in {self.fn}"
-        assert is_function(method), f"Member {name} is not callable in {self.fn}"
+        if not (method or is_function(method)):
+            raise_type_error_exc(tx, f"Cannot find callable {name} in {self.fn}")
         options = {}
         if self.source:
             options["source"] = AttrSource(self.source, name)
@@ -2453,7 +2468,11 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
             )
 
         if self.rank == 1:
-            assert len(args) + len(kwargs) == 4
+            if len(args) + len(kwargs) != 4:
+                raise_type_error_exc(
+                    tx,
+                    f"TMA metadata rank=1 requires exactly 4 arguments, got {len(args) + len(kwargs)}",
+                )
             dims = [
                 kwargs["dim"] if "dim" in kwargs else args[1],
             ]
@@ -2461,7 +2480,11 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
                 kwargs["block_dim"] if "block_dim" in kwargs else args[2],
             ]
         else:
-            assert len(args) + len(kwargs) == 6
+            if len(args) + len(kwargs) != 6:
+                raise_type_error_exc(
+                    tx,
+                    f"TMA metadata rank=2 requires exactly 6 arguments, got {len(args) + len(kwargs)}",
+                )
             dims = [
                 kwargs["dim1"] if "dim1" in kwargs else args[1],
                 kwargs["dim0"] if "dim0" in kwargs else args[2],

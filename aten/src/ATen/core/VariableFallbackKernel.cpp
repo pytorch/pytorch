@@ -109,6 +109,10 @@ TORCH_LIBRARY_IMPL(_, AutogradHPU, m) {
   m.fallback(AUTOGRAD_FALLBACK);
 }
 
+TORCH_LIBRARY_IMPL(_, AutogradPrivateUse1, m) {
+  m.fallback(AUTOGRAD_FALLBACK);
+}
+
 #undef AUTOGRAD_FALLBACK
 
 } // namespace

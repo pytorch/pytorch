@@ -419,7 +419,7 @@ def get_base_name_to_sets_of_related_ops() -> dict[str, set[NSNodeTargetType]]:
         target2,
     ) in _lower_to_native_backend.STATIC_LOWER_FUNCTIONAL_MAP.items():
         new_connections.append((source, target1))
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         new_connections.append((source, target2))
 
     for source_to_target in (
@@ -428,7 +428,7 @@ def get_base_name_to_sets_of_related_ops() -> dict[str, set[NSNodeTargetType]]:
         quantization_mappings.DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS,
     ):
         for source, target in source_to_target.items():  # type:ignore[assignment]
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             new_connections.append((source, target))
 
     #

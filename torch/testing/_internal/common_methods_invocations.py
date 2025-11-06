@@ -445,11 +445,9 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
         )
 
     # Checking for permutations of weights and biases as `None`
-    weights = [channels, None, None]
-    biases = [None, channels, None]
     is_training = [True, False, False]
 
-    for weight, bias, training in zip(weights, biases, is_training):
+    for training in is_training:
         yield SampleInput(
             make_arg(input_shape),
             args=(
@@ -3631,7 +3629,7 @@ class _TestParamsMaxPoolBase:
     def _gen_kwargs(self):
         keys = self.kwargs.keys()
         for values in product(*self.kwargs.values()):
-            yield dict(zip(keys, values))
+            yield dict(zip(keys, values, strict=True))
 
     def gen_input_params(self):
         yield from product(self._gen_shape(), self._gen_kwargs())
@@ -4400,7 +4398,7 @@ def sample_inputs_instance_norm(opinfo, device, dtype, requires_grad, **kwargs):
     weights = [channels, None]
     biases = [None, None]
 
-    for weight_channels, bias_channels in zip(weights, biases):
+    for weight_channels, bias_channels in zip(weights, biases, strict=True):
         running_mean = make_arg_without_requires_grad(channels, low=0)
         running_var = make_arg_without_requires_grad(channels, low=0)
         yield SampleInput(
@@ -9765,6 +9763,7 @@ foreach_unary_op_db: list[OpInfo] = [
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
+        supports_sparse=True,
         decorators=(
             DecorateInfo(
                 unittest.expectedFailure,
@@ -11615,7 +11614,7 @@ def reference_searchsorted(sorted_sequence, boundary, out_int32=False, right=Fal
         # numpy searchsorted only supports 1D inputs so we split up ND inputs
         orig_shape = boundary.shape
         num_splits = np.prod(sorted_sequence.shape[:-1])
-        splits = range(0, num_splits)
+        splits = range(num_splits)
         sorted_sequence, boundary = sorted_sequence.reshape(num_splits, -1), boundary.reshape(num_splits, -1)
         if sorter is not None:
             sorter = sorter.reshape(num_splits, -1)
@@ -11625,7 +11624,7 @@ def reference_searchsorted(sorted_sequence, boundary, out_int32=False, right=Fal
         split_sorter = [sorter[i] if (sorter is not None) else None for i in splits]
 
         split_ret = [np.searchsorted(s_seq, b, side=side, sorter=s_sort)
-                     for (s_seq, b, s_sort) in zip(split_sequence, split_boundary, split_sorter)]
+                     for (s_seq, b, s_sort) in zip(split_sequence, split_boundary, split_sorter, strict=True)]
         split_ret = [i.astype(np.int32) for i in split_ret] if out_int32 else split_ret
         return np.stack(split_ret).reshape(orig_shape)
 
@@ -14312,7 +14311,7 @@ op_db: list[OpInfo] = [
            )),
     OpInfo('max',
            variant_test_name='reduction_with_dim',
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            supports_fwgrad_bwgrad=True,
@@ -14321,7 +14320,7 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True),
     OpInfo('max',
            variant_test_name='reduction_no_dim',
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
            supports_out=True,
            supports_forward_ad=True,
@@ -14466,7 +14465,7 @@ op_db: list[OpInfo] = [
            check_batched_forward_grad=False,),
     OpInfo('min',
            variant_test_name='reduction_with_dim',
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            supports_fwgrad_bwgrad=True,
@@ -14475,7 +14474,7 @@ op_db: list[OpInfo] = [
            )),
     OpInfo('min',
            variant_test_name='reduction_no_dim',
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
            supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -14785,7 +14784,7 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True),
     OpInfo('aminmax',
            ref=lambda x, dim=None, keepdim=False: (np.amin(x, axis=dim, keepdims=keepdim), np.amax(x, axis=dim, keepdims=keepdim)),
-           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
            decorators=(onlyNativeDeviceTypes,),
            supports_autograd=False,
@@ -16258,7 +16257,7 @@ op_db: list[OpInfo] = [
         aten_backward_name='_prelu_kernel_backward',
         ref=lambda x, weight:
             np.maximum(0., x) + np.minimum(0., x) *
-            (weight if x.ndim == 1 else weight.reshape([weight.size if i == 1 else 1 for i in range(0, x.ndim)])),
+            (weight if x.ndim == 1 else weight.reshape([weight.size if i == 1 else 1 for i in range(x.ndim)])),
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -20342,9 +20341,7 @@ op_db: list[OpInfo] = [
            ref=reference_smooth_l1_loss,
            sample_inputs_func=sample_inputs_smooth_l1_loss,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
-           backward_dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -21129,7 +21126,7 @@ op_db: list[OpInfo] = [
         supports_forward_ad=True,
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
-        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
         ref=reference_reduction_numpy(np.amax),
         skips=(
             # FIXME: reduces all dimensions when dim=[]
@@ -21144,7 +21141,7 @@ op_db: list[OpInfo] = [
         supports_forward_ad=True,
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
-        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
         ref=reference_reduction_numpy(np.amin),
         skips=(
             # FIXME: reduces all dimensions when dim=[]

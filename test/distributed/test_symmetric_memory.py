@@ -52,6 +52,9 @@ from torch.testing._internal.common_utils import (
 
 test_contexts = [nullcontext, _test_mode]
 
+# Set environment variable to disable multicast for all tests in this module
+os.environ["TORCH_SYMM_MEM_DISABLE_MULTICAST"] = "1"
+
 # So that tests are written in device-agnostic way
 device_type = "cuda"
 device_module = torch.get_device_module(device_type)
@@ -271,11 +274,12 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             self.assertTrue(buf.eq(peer_rank + world.size() // 2).all())
 
 
-# We move AsyncTP tests to a seperate test suite because 1) Async TP ops are not
+# We move AsyncTP tests to a separate test suite because 1) Async TP ops are not
 # the core symmetric memory APIs, they are more like applications, 2)
 # MultiProcContinuousTest will skip all the following tests if a test fails (
 # we should fix this too). We still want to get the test signals for the core
 # symmetric memory APIs when Async TP ops fail.
+@skip_if_rocm_multiprocess  # AsyncTP is not yet supported on ROCm
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class AsyncTPTest(MultiProcContinuousTest):
@@ -549,6 +553,10 @@ class AsyncTPTest(MultiProcContinuousTest):
     @skipUnless(SM89OrLater, "Requires compute capability >= 8.9")
     @parametrize("scatter_dim", [0, 1])
     @parametrize("rowwise", [True, False])
+    @skipIf(
+        SM100OrLater,
+        "https://github.com/pytorch/pytorch/issues/162940",
+    )
     def test_fused_scaled_matmul_reduce_scatter(
         self, scatter_dim: int, rowwise: bool
     ) -> None:
@@ -613,7 +621,7 @@ class AsyncTPTest(MultiProcContinuousTest):
 
 # [READ ME FIRST]
 # The `SymmMemEmptySetDeviceTest` suite parameterizes whether user sets the
-# device before calling symm_mem.emtpy.  Either way should work.
+# device before calling symm_mem.empty.  Either way should work.
 # However, since `set_device` is persistent, we cannot use the
 # `MultiProcContinuousTest` template because the next function will be
 # "contaminated", leading to flaky tests (e.g. hang). Therefore, we use

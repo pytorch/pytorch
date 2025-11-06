@@ -184,7 +184,7 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
                         and len(v_args) == len(c_args)
                         and all(
                             issubtype(v_arg, c_arg)
-                            for v_arg, c_arg in zip(v_args, c_args)
+                            for v_arg, c_arg in zip(v_args, c_args, strict=True)
                         )
                     ):
                         return True
@@ -207,7 +207,7 @@ def issubinstance(data, data_type):
             return True
         if len(dt_args) != len(data):
             return False
-        return all(issubinstance(d, t) for d, t in zip(data, dt_args))
+        return all(issubinstance(d, t) for d, t in zip(data, dt_args, strict=True))
     elif isinstance(data, (list, set)):
         if dt_args is None or len(dt_args) == 0:
             return True
@@ -265,7 +265,7 @@ class _DataPipeType:
 
 # Default type for DataPipe without annotation
 _T_co = TypeVar("_T_co", covariant=True)
-# pyrefly: ignore  # invalid-annotation
+# pyrefly: ignore [invalid-annotation]
 _DEFAULT_TYPE = _DataPipeType(Generic[_T_co])
 
 
@@ -284,7 +284,7 @@ class _DataPipeMeta(GenericMeta):
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
         # TODO: the statements below are not reachable by design as there is a bug and typing is low priority for now.
-        # pyrefly: ignore  # no-access
+        # pyrefly: ignore [no-access]
         cls.__origin__ = None
         if "type" in namespace:
             return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
