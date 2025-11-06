@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from typing import Any, Optional, Union
 
 import torch
+import torch._C._autograd as _autograd_cpp
 from torch.autograd.graph import GradientEdge, Node
 from torch.nn import Parameter
 
@@ -211,6 +212,18 @@ def stage_backward_input(
         else:
             inp.grad += dinput
 
+    # Create ownership tokens for intermediates BEFORE detaching
+    # These tokens keep the PyNode cdata alive for use in stage_backward_weight
+    for param_group in param_groups:
+        param_group["intermediate_tokens"] = [
+            _autograd_cpp._create_ownership_token(intermediate)
+            for intermediate in param_group["intermediates"]
+        ]
+        param_group["param_tokens"] = [
+            _autograd_cpp._create_ownership_token(param)
+            for param in param_group["params"]
+        ]
+
     # stage_outputs_or_loss are not used in backwards after this point, so we can safely remove it from the autograd graph
     # this allows autograd to clear up the graph dedicated for this tensor and free up significant memory
     for t in stage_outputs_or_loss:
@@ -238,13 +251,15 @@ def stage_backward_weight(
         valid_edges = []
         valid_grad_outputs: list[torch.Tensor] = []
 
-        for grads_tuple, intermediate in zip(
-            param_group["grads"], param_group["intermediates"]
+        for i, (grads_tuple, intermediate) in enumerate(
+            zip(param_group["grads"], param_group["intermediates"])
         ):
             non_none_grads = [g for g in grads_tuple if g is not None]
             if non_none_grads:
                 summed_grad = sum(non_none_grads)
-                valid_edges.append(GradientEdge(intermediate, 0))
+                # Use pre-created ownership token to keep the intermediate node's cdata alive
+                token = param_group["intermediate_tokens"][i]
+                valid_edges.append(GradientEdge(intermediate, 0, ownership_token=token))
                 # pyrefly: ignore [bad-argument-type]
                 valid_grad_outputs.append(summed_grad)
 
@@ -254,10 +269,19 @@ def stage_backward_weight(
         # because we install the hook function onto each of the intermediate autograd nodes.
         # We need to keep intermediates alive up until backward_weight, but we can free it now.
         del param_group["intermediates"]
+        # Also clean up the intermediate tokens since we've copied them to valid_edges
+        del param_group["intermediate_tokens"]
 
         if valid_edges:  # Only call autograd.grad if we have valid gradients
             # [NEW!] Able to pass a GradientEdge to autograd.grad as output
-            weights_edges = tuple(GradientEdge(w, 0) for w in param_group["params"])
+            # Use pre-created ownership tokens for weight nodes
+            weights_edges = tuple(
+                GradientEdge(w, 0, ownership_token=token)
+                for w, token in zip(param_group["params"], param_group["param_tokens"])
+            )
+            # Clean up param tokens after use
+            del param_group["param_tokens"]
+
             dweights = torch.autograd.grad(
                 valid_edges,
                 weights_edges,
