@@ -29,9 +29,9 @@ import contextlib
 import functools
 import inspect
 import operator
-from collections.abc import Sequence
+from collections.abc import Generator, Iterable, Sequence
 from types import TracebackType
-from typing import Any, Generator, Iterable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch._C
 import torch.utils._pytree as pytree
@@ -164,7 +164,8 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         if value is not None:
             super().__init__(value, **kwargs)
         self.value = value
-        self.cm_obj = value  # needed for BC with calling enter from CM code
+        # needed for BC with calling enter from CM code
+        self.cm_obj = value  # type: ignore[assignment]
         self.source = source  # type: ignore[assignment]
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
