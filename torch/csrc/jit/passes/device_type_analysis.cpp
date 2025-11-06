@@ -252,7 +252,7 @@ std::unique_ptr<OperatorMap<PropRule>>
 // This analysis propagates input device types (if any) throughout the
 // graph.
 bool DeviceTypePropagation(std::shared_ptr<Graph>& graph) {
-  auto tp = std::make_unique<DeviceTypePropagationPass>((graph));
+  auto tp = std::make_unique<DeviceTypePropagationPass>(graph);
   bool changed = tp->run();
   if (changed) {
     GRAPH_DUMP("After TensorPropertyPropagation pass:", graph);

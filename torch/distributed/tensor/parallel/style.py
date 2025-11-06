@@ -548,6 +548,7 @@ class PrepareModuleInput(ParallelStyle):
         assert self.desired_input_layouts is not None, (
             "desired module inputs should not be None!"
         )
+
         for inp, input_layout, desired_layout in zip(
             inputs, self.input_layouts, self.desired_input_layouts
         ):
@@ -663,6 +664,7 @@ class PrepareModuleOutput(ParallelStyle):
             raise ValueError(
                 "module outputs and output_layouts should have same length!"
             )
+
         for out, out_layout, desired_out_layout in zip(
             outputs, self.output_layouts, self.desired_output_layouts
         ):
