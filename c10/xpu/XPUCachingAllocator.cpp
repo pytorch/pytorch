@@ -1,9 +1,11 @@
+#include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 
 #include <deque>
 #include <mutex>
 #include <set>
+#include <vector>
 
 namespace c10::xpu::XPUCachingAllocator {
 
@@ -16,6 +18,7 @@ constexpr size_t kDeviceAlignment = 512;
 namespace {
 using stream_set = ska::flat_hash_set<xpu::XPUStream>;
 
+struct Block;
 typedef bool (*Comparison)(const Block*, const Block*);
 bool BlockComparatorSize(const Block* a, const Block* b);
 bool BlockComparatorAddress(const Block* a, const Block* b);
@@ -1792,18 +1795,10 @@ class NativeCachingAllocator : public XPUAllocator {
   ska::flat_hash_map<void*, Block*> allocated_blocks;
   c10::ApproximateClockToUnixTimeConverter clock_converter;
 
-Block* XPUAllocator::get_allocated_block(void* ptr, bool remove) {
-  std::scoped_lock<std::mutex> lock(mutex);
-  auto it = allocated_blocks.find(ptr);
-  if (it == allocated_blocks.end()) {
-    return nullptr;
+  void add_allocated_block(Block* block) {
+    std::lock_guard<std::mutex> lock(mutex);
+    allocated_blocks[block->ptr] = block;
   }
-  Block* block = it->second;
-  if (remove) {
-    allocated_blocks.erase(it);
-  }
-  return block;
-}
 
   void assertValidDevice(DeviceIndex device) {
     const auto device_num = device_allocators.size();
@@ -1826,104 +1821,56 @@ Block* XPUAllocator::get_allocated_block(void* ptr, bool remove) {
       }
     }
   }
-}
 
-bool XPUAllocator::initialized() override {
-  return !device_allocators.empty();
-}
-
-void XPUAllocator::malloc(
-    void** devPtr,
-    DeviceIndex device,
-    size_t size,
-    sycl::queue& queue) {
-  TORCH_INTERNAL_ASSERT(
-      0 <= device && static_cast<size_t>(device) < device_allocators.size(),
-      "Allocator not initialized for device ",
-      static_cast<int16_t>(device),
-      ": did you call init?");
-  Block* block = device_allocators[device]->malloc(device, size, queue);
-  add_allocated_block(block);
-  *devPtr = block->ptr;
-  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-  if (C10_UNLIKELY(interp)) {
-    (*interp)->trace_gpu_memory_allocation(
-        c10::kXPU, reinterpret_cast<uintptr_t>(*devPtr));
-  }
-}
-
-void XPUAllocator::free(void* ptr) {
-  if (!ptr) {
-    return;
-  }
-  Block* block = get_allocated_block(ptr, /* remove */ true);
-  TORCH_CHECK(block, "invalid device pointer: ", ptr);
-  device_allocators[block->device]->free(block);
-  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-  if (C10_UNLIKELY(interp)) {
-    (*interp)->trace_gpu_memory_deallocation(
-        c10::kXPU, reinterpret_cast<uintptr_t>(block->ptr));
-  }
-}
-
-void XPUAllocator::emptyCache(MempoolId_t mempool_id) {
-  for (auto& da : device_allocators) {
-    da->emptyCache();
-  }
-}
-
-void XPUAllocator::recordStream(const DataPtr& ptr, c10::Stream stream) {
-  if (!ptr.get()) {
-    return;
-  }
-  if (ptr.get_deleter() != &local_raw_delete) {
-    return;
+  bool initialized() override {
+    return !device_allocators.empty();
   }
 
-  Block* block = get_allocated_block(ptr.get());
-  TORCH_CHECK(block, "No allocated block can be found.");
-  c10::xpu::XPUStream xpu_stream{stream};
-  device_allocators[block->device]->recordStream(block, xpu_stream);
-}
-
-DataPtr XPUAllocator::allocate(size_t size) {
-  auto device = c10::xpu::current_device();
-  void* r = nullptr;
-  if (size != 0) {
-    this->malloc(&r, device, size, xpu::getCurrentXPUStream(device));
+  void malloc(
+      void** devPtr,
+      DeviceIndex device,
+      size_t size,
+      sycl::queue& queue) {
+    TORCH_INTERNAL_ASSERT(
+        0 <= device && static_cast<size_t>(device) < device_allocators.size(),
+        "Allocator not initialized for device ",
+        static_cast<int16_t>(device),
+        ": did you call init?");
+    Block* block = device_allocators[device]->malloc(device, size, queue);
+    add_allocated_block(block);
+    *devPtr = block->ptr;
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_memory_allocation(
+          c10::kXPU, reinterpret_cast<uintptr_t>(*devPtr));
+    }
   }
-  return {r, r, &local_raw_delete, Device(DeviceType::XPU, device)};
-}
 
   void emptyCache(MempoolId_t mempool_id) override {
     for (auto& da : device_allocators) {
       da->emptyCache(mempool_id);
     }
   }
-  auto device = c10::xpu::current_device();
-  void* r = nullptr;
-  malloc(&r, device, size, xpu::getCurrentXPUStream(device));
-  return r;
-}
 
-void* XPUAllocator::raw_alloc_with_stream(size_t size, XPUStream stream) {
-  if (size == 0) {
-    return nullptr;
+  void emptyCache(MempoolId_t mempool_id) override {
+    for (auto& da : device_allocators) {
+      da->emptyCache(mempool_id);
+    }
   }
-  auto device = c10::xpu::current_device();
-  void* r = nullptr;
-  malloc(&r, device, size, stream);
-  return r;
-}
 
-void XPUAllocator::raw_delete(void* ptr) {
-  this->free(ptr);
-}
+  void recordStream(const DataPtr& ptr, c10::Stream stream) override {
+    if (!ptr.get()) {
+      return;
+    }
+    if (ptr.get_deleter() != &local_raw_delete) {
+      return;
+    }
 
-void XPUAllocator::copy_data(void* dest, const void* src, std::size_t count)
-    const {
-  xpu::getCurrentXPUStream().queue().memcpy(dest, src, count);
-}
+    Block* block = get_allocated_block(ptr.get());
+    TORCH_CHECK(block, "No allocated block can be found.");
+    c10::xpu::XPUStream xpu_stream{stream};
+    device_allocators[block->device]->recordStream(block, xpu_stream);
+  }
 
   void* raw_alloc(size_t size) override {
     if (size == 0) {
@@ -1935,10 +1882,9 @@ void XPUAllocator::copy_data(void* dest, const void* src, std::size_t count)
     return r;
   }
 
-DeviceStats XPUAllocator::getDeviceStats(DeviceIndex device) {
-  assertValidDevice(device);
-  return device_allocators[device]->getStats();
-}
+  DeleterFnPtr raw_deleter() const override {
+    return &local_raw_delete;
+  }
 
   void raw_delete(void* ptr) override {
     this->free(ptr);

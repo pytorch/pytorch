@@ -4,7 +4,7 @@
 #include <c10/core/CachingDeviceAllocator.h>
 #include <c10/util/ApproximateClock.h>
 #include <c10/xpu/XPUStream.h>
-#include <vector>
+
 
 namespace c10::xpu::XPUCachingAllocator {
 

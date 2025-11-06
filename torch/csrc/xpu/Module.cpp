@@ -696,6 +696,7 @@ void initModule(PyObject* module) {
   registerXpuDeviceProperties(module);
   registerXpuPluggableAllocator(module);
   initXpuMethodBindings(module);
+  registerXpuAllocator(module);
 }
 
 } // namespace torch::xpu
