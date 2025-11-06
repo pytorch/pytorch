@@ -50,7 +50,7 @@
       MY_DISPATCH_CASE,                       \
       TYPE,                                   \
       NAME,                                   \
-      THO_WRAP(BODY),                         \
+      AT_WRAP(BODY),                          \
       __VA_ARGS__)
 
 #define TEST_DISPATCH_V2(NAME, EXPECTEDCOUNT, ...)                             \

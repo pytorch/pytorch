@@ -98,7 +98,7 @@ def _default_custom_combo_kernel_horizontal_partition(
         ]
         short_reduction = [n for n in reduction if n not in long_reduction]
         if long_reduction:
-            log.warning(
+            log.debug(
                 "ComboKernels: %d long reduction nodes are separated",
                 len(long_reduction),
             )
@@ -112,7 +112,7 @@ def _default_custom_combo_kernel_horizontal_partition(
         ]
         if large_pointwise:
             # TODO benchmark the performance when large pointwise nodes combining with others
-            log.warning(
+            log.debug(
                 "ComboKernels: %d large pointwise nodes are separated",
                 len(large_pointwise),
             )
@@ -627,7 +627,7 @@ class ComboKernel(Kernel):
         if heuristics == "foreach":
             heuristics_line = f"""
                 @triton_heuristics.foreach(
-                    num_warps={self.num_warps},
+                    filename=__file__,
                     triton_meta={triton_meta!r},
                     inductor_meta={inductor_meta!r},
                 )
@@ -699,7 +699,7 @@ class ComboKernel(Kernel):
                 block_names[f"{tree.prefix.upper()}BLOCK"] = tree.prefix
         self.block_args = list(block_names.keys())
 
-        return [ConstexprArg(x) for x in block_names.keys()]
+        return [ConstexprArg(x) for x in block_names]
 
     def add_numel_to_args(
         self, argdefs: list[ArgName], signature: list[Any]
