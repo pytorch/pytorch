@@ -22,8 +22,8 @@ import inspect
 import sys
 import warnings
 from collections.abc import Callable, Sequence, Sized
-from contextlib import ExitStack
-from typing import Any, ContextManager, Optional, TYPE_CHECKING, Union
+from contextlib import AbstractContextManager, ExitStack
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch._C
 from torch._guards import Guard
@@ -163,7 +163,7 @@ class ContextWrappingVariable(VariableTracker):
 class GenericContextWrappingVariable(UserDefinedObjectVariable):
     # Some methods in ContextWrappingVariable assumes the arguments are
     # python constants. Which might not always be the case here.
-    def __init__(self, cm_obj: ContextManager[Any], **kwargs: Any) -> None:
+    def __init__(self, cm_obj: AbstractContextManager[Any], **kwargs: Any) -> None:
         assert cm_obj is not None
         super().__init__(
             value=cm_obj,
