@@ -380,6 +380,7 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
+    @requires_cuda
     def test_stream_backward(self) -> None:
         def fn(x, y):
             s2 = torch.Stream()
