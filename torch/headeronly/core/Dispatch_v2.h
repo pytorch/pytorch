@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/headeronly/core/Dispatch.h>
 #include <torch/headeronly/core/ScalarType.h>
 
 // This file provides THO_DISPATCH_V2_TMPL macro that is a generalized
@@ -21,6 +22,15 @@
       TYPE,                                                \
       NAME,                                                \
       THO_AP_VAR_TMPL(DISPATCH_CASE, AT_WRAP(BODY), TYPE, __VA_ARGS__))
+
+// THO_DISPATCH_V2 is same as AT_DISPATCH_V2 but using
+// THO_DISPATCH_SWITCH and THO_DISPATCH_CASE instead of
+// AT_DISPATCH_SWITCH and AT_DISPATCH_CASE, respectively.
+#define THO_DISPATCH_V2(TYPE, NAME, BODY, ...) \
+  THO_DISPATCH_V2_TMPL(                        \
+      THO_DISPATCH_SWITCH, THO_DISPATCH_CASE, TYPE, NAME, BODY, __VA_ARGS__)
+
+// Type collection macros
 
 // This macro lets you pass an arbitrary expression that may contain internal
 // commas to another macro without having the commas causing the expression
