@@ -48,10 +48,15 @@ torch_new_list_reserve_size(size_t size, StableListHandle* ret);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_list_size(StableListHandle list_handle, size_t* size);
 
-AOTI_TORCH_EXPORT AOTITorchError torch_list_at(
+AOTI_TORCH_EXPORT AOTITorchError torch_list_get_item(
     StableListHandle list_handle,
     size_t index,
     StableIValue* element);
+
+AOTI_TORCH_EXPORT AOTITorchError torch_list_set_item(
+    StableListHandle list_handle,
+    size_t index,
+    StableIValue element);
 
 AOTI_TORCH_EXPORT AOTITorchError
 torch_list_push_back(StableListHandle list_handle, StableIValue element);
