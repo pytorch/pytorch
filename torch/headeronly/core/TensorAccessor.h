@@ -203,7 +203,11 @@ class GenericPackedTensorAccessorBase {
 };
 
 template <
-    template <typename I> class ArrayRef,
+    template <
+        typename,
+        size_t,
+        template <typename U> class,
+        typename> class TensorAccessor,
     typename IndexBoundsCheck,
     typename T,
     size_t N,
@@ -244,19 +248,19 @@ class GenericPackedTensorAccessor : public GenericPackedTensorAccessorBase<
             PtrTraits,
             index_t>(data_, sizes_, strides_) {}
 
-  C10_DEVICE TensorAccessor<ArrayRef, T, N - 1, PtrTraits, index_t> operator[](
+  C10_DEVICE TensorAccessor<T, N - 1, PtrTraits, index_t> operator[](
       index_t i) {
     index_t* new_sizes = this->sizes_ + 1;
     index_t* new_strides = this->strides_ + 1;
-    return TensorAccessor<ArrayRef, T, N - 1, PtrTraits, index_t>(
+    return TensorAccessor<T, N - 1, PtrTraits, index_t>(
         this->data_ + this->strides_[0] * i, new_sizes, new_strides);
   }
 
-  C10_DEVICE const TensorAccessor<ArrayRef, T, N - 1, PtrTraits, index_t>
-  operator[](index_t i) const {
+  C10_DEVICE const TensorAccessor<T, N - 1, PtrTraits, index_t> operator[](
+      index_t i) const {
     const index_t* new_sizes = this->sizes_ + 1;
     const index_t* new_strides = this->strides_ + 1;
-    return TensorAccessor<ArrayRef, T, N - 1, PtrTraits, index_t>(
+    return TensorAccessor<T, N - 1, PtrTraits, index_t>(
         this->data_ + this->strides_[0] * i, new_sizes, new_strides);
   }
 
@@ -265,7 +269,7 @@ class GenericPackedTensorAccessor : public GenericPackedTensorAccessorBase<
   /// made by permuting the size/stride arrays. If the dimensions are not valid,
   /// asserts.
   C10_HOST GenericPackedTensorAccessor<
-      ArrayRef,
+      TensorAccessor,
       IndexBoundsCheck,
       T,
       N,
@@ -275,7 +279,7 @@ class GenericPackedTensorAccessor : public GenericPackedTensorAccessorBase<
     this->bounds_check_(dim1);
     this->bounds_check_(dim2);
     GenericPackedTensorAccessor<
-        ArrayRef,
+        TensorAccessor,
         IndexBoundsCheck,
         T,
         N,
@@ -289,13 +293,17 @@ class GenericPackedTensorAccessor : public GenericPackedTensorAccessorBase<
 };
 
 template <
-    template <typename I> class ArrayRef,
+    template <
+        typename,
+        size_t,
+        template <typename> class,
+        typename> class TensorAccessor,
     typename IndexBoundsCheck,
     typename T,
     template <typename U> class PtrTraits,
     typename index_t>
 class GenericPackedTensorAccessor<
-    ArrayRef,
+    TensorAccessor,
     IndexBoundsCheck,
     T,
     1,
@@ -346,7 +354,7 @@ class GenericPackedTensorAccessor<
   // 1-dimensional case the returned PackedTensorAccessor will always be an
   // identical copy of the original
   C10_HOST GenericPackedTensorAccessor<
-      ArrayRef,
+      TensorAccessor,
       IndexBoundsCheck,
       T,
       1,
@@ -356,7 +364,7 @@ class GenericPackedTensorAccessor<
     this->bounds_check_(dim1);
     this->bounds_check_(dim2);
     return GenericPackedTensorAccessor<
-        ArrayRef,
+        TensorAccessor,
         IndexBoundsCheck,
         T,
         1,
@@ -425,7 +433,7 @@ template <
     template <typename U> class PtrTraits = DefaultPtrTraits,
     typename index_t = int64_t>
 using GenericPackedTensorAccessor = detail::GenericPackedTensorAccessor<
-    c10::HeaderOnlyArrayRef,
+    TensorAccessor,
     IndexBoundsCheck<N, index_t>,
     T,
     N,
