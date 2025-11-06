@@ -432,6 +432,53 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = AttrSource(self.source, "__subclasses__")
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
+        elif is_namedtuple_cls(self.value) and name == "_make":
+            # Handle namedtuple._make(iterable) classmethod
+            # _make takes an iterable and creates a namedtuple instance from it
+            if kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            if len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            # Unpack the iterable argument
+            iterable_arg = args[0]
+            if not iterable_arg.has_force_unpack_var_sequence(tx):
+                unimplemented_v2(
+                    gb_type="namedtuple._make() with non-unpackable iterable",
+                    context=f"{self.value}._make({iterable_arg})",
+                    explanation="namedtuple._make() requires an iterable that can be unpacked",
+                    hints=graph_break_hints.SUPPORTABLE,
+                )
+            items = iterable_arg.force_unpack_var_sequence(tx)
+            fields = namedtuple_fields(self.value)
+            if len(items) != len(fields):
+                raise_type_error_exc(
+                    tx,
+                    f"{self.value}._make() expected {len(fields)} items, got {len(items)}",
+                )
+            # Create NamedTupleVariable from the items
+            # Need cls_source for mutation tracking when variable is saved
+            from .base import AttributeMutationNew, AttrSource
+            source = None
+            if self.source:
+                source = AttrSource(self.source, "_make")
+            # Set cls_source to self.source for proper reconstruction
+            # This is needed when the variable needs to be saved as a tempvar
+            return variables.NamedTupleVariable(
+                items,
+                self.value,
+                mutation_type=AttributeMutationNew(cls_source=self.source),
+                source=source,
+            )
         elif (
             self.value in {collections.OrderedDict, collections.defaultdict}
             and name == "fromkeys"
@@ -3024,6 +3071,19 @@ class NamedTupleVariable(UserDefinedTupleVariable):
                 new_items, self.tuple_cls, self.dynamic_attributes
             )
 
+        # Handle __eq__ and __ne__ - delegate to tuple comparison
+        # Namedtuples compare by value like tuples
+        if name in ("__eq__", "__ne__"):
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            # Delegate to tuple's comparison via _tuple_vt
+            return self._tuple_vt.call_method(tx, name, args, kwargs)
+
         # Handle __getitem__ explicitly - delegate to tuple
         if name == "__getitem__":
             if kwargs:
@@ -3049,6 +3109,24 @@ class NamedTupleVariable(UserDefinedTupleVariable):
             # Namedtuples subclass tuple, so they support __iter__
             # Delegate to tuple's __iter__ via _tuple_vt
             return self._tuple_vt.call_method(tx, name, args, kwargs)
+
+        # Handle __repr__ explicitly to avoid tracing into pickle operations
+        # that might be triggered by the actual repr() implementation.
+        # The parent class would try to trace into the Python __repr__ method,
+        # which can trigger pickle.Encoder.__new__ and cause graph breaks.
+        if name == "__repr__":
+            # if kwargs or args:
+            #     raise_args_mismatch(
+            #         tx,
+            #         name,
+            #         "0 args and 0 kwargs",
+            #         f"{len(args)} args and {len(kwargs)} kwargs",
+            #     )
+            # Use as_python_constant to get the actual value, then call repr on it.
+            # This avoids tracing into the repr implementation.
+            python_value = self.as_python_constant()
+            repr_str = repr(python_value)
+            return variables.ConstantVariable.create(repr_str)
 
         # Delegate tuple methods to _tuple_vt
         method = self._maybe_get_baseclass_method(name)
