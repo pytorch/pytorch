@@ -18,7 +18,11 @@ import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._C import DispatchKey
-from torch._higher_order_ops.utils import redirect_to_mode
+from torch._higher_order_ops.utils import (
+    make_functional_wrapper_functionalize_impl,
+    redirect_to_mode,
+    trace_functional_wrapper,
+)
 from torch._ops import HigherOrderOperator
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -1166,30 +1170,6 @@ def _(
     return None
 
 
-def trace_triton_kernel_wrapper(
-    proxy_mode: ProxyTorchDispatchMode,
-    func_overload: Callable[..., Any],
-    node_args: dict[str, Any],
-) -> Optional[dict[str, Any]]:
-    with disable_proxy_modes_tracing():
-        out = func_overload(**node_args)
-
-    proxy_args = pytree.tree_map(
-        proxy_mode.tracer.unwrap_proxy,  # type: ignore[union-attr]
-        node_args,
-    )
-    out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function",
-        func_overload,
-        (),
-        proxy_args,
-        name=func_overload.__name__ + "_proxy",
-    )
-
-    ret = track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
-    return ret
-
-
 @triton_kernel_wrapper_mutation.py_impl(ProxyTorchDispatchMode)
 def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     mode: ProxyTorchDispatchMode,
@@ -1200,9 +1180,10 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
 ) -> None:
-    trace_triton_kernel_wrapper(
+    trace_functional_wrapper(
         mode,
         triton_kernel_wrapper_mutation,
+        (),
         {
             "kernel_idx": kernel_idx,
             "constant_args_idx": constant_args_idx,
@@ -1332,9 +1313,10 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
 ) -> dict[str, Any]:
-    ret = trace_triton_kernel_wrapper(
+    ret = trace_functional_wrapper(
         mode,
         triton_kernel_wrapper_functional,
+        (),
         {
             "kernel_idx": kernel_idx,
             "constant_args_idx": constant_args_idx,
@@ -1348,27 +1330,9 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
     return ret
 
 
-@triton_kernel_wrapper_functional.py_functionalize_impl
-def triton_kernel_wrapper_functional_functionalize(
-    ctx: "BaseFunctionalizeAPI",
-    kernel_idx: int,
-    constant_args_idx: int,
-    grid: list["TritonGridType"],
-    tma_descriptor_metadata: TMADescriptorMetadata,
-    kwargs: dict[str, Any],
-    tensors_to_clone: list[str],
-) -> dict[str, Any]:
-    unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
-    with ctx.redispatch_to_next():
-        outputs = triton_kernel_wrapper_functional(
-            kernel_idx=kernel_idx,
-            constant_args_idx=constant_args_idx,
-            grid=grid,
-            tma_descriptor_metadata=tma_descriptor_metadata,
-            kwargs=unwrapped_kwargs,
-            tensors_to_clone=tensors_to_clone,
-        )
-        return ctx.wrap_tensors(outputs)  # type: ignore[return-value,arg-type]
+triton_kernel_wrapper_functional.py_functionalize_impl(
+    make_functional_wrapper_functionalize_impl(triton_kernel_wrapper_functional)
+)
 
 
 triton_kernel_wrapper_mutation.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]

@@ -15,7 +15,9 @@ from torch._higher_order_ops.utils import (
     call_op,
     HopInstance,
     HopSchema,
+    make_functional_wrapper_functionalize_impl,
     materialize_callable_in_args,
+    trace_functional_wrapper,
     unique_graph_id,
 )
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
@@ -817,26 +819,12 @@ def auto_functionalized_proxy(
     _mutable_op: OpOverload,
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
-    with disable_proxy_modes_tracing():
-        out = auto_functionalized(_mutable_op, **kwargs)
-
-    proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
-    out_proxy = mode.tracer.create_proxy(
-        "call_function",
-        auto_functionalized,
-        (_mutable_op,),
-        proxy_kwargs,
-    )
-    result = track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
-    return result
+    return trace_functional_wrapper(mode, auto_functionalized, (_mutable_op,), kwargs)
 
 
-@auto_functionalized.py_functionalize_impl
-def auto_functionalized_func(ctx, _mutable_op, **kwargs):
-    unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
-    with ctx.redispatch_to_next():
-        result = auto_functionalized(_mutable_op, **unwrapped_kwargs)
-    return ctx.wrap_tensors(result)
+auto_functionalized.py_functionalize_impl(
+    make_functional_wrapper_functionalize_impl(auto_functionalized)
+)
 
 
 # auto_functionalized_v2 functions
@@ -1013,9 +1001,6 @@ def auto_functionalized_v2_proxy(
     return result
 
 
-@auto_functionalized_v2.py_functionalize_impl
-def auto_functionalized_v2_func(ctx, _mutable_op, **kwargs):
-    unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
-    with ctx.redispatch_to_next():
-        result = auto_functionalized_v2(_mutable_op, **unwrapped_kwargs)
-    return ctx.wrap_tensors(result)
+auto_functionalized_v2.py_functionalize_impl(
+    make_functional_wrapper_functionalize_impl(auto_functionalized_v2)
+)
