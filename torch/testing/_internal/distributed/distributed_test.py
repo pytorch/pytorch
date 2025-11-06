@@ -7050,8 +7050,8 @@ class DistributedTest:
 
                 self.assertGreaterEqual(attrs.get("in_msg_nelems", -1), 0)
                 self.assertGreaterEqual(attrs.get("out_msg_nelems", -1), 0)
-                self.assertTrue("in_split_size" in attrs.keys())
-                self.assertTrue("out_split_size" in attrs.keys())
+                self.assertTrue("in_split_size" in attrs)
+                self.assertTrue("out_split_size" in attrs)
                 self.assertEqual(attrs.get("global_rank_start", -1), 0)
                 self.assertEqual(attrs.get("global_rank_stride", -1), 1)
 
@@ -9306,7 +9306,7 @@ class DistributedTest:
                 "tuple": tuple,
                 "dict": dict,
             }
-            for output_type in type_mapping.keys():
+            for output_type in type_mapping:
                 for _ in range(6):
                     out = model(inp, output_type=output_type)
                     loss = get_loss(out)
