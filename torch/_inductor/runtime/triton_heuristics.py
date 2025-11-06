@@ -2837,51 +2837,51 @@ def _reduction_configs(
             )
 
     def outer_config_opt():
-        # Default to 64 for vectorized loads
-        max_x_block, x_block = 256, 64
-        load_factor = inductor_meta.get("num_load", 0)
+        max_x_block = 256
+        num_loads = inductor_meta.get("num_load", 0)
+        load_factor = num_loads + inductor_meta.get("num_store")
+        reduction_factor = inductor_meta.get("num_reduction", 0)
         x = size_hints["x"]
         num_warps = None
+        outer_register_intensive = register_intensive
 
-        # Try to use all SMs with small x
+        # Initial x block for utilizing all SMs
         if x <= 1024:
-            x_block = max(min(x // 128, 8), 2)
-            outer_r_block = min(rnumel, 64)
-        # Lower bound x = 1024, 1024 // 16 = 128 around # of SMs
-        elif x // 4096 <= 8:
+            x_block = max(x // 128, 2)
+        elif x < 16384:
             x_block = 16
-            outer_r_block = 512 // x_block
-        elif num_dynamic > 1:
-            # Lots of compute with multiple dynamic shape per loop iteration
-            # Larger RBLOCK minimizes loop iteration
-            outer_r_block = max(min((rnumel // 64), 64), 8)
-        elif num_dynamic == 1:
-            # Dynamic shapes introduce a lot register pressure for indexing
-            outer_r_block = (
-                1
-                if load_factor >= 3
-                else min(next_power_of_2(max(rnumel, 128) // 128), 8)
-            )
+        elif x < 65536:
+            x_block = 32
         else:
-            x_block = max(min(max_x_block, next_power_of_2(x // 4096)), x_block)
-            if load_factor < 4 or rnumel <= 128:
-                outer_r_block = 512 // x_block
-            else:
-                # Heavier reductions contain a lot more overhead per loop iteration
-                # We minimize the overhead by enlarging r block
-                if rnumel >= 2048:
-                    outer_r_block = 64
-                else:
-                    outer_r_block = 32
-                x_block = min(x_block, 32)
-                num_warps = 4
+            x_block = min(max_x_block, max((x // 4096), 64))
 
-        # Set register intensive to true by default as we try to maximize tiles with heuristic
+        # Less possible vectorization, decrease xblock
+        if num_loads == 1 and x_block > 1:
+            x_block //= 2
+
+        if reduction_factor >= 3:
+            outer_register_intensive = True
+
+        if num_dynamic >= 1:
+            # Dynamic shapes introduce a lot register pressure for indexing
+            outer_r_block = 1 if load_factor > 5 else min(max(rnumel // 128, 1), 8)
+            outer_register_intensive = True
+        else:
+            # Very memory bound, maximize bytes in flight
+            if load_factor // reduction_factor >= 2:
+                x_block = 8
+            outer_r_block = 512 // x_block if rnumel <= 512 else min(rnumel // 4, 1024)
+            # Assume each warp takes a single column of x_block, vectorize the loads
+            # Force more work per thread, generally better for Hopper and Blackwell
+            num_warps = outer_r_block // 32 if outer_r_block > 64 else None
+            x_block = max(min(x_block, 4096 // outer_r_block), 8)
+
         return make_config(
             x_block,
             outer_r_block,
             num_warps=num_warps,
-            register_intensive=register_intensive,
+            register_intensive=outer_register_intensive,
+            dynamic_scale_rblock=False,
         )
 
     contiguous_config = make_config(
