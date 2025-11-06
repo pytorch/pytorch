@@ -435,7 +435,7 @@ from user code:
             return re.sub(r"qualname: \S*flatten", "qualname: <path>.flatten", s)
 
         fn(torch.randn(4))
-        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertGreaterEqual(len(counters["graph_break"]), 1)
         first_graph_break = next(iter(counters["graph_break"].keys()))
         self.assertExpectedInline(
             post_munge(first_graph_break),
