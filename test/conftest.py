@@ -309,10 +309,13 @@ class StepcurrentPlugin:
         assert config.cache is not None
         self.cache: pytest.Cache = config.cache
         self.directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
+        self.lastrun_location = f"{self.directory}/lastrun"
+        self.made_failing_xml_location = f"{self.directory}/made_failing_xml"
         self.lastrun: Optional[str] = self.cache.get(self.directory, None)
         self.initial_val = self.lastrun
         self.skip: bool = config.getoption("stepcurrent_skip")
         self.run_single: bool = config.getoption("run_single")
+        self.cache.set(self.made_failing_xml_location, "False")
 
     def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
         if not self.lastrun:
@@ -354,3 +357,5 @@ class StepcurrentPlugin:
     def pytest_sessionfinish(self, session, exitstatus):
         if exitstatus == 0:
             self.cache.set(self.directory, self.initial_val)
+        if exitstatus != 0:
+            self.cache.set(self.made_failing_xml_location, "True")

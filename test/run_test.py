@@ -752,6 +752,14 @@ def run_test_retries(
 
     num_failures = defaultdict(int)
 
+    def read_pytest_cache(key: str) -> Any:
+        cache_file = REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key / key
+        try:
+            with open(cache_file) as f:
+                return f.read()
+        except FileNotFoundError:
+            return None
+
     print_items = ["--print-items"]
     sc_command = f"--sc={stepcurrent_key}"
     while True:
@@ -772,12 +780,11 @@ def run_test_retries(
 
         # Read what just failed/ran
         try:
-            with open(
-                REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
-            ) as f:
-                current_failure = f.read()
-                if current_failure == "null":
-                    current_failure = f"'{test_file}'"
+            current_failure = read_pytest_cache("current_failure")
+            if current_failure is None:
+                raise FileNotFoundError()
+            if current_failure == "null":
+                current_failure = f"'{test_file}'"
         except FileNotFoundError:
             print_to_file(
                 "No stepcurrent file found. Either pytest didn't get to run (e.g. import error)"
@@ -801,7 +808,7 @@ def run_test_retries(
             # failing tests instead of reruns. [1:-1] to remove quotes
             print_to_file(f"FAILED CONSISTENTLY: {current_failure[1:-1]}")
             if (
-                current_failure == f"'{test_file}'"
+                read_pytest_cache("made_failing_xml") == "False"
                 and IS_CI
                 and options.upload_artifacts_while_running
             ):
