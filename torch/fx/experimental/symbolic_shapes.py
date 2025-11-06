@@ -255,6 +255,17 @@ def _nested_int_aware_sort(
     )
 
 
+def size_hint(x: int | torch.SymInt, *, allow_none: bool = False) -> int | None:
+    """Gets a size hint for a given expression from the underlying shapes we had.
+    Does not introduce a guard, so only use this when you can guarantee that
+    your code is still valid for arbitrary shapes (such as optimization decisions)
+    """
+    if isinstance(x, int):
+        return x
+    assert isinstance(x, torch.SymInt)
+    return x.node.shape_env.size_hint(x.node.expr, allow_none=allow_none)
+
+
 # Wrapper on lru_cache that reports statistics at process end
 def lru_cache(
     maxsize: Optional[int],
@@ -458,10 +469,6 @@ def has_static_value(a: Union[SymBool, SymFloat, SymInt, bool, float, int]) -> b
     return a.node.shape_env.bound_sympy(a.node.expr).is_singleton()  # type: ignore[union-attr]
 
 
-@deprecated(
-    "guard_size_oblivious will be removed. Consider using explicit unbacked handling \
-    potentially utilizing guard_or_false, guard_or_true, or statically_known_true"
-)
 def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
     """
     Perform a guard on a symbolic boolean expression in a size oblivious way.
