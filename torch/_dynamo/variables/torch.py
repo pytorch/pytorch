@@ -1074,7 +1074,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     hints=[],
                 )
             return variables.ConstantVariable.create(
-                # pyrefly: ignore [bad-argument-type]
+                # pyrefly: ignore [bad-argument-type, unbound-name]
                 torch.fx.experimental.symbolic_shapes.guard_scalar(val)
             )
 
