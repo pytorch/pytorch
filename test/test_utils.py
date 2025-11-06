@@ -529,7 +529,6 @@ class TestCheckpoint(TestCase):
     def test_infer_device_state_recursive_multi_gpu(self):
         # Check that no warning is issued for either gpu:0, gpu:1 or
         # gpu:0, gpu:0 cases since they are both the same device type
-        global device_type
         inp = {
             "foo": torch.rand(10, device=f"{device_type}:0"),
             "bar": [torch.rand(10, device=f"{device_type}:1")],
