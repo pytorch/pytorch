@@ -186,6 +186,11 @@ if(HIP_FOUND)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
   endif()
 
+  check_include_file("rocm_smi/rocm_smi.h" HAS_ROCM_SMI_H)
+  if(NOT HAS_ROCM_SMI_H)
+    message(FATAL_ERROR "rocm_smi.h not found. Please install the rocm-smi-lib package.")
+  endif()
+  
   # Optional components.
   find_package_and_print_version(hipsparselt)  # Will be required when ready.
 
