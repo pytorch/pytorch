@@ -197,7 +197,7 @@ def collate(
         return elem_type(
             *(
                 collate(samples, collate_fn_map=collate_fn_map)
-                for samples in zip(*batch)
+                for samples in zip(*batch, strict=False)
             )
         )
     elif isinstance(elem, collections.abc.Sequence):
@@ -207,7 +207,9 @@ def collate(
         # pyrefly: ignore [not-iterable]
         if not all(len(elem) == elem_size for elem in it):
             raise RuntimeError("each element in list of batch should be of equal size")
-        transposed = list(zip(*batch))  # It may be accessed twice, so we use a list.
+        transposed = list(
+            zip(*batch, strict=False)
+        )  # It may be accessed twice, so we use a list.
 
         if isinstance(elem, tuple):
             return [

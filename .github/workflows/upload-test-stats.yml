@@ -6,6 +6,7 @@ on:
       - pull
       - trunk
       - periodic
+      - periodic-rocm-mi200
       - periodic-rocm-mi300
       - inductor
       - unstable
