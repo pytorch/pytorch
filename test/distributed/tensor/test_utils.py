@@ -789,9 +789,11 @@ class Test_StridedShard_with_shard_order(LocalDTensorTestBase):
             all_shard_order = list(shard_iter)
             import random
 
+            random.seed(42)
             shard_order_choices = random.sample(
                 all_shard_order, min(25, len(all_shard_order))
             )
+
             x = torch.randn(32, 32, 32)
             for shard_order in shard_order_choices:
                 a = _distribute_tensor(x, mesh, None, shard_order)

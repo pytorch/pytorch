@@ -8,6 +8,7 @@ import torch
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
+    MaskPartial,
     Partial,
     Placement,
     Replicate,
@@ -155,7 +156,7 @@ class DTensorSpec:
               - For each mesh dimension in the entry's mesh_dims (in order):
                 - Calculate split_factor as the product of mesh sizes for all mesh dimensions
                   that appear:
-                  1. Earlier in the shard order (lower index in mesh_dims)
+                  1. Earlier in the shard order (lower index in mesh_dims), and
                   2. Later in the placement tuple (higher mesh dimension index)
                 - If split_factor == 1: use normal Shard
                 - Otherwise: use _StridedShard with the calculated split_factor
@@ -182,7 +183,7 @@ class DTensorSpec:
             mesh_dims = entry.mesh_dims
             for idx in range(len(mesh_dims)):
                 # TODO(zpcore): split_factor from `view` and `shard order`
-                # should be able to be multiplied into one. Need to loose the
+                # should be able to be multiplied into one. Need to loosen the
                 # condition here.
                 if type(placements[idx]) is not Shard:
                     raise ValueError(
@@ -190,13 +191,15 @@ class DTensorSpec:
                         f"found {placements[idx]} in {placements=}."
                     )
                 mesh_dim = mesh_dims[idx]
-                count = math.prod(mesh.size(i) for i in mesh_dims[:idx] if i > mesh_dim)
-                if count == 1:
-                    # user normal Shard
+                split_factor = math.prod(
+                    mesh.size(i) for i in mesh_dims[:idx] if i > mesh_dim
+                )
+                if split_factor == 1:
+                    # use normal Shard
                     placements_list[mesh_dim] = Shard(tensor_dim)
                 else:
                     placements_list[mesh_dim] = _StridedShard(
-                        tensor_dim, split_factor=count
+                        tensor_dim, split_factor=split_factor
                     )
         return tuple(placements_list)
 
@@ -223,7 +226,7 @@ class DTensorSpec:
 
           Algorithm:
               1. If no _StridedShard in placements, return default shard order
-              2. Create a list of mesh_dims_order for each tensor dimension
+              2. Create an empty list for each tensor dimension to represent mesh dim ordering
               3. Iterate through placements in reverse order (right to left):
                  - For each Shard/_StridedShard on a tensor dimension:
                    - Extract its split_factor (1 for Shard, split_factor for _StridedShard)
@@ -241,15 +244,15 @@ class DTensorSpec:
             >>> # Process tensor_dim=0 from right to left:
             >>> #   - mesh_dim=2: Shard(0) with sf=1
             >>> #     Try position 0: accumulated_sf=1, matches! Insert at position 0
-            >>> #     Current order: [2]
+            >>> #     Current mesh_dims_order order: [2]
             >>> #   - mesh_dim=1: _StridedShard(0, sf=2) with sf=2
             >>> #     Try position 0: accumulated_sf=1, no match
             >>> #     Try position 1: accumulated_sf=1*mesh.size(2)=2, matches! Insert at position 1
-            >>> #     Current order: [2, 1]
+            >>> #     Current mesh_dims_order order: [2, 1]
             >>> #   - mesh_dim=0: _StridedShard(0, sf=2) with sf=2
             >>> #     Try position 0: accumulated_sf=1, no match
             >>> #     Try position 1: accumulated_sf=1*mesh.size(2)=2, matches! Insert at position 1
-            >>> #     Final order: [2, 0, 1]
+            >>> #     Final mesh_dims_order order: [2, 0, 1]
             >>> # Result: ShardOrder((ShardOrderEntry(tensor_dim=0, mesh_dims=(2, 0, 1)),))
             >>> # This means: first shard on mesh_dim=2, then mesh_dim=0, then mesh_dim=1
 
@@ -289,6 +292,11 @@ class DTensorSpec:
                 if not find_order:
                     # _StridedShard is not convertible to ShardOrder
                     return None
+            else:
+                if not isinstance(cur_placement, Replicate | Partial | MaskPartial):
+                    raise ValueError(
+                        f"Unsupported placement type {type(cur_placement)} encountered in {placements}; expected Replicate, Partial, or MaskPartial."
+                    )
         for tensor_dim in range(max_tensor_dim):
             if len(tensor_dim_to_mesh_dims_order[tensor_dim]) > 0:
                 shard_order.append(
