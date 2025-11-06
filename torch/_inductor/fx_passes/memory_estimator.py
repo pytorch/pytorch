@@ -76,7 +76,6 @@ class GraphAliasTracker:
             output_storages = self._get_output_storages(node)
             self.node_to_output_storages[node] = output_storages
 
-            # Track fresh allocations
             for storage_key in output_storages:
                 self.storage_to_producers[storage_key].add(node)
 

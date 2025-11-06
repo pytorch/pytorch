@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import copy
+import functools
 import itertools
 import os
 import unittest
@@ -1799,9 +1800,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(len(sigmoid_nodes), 1)
         self.assertTrue("original_aten" in sigmoid_nodes[0].meta)
 
-    def test_mutable_custom_op_pattern_matcher(self):
-        import functools
-
+    def test_mutable_pattern_matcher_custom_op(self):
         @torch.library.custom_op("mylib::foo_inplace", mutates_args={"x"})
         def foo_inplace(x: torch.Tensor) -> None:
             x.add_(1)
@@ -1826,7 +1825,7 @@ class TestPatternMatcher(TestCase):
 
         inp = torch.ones(3, device=GPU_TYPE)
 
-        my_patterns = PatternMatcherPass()
+        my_patterns = PatternMatcherPass(check_aliasing_safety=True)
         register_replacement(
             search_fn=mutable_ops_pattern,
             replace_fn=mutable_ops_replacement,
@@ -1873,7 +1872,6 @@ class TestPatternMatcher(TestCase):
 
         f1_result = f1(f1_inp, out)
         f1_replaced_result = f1_replaced(f1_replaced_inp, replaced_out)
-
         self.assertEqual(count, 1)
         self.assertEqual(f1_result, f1_replaced_result)
 
@@ -2001,84 +1999,565 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(f5_inp1, f5_replaced_inp1)
         self.assertEqual(f5_out, f5_replaced_out)
 
-    def test_mutable_custom_op_pattern_matcher_unsafe_clone_removal(self):
-        import functools
+    def test_mutable_pattern_matcher_custom_op_multi(self):
+        @torch.library.custom_op("mylib::foo_inplace", mutates_args={"x"})
+        def foo_inplace(x: torch.Tensor) -> None:
+            x.add_(1)
 
-        @torch.library.custom_op("mylib::add_two_inplace", mutates_args={"x"})
-        def add_two_inplace(x: torch.Tensor) -> None:
+        @torch.library.custom_op("mylib::mutate_three", mutates_args={"x", "y", "z"})
+        def mutate_three(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> None:
+            x.add_(1)
+            y.copy_(x)
+            z.copy_(y + 1)
+
+        @torch.library.custom_op("mylib::fused_three", mutates_args={"x", "y", "z"})
+        def fused_three(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> None:
             x.add_(2)
+            y.copy_(x + 1)
+            z.copy_(y + 1)
 
-        # Pattern: clone + mutation
+        def pattern(x, y, z):
+            mutate_three(x, y, z)
+            return x, y, z
+
+        def replacement(x, y, z):
+            fused_three(x, y, z)
+            return x, y, z
+
+        inp = torch.ones(3, device=GPU_TYPE)
+        pattern_matcher = PatternMatcherPass(check_aliasing_safety=True)
+        register_replacement(
+            search_fn=pattern,
+            replace_fn=replacement,
+            example_inputs=[
+                inp.clone().detach(),
+                inp.clone().detach(),
+                inp.clone().detach(),
+            ],
+            trace_fn=functools.partial(fwd_only),
+            pass_dicts=pattern_matcher,
+        )
+
+        count = 0
+
+        def custom_pass_three(graph: torch.fx.Graph):
+            nonlocal count
+            count = pattern_matcher.apply(graph)
+
+        def custom_backend_three(graph: torch.fx.GraphModule, example_inputs):
+            from torch._inductor import config
+
+            current_config = config.shallow_copy_dict()
+            from torch._inductor.compile_fx import compile_fx
+
+            current_config["post_grad_mutable_custom_post_pass"] = custom_pass_three
+            return compile_fx(graph, example_inputs, config_patches=current_config)
+
+        @torch.compile(fullgraph=True, backend=custom_backend_three)
+        def fn(x, y, z):
+            x = x.clone()
+            y = y.clone()
+            z = z.clone()
+            mutate_three(x, y, z)
+            mutate_three(x, y, z)
+            return x, y, z
+
+        def fn_replaced(x, y, z):
+            x = x.clone()
+            y = y.clone()
+            z = z.clone()
+            fused_three(x, y, z)
+            fused_three(x, y, z)
+
+            return x, y, z
+
+        inp_x = torch.rand(3, device=GPU_TYPE)
+        inp_y = torch.rand(3, device=GPU_TYPE)
+        inp_z = torch.rand(3, device=GPU_TYPE)
+        x = inp_x.clone()
+        y = inp_y.clone()
+        z = inp_z.clone()
+        x_replaced = inp_x.clone()
+        y_replaced = inp_y.clone()
+        z_replaced = inp_z.clone()
+
+        result = fn(x, y, z)
+        replaced_result = fn_replaced(x_replaced, y_replaced, z_replaced)
+        self.assertEqual(count, 2)  # Both consecutive mutations should be matched
+        self.assertEqual(result[0], replaced_result[0])
+        self.assertEqual(result[1], replaced_result[1])
+        self.assertEqual(result[2], replaced_result[2])
+
+        @torch.library.custom_op("mylib::mutate_y_z", mutates_args={"y", "z"})
+        def mutate_y_z(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> None:
+            y.copy_(x + 1)
+            z.copy_(y + 1)
+
+        def pattern(x, y, z):
+            foo_inplace(x)
+            mutate_y_z(x, y, z)
+            return x, y, z
+
+        def replacement(x, y, z):
+            fused_three(x, y, z)
+            return x, y, z
+
+        inp = torch.ones(3, device=GPU_TYPE)
+        pattern_matcher = PatternMatcherPass(check_aliasing_safety=True)
+        register_replacement(
+            search_fn=pattern,
+            replace_fn=replacement,
+            example_inputs=[
+                inp.clone().detach(),
+                inp.clone().detach(),
+                inp.clone().detach(),
+            ],
+            trace_fn=functools.partial(fwd_only),
+            pass_dicts=pattern_matcher,
+        )
+
+        count = 0
+
+        def custom_pass_mixed(graph: torch.fx.Graph):
+            nonlocal count
+            count = pattern_matcher.apply(graph)
+
+        def custom_backend_mixed(graph: torch.fx.GraphModule, example_inputs):
+            from torch._inductor import config
+
+            current_config = config.shallow_copy_dict()
+            from torch._inductor.compile_fx import compile_fx
+
+            current_config["post_grad_mutable_custom_post_pass"] = custom_pass_mixed
+            return compile_fx(graph, example_inputs, config_patches=current_config)
+
+        # mixed mutation patterns with views
+        @torch.compile(fullgraph=True, backend=custom_backend_mixed)
+        def fn(x, y, z):
+            x_view = x.view(-1)
+            y_view = y.view(-1)
+            z_view = z.view(-1)
+            foo_inplace(x_view)
+            mutate_y_z(x_view, y_view, z_view)
+            return x, y, z
+
+        def fn_replaced(x, y, z):
+            x_view = x.view(-1)
+            y_view = y.view(-1)
+            z_view = z.view(-1)
+            fused_three(x_view, y_view, z_view)
+            return x, y, z
+
+        x = inp_x.clone()
+        y = inp_y.clone()
+        z = inp_z.clone()
+        x_replaced = inp_x.clone()
+        y_replaced = inp_y.clone()
+        z_replaced = inp_z.clone()
+
+        result = fn(x, y, z)
+        replaced_result = fn_replaced(x_replaced, y_replaced, z_replaced)
+        self.assertEqual(count, 1)
+        self.assertEqual(result[0], replaced_result[0])
+        self.assertEqual(result[1], replaced_result[1])
+        self.assertEqual(result[2], replaced_result[2])
+
+    def test_pattern_safety_escaping_mutation_blocking(self):
+        # Case 1: Block adding mutation to escaping input with subsequent use
+        @torch.library.custom_op("mylib::add_one_inplace", mutates_args={"x"})
+        def add_one_inplace(x: torch.Tensor) -> None:
+            x.add_(1)
+
         def pattern(x):
-            y = x.clone()
-            add_two_inplace(y)
-            return y
+            return x + 1
 
-        # Replacement: mutation without clone
         def replacement(x):
-            add_two_inplace(x)
+            add_one_inplace(x)  # new mutation on escaping input
             return x
 
-        my_patterns = PatternMatcherPass()
+        patterns = PatternMatcherPass(check_aliasing_safety=True)
         register_replacement(
             search_fn=pattern,
             replace_fn=replacement,
             example_inputs=[torch.ones(3, device=GPU_TYPE)],
             trace_fn=functools.partial(fwd_only),
-            pass_dicts=my_patterns,
+            pass_dicts=patterns,
         )
 
         count = 0
 
         def custom_pass(graph: torch.fx.Graph):
             nonlocal count
-            count = my_patterns.apply(graph)
+            count = patterns.apply(graph)
 
         def custom_backend(graph: torch.fx.GraphModule, example_inputs):
             from torch._inductor import config
-
-            current_config = config.shallow_copy_dict()
             from torch._inductor.compile_fx import compile_fx
 
+            current_config = config.shallow_copy_dict()
             current_config["post_grad_mutable_custom_post_pass"] = custom_pass
             return compile_fx(graph, example_inputs, config_patches=current_config)
 
-        # Case 1: graph input - must not match
         @torch.compile(fullgraph=True, backend=custom_backend)
-        def unsafe_case1(x):
-            y = x.clone()
-            add_two_inplace(y)
+        def func(x):
+            y = x + 1  # pattern converts to x.add_(1)
+            z = x + 2  # subsequent use of escaping input x
+            return y, z
+
+        inp = torch.rand(3, device=GPU_TYPE)
+        inp_original = inp.clone()
+        result_y, result_z = func(inp)
+
+        self.assertEqual(
+            count, 0, "expected pattern to be blocked (new mutation on escaping input)"
+        )
+
+        expected_y = inp_original + 1
+        expected_z = inp_original + 2
+        torch.testing.assert_close(result_y, expected_y)
+        torch.testing.assert_close(result_z, expected_z)
+
+        # Case 2: Block adding mutation to aliased escaping input
+        def pattern(x):
+            return x + 1
+
+        def replacement(x):
+            add_one_inplace(x)
+            return x
+
+        patterns = PatternMatcherPass(check_aliasing_safety=True)
+        register_replacement(
+            search_fn=pattern,
+            replace_fn=replacement,
+            example_inputs=[torch.ones(3, device=GPU_TYPE)],
+            trace_fn=functools.partial(fwd_only),
+            pass_dicts=patterns,
+        )
+
+        count = 0
+
+        @torch.compile(fullgraph=True, backend=custom_backend)
+        def func(x):
+            b = x.view(-1)
+            c = b + 1  # pattern on b, but b view of x
+            z = x + 4  # subsequent use
+            return c, z
+
+        inp = torch.rand(3, device=GPU_TYPE)
+        inp_original = inp.clone()
+        result_c, result_z = func(inp)
+
+        self.assertEqual(
+            count,
+            0,
+            "expected pattern to be blocked (mutation on view of escaping input)",
+        )
+
+        expected_c = inp_original + 1
+        expected_z = inp_original + 4
+        torch.testing.assert_close(result_c, expected_c)
+        torch.testing.assert_close(result_z, expected_z)
+
+        # Case 3: Block pattern that mutates a node that escapes as output
+        def pattern(x):
+            return x + 5
+
+        def replacement(x):
+            return x.add_(5)
+
+        patterns = PatternMatcherPass(check_aliasing_safety=True)
+        register_replacement(
+            search_fn=pattern,
+            replace_fn=replacement,
+            example_inputs=[torch.ones(3, device=GPU_TYPE)],
+            trace_fn=functools.partial(fwd_only),
+            pass_dicts=patterns,
+        )
+
+        count = 0
+
+        @torch.compile(fullgraph=True, backend=custom_backend)
+        def func(x):
+            y = x + 0  # y is intermediate (creates new storage)
+            z = y + 5  # pattern matches on y
+            w = z * 2  # w depends on z
+            return y, w  # y escapes as output
+
+        inp = torch.rand(3, device=GPU_TYPE)
+        inp_original = inp.clone()
+        result_y, result_w = func(inp)
+
+        self.assertEqual(
+            count, 0, "expected pattern to be blocked (mutates escaping output node)"
+        )
+
+        expected_y = inp_original + 0
+        expected_z = expected_y + 5
+        expected_w = expected_z * 2
+        torch.testing.assert_close(result_y, expected_y)
+        torch.testing.assert_close(result_w, expected_w)
+        torch.testing.assert_close(inp, inp_original)
+
+    def test_pattern_safety_subsequent_use_blocking(self):
+        @torch.library.custom_op("mylib::add_value_inplace", mutates_args={"x"})
+        def add_value_inplace(x: torch.Tensor, value: float) -> None:
+            x.add_(value)
+
+        def pattern(x):
+            return x + 5
+
+        def replacement(x):
+            add_value_inplace(x, 5.0)
+            return x
+
+        patterns = PatternMatcherPass(check_aliasing_safety=True)
+        register_replacement(
+            search_fn=pattern,
+            replace_fn=replacement,
+            example_inputs=[torch.ones(3, device=GPU_TYPE)],
+            trace_fn=functools.partial(fwd_only),
+            pass_dicts=patterns,
+        )
+
+        count = 0
+
+        def custom_pass(graph: torch.fx.Graph):
+            nonlocal count
+            count = patterns.apply(graph)
+
+        def custom_backend(graph: torch.fx.GraphModule, example_inputs):
+            from torch._inductor import config
+            from torch._inductor.compile_fx import compile_fx
+
+            current_config = config.shallow_copy_dict()
+            current_config["post_grad_mutable_custom_post_pass"] = custom_pass
+            return compile_fx(graph, example_inputs, config_patches=current_config)
+
+        @torch.compile(fullgraph=True, backend=custom_backend)
+        def func(x):
+            intermediate = x + 0  # creates new storage, non-escaping intermediate
+            result1 = intermediate + 5  # pattern target on intermediate
+            result2 = intermediate * 2  # subsequent use of intermediate
+            return result1, result2
+
+        inp = torch.rand(3, device=GPU_TYPE)
+        inp_original = inp.clone()
+        result1, result2 = func(inp)
+
+        self.assertEqual(
+            count, 0, "expected pattern to be blocked (subsequent use of intermediate)"
+        )
+
+        expected1 = inp_original + 5
+        expected2 = inp_original * 2
+        torch.testing.assert_close(result1, expected1)
+        torch.testing.assert_close(result2, expected2)
+
+        @torch.compile(fullgraph=True, backend=custom_backend)
+        def func(x):
+            intermediate = x + 0
+            result1 = intermediate + 5
+            return result1
+
+        inp = torch.rand(3, device=GPU_TYPE)
+        inp_original = inp.clone()
+        result1 = func(inp)
+
+        self.assertEqual(
+            count, 1, "expected pattern to be allow (no subsequent use of intermediate)"
+        )
+
+        expected1 = inp_original + 5
+        torch.testing.assert_close(result1, expected1)
+
+    def test_pattern_safety_aliasing_blocking(self):
+        # Case 1: Block clone removal creating input-output aliasing
+        def pattern(x):
+            return x.clone()
+
+        def replacement(x):
+            return x  # Removes clone, creates input-output aliasing!
+
+        patterns = PatternMatcherPass(check_aliasing_safety=True)
+        register_replacement(
+            search_fn=pattern,
+            replace_fn=replacement,
+            example_inputs=[torch.ones(3, device=GPU_TYPE)],
+            trace_fn=functools.partial(fwd_only),
+            pass_dicts=patterns,
+        )
+
+        def fn(x):
+            return x.clone()
+
+        example_input = torch.ones(3, device=GPU_TYPE)
+        fx_graph = make_fx(fn)(example_input)
+        count = patterns.apply(fx_graph.graph)
+
+        self.assertEqual(
+            count,
+            0,
+            "expected pattern to be blocked (clone removal creates aliasing)",
+        )
+
+        result = fn(example_input)
+        torch.testing.assert_close(result, example_input)
+
+        # Case 2: Block no-op removal creating input-output aliasing
+        def pattern(x):
+            return x + 0
+
+        def replacement(x):
+            return x  # Removes +0, creates input-output aliasing
+
+        patterns = PatternMatcherPass(check_aliasing_safety=True)
+        register_replacement(
+            search_fn=pattern,
+            replace_fn=replacement,
+            example_inputs=[torch.ones(3, device=GPU_TYPE)],
+            trace_fn=functools.partial(fwd_only),
+            pass_dicts=patterns,
+        )
+
+        def fn(x):
+            return x + 0  # No-op that creates new storage
+
+        example_input = torch.ones(3, device=GPU_TYPE)
+        fx_graph = make_fx(fn)(example_input)
+        count = patterns.apply(fx_graph.graph)
+
+        self.assertEqual(
+            count,
+            0,
+            "expected pattern to be blocked (no-op removal creates aliasing)",
+        )
+
+        result = fn(example_input)
+        torch.testing.assert_close(result, example_input)
+
+        # Case 3: Block pattern that changes computation to return input directly
+        def pattern(x):
+            return x * 1  # Creates new tensor (no aliasing)
+
+        def replacement(x):
+            return x  # Returns input directly (creates aliasing!)
+
+        patterns = PatternMatcherPass(check_aliasing_safety=True)
+        register_replacement(
+            search_fn=pattern,
+            replace_fn=replacement,
+            example_inputs=[torch.ones(3, device=GPU_TYPE)],
+            trace_fn=functools.partial(fwd_only),
+            pass_dicts=patterns,
+        )
+
+        def fn(x):
+            return x * 1  # No-op multiplication creates new storage
+
+        example_input = torch.ones(3, device=GPU_TYPE)
+        fx_graph = make_fx(fn)(example_input)
+        count = patterns.apply(fx_graph.graph)
+
+        self.assertEqual(
+            count,
+            0,
+            "expected pattern to be blocked (no-op removal creates aliasing)",
+        )
+
+        result = fn(example_input)
+        torch.testing.assert_close(result, example_input)
+
+        # Case 4: Block no-op removal when external mutation exists
+        def pattern(x):
+            y = x + 0  # No-op that creates new storage
             return y
 
-        input_tensor = torch.ones(3, device=GPU_TYPE)
-        original_input = input_tensor.clone()
-        result = unsafe_case1(input_tensor)
+        def replacement(x):
+            y = x  # Remove no-op, creates aliasing
+            return y
+
+        patterns = PatternMatcherPass(check_aliasing_safety=True)
+        register_replacement(
+            search_fn=pattern,
+            replace_fn=replacement,
+            example_inputs=(torch.randn(3, 3),),
+            trace_fn=functools.partial(fwd_only),
+            pass_dicts=patterns,
+        )
+
+        def fn(x):
+            b = x + 0  # Pattern will try to optimize this
+            b.add_(3)  # External mutation (not in pattern)
+            z = x + 4  # Subsequent use of x
+            return z
+
+        example_input = torch.randn(3, 3)
+        fx_graph = make_fx(fn)(example_input)
+        count = patterns.apply(fx_graph.graph)
 
         self.assertEqual(
-            input_tensor,
-            original_input,
-            "Pattern matcher incorrectly removed clone, mutating graph input!",
+            count,
+            0,
+            "expected pattern to be blocked (external mutation exists)",
         )
-        self.assertEqual(result, original_input + 2)
-        self.assertEqual(count, 0, "Pattern should NOT match when x is a graph input!")
 
-        # Case 2: later use in graph - must not match
-        @torch.compile(fullgraph=True, backend=custom_backend)
-        def unsafe_case2():
-            x = torch.ones(3, device=GPU_TYPE)
-            y = x.clone()
-            add_two_inplace(y)
-            return x + y
+        result = fn(example_input.clone())
+        expected = example_input + 4
+        torch.testing.assert_close(result, expected)
 
-        result = unsafe_case2()
-        expected = torch.ones(3, device=GPU_TYPE) + (torch.ones(3, device=GPU_TYPE) + 2)
+        # Case 5: Block multi-pass optimization that would create unsafe aliasing
+        def pattern_a(x):
+            y = x + 0
+            return y
 
-        self.assertEqual(
-            result,
-            expected,
-            "Pattern matcher incorrectly removed clone, affecting later use!",
+        def replacement_a(x):
+            y = x
+            return y
+
+        # Pass 2: Inplace conversion
+        def pattern_b(y):
+            z = y + 1
+            return z
+
+        def replacement_b(y):
+            z = y.add_(1)
+            return z
+
+        patterns = PatternMatcherPass(check_aliasing_safety=True)
+        register_replacement(
+            search_fn=pattern_a,
+            replace_fn=replacement_a,
+            example_inputs=(torch.randn(3, 3),),
+            trace_fn=functools.partial(fwd_only),
+            pass_dicts=patterns,
         )
-        self.assertEqual(count, 0, "Pattern should NOT match when x has later use!")
+        register_replacement(
+            search_fn=pattern_b,
+            replace_fn=replacement_b,
+            example_inputs=(torch.randn(3, 3),),
+            trace_fn=functools.partial(fwd_only),
+            pass_dicts=patterns,
+        )
+
+        def fn(x):
+            b = x + 0  # Pass 1 target
+            c = b + 1  # Pass 2 target (after Pass 1)
+            z = x + 4  # Subsequent use
+            return c, z
+
+        example_input = torch.randn(3, 3)
+        fx_graph = make_fx(fn)(example_input)
+
+        count = patterns.apply(fx_graph.graph)
+        self.assertLessEqual(
+            count, 1, "multi-pass optimization should be blocked at Pass 1"
+        )
+
+        result_c, result_z = fn(example_input.clone())
+        expected_c = example_input + 1
+        expected_z = example_input + 4
+        torch.testing.assert_close(result_c, expected_c)
+        torch.testing.assert_close(result_z, expected_z)
 
 
 if __name__ == "__main__":
