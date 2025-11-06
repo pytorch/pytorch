@@ -270,7 +270,7 @@ def converged(curr_modules, prev_modules, threshold=1e-4):
     summed_norms = torch.tensor(0.0)
     if None in prev_modules.values():
         return False
-    for name in curr_modules.keys():
+    for name in curr_modules:
         curr_weight = get_module_weight(curr_modules[name])
         prev_weight = get_module_weight(prev_modules[name])
 
