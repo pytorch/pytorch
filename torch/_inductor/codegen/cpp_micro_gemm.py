@@ -968,7 +968,7 @@ def check_vnni_extra(config, m, n, k, alpha, num_threads, **kwargs):
     *generate_gemm_config(
         VecAVX512VNNI,
         # (block_m, block_n, block_k)
-        [(4, 32, 4), (8, 32, 4)],
+        [(6, 64, 4)],
         input_dtype=torch.uint8,
         input2_dtype=torch.int8,
         output_dtype=torch.int32,
@@ -1058,7 +1058,6 @@ inline void {{kernel_name}}_kernel(
             // B block in VNNI layout: [K / vnni_size, N, vnni_size]
             int64_t offset = k * ldb + col * 16 * vnni_size;
             vb[col] = _mm512_loadu_si512((__m512i const*)(B + offset));
-            _mm_prefetch(B + offset + 128 * ldb, _MM_HINT_T0);
         }
         vc[i] = _mm512_dpbusd_epi32(vc[i], va, vb[col]);
     };
