@@ -125,10 +125,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._skip["device"]["cuda"]
 
     @property
-    def skip_models_for_xpu(self):
-        return self._skip["device"]["xpu"]
-
-    @property
     def skip_models_for_freezing_cuda(self):
         return self._skip["freezing"]["cuda"]
 

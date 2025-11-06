@@ -49,7 +49,6 @@ static PyObject* THPEvent_pynew(
   }
 
   THPEvent* self = reinterpret_cast<THPEvent*>(ptr.get());
-  self->weakreflist = nullptr;
 
   // TODO: blocking and interprocess are not supported yet. To support them, the
   // flag system of c10::Event needs to be refactored. C10::Event should also
@@ -74,7 +73,6 @@ PyObject* THPEvent_new(c10::DeviceType device_type, c10::EventFlag flag) {
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   TORCH_CHECK(self, "Failed to allocate memory for Event");
   auto self_ = reinterpret_cast<THPEvent*>(self.get());
-  self_->weakreflist = nullptr;
   new (&self_->event) c10::Event(device_type, flag);
   return self.release();
 }
@@ -84,7 +82,6 @@ static void THPEvent_dealloc(THPEvent* self) {
     pybind11::gil_scoped_release no_gil{};
     self->event.~Event();
   }
-  PyObject_ClearWeakRefs((PyObject*)self);
   Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
 }
 
@@ -285,8 +282,7 @@ static PyMethodDef THPEvent_methods[] = {
     {"synchronize", THPEvent_synchronize, METH_NOARGS, nullptr},
     {"ipc_handle", THPEvent_ipc_handle, METH_NOARGS, nullptr},
     {nullptr}};
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Winvalid-offsetof"
+
 PyTypeObject THPEventType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch.Event", /* tp_name */
@@ -312,7 +308,7 @@ PyTypeObject THPEventType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
-    offsetof(THPEvent, weakreflist), /* tp_weaklistoffset */
+    0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THPEvent_methods, /* tp_methods */
@@ -327,7 +323,6 @@ PyTypeObject THPEventType = {
     nullptr, /* tp_alloc */
     THPEvent_pynew, /* tp_new */
 };
-#pragma GCC diagnostic pop
 
 void THPEvent_init(PyObject* module) {
   THPEventClass = &THPEventType;

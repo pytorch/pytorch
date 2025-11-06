@@ -262,7 +262,7 @@ class TestShapeOps(TestCase):
             expected = xn.diagonal(*args)
             self.assertEqual(expected.shape, result.shape)
             self.assertEqual(expected, result)
-        # test non-contiguous
+        # test non-continguous
         xp = x.permute(1, 2, 3, 0)
         result = torch.diagonal(xp, 0, -2, -1)
         expected = xp.numpy().diagonal(0, -2, -1)

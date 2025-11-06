@@ -1,18 +1,12 @@
 """Torchfuzz operators module."""
 
 from torchfuzz.operators.arg import ArgOperator
-from torchfuzz.operators.argsort import ArgsortOperator
 from torchfuzz.operators.base import Operator
 from torchfuzz.operators.constant import ConstantOperator
-from torchfuzz.operators.gather import GatherOperator
-from torchfuzz.operators.index_select import IndexSelectOperator
 from torchfuzz.operators.item import ItemOperator
 from torchfuzz.operators.layout import (
-    CatOperator,
-    ExpandOperator,
     FlattenOperator,
     ReshapeOperator,
-    SplitOperator,
     SqueezeOperator,
     UnsqueezeOperator,
     ViewOperator,
@@ -28,9 +22,7 @@ from torchfuzz.operators.nn_functional import (
     EmbeddingOperator,
     LayerNormOperator,
     LinearOperator,
-    MultiHeadAttentionForwardOperator,
     ReLUOperator,
-    ScaledDotProductAttentionOperator,
     SoftmaxOperator,
 )
 from torchfuzz.operators.registry import (
@@ -51,7 +43,6 @@ from torchfuzz.operators.scalar_pointwise import (
 )
 from torchfuzz.operators.tensor_pointwise import (
     AddOperator,
-    ClampOperator,
     DivOperator,
     MulOperator,
     PointwiseOperator,
@@ -66,7 +57,6 @@ __all__ = [
     "MulOperator",
     "SubOperator",
     "DivOperator",
-    "ClampOperator",
     "ScalarPointwiseOperator",
     "ScalarAddOperator",
     "ScalarMulOperator",
@@ -75,26 +65,18 @@ __all__ = [
     "ItemOperator",
     "ConstantOperator",
     "ArgOperator",
-    "ArgsortOperator",
-    "GatherOperator",
-    "IndexSelectOperator",
     "ViewOperator",
     "ReshapeOperator",
     "FlattenOperator",
     "SqueezeOperator",
     "UnsqueezeOperator",
-    "SplitOperator",
-    "ExpandOperator",
-    "CatOperator",
     "MMOperator",
     "AddmmOperator",
     "BmmOperator",
     "MatmulOperator",
     "EmbeddingOperator",
     "LinearOperator",
-    "MultiHeadAttentionForwardOperator",
     "ReLUOperator",
-    "ScaledDotProductAttentionOperator",
     "SoftmaxOperator",
     "DropoutOperator",
     "LayerNormOperator",

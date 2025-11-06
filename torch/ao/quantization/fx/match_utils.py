@@ -33,8 +33,7 @@ def _is_match(modules, node, pattern, max_uses=sys.maxsize):
     if isinstance(pattern, tuple):
         self_match, *arg_matches = pattern
         if self_match is getattr:
-            if len(pattern) != 2:
-                raise AssertionError("Expecting getattr pattern to have two elements")
+            assert len(pattern) == 2, "Expecting getattr pattern to have two elements"
             arg_matches = []
     else:
         self_match = pattern
@@ -191,8 +190,7 @@ def _find_matches(
                     break
 
     # add custom module instances to the match result
-    if modules is None:
-        raise AssertionError("modules must not be None")
+    assert modules is not None
     for node in graph.nodes:
         if (
             node.op == "call_module"
@@ -206,8 +204,7 @@ def _find_matches(
             )
 
     def is_standalone_module(node_target: str, modules: dict[str, torch.nn.Module]):
-        if modules is None:
-            raise AssertionError("modules must not be None")
+        assert modules is not None
         return (
             node_target in standalone_module_names
             or type(modules[node_target])  # type: ignore[operator]

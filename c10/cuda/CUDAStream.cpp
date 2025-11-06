@@ -15,6 +15,7 @@ namespace c10::cuda {
 namespace {
 
 // Global stream state and constants
+c10::once_flag init_flag;
 DeviceIndex num_gpus = -1;
 constexpr int kStreamsPerPoolBits = 5;
 constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
@@ -225,10 +226,7 @@ void initDeviceStreamState(DeviceIndex device_index) {
 // Init front-end to ensure initialization only occurs once
 void initCUDAStreamsOnce() {
   // Inits default streams (once, globally)
-  auto static init_flag [[maybe_unused]] = [] {
-    initGlobalStreamState();
-    return true;
-  }();
+  c10::call_once(init_flag, initGlobalStreamState);
 
   if (current_streams) {
     return;

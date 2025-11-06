@@ -58,7 +58,7 @@ class SubProcess(mp.Process):
 
 
 def _test_cuda_ipc_deadlock_actor(queue, iterations):
-    for _ in range(iterations):
+    for i in range(iterations):
         if not queue.empty():
             queue.get()
         time.sleep(0.01)
@@ -66,7 +66,7 @@ def _test_cuda_ipc_deadlock_actor(queue, iterations):
 
 def _test_cuda_ipc_deadlock_learner(queue, iterations):
     net = torch.nn.LSTM(1, 1).cuda()
-    for _ in range(iterations):
+    for i in range(iterations):
         if not queue.full():
             queue.put(copy.deepcopy(net.state_dict()))
         time.sleep(0.01)
@@ -138,7 +138,7 @@ def send_tensor_with_untyped_storage(queue, event):
 
 def receive_and_send_sum(queue, out_queue, event, device, dtype, count, size=5):
     s = torch.full([size], 0, device=device, dtype=dtype)
-    for _ in range(count):
+    for i in range(count):
         t = queue.get()
         s += t
     out_queue.put(s)
@@ -146,7 +146,7 @@ def receive_and_send_sum(queue, out_queue, event, device, dtype, count, size=5):
 
 
 def receive_and_send(queue, out_queue, event, count):
-    for _ in range(count):
+    for i in range(count):
         t = queue.get()
         out_queue.put(t.clone())
     event.wait()

@@ -142,10 +142,7 @@ class _ConvNd(Module):
             self._reversed_padding_repeated_twice = [0, 0] * len(kernel_size)
             if padding == "same":
                 for d, k, i in zip(
-                    dilation,
-                    kernel_size,
-                    range(len(kernel_size) - 1, -1, -1),
-                    strict=False,
+                    dilation, kernel_size, range(len(kernel_size) - 1, -1, -1)
                 ):
                     total_padding = d * (k - 1)
                     left_pad = total_padding // 2
@@ -1471,7 +1468,7 @@ class _LazyConvXdMixin(LazyModuleMixin):
         raise NotImplementedError
 
 
-# LazyConv1d defines weight as a Tensor but derived class defines it as UninitializeParameter
+# LazyConv1d defines weight as a Tensor but derived class defines it as UnitializeParameter
 class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
     r"""A :class:`torch.nn.Conv1d` module with lazy initialization of the ``in_channels`` argument.
 
@@ -1543,7 +1540,7 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
         return 1
 
 
-# LazyConv2d defines weight as a Tensor but derived class defines it as UninitializeParameter
+# LazyConv2d defines weight as a Tensor but derived class defines it as UnitializeParameter
 class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
     r"""A :class:`torch.nn.Conv2d` module with lazy initialization of the ``in_channels`` argument.
 
@@ -1615,7 +1612,7 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
         return 2
 
 
-# LazyConv3d defines weight as a Tensor but derived class defines it as UninitializeParameter
+# LazyConv3d defines weight as a Tensor but derived class defines it as UnitializeParameter
 class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
     r"""A :class:`torch.nn.Conv3d` module with lazy initialization of the ``in_channels`` argument.
 
@@ -1688,7 +1685,7 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
         return 3
 
 
-# LazyConvTranspose1d defines weight as a Tensor but derived class defines it as UninitializeParameter
+# LazyConvTranspose1d defines weight as a Tensor but derived class defines it as UnitializeParameter
 class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[misc]
     r"""A :class:`torch.nn.ConvTranspose1d` module with lazy initialization of the ``in_channels`` argument.
 
@@ -1760,7 +1757,7 @@ class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[mi
         return 1
 
 
-# LazyConvTranspose2d defines weight as a Tensor but derived class defines it as UninitializeParameter
+# LazyConvTranspose2d defines weight as a Tensor but derived class defines it as UnitializeParameter
 class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[misc]
     r"""A :class:`torch.nn.ConvTranspose2d` module with lazy initialization of the ``in_channels`` argument.
 
@@ -1832,7 +1829,7 @@ class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[mi
         return 2
 
 
-# LazyConvTranspose3d defines weight as a Tensor but derived class defines it as UninitializeParameter
+# LazyConvTranspose3d defines weight as a Tensor but derived class defines it as UnitializeParameter
 class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[misc]
     r"""A :class:`torch.nn.ConvTranspose3d` module with lazy initialization of the ``in_channels`` argument.
 

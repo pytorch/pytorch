@@ -539,7 +539,7 @@ class TestSet(TestJointOps, TestCase):
         # s.discard(self.thetype(self.word))
 
     def test_pop(self):
-        for _ in range(len(self.s)):
+        for i in range(len(self.s)):
             elem = self.s.pop()
             self.assertNotIn(elem, self.s)
         self.assertRaises(KeyError, self.s.pop)
@@ -990,7 +990,7 @@ class TestExceptionPropagation(TestCase):
     def test_changingSizeWhileIterating(self):
         s = OrderedSet([1, 2, 3])
         try:
-            for _ in s:
+            for i in s:
                 s.update([4])  # noqa: B909
         except RuntimeError:
             pass

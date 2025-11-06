@@ -23,10 +23,7 @@ class SaliencyPruner(BaseStructuredSparsifier):
                 "Structured pruning can only be applied to a 2+dim weight tensor!"
             )
         saliency = -weights.norm(dim=tuple(range(1, weights.dim())), p=1)
-        if saliency.shape != mask.shape:
-            raise AssertionError(
-                f"saliency shape ({saliency.shape}) must match mask shape ({mask.shape})"
-            )
+        assert saliency.shape == mask.shape
 
         num_to_pick = int(len(mask) * kwargs["sparsity_level"])
         prune = saliency.topk(num_to_pick).indices

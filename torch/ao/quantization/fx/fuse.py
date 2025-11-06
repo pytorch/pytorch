@@ -102,10 +102,7 @@ def fuse(
         else:
             node_subpattern = None
         if maybe_last_node is node:
-            if obj is None:
-                raise AssertionError(
-                    "fuse handler object must not be None for matched root node"
-                )
+            assert obj is not None
             root_node_getter = fusion_pattern_to_root_node_getter.get(
                 pattern, default_root_node_getter
             )

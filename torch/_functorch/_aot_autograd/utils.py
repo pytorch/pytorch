@@ -3,7 +3,6 @@
 Contains various utils for AOTAutograd, including those for handling collections.
 """
 
-import copy
 import dataclasses
 import logging
 import operator
@@ -159,7 +158,7 @@ class PytreeThunk:
         assert spec is not None
         self.spec: pytree.TreeSpec = spec
         if self.spec.type in {tuple, list} and all(
-            child.is_leaf() for child in spec.children()
+            child.is_leaf() for child in spec.children_specs
         ):
             self.is_simple = True
         if self.spec.is_leaf():
@@ -250,7 +249,7 @@ def maybe_to_fresh_input(idx, t, meta):
 def is_with_effects(node):
     return (
         node.op == "call_function"
-        and node.target is torch.ops.higher_order.with_effects
+        and node.target == torch.ops.higher_order.with_effects
     )
 
 
@@ -296,7 +295,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
         for output_token_node in output_token_nodes:
             assert (
                 output_token_node.op == "call_function"
-                and output_token_node.target is operator.getitem
+                and output_token_node.target == operator.getitem
                 and output_token_node.args[1] == 0
             )
         with module.graph.inserting_before(node):
@@ -328,11 +327,11 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                     if (
                         isinstance(out, torch.fx.node.Node)
                         and out.op == "call_function"
-                        and out.target is operator.getitem
+                        and out.target == operator.getitem
                         and out.args[1] == 0
                         and out.args[0] in with_effect_nodes
                     ):
-                        # pyrefly: ignore [missing-attribute]
+                        # pyrefly: ignore  # missing-attribute
                         output_token_nodes.append(out)
                     else:
                         other_output_nodes.append(out)
@@ -460,9 +459,7 @@ def _copy_metadata_to_bw_nodes_in_subgraph(
             node.meta["fwd_nn_module_stack"] = fwd_node.meta.get("nn_module_stack")
             node.meta["fwd_source_fn_stack"] = fwd_node.meta.get("source_fn_stack")
             # TODO: better to change to a specific field of custom?
-            custom = fwd_node.meta.get("custom")
-            if custom is not None:
-                node.meta["custom"] = copy.deepcopy(custom)
+            node.meta["custom"] = fwd_node.meta.get("custom")
 
 
 def copy_fwd_metadata_to_bw_nodes(fx_g: torch.fx.GraphModule) -> None:
@@ -576,10 +573,10 @@ def without_output_descs(f: Callable[_P, tuple[_T, _S]]) -> Callable[_P, _T]:
     @wraps(f)
     @simple_wraps(f)
     def inner(*args, **kwargs):
-        # pyrefly: ignore [invalid-param-spec]
+        # pyrefly: ignore  # invalid-param-spec
         return f(*args, **kwargs)[0]
 
-    # pyrefly: ignore [bad-return]
+    # pyrefly: ignore  # bad-return
     return inner
 
 

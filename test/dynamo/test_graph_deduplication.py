@@ -8,9 +8,19 @@ from torch._dynamo.graph_deduplication import apply_graph_deduplication
 from torch._dynamo.graph_utils import _detect_cycles
 from torch._dynamo.output_graph import FakeRootModule
 from torch._dynamo.test_case import TestCase
-from torch._dynamo.testing import extract_graph, extract_graph_and_tracker, normalize_gm
+from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
+    extract_graph_and_tracker,
+    normalize_gm,
+)
 from torch.compiler import allow_in_graph
 from torch.utils._ordered_set import OrderedSet
+
+
+def extract_graph(fn, *args, **kwargs):
+    backend = AotEagerAndRecordGraphs()
+    result = torch.compile(backend=backend)(fn)(*args, **kwargs)
+    return result, backend.graphs, backend.fw_graphs
 
 
 def graph_str(gm):
@@ -30,7 +40,7 @@ class GraphDededuplicationTests(TestCase):
         super().tearDown()
 
     def run_and_return_graphs(self, fn, *args, **kwargs):
-        return extract_graph(fn, *args, **kwargs)[0:3]
+        return extract_graph(fn, *args, **kwargs)
 
     def run_and_get_simple_graph(self):
         def fn(x, y):

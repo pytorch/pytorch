@@ -2,26 +2,9 @@
 
 #include <ATen/cpu/vec/vec.h>
 
+#include <iostream>
 namespace torch {
 namespace aot_inductor {
-
-template <typename T>
-void ExpectVecEqual(
-    const at::vec::Vectorized<T>& expected,
-    const at::vec::Vectorized<T>& actual) {
-  using Vec = at::vec::Vectorized<T>;
-  // Have to use std::vector for comparison because at::vec::Vectorized doesn't
-  // support operator[] on aarch64
-  std::vector<T> expected_data(Vec::size());
-  std::vector<T> actual_data(Vec::size());
-
-  expected.store(expected_data.data());
-  actual.store(actual_data.data());
-
-  for (int i = 0; i < Vec::size(); i++) {
-    EXPECT_EQ(expected_data[i], actual_data[i]);
-  }
-}
 
 TEST(TestVec, TestAdd) {
   using Vec = at::vec::Vectorized<int>;
@@ -33,7 +16,9 @@ TEST(TestVec, TestAdd) {
   std::vector<int> expected(1024, 3);
   Vec expected_vec = Vec::loadu(expected.data());
 
-  ExpectVecEqual(expected_vec, actual_vec);
+  for (int i = 0; i < Vec::size(); i++) {
+    EXPECT_EQ(expected_vec[i], actual_vec[i]);
+  }
 }
 
 TEST(TestVec, TestMax) {
@@ -45,7 +30,9 @@ TEST(TestVec, TestMax) {
   Vec actual_vec = at::vec::maximum(a_vec, b_vec);
   Vec expected_vec = b_vec;
 
-  ExpectVecEqual(expected_vec, actual_vec);
+  for (int i = 0; i < Vec::size(); i++) {
+    EXPECT_EQ(expected_vec[i], actual_vec[i]);
+  }
 }
 
 TEST(TestVec, TestMin) {
@@ -57,7 +44,9 @@ TEST(TestVec, TestMin) {
   Vec actual_vec = at::vec::minimum(a_vec, b_vec);
   Vec expected_vec = a_vec;
 
-  ExpectVecEqual(expected_vec, actual_vec);
+  for (int i = 0; i < Vec::size(); i++) {
+    EXPECT_EQ(expected_vec[i], actual_vec[i]);
+  }
 }
 
 TEST(TestVec, TestConvert) {
@@ -69,7 +58,9 @@ TEST(TestVec, TestConvert) {
   auto actual_vec = at::vec::convert<float>(a_vec);
   auto expected_vec = b_vec;
 
-  ExpectVecEqual(expected_vec, actual_vec);
+  for (int i = 0; i < at::vec::Vectorized<int>::size(); i++) {
+    EXPECT_EQ(expected_vec[i], actual_vec[i]);
+  }
 }
 
 TEST(TestVec, TestClampMin) {
@@ -81,7 +72,9 @@ TEST(TestVec, TestClampMin) {
   Vec actual_vec = at::vec::clamp_min(a_vec, min_vec);
   Vec expected_vec = min_vec;
 
-  ExpectVecEqual(expected_vec, actual_vec);
+  for (int i = 0; i < Vec::size(); i++) {
+    EXPECT_EQ(expected_vec[i], actual_vec[i]);
+  }
 }
 
 } // namespace aot_inductor

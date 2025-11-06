@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 from collections import namedtuple
-from typing import Any, Generic, Literal, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Generic, Literal, TYPE_CHECKING, TypeVar, Union
 
 import torch
 from torch._dynamo.utils import counters, set_feature_use
@@ -88,7 +88,7 @@ class NoTritonConfigsError(RuntimeError):
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Container, Hashable
+    from collections.abc import Container, Hashable
 
     from torch._guards import CompileId
 
@@ -336,7 +336,6 @@ class CachingAutotuner(KernelInterface):
             name=self.fn.__name__,
             size_hints=size_hints,
             inductor_meta=self.inductor_meta,
-            frozen_fields=self.get_coordesc_frozen_fields(),
         )
         self.filename = filename
 
@@ -365,13 +364,6 @@ class CachingAutotuner(KernelInterface):
 
         # Mode for launch grid calculation
         self.grid_mode: Literal["python", "cpp"] = "python"
-
-    def get_coordesc_frozen_fields(self) -> OrderedSet[str]:
-        out: OrderedSet[str] = OrderedSet()
-        if self.inductor_meta.get("RSPLIT_SIZE"):
-            # We fix XBLOCK for mix order reduction
-            out.add("XBLOCK")
-        return out
 
     def is_statically_launchable(self):
         """
@@ -538,7 +530,7 @@ class CachingAutotuner(KernelInterface):
                 #   = regs_per_multiprocessor / (nreg * 32 * num_warps)
                 #   < regs_per_multiprocessor / ((regs_per_multiprocessor / max_threads_per_multi_processor) * 32 * num_warps)
                 #   = max_threads_per_multi_processor / (32 * num_warps)
-                # Using a tighter upper bound can reveal more optimization opportunities.
+                # Using a tigher upper bound can reveal more optimization opportunities.
                 max_blocks_per_sm = max(
                     device_prop.regs_per_multiprocessor // nreg_per_block, 1
                 )
@@ -925,15 +917,11 @@ class CachingAutotuner(KernelInterface):
 
             return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
 
-        benchmark_kwargs = (
-            {}
-            if self.device_props.type == "cpu"
-            else {"rep": 40, "is_vetted_benchmarking": True}
-        )
-        return benchmarker.benchmark(
-            fn=kernel_call,
-            device=self.device_props.type,
-            **benchmark_kwargs,  # type: ignore[arg-type]
+        if self.device_props.type == "cpu":
+            return benchmarker.benchmark_cpu(kernel_call)
+
+        return benchmarker.benchmark_gpu(
+            kernel_call, rep=40, is_vetted_benchmarking=True
         )
 
     def copy_args_to_cpu_if_needed(self, *args, **kwargs):
@@ -2635,17 +2623,6 @@ def pointwise(
                         ),
                     ]
                 )
-                if inductor_meta.get("atomic_add_found"):
-                    configs.extend(
-                        [
-                            triton_config_with_settings(
-                                size_hints,
-                                64,
-                                num_warps=1,
-                                num_stages=1,  # 250% improvement
-                            )
-                        ]
-                    )
     if len(size_hints) == 2:
         # Only avoiding tuning on TileHint.SQUARE if not on ROCm builds
         # ROCm has observed improvement by diverging here
@@ -2860,51 +2837,51 @@ def _reduction_configs(
             )
 
     def outer_config_opt():
-        # Default to 64 for vectorized loads
-        max_x_block, x_block = 256, 64
-        load_factor = inductor_meta.get("num_load", 0)
+        max_x_block = 256
+        num_loads = inductor_meta.get("num_load", 0)
+        load_factor = num_loads + inductor_meta.get("num_store")
+        reduction_factor = inductor_meta.get("num_reduction", 0)
         x = size_hints["x"]
         num_warps = None
+        outer_register_intensive = register_intensive
 
-        # Try to use all SMs with small x
+        # Initial x block for utilizing all SMs
         if x <= 1024:
-            x_block = max(min(x // 128, 8), 2)
-            outer_r_block = min(rnumel, 64)
-        # Lower bound x = 1024, 1024 // 16 = 128 around # of SMs
-        elif x // 4096 <= 8:
+            x_block = max(x // 128, 2)
+        elif x < 16384:
             x_block = 16
-            outer_r_block = 512 // x_block
-        elif num_dynamic > 1:
-            # Lots of compute with multiple dynamic shape per loop iteration
-            # Larger RBLOCK minimizes loop iteration
-            outer_r_block = max(min((rnumel // 64), 64), 8)
-        elif num_dynamic == 1:
-            # Dynamic shapes introduce a lot register pressure for indexing
-            outer_r_block = (
-                1
-                if load_factor >= 3
-                else min(next_power_of_2(max(rnumel, 128) // 128), 8)
-            )
+        elif x < 65536:
+            x_block = 32
         else:
-            x_block = max(min(max_x_block, next_power_of_2(x // 4096)), x_block)
-            if load_factor < 4 or rnumel <= 128:
-                outer_r_block = 512 // x_block
-            else:
-                # Heavier reductions contain a lot more overhead per loop iteration
-                # We minimize the overhead by enlarging r block
-                if rnumel >= 2048:
-                    outer_r_block = 64
-                else:
-                    outer_r_block = 32
-                x_block = min(x_block, 32)
-                num_warps = 4
+            x_block = min(max_x_block, max((x // 4096), 64))
 
-        # Set register intensive to true by default as we try to maximize tiles with heuristic
+        # Less possible vectorization, decrease xblock
+        if num_loads == 1 and x_block > 1:
+            x_block //= 2
+
+        if reduction_factor >= 3:
+            outer_register_intensive = True
+
+        if num_dynamic >= 1:
+            # Dynamic shapes introduce a lot register pressure for indexing
+            outer_r_block = 1 if load_factor > 5 else min(max(rnumel // 128, 1), 8)
+            outer_register_intensive = True
+        else:
+            # Very memory bound, maximize bytes in flight
+            if load_factor // reduction_factor >= 2:
+                x_block = 8
+            outer_r_block = 512 // x_block if rnumel <= 512 else min(rnumel // 4, 1024)
+            # Assume each warp takes a single column of x_block, vectorize the loads
+            # Force more work per thread, generally better for Hopper and Blackwell
+            num_warps = outer_r_block // 32 if outer_r_block > 64 else None
+            x_block = max(min(x_block, 4096 // outer_r_block), 8)
+
         return make_config(
             x_block,
             outer_r_block,
             num_warps=num_warps,
-            register_intensive=register_intensive,
+            register_intensive=outer_register_intensive,
+            dynamic_scale_rblock=False,
         )
 
     contiguous_config = make_config(
@@ -3393,38 +3370,6 @@ def persistent_reduction(
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     inductor_meta.pop(persistent_reduction_key)
 
-    if inductor_meta.get("RSPLIT_SIZE"):
-        new_configs = []
-        for c in configs:
-            c.kwargs["RSPLIT_SIZE"] = inductor_meta.get("RSPLIT_SIZE")
-
-            # small XBLOCK to use less registers/smem
-            c.kwargs["XBLOCK"] = 1
-
-            rnumel_hint = size_hints["r0_"]
-
-            if rnumel_hint <= 1024:
-                c.num_warps //= 2
-                c.num_warps = max(c.num_warps, 2)
-                new_configs.append(c)
-
-                # less warps so potentially each sm can run more thread blocks
-                # Inside each thread block, we handle the split sequentially,
-                # more thread blocks is beneficial here.
-                newc = copy.deepcopy(c)
-                newc.num_warps = 2
-                new_configs.append(newc)
-            else:
-                # more warps for larger rows
-                new_configs.append(c)
-
-                if c.num_warps < 32:
-                    newc = copy.deepcopy(c)
-                    newc.num_warps *= 2
-                    new_configs.append(newc)
-
-        configs = unique_configs(new_configs)
-
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
     return cached_autotune(
         size_hints,
@@ -3593,7 +3538,7 @@ def foreach(triton_meta, filename=None, inductor_meta=None):
     configs = []
 
     # Naive autotuning path for num_warps
-    if not (
+    if not inductor_meta.get("autotune_pointwise", True) and not (
         inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise")
     ):
         configs.append(triton.Config({}, num_stages=1, num_warps=8))
@@ -3731,15 +3676,6 @@ class Grid2DWithYZOverflow(GridExpr):
         )
         self.y_grid = self.ceildiv("y_grid_raw_", "y_grid_div_")
         self.z_grid = "y_grid_div_"
-
-
-class MixOrderReductionGrid(GridExpr):
-    def generate(self, meta: dict[str, int]) -> None:
-        split_size = meta.get("RSPLIT_SIZE")
-        xblock = meta.get("XBLOCK")
-        assert split_size
-        assert xblock == 1, "Mix order reduction force XBLOCK=1 right now"
-        self.x_grid = self.ceildiv("xnumel", split_size)
 
 
 class CooperativeReductionGrid(GridExpr):

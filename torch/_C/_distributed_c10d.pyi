@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 # mypy: disable-error-code="type-arg"
-from collections.abc import Callable
 from datetime import timedelta
 from enum import Enum
 from typing import Any, Optional, overload, Union
@@ -617,11 +616,6 @@ class FakeWork(Work):
     def wait(self, timeout: timedelta = ...) -> bool: ...
     def getFuture(self) -> Future: ...
 
-class PythonCallbackWork(Work):
-    def __init__(self, callback: Callable[[timedelta], bool]) -> None: ...
-    def wait(self, timeout: timedelta = ...) -> bool: ...
-    def get_future(self) -> Future: ...
-
 class ProcessGroupGloo(Backend):
     class Device: ...
 
@@ -855,9 +849,7 @@ class _SymmetricMemory:
 
 class ProcessGroupXCCL(Backend):
     class Options(Backend.Options):
-        is_high_priority_stream: bool
-
-        def __init__(self, is_high_priority_stream: bool = False): ...
+        def __init__(self): ...
 
     def __init__(
         self,

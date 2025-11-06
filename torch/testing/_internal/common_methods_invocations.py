@@ -445,9 +445,11 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
         )
 
     # Checking for permutations of weights and biases as `None`
+    weights = [channels, None, None]
+    biases = [None, channels, None]
     is_training = [True, False, False]
 
-    for training in is_training:
+    for weight, bias, training in zip(weights, biases, is_training, strict=True):
         yield SampleInput(
             make_arg(input_shape),
             args=(
@@ -9763,7 +9765,6 @@ foreach_unary_op_db: list[OpInfo] = [
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
-        supports_sparse=True,
         decorators=(
             DecorateInfo(
                 unittest.expectedFailure,
@@ -14311,7 +14312,7 @@ op_db: list[OpInfo] = [
            )),
     OpInfo('max',
            variant_test_name='reduction_with_dim',
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            supports_fwgrad_bwgrad=True,
@@ -14320,7 +14321,7 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True),
     OpInfo('max',
            variant_test_name='reduction_no_dim',
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
            supports_out=True,
            supports_forward_ad=True,
@@ -14465,7 +14466,7 @@ op_db: list[OpInfo] = [
            check_batched_forward_grad=False,),
     OpInfo('min',
            variant_test_name='reduction_with_dim',
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            supports_fwgrad_bwgrad=True,
@@ -14474,7 +14475,7 @@ op_db: list[OpInfo] = [
            )),
     OpInfo('min',
            variant_test_name='reduction_no_dim',
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -14784,7 +14785,7 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True),
     OpInfo('aminmax',
            ref=lambda x, dim=None, keepdim=False: (np.amin(x, axis=dim, keepdims=keepdim), np.amax(x, axis=dim, keepdims=keepdim)),
-           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64),
+           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
            decorators=(onlyNativeDeviceTypes,),
            supports_autograd=False,
@@ -20341,7 +20342,9 @@ op_db: list[OpInfo] = [
            ref=reference_smooth_l1_loss,
            sample_inputs_func=sample_inputs_smooth_l1_loss,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
-           backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -21126,7 +21129,7 @@ op_db: list[OpInfo] = [
         supports_forward_ad=True,
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
-        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         ref=reference_reduction_numpy(np.amax),
         skips=(
             # FIXME: reduces all dimensions when dim=[]
@@ -21141,7 +21144,7 @@ op_db: list[OpInfo] = [
         supports_forward_ad=True,
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
-        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         ref=reference_reduction_numpy(np.amin),
         skips=(
             # FIXME: reduces all dimensions when dim=[]

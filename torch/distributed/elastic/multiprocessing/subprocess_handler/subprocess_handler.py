@@ -11,7 +11,10 @@ import sys
 from subprocess import Popen
 from typing import Any, Optional
 
-from torch.numa.binding import maybe_wrap_command_args_with_numa_binding, NumaOptions
+from torch.numa.binding import (
+    maybe_temporarily_apply_numa_binding_to_current_thread,
+    NumaOptions,
+)
 
 
 __all__ = ["SubprocessHandler"]
@@ -50,15 +53,14 @@ class SubprocessHandler:
         env_vars.update(env)
 
         args_str = (entrypoint, *[str(e) for e in args])
-        args_str = maybe_wrap_command_args_with_numa_binding(
-            args_str,
-            gpu_index=local_rank_id,
-            numa_options=numa_options,
-        )
 
         self.local_rank_id = local_rank_id
 
-        self.proc: Popen = self._popen(args_str, env_vars)
+        # See HACK [NUMA inheritance] in spawn.py for context.
+        with maybe_temporarily_apply_numa_binding_to_current_thread(
+            gpu_index=local_rank_id, numa_options=numa_options
+        ):
+            self.proc: Popen = self._popen(args_str, env_vars)
 
     def _popen(self, args: tuple, env: dict[str, str]) -> Popen:
         kwargs: dict[str, Any] = {}

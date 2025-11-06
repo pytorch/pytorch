@@ -12,8 +12,8 @@ import os
 import textwrap
 import warnings
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Sequence
-from typing import Any, cast, Optional, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Iterable, Sequence
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -27,7 +27,7 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.utils import get_layout_constraint_tag
-from torch._prims_common import (  # pyrefly: ignore  # deprecated; pyrefly: ignore [deprecated]
+from torch._prims_common import (  # pyrefly: ignore  # deprecated
     canonicalize_dim,
     canonicalize_dims,
     check,
@@ -2490,18 +2490,11 @@ def inductor_randint(
 
 
 def _boundaries_helper(tb: TensorBox) -> tuple[str, sympy.Expr, sympy.Expr, sympy.Expr]:
-    # Calculate the maximum offset for the boundaries tensor
-    # For a strided tensor, this is sum((size[i] - 1) * stride[i]) + stride[-1]
-    # This ensures the mask check in bucketize_binary_search works correctly
-    # for both contiguous and non-contiguous tensors.
-    size = tb.get_size()
-    stride = tb.get_stride()
-    max_offset = sum((s - 1) * st for s, st in zip(size, stride)) + stride[-1]
     return (
         tb.get_name(),
-        size[-1],
-        max_offset,
-        stride[-1],
+        tb.get_size()[-1],
+        tb.get_size()[0] * tb.get_stride()[0],
+        tb.get_stride()[-1],
     )
 
 
@@ -3929,7 +3922,7 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
                     isinstance(indice, ir.StorageBox)
                     and isinstance(indice.data, ir.ExternKernel)
                     and getattr(indice.data, "fx_node", None)
-                    and indice.data.fx_node.target is torch.ops.aten.randperm.default
+                    and indice.data.fx_node.target == torch.ops.aten.randperm.default
                 )
             return False
 
@@ -6078,9 +6071,7 @@ def _validate_reduction_axis(x, axis):
     return axis
 
 
-def _make_reduction_inner(
-    x, *, axis, keepdims, dtype, override_return_dtype, reduction_type=None
-):
+def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
     if dtype is not None:
         x = to_dtype(x, dtype)
     size = x.get_size()
@@ -6098,23 +6089,6 @@ def _make_reduction_inner(
             kept_idx.append(i)
             kept_sizes.append(size[i])
 
-    # For argmax/argmin compute logical indices when the tensor has non-contiguous layout.
-    should_compute_logical_index = False
-    if (
-        reduction_type in ("argmax", "argmin")
-        and len(reduced_sizes) > 1
-        and is_triton(x)
-    ):
-        if isinstance(x.data, PermuteView):
-            should_compute_logical_index = True
-        elif isinstance(x.data, ir.ReinterpretView) or (
-            isinstance(x.data, ir.StorageBox) and isinstance(x.data.data, ir.Buffer)
-        ):
-            layout = x.get_layout()
-            should_compute_logical_index = (
-                layout.is_transposed() or not layout.is_contiguous()
-            )
-
     def loader(index, reduction_index):
         assert len(reduction_index) == len(reduced_idx)
         if keepdims:
@@ -6126,21 +6100,7 @@ def _make_reduction_inner(
             zip(kept_idx, index), zip(reduced_idx, reduction_index)
         ):
             new_index[idx] = var
-        value = inner_loader(new_index)
-
-        # For argmax/argmin, return tuple with logical linear index if needed
-        if should_compute_logical_index:
-            rindex = [sympy.expand(i) for i in reduction_index]
-
-            # Compute linear index in row-major order
-            # For reduction_ranges = [4, 6]: linear_index = r0 * 6 + r1
-            linear_idx = rindex[0]
-            for i in range(1, len(rindex)):
-                linear_idx = linear_idx * reduced_sizes[i] + rindex[i]
-
-            return (value, ops.index_expr(linear_idx, torch.int64))
-
-        return value
+        return inner_loader(new_index)
 
     if keepdims:
         new_size = list(size)
@@ -6168,7 +6128,6 @@ def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
             keepdims=keepdims,
             dtype=dtype,
             override_return_dtype=override_return_dtype,
-            reduction_type=reduction_type,
         )
         result = Reduction.create(reduction_type=reduction_type, input_node=x, **kwargs)
         if isinstance(
@@ -7307,35 +7266,6 @@ def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, *operands):
     return list(map(TensorBox.create, result))  # type: ignore[call-overload]
 
 
-def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
-    """Process nodes from a FX graph by executing them through V.graph.
-
-    This is a common pattern for executing a subgraph's nodes:
-    - Placeholder nodes are mapped to the provided args
-    - Output nodes return their result
-    - Other nodes are executed via V.graph.run_node
-
-    """
-    output = None
-
-    for i, node in enumerate(graph_module.graph.nodes):
-        if node.op == "placeholder":
-            assert node not in V.graph.env
-            V.graph.env[node] = args[i]
-            continue
-        elif node.op == "output":
-            output_args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
-            output = torch.fx.Interpreter.output(V.graph, node, output_args, kwargs)
-        else:
-            assert node not in V.graph.env
-            V.graph.env[node] = V.graph.run_node(node)
-
-    if output is None:
-        raise RuntimeError("No output node found in graph")
-
-    return output
-
-
 # Import the control_deps_op HOP for lowering
 from torch._inductor.fx_passes.control_dependencies import control_deps
 
@@ -7363,11 +7293,21 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     arg_offset = 2  # first two args (additional_deps, subgraph)
     assert len(args) + arg_offset == len(original_args)
 
+    output = None
+
     operation_len = len(V.graph.operations)
     assert len(subgraph_fn.graph_module.graph.find_nodes(op="placeholder")) == len(args)
-
-    # Process subgraph nodes using the shared helper
-    output = process_subgraph_nodes(subgraph_fn.graph_module, list(args))
+    for i, node in enumerate(subgraph_fn.graph_module.graph.nodes):
+        if node.op == "placeholder":
+            assert node not in V.graph.env
+            V.graph.env[node] = args[i]
+            continue
+        elif node.op == "output":
+            args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
+            output = torch.fx.Interpreter.output(V.graph, node, args, kwargs)
+        else:
+            assert node not in V.graph.env
+            V.graph.env[node] = V.graph.run_node(node)
 
     assert output is not None and additional_deps
 

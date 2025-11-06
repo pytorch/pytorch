@@ -42,7 +42,7 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .exc import SideEffectsError, unimplemented_v2
-from .source import GlobalSource, LocalCellSource, Source, TempLocalSource
+from .source import GlobalSource, LocalCellSource, LocalSource, Source
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
     AttributeMutation,
@@ -258,7 +258,6 @@ class SideEffects:
                 "Dynamo needs to fully exhaust the generator, which may cause "
                 "unintended variable modifications."
             )
-        assert item.mutation_type is not None
         if not is_side_effect_safe(item.mutation_type):
             # TODO plumb HOP information here
             unimplemented_v2(
@@ -374,7 +373,7 @@ class SideEffects:
 
         if self.is_attribute_mutation(item):
             return item in self.store_attr_mutations
-        assert item.mutation_type is not None
+
         return item.mutation_type.is_modified  # type: ignore[attr-defined]
 
     def _track_obj(
@@ -626,12 +625,6 @@ class SideEffects:
         cur_tx: Optional[InstructionTranslatorBase] = tx
         while cur_tx is not None:
             init_live_vars.extend([cur_tx.stack, cur_tx.symbolic_locals])
-            if cur_tx.parent is not None:
-                # for non-root tx'es, also keep the cells/freevars alive so they get codegen'd properly
-                # TODO see if we could prune dead cells - cell pruning information needs to be forwarded
-                # to the resume function creation as well.
-                assert cur_tx.post_prune_cell_and_freevars is not None
-                init_live_vars.append(cur_tx.post_prune_cell_and_freevars)
             cur_tx = cur_tx.parent
         VariableTracker.visit(
             visit,
@@ -704,7 +697,7 @@ class SideEffects:
                     )
                     cg.extend_output(create_call_function(0, False))
                     cg.add_cache(var)
-                    var.source = TempLocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
+                    var.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
                 elif var.source is None:
                     # pyrefly: ignore [bad-assignment]
                     var.source = LocalCellSource(var.local_name)
@@ -729,7 +722,7 @@ class SideEffects:
                     # `add_cache` generates STORE and consumes TOS, but we never
                     # cleared it. TODO move this call into `add_cache`
                     cg.clear_tos()
-                    var.source = TempLocalSource(cg.tempvars[var])
+                    var.source = LocalSource(cg.tempvars[var])
             elif isinstance(var, variables.AutogradFunctionContextVariable):
                 unimplemented_v2(
                     gb_type="AutogradFunctionContextVariable escaped Dynamo-traced region",
@@ -764,7 +757,7 @@ class SideEffects:
                 cg.extend_output(create_call_function(1 + len(var.init_args), False))  # type: ignore[attr-defined]
 
                 cg.add_cache(var)
-                var.source = TempLocalSource(cg.tempvars[var])
+                var.source = LocalSource(cg.tempvars[var])
 
         for ctx, args in self.save_for_backward:
             cg(ctx.source)

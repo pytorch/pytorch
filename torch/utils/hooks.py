@@ -114,7 +114,7 @@ class BackwardHook:
 
     def _pack_with_none(self, indices, values, size):
         res = [None] * size
-        for idx, val in zip(indices, values, strict=True):
+        for idx, val in zip(indices, values):
             res[idx] = val
 
         return tuple(res)
@@ -180,7 +180,7 @@ class BackwardHook:
         fn(grad_fns[0])
 
         arg_list = list(args)
-        for idx, val in zip(tensors_idx, new_tensors, strict=True):
+        for idx, val in zip(tensors_idx, new_tensors):
             arg_list[idx] = val
 
         if type(args) is tuple:

@@ -144,7 +144,7 @@ class BasePruningMethod(ABC):
 
         method = _get_composite_method(cls, module, name, *args, **kwargs)
         # at this point we have no forward_pre_hooks but we could have an
-        # active reparameterization of the tensor if another pruning method
+        # active reparametrization of the tensor if another pruning method
         # had been applied (in which case `method` would be a PruningContainer
         # and not a simple pruning method).
 
@@ -231,7 +231,7 @@ class BasePruningMethod(ABC):
         default_mask = default_mask if default_mask is not None else torch.ones_like(t)
         return t * self.compute_mask(importance_scores, default_mask=default_mask)
 
-    def remove(self, module) -> None:
+    def remove(self, module):
         r"""Remove the pruning reparameterization from a module.
 
         The pruned parameter named ``name`` remains permanently pruned,
@@ -269,7 +269,7 @@ class PruningContainer(BasePruningMethod):
     them.
     """
 
-    def __init__(self, *args) -> None:
+    def __init__(self, *args):
         self._pruning_methods: tuple[BasePruningMethod, ...] = ()
         if not isinstance(args, Iterable):  # only 1 item
             self._tensor_name = args._tensor_name
@@ -284,7 +284,7 @@ class PruningContainer(BasePruningMethod):
             for method in args:
                 self.add_pruning_method(method)
 
-    def add_pruning_method(self, method) -> None:
+    def add_pruning_method(self, method):
         r"""Add a child pruning ``method`` to the container.
 
         Args:
@@ -303,7 +303,7 @@ class PruningContainer(BasePruningMethod):
         # if all checks passed, add to _pruning_methods tuple
         self._pruning_methods += (method,)  # type: ignore[operator]
 
-    def __len__(self) -> int:
+    def __len__(self):
         return len(self._pruning_methods)
 
     def __iter__(self):
@@ -449,7 +449,7 @@ class RandomUnstructured(BasePruningMethod):
 
     PRUNING_TYPE = "unstructured"
 
-    def __init__(self, amount) -> None:
+    def __init__(self, amount):
         # Check range of validity of pruning amount
         _validate_pruning_amount_init(amount)
         self.amount = amount
@@ -506,7 +506,7 @@ class L1Unstructured(BasePruningMethod):
 
     PRUNING_TYPE = "unstructured"
 
-    def __init__(self, amount) -> None:
+    def __init__(self, amount):
         # Check range of validity of pruning amount
         _validate_pruning_amount_init(amount)
         self.amount = amount
@@ -574,7 +574,7 @@ class RandomStructured(BasePruningMethod):
 
     PRUNING_TYPE = "structured"
 
-    def __init__(self, amount, dim=-1) -> None:
+    def __init__(self, amount, dim=-1):
         # Check range of validity of amount
         _validate_pruning_amount_init(amount)
         self.amount = amount
@@ -682,7 +682,7 @@ class LnStructured(BasePruningMethod):
 
     PRUNING_TYPE = "structured"
 
-    def __init__(self, amount, n, dim=-1) -> None:
+    def __init__(self, amount, n, dim=-1):
         # Check range of validity of amount
         _validate_pruning_amount_init(amount)
         self.amount = amount
@@ -799,7 +799,7 @@ class LnStructured(BasePruningMethod):
 class CustomFromMask(BasePruningMethod):
     PRUNING_TYPE = "global"
 
-    def __init__(self, mask) -> None:
+    def __init__(self, mask):
         self.mask = mask
 
     def compute_mask(self, t, default_mask):
@@ -1025,9 +1025,7 @@ def ln_structured(module, name, amount, n, dim, importance_scores=None):
     return module
 
 
-def global_unstructured(
-    parameters, pruning_method, importance_scores=None, **kwargs
-) -> None:
+def global_unstructured(parameters, pruning_method, importance_scores=None, **kwargs):
     r"""
     Globally prunes tensors corresponding to all parameters in ``parameters`` by applying the specified ``pruning_method``.
 
@@ -1214,7 +1212,7 @@ def remove(module, name):
     )
 
 
-def is_pruned(module) -> bool:
+def is_pruned(module):
     r"""Check if a module is pruned by looking for pruning pre-hooks.
 
     Check whether ``module`` is pruned by looking for
@@ -1243,7 +1241,7 @@ def is_pruned(module) -> bool:
     return False
 
 
-def _validate_pruning_amount_init(amount) -> None:
+def _validate_pruning_amount_init(amount):
     r"""Validate helper to check the range of amount at init.
 
     Args:
@@ -1273,7 +1271,7 @@ def _validate_pruning_amount_init(amount) -> None:
         )
 
 
-def _validate_pruning_amount(amount, tensor_size) -> None:
+def _validate_pruning_amount(amount, tensor_size):
     r"""Validate that the pruning amount is meaningful wrt to the size of the data.
 
     Validation helper to check that the amount of parameters to prune
@@ -1297,7 +1295,7 @@ def _validate_pruning_amount(amount, tensor_size) -> None:
         )
 
 
-def _validate_structured_pruning(t) -> None:
+def _validate_structured_pruning(t):
     r"""Validate that the tensor to be pruned is at least 2-Dimensional.
 
     Validation helper to check that the tensor to be pruned is multi-
@@ -1344,7 +1342,7 @@ def _compute_nparams_toprune(amount, tensor_size):
         return round(amount * tensor_size)
 
 
-def _validate_pruning_dim(t, dim) -> None:
+def _validate_pruning_dim(t, dim):
     r"""Validate that the pruning dimension is within the bounds of the tensor dimension.
 
     Args:

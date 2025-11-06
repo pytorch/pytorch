@@ -20,7 +20,7 @@ from torch.utils._config_module import Config, install_config_module
 
 # [@compile_ignored: debug]
 _save_config_ignore = [
-    # callable not serializable
+    # callable not serializeable
     "joint_custom_pass",
 ]
 

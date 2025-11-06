@@ -152,7 +152,7 @@ class TestPeephole(JitTestCase):
         self.run_pass("peephole", test.graph)
         FileCheck().check_not("prim::unchecked_cast").run(test.graph)
 
-        # refinement not optimized out
+        # refinement not optimzied out
         def is_int_tensor(x):
             scalar = x.item()
             if isinstance(scalar, int):

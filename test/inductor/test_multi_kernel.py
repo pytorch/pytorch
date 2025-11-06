@@ -111,7 +111,6 @@ class MultiKernelTest(TestCase):
     @requires_triton()
     # TODO: bobrenjc93 to fix multi-kernel for ROCM
     @skipIfRocm
-    @skipIfXpu
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_triton_gemm(self):
         def fn(x, y):
@@ -140,7 +139,6 @@ class MultiKernelTest(TestCase):
     @requires_triton()
     # TODO: bobrenjc93 to fix multi-kernel for ROCM
     @skipIfRocm
-    @skipIfXpu
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_triton_relu_fused_gemm(self):
         def fn(x, y):

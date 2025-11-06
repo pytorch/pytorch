@@ -19,13 +19,6 @@ inline namespace CPU_CAPABILITY {
 #error "Big endian is not supported."
 #endif
 
-// GCC does not properly optimize bf16 operators
-#if defined(__ARM_FEATURE_BF16) && (__clang_major__ >= 19)
-#define BF16_ARITHMETIC_SUPPORTED() 1
-#else
-#define BF16_ARITHMETIC_SUPPORTED() 0
-#endif
-
 // Unlike the float16_t family of types, bfloat16_t is not available
 // when we're not targeting bfloat16 hardware support on some
 // platforms (but not Mac, so we have to be careful not to shadow the
@@ -359,35 +352,18 @@ class Vectorized<c10::BFloat16> : public Vectorized16<
         other, &Vectorized<float>::name);                        \
   }
 
+  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(abs)
   Vectorized frac() const;
   DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(trunc)
   DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(sqrt)
 
 #ifdef __ARM_FEATURE_BF16
-  // Flip sign bit
   Vectorized<c10::BFloat16> neg() const {
-    return vreinterpretq_bf16_s16(vreinterpretq_s16_bf16(values) ^ (-32768));
+    return -values;
   }
-  // Fast reciprocal is fine because we are truncating results
   Vectorized<c10::BFloat16> reciprocal() const {
-    auto x = vcvtq_low_f32_bf16(values);
-    auto y = vcvtq_high_f32_bf16(values);
-    x = vrecpeq_f32(x);
-    y = vrecpeq_f32(y);
-    return vcvtq_high_bf16_f32(vcvtq_low_bf16_f32(x), y);
+    return 1.0f / values;
   }
-  // Clearing the sign bit
-  Vectorized<c10::BFloat16> abs() const {
-    return vreinterpretq_bf16_u16(vreinterpretq_u16_bf16(values) & 0x7FFF);
-  }
-#else
-  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(abs)
-  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(neg)
-  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(reciprocal)
-#endif
-
-// These functions are optimized on clang-21+
-#if BF16_ARITHMETIC_SUPPORTED() && (__clang_major__ >= 21)
   Vectorized<c10::BFloat16> operator==(
       const Vectorized<c10::BFloat16>& other) const {
     return values == other.values;
@@ -418,6 +394,8 @@ class Vectorized<c10::BFloat16> : public Vectorized16<
     return values >= other.values;
   }
 #else
+  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(neg)
+  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(reciprocal)
   DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator==)
   DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator!=)
   DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator<)
@@ -473,7 +451,7 @@ template <>
 Vectorized<c10::BFloat16> inline operator+(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {
-#if BF16_ARITHMETIC_SUPPORTED()
+#ifdef __ARM_FEATURE_BF16
   bfloat16x8_t x = a;
   bfloat16x8_t y = b;
   return x + y;
@@ -486,7 +464,7 @@ template <>
 Vectorized<c10::BFloat16> inline operator-(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {
-#if BF16_ARITHMETIC_SUPPORTED()
+#ifdef __ARM_FEATURE_BF16
   bfloat16x8_t x = a;
   bfloat16x8_t y = b;
   return x - y;
@@ -499,7 +477,7 @@ template <>
 Vectorized<c10::BFloat16> inline operator*(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {
-#if BF16_ARITHMETIC_SUPPORTED()
+#ifdef __ARM_FEATURE_BF16
   bfloat16x8_t x = a;
   bfloat16x8_t y = b;
   return x * y;
@@ -512,7 +490,7 @@ template <>
 Vectorized<c10::BFloat16> inline operator/(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {
-#if BF16_ARITHMETIC_SUPPORTED()
+#ifdef __ARM_FEATURE_BF16
   bfloat16x8_t x = a;
   bfloat16x8_t y = b;
   return x / y;
@@ -629,7 +607,7 @@ Vectorized<c10::BFloat16> inline fmadd(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b,
     const Vectorized<c10::BFloat16>& c) {
-#if BF16_ARITHMETIC_SUPPORTED()
+#ifdef __ARM_FEATURE_BF16
   bfloat16x8_t x = a;
   bfloat16x8_t y = b;
   bfloat16x8_t z = c;
@@ -649,7 +627,7 @@ Vectorized<c10::BFloat16> inline fnmadd(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b,
     const Vectorized<c10::BFloat16>& c) {
-#if BF16_ARITHMETIC_SUPPORTED()
+#ifdef __ARM_FEATURE_BF16
   bfloat16x8_t x = a;
   bfloat16x8_t y = b;
   bfloat16x8_t z = c;
@@ -665,7 +643,7 @@ Vectorized<c10::BFloat16> inline fmsub(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b,
     const Vectorized<c10::BFloat16>& c) {
-#if BF16_ARITHMETIC_SUPPORTED()
+#ifdef __ARM_FEATURE_BF16
   bfloat16x8_t x = a;
   bfloat16x8_t y = b;
   bfloat16x8_t z = c;
@@ -681,7 +659,7 @@ Vectorized<c10::BFloat16> inline fnmsub(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b,
     const Vectorized<c10::BFloat16>& c) {
-#if BF16_ARITHMETIC_SUPPORTED()
+#ifdef __ARM_FEATURE_BF16
   bfloat16x8_t x = a;
   bfloat16x8_t y = b;
   bfloat16x8_t z = c;

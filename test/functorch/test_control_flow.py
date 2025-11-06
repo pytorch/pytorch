@@ -742,7 +742,7 @@ def forward(self, pred_1, x_1):
 
     def test_cond_in_forloop(self):
         def for_loop_fake(x):
-            for _ in range(3):
+            for i in range(3):
                 x = x * x + 1
             return x
 
@@ -942,7 +942,9 @@ def forward(self, pred_1):
         b = torch.randn(4, requires_grad=True)
         c = torch.randn(4, requires_grad=True)
 
-        for pred in [torch.tensor(False), torch.tensor(True)]:
+        for pred, fn in zip(
+            [torch.tensor(False), torch.tensor(True)], [false_fn, true_fn]
+        ):
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
                 "Cond doesn't work unless it is captured completely with torch.compile",
@@ -1234,7 +1236,7 @@ def forward(self, pred_1, x_1):
         from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 
         # This is a helper function that extracts the metadata from the tensor and
-        # sets the requires_grad flag to false. This is needed as we compare the
+        # sets the requries_grad flag to false. This is needed as we compare the
         # metadata of the operands and the gradients
         def _extract_tensor_metadata_except_requires_grad(arg):
             metadata = _extract_tensor_metadata(arg)
@@ -3064,9 +3066,13 @@ class GraphModule(torch.nn.Module):
         ).to(DEVICE)
 
         # Test 3 models: RNNScanList, RNNScanTensor, RNNLoop
-        models = [RNNScanList, RNNScanTensor, RNNLoop]
+        models = [
+            ("ScanList", RNNScanList),
+            ("ScanTensor", RNNScanTensor),
+            ("Loop", RNNLoop),
+        ]
 
-        for model_class in models:
+        for model_name, model_class in models:
             # Create uncompiled model
             model_uc = model_class().to(DEVICE)
             uncompiled_grads, uncompiled_loss = run_test_and_get_grads_loss(
@@ -3082,7 +3088,9 @@ class GraphModule(torch.nn.Module):
             )
 
             # Compare gradients for each layer
-            for uncompiled_grad, compiled_grad in zip(uncompiled_grads, compiled_grads):
+            for i, (uncompiled_grad, compiled_grad) in enumerate(
+                zip(uncompiled_grads, compiled_grads)
+            ):
                 self.assertEqual(
                     uncompiled_grad,
                     compiled_grad,
@@ -7532,7 +7540,7 @@ def forward(self, arg0_1, arg1_1):
 
         inps = (torch.ones(3, 4), torch.ones(3, 5), torch.ones(5, 4), torch.ones(5, 3))
         for inp in inps:
-            gm = make_fx(foo, tracing_mode="symbolic")(inp)
+            gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 4))
             self.assertExpectedInline(
                 gm.code.strip(),
                 """\
@@ -8350,6 +8358,7 @@ class GraphModule(torch.nn.Module):
 
         x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
         _guards_fn = self._guards_fn(x);  _guards_fn = None
+
         sym_size_int_1: "Sym(s77)" = torch.ops.aten.sym_size.int(x, 0)
 
         while_loop_cond_graph_0 = self.while_loop_cond_graph_0
@@ -8649,6 +8658,7 @@ class GraphModule(torch.nn.Module):
 
         x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
         _guards_fn = self._guards_fn(x);  _guards_fn = None
+
         sym_size_int_1: "Sym(s6)" = torch.ops.aten.sym_size.int(x, 0)
 
         sin: "f32[s6, 3]" = torch.ops.aten.sin.default(x);  x = None
@@ -8935,8 +8945,10 @@ class GraphModule(torch.nn.Module):
             t_4: "f32[3, 3]" = torch.ops.aten.t.default(t_3);  t_3 = None
             mul_4: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select)
             mul_5: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select);  arg1_1 = select = None
+
             add_7: "f32[3, 3]" = torch.ops.aten.add.Tensor(mm, mul_5);  mm = mul_5 = None
             add_8: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_7, mul_4);  add_7 = mul_4 = None
+
             add_9: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
             add_10: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
             add_11: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
@@ -9151,6 +9163,7 @@ class GraphModule(torch.nn.Module):
 
         x, y, z, = fx_pytree.tree_flatten_spec(([x, y, z], {}), self._in_spec)
         _guards_fn = self._guards_fn(x, y, z);  _guards_fn = None
+
         sym_size_int_4: "Sym(s17)" = torch.ops.aten.sym_size.int(y, 0);  y = None
         sym_size_int_5: "Sym(s68)" = torch.ops.aten.sym_size.int(z, 0)
 

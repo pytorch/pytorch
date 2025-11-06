@@ -2464,11 +2464,11 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
         }
         node_list = [
-            # Q/DQ for first linear
+            # Q/DQ for first lienar
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.linear.default,
-            # Q/DQ for second linear
+            # Q/DQ for second lienar
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.linear.default,

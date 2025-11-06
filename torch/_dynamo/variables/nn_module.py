@@ -796,10 +796,6 @@ class NNModuleVariable(VariableTracker):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             return ConstantVariable.create(len(module))
-        elif name == "__iter__":
-            return ListIteratorVariable(
-                self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
-            )
         elif (
             name == "__contains__"
             and isinstance(module, (torch.nn.ModuleDict, torch.nn.ParameterDict))
@@ -826,19 +822,9 @@ class NNModuleVariable(VariableTracker):
             )
 
             if type(module).__getitem__ not in builtin_supported:
-                if not (
-                    isinstance(args[0], variables.ConstantVariable)
-                    and isinstance(args[0].as_python_constant(), (str, int))
-                ):
-                    unimplemented_v2(
-                        gb_type="Invalid or non-const argument in nn.Module __getitem__",
-                        context=f"call_method: {self} {name} {args} {kwargs}",
-                        explanation="Dynamo does not support calling "
-                        f"method `{name}` of ``nn.Module`` {module} with a non-constant or non-(str, int) key.",
-                        hints=[
-                            "Use constant arguments of type str or int for __getitem__"
-                        ],
-                    )
+                assert isinstance(args[0], variables.ConstantVariable), typestr(args[0])
+                key = args[0].as_python_constant()
+                assert isinstance(key, (str, int))
                 fn = getattr(module, name).__func__
 
                 assert isinstance(fn, types.FunctionType)

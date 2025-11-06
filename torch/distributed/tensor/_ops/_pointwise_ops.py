@@ -618,7 +618,7 @@ def common_pointwise_strategy(
     return pointwise_strategy
 
 
-for op in linear_pointwise_ops:
+for op in linear_pointwise_ops.keys():
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
         linear_pointwise_strategy
     )

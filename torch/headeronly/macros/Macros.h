@@ -1,11 +1,6 @@
 #ifndef C10_MACROS_MACROS_H_
 #define C10_MACROS_MACROS_H_
-
-#ifdef __cplusplus
 #include <cassert>
-#else
-#include <assert.h>
-#endif
 
 /* Main entry for torch/headeronly/macros (used to be c10/macros).
  *
@@ -144,8 +139,6 @@
 
 #define C10_RESTRICT __restrict
 
-#ifdef __cplusplus
-
 // Simply define the namespace, in case a dependent library want to refer to
 // the c10 namespace but not any nontrivial files.
 namespace c10 {}
@@ -182,8 +175,6 @@ using namespace c10::hip;
 namespace at::xpu {
 using namespace c10::xpu;
 } // namespace at::xpu
-
-#endif // __cplusplus
 
 // C10_LIKELY/C10_UNLIKELY
 //
@@ -245,11 +236,7 @@ using namespace c10::xpu;
 
 #define C10_ERASE C10_ALWAYS_INLINE C10_ATTR_VISIBILITY_HIDDEN
 
-#ifdef __cplusplus
 #include <cstdint>
-#else
-#include <stdint.h>
-#endif
 
 #ifdef __HIPCC__
 // Unlike CUDA, HIP requires a HIP header to be included for __host__ to work.
@@ -480,7 +467,7 @@ __host__ __device__
 // a non-negligible performance impact even if the assert condition is
 // never triggered. We choose to use abort() instead which will still
 // terminate the application but without a more useful error message.
-#if !defined(C10_USE_ROCM_KERNEL_ASSERT) && defined(USE_ROCM)
+#if !defined(C10_USE_ROCM_KERNEL_ASSERT) and defined(USE_ROCM)
 #define CUDA_KERNEL_ASSERT(cond) \
   if C10_UNLIKELY (!(cond)) {    \
     abort();                     \
@@ -530,20 +517,8 @@ __host__ __device__
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
-#endif //  C10_USE_ROCM_KERNEL_ASSERT && USE_ROCM
+#endif //  C10_USE_ROCM_KERNEL_ASSERT and USE_ROCM
 #endif // __APPLE__
-
-// Compile-time switch to control how assertions are logged inside CUDA kernels.
-// If C10_CUDA_VERBOSE_ASSERT is defined,  CUDA_KERNEL_ASSERT_VERBOSE will
-// take addition information passed to the macro and forward them to
-// CUDA_KERNEL_ASSERT_PRINTF If C10_CUDA_VERBOSE_ASSERT is not defined,
-// CUDA_KERNEL_ASSERT_VERBOSE will behave the same as CUDA_KERNEL_ASSERT.
-#ifdef C10_ENABLE_VERBOSE_ASSERT
-#define CUDA_KERNEL_ASSERT_VERBOSE(cond, ...) \
-  CUDA_KERNEL_ASSERT_PRINTF(cond, __VA_ARGS__)
-#else
-#define CUDA_KERNEL_ASSERT_VERBOSE(cond, ...) CUDA_KERNEL_ASSERT(cond)
-#endif
 
 #ifdef __APPLE__
 #include <TargetConditionals.h>

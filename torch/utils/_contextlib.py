@@ -7,8 +7,7 @@ import inspect
 import sys
 import warnings
 from collections.abc import Callable
-from typing import Any, cast, overload, TypeVar
-from typing_extensions import Self
+from typing import Any, cast, TypeVar
 
 
 # Used for annotating the decorator usage of _DecoratorContextManager (e.g.,
@@ -159,12 +158,7 @@ class _DecoratorContextManager:
 class _NoParamDecoratorContextManager(_DecoratorContextManager):
     """Allow a context manager to be used as a decorator without parentheses."""
 
-    @overload
-    def __new__(cls, orig_func: F) -> F: ...  # type: ignore[misc]
-    @overload
-    def __new__(cls, orig_func: None = None) -> Self: ...
-
-    def __new__(cls, orig_func: F | None = None) -> Self | F:  # type: ignore[misc]
+    def __new__(cls, orig_func=None):
         if orig_func is None:
             return super().__new__(cls)
         return cls()(orig_func)

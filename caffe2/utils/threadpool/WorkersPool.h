@@ -258,7 +258,6 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
     case State::HasWork:
       DCHECK(new_state == State::Ready || new_state == State::ExitAsSoonAsPossible);
       break;
-    case State::ExitAsSoonAsPossible:
     default:
       abort();
     }
@@ -293,8 +292,6 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
         break;
       case State::ExitAsSoonAsPossible:
         return;
-      case State::Ready:
-      case State::ThreadStartup:
       default:
         abort();
       }

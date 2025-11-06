@@ -26,8 +26,6 @@
 
 #include <torch/headeronly/core/ScalarType.h>
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
-
 namespace c10 {
 
 // See [dtype Macros note] in torch/headeronly/core/ScalarType.h
@@ -290,5 +288,3 @@ C10_API std::pair<std::string, std::string> getDtypeNames(
 C10_API const std::unordered_map<std::string, ScalarType>& getStringToDtypeMap();
 
 } // namespace c10
-
-C10_DIAGNOSTIC_POP()

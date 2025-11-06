@@ -4,9 +4,9 @@ import itertools
 import logging
 import sys
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import torch
 import torch.fx as fx
@@ -18,8 +18,8 @@ from torch._inductor.fx_passes.memory_estimator import (
     MemoryTracker,
 )
 from torch.fx.operator_schemas import normalize_function
+from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._python_dispatch import _disable_current_modes
 
 
 log = logging.getLogger(__name__)
@@ -136,7 +136,7 @@ def benchmark_node_with_cache_key(
         key += f"T: {shape, stride, t.dtype} "
         return rand_strided(shape, stride, device=t.device, dtype=t.dtype)  # type: ignore[arg-type]
 
-    with _disable_current_modes():
+    with no_dispatch():
         args, kwargs = torch.utils._pytree.tree_map_only(
             torch.Tensor,
             lambda t: to_real(t),
@@ -732,12 +732,12 @@ class OverlapScheduler:
         if not torch._inductor.config.test_configs.assume_bucketing_reduces_latency:
             return False
 
-        key = bucket_key(node, mode="custom_ops_multidtype")
+        key = bucket_key(node)
         if key is None:
             return False
 
         for in_flight_coll in self.in_flight.keys():
-            if bucket_key(in_flight_coll, mode="custom_ops_multidtype") == key:
+            if bucket_key(in_flight_coll) == key:
                 return True
 
         return False
