@@ -1509,16 +1509,12 @@ def view_to_reshape(gm):
 # Relevant for addmm and (add + mm)/(mm + add)
 # Follows the dispatch logic for cuBLASLt at
 # aten/src/ATen/native/cuda/Blas.cpp::isInputCompliesAddmmCudaLt
-def _cublaslt_can_fuse_bias_epilogue(inp, mat1, mat2):
-    if config.max_autotune_gemm:
-        return False
-
+def _addmm_can_fuse_bias(inp, mat1, mat2):
     if not (inp.is_cuda and inp.is_contiguous()):
         return False
 
     if not (
-        ((inp.dim() == 1 or inp.squeeze().dim() == 1) and (inp.size(-1) == mat2.size(-1)))
-        or (inp.dim() == 2 and (inp.size(-2) == mat1.size(-2)) and (inp.size(-1) == mat2.size(-1)))
+        (inp.dim() == 1 or inp.squeeze().dim() == 1) and (inp.size(-1) == mat2.size(-1))
     ):
         return False
 
@@ -1534,6 +1530,19 @@ def _cublaslt_can_fuse_bias_epilogue(inp, mat1, mat2):
     return True
 
 
+def _can_dispatch_to_addmm(inp, mat1, mat2):
+    if not inp.is_cuda:
+        return False
+
+    if inp.dtype != mat1.dtype or inp.dtype != mat2.dtype:
+        return False
+
+    if inp.dim() == 2 and is_expandable_to(inp.shape, (mat1.shape[-2], mat2.shape[-1])):
+        return True
+
+    return _addmm_can_fuse_bias(inp, mat1, mat2)
+
+
 def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
@@ -1545,7 +1554,7 @@ def should_prefer_unfused_addmm(match):
         return True
     else:
         args_val = (arg.meta["val"] for arg in (inp, *match.args))
-        return not _cublaslt_can_fuse_bias_epilogue(*args_val)
+        return not _can_dispatch_to_addmm(*args_val)
 
 
 @register_graph_pattern(
