@@ -408,6 +408,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.cuda.amp.autocast,
             torch.cpu.amp.autocast,
         ):
+            # pyrefly: ignore [bad-argument-type]
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
             # NOTE any class added here must align with the semantic
