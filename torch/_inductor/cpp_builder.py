@@ -921,12 +921,13 @@ def _get_optimization_cflags(
             # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
             # `-march=native` is unrecognized option on M1
             if not config.is_fbcode():
-                if platform.machine() == "ppc64le":
+                machine = platform.machine()
+                if machine == "ppc64le":
                     cflags.append("mcpu=native")
-                elif platform.machine() == "riscv64":
-                    cflags.append("march=rv64gc")
-                elif platform.machine() == "riscv32":
-                    cflags.append("march=rv32gc")
+                elif machine in ("riscv64", "riscv32"):
+                    # RISC-V doesn't support -march=native
+                    # Use a generic RISC-V target with common extensions
+                    cflags.append("march=rv64gc" if machine == "riscv64" else "march=rv32gc")
                 else:
                     cflags.append("march=native")
 

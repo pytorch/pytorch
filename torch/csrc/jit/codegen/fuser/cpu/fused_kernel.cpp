@@ -213,7 +213,7 @@ static CompilerConfig& getConfig() {
   return config;
 }
 
-// NB: -march=native not supported on PPC64 g++.  It's a bit annoying
+// NB: -march=native not supported on PPC64 and RISC-V g++.  It's a bit annoying
 // to do a configure-style test to decide whether or not the g++
 // actually supports it or not, so we heuristically use the host
 // compiler to predict if the runtime compiler supports the option we
@@ -253,7 +253,7 @@ static const std::string compile_string = "cd /D \"" + temp_dir +
 #else
 static const std::string compile_string =
     "\"${cxx}\" -O3 -g "
-#ifndef __PPC64__
+#if !defined(__PPC64__) && !defined(__riscv)
 //  "-march=native "
 #endif
     "-std=c++17 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
