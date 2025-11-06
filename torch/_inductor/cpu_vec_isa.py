@@ -252,6 +252,13 @@ extern "C" __m512bh __avx512_bf16_chk_kernel(__m512 a, __m512 b) {
 class VecAVX512VNNI(VecAVX512):
     _bit_width = 512
     _arch_flags = VecAVX512._arch_flags + " -mavx512vnni -mavx512vl"
+    _dtype_nelements = {
+        torch.float: 16,
+        torch.bfloat16: 32,
+        torch.float16: 32,
+        torch.int8: 64,
+        torch.uint8: 64,
+    }
 
     def __str__(self) -> str:
         return super().__str__() + " avx512_vnni"

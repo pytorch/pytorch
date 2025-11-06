@@ -2180,12 +2180,14 @@ def create_micro_gemm(
                 if config.vec_isa_cls == VecAMX and skip_amx_kernel_for_woq(dynamic_M):
                     continue
                 # Criteria on the ranking of configurations
-                # 1. ISA: AMX == VNNI > VEC, choose AMX or VNNI by availability and other scores
+                # 1. ISA: AMX > VNNI > VEC
                 # 2. Dividable by block sizes (block_m, block_n, block_k)
                 # 3. Number of mxn blocks is large enough to occupy all the threads
                 # 4. Register blocks are larger
                 isa_score = 0
-                if config.vec_isa_cls in [VecAMX, VecAVX512VNNI]:
+                if config.vec_isa_cls == VecAMX:
+                    isa_score += 2
+                elif config.vec_isa_cls == VecAVX512VNNI:
                     isa_score += 1
                 dividable_score = 0
                 if m % block_m == 0:
