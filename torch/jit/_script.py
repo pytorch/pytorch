@@ -15,7 +15,7 @@ import inspect
 import pickle
 import warnings
 from collections.abc import Callable
-from typing import Any, Union
+from typing import Any, TypeVar, Union
 from typing_extensions import deprecated
 
 import torch
@@ -54,6 +54,9 @@ from torch.package import PackageExporter, PackageImporter
 from torch.utils import set_module
 
 from ._serialization import validate_map_location
+
+
+_T = TypeVar("_T")
 
 
 type_trace_db = JitTypeTraceStore()  # DB to hold all call traces from MonkeyType
@@ -1248,12 +1251,12 @@ def _script_impl(
 
 
 def script(
-    obj,
-    optimize=None,
-    _frames_up=0,
-    _rcb=None,
+    obj: Any,
+    optimize: None = None,
+    _frames_up: int = 0,
+    _rcb: Callable[[Any], Any] | None = None,
     example_inputs: Union[list[tuple], dict[Callable, list[tuple]], None] = None,
-):
+) -> Any:
     r"""Script the function.
 
     Scripting a function or ``nn.Module`` will inspect the source code, compile
@@ -1552,7 +1555,7 @@ def _check_directly_compile_overloaded(obj):
         )
 
 
-def interface(obj):
+def interface(obj: _T) -> _T:
     r"""Decorate to annotate classes or modules of different types.
 
     This decorator can be used to define an interface that can be used to annotate
