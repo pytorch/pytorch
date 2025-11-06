@@ -13,7 +13,7 @@ from .._utils import _dummy_type
 
 __all__ = [
     "graph_pool_handle",
-    "CUDAGraph",
+    "XPUGraph",
     "graph",
 ]
 
