@@ -21,6 +21,7 @@ class TestFuzzerCompileIssues(TestCase):
 
     def setUp(self):
         """Configure common test settings."""
+        super().setUp()
         torch._dynamo.config.capture_scalar_outputs = True
         torch._dynamo.config.capture_dynamic_output_shape_ops = True
         torch._inductor.config.emulate_precision_casts = True
