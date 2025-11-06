@@ -8,7 +8,6 @@
 #include <oneapi/dnnl/dnnl.hpp>
 
 namespace at::native::onednn {
-using at::native::onednn::ScalingType;
 at::Tensor broadcast_bias2D(
     at::Tensor& dst,
     at::Tensor& bias,
@@ -330,24 +329,49 @@ void quantized_matmul(
 
 // Describes how to configure oneDNN scales for a given role/ScalingType
 struct ScaleSpec {
+  // specifies the way scale values will be applied to an ARG tensor.
   int mask;
-  dnnl::memory::dims groups; // grouping along logical dims
-  dnnl::memory::data_type dtype; // f32 for FP8; e8m0 for MXFP
+  // specifies how scales are grouped along dimensions where
+  // multiple scale factors are used.
+  dnnl::memory::dims groups;
+  // specifies data type for scale factors.
+  dnnl::memory::data_type dtype;
 
-  int64_t expected_numel_src(int64_t M, int64_t K) const {
-    TORCH_CHECK((groups == dnnl::memory::dims{1, 1}) || (groups == dnnl::memory::dims{1, K}), "Unexpected SRC groups for expected_numel_src");
-    if (groups == dnnl::memory::dims{1, 1}) {
-      return 1;
-    } else {
-      return M;
-    }
-  }
-  int64_t expected_numel_wei(int64_t K, int64_t N) const {
+  // Helper to compute expected number of elements for scale tensors
+  // arg_type: "src" for SRC (groups pattern {1, X}),
+  // "wei" for WEIGHTS (groups pattern {X, 1})
+  int64_t expected_numel(
+      int64_t outer_dim,
+      int64_t inner_dim,
+      const std::string& arg_type) const {
     if (groups == dnnl::memory::dims{1, 1})
-      return 1;
-    if (groups == dnnl::memory::dims{K, 1})
-      return N;
-    TORCH_CHECK(false, "Unexpected WEI groups for expected_numel_wei");
+      return 1; // tensorwise scaling
+
+    TORCH_CHECK(
+        arg_type == "src" || arg_type == "wei",
+        "Expected arg_type to be 'src' or 'wei', but got '",
+        arg_type,
+        "'");
+
+    bool is_src = (arg_type == "src");
+    // For rowwise: SRC groups={1, K}, WEI groups={K, 1}
+    if (is_src) {
+      if (groups == dnnl::memory::dims{1, inner_dim})
+        return outer_dim;
+    } else {
+      if (groups == dnnl::memory::dims{inner_dim, 1})
+        return outer_dim;
+    }
+
+    TORCH_CHECK(
+        false,
+        "Expected groups to be one of: {1, 1} (tensorwise), ",
+        is_src ? "{1, K} (rowwise)" : "{K, 1} (rowwise)",
+        "; but got groups={",
+        groups[0],
+        ", ",
+        groups[1],
+        "}");
   }
 
   // Normalize an incoming scale tensor to contiguous storage and appropriate
@@ -361,28 +385,44 @@ struct ScaleSpec {
   }
 };
 
-// Factory helpers to build a ScaleSpec for SRC or WEI given scaling type and
-// logical dims
-inline ScaleSpec make_src_spec(ScalingType scaling_type, int64_t M, int64_t K) {
-  switch (scaling_type) {
-    case ScalingType::TensorWise:
-      return {0, {1, 1}, dnnl::memory::data_type::f32};
-    case ScalingType::RowWise:
-      return {(1 << 0) | (1 << 1), {1, K}, dnnl::memory::data_type::f32};
-  }
+// This function defines how to set scales mask and groups according to:
+// https://github.com/uxlfoundation/oneDNN/blob/main/tests/benchdnn/doc/knobs_attr.md#--attr-scales
+// The returned value will be used in
+// `set_scales(arg, mask, groups, data_type)`.
+inline ScaleSpec make_scale_spec(
+    ScalingType scaling_type,
+    int64_t M,
+    int64_t K,
+    int64_t N,
+    const std::string& arg_type) {
   TORCH_CHECK(
-      false, "Unknown src scaling type, got ", static_cast<int>(scaling_type));
-}
+      arg_type == "src" || arg_type == "wei",
+      "Expected arg_type to be 'src' or 'wei', but got '",
+      arg_type,
+      "'");
 
-inline ScaleSpec make_wei_spec(ScalingType scaling_type, int64_t K, int64_t N) {
+  int64_t dim = K; // Currently only K is used for grouping
+  bool is_src = (arg_type == "src");
   switch (scaling_type) {
     case ScalingType::TensorWise:
+      // Scale tensorwise. The same as `--attr-scales=common`.
+      // mask=0 : scale whole tensor
+      // groups={1, 1}: indicates that there is only one group for scaling
       return {0, {1, 1}, dnnl::memory::data_type::f32};
     case ScalingType::RowWise:
-      return {(1 << 0) | (1 << 1), {K, 1}, dnnl::memory::data_type::f32};
+      // Scale RowWise. The same as `--attr-scales=per_dim_01`.
+      // mask={(1 << 0) | (1 << 1)}: Scale on both dim0 and dim1
+      // SRC: groups={1, K}, WEIGHTS: groups={K, 1}
+      return {
+          (1 << 0) | (1 << 1),
+          is_src ? dnnl::memory::dims{1, dim} : dnnl::memory::dims{dim, 1},
+          dnnl::memory::data_type::f32};
   }
   TORCH_CHECK(
-      false, "Unknown wei scaling type, got ", static_cast<int>(scaling_type));
+      false,
+      "Expected scaling_type to be one of: TensorWise, RowWise; ",
+      "but got scaling_type=",
+      static_cast<int>(scaling_type));
 }
 
 sycl::event scaled_matmul(
@@ -432,8 +472,8 @@ sycl::event scaled_matmul(
   }
 
   // 1.2 Create primitive descriptor and set scales mask
-  const ScaleSpec src_spec = make_src_spec(scaling_choice_a, M, K);
-  const ScaleSpec wei_spec = make_wei_spec(scaling_choice_b, K, N);
+  const ScaleSpec src_spec = make_scale_spec(scaling_choice_a, M, K, N, "src");
+  const ScaleSpec wei_spec = make_scale_spec(scaling_choice_b, M, K, N, "wei");
 
   dnnl::primitive_attr op_attr = dnnl::primitive_attr();
 
@@ -444,7 +484,8 @@ sycl::event scaled_matmul(
 #endif
 
   std::vector<int64_t> default_groups;
-  op_attr.set_scales(DNNL_ARG_SRC, src_spec.mask, src_spec.groups, src_spec.dtype);
+  op_attr.set_scales(
+      DNNL_ARG_SRC, src_spec.mask, src_spec.groups, src_spec.dtype);
   op_attr.set_scales(
       DNNL_ARG_WEIGHTS, wei_spec.mask, wei_spec.groups, wei_spec.dtype);
   // scale_result tensor currently only supports scalar(TensorWise Scaling).
@@ -495,7 +536,8 @@ sycl::event scaled_matmul(
     return make_onednn_memory(scale_md, engine, prepared.data_ptr());
   };
 
-  auto scratchpad = make_onednn_memory(matmul_pd.scratchpad_desc(), engine, nullptr);
+  auto scratchpad =
+      make_onednn_memory(matmul_pd.scratchpad_desc(), engine, nullptr);
 
   // 3. Setup Args for exec
   std::unordered_map<int, dnnl::memory> args;
@@ -509,9 +551,9 @@ sycl::event scaled_matmul(
 
   // Attach runtime scales using specs
   auto src_sc_mem = make_scale_mem_from_spec(
-      src_spec, src_spec.expected_numel_src(M, K), scale_a);
+      src_spec, src_spec.expected_numel(M, K, "src"), scale_a);
   auto wei_sc_mem = make_scale_mem_from_spec(
-      wei_spec, wei_spec.expected_numel_wei(K, N), scale_b);
+      wei_spec, wei_spec.expected_numel(N, K, "wei"), scale_b);
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_sc_mem});
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, wei_sc_mem});
   if (with_dst_scale) {
