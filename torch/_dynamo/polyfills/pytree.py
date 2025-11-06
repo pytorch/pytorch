@@ -164,7 +164,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
         num_leaves: int = field(init=False)
         num_children: int = field(init=False)
 
-        def __post_init__(self) -> None:
+        def __post_init__(self, /) -> None:
             if self._type is None:
                 assert len(self._children) == 0
                 assert self._metadata is None
@@ -183,7 +183,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
             object.__setattr__(self, "num_leaves", num_leaves)
             object.__setattr__(self, "num_children", num_children)
 
-        def __repr__(self) -> str:
+        def __repr__(self, /) -> str:
             def helper(treespec: PyTreeSpec) -> str:
                 if treespec.is_leaf():
                     assert treespec.type is None
@@ -217,29 +217,47 @@ if python_pytree._cxx_pytree_dynamo_traceable:
             ]
             return f"PyTreeSpec({', '.join(inner)})"
 
-        def __len__(self) -> int:
+        def __len__(self, /) -> int:
             return self.num_leaves
 
         @property
-        def type(self) -> builtins.type | None:
+        def type(self, /) -> builtins.type | None:
             return self._type
 
-        def is_leaf(self) -> bool:
+        def is_leaf(self, /) -> bool:
             return self.num_nodes == 1 and self.num_leaves == 1
 
-        def children(self) -> list[PyTreeSpec]:
+        def paths(self, /) -> list[tuple[Any, ...]]:
+            paths: list[tuple[Any, ...]] = []
+
+            def helper(treespec: PyTreeSpec, path_prefix: tuple[Any, ...]) -> None:
+                if treespec.is_leaf():
+                    paths.append(path_prefix)
+                    return
+
+                for entry, subspec in zip(
+                    treespec._entries,
+                    treespec._children,
+                    strict=True,
+                ):
+                    helper(subspec, path_prefix + (entry,))
+
+            helper(self, ())
+            return paths
+
+        def children(self, /) -> list[PyTreeSpec]:
             return list(self._children)
 
-        def child(self, index: int) -> PyTreeSpec:
+        def child(self, index: int, /) -> PyTreeSpec:
             return self._children[index]
 
-        def entries(self) -> list[Any]:
+        def entries(self, /) -> list[Any]:
             return list(self._entries)
 
-        def entry(self, index: int) -> Any:
+        def entry(self, index: int, /) -> Any:
             return self._entries[index]
 
-        def flatten_up_to(self, tree: PyTree) -> list[PyTree]:
+        def flatten_up_to(self, tree: PyTree, /) -> list[PyTree]:
             def helper(
                 treespec: PyTreeSpec,
                 node: PyTree,
@@ -328,7 +346,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
             helper(self, tree, subtrees)
             return subtrees
 
-        def unflatten(self, leaves: Iterable[Any]) -> PyTree:
+        def unflatten(self, leaves: Iterable[Any], /) -> PyTree:
             if not isinstance(leaves, (list, tuple)):
                 leaves = list(leaves)
             if len(leaves) != self.num_leaves:
@@ -525,6 +543,28 @@ if python_pytree._cxx_pytree_dynamo_traceable:
     __all__ += ["tree_flatten"]
 
     @substitute_in_graph(  # type: ignore[arg-type]
+        optree.tree_flatten_with_path,
+        # We need to disable constant folding here because we want the function to reference the
+        # PyTreeSpec class defined above, not the one in the C++ module.
+        can_constant_fold_through=False,
+    )
+    def tree_flatten_with_path(
+        tree: PyTree,
+        /,
+        is_leaf: Callable[[PyTree], bool] | None = None,
+        *,
+        none_is_leaf: bool = False,
+        namespace: str = "",
+    ) -> tuple[list[tuple[Any, ...]], list[Any], PyTreeSpec]:
+        leaves, treespec = tree_flatten(
+            tree,
+            is_leaf=is_leaf,
+            none_is_leaf=none_is_leaf,
+            namespace=namespace,
+        )
+        return treespec.paths(), leaves, treespec  # type: ignore[return-value]
+
+    @substitute_in_graph(  # type: ignore[arg-type]
         optree.tree_structure,
         # We need to disable constant folding here because we want the function to reference the
         # PyTreeSpec class defined above, not the one in the C++ module.
@@ -602,6 +642,50 @@ if python_pytree._cxx_pytree_dynamo_traceable:
         )
         flat_args = [leaves] + [treespec.flatten_up_to(r) for r in rests]
         deque(map(func, *flat_args), maxlen=0)  # consume and exhaust the iterable
+        return tree
+
+    __all__ += ["tree_map_"]
+
+    @substitute_in_graph(optree.tree_map_with_path, can_constant_fold_through=True)  # type: ignore[arg-type]
+    def tree_map_with_path(
+        func: Callable[..., Any],
+        tree: PyTree,
+        /,
+        *rests: PyTree,
+        is_leaf: Callable[[PyTree], bool] | None = None,
+        none_is_leaf: bool = False,
+        namespace: str = "",
+    ) -> PyTree:
+        paths, leaves, treespec = tree_flatten_with_path(
+            tree,
+            is_leaf=is_leaf,
+            none_is_leaf=none_is_leaf,
+            namespace=namespace,
+        )
+        flat_args = [leaves] + [treespec.flatten_up_to(r) for r in rests]
+        return treespec.unflatten(map(func, paths, *flat_args))
+
+    __all__ += ["tree_map_with_path"]
+
+    @substitute_in_graph(optree.tree_map_with_path_, can_constant_fold_through=True)  # type: ignore[arg-type]
+    def tree_map_with_path_(
+        func: Callable[..., Any],
+        tree: PyTree,
+        /,
+        *rests: PyTree,
+        is_leaf: Callable[[PyTree], bool] | None = None,
+        none_is_leaf: bool = False,
+        namespace: str = "",
+    ) -> PyTree:
+        paths, leaves, treespec = tree_flatten_with_path(
+            tree,
+            is_leaf=is_leaf,
+            none_is_leaf=none_is_leaf,
+            namespace=namespace,
+        )
+        flat_args = [leaves] + [treespec.flatten_up_to(r) for r in rests]
+        # consume and exhaust the iterable
+        deque(map(func, paths, *flat_args), maxlen=0)
         return tree
 
     __all__ += ["tree_map_"]
