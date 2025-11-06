@@ -2379,6 +2379,10 @@ fallback_randn_default = fallback_handler(aten.randn.default)
 fallback_randn_generator = fallback_handler(aten.randn.generator)
 make_fallback(aten.randint)
 
+# TODO: mlazos reevaluate if we want to codegen something different
+make_fallback(torch.ops.streams.record_event.default)
+make_fallback(torch.ops.streams.wait_event.default)
+
 
 @register_lowering(aten.rand)
 def rand(*args, **kwargs):
