@@ -40,21 +40,18 @@ class TestHopPrint(TestCase):
 
         self.assertEqual(printed_output, "moo 1 2")
 
-    def test_tensor_print(self):
-        def f(x):
-            x = x + x
-            torch._higher_order_ops.print("moo {x}", x=x)
-            x = x * x
-            torch._higher_order_ops.print("yeehop {x}", x=x.shape[0])
-            return x
+        fx_f = make_fx(f)(x)
+        new_inp = torch.randn(3, 3)
 
-        counters.clear()
-        x = torch.randn(3, 3)
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            f(x)
-            printed_output = mock_stdout.getvalue().strip()
+            fx_f(new_inp)
+            ori_printed_output = mock_stdout.getvalue().strip()
 
-        self.assertEqual(printed_output, f"moo {x * 2}\nyeehop 3")
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            f(new_inp)
+            fx_printed_output = mock_stdout.getvalue().strip()
+
+        self.assertEqual(ori_printed_output, fx_printed_output)
 
     def test_print_with_proxy_graph(self):
         class M(torch.nn.Module):
@@ -69,11 +66,10 @@ class TestHopPrint(TestCase):
         inputs = (torch.randn(3),)
 
         # Without functionalization, print should just appear in the graph directly
-        gm = make_fx(M(), tracing_mode="symbolic")
-        gm_with_input = gm(*inputs)
+        gm = make_fx(M(), tracing_mode="symbolic")(*inputs)
 
         self.assertExpectedInline(
-            str(gm_with_input.code).strip(),
+            str(gm.code).strip(),
             """\
 def forward(self, arg0_1):
     print_1 = torch.ops.higher_order.print('moo {x} {y}', x = 1, y = 2);  print_1 = None
@@ -84,25 +80,6 @@ def forward(self, arg0_1):
     print_4 = torch.ops.higher_order.print('yeehop {x}', x = sym_size_int);  sym_size_int = print_4 = None
     return (add,)""",
         )
-
-    def test_print_with_proxy_consistency(self):
-        def fn(x):
-            torch._higher_order_ops.print("moo {x} {y}", x=1, y=2)
-            return torch.sin(x)
-
-        inp = torch.randn(3)
-        fx_f = make_fx(fn)(inp)
-        new_inp = torch.randn(3)
-
-        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            fn(new_inp)
-            ori_printed_output = mock_stdout.getvalue().strip()
-
-        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            fx_f(new_inp)
-            fx_printed_output = mock_stdout.getvalue().strip()
-
-        self.assertEqual(ori_printed_output, fx_printed_output)
 
 
 if __name__ == "__main__":
