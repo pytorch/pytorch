@@ -506,12 +506,17 @@ def dist_strategy(op_schema: OpSchema) -> OpStrategy:
     )
     aligned_strategy = linear_pointwise_strategy(sub_schema)
 
+    # Compute broadcasted shape to determine reduction dimensions
+    # dist(a, b) = norm(a - b), so we need ndim of the broadcasted result
+    common_shape = torch.broadcast_shapes(input_strategy.shape, other_strategy.shape)
+    result_ndim = len(common_shape)
+
     # Apply reduction to aligned strategy
     output_strategy = OpStrategy([])
     for aligned_spec in aligned_strategy.strategies:
-        reduce_dims = list(range(input_strategy.ndim))
+        reduce_dims = list(range(result_ndim))
         reduce_dims_map = _infer_reduce_dims_map(
-            reduce_dims, input_strategy.ndim, keep_dim=False
+            reduce_dims, result_ndim, keep_dim=False
         )
 
         out_placements = map_placements_after_reduction(
