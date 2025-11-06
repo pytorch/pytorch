@@ -257,8 +257,6 @@ class PyTreeSpec:
         return self.num_nodes == 1 and self.num_leaves == 1
 
     def paths(self, /) -> list[tuple[Any, ...]]:
-        paths: list[tuple[Any, ...]] = []
-
         def helper(treespec: Self, path_prefix: tuple[Any, ...]) -> None:
             if treespec.is_leaf():
                 paths.append(path_prefix)
@@ -271,6 +269,7 @@ class PyTreeSpec:
             ):
                 helper(subspec, path_prefix + (entry,))
 
+        paths: list[tuple[Any, ...]] = []
         helper(self, ())
         return paths
 
