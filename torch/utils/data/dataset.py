@@ -267,10 +267,10 @@ class StackDataset(Dataset[_T_stack]):
                             "Nested dataset's output size mismatch."
                             f" Expected {len(indices)}, got {len(items)}"
                         )
-                    for data, d_sample in zip(items, dict_batch):
+                    for data, d_sample in zip(items, dict_batch, strict=True):
                         d_sample[k] = data
                 else:
-                    for idx, d_sample in zip(indices, dict_batch):
+                    for idx, d_sample in zip(indices, dict_batch, strict=True):
                         d_sample[k] = dataset[idx]
             return dict_batch
 
@@ -284,10 +284,10 @@ class StackDataset(Dataset[_T_stack]):
                         "Nested dataset's output size mismatch."
                         f" Expected {len(indices)}, got {len(items)}"
                     )
-                for data, t_sample in zip(items, list_batch):
+                for data, t_sample in zip(items, list_batch, strict=True):
                     t_sample.append(data)
             else:
-                for idx, t_sample in zip(indices, list_batch):
+                for idx, t_sample in zip(indices, list_batch, strict=True):
                     t_sample.append(dataset[idx])
         tuple_batch: list[_T_tuple] = [tuple(sample) for sample in list_batch]
         return tuple_batch
@@ -477,5 +477,5 @@ def random_split(
     lengths = cast(Sequence[int], lengths)
     return [
         Subset(dataset, indices[offset - length : offset])
-        for offset, length in zip(itertools.accumulate(lengths), lengths)
+        for offset, length in zip(itertools.accumulate(lengths), lengths, strict=True)
     ]

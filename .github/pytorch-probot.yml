@@ -19,6 +19,7 @@ ciflow_push_tags:
 - ciflow/inductor-perf-test-nightly-rocm-mi300
 - ciflow/inductor-perf-test-nightly-rocm-mi355
 - ciflow/inductor-perf-test-nightly-x86-zen
+- ciflow/inductor-perf-test-nightly-xpu
 - ciflow/inductor-periodic
 - ciflow/inductor-rocm
 - ciflow/linux-aarch64
