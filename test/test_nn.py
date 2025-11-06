@@ -13516,7 +13516,7 @@ if __name__ == '__main__':
 
         # Should warning when parameters generator exhausted
         params = l.parameters()
-        for p in params:
+        for _p in params:
             pass
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
