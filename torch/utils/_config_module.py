@@ -692,7 +692,7 @@ class ConfigModule(ModuleType):
                     raise AssertionError(
                         "prior should be empty when entering ConfigPatch"
                     )
-                for key in self.changes.keys():
+                for key in self.changes:
                     # KeyError on invalid entry
                     prior[key] = config.__getattr__(key)
                 for k, v in self.changes.items():
