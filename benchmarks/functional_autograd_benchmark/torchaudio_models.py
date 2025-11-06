@@ -389,7 +389,7 @@ class PositionalEncoding(nn.Module):
         \text{PosEncoder}(pos, 2i+1) = cos(pos/10000^(2i/d_model))
         \text{where pos is the word position and i is the embed idx)
     Args:
-        d_model: the embed dim (required).
+        d_model: the embed dim (required). This must be an even number.
         dropout: the dropout value (default=0.1).
         max_len: the max. length of the incoming sequence (default=5000).
     Examples:
@@ -398,6 +398,8 @@ class PositionalEncoding(nn.Module):
 
     def __init__(self, d_model, dropout=0.1, max_len=5000):
         super().__init__()
+
+        assert d_model % 2 == 0, 'The dimension of the embedding must be an even number.'
         self.dropout = nn.Dropout(p=dropout)
 
         pe = torch.zeros(max_len, d_model)
