@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 from collections import namedtuple
-from typing import Any, Callable, Generic, Literal, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Generic, Literal, TYPE_CHECKING, TypeVar, Union
 
 import torch
 from torch._dynamo.utils import counters, set_feature_use
@@ -88,7 +88,7 @@ class NoTritonConfigsError(RuntimeError):
 
 
 if TYPE_CHECKING:
-    from collections.abc import Container, Hashable
+    from collections.abc import Callable, Container, Hashable
 
     from torch._guards import CompileId
 
@@ -336,6 +336,7 @@ class CachingAutotuner(KernelInterface):
             name=self.fn.__name__,
             size_hints=size_hints,
             inductor_meta=self.inductor_meta,
+            frozen_fields=self.get_coordesc_frozen_fields(),
         )
         self.filename = filename
 
@@ -364,6 +365,13 @@ class CachingAutotuner(KernelInterface):
 
         # Mode for launch grid calculation
         self.grid_mode: Literal["python", "cpp"] = "python"
+
+    def get_coordesc_frozen_fields(self) -> OrderedSet[str]:
+        out: OrderedSet[str] = OrderedSet()
+        if self.inductor_meta.get("RSPLIT_SIZE"):
+            # We fix XBLOCK for mix order reduction
+            out.add("XBLOCK")
+        return out
 
     def is_statically_launchable(self):
         """
@@ -917,11 +925,15 @@ class CachingAutotuner(KernelInterface):
 
             return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
 
-        if self.device_props.type == "cpu":
-            return benchmarker.benchmark_cpu(kernel_call)
-
-        return benchmarker.benchmark_gpu(
-            kernel_call, rep=40, is_vetted_benchmarking=True
+        benchmark_kwargs = (
+            {}
+            if self.device_props.type == "cpu"
+            else {"rep": 40, "is_vetted_benchmarking": True}
+        )
+        return benchmarker.benchmark(
+            fn=kernel_call,
+            device=self.device_props.type,
+            **benchmark_kwargs,  # type: ignore[arg-type]
         )
 
     def copy_args_to_cpu_if_needed(self, *args, **kwargs):
@@ -3388,15 +3400,28 @@ def persistent_reduction(
 
             # small XBLOCK to use less registers/smem
             c.kwargs["XBLOCK"] = 1
-            c.num_warps //= 2
-            c.num_warps = max(c.num_warps, 2)
 
-            # less warps so potentially each sm can run more thread blocks
-            # Inside each thread block, we handle the split sequentially,
-            # more thread blocks is beneficial here.
-            newc = copy.deepcopy(c)
-            newc.num_warps = 2
-            new_configs.append(newc)
+            rnumel_hint = size_hints["r0_"]
+
+            if rnumel_hint <= 1024:
+                c.num_warps //= 2
+                c.num_warps = max(c.num_warps, 2)
+                new_configs.append(c)
+
+                # less warps so potentially each sm can run more thread blocks
+                # Inside each thread block, we handle the split sequentially,
+                # more thread blocks is beneficial here.
+                newc = copy.deepcopy(c)
+                newc.num_warps = 2
+                new_configs.append(newc)
+            else:
+                # more warps for larger rows
+                new_configs.append(c)
+
+                if c.num_warps < 32:
+                    newc = copy.deepcopy(c)
+                    newc.num_warps *= 2
+                    new_configs.append(newc)
 
         configs = unique_configs(new_configs)
 
@@ -3561,13 +3586,24 @@ def user_autotune(
     )
 
 
-def foreach(triton_meta, num_warps, filename=None, inductor_meta=None):
+def foreach(triton_meta, filename=None, inductor_meta=None):
     """
     Compile a triton foreach kernel
     """
+    configs = []
+
+    # Naive autotuning path for num_warps
+    if not (
+        inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise")
+    ):
+        configs.append(triton.Config({}, num_stages=1, num_warps=8))
+    else:
+        for warps in [1, 2, 4, 8]:
+            configs.append(triton.Config({}, num_stages=1, num_warps=warps))
+
     return cached_autotune(
         None,
-        [triton.Config({}, num_stages=1, num_warps=num_warps)],
+        configs,
         triton_meta=triton_meta,
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,
@@ -3702,8 +3738,7 @@ class MixOrderReductionGrid(GridExpr):
         split_size = meta.get("RSPLIT_SIZE")
         xblock = meta.get("XBLOCK")
         assert split_size
-        assert xblock
-        assert split_size % xblock == 0
+        assert xblock == 1, "Mix order reduction force XBLOCK=1 right now"
         self.x_grid = self.ceildiv("xnumel", split_size)
 
 

@@ -22,7 +22,8 @@ optimizer-specific optimizations and safety guarantees.
 
 import logging
 import weakref
-from typing import Any, Iterable, Optional, TYPE_CHECKING
+from collections.abc import Iterable
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.variables.tensor import TensorVariable
@@ -99,6 +100,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         **kwargs: Any,
     ) -> None:
         super().__init__(value, **kwargs)
+        # pyrefly: ignore [bad-override]
         self.value: torch.optim.Optimizer = value
         self.grad_to_source = grad_to_source or {}
         self.tensor_to_source = tensor_to_source or {}

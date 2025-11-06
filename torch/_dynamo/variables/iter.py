@@ -14,8 +14,8 @@ handling of iterator operations during code transformation and optimization.
 """
 
 import itertools
-from collections.abc import Callable
-from typing import Any, Sequence, TYPE_CHECKING, Union
+from collections.abc import Callable, Sequence
+from typing import Any, TYPE_CHECKING, Union
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
@@ -155,6 +155,7 @@ class ItertoolsVariable(VariableTracker):
 
             result = []
             try:
+                # pyrefly: ignore [unbound-name]
                 for k, v in itertools.groupby(seq, key=keyfunc):
                     result.append(
                         variables.TupleVariable(

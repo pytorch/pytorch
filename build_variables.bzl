@@ -917,7 +917,6 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_torch_functions_manual.cpp",
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_variable_indexing.cpp",
-    "torch/csrc/distributed/DTensorFallbackKernel.cpp",
     "torch/csrc/distributed/python_placement.cpp",
     "torch/csrc/dynamo/python_compiled_autograd.cpp",
     "torch/csrc/dynamo/cache_entry.cpp",
@@ -930,6 +929,7 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/guards.cpp",
     "torch/csrc/dynamo/utils.cpp",
     "torch/csrc/dynamo/init.cpp",
+    "torch/csrc/dynamo/stackref_bridge.c",
     "torch/csrc/functorch/init.cpp",
     "torch/csrc/fx/node.cpp",
     "torch/csrc/mps/Module.cpp",
@@ -1025,6 +1025,7 @@ libtorch_python_core_sources = [
 libtorch_python_distributed_core_sources = [
     "torch/csrc/distributed/c10d/init.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
+    "torch/csrc/distributed/c10d/python_callback_work.cpp",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [

@@ -560,6 +560,7 @@ class TestAsyncCheckpointerSpecific(TestCase):
 
             # Wait for all to complete
             for stage_future, write_future in futures:
+                stage_future.result()
                 write_future.result()
 
             # Verify all checkpoints exist and have correct content
