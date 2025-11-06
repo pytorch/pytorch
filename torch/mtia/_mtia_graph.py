@@ -66,9 +66,3 @@ class _graph:
     def __exit__(self, *args: object) -> None:
         self.mtia_graph.capture_end()
         self.stream_ctx.__exit__(*args)
-
-
-__all__ = [
-    "_MTIAGraph",
-    "_graph",
-]
