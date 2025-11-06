@@ -839,6 +839,34 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         "call_function", get_external_object_by_index, (ind,), {}
                     ),
                 )
+            elif issubclass(self.value, torch.Event):
+                from .constant import ConstantVariable
+                from .lists import TupleVariable
+
+                # Register newly created event for reconstruction
+                var_kwargs = ConstDictVariable(
+                    {ConstantVariable(k): v for k, v in kwargs.items()}
+                )
+                var_args = TupleVariable(list(args))
+                event = self.value(
+                    *(var_args.as_python_constant()),
+                    **(var_kwargs.as_python_constant()),
+                )
+                from ..graph_bytecode_inputs import register_graph_created_object
+                from .streams import EventVariable
+
+                ind = register_graph_created_object(
+                    event,
+                    EventVariable.make_construct_in_graph_event_fn(
+                        var_args, var_kwargs
+                    ),
+                )
+                tensor_variable = wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function", get_external_object_by_index, (ind,), {}
+                    ),
+                )
             else:
                 tensor_variable = wrap_fx_proxy(
                     tx=tx,
