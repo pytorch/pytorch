@@ -1172,10 +1172,17 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
             _internal_assert(gid in holder.handles)
 
             if holder.handles[gid] is None:
+                extra = ""
+                if torch._C._get_graph_exec_group() is not None:
+                    extra = (
+                        "Performing two backward calls that overlap (i.e. require the same "
+                        "saved activation in order to compute gradients) is not allowed while "
+                        "under the torch.utils.checkpoint.GraphExecGroup context. "
+                    )
                 raise CheckpointError(
                     "torch.utils.checkpoint: Unpack is being triggered for a tensor that was already "
-                    "unpacked once. If you are calling ctx.saved_tensors in backward, make sure to do "
-                    "so only once. Otherwise please open an issue with details on your use case."
+                    f"unpacked once. {extra}If you are calling ctx.saved_tensors in backward, make sure "
+                    "to do so only once. Otherwise please open an issue with details on your use case."
                 )
             _internal_assert(holder.handles[gid] in frame.recomputed[gid])
             ret = frame.recomputed[gid][holder.handles[gid]]
@@ -1606,6 +1613,8 @@ class GraphExecGroup:
 
     Backward calls under the same instance of this context manager must execute
     over non-overlapping regions of the backward graph even if retain_graph=True.
+    In particular, any two backward call cannot use the same saved activation for
+    gradient computation.
 
     .. note::
         This context manager only affects checkpoint with use_reentrant=False, and
