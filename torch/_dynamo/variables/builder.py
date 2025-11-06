@@ -1083,6 +1083,7 @@ class VariableBuilder:
             return EventVariable(
                 event_proxy,
                 value,
+                index,
                 source=self.source,
             )
         elif (
@@ -3004,16 +3005,28 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         return SymNodeVariable(proxy, example_value, **options)
     elif (
         isinstance(example_value, torch.Stream)
-        and proxy.node.target == get_external_object_by_index
+        and proxy.node.target is get_external_object_by_index
     ) or proxy.node.target in [
         device_interface.current_stream
         for _, device_interface in get_registered_device_interfaces()
     ]:
         set_example_value(proxy.node, example_value)
         index = None
-        if proxy.node.target == get_external_object_by_index:
+        if proxy.node.target is get_external_object_by_index:
             index = proxy.node.args[0]
         return StreamVariable(proxy, example_value, index, **options)
+    elif (
+        isinstance(example_value, torch.Event)
+        and proxy.node.target is get_external_object_by_index
+    ) or proxy.node.target in [
+        device_interface.current_stream
+        for _, device_interface in get_registered_device_interfaces()
+    ]:
+        index = None
+        if proxy.node.target is get_external_object_by_index:
+            index = proxy.node.args[0]
+        set_example_value(proxy.node, example_value)
+        return EventVariable(proxy, example_value, index, **options)
     elif (
         inspect.isclass(proxy.node.target)
         and issubclass(proxy.node.target, torch.Event)
@@ -3022,7 +3035,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         for _, device_interface in get_registered_device_interfaces()
     ]:
         set_example_value(proxy.node, example_value)
-        return EventVariable(proxy, example_value, **options)
+        return EventVariable(proxy, example_value, None, **options)
     elif proxy.node.target == "query" and proxy.node.op == "call_method":
         set_example_value(proxy.node, example_value)
         return ConstantVariable(example_value, **options)
@@ -3033,7 +3046,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         and proxy.node.op == "call_method"
     ):
         set_example_value(proxy.node, example_value)
-        return EventVariable(proxy, example_value, **options)
+        return EventVariable(proxy, example_value, None, **options)
     elif isinstance(example_value, int) and (
         proxy.node.target
         in [

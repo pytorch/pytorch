@@ -447,6 +447,37 @@ class GraphModule(torch.nn.Module):
         )
 
     @requires_cuda
+    def test_event_tracing(self):
+        def fn(x) -> None:
+            e = torch.Event()
+            e.record()
+            x.add_(1)
+            return x
+
+        inp = (torch.ones(2, 2, device="cuda"),)
+        (
+            _,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+
+        self.assertExpectedInline(
+            print_graph(fw_graphs[0]),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]"):
+        #
+        record_event = torch.ops.streams.record_event.default(0, 1);  record_event = None
+
+        #
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+        copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = None
+        return (copy_,)
+""",
+        )
+
+    @requires_cuda
     def test_run_opcheck_fork_join(self):
         from torch._dynamo.variables.streams import fork_stream, join_stream
         from torch.library import opcheck
