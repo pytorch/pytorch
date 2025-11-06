@@ -1046,6 +1046,39 @@ def speculate_subgraph(
                         output, masks_to_filter_const_values
                     )
 
+                # Make intermediates output of the subgraph. This helps HOPs
+                # which allow side effects. Consider a scenario where  we have a
+                # list in the outer scope, which gets appended in the subgraph
+                # code - lets calls it `sin`, without subgraph returning `sin`
+                # as output. Since this `sin` is not an output of the subgraph,
+                # there is no way for the outer scope list to access the
+                # subgraph intermediate node - `sin`. Therefore, we make all
+                # intermediates outputs of the subgraph.
+
+                # One of the inefficiencies of this approach is that
+                if under_activation_checkpoint:
+                    #
+                    # TODO - We should enable this for more HOPs specifically invoke_subgraph and autograd.Function.
+                    output_vts = {
+                        vt
+                        for vt in output.items
+                        if isinstance(vt, (variables.TensorVariable, variables.SymNodeVariable))
+                    }
+
+                    # TODO - this should probably outside of should_flatten_outputs
+                    # TODO - I think this will mess up the pytree_unflatten later
+                    # on, when we undo the flattening for outputs.
+
+                    # Force the extra outputs, the TensorVariable cache in
+                    # output_graph.py will rewrite the proxy
+                    extra_outputs = []
+                    for out in subtracer.tracked_tensor_or_symint_vt:
+                        if out not in output_vts:
+                            extra_outputs.append(out)
+                    output = TupleVariable(output.items + extra_outputs)
+
+
+
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
             # TODO: support pytree output

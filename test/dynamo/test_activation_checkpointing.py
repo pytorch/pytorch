@@ -1699,7 +1699,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1], res[1])
 
-    @unittest.expectedFailure
     @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=True)
     def test_nonlocal_list_mutation_hidden(self):
         def gn(x, z):
