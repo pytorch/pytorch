@@ -1,11 +1,11 @@
-import unittest
-from unittest.mock import patch, MagicMock
 import tempfile
+import unittest
+from unittest.mock import MagicMock, patch
 
 from tools.linter.adapters.stable_shim_version_linter import (
-    get_current_version,
-    get_added_lines,
     check_file,
+    get_added_lines,
+    get_current_version,
 )
 
 
