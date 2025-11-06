@@ -1192,8 +1192,10 @@ class NativeShardingPropagatorCache {
   // Returns an invalid (falsey) py::object if the lookup fails.
   py::object find(const NativeOpSchema& op_schema) const {
     if (auto it = repr_.find(op_schema); it != repr_.end()) {
+      hits_++;
       return py::object(it->second);
     }
+    misses_++;
     return py::object();
   }
 
@@ -1205,8 +1207,20 @@ class NativeShardingPropagatorCache {
         "tried to insert already-present element in NativeShardingPropagatorCache!");
   }
 
+  auto hits() const {
+    return hits_;
+  }
+
+  auto misses() const {
+    return misses_;
+  }
+
  private:
   c10::FastMap<NativeOpSchema, py::object> repr_;
+  // Cache is thread-local, so we don't take any further action for
+  // thread-safety of these.
+  mutable std::size_t hits_ = 0;
+  mutable std::size_t misses_ = 0;
 };
 
 static std::optional<NativeOpSchema> create_native_op_schema(
@@ -1985,6 +1999,25 @@ static std::optional<NativeOpSchema> create_native_op_schema(
       std::move(comparison_key),
       comparison_key_hash,
       args_kwargs.num_positional_args());
+}
+
+static PyObject* get_DTensor_sharding_propagator_cache_stats(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto& cache = get_thread_local_native_sharding_propagator_cache();
+  py::tuple result(2);
+  result[0] = cache.hits();
+  result[1] = cache.misses();
+  return result.release().ptr();
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* clear_DTensor_sharding_propagator_cache(
+    PyObject* self,
+    PyObject* noargs) {
+  native_sharding_propagator_cache_DO_NOT_USE.reset();
+  Py_RETURN_NONE;
 }
 
 using getter = PyObject* (*)(PyObject*, void*);
@@ -2973,6 +3006,14 @@ static PyMethodDef extra_functions[] = {
      castPyCFunctionFast(DTensor_compute_global_tensor_info),
      METH_FASTCALL,
      compute_global_tensor_info_doc},
+    {"_get_DTensor_sharding_propagator_cache_stats",
+     get_DTensor_sharding_propagator_cache_stats,
+     METH_NOARGS,
+     nullptr},
+    {"_clear_DTensor_sharding_propagator_cache",
+     clear_DTensor_sharding_propagator_cache,
+     METH_NOARGS,
+     nullptr},
     {nullptr}};
 
 struct THPVariableMeta {
