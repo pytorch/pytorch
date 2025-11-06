@@ -270,7 +270,9 @@ def _call_function_and_unflatten_output(
             if isinstance(
                 orig_vt, (variables.SymNodeVariable, variables.TensorVariable)
             ):
-                assert isinstance(subgraph_vt, variables.TensorVariable)
+                assert isinstance(
+                    subgraph_vt, (variables.SymNodeVariable, variables.TensorVariable)
+                )
                 orig_vt.proxy = subgraph_vt.proxy
 
     if ret_spec.masks_to_filter_const_values:
