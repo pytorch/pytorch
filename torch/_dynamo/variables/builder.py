@@ -3011,7 +3011,10 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         for _, device_interface in get_registered_device_interfaces()
     ]:
         set_example_value(proxy.node, example_value)
-        return StreamVariable(proxy, example_value, proxy.node.args[0], **options)
+        index = None
+        if proxy.node.target == get_external_object_by_index:
+            index = proxy.node.args[0]
+        return StreamVariable(proxy, example_value, index, **options)
     elif (
         isinstance(example_value, torch.Event)
         and proxy.node.target == get_external_object_by_index

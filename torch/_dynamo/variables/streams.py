@@ -204,7 +204,7 @@ class StreamVariable(StreamContextVariable):
         self,
         proxy: Proxy,
         value: torch.Stream,
-        user_object_index: int,
+        user_object_index: Optional[int] = None,
         **kwargs: Any,
     ) -> None:
         # Index into the user object table
@@ -300,7 +300,7 @@ class StreamVariable(StreamContextVariable):
             codegen.append_output(codegen.create_load_const(self.user_object_index))
             codegen.extend_output(create_call_function(1, False))
         else:
-            # TODO mlazos: evaluate if we still need this
+            # This will support the legacy behavior
             prefix = f"_stream_{self.device}"
             name = codegen.tx.output.install_global_by_id(prefix, self.value)
             codegen.append_output(codegen.create_load_global(name, add=True))

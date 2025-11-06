@@ -196,6 +196,7 @@ class <lambda>(torch.nn.Module):
         s_exp = fn(*inp)
         self.assertEqual(s_act, s_exp)
 
+    @requires_cuda
     def test_nested_stream_enter_exit(self):
         def fn(x, y, s0, s1, s2):
             with s1:
@@ -249,6 +250,7 @@ class <lambda>(torch.nn.Module):
     def test_nested_stream_enter_exit_graph_break(self):
         pass
 
+    @requires_cuda
     def test_local_stream_enter_exit(self):
         def fn(x, y):
             s2 = torch.Stream()
@@ -289,6 +291,7 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
+    @requires_cuda
     def test_local_stream_nested_enter_exit(self):
         def fn(x, y):
             s2 = torch.Stream()
@@ -331,6 +334,7 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
+    @requires_cuda
     def test_stream_with_mutation(self):
         def fn(x, y):
             s2 = torch.Stream()
