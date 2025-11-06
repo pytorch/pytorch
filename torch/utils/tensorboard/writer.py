@@ -166,6 +166,7 @@ class FileWriter:
         The events will go into a new events file.
         Does nothing if the EventFileWriter was not closed.
         """
+        # pyrefly: ignore [missing-attribute]
         self.event_writer.reopen()
 
 
@@ -280,6 +281,7 @@ class SummaryWriter:
                 self.file_writer.add_event(
                     Event(
                         step=most_recent_step,
+                        # pyrefly: ignore [missing-attribute]
                         session_log=SessionLog(status=SessionLog.START),
                     )
                 )
@@ -422,7 +424,7 @@ class SummaryWriter:
             fw_tag = fw_logdir + "/" + main_tag.replace("/", "_") + "_" + tag
             if self.all_writers is None:
                 raise AssertionError("self.all_writers is None")
-            if fw_tag in self.all_writers.keys():
+            if fw_tag in self.all_writers:
                 fw = self.all_writers[fw_tag]
             else:
                 fw = FileWriter(

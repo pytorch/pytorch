@@ -591,7 +591,7 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
         )
 
     def is_mm(node: torch.fx.Node) -> bool:
-        return node.target == torch.ops.aten.mm.default
+        return node.target is torch.ops.aten.mm.default
 
     # the inner MM
     inner_mm = match.nodes[-1]

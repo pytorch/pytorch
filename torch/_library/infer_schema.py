@@ -291,7 +291,7 @@ def parse_return(annotation, error_fn):
 
     origin = typing.get_origin(annotation)
     if origin is not tuple:
-        if annotation not in SUPPORTED_RETURN_TYPES.keys():
+        if annotation not in SUPPORTED_RETURN_TYPES:
             error_fn(
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."

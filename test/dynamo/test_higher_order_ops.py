@@ -2858,7 +2858,7 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             return wrap(lambda x: model(x), x)
 
-        for i in range(2):
+        for _ in range(2):
             # second iteration is key, hooks would have fired during aot trace
             # on first iter
             activations.clear()
