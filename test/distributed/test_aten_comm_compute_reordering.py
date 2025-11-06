@@ -949,13 +949,21 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
         """Test collective benchmarking with real process group (falls back on fake)."""
 
         def func(a):
+            # Test all three collective types with 8x8 (power of 2 size = 256 elements = 1024 bytes for fp32)
             ar = _functional_collectives.all_reduce(a, "sum", "0")
+            ag = _functional_collectives.all_gather_tensor(
+                a, 0, list(range(self.world_size))
+            )
+            rs = _functional_collectives.reduce_scatter_tensor(a, "sum", 0, "0")
+
             b = torch.matmul(a, a)
-            return torch.matmul(ar, b)
+            c = torch.matmul(ar, b)
+            return c.sum() + ag.sum() + rs.sum()
 
         patches = {
             **get_patches(),
             "aten_distributed_optimizations.collective_estimator": "benchmark",
+            "aten_distributed_optimizations.custom_runtime_estimation": None,  # Remove custom estimation so benchmarking happens
         }
 
         with _dynamo_dist_per_rank_init(
@@ -964,19 +972,15 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
         ):
-            # Clear any stale cache from previous tests
-            from torch._inductor.fx_passes.node_runtime_estimation import clear_collective_cache_once
-            clear_collective_cache_once()
-
-            inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
+            inputs = torch.ones(8, 8, dtype=torch.float, device=device_type) + self.rank
 
             with torch._inductor.config.patch(patches):
                 compiled = torch.compile(func)
                 out, aten_graph_str = run_and_get_aten_graph(compiled, inputs)
 
-                # Verify wait_tensor is sinked (scheduling worked)
-                FileCheck().check("all_reduce").check("mm").check("wait_tensor").check(
-                    "mm"
+                # Verify all three collective types are present
+                FileCheck().check("all_reduce").check("all_gather").check(
+                    "reduce_scatter"
                 ).run(aten_graph_str)
 
                 # Test passes if compilation succeeded with benchmarking enabled

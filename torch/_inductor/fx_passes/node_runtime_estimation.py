@@ -8,8 +8,8 @@ from functools import lru_cache
 from typing import Optional
 
 import torch
-from torch._logging import getArtifactLogger
 from torch._inductor.utils import clear_on_fresh_cache
+from torch._logging import getArtifactLogger
 
 
 # Setup logger for artifact logging

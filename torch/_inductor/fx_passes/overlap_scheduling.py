@@ -425,7 +425,9 @@ class OverlapScheduler:
         # Benchmark collectives if enabled (only CUDA events - others are deterministic)
         # Skip if custom estimation is provided for collectives
         collective_nodes: list[fx.Node] = []
-        benchmarked_collective_nodes: list[fx.Node] = []  # Track which were actually benchmarked
+        benchmarked_collective_nodes: list[
+            fx.Node
+        ] = []  # Track which were actually benchmarked
         if self.collective_estimator == "benchmark":
             from torch._inductor.fx_passes.node_runtime_estimation import (
                 benchmark_collective_with_cuda_events,
