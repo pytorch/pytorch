@@ -1,0 +1,9 @@
+# Auto-generated file listing shim functions and their minimum required versions
+# Format: function_name: TORCH_VERSION_MAJOR_MINOR_PATCH
+#
+# This file is automatically updated by the stable_shim_usage_linter.
+# DO NOT EDIT MANUALLY.
+
+torch_call_dispatcher: TORCH_VERSION_2_10_0
+torch_library_impl: TORCH_VERSION_2_10_0
+torch_library_impl2: TORCH_VERSION_2_10_0
