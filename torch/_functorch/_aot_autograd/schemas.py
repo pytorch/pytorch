@@ -360,7 +360,8 @@ class SubclassCreationMeta:
 
     def __post_init__(self):
         # sanity assert to make sure we don't leak memory
-        assert is_fake(self.original_subclass)
+        # original_subclass can be None if make_runtime_safe() was already called
+        assert self.original_subclass is None or is_fake(self.original_subclass)
 
 
 # This class encapsulates all aliasing + mutation info we need about the forward graph
@@ -413,14 +414,11 @@ class ViewAndMutationMeta:
 
     # length = # user inputs
     subclass_inp_meta: list[Union[PlainTensorMeta, SubclassCreationMeta]]
-    # So, the full set of outputs to the forward graph looks something like:
-    # (*mutated_inps, *user_outs, *intermediate_bases, *saved_for_bw_tensors)
-    # where the first 3 of those 4 can be subclasses
-    # (but not saved_for_bw tensors, since these are internal to the compiler
-    # and not user visible, so there's no point in wrapping/unwrapping them at runtime).
-    # This list contains subclass information on all of the fw graph outputs
-    # except for saved_for_bw_tensors.
-    subclass_fw_graph_out_meta: list[Union[PlainTensorMeta, SubclassCreationMeta]]
+    # Tuple of (user_outputs_meta, intermediate_bases_meta) used to compute subclass_fw_graph_out_meta
+    _subclass_meta_components: tuple[
+        list[Union[PlainTensorMeta, SubclassCreationMeta]],  # user outputs
+        list[Union[PlainTensorMeta, SubclassCreationMeta]],  # intermediate bases
+    ]
     # length = # backward graph inputs
     subclass_tangent_meta: list[Union[PlainTensorMeta, SubclassCreationMeta]]
     # TODO: we should kill this
@@ -625,6 +623,94 @@ class ViewAndMutationMeta:
         # this information.
         self.num_forward = self.num_forward_returns + self.num_outputs_rng_offset
 
+    def _adjust_subclass_meta_with_offset(
+        self, meta: SubclassCreationMeta, offset: int
+    ) -> SubclassCreationMeta:
+        """Helper to adjust SubclassCreationMeta indices by offset."""
+        from dataclasses import replace
+
+        adjusted = replace(
+            meta, flat_tensor_start_idx=meta.flat_tensor_start_idx + offset
+        )
+        if meta.original_subclass is not None:
+            # Not runtime-safe yet: call make_runtime_safe to prepare for runtime
+            adjusted.make_runtime_safe()
+        return adjusted
+
+    def _add_mutated_inputs(self, result: list, offset_ref: list[int]) -> None:
+        """Add mutated input metadata to result and track offset."""
+        if len(self.subclass_inp_meta) == 0:
+            return
+
+        def is_mutated_out_graph(info):
+            return info.mutation_type == MutationType.MUTATED_OUT_GRAPH
+
+        def is_metadata_mutation(info):
+            return info.mutates_metadata
+
+        if self.is_train or not self.keep_input_mutations:
+            condition = is_mutated_out_graph
+        else:
+            condition = is_metadata_mutation
+
+        for i, info in enumerate(self.input_info):
+            if condition(info):
+                meta = self.subclass_inp_meta[i]
+                result.append(meta)
+                offset_ref[0] += (
+                    meta.arg_count if isinstance(meta, SubclassCreationMeta) else 1
+                )
+
+    def _add_metadata_with_offset(
+        self,
+        result: list,
+        metadata_list: list[Union[PlainTensorMeta, SubclassCreationMeta]],
+        offset: int,
+    ) -> None:
+        """Add metadata to result, adjusting indices by offset if needed."""
+        from dataclasses import replace
+
+        if offset > 0:
+            for meta in metadata_list:
+                if isinstance(meta, SubclassCreationMeta):
+                    result.append(self._adjust_subclass_meta_with_offset(meta, offset))
+                else:
+                    result.append(
+                        replace(meta, unwrapped_idx=meta.unwrapped_idx + offset)
+                    )
+        else:
+            result.extend(metadata_list)
+
+    @property
+    def subclass_fw_graph_out_meta(
+        self,
+    ) -> list[Union[PlainTensorMeta, SubclassCreationMeta]]:
+        """
+        Computes subclass metadata for forward graph outputs based on is_train and keep_input_mutations.
+        Forward outputs: (*mutated_inps, *user_outs, *intermediate_bases, *saved_for_bw_tensors)
+        """
+        result: list[Union[PlainTensorMeta, SubclassCreationMeta]] = []
+        user_outs_meta, intermediate_bases_meta = self._subclass_meta_components
+
+        # Add mutated inputs and track offset
+        offset_ref = [0]
+        self._add_mutated_inputs(result, offset_ref)
+        offset = offset_ref[0]
+
+        # Add user outputs with offset adjustment
+        self._add_metadata_with_offset(result, user_outs_meta, offset)
+
+        # Add intermediate bases (training only) with offset adjustment
+        if self.is_train:
+            # Calculate offset for intermediate bases (after mutated inputs + user outputs)
+            for meta in user_outs_meta:
+                offset += (
+                    meta.arg_count if isinstance(meta, SubclassCreationMeta) else 1
+                )
+            self._add_metadata_with_offset(result, intermediate_bases_meta, offset)
+
+        return result
+
     def make_runtime_safe(self):
         """
         There are various fields in ViewAndMutationMeta that aren't serializable. This function is called after all tracing
@@ -655,7 +741,12 @@ class ViewAndMutationMeta:
         for inp_meta in self.subclass_inp_meta:
             if isinstance(inp_meta, SubclassCreationMeta):
                 inp_meta.make_runtime_safe()
-        for inp_meta in self.subclass_fw_graph_out_meta:
+        # Process tuple components
+        user_outs_meta, intermediate_bases_meta = self._subclass_meta_components
+        for inp_meta in user_outs_meta:
+            if isinstance(inp_meta, SubclassCreationMeta):
+                inp_meta.make_runtime_safe()
+        for inp_meta in intermediate_bases_meta:
             if isinstance(inp_meta, SubclassCreationMeta):
                 inp_meta.make_runtime_safe()
         for inp_meta in self.subclass_tangent_meta:
