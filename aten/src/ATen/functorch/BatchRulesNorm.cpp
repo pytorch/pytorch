@@ -443,14 +443,14 @@ static bool has_same_shape(
   if (!tensor.defined()) {
     return true;
   }
-  if (rankWithoutBatchDim(tensor, tensor_bdim) != (int64_t) normalized_shape.size()) {
+  if (rankWithoutBatchDim(tensor, tensor_bdim) != static_cast<int64_t>(normalized_shape.size())) {
     return false;
   }
   const auto tensor_shape = tensor.sizes();
   for (const auto i : c10::irange(normalized_shape.size())) {
     auto j = i;
     // (0, 1, 2), 1 -> (0, 2, 3)
-    if (tensor_bdim.has_value() && (int64_t)i >= tensor_bdim.value()) {
+    if (tensor_bdim.has_value() && static_cast<int64_t>(i) >= tensor_bdim.value()) {
       j = j + 1;
     }
     if (normalized_shape[i] != tensor_shape[j]) {

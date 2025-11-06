@@ -512,7 +512,7 @@ class FakeTensorTest(TestCase):
     def test_upsample_bilinear_small_channels(self):
         out = []
         mode = FakeTensorMode()
-        for i, context in enumerate([contextlib.nullcontext, lambda: mode]):
+        for context in [contextlib.nullcontext, lambda: mode]:
             with context():
                 arg0_1 = torch.empty_strided(
                     (3, 427, 640), (1, 1920, 3), dtype=torch.float32, device="cuda"
@@ -1057,6 +1057,17 @@ class FakeTensorTest(TestCase):
 
         self.assertIsInstance(r[0], FakeTensor)
         self.assertIsInstance(r[1], FakeTensor)
+
+    def test_fast_div_int_to_float(self):
+        mode = FakeTensorMode()
+        with mode:
+            x = torch.empty(2, 2, device="cpu", dtype=torch.int32)
+            y = torch.empty(2, 2, device="cpu", dtype=torch.int32)
+        from torch._subclasses.fake_impls import get_fast_op_impls
+
+        fast_div = get_fast_op_impls()[torch.ops.aten.div.Tensor]
+        z = fast_div(mode, x, y)
+        self.assertEqual(z.dtype, torch.float32)
 
     def test_fast_div(self):
         mode = FakeTensorMode()

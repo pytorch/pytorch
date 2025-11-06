@@ -2,7 +2,10 @@
 import copy
 import itertools
 import logging
-from typing import Callable, TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+from torch.utils._ordered_set import OrderedSet
 
 from .hints import TRITON_MAX_BLOCK
 from .runtime_utils import red_text, triton_config_to_hashable
@@ -53,6 +56,7 @@ class CoordescTuner:
         name="unknown",
         size_hints=None,
         inductor_meta=None,
+        frozen_fields=None,
     ):
         self.is_mm = is_mm  # we will tune num_stages for mm
 
@@ -65,6 +69,9 @@ class CoordescTuner:
         self.name = name
         self.size_hints = size_hints
         self.inductor_meta = inductor_meta or {}
+        self.frozen_fields: OrderedSet[str] = (
+            OrderedSet(frozen_fields) if frozen_fields is not None else OrderedSet()
+        )
 
     def get_config_max(self, prefix: str) -> int:
         max_block = TRITON_MAX_BLOCK[prefix.upper()]
@@ -116,7 +123,7 @@ class CoordescTuner:
             out.append("num_stages")
             out.remove("ZBLOCK")  # ZBLOCK=1 always in native matmul
 
-        return out
+        return [f for f in out if f not in self.frozen_fields]
 
     def value_too_large(self, name: str, val: int) -> bool:
         block_suffix = "BLOCK"
@@ -331,3 +338,40 @@ class CoordescTuner:
         )
 
         return best_config
+
+    @staticmethod
+    def autotune_single_field(fn, init_val, min_val=None, max_val=None):
+        """
+        fn is a function that takes the field value and returns the benchmarking result
+        init_val is the starting point of autotuning.
+
+        Should work well for parabola like curve. Here is a real example
+        for split-size of mix-order-reduction: https://github.com/pytorch/pytorch/pull/166461
+        """
+        cache = {}
+
+        def _bench(val):
+            if val not in cache:
+                cache[val] = fn(val)
+                # print(f"split size {val} -> {cache[val]:.3f} ms")
+            return cache[val]
+
+        if min_val is None:
+            min_val = 1
+        if max_val is None:
+            max_val = 2**30  # some arbitrary large value
+
+        best_val = init_val
+        improved = True
+        while improved:
+            improved = False
+            candlist = [best_val // 2, best_val * 2]
+            for cand in candlist:
+                cand = max(cand, min_val)
+                cand = min(cand, max_val)
+
+                if _bench(cand) < _bench(best_val):
+                    best_val = cand
+                    improved = True
+
+        return best_val

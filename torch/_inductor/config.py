@@ -8,6 +8,9 @@ from torch._environment import is_fbcode
 from torch.utils._config_module import Config, get_tristate_env, install_config_module
 
 
+if TYPE_CHECKING:
+    from torch._inductor.choices import InductorChoices
+
 inplace_padding = os.environ.get("TORCHINDUCTOR_INPLACE_PADDING", "1") == "1"
 can_inplace_pad_graph_input = False  # ease testing
 
@@ -376,6 +379,15 @@ reorder_for_compute_comm_overlap = False
 # for built-in passes, use string name; for user-defined passes, pass in the function handle
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
 # hence custom IR passes built on top of it might break in the future.
+#
+# See aten_distributed_optimizations, it is recommended way for distributed optimizations.
+#
+# Recommended configuration for reorder_for_compute_comm_overlap_passes:
+# [
+#     "reorder_communication_preserving_peak_memory",
+#     "sink_waits_iterative",
+#     "reorder_communication_preserving_peak_memory",
+# ]
 reorder_for_compute_comm_overlap_passes: list[
     Union[
         str,
@@ -384,11 +396,7 @@ reorder_for_compute_comm_overlap_passes: list[
             list["torch._inductor.scheduler.BaseSchedulerNode"],
         ],
     ]
-] = [
-    "reorder_compute_for_overlap",
-    "sink_waits",
-    "raise_comms",
-]
+] = []
 
 # Maximum number of positions to advance a given collective, unlimited by default
 reorder_prefetch_limit: Optional[int] = None
@@ -404,16 +412,6 @@ reorder_for_peak_memory_debug = False
 # is zero, which turns off this optimization.
 size_threshold_for_succ_based_strategy: int = 0
 
-reorder_iterative_debug_memory_recompute: bool = False
-reorder_iterative_debug_limit_to_reorder: Optional[int] = (
-    None
-    if (env_str := os.getenv("PYTORCH_REORDER_COLLECTIVES_LIMIT")) is None
-    else int(env_str)
-)
-sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
-    # pyrefly: ignore [unbound-name]
-    None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
-)
 
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
@@ -653,6 +651,9 @@ assume_unaligned_fallback_output = (
     os.environ.get("TORCHINDUCTOR_ASSUME_UNALIGNED_FALLBACK_OUTPUT") == "1"
 )
 
+# Custom InductorChoices callable to use (can be a class or functools.partial with kwargs)
+inductor_choices_class: Optional[Callable[[], "InductorChoices"]] = None
+
 # fuse even in cases without common reads
 aggressive_fusion = False
 
@@ -667,6 +668,17 @@ loop_ordering_after_fusion: bool = (
     )
     == "1"
 )
+
+
+# When trying to fuse two nodes, one with:
+# a[contiguous_writes] = fn(...)
+# and another node:
+# b[contiguous_writes] = a[discontiguous_reads]
+# If b is unary, and we can figure out an inverse formula for
+# discontiguous writes, invert b as :
+# b[inverse(discontiguous_writes)] = a[contiguous_reads]
+# so that the nodes can fuse. for more details: https://gist.github.com/eellison/6f9f4a7ec10a860150b15b719f9285a9
+loop_index_inversion_in_fusion: bool = True
 
 # If fusing two nodes only save less then score_fusion_memory_threshold memory,
 # we should not bother fusing the nodes.
@@ -952,6 +964,11 @@ quiesce_async_compile_pool: bool = Config(
     justknob="pytorch/inductor:quiesce_async_compile_pool",
     env_name_force="TORCHINDUCTOR_QUIESCE_ASYNC_COMPILE_POOL",
     default=False,
+)
+
+# Time in seconds to wait before quiescing
+quiesce_async_compile_time: int = Config(
+    default=60,
 )
 
 # Whether or not to enable statically launching CUDA kernels
@@ -1549,6 +1566,9 @@ class triton:
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0") == "1"
     )
 
+    mix_order_reduction_split_size: Optional[int] = None
+    mix_order_reduction_autotune_split_size = True
+
 
 class aot_inductor:
     """
@@ -1936,8 +1956,12 @@ class rocm:
 # Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental)
 cpu_backend: Literal["cpp", "triton", "halide"] = "cpp"
 
-# Backend to use for CUDA codegen either "triton" or "halide" (experimental)
-cuda_backend: Literal["triton", "halide"] = "triton"
+# Backend to use for CUDA codegen either
+# "triton", "halide" (experimental) or "pallas" (experimental)
+cuda_backend: Literal["triton", "halide", "pallas"] = "triton"
+
+# Backend to use for XPU codegen either "triton"
+xpu_backend: Literal["triton"] = "triton"
 
 
 class halide:
@@ -2092,6 +2116,17 @@ write_are_deterministic_algorithms_enabled = (
 )
 
 
+class lookup_table:
+    # Lookup table for template config overrides
+    table: Optional[dict[str, list[dict[str, Any]]]] = None
+
+    # Enable template src_hash checking in lookup table to prevent using stale configs.
+    # If True, configs with 'template_hash' field will be compared against the template's
+    # src_hash at runtime and filtered out if they don't match. If False, no
+    # hash checking is performed.
+    check_src_hash: bool = True
+
+
 class test_configs:
     force_extern_kernel_in_multi_template: bool = False
 
@@ -2129,6 +2164,9 @@ class test_configs:
     distort_benchmarking_result = os.getenv(
         "TORCHINDUCTOR_DISTORT_BENCHMARKING_RESULT", ""
     )
+
+    bisect_pre_grad_graph = False
+    bisect_keep_custom_backend_for_inductor = False
 
 
 if TYPE_CHECKING:
