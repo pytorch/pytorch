@@ -16,10 +16,6 @@ from torch._inductor.utils import clear_on_fresh_cache
 log = getArtifactLogger(__name__, "node_runtime_estimation")
 
 
-# ============================================================================
-# Cache (process-local, not disk-based to avoid concurrent writes from ranks)
-# ============================================================================
-
 # TODO: Consider using a distributed-aware cache or rank-local disk cache
 # not using local cache because different ranks might write to it concurrently.
 # solvable in future, potentially with workflow to seed cache
@@ -40,10 +36,6 @@ def set_cached_runtime(key: str, value: float) -> None:
     _get_collective_cache()[key] = value
 
 
-# ============================================================================
-# Utilities
-# ============================================================================
-
 def get_hint(x: int | torch.SymInt) -> Optional[int]:
     if isinstance(x, int):
         return x
@@ -63,11 +55,6 @@ def can_benchmark_collective() -> bool:
         return False
 
     return True
-
-
-# ============================================================================
-# Collective Benchmarking
-# ============================================================================
 
 
 def _benchmark_collective_with_cuda_events_impl(
@@ -114,12 +101,8 @@ def benchmark_collective_with_cuda_events(
 ) -> tuple[float | None, str]:
     """
     Benchmark collective with CUDA events. Returns (runtime_ms, cache_key) or (None, "") on failure.
-
-    Uses power-of-2 rounding for bandwidth-bound ops and byte-based caching
-    (dtype-agnostic: fp32 512 == fp16 1024 both = 2048 bytes).
     """
     from torch._inductor import fx_utils
-    from torch._inductor.runtime.runtime_utils import next_power_of_2
 
     # Early check: can we actually run collectives?
     if not can_benchmark_collective():
@@ -131,11 +114,9 @@ def benchmark_collective_with_cuda_events(
 
     # Extract actual input size in BYTES (first tensor argument)
     actual_bytes: Optional[int] = None
-    actual_dtype: Optional[torch.dtype] = None
-    actual_device: Optional[torch.device] = None
 
     def extract_tensor_info(t: torch.Tensor) -> torch.Tensor:
-        nonlocal actual_bytes, actual_dtype, actual_device
+        nonlocal actual_bytes
         if actual_bytes is None:
             shape = [get_hint(dim) for dim in t.shape]
             if any(s is None for s in shape):
@@ -146,73 +127,28 @@ def benchmark_collective_with_cuda_events(
                 total_elems *= dim
 
             actual_bytes = total_elems * t.dtype.itemsize
-            actual_dtype = t.dtype
-            actual_device = t.device
         else:
             raise RuntimeError(f"should only be one input tensor to collective {n}")
+        return t
 
     torch.utils._pytree.tree_map_only(torch.Tensor, extract_tensor_info, (args, kwargs))
 
-    if actual_bytes is None or actual_device is None or actual_dtype is None:
+    if actual_bytes is None:
         return None, ""
 
-    upper_pow2_bytes = next_power_of_2(actual_bytes)
-    lower_pow2_bytes = (
-        upper_pow2_bytes if upper_pow2_bytes == actual_bytes else upper_pow2_bytes // 2
-    )
+    # Cache key by BYTES (dtype-agnostic)
+    key = f"{n.target}: ({actual_bytes} bytes)"
 
-    # Helper to benchmark a specific power-of-2 byte size
-    def benchmark_bytes(
-        bytes_pow2: int, dtype: torch.dtype
-    ) -> tuple[float | None, str]:
-        # Cache key by BYTES (dtype-agnostic)
-        key = f"{n.target}: ({bytes_pow2} bytes)"
+    # Check cache
+    if (cached := get_cached_runtime(key)) is not None:
+        return cached, key
 
-        # Check persistent cache
-        if (cached := get_cached_runtime(key)) is not None:
-            return cached, key
+    # Benchmark using CUDA events with actual args/kwargs
+    runtime = _benchmark_collective_with_cuda_events_impl(n, args, kwargs, nruns)
 
-        # Not in cache, need to benchmark
-        # Calculate number of elements for this byte size
-        num_elements = bytes_pow2 // dtype.itemsize
+    if runtime is None:
+        return None, key
 
-        # Create empty tensor for benchmarking
-        benchmark_tensor = torch.empty(num_elements, dtype=dtype, device=actual_device)
-
-        # Replace all tensors in args/kwargs with benchmark_tensor
-        bench_args, bench_kwargs = torch.utils._pytree.tree_map_only(
-            torch.Tensor,
-            lambda t: benchmark_tensor,
-            (args, kwargs),
-        )
-
-        # Benchmark using CUDA events
-        runtime = _benchmark_collective_with_cuda_events_impl(
-            n, bench_args, bench_kwargs, nruns
-        )
-
-        if runtime is None:
-            return None, key
-
-        # Cache the result
-        set_cached_runtime(key, runtime)
-        return runtime, key
-
-    # If exact power-of-2 bytes, just return benchmark
-    if actual_bytes in (lower_pow2_bytes, upper_pow2_bytes):
-        return benchmark_bytes(actual_bytes, actual_dtype)
-
-    # Otherwise, benchmark bounds and interpolate
-    lower_runtime, lower_key = benchmark_bytes(lower_pow2_bytes, actual_dtype)
-    upper_runtime, upper_key = benchmark_bytes(upper_pow2_bytes, actual_dtype)
-
-    if lower_runtime is None or upper_runtime is None:
-        return None, ""
-
-    # Linear interpolation
-    ratio = (actual_bytes - lower_pow2_bytes) / (upper_pow2_bytes - lower_pow2_bytes)
-    interpolated = lower_runtime + ratio * (upper_runtime - lower_runtime)
-
-    # Return key showing actual bytes (for tracking)
-    actual_key = f"{n.target}: ({actual_bytes} bytes)"
-    return interpolated, actual_key
+    # Cache the result
+    set_cached_runtime(key, runtime)
+    return runtime, key

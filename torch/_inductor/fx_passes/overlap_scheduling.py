@@ -61,21 +61,7 @@ def estimate_collective_time(
     if (est := get_custom_estimation(n, custom_runtime_estimation)) is not None:
         return est
 
-    # Use benchmarking if configured
-    from torch._inductor import config
-
-    if config.aten_distributed_optimizations.benchmark_collectives:
-        from torch._inductor.fx_passes.node_runtime_estimation import (
-            benchmark_collective_with_cuda_events,
-        )
-
-        # Use cache during estimation
-        runtime, _ = benchmark_collective_with_cuda_events(n, nruns=2)
-        if runtime is not None:
-            return runtime
-        # Fall through to analytical model if benchmarking failed
-
-    # Otherwise use analytical model
+    # Use analytical model (benchmarking is handled separately in alignment)
     return torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
         n, override_size
     )
@@ -382,7 +368,6 @@ class OverlapScheduler:
         world_size: int,
     ) -> None:
         """Log collective benchmarks with analytical comparisons for tlparse."""
-        print(f"LOG: _log_collective_benchmarks called with {len(collective_keys)} keys")
         collective_benchmarks = {}
         for key, benchmarked_ms, coll_node in zip(
             collective_keys, benchmarked_medians, collective_nodes
@@ -403,8 +388,6 @@ class OverlapScheduler:
                 "analytical_inductor_ms": inductor_ms,
             }
 
-        print(f"LOG: Emitting tlparse artifact with {len(collective_benchmarks)} benchmarks")
-        print(f"LOG: collective_benchmarks = {collective_benchmarks}")
         # Emit tlparse artifact
         from torch._logging import trace_structured
 
@@ -440,7 +423,9 @@ class OverlapScheduler:
             compute_key_count += 1
 
         # Benchmark collectives if enabled (only CUDA events - others are deterministic)
+        # Skip if custom estimation is provided for collectives
         collective_nodes: list[fx.Node] = []
+        benchmarked_collective_nodes: list[fx.Node] = []  # Track which were actually benchmarked
         if self.collective_estimator == "benchmark":
             from torch._inductor.fx_passes.node_runtime_estimation import (
                 benchmark_collective_with_cuda_events,
@@ -451,11 +436,17 @@ class OverlapScheduler:
             ]
 
             # Benchmark CUDA events (non-deterministic, needs alignment)
+            # Skip collectives with custom estimation
             for n in collective_nodes:
+                if get_custom_estimation(n, self.custom_runtime_estimation) is not None:
+                    continue
+
+                # Benchmark actual size
                 cuda_val, cuda_key = benchmark_collective_with_cuda_events(n, nruns=2)
                 if cuda_val is not None:
                     runtime_estimations.append(cuda_val)
                     runtime_estimations_keys.append(cuda_key)
+                    benchmarked_collective_nodes.append(n)
 
         # Single all_gather and compute medians
         import torch.distributed as dist
@@ -497,7 +488,7 @@ class OverlapScheduler:
 
                 # Update CollectiveInfo with aligned benchmark
                 coll_idx = idx - compute_key_count
-                coll_node = collective_nodes[coll_idx]
+                coll_node = benchmarked_collective_nodes[coll_idx]
                 info = self.collective_info[coll_node]
                 info.estimated_time_ms = median_runtime_estimation
                 info.exposed_time_ms = median_runtime_estimation
@@ -508,7 +499,7 @@ class OverlapScheduler:
         # Log benchmarks with analytical comparisons
         if collective_keys:
             self._log_collective_benchmarks(
-                collective_nodes[: len(collective_keys)],
+                benchmarked_collective_nodes,
                 collective_keys,
                 collective_medians,
                 world_size,
