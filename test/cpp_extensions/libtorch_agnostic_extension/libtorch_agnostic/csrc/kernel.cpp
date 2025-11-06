@@ -479,11 +479,8 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
 }
 
 std::vector<Tensor> my__foreach_mul(torch::headeronly::HeaderOnlyArrayRef<Tensor> self, torch::headeronly::HeaderOnlyArrayRef<Tensor> other) {
-  const auto num_args = 2;
-  StableIValue stack[num_args];
-  stack[0] = torch::stable::detail::from(self);
-  stack[1] = torch::stable::detail::from(other);
-  aoti_torch_call_dispatcher("aten::_foreach_mul", "List", stack);
+  std::array<StableIValue, 2> stack = {torch::stable::detail::from(self), torch::stable::detail::from(other)};
+  aoti_torch_call_dispatcher("aten::_foreach_mul", "List", stack.data());
   return torch::stable::detail::to<std::vector<Tensor>>(stack[0]);
 }
 
@@ -496,11 +493,8 @@ void boxed_my__foreach_mul(StableIValue* stack, uint64_t num_args, uint64_t num_
 }
 
 void my__foreach_mul_(torch::headeronly::HeaderOnlyArrayRef<Tensor> self, torch::headeronly::HeaderOnlyArrayRef<Tensor> other) {
-  const auto num_args = 2;
-  StableIValue stack[num_args];
-  stack[0] = torch::stable::detail::from(self);
-  stack[1] = torch::stable::detail::from(other);
-  aoti_torch_call_dispatcher("aten::_foreach_mul_", "List", stack);
+  std::array<StableIValue, 2> stack = {torch::stable::detail::from(self), torch::stable::detail::from(other)};
+  aoti_torch_call_dispatcher("aten::_foreach_mul_", "List", stack.data());
 }
 
 void boxed_my__foreach_mul_(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
@@ -508,7 +502,7 @@ void boxed_my__foreach_mul_(StableIValue* stack, uint64_t num_args, uint64_t num
 }
 
 std::vector<Tensor> make_tensor_clones_and_call_foreach(Tensor t1, Tensor t2) {
-  // This function tests that my__foreach_mul can take in non-owning HeaderOnlyArrayRefs
+  // This function tests that my__foreach_mul can take in std::initializer_lists
   // in addition to std::vectors.
   Tensor t1_1 = my_clone(t1);
   Tensor t1_2 = my_clone(t1);
