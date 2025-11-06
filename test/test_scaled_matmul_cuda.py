@@ -1594,8 +1594,6 @@ class TestFP8Matmul(TestCase):
         _run_test(x_hp, x_recipe, x_fp8, x_scales, x_scales_original,
                   y_hp, y_recipe, y_fp8, y_scales, y_scales_original)
 
-
-    # XPU does not support block_wise scaled_mm yet.
     @skipXPU
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not IS_SM90, "cuBLAS blockwise scaling requires sm90+")
