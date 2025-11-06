@@ -28,7 +28,6 @@ Error Formatting:
 
 import json
 import logging
-import os
 import re
 import textwrap
 import typing
@@ -477,7 +476,9 @@ def unimplemented_with_warning(
         payload_fn=lambda: graph_break_msg,
     )
     graph_breaks_log.debug("%s", graph_break_msg)
-    unimplemented(
+    _unimplemented = unimplemented
+    # to prevent a graph break registry entry
+    _unimplemented(
         gb_type=gb_type,
         context=context,
         explanation=explanation,
