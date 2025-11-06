@@ -208,3 +208,32 @@ def parse_xml_and_upload_json() -> None:
                     lock.release()
     except Exception as e:
         print(f"Failed to parse and upload json test reports: {e}")
+
+
+def upload_adhoc_failure_json(invoking_file: str) -> None:
+    """
+    manually upload a json to s3 indicating that the entire test file failed
+    since xml was probably not generated in this case
+    """
+    message = "The test file failed but we were not able to determine the exact unittest.  The most likely cause is a segfault"
+    j = {
+        "invoking_file": invoking_file,
+        "file": f"{invoking_file}.py",
+        "name": "entire_test_suite_failure",
+        "workflow_id": os.environ.get("GITHUB_RUN_ID"),
+        "workflow_run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
+        "job_id": os.environ.get("JOB_ID"),
+        "failure": {
+            "message": message,
+            "text": message
+        }
+    }
+    gzipped = gzip.compress(json.dumps(j).encode("utf-8"))
+    s3_key = f"{invoking_file.replace('/', '_')}_{os.urandom(8).hex()}.json"
+    get_s3_resource().put_object(
+        Body=gzipped,
+        Bucket="gha-artifacts",
+        Key=f"test_jsons_while_running/{os.environ.get('GITHUB_RUN_ID')}/{job_id}/{s3_key}",
+        ContentType="application/json",
+        ContentEncoding="gzip",
+    )
