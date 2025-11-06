@@ -5,8 +5,9 @@ import math
 import operator
 import sys
 import typing
-from typing import Any, Callable, Optional, TypeVar, Union
-from typing_extensions import ParamSpec, TypeAlias
+from collections.abc import Callable
+from typing import Any, Optional, TypeAlias, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._decomp as decomp

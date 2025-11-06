@@ -2947,7 +2947,7 @@ e.
 
     # Emit one build rule per source to enable incremental build.
     build = []
-    for source_file, object_file in zip(sources, objects):
+    for source_file, object_file in zip(sources, objects, strict=True):
         is_cuda_source = _is_cuda_file(source_file) and with_cuda
         is_sycl_source = _is_sycl_file(source_file) and with_sycl
         if is_cuda_source:

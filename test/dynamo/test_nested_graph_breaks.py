@@ -380,6 +380,41 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 13)
 
+    def test_dead_nested_cells(self):
+        global f1, f2, f3
+
+        def f3(x, cell1):
+            cell1 += 2
+            x = x + cell1
+            torch._dynamo.graph_break()
+            return x + cell1
+
+        def f1(cell1=0):
+            def inner(x):
+                x += 4
+                x = f3(x, cell1)
+                return x + 8
+
+            return inner
+
+        def f2(x):
+            return f1()(x + 16) + 32
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f2)
+        x = torch.zeros(3)
+        res = f2(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        # If we don't handle dead cells in nested functions correctly,
+        # frame_count will increase since we also
+        # graph break when we attempt to codegen inner.
+        # The exact issue was that side_effects was failing to codegen inner's cell's creation.
+        # So when we try to codegen cells for resume functions, we end up trying to codegen
+        # a CellVariable without a source, which leads to a graph break we can't resume from.
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 6)
+
     def test_cells_double_graph_break(self):
         def f1(x1):
             cell1 = x1 + 1
@@ -805,6 +840,39 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
                     for key in torch._dynamo.utils.counters["resumes"].keys()
                 )
             )
+
+    def test_disable_nested_graph_breaks(self):
+        global f1, f2, f3, f4, f5
+
+        def f1(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def f2(x):
+            return f1(x + 4) + 8
+
+        # NOTE since the disable_nested_graph_breaks decorator is implemented as a
+        # context manager, we don't need to separately test context manager usage.
+        @torch._dynamo.disable_nested_graph_breaks
+        def f3(x):
+            return f2(x + 16) + 32
+
+        def f4(x):
+            return f3(x + 64) + 128
+
+        def f5(x):
+            return f4(x + 256) + 512
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f5)
+        x = torch.zeros(3)
+        res = f5(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        # 2 frames from each of f5+f4, f3, f2, f1
+        self.assertEqual(cnts.frame_count, 8)
+        self.assertEqual(cnts.op_count, 10)
 
 
 if __name__ == "__main__":
