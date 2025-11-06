@@ -35,10 +35,10 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     skipIfNoLapack, skipIfRocm, MI300_ARCH, skipIfRocmArch, skipIfXpu, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
     download_file, get_function_arglist, load_tests, skipIfMPS, \
-    IS_PPC, \
+    IS_PPC, TEST_GPU, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     _get_torch_rocm_version
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
@@ -75,8 +75,6 @@ if TEST_SCIPY:
 if TEST_NUMPY:
     import numpy as np
 
-TEST_GPU = torch.cuda.is_available() or torch.xpu.is_available()
-TEST_MULTIGPU = TEST_GPU and torch.accelerator.device_count() >= 2
 device_type = (acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu")
 
 # WARNING: If you add a new top-level test case to this file, you MUST
@@ -4427,7 +4425,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             for device in get_all_device_types():
                 input = torch.zeros((5, 0, 3))
                 rnn = module(input_size=3, hidden_size=4)
-                if device == 'cuda' or device == 'xpu':
+                if device in ['cuda', 'xpu']:
                     rnn.to(device_type)
                     input = input.to(device_type)
                 outs = rnn(input)
