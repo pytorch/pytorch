@@ -34,7 +34,7 @@ def print_proxy_torch_dispatch_mode(
     mode: ProxyTorchDispatchMode, format_str: str, **kwargs: object
 ) -> None:
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
-    mode.tracer.create_proxy("call_function", print, (format_str,), proxy_kwargs)
+    mode.tracer.create_proxy("call_function", print, (format_str,), proxy_kwargs)  # noqa: F841
 
 
 @print.py_functionalize_impl
