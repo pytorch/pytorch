@@ -553,7 +553,7 @@ class TestPatternMatcher(TestCase):
                 torch.randn(16, 16, device=GPU_TYPE),
                 torch.randn(16, 16, device=GPU_TYPE),
                 torch.randn(16, 16, device=GPU_TYPE),
-                False,
+                True,
             ),
             (
                 torch.randn(8, device=GPU_TYPE),
