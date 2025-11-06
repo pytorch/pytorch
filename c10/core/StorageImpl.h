@@ -105,29 +105,11 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     data_ptr_.clear();
   }
 
-  void incref_pyobject() const override final {
-    // Because intrusive_ptr incref uses relaxed memory order, we need to
-    // do an acquire fence to ensure that the kHasPyObject bit was
-    // observed before the load of the PyObject* below.
-    // NB: This is a no-op on x86/x86-64
-    std::atomic_thread_fence(std::memory_order_acquire);
+  void incref_pyobject() const override final;
 
-    PyObject* obj = pyobj_slot_.load_pyobj();
-    (*pyobj_slot_.pyobj_interpreter())->incref(obj);
-  }
+  void decref_pyobject() const override final;
 
-  void decref_pyobject() const override final {
-    PyObject* obj = pyobj_slot_.load_pyobj();
-    (*pyobj_slot_.pyobj_interpreter())->decref(obj);
-  }
-
-  bool try_incref_pyobject() const override final {
-    c10::impl::PyInterpreter* interp = pyobj_slot_.pyobj_interpreter();
-    if (C10_UNLIKELY(!interp)) {
-      return false;
-    }
-    return (*interp)->try_incref(pyobj_slot_);
-  }
+  bool try_incref_pyobject() const override final;
 
   size_t nbytes() const {
     // OK to do this instead of maybe_as_int as nbytes is guaranteed positive
