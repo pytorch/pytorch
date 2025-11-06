@@ -443,7 +443,7 @@ def _verify_state_dict(
                 f"or load but optim state_dict is empty. {optim_state_dict}"
             )
 
-    for key in model_state_dict.keys():
+    for key in model_state_dict:
         if _FLAT_PARAM in key:
             raise RuntimeError(
                 f"{key} contains {_FLAT_PARAM}. This can happen if the model "
