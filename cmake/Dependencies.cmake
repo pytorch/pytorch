@@ -1637,45 +1637,6 @@ if(USE_KINETO)
   message(STATUS "  KINETO_BUILD_TESTS = ${KINETO_BUILD_TESTS}")
   message(STATUS "  KINETO_LIBRARY_TYPE = ${KINETO_LIBRARY_TYPE}")
 
-  if(NOT LIBKINETO_NOCUPTI)
-    if(TARGET CUDA::cupti)
-      message(STATUS "Found CUPTI")
-      set(LIBKINETO_NOCUPTI OFF CACHE STRING "" FORCE)
-
-      # I've only tested this sanity check on Linux; if someone
-      # runs into this bug on another platform feel free to
-      # generalize it accordingly
-      if(NOT USE_CUPTI_SO AND UNIX)
-        include(CheckCXXSourceRuns)
-        # rt is handled by the CMAKE_REQUIRED_LIBRARIES set above
-        if(NOT APPLE)
-          set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} "dl" "pthread")
-        endif()
-        set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} $<LINK_LIBRARY:WHOLE_ARCHIVE,CUDA::cupti_static>)
-        check_cxx_source_runs("#include <stdexcept>
-  int main() {
-    try {
-      throw std::runtime_error(\"error\");
-    } catch (...) {
-      return 0;
-    }
-    return 1;
-  }" EXCEPTIONS_WORK)
-        set(CMAKE_REQUIRED_LINK_OPTIONS "")
-        if(NOT EXCEPTIONS_WORK)
-          message(FATAL_ERROR
-            "Detected that statically linking against CUPTI causes exceptions to stop working.  "
-            "See https://github.com/pytorch/pytorch/issues/57744 for more details.  "
-            "Perhaps try: USE_CUPTI_SO=1 CMAKE_FRESH=1 python -m pip install -e . -v --no-build-isolation")
-        endif()
-      endif()
-
-    else()
-      message(STATUS "Could not find CUPTI library, using CPU-only Kineto build")
-      set(LIBKINETO_NOCUPTI ON CACHE STRING "" FORCE)
-    endif()
-  endif()
-
   if(NOT LIBKINETO_NOROCTRACER)
     if("$ENV{ROCM_SOURCE_DIR}" STREQUAL "")
       set(ENV{ROCM_SOURCE_DIR} "/opt/rocm")
