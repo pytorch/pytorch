@@ -3,6 +3,7 @@ import functools
 import re
 import unittest
 import weakref
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.test_case
@@ -490,6 +491,20 @@ class GraphModule(torch.nn.Module):
         finally:
             torch.accelerator.set_stream(original_stream)
             reset_user_object_tracking()
+
+    @requires_cuda
+    def test_inductor_lowering(self):
+        with patch("torch._inductor.config.implicit_fallbacks", False):
+
+            @torch.compile()
+            def fn(x):
+                e = torch.Event()
+                x += x + 1
+                e.record()
+                return x
+
+            inp = (torch.ones(2, 2, device="cuda"),)
+            fn(*inp)
 
     def test_is_marked_side_effectful(self):
         self.assertIn(
