@@ -8,7 +8,7 @@ from torch.testing._internal.common_utils import TestCase
 
 class TestUpgrader(TestCase):
     def setUp(self) -> None:
-        TestCase.setUp(self)
+        super().setUp()
         # Register example upgraders dynamically
         torch._C._export.register_example_upgraders()
 

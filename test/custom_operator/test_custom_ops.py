@@ -18,7 +18,7 @@ torch.ops.import_module("pointwise")
 
 class TestCustomOperators(TestCase):
     def setUp(self):
-        TestCase.setUp(self)
+        super().setUp()
         self.library_path = get_custom_op_library_path()
         ops.load_library(self.library_path)
 

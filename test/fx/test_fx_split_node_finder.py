@@ -27,7 +27,7 @@ def sup_f(x):
 
 class TestFxSplitNodeFinder(TestCase):
     def setUp(self):
-        TestCase.setUp(self)
+        super().setUp()
         self.save_path = sys.path[:]
         self.tmpdir = tempfile.mkdtemp()
         sys.path.insert(0, self.tmpdir)

@@ -88,7 +88,7 @@ class CppThreadTestCUDA(TestCase):
             torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
 
     def setUp(self) -> None:
-        TestCase.setUp(self)
+        super().setUp()
         if not torch.cuda.is_available():
             self.skipTest("Test machine does not have cuda")
         global device
@@ -231,7 +231,7 @@ class CppThreadTestXPU(TestCase):
             torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
 
     def setUp(self) -> None:
-        TestCase.setUp(self)
+        super().setUp()
         if not torch.xpu.is_available():
             self.skipTest("Test machine does not have xpu")
         global device

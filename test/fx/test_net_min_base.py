@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import TestCase
 
 class TestNetMinBaseBlock(TestCase):
     def setUp(self) -> None:
-        TestCase.setUp(self)
+        super().setUp()
         # Setup test fixtures for each test method
 
         class SimpleModule(torch.nn.Module):
