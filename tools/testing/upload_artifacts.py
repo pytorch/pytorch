@@ -215,25 +215,29 @@ def upload_adhoc_failure_json(invoking_file: str) -> None:
     manually upload a json to s3 indicating that the entire test file failed
     since xml was probably not generated in this case
     """
+    try:
+        job_id = int(os.environ.get("JOB_ID"))
+        workflow_id = int(os.environ.get("GITHUB_RUN_ID"))
+    except Exception as e:
+        print(f"Failed to get job_id or workflow_id: {e}")
+        return
+
     message = "The test file failed but we were not able to determine the exact unittest.  The most likely cause is a segfault"
     j = {
         "invoking_file": invoking_file,
         "file": f"{invoking_file}.py",
         "name": "entire_test_suite_failure",
-        "workflow_id": os.environ.get("GITHUB_RUN_ID"),
+        "workflow_id": workflow_id,
         "workflow_run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
-        "job_id": os.environ.get("JOB_ID"),
-        "failure": {
-            "message": message,
-            "text": message
-        }
+        "job_id": job_id,
+        "failure": {"message": message, "text": message},
     }
     gzipped = gzip.compress(json.dumps(j).encode("utf-8"))
     s3_key = f"{invoking_file.replace('/', '_')}_{os.urandom(8).hex()}.json"
     get_s3_resource().put_object(
         Body=gzipped,
         Bucket="gha-artifacts",
-        Key=f"test_jsons_while_running/{os.environ.get('GITHUB_RUN_ID')}/{job_id}/{s3_key}",
+        Key=f"test_jsons_while_running/{workflow_id}/{job_id}/{s3_key}",
         ContentType="application/json",
         ContentEncoding="gzip",
     )

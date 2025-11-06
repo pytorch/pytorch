@@ -78,8 +78,8 @@ from tools.testing.test_selections import (
 try:
     from tools.testing.upload_artifacts import (
         parse_xml_and_upload_json,
-        zip_and_upload_artifacts,
         upload_adhoc_failure_json,
+        zip_and_upload_artifacts,
     )
 except ImportError:
     # some imports in those files might fail, e.g., boto3 not installed. These
@@ -800,7 +800,11 @@ def run_test_retries(
             # This is for log classifier so it can prioritize consistently
             # failing tests instead of reruns. [1:-1] to remove quotes
             print_to_file(f"FAILED CONSISTENTLY: {current_failure[1:-1]}")
-            if current_failure == f"'{test_file}'" and IS_CI and options.upload_artifacts_while_running:
+            if (
+                current_failure == f"'{test_file}'"
+                and IS_CI
+                and options.upload_artifacts_while_running
+            ):
                 upload_adhoc_failure_json(test_file)
 
             if not continue_through_error:

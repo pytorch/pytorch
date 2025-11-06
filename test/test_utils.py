@@ -149,6 +149,11 @@ class TestCheckpoint(TestCase):
                     self.assertEqual(m.counter, 1)
 
     def test_checkpoint_valid(self):
+        # segfault
+        import signal
+
+        signal.raise_signal(signal.SIGSEGV)
+
         model = nn.Sequential(
             nn.Linear(100, 50),
             nn.ReLU(),
