@@ -202,12 +202,21 @@ struct FromImpl<torch::headeronly::HeaderOnlyArrayRef<T>> {
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
     StableListHandle new_list_handle;
-    TORCH_ERROR_CODE_CHECK(
-        torch_new_list_reserve_size(val.size(), &new_list_handle));
-    for (const auto& elem : val) {
-      TORCH_ERROR_CODE_CHECK(torch_list_push_back(new_list_handle, from(elem)));
+    try {
+      TORCH_ERROR_CODE_CHECK(
+          torch_new_list_reserve_size(val.size(), &new_list_handle));
+      for (const auto& elem : val) {
+        TORCH_ERROR_CODE_CHECK(
+            torch_list_push_back(new_list_handle, from(elem)));
+      }
+      return from(new_list_handle);
+    } catch (const std::runtime_error& e) {
+      if (new_list_handle != nullptr) {
+        // clean up memory if an error was thrown
+        TORCH_ERROR_CODE_CHECK(torch_delete_list(new_list_handle));
+      }
+      throw e;
     }
-    return from(new_list_handle);
   }
 };
 
@@ -387,17 +396,22 @@ struct ToImpl<std::vector<T>> {
       [[maybe_unused]] bool is_internal) {
     auto list_handle = to<StableListHandle>(val);
     size_t size;
-    TORCH_ERROR_CODE_CHECK(torch_list_size(list_handle, &size));
-    std::vector<T> result;
-    result.reserve(size);
-    for (size_t i = 0; i < size; i++) {
-      StableIValue element;
-      TORCH_ERROR_CODE_CHECK(torch_list_get_item(list_handle, i, &element));
-      result.push_back(to<T>(element));
+    try {
+      TORCH_ERROR_CODE_CHECK(torch_list_size(list_handle, &size));
+      std::vector<T> result;
+      result.reserve(size);
+      for (size_t i = 0; i < size; i++) {
+        StableIValue element;
+        TORCH_ERROR_CODE_CHECK(torch_list_get_item(list_handle, i, &element));
+        result.push_back(to<T>(element));
+      }
+      TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
+      return result;
+    } catch (const std::runtime_error& e) {
+      // clean up memory if an exception is thrown, and rethrow
+      TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
+      throw e;
     }
-
-    TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
-    return result;
   }
 };
 
