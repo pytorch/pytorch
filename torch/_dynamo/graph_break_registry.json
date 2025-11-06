@@ -3073,7 +3073,7 @@
       ]
     }
   ],
-  "GB0300": [
+  "GB0301": [
     {
       "Gb_type": "HOP: non torch.Tensor leaf",
       "Context": "args types: {[type(a.realize()) for a in args]}",
@@ -3081,7 +3081,7 @@
       "Hints": []
     }
   ],
-  "GB0301": [
+  "GB0302": [
     {
       "Gb_type": "HOP: non-callable variable",
       "Context": "arg name: {arg_name}, func_var type: {str(func_var)}",
@@ -3089,7 +3089,7 @@
       "Hints": []
     }
   ],
-  "GB0302": [
+  "GB0303": [
     {
       "Gb_type": "torch.while_loop: improper args/kwargs",
       "Context": "args: {args}, kwargs: {kwargs}",
@@ -3099,7 +3099,7 @@
       ]
     }
   ],
-  "GB0303": [
+  "GB0304": [
     {
       "Gb_type": "torch.while_loop: improper additional_inputs",
       "Context": "str(additional_inputs)",
@@ -3109,7 +3109,7 @@
       ]
     }
   ],
-  "GB0304": [
+  "GB0305": [
     {
       "Gb_type": "invalid set_subgraph_inputs and sub_kwargs settings",
       "Context": "set_subgraph_inputs: {set_subgraph_inputs}, sub_kwargs: {sub_kwargs}",
@@ -3120,7 +3120,7 @@
       ]
     }
   ],
-  "GB0305": [
+  "GB0306": [
     {
       "Gb_type": "unsupported HigherOrderOperator",
       "Context": "str(value)",
@@ -3130,7 +3130,7 @@
       ]
     }
   ],
-  "GB0306": [
+  "GB0307": [
     {
       "Gb_type": "unsupported HigherOrderOperator function call",
       "Context": "str(self.value)",
@@ -3140,7 +3140,7 @@
       ]
     }
   ],
-  "GB0307": [
+  "GB0308": [
     {
       "Gb_type": "torch.while_loop: unsupported cond_fn return type",
       "Context": "str(cond_r)",
@@ -3150,7 +3150,7 @@
       ]
     }
   ],
-  "GB0308": [
+  "GB0309": [
     {
       "Gb_type": "torch.cond: improper args/kwargs",
       "Context": "args: {args}, kwargs: {kwargs}",
@@ -3160,7 +3160,7 @@
       ]
     }
   ],
-  "GB0309": [
+  "GB0310": [
     {
       "Gb_type": "torch.cond: improper predicate",
       "Context": "str(pred)",
@@ -3170,7 +3170,7 @@
       ]
     }
   ],
-  "GB0310": [
+  "GB0311": [
     {
       "Gb_type": "torch.cond: improper operands",
       "Context": "str(operands)",
@@ -3180,7 +3180,7 @@
       ]
     }
   ],
-  "GB0311": [
+  "GB0312": [
     {
       "Gb_type": "torch.cond: improper operands contents",
       "Context": "str(operands)",
@@ -3190,7 +3190,7 @@
       ]
     }
   ],
-  "GB0312": [
+  "GB0313": [
     {
       "Gb_type": "torch.cond: differing branch outputs",
       "Context": "true_spec: {true_spec.treespec}, false_spec: {false_spec.treespec}, same_spec: {same_spec}",
@@ -3200,7 +3200,7 @@
       ]
     }
   ],
-  "GB0313": [
+  "GB0314": [
     {
       "Gb_type": "HOP body output unsupported",
       "Context": "non-tensor outputs: {non_tensor_output}",
@@ -3210,7 +3210,7 @@
       ]
     }
   ],
-  "GB0314": [
+  "GB0315": [
     {
       "Gb_type": "torch.associative_scan: improper xs",
       "Context": "str(xs)",
@@ -3220,7 +3220,7 @@
       ]
     }
   ],
-  "GB0315": [
+  "GB0316": [
     {
       "Gb_type": "torch.associative_scan: improper additional_inputs",
       "Context": "str(additional_inputs)",
@@ -3230,7 +3230,7 @@
       ]
     }
   ],
-  "GB0316": [
+  "GB0317": [
     {
       "Gb_type": "torch.associative_scan: zero-sized tensor",
       "Context": "str(xs_vars[0])",
@@ -3240,7 +3240,7 @@
       ]
     }
   ],
-  "GB0317": [
+  "GB0318": [
     {
       "Gb_type": "torch.associative_scan: combine_fn improper number of leaves",
       "Context": "str(_combine_treespec.as_python_constant())",
@@ -3250,7 +3250,7 @@
       ]
     }
   ],
-  "GB0318": [
+  "GB0319": [
     {
       "Gb_type": "torch.associative_scan: mismatched input/output tree structure",
       "Context": "xs: {xs_treespec.as_python_constant()}, output: {_combine_treespec.as_python_constant()}",
@@ -3260,7 +3260,7 @@
       ]
     }
   ],
-  "GB0319": [
+  "GB0320": [
     {
       "Gb_type": "torch.scan: improper xs",
       "Context": "str(xs)",
@@ -3270,7 +3270,7 @@
       ]
     }
   ],
-  "GB0320": [
+  "GB0321": [
     {
       "Gb_type": "torch.scan: improper init",
       "Context": "str(init)",
@@ -3280,7 +3280,7 @@
       ]
     }
   ],
-  "GB0321": [
+  "GB0322": [
     {
       "Gb_type": "torch.scan: no init leaves",
       "Context": "",
@@ -3290,7 +3290,7 @@
       ]
     }
   ],
-  "GB0322": [
+  "GB0323": [
     {
       "Gb_type": "torch.scan: improper additional_inputs",
       "Context": "str(additional_inputs)",
@@ -3300,7 +3300,7 @@
       ]
     }
   ],
-  "GB0323": [
+  "GB0324": [
     {
       "Gb_type": "torch.scan: zero-sized tensor",
       "Context": "str(xs_vars[0])",
@@ -3310,7 +3310,7 @@
       ]
     }
   ],
-  "GB0324": [
+  "GB0325": [
     {
       "Gb_type": "torch.map: kwargs not supported",
       "Context": "args: {args}, kwargs: {kwargs}",
@@ -3320,7 +3320,7 @@
       ]
     }
   ],
-  "GB0325": [
+  "GB0326": [
     {
       "Gb_type": "torch.map: improper inputs",
       "Context": "str(sample_shape)",
@@ -3330,7 +3330,7 @@
       ]
     }
   ],
-  "GB0326": [
+  "GB0327": [
     {
       "Gb_type": "executorch_call_delegate: kwargs not supported",
       "Context": "args: {args}, kwargs: {kwargs}",
@@ -3338,7 +3338,7 @@
       "Hints": []
     }
   ],
-  "GB0327": [
+  "GB0328": [
     {
       "Gb_type": "torch.func.functional_call capture is disabled",
       "Context": "",
@@ -3348,7 +3348,7 @@
       ]
     }
   ],
-  "GB0328": [
+  "GB0329": [
     {
       "Gb_type": "WrapHigherOrderVariable: kwargs unexpected",
       "Context": "args: {args}, kwargs: {kwargs}",
@@ -3358,7 +3358,7 @@
       ]
     }
   ],
-  "GB0329": [
+  "GB0330": [
     {
       "Gb_type": "wrap_with_set_grad_enabled: unexpected kwargs",
       "Context": "args: {args}, kwargs: {kwargs}",
@@ -3368,7 +3368,7 @@
       ]
     }
   ],
-  "GB0330": [
+  "GB0331": [
     {
       "Gb_type": "wrap_with_set_grad_enabled: non-constant grad_enabled",
       "Context": "str(grad_enabled)",
@@ -3378,7 +3378,7 @@
       ]
     }
   ],
-  "GB0331": [
+  "GB0332": [
     {
       "Gb_type": "wrap_with_set_grad_enabled: unexpected freevars",
       "Context": "str(body_lifted_freevars)",
@@ -3386,7 +3386,7 @@
       "Hints": []
     }
   ],
-  "GB0332": [
+  "GB0333": [
     {
       "Gb_type": "wrap_with_autocast: unexpected kwargs",
       "Context": "args: {args}, kwargs: {kwargs}",
@@ -3396,7 +3396,7 @@
       ]
     }
   ],
-  "GB0333": [
+  "GB0334": [
     {
       "Gb_type": "wrap_with_autocast: unexpected freevars",
       "Context": "str(body_lifted_freevars)",
@@ -3404,7 +3404,7 @@
       "Hints": []
     }
   ],
-  "GB0334": [
+  "GB0335": [
     {
       "Gb_type": "hints_wrapper: improper args/kwargs",
       "Context": "args: {args}, kwargs: {kwargs}",
@@ -3414,7 +3414,7 @@
       ]
     }
   ],
-  "GB0335": [
+  "GB0336": [
     {
       "Gb_type": "out_dtype: unexpected kwargs",
       "Context": "args: {args}, kwargs: {kwargs}",
@@ -3424,7 +3424,7 @@
       ]
     }
   ],
-  "GB0336": [
+  "GB0337": [
     {
       "Gb_type": "strict_mode: unexpected kwargs",
       "Context": "args: {args}, kwargs: {kwargs}",
@@ -3434,7 +3434,7 @@
       ]
     }
   ],
-  "GB0337": [
+  "GB0338": [
     {
       "Gb_type": "invoke_subgraph: kwargs unexpected",
       "Context": "args: {args}, kwargs: {kwargs}",
@@ -3444,7 +3444,7 @@
       ]
     }
   ],
-  "GB0338": [
+  "GB0339": [
     {
       "Gb_type": "torch.while_loop: infinite loop detected",
       "Context": "str(cond_r)",
@@ -3454,7 +3454,7 @@
       ]
     }
   ],
-  "GB0339": [
+  "GB0340": [
     {
       "Gb_type": "torch.cond: unsupported branch return type",
       "Context": "str(ret_val)",
@@ -3464,7 +3464,7 @@
       ]
     }
   ],
-  "GB0340": [
+  "GB0341": [
     {
       "Gb_type": "torch.associative_scan: improper args",
       "Context": "args: {args}",
@@ -3474,7 +3474,7 @@
       ]
     }
   ],
-  "GB0341": [
+  "GB0342": [
     {
       "Gb_type": "torch.scan: improper combine_fn",
       "Context": "str(combine_fn_var)",
@@ -3484,7 +3484,7 @@
       ]
     }
   ],
-  "GB0342": [
+  "GB0343": [
     {
       "Gb_type": "torch.scan: improper combine_fn number of returns",
       "Context": "str(combine_result_vars)",
@@ -3494,7 +3494,7 @@
       ]
     }
   ],
-  "GB0343": [
+  "GB0344": [
     {
       "Gb_type": "wrap_with_autocast: expected constant arg",
       "Context": "str(args)",
@@ -3504,7 +3504,7 @@
       ]
     }
   ],
-  "GB0344": [
+  "GB0345": [
     {
       "Gb_type": "strict_mode: improper args",
       "Context": "args: {args}, kwargs: {kwargs}",
@@ -3514,7 +3514,7 @@
       ]
     }
   ],
-  "GB0345": [
+  "GB0346": [
     {
       "Gb_type": "autograd.Function.apply: non-function or method forward",
       "Context": "str(self.fwd_graph)",
@@ -3522,7 +3522,7 @@
       "Hints": []
     }
   ],
-  "GB0346": [
+  "GB0347": [
     {
       "Gb_type": "autograd.Function.apply: _materialize_non_diff_grads mutation",
       "Context": "",
@@ -3532,7 +3532,7 @@
       ]
     }
   ],
-  "GB0347": [
+  "GB0348": [
     {
       "Gb_type": "autograd.Function.apply: non-function or method backward",
       "Context": "str(self.bwd_graph)",
@@ -3540,7 +3540,7 @@
       "Hints": []
     }
   ],
-  "GB0348": [
+  "GB0349": [
     {
       "Gb_type": "cannot unwrap variable for check_meta_consistency",
       "Context": "str(var)",
@@ -3548,7 +3548,7 @@
       "Hints": []
     }
   ],
-  "GB0349": [
+  "GB0350": [
     {
       "Gb_type": "torch.cond: unsupported branch return type (constant non-int)",
       "Context": "str(ret_val)",
@@ -3558,7 +3558,7 @@
       ]
     }
   ],
-  "GB0350": [
+  "GB0351": [
     {
       "Gb_type": "HOP body taking non-Tensor as input",
       "Context": "str(sub_args)",
@@ -3568,7 +3568,7 @@
       ]
     }
   ],
-  "GB0351": [
+  "GB0352": [
     {
       "Gb_type": "autograd.Function.apply: non-function or method backward (2)",
       "Context": "str(self.bwd_graph)",
