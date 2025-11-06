@@ -409,7 +409,9 @@ class _KinetoProfile:
             )
         return MemoryProfile(self.profiler.kineto_results)
 
-    def export_memory_timeline(self, path: str, device: Optional[str] = None) -> None:
+    def export_memory_timeline(
+        self, path: str, device: Optional[torch.device | str | int] = None
+    ) -> None:
         """Export memory event information from the profiler collected
         tree for a given device, and export a timeline plot. There are 3
         exportable files using ``export_memory_timeline``, each controlled by the
@@ -431,31 +433,39 @@ class _KinetoProfile:
 
         Output: Memory timeline written as gzipped JSON, JSON, or HTML.
         """
-        # Default to device 0, if unset. Fallback on cpu.
+        device_str = "cpu"
         if device is None:
-            if self.use_device and self.use_device != "cuda":
-                device = self.use_device + ":0"
-            else:
-                device = "cuda:0" if torch.cuda.is_available() else "cpu"
-
+            if self.use_device:
+                device_str = f"{str(torch.accelerator.current_accelerator())}:{torch.accelerator.current_device_index()}"
+        elif isinstance(device, int):
+            if not 0 <= device < torch.accelerator.device_count():
+                raise ValueError(
+                    f"Device index {device} is out of bounds for available devices "
+                    f"0 to {torch.accelerator.device_count() - 1}."
+                )
+            device_str = f"{torch.accelerator.current_accelerator()}:{device}"
+        elif isinstance(device, str):
+            device_str = str(torch.device(device))
+        else:  # torch.device
+            device_str = str(device)
         # Construct the memory timeline plot data
         self.mem_tl = MemoryProfileTimeline(self._memory_profile())
 
         # Depending on the file suffix, save the data as json.gz or json.
         # For html, we can embed the image into an HTML file.
         if path.endswith(".html"):
-            self.mem_tl.export_memory_timeline_html(path, device)
+            self.mem_tl.export_memory_timeline_html(path, device_str)
         elif path.endswith(".gz"):
             with tempfile.NamedTemporaryFile("w+t", suffix=".json") as fp:
                 fp.close()
                 if path.endswith("raw.json.gz"):
-                    self.mem_tl.export_memory_timeline_raw(fp.name, device)
+                    self.mem_tl.export_memory_timeline_raw(fp.name, device_str)
                 else:
-                    self.mem_tl.export_memory_timeline(fp.name, device)
+                    self.mem_tl.export_memory_timeline(fp.name, device_str)
                 with open(fp.name) as fin, gzip.open(path, "wt") as fout:
                     fout.writelines(fin)
         else:
-            self.mem_tl.export_memory_timeline(path, device)
+            self.mem_tl.export_memory_timeline(path, device_str)
 
 
 class ProfilerAction(Enum):
