@@ -9,6 +9,7 @@ from typing_extensions import deprecated
 
 import torch
 from torch import _VF, Tensor
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn import init
 from torch.nn.parameter import Parameter
 from torch.nn.utils.rnn import PackedSequence
@@ -254,7 +255,7 @@ class RNNBase(Module):
         # alias would break the assumptions of the uniqueness check in
         # Module.named_parameters().
         unique_data_ptrs = {
-            p.data_ptr()  # type: ignore[union-attr]
+            StorageWeakRef(p.untyped_storage())  # type: ignore[union-attr]
             for p in self._flat_weights
         }
         if len(unique_data_ptrs) != len(self._flat_weights):
