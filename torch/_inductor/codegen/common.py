@@ -516,6 +516,7 @@ def init_backend_registration() -> None:
     from .cpp_wrapper_mps import CppWrapperMps
     from .halide import HalideScheduling
     from .mps import MetalScheduling
+    from .pallas import PallasScheduling
     from .python_wrapper_mtia import PythonWrapperMtia
     from .triton import TritonScheduling
     from .wrapper import PythonWrapperCodegen
@@ -542,6 +543,7 @@ def init_backend_registration() -> None:
         cuda_backends = {
             "triton": CombinedScheduling,
             "halide": HalideScheduling,
+            "pallas": PallasScheduling,
         }
         register_backend_for_device(
             "cuda",

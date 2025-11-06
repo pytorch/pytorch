@@ -175,10 +175,23 @@ def try_import_cutlass() -> bool:
 
 
 @functools.lru_cache(8)
-def _normalize_cutlass_arch(arch: str) -> str:
+def _normalize_cutlass_arch(arch: str, device_type: str) -> str:
+    if device_type == "xpu":
+        return _normalize_xpu_arch(arch)
+    else:
+        return _normalize_cuda_arch(arch)
+
+
+def _normalize_xpu_arch(arch: str) -> str:
     if arch.startswith("Xe"):
         return arch[2:]
+    if 12 <= int(arch) and int(arch) <= 50:
+        return arch
+    else:
+        raise NotImplementedError(f"Unsupported xpu arch: {arch}")
 
+
+def _normalize_cuda_arch(arch: str) -> str:
     if int(arch) >= 100:
         log.warning(
             "Detected CUDA architecture >= 100: %s. We will generate operations with "
@@ -224,18 +237,21 @@ class CUTLASSArgs:
     interface_dir: None = None
     filter_by_cc = True
     disable_full_archs_compilation = False
+    device_type: str = "cuda"
 
     def __post_init__(self):
         if self.architectures is None or self.toolkit_version is None:
             raise RuntimeError(
                 f"{self.architectures=} or {self.toolkit_version=} is None!"
             )
-        self.architectures = _normalize_cutlass_arch(self.architectures)
+        self.architectures = _normalize_cutlass_arch(
+            self.architectures, device_type=self.device_type
+        )
 
 
 @clear_on_fresh_cache
 @functools.cache
-def _gen_ops_cached(arch, version) -> dict[Any, Any]:
+def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]:
     # Note: Cache needs to be specific for cuda architecture and version
 
     # Import cutlass python scripts.
@@ -245,34 +261,37 @@ def _gen_ops_cached(arch, version) -> dict[Any, Any]:
 
     if arch is None or version is None:
         log.error(
-            "Cannot detect cuda arch %s or cuda version %s. "
+            "Cannot detect cuda arch %s or version %s. "
             "Will discard all cutlass ops. "
             "Please consider setting _inductor.cuda.arch and _inductor.cuda.version configs.",
             arch,
             version,
         )
         return {}
-    is_xpu = arch.startswith("Xe")
-    arch = _normalize_cutlass_arch(arch)
+
+    arch = _normalize_cutlass_arch(arch, device_type)
     instantiation_level: str = config.cutlass.cutlass_instantiation_level
     args = CUTLASSArgs(
         architectures=arch,
         toolkit_version=version,
         instantiation_level=instantiation_level,
         operations=CUTLASS_OPERATION_KIND,
+        device_type=device_type,
     )
     manifest = cutlass_manifest.Manifest(args)
 
     start_time = time.time()
-    if is_xpu:
+    if device_type == "xpu":
         if hasattr(cutlass_generator, "GenerateIntelXe"):
-            cutlass_generator.GenerateIntelXe(manifest, args.toolkit_version, arch=arch)
+            cutlass_generator.GenerateIntelXe(
+                manifest, args.toolkit_version, arch=int(arch)
+            )
         else:
             raise NotImplementedError(
                 "Arch " + arch + " is not supported by current cutlass lib."
             )
 
-    if arch == "100":
+    elif arch == "100":
         if hasattr(cutlass_generator, "GenerateSM100"):
             cutlass_generator.GenerateSM100(manifest, args.toolkit_version)
         cutlass_generator.GenerateSM90(manifest, args.toolkit_version)
@@ -301,7 +320,7 @@ def gen_ops(device_type: str) -> dict[Any, Any]:
         device_op_overrides = get_device_op_overrides(device_type)
         arch = device_op_overrides.get_device_arch()
         version = device_op_overrides.get_toolkit_version()
-        return _gen_ops_cached(arch, version)
+        return _gen_ops_cached(arch, version, device_type)
 
 
 from ..cpp_utils import DTYPE_TO_CPP
