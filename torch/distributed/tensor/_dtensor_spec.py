@@ -295,7 +295,8 @@ class DTensorSpec:
             else:
                 if not isinstance(cur_placement, Replicate | Partial | MaskPartial):
                     raise ValueError(
-                        f"Unsupported placement type {type(cur_placement)} encountered in {placements}; expected Replicate, Partial, or MaskPartial."
+                        f"Unsupported placement type {type(cur_placement)} encountered in "
+                        f"{placements}; expected Replicate, Partial, or MaskPartial."
                     )
         for tensor_dim in range(max_tensor_dim):
             if len(tensor_dim_to_mesh_dims_order[tensor_dim]) > 0:
