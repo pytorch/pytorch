@@ -3040,7 +3040,7 @@ class Module:
 
         return replica
 
-    def compile(self, *args, **kwargs):
+    def compile(self, *args, **kwargs) -> None:
         """
         Compile this Module's forward using :func:`torch.compile`.
 
