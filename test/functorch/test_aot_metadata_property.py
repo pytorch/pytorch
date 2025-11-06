@@ -7,19 +7,13 @@ dynamically generates the correct metadata based on is_train and keep_input_muta
 eliminating the need to re-run run_functionalized_fw_and_collect_metadata.
 """
 
-import unittest
 from unittest.mock import patch
 
 import torch
 from torch._functorch._aot_autograd.collect_metadata_analysis import (
     run_functionalized_fw_and_collect_metadata,
 )
-from torch._functorch._aot_autograd.schemas import (
-    MutationType,
-    PlainTensorMeta,
-    SubclassCreationMeta,
-    ViewAndMutationMeta,
-)
+from torch._functorch._aot_autograd.schemas import PlainTensorMeta, ViewAndMutationMeta
 from torch._functorch.aot_autograd import aot_function
 from torch.testing._internal.common_subclass import WrapperTensor
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -71,7 +65,10 @@ class TestAOTMetadataProperty(TestCase):
     def test_property_computes_correct_metadata_training(self):
         """Test that the property correctly computes metadata in training mode."""
         # Create a simple ViewAndMutationMeta with mocked data
-        from torch._functorch._aot_autograd.schemas import InputAliasInfo, OutputAliasInfo
+        from torch._functorch._aot_autograd.schemas import (
+            InputAliasInfo,
+            OutputAliasInfo,
+        )
 
         # Mock input info: 3 inputs, first one is mutated
         input_info = [
@@ -164,11 +161,17 @@ class TestAOTMetadataProperty(TestCase):
         self.assertEqual(fw_graph_out[0], subclass_inp_meta[0])  # mutated input
         self.assertEqual(fw_graph_out[1], user_outs_meta[0])  # user output 1
         self.assertEqual(fw_graph_out[2], user_outs_meta[1])  # user output 2
-        self.assertEqual(fw_graph_out[3], intermediate_bases_meta[0])  # intermediate base
+        self.assertEqual(
+            fw_graph_out[3], intermediate_bases_meta[0]
+        )  # intermediate base
 
     def test_property_computes_correct_metadata_inference(self):
         """Test that the property correctly computes metadata in inference mode."""
-        from torch._functorch._aot_autograd.schemas import InputAliasInfo, OutputAliasInfo, OutputType
+        from torch._functorch._aot_autograd.schemas import (
+            InputAliasInfo,
+            OutputAliasInfo,
+            OutputType,
+        )
 
         # Mock input info: 3 inputs, first one is mutated
         input_info = [
@@ -262,7 +265,11 @@ class TestAOTMetadataProperty(TestCase):
 
     def test_property_with_keep_input_mutations(self):
         """Test that the property correctly handles keep_input_mutations=True."""
-        from torch._functorch._aot_autograd.schemas import InputAliasInfo, OutputAliasInfo, OutputType
+        from torch._functorch._aot_autograd.schemas import (
+            InputAliasInfo,
+            OutputAliasInfo,
+            OutputType,
+        )
 
         # Mock input info: 3 inputs, first is data-mutated, second is metadata-mutated
         input_info = [
@@ -349,7 +356,9 @@ class TestAOTMetadataProperty(TestCase):
 
         # Check order: metadata_mutated_inputs, user_outputs
         user_outs_meta, _ = subclass_meta_components
-        self.assertEqual(fw_graph_out[0], subclass_inp_meta[1])  # metadata-mutated input
+        self.assertEqual(
+            fw_graph_out[0], subclass_inp_meta[1]
+        )  # metadata-mutated input
         self.assertEqual(fw_graph_out[1], user_outs_meta[0])  # user output 1
         self.assertEqual(fw_graph_out[2], user_outs_meta[1])  # user output 2
 
@@ -386,11 +395,13 @@ class TestAOTMetadataProperty(TestCase):
             def nop_compiler(fx_module, _):
                 return fx_module
 
-            compiled_fn = aot_function(fn, fw_compiler=nop_compiler, bw_compiler=nop_compiler)
+            compiled_fn = aot_function(
+                fn, fw_compiler=nop_compiler, bw_compiler=nop_compiler
+            )
 
             # Run the compiled function
             with torch.no_grad():  # Force inference mode
-                result = compiled_fn(x, y)
+                compiled_fn(x, y)
 
         # We should only call run_functionalized_fw_and_collect_metadata ONCE
         # Before the fix, it would be called TWICE in the subclass path
@@ -406,7 +417,11 @@ class TestAOTMetadataProperty(TestCase):
         Test that changing is_train flag on the same metadata object produces
         consistent results with the property.
         """
-        from torch._functorch._aot_autograd.schemas import InputAliasInfo, OutputAliasInfo, OutputType
+        from torch._functorch._aot_autograd.schemas import (
+            InputAliasInfo,
+            OutputAliasInfo,
+            OutputType,
+        )
 
         # Mock input info: 1 mutated input
         input_info = [

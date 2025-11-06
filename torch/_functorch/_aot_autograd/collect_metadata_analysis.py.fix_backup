@@ -835,6 +835,7 @@ from a multi-output view call"
             f_fw_graph_outs = f_metadata_mutated_inputs + f_fw_graph_outs
         if is_train:
             f_fw_graph_outs = f_fw_graph_outs + intermediate_bases
+        fw_graph_outs = pytree.tree_map(from_fun, f_fw_graph_outs)
 
         grad_enabled_mutation = None
         if torch.is_grad_enabled() != prior_grad_enabled:
