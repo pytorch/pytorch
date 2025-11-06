@@ -130,7 +130,7 @@ class TailLog:
         self._log_line_prefixes = log_line_prefixes
         self._log_line_filter = log_line_filter
         self._finished_events: dict[int, Event] = {
-            local_rank: Event() for local_rank in log_files.keys()
+            local_rank: Event() for local_rank in log_files
         }
         self._futs: list[Future] = []
         self._interval_sec = interval_sec
