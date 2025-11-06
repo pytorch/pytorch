@@ -665,11 +665,12 @@ void spgemm(
       kHalf,
       kBFloat16,
       C.scalar_type(),
-      "spgemm",
+      "sampled_addmm_out_sparse_csr",
       [&] {
-        auto beta_ = beta.to<scalar_t>();
-        auto alpha_ = alpha.to<scalar_t>();
-        auto compute_type = at::cuda::getCudaDataType<scalar_t>();
+        using opmath_t = at::opmath_type<scalar_t>;
+        auto beta_ = beta.to<opmath_t>();
+        auto alpha_ = alpha.to<opmath_t>();
+        auto compute_type = at::cuda::getCudaDataType<opmath_t>();
         auto handle = at::cuda::getCurrentCUDASparseHandle();
 
         // It's required to call workEstimation twice
@@ -1352,10 +1353,13 @@ void sampled_addmm_out_sparse_csr(
   c10::MaybeOwned<Tensor> A_ = prepare_dense_matrix_for_cusparse(A);
   c10::MaybeOwned<Tensor> B_ = prepare_dense_matrix_for_cusparse(B);
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      kHalf,
+      kBFloat16,
       C.scalar_type(),
       "sampled_addmm_out_sparse_csr",
       [&] {
+        using opmath_t = at::opmath_type<scalar_t>;
         // CUDA 11.6 doesn't support batched inputs, it raises an error:
         // ** On entry to cusparseSDDMM_bufferSize(): batched SDDMM is not supported
         // So we need to resort to the for loop
@@ -1364,9 +1368,9 @@ void sampled_addmm_out_sparse_csr(
           auto descB = at::cuda::sparse::CuSparseConstDnMatDescriptor(*B_, /*batch_offset=*/i);
           auto descC = at::cuda::sparse::CuSparseSpMatCsrDescriptor(C, /*batch_offset=*/i);
 
-          auto beta_ = beta.to<scalar_t>();
-          auto alpha_ = alpha.to<scalar_t>();
-          auto compute_type = at::cuda::getCudaDataType<scalar_t>();
+          auto beta_ = beta.to<opmath_t>();
+          auto alpha_ = alpha.to<opmath_t>();
+          auto compute_type = at::cuda::getCudaDataType<opmath_t>();
           auto handle = at::cuda::getCurrentCUDASparseHandle();
           size_t buffer_size = 0;
           TORCH_CUDASPARSE_CHECK(cusparseSDDMM_bufferSize(
