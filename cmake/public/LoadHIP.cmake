@@ -190,7 +190,7 @@ if(HIP_FOUND)
   if(NOT HAS_ROCM_SMI_H)
     message(FATAL_ERROR "rocm_smi.h not found. Please install the rocm-smi-lib package.")
   endif()
-  
+
   # Optional components.
   find_package_and_print_version(hipsparselt)  # Will be required when ready.
 
