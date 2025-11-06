@@ -108,7 +108,7 @@ class TestOpaqueObject(TestCase):
         def size_impl_fake(q: torch._C.ScriptObject) -> int:
             ctx = torch._custom_op.impl.get_ctx()
             u0 = ctx.create_unbacked_symint()
-            torch._check_is_size(u0)
+            torch._check(u0 >= 0)
             return u0
 
         super().setUp()
