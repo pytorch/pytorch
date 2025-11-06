@@ -150,7 +150,7 @@ def get_added_lines(filename: str) -> set[int]:
     return added_lines
 
 
-def parse_shim_file(filename: str) -> list[LintMessage]:
+def check_file(filename: str) -> list[LintMessage]:
     """
     Parse the stable/c/shim.h file and check that:
     1. All function declarations are within TORCH_FEATURE_VERSION blocks
@@ -308,17 +308,6 @@ def parse_shim_file(filename: str) -> list[LintMessage]:
                     )
 
     return lint_messages
-
-
-def check_file(filename: str) -> list[LintMessage]:
-    """
-    Check if the file is stable/c/shim.h and lint it.
-    """
-    # Only lint the specific file
-    if not filename.endswith("torch/csrc/stable/c/shim.h"):
-        return []
-
-    return parse_shim_file(filename)
 
 
 if __name__ == "__main__":
