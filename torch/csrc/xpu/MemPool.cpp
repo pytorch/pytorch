@@ -9,7 +9,6 @@
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
-// NOLINTNEXTLINE(misc-use-internal-linkage)
 void THXPMemPool_init(PyObject* module) {
   auto torch_C_m = py::handle(module).cast<py::module>();
   shared_ptr_class_<::c10::xpu::MemPool>(torch_C_m, "_MemPool")
