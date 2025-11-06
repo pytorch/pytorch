@@ -1661,8 +1661,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # We need to have this check this way, because in case init is a TreeSpec and carry
         # but carry is only a LeafSpec, these two cannot be compared correctly.
         if (
-            isinstance(xs_treespec.as_python_constant(), pytree.LeafSpec)
-            != isinstance(_combine_treespec.as_python_constant(), pytree.LeafSpec)
+            xs_treespec.as_python_constant().is_leaf()
+            != _combine_treespec.as_python_constant().is_leaf()
         ) or not _make_inlined(tx, pytree.TreeSpec.__eq__)(
             xs_treespec, _combine_treespec
         ).as_python_constant():
@@ -3560,7 +3560,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         if type(value) is not type(_local_map_wrapped):
             return False
 
-        return value == _local_map_wrapped and cls._enabled
+        return value is _local_map_wrapped and cls._enabled
 
     @staticmethod
     def build(**options):

@@ -1606,7 +1606,7 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
         node_list = list(g.nodes)
         for n in node_list:
             if (
-                n.target == operator.getitem
+                n.target is operator.getitem
                 and n.args[0].target is torch.ops.fsdp.all_gather_copy_in.default
                 and n.args[1] == 1
             ):

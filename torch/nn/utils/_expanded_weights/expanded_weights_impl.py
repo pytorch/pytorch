@@ -140,7 +140,7 @@ class ExpandedWeight(torch.Tensor):
             if decomp is not None:
                 with setup_rnn(use_input_variant, args, kwargs):
                     return decomp(*args, **kwargs)
-        if func == torch._cudnn_rnn_flatten_weight:
+        if func is torch._cudnn_rnn_flatten_weight:
             # since we aren't using the fused cuda kernels for RNNs, don't do this
             return
         if func in cls.handled_functions:
