@@ -57,7 +57,7 @@ load_tests = load_tests  # noqa: PLW0127
 HAS_CUDA = torch.cuda.is_available()
 HAS_XPU = torch.xpu.is_available()
 HAS_GPU = HAS_CUDA or HAS_XPU
-device_type = get_gpu_type()
+device_type = acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 
 
 from torch.testing._internal.common_utils import run_tests, TestCase
