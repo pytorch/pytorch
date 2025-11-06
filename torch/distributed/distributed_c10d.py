@@ -3,6 +3,7 @@
 
 import collections.abc
 import contextlib
+import copy
 import ctypes
 import hashlib
 import io
@@ -5212,7 +5213,9 @@ def split_group(
 
     if pg_options is None:
         # default pg_options same as the parent process group
-        pg_options = parent_backend.options
+        # A deep copy is needed because if the option will be modified inside split
+        # and if we split parent pg multiple times, we will run into device out of bound error.
+        pg_options = copy.deepcopy(parent_backend.options)
 
     # this timeout defaulting/validation is used for all the new_groups/new_subgroups variants,
     # which may just pass their timeout value (or None)
