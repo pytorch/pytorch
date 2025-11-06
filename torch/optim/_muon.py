@@ -78,7 +78,7 @@ def _adjust_lr(
     A, B = param_shape[:2]
 
     if adjust_lr_fn is None or adjust_lr_fn == "original":
-        # pyrefly: ignore  # no-matching-overload
+        # pyrefly: ignore [no-matching-overload]
         adjusted_ratio = math.sqrt(max(1, A / B))
     elif adjust_lr_fn == "match_rms_adamw":
         adjusted_ratio = 0.2 * math.sqrt(max(A, B))
@@ -141,7 +141,7 @@ class Muon(Optimizer):
         params_with_grad: list[Tensor],
         grads: list[Tensor],
         muon_momentum_bufs: list[Tensor],
-    ):
+    ) -> bool:
         for p in group["params"]:
             if p.grad is None:
                 continue
@@ -337,7 +337,7 @@ def muon(
     eps: float,
     adjust_lr_fn: Optional[str],
     has_complex: bool,
-):
+) -> None:
     r"""Functional API that performs Muon algorithm computation.
 
     See :class:`~torch.optim.Muon` for details.

@@ -269,7 +269,10 @@ def _worker_loop(
 
         shared_rng = torch.Generator()
         if isinstance(dataset, IterDataPipe):
-            assert shared_seed is not None
+            if shared_seed is None:
+                raise AssertionError(
+                    "shared_seed must be provided for IterDataPipe workers"
+                )
             shared_rng.manual_seed(shared_seed)
             dataset = apply_random_seed(dataset, shared_rng)
 
@@ -321,7 +324,10 @@ def _worker_loop(
                 iteration_end = False
 
                 if isinstance(dataset, IterDataPipe):
-                    assert r.seed is not None
+                    if r.seed is None:
+                        raise AssertionError(
+                            "resume iteration seed is None for IterDataPipe"
+                        )
                     shared_rng.manual_seed(r.seed)
                     dataset = apply_random_seed(dataset, shared_rng)
 
@@ -332,7 +338,10 @@ def _worker_loop(
                 continue
             elif r is None:
                 # Received the final signal
-                assert done_event.is_set() or iteration_end
+                if not done_event.is_set() and not iteration_end:
+                    raise AssertionError(
+                        "Received final signal but neither done_event nor iteration_end is set"
+                    )
                 break
             elif done_event.is_set() or iteration_end:
                 # `done_event` is set. But I haven't received the final signal

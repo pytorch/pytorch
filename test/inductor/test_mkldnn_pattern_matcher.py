@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     IS_X86,
     MI300_ARCH,
+    MI350_ARCH,
     parametrize,
     skipIfNoXPU,
     skipIfRocm,
@@ -759,7 +760,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
             metrics.reset()
             mod = M(unary_fn, 10, 30, bias=bias).eval()
             # only fuse for linear when the dtype is bf16
-            mod = mod
             v = torch.randn(2, 10)
 
             def matcher_check_fn():
@@ -834,9 +834,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         for dtype in dtypes:
             torch._dynamo.reset()
-            autocast_enabled = (
-                True if dtype in [torch.bfloat16, torch.float16] else False
-            )
+            autocast_enabled = dtype in [torch.bfloat16, torch.float16]
             with (
                 torch.no_grad(),
                 torch.autocast(
@@ -1187,7 +1185,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocmArch(MI300_ARCH)
+    @skipIfRocmArch(MI300_ARCH + MI350_ARCH)
     def test_qconv2d_int8_mixed_bf16(self):
         r"""
         This testcase will quantize a single Conv2d module with int8_mixed_bf16 quantization.
@@ -1197,7 +1195,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocmArch(MI300_ARCH)
+    @skipIfRocmArch(MI300_ARCH + MI350_ARCH)
     def test_qconv2d_int8_mixed_bf16_use_autocast(self):
         r"""
         This testcase will quantize a single Conv2d module with int8_mixed_bf16 quantization.
@@ -4420,14 +4418,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
         out_feature = 64
         q_min, q_max = -32, 31
         # we only test for qlinear_binary in this case
-        test_for_pointwise_binary = (
-            True
-            if M == 1
+        test_for_pointwise_binary = bool(
+            M == 1
             and inplace_add
             and not expand_a_scale
             and not dynamic
             and not has_bias
-            else False
         )
         if test_for_pointwise_binary and not IS_X86:
             self.skipTest("Some UTs are only supported on x86_64 CPUs")

@@ -27,6 +27,7 @@ def _verbose_printer(verbose: bool | None) -> Callable[..., None]:
     """Prints messages based on `verbose`."""
     if verbose is False:
         return lambda *_, **__: None
+    # pyrefly: ignore [not-iterable]
     return lambda *args, **kwargs: print("[torch.onnx]", *args, **kwargs)
 
 
@@ -47,6 +48,7 @@ def _patch_dynamo_unsupported_functions():
 
     # Replace torch.jit.isinstance with isinstance
     jit_isinstance = torch.jit.isinstance
+    # pyrefly: ignore [bad-assignment]
     torch.jit.isinstance = isinstance
     logger.info("Replaced torch.jit.isinstance with isinstance to allow dynamo tracing")
     try:
@@ -165,6 +167,7 @@ class TorchExportStrictStrategy(CaptureStrategy):
                     kwargs=kwargs,
                     dynamic_shapes=dynamic_shapes,
                     strict=True,
+                    prefer_deferred_runtime_asserts_over_guards=_flags.PREFER_DEFERRED_RUNTIME_ASSERTS_OVER_GUARDS,
                 )
             except torch._dynamo.exc.UserError as exc:
                 # Refine the dynamic shapes based on the suggested fixes.
@@ -176,7 +179,12 @@ class TorchExportStrictStrategy(CaptureStrategy):
                     # If the dynamic shapes cannot be refined, re-raise the exception.
                     raise exc from None
                 return torch.export.export(
-                    model, args, kwargs=kwargs, dynamic_shapes=new_shapes, strict=True
+                    model,
+                    args,
+                    kwargs=kwargs,
+                    dynamic_shapes=new_shapes,
+                    strict=True,
+                    prefer_deferred_runtime_asserts_over_guards=_flags.PREFER_DEFERRED_RUNTIME_ASSERTS_OVER_GUARDS,
                 )
 
     def _enter(self, model) -> None:
@@ -214,6 +222,7 @@ class TorchExportNonStrictStrategy(CaptureStrategy):
                     kwargs=kwargs,
                     dynamic_shapes=dynamic_shapes,
                     strict=False,
+                    prefer_deferred_runtime_asserts_over_guards=_flags.PREFER_DEFERRED_RUNTIME_ASSERTS_OVER_GUARDS,
                 )
             except torch._dynamo.exc.UserError as exc:
                 # Refine the dynamic shapes based on the suggested fixes.
@@ -225,7 +234,12 @@ class TorchExportNonStrictStrategy(CaptureStrategy):
                     # If the dynamic shapes cannot be refined, re-raise the exception.
                     raise exc from None
                 return torch.export.export(
-                    model, args, kwargs=kwargs, dynamic_shapes=new_shapes, strict=False
+                    model,
+                    args,
+                    kwargs=kwargs,
+                    dynamic_shapes=new_shapes,
+                    strict=False,
+                    prefer_deferred_runtime_asserts_over_guards=_flags.PREFER_DEFERRED_RUNTIME_ASSERTS_OVER_GUARDS,
                 )
 
     def _enter(self, model) -> None:
