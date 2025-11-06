@@ -2,25 +2,26 @@
 
 set -ex
 
+source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
+
 # Get the pinned JAX version
-JAX_VERSION=$(cat /ci_commit_pins/jax.txt)
+JAX_VERSION=$(get_pinned_commit /ci_commit_pins/jax)
 
 function install_jax_12() {
   echo "Installing JAX ${JAX_VERSION} with CUDA 12 support"
-  pip install --progress-bar off "jax[cuda12]==${JAX_VERSION}" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+  pip_install "jax[cuda12]==${JAX_VERSION}" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
   # Verify installation
-  python -c "import jax; print('JAX version:', jax.__version__)"
+  conda_run python -c "import jax; print('JAX version:', jax.__version__)"
   echo "JAX ${JAX_VERSION} installation completed successfully for CUDA 12"
 }
 
 function install_jax_13() {
   echo "Installing JAX ${JAX_VERSION} with CUDA 13 support"
-  # JAX may not have separate cuda13 packages yet, use cuda12
-  pip install --progress-bar off "jax[cuda12]==${JAX_VERSION}" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+  pip_install "jax[cuda13]==${JAX_VERSION}" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
   # Verify installation
-  python -c "import jax; print('JAX version:', jax.__version__)"
+  conda_run python -c "import jax; print('JAX version:', jax.__version__)"
   echo "JAX ${JAX_VERSION} installation completed successfully for CUDA 13"
 }
 

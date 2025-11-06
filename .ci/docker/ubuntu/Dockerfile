@@ -62,6 +62,14 @@ ENV USE_SYSTEM_NCCL=1
 ENV NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
 ENV NCCL_LIB_DIR="/usr/local/cuda/lib64/"
 
+# Install JAX with CUDA support
+ARG CUDA_VERSION
+COPY ./common/install_jax.sh install_jax.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ./ci_commit_pins/jax.txt /ci_commit_pins/jax.txt
+RUN bash ./install_jax.sh ${CUDA_VERSION}
+RUN rm -f install_jax.sh common_utils.sh /ci_commit_pins/jax.txt
+
 
 # (optional) Install UCC
 ARG UCX_COMMIT
