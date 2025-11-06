@@ -267,7 +267,9 @@ def _call_function_and_unflatten_output(
     # outer graph uses an original vt, it uses the subgraph output.
     if body_r is not None:
         for orig_vt, subgraph_vt in zip(body_r.items, flat_variable.items):
-            if isinstance(orig_vt, variables.TensorVariable):
+            if isinstance(
+                orig_vt, (variables.SymNodeVariable, variables.TensorVariable)
+            ):
                 assert isinstance(subgraph_vt, variables.TensorVariable)
                 orig_vt.proxy = subgraph_vt.proxy
 
