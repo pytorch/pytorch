@@ -85,8 +85,8 @@ TORCH_LIBRARY(myops, m) {
   m.def("add_scalar(Tensor input, float scalar) -> Tensor", &add_scalar);
 }
 
-// Register CUDA implementation
-TORCH_LIBRARY_IMPL(myops, CUDA, m) {
+// Register the implementation
+TORCH_LIBRARY_IMPL(myops, CompositeExplicitAutograd, m) {
   m.impl("add_scalar", &add_scalar);
 }
 
@@ -140,7 +140,7 @@ STABLE_TORCH_LIBRARY(myops, m) {
   m.def("add_scalar(Tensor input, float scalar) -> Tensor", &boxed_add_scalar);
 }
 
-// (7) Register CUDA implementation using STABLE_TORCH_LIBRARY_IMPL
+// (7) Register the implementation using STABLE_TORCH_LIBRARY_IMPL
 STABLE_TORCH_LIBRARY_IMPL(myops, CompositeExplicitAutograd, m) {
   m.impl("add_scalar", &boxed_add_scalar);
 }
