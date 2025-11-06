@@ -33,69 +33,6 @@ static inline int PyCode_GetNFreevars(PyCodeObject* code) {
 #endif
 }
 
-#if !IS_PYTHON_3_14_PLUS
-static inline int PyUnstable_TryIncRef(PyObject* obj) {
-#if defined(Py_GIL_DISABLED)
-  uint32_t local = _Py_atomic_load_uint32_relaxed(&obj->ob_ref_local);
-  local += 1;
-  if (local == 0) {
-    // immortal
-    return 1;
-  }
-  if (_Py_IsOwnedByCurrentThread(obj)) {
-    _Py_atomic_store_uint32_relaxed(&obj->ob_ref_local, local);
-#ifdef Py_REF_DEBUG
-    _Py_INCREF_IncRefTotal();
-#endif
-    return 1;
-  }
-  Py_ssize_t shared = _Py_atomic_load_ssize_relaxed(&obj->ob_ref_shared);
-  for (;;) {
-    // If the shared refcount is zero and the object is either merged
-    // or may not have weak references, then we cannot incref it.
-    if (shared == 0 || shared == _Py_REF_MERGED) {
-      return 0;
-    }
-
-    if (_Py_atomic_compare_exchange_ssize(
-            &obj->ob_ref_shared,
-            &shared,
-            shared + (1 << _Py_REF_SHARED_SHIFT))) {
-#ifdef Py_REF_DEBUG
-      _Py_INCREF_IncRefTotal();
-#endif
-      return 1;
-    }
-  }
-#else
-  if (Py_REFCNT(obj) > 0) {
-    Py_INCREF(obj);
-    return 1;
-  }
-  return 0;
-#endif
-}
-
-static inline void PyUnstable_EnableTryIncRef(PyObject* obj) {
-#ifdef Py_GIL_DISABLED
-  if (_Py_IsImmortal(obj)) {
-    return;
-  }
-  for (;;) {
-    Py_ssize_t shared = _Py_atomic_load_ssize_relaxed(&obj->ob_ref_shared);
-    if ((shared & _Py_REF_SHARED_FLAG_MASK) != 0) {
-      // Nothing to do if it's in WEAKREFS, QUEUED, or MERGED states.
-      return;
-    }
-    if (_Py_atomic_compare_exchange_ssize(
-            &obj->ob_ref_shared, &shared, shared | _Py_REF_MAYBE_WEAKREF)) {
-      return;
-    }
-  }
-#endif
-}
-#endif
-
 #ifdef __cplusplus
 }
 #endif
