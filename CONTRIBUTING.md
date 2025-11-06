@@ -274,6 +274,27 @@ dependencies as well as the nightly binaries into the repo directory.
   * ...
 * [.circleci](.circleci) - CircleCI configuration management. [README](.circleci/README.md)
 
+## Spin
+
+[Spin](https://github.com/scientific-python/spin) is a developer cli tool that
+helps running common tasks.
+To list the available tasks, run `spin --help`.
+Currently, we support the following tasks with Spin:
+
+### Linting
+
+Spin helps with linting by making sure that lintrunner is installed correctly
+and by isolating the lintrunner environment from the general development
+environment using uv.
+
+|command||
+|-|-|
+|`setup-lint`|update lintrunner and perform a fresh setup|
+|`lazy-setup-lint`|only perform setup if the lint configuration has changed|
+|`lint`|perform full lint on all files|
+|`quicklint`|perform lint on all files changed in the latest commit and the working directory|
+|`quickfix`|autofix issues on all files changed in the latest commit and the working directory|
+
 ## Unit testing
 
 ### Python Unit Testing
