@@ -52,6 +52,7 @@ class CoordescTuner:
         self,
         is_mm=False,
         is_native_matmul=False,
+        is_mix_order_reduction=False,
         name="unknown",
         size_hints=None,
         inductor_meta=None,
@@ -64,6 +65,7 @@ class CoordescTuner:
         # tl.dot also does not support size smaller than 16; we put this restriction.
         self.is_native_matmul = is_native_matmul
         assert not (self.is_mm and self.is_native_matmul)
+        self.is_mix_order_reduction = is_mix_order_reduction
         self.cached_benchmark_results = {}
         self.name = name
         self.size_hints = size_hints
@@ -122,6 +124,12 @@ class CoordescTuner:
             out.append("num_stages")
             out.remove("ZBLOCK")  # ZBLOCK=1 always in native matmul
 
+        if self.is_mix_order_reduction:
+            # unlike TritonConfig.num_stages, this one is
+            # put in TritonConfig.kwargs["NUM_STAGES"] and is used to
+            # control the stage of pipelining of tl.range.
+            out.append("NUM_STAGES")
+
         return [f for f in out if f not in self.frozen_fields]
 
     def value_too_large(self, name: str, val: int) -> bool:
@@ -145,15 +153,23 @@ class CoordescTuner:
         # Break if value becomes 0/neg
         return val <= 0
 
-    def get_neighbour_values(self, name, orig_val, radius=1, include_self=False):
+    def get_neighbour_values(self, name, orig_val, radius=None, include_self=False):
         """
         Get neighbour values in 'radius' steps. The original value is not
         returned as it's own neighbour.
         """
+        if radius is None:
+            radius = 1
+        if name == "NUM_STAGES":
+            # we see cases that
+            # NUM_STAGES=1 is better than NUM_STAGES=2
+            # while NUM_STAGES=1 is worse than NUM_STAGES=3
+            radius = max(radius, 2)
+
         assert radius >= 1
 
         def update(cur_val, inc=True):
-            if name == "num_stages":
+            if name in ["num_stages", "NUM_STAGES"]:
                 if inc:
                     return cur_val + 1
                 else:
@@ -208,10 +224,11 @@ class CoordescTuner:
             old_value = get_field(best_config, field)
             if old_value is None:
                 continue
+            radius = self.inductor_meta.get("coordinate_descent_search_radius", 1)
             candidate_values = self.get_neighbour_values(
                 field,
                 old_value,
-                radius=self.inductor_meta.get("coordinate_descent_search_radius", 1),
+                radius=field,
                 include_self=True,
             )
             candidate_values_list.append(candidate_values)

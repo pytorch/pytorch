@@ -4571,7 +4571,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
                 accumname2var[name] = self.cse.namedvar(name, dtype=torch.float)
             self.body.writeline("split_size = min(RSPLIT_SIZE, xnumel - xoffset)")
-            self.body.writeline("for _ in range(0, split_size, XBLOCK):")
+            self.body.writeline("for _ in tl.range(0, split_size, XBLOCK, num_stages=NUM_STAGES):")
             with self.body.indent(offset=1):
                 self.body.splice(self.indexing_code)
                 self.body.writelines(
@@ -5038,6 +5038,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         if self.mix_order_reduction:
             add_constexpr_arg("RSPLIT_SIZE")
+            add_constexpr_arg("NUM_STAGES")
 
         triton_meta_signature = signature_to_meta(
             signature, size_dtype=self.index_dtype, argdefs=argdefs
@@ -5587,7 +5588,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
         if self._has_constant_mask(entry):
             sizes = self.dense_size_str()
-            code.writeline(f"{x}mask = tl.full({sizes}, True, tl.int1)")
+            # code.writeline(f"{x}mask = tl.full({sizes}, True, tl.int1)")
+            code.writeline(f"{x}mask = tl.full([R0_BLOCK], True, tl.int1)[None, :]")
         else:
             code.writeline(f"{x}mask = {entry.name} < {x}numel")
 

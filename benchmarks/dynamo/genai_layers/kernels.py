@@ -440,6 +440,10 @@ class RMSNormBackward(BenchmarkKernel):
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
         # TODO: OOM for (32768, 65536) on h100
         return (
+            # (1152 * 200, 256),
+            (1152 * 1000, 384),
+        )
+        return (
             (32768, 256),
             (32768, 512),
             (32768, 1024),

@@ -1,0 +1,3 @@
+- mask to avoid out of bound acces when using larger xblock
+- tune num-stages <==
+- tune xblock (upper bound is split size) <== (it's fine to not foce upper bound if we mask properly)
