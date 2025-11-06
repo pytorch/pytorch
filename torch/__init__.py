@@ -33,7 +33,11 @@ from typing import (
     TypeVar as _TypeVar,
     Union as _Union,
 )
-from typing_extensions import deprecated, ParamSpec as _ParamSpec, TypeIs as _TypeIs
+from typing_extensions import (
+    deprecated as _deprecated,
+    ParamSpec as _ParamSpec,
+    TypeIs as _TypeIs,
+)
 
 
 # As a bunch of torch.packages internally still have this check
@@ -1718,7 +1722,7 @@ def _check(cond, message=None):  # noqa: F811
     _check_with(RuntimeError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
-@deprecated(
+@_deprecated(
     "_check_is_size will be removed in a future PyTorch release along with guard_size_oblivious. \
     Use _check(i >= 0) instead."
 )
