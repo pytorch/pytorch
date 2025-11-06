@@ -338,7 +338,6 @@ class CachingAutotuner(KernelInterface):
             name=self.fn.__name__,
             size_hints=size_hints,
             inductor_meta=self.inductor_meta,
-            frozen_fields=self.get_coordesc_frozen_fields(),
         )
         self.filename = filename
 
@@ -367,13 +366,6 @@ class CachingAutotuner(KernelInterface):
 
         # Mode for launch grid calculation
         self.grid_mode: Literal["python", "cpp"] = "python"
-
-    def get_coordesc_frozen_fields(self) -> OrderedSet[str]:
-        out: OrderedSet[str] = OrderedSet()
-        if self.is_mix_order_reduction:
-            # We fix XBLOCK for mix order reduction
-            out.add("XBLOCK")
-        return out
 
     def is_statically_launchable(self):
         """
@@ -3399,7 +3391,9 @@ def persistent_reduction(
             c.kwargs["NUM_STAGES"] = 1
 
             # small XBLOCK to use less registers/smem
-            c.kwargs["XBLOCK"] = 4
+            c.kwargs["XBLOCK"] = (
+                torch._inductor.config.triton.mix_order_reduction_initial_xblock
+            )
 
             rnumel_hint = size_hints["r0_"]
 
@@ -3726,9 +3720,9 @@ class MixOrderReductionGrid(GridExpr):
     def generate(self, meta: dict[str, int]) -> None:
         split_size = meta.get("RSPLIT_SIZE")
         xblock = meta.get("XBLOCK")
-        assert split_size
-        # assert xblock == 1, "Mix order reduction force XBLOCK=1 right now"
-        assert split_size % xblock == 0
+        assert split_size, "Missing RSPLIT_SIZE"
+        assert xblock, "Missing XBLOCK"
+        assert split_size % xblock == 0, f"{split_size=}, {xblock=}"
         self.x_grid = self.ceildiv("xnumel", split_size)
 
 

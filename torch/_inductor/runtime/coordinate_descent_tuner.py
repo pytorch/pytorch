@@ -206,6 +206,15 @@ class CoordescTuner:
         threshold = 0.001  # 0.1%
         return test is not None and test < baseline * (1 - threshold)
 
+    def is_valid_config(self, config) -> bool:
+        if self.is_mix_order_reduction:
+            # Mix order reduction has an extra constraint that
+            # we should not tune XBLOCK beyond RSPLIT_SIZE
+            xblock = config.kwargs["XBLOCK"]
+            split_size = config.kwargs["RSPLIT_SIZE"]
+            return xblock <= split_size
+        return True
+
     def check_all_tuning_directions(
         self,
         # pyrefly: ignore [missing-attribute]
@@ -228,7 +237,7 @@ class CoordescTuner:
             candidate_values = self.get_neighbour_values(
                 field,
                 old_value,
-                radius=field,
+                radius=radius,
                 include_self=True,
             )
             candidate_values_list.append(candidate_values)
@@ -241,6 +250,8 @@ class CoordescTuner:
             candidate_config = copy.deepcopy(best_config)
             for new_val, field in zip(choice, effective_fields):
                 set_field(candidate_config, field, new_val)
+            if not self.is_valid_config(candidate_config):
+                continue
             cmp_res, candidate_timing = self.compare_config(
                 func, candidate_config, best_config, best_timing
             )
@@ -318,6 +329,8 @@ class CoordescTuner:
                     candidate_config = copy.deepcopy(best_config)
                     set_field(candidate_config, name, next_val)
 
+                    if not self.is_valid_config(candidate_config):
+                        continue
                     cmp_res, candidate_timing = self.compare_config(
                         func, candidate_config, best_config, best_timing
                     )

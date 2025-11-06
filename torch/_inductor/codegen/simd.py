@@ -592,6 +592,14 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 sizes[tree.tensor_dim] = f"{tree.prefix.upper()}BLOCK"
         return sizes
 
+    def create_constant_mask(self, entry) -> str:
+        x = entry.prefix
+        sizes = ["None"] * self.triton_tensor_ndim()
+        sizes[entry.tensor_dim] = ":"
+        suffix = ", ".join(sizes)
+        out = f"{x}mask = tl.full([{x.upper()}BLOCK], True, tl.int1)[{suffix}]"
+        return out
+
     def dense_size_str(self) -> str:
         sizes = self.dense_size_list()
         return f"[{', '.join(sizes)}]"

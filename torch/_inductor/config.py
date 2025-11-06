@@ -1555,6 +1555,7 @@ class triton:
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0" if is_fbcode() else "1")
         == "1"
     )
+    mix_order_reduction_initial_xblock = 1
 
     mix_order_reduction_split_size: Optional[int] = None
     mix_order_reduction_autotune_split_size = (
