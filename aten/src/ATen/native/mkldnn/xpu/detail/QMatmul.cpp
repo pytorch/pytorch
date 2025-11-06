@@ -335,11 +335,12 @@ struct ScaleSpec {
   dnnl::memory::data_type dtype; // f32 for FP8; e8m0 for MXFP
 
   int64_t expected_numel_src(int64_t M, int64_t K) const {
-    if (groups == dnnl::memory::dims{1, 1})
+    TORCH_CHECK((groups == dnnl::memory::dims{1, 1}) || (groups == dnnl::memory::dims{1, K}), "Unexpected SRC groups for expected_numel_src");
+    if (groups == dnnl::memory::dims{1, 1}) {
       return 1;
-    if (groups == dnnl::memory::dims{1, K})
+    } else {
       return M;
-    TORCH_CHECK(false, "Unexpected SRC groups for expected_numel_src");
+    }
   }
   int64_t expected_numel_wei(int64_t K, int64_t N) const {
     if (groups == dnnl::memory::dims{1, 1})

@@ -57,19 +57,8 @@ bool is_desired_scaling(
     const at::Tensor& t,
     const at::Tensor& scale,
     ScalingType desired_scaling) {
-  switch (desired_scaling) {
-    case ScalingType::TensorWise:
-      return is_tensorwise_scaling(t, scale);
-    case ScalingType::RowWise:
-      return is_rowwise_scaling(t, scale);
-    default:
-      TORCH_CHECK(
-          false,
-          "Unsupported scaling type. t.type()=",
-          t.toString(),
-          ", scale.type()=",
-          scale.toString());
-      return false;
+  auto result = desired_scaling == ScalingType::TensorWise ? is_tensorwise_scaling(t, scale) : is_rowwise_scaling(t, scale);
+  return res;
   }
 }
 
