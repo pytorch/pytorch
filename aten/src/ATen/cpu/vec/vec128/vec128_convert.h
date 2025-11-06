@@ -191,22 +191,37 @@ inline void convert(const at::Half* src, bool* dst, int64_t n) {
 }
 
 #endif
-#ifdef __ARM_FEATURE_BF16
-CONVERT_TEMPLATE(bfloat16_t, uint8_t)
-CONVERT_TEMPLATE(bfloat16_t, int8_t)
-CONVERT_TEMPLATE(bfloat16_t, int16_t)
-CONVERT_TEMPLATE(bfloat16_t, int32_t)
-CONVERT_TEMPLATE(bfloat16_t, int64_t)
-CONVERT_TEMPLATE(bfloat16_t, bfloat16_t)
-CONVERT_TEMPLATE(bfloat16_t, float)
-CONVERT_TEMPLATE(bfloat16_t, double)
-CONVERT_TEMPLATE(uint8_t, bfloat16_t)
-CONVERT_TEMPLATE(int8_t, bfloat16_t)
-CONVERT_TEMPLATE(int16_t, bfloat16_t)
-CONVERT_TEMPLATE(int32_t, bfloat16_t)
-CONVERT_TEMPLATE(int64_t, bfloat16_t)
-CONVERT_TEMPLATE(float, bfloat16_t)
-CONVERT_TEMPLATE(double, bfloat16_t)
+
+template <typename to_type>
+inline void convertFromBf16Impl(
+    const c10::BFloat16* __restrict src,
+    to_type* __restrict dst,
+    int64_t n) {
+  const uint16_t* srcPtr = reinterpret_cast<const uint16_t*>(src);
+  uint64_t len = static_cast<uint64_t>(n);
+  for (uint64_t i = 0; i < len; i++) {
+    uint32_t tmp = static_cast<uint32_t>(srcPtr[i]) << 16;
+    float tmpF;
+    __builtin_memcpy(&tmpF, &tmp, sizeof(float));
+    dst[i] = static_cast<to_type>(tmpF);
+  }
+}
+#define CONVERT_FROM_BF16_TEMPLATE(to_type)                                \
+  template <>                                                              \
+  inline void convert(const c10::BFloat16* src, to_type* dst, int64_t n) { \
+    return convertFromBf16Impl<to_type>(src, dst, n);                      \
+  }
+
+CONVERT_FROM_BF16_TEMPLATE(uint8_t)
+CONVERT_FROM_BF16_TEMPLATE(int8_t)
+CONVERT_FROM_BF16_TEMPLATE(int16_t)
+CONVERT_FROM_BF16_TEMPLATE(int32_t)
+CONVERT_FROM_BF16_TEMPLATE(int64_t)
+CONVERT_FROM_BF16_TEMPLATE(float)
+CONVERT_FROM_BF16_TEMPLATE(double)
+#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
+CONVERT_FROM_BF16_TEMPLATE(float16_t)
+#endif
 
 inline void convertBoolToBfloat16Impl(
     const bool* __restrict src,
@@ -244,8 +259,6 @@ template <>
 inline void convert(const c10::BFloat16* src, bool* dst, int64_t n) {
   return convertBfloat16ToBoolImpl(src, dst, n);
 }
-
-#endif
 
 #endif
 

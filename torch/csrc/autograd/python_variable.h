@@ -86,12 +86,13 @@ void pushPyOutToStack(
     py::object out,
     const char* msg);
 
-void callDTensorCustomOpHandler(
-    const c10::OperatorHandle& op,
-    torch::jit::Stack* stack);
+py::handle get_dtensor_class();
 
-void callDTensorOpDispatch(
+py::object dispatchDTensorOp(
     const c10::OperatorHandle& op,
+    py::handle py_op,
+    py::handle args,
+    py::handle kwargs,
     torch::jit::Stack* stack);
 
 inline PyObject* THPVariable_WrapList(

@@ -389,9 +389,11 @@ Tensor internal_new_from_data(
         c10::DispatchKey::FuncTorchDynamicLayerFrontMode);
     c10::impl::ExcludeDispatchKeyGuard functorch_back_guard(
         c10::DispatchKey::FuncTorchDynamicLayerBackMode);
-    // We disable Fake handler for similar reasons as functorch.
-    c10::impl::ExcludeDispatchKeyGuard fake_guard(
-        c10::DispatchKeySet{c10::DispatchKey::Fake});
+    // We disable Fake and DeferredInit handlers for similar reasons as
+    // functorch.
+    c10::impl::ExcludeDispatchKeyGuard fake_and_deferred_init_guard(
+        c10::DispatchKeySet{
+            c10::DispatchKey::Fake, c10::DispatchKey::DeferredInit});
     // Note [Functionalization <> torch.Tensor constructor]
     // Functionalization "lifts" the newly constructed tensor into a wrapper
     // using aten::lift().
@@ -1706,9 +1708,9 @@ bool isValidDLPackCapsule(PyObject* data) {
 
 Tensor tensor_fromDLPack(PyObject* data) {
   const char* bad_capsule =
-      ("from_dlpack received an invalid capsule. "
-       "Note that DLTensor capsules can be consumed only once, "
-       "so you might have already constructed a tensor from it once.");
+      "from_dlpack received an invalid capsule. "
+      "Note that DLTensor capsules can be consumed only once, "
+      "so you might have already constructed a tensor from it once.";
 
   if (PyCapsule_IsValid(
           data, at::DLPackTraits<DLManagedTensorVersioned>::capsule)) {
