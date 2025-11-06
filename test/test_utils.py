@@ -681,7 +681,6 @@ class TestHipifyTrie(TestCase):
         for i in range(len(orig_chars)):
             self.assertEqual(self.trie.quote(orig_chars[i]), quoted_strs[i])
 
-    @unittest.skipIf(HAS_XPU, "XPU not supported hipify")
     def test_export_trie_to_regex(self):
         words_to_add = [
             "__CUDACC__",
@@ -705,7 +704,6 @@ class TestHipifyTrie(TestCase):
         expected_regex = r"(?:app(?:le)?|ban(?:ana)?)"
         self.assertEqual(regex, expected_regex)
 
-    @unittest.skipIf(HAS_XPU, "XPU not supported hipify")
     def test_single_export_trie_to_regex(self):
         words_to_add = ["cudaErrorInvalidMemcpyDirection"]
         for word in words_to_add:
