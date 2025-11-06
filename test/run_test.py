@@ -753,7 +753,9 @@ def run_test_retries(
     num_failures = defaultdict(int)
 
     def read_pytest_cache(key: str) -> Any:
-        cache_file = REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key / key
+        cache_file = (
+            REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key / key
+        )
         try:
             with open(cache_file) as f:
                 return f.read()
@@ -782,7 +784,7 @@ def run_test_retries(
         try:
             current_failure = read_pytest_cache("current_failure")
             if current_failure is None:
-                raise FileNotFoundError()
+                raise FileNotFoundError
             if current_failure == "null":
                 current_failure = f"'{test_file}'"
         except FileNotFoundError:
