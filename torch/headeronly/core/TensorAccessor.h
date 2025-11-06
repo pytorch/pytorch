@@ -78,12 +78,12 @@ template <
     size_t N,
     template <typename U> class PtrTraits = DefaultPtrTraits,
     typename index_t = int64_t>
-class TensorAccessor
+class TensorAccessorDetail
     : public TensorAccessorBase<ArrayRefCls, T, N, PtrTraits, index_t> {
  public:
   typedef typename PtrTraits<T>::PtrType PtrType;
 
-  C10_HOST_DEVICE TensorAccessor(
+  C10_HOST_DEVICE TensorAccessorDetail(
       PtrType data_,
       const index_t* sizes_,
       const index_t* strides_)
@@ -92,22 +92,27 @@ class TensorAccessor
             sizes_,
             strides_) {}
 
-  C10_HOST_DEVICE TensorAccessor<ArrayRefCls, T, N - 1, PtrTraits, index_t>
+  C10_HOST_DEVICE TensorAccessorDetail<
+      ArrayRefCls,
+      T,
+      N - 1,
+      PtrTraits,
+      index_t>
   operator[](index_t i) {
-    return TensorAccessor<ArrayRefCls, T, N - 1, PtrTraits, index_t>(
+    return TensorAccessorDetail<ArrayRefCls, T, N - 1, PtrTraits, index_t>(
         this->data_ + this->strides_[0] * i,
         this->sizes_ + 1,
         this->strides_ + 1);
   }
 
-  C10_HOST_DEVICE const TensorAccessor<
+  C10_HOST_DEVICE const TensorAccessorDetail<
       ArrayRefCls,
       T,
       N - 1,
       PtrTraits,
       index_t>
   operator[](index_t i) const {
-    return TensorAccessor<ArrayRefCls, T, N - 1, PtrTraits, index_t>(
+    return TensorAccessorDetail<ArrayRefCls, T, N - 1, PtrTraits, index_t>(
         this->data_ + this->strides_[0] * i,
         this->sizes_ + 1,
         this->strides_ + 1);
@@ -119,12 +124,12 @@ template <
     typename T,
     template <typename U> class PtrTraits,
     typename index_t>
-class TensorAccessor<ArrayRefCls, T, 1, PtrTraits, index_t>
+class TensorAccessorDetail<ArrayRefCls, T, 1, PtrTraits, index_t>
     : public TensorAccessorBase<ArrayRefCls, T, 1, PtrTraits, index_t> {
  public:
   typedef typename PtrTraits<T>::PtrType PtrType;
 
-  C10_HOST_DEVICE TensorAccessor(
+  C10_HOST_DEVICE TensorAccessorDetail(
       PtrType data_,
       const index_t* sizes_,
       const index_t* strides_)
@@ -414,7 +419,7 @@ template <
     size_t N,
     template <typename U> class PtrTraits = DefaultPtrTraits,
     typename index_t = int64_t>
-using TensorAccessor = detail::TensorAccessor<
+using TensorAccessor = detail::TensorAccessorDetail<
     torch::headeronly::IntHeaderOnlyArrayRef,
     T,
     N,
