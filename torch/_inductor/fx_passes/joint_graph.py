@@ -535,7 +535,7 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
             if (
                 len(invoke_quant_replacement.users) == 1
                 and len(subgraph.users) == 1
-                and first_user.target == operator.getitem
+                and first_user.target is operator.getitem
                 and first_user.args[1] == 0
             ):
                 subgraph_graph = getattr(gm, subgraph.target)

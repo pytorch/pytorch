@@ -1198,7 +1198,8 @@ class NativeShardingPropagatorCache {
   }
 
   void insert(NativeOpSchema&& op_schema, py::object output_sharding) {
-    auto [it, inserted] = repr_.emplace(std::move(op_schema), std::move(output_sharding));
+    auto [it, inserted] =
+        repr_.emplace(std::move(op_schema), std::move(output_sharding));
     TORCH_INTERNAL_ASSERT(
         inserted,
         "tried to insert already-present element in NativeShardingPropagatorCache!");
@@ -1232,27 +1233,39 @@ get_thread_local_native_sharding_propagator_cache() {
     py::dict thread_dict =
         py::reinterpret_borrow<py::dict>(PyThreadState_GetDict());
     // We need to clean up before Python detaches from the thread if
-    // the thread is being destroyed. Note that optional::reset() is
-    // idempotent!
+    // the thread is being destroyed.
     thread_dict["__DTensor_fastpath_thread_cache_cleanup"] =
-        py::capsule(&native_sharding_propagator_cache_DO_NOT_USE, [](void* p) {
-          auto* popt_cache =
-              reinterpret_cast<std::optional<NativeShardingPropagatorCache>*>(
-                  p);
-          popt_cache->reset();
+        py::capsule(new std::thread::id(this_thread_id), [](void* p) {
+          auto* ptid = reinterpret_cast<std::thread::id*>(p);
+          {
+            std::lock_guard<std::mutex> inner_lock(
+                native_sharding_propagator_cache_cleanup_mutex);
+            auto it = all_thread_caches.find(*ptid);
+            if (it != all_thread_caches.end()) {
+              // We need to both:
+              // 1) free python objects, and
+              it->second->reset();
+              // 2) make sure we don't try to come back and mess with
+              // a destroyed thread-local at module unload (e.g.,
+              // process exit) time.
+              all_thread_caches.erase(it);
+            }
+          }
+          delete ptid;
         });
   }
   return native_sharding_propagator_cache_DO_NOT_USE.value();
 }
 
 // We need to clean up all thread_locals if our module is getting
-// unloaded. Note that optional::reset() is idempotent!
+// unloaded.
 void cleanup_thread_local_native_sharding_propagator_caches() {
   std::lock_guard<std::mutex> lock(
       native_sharding_propagator_cache_cleanup_mutex);
   for (auto& [_, popt_cache] : all_thread_caches) {
     popt_cache->reset();
   }
+  all_thread_caches.clear();
 }
 
 py::object dispatchDTensorOp(

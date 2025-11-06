@@ -850,7 +850,7 @@ def node_inline_(call_mod_node: torch.fx.Node) -> Optional[torch.fx.GraphModule]
                 get_item_users = nodes_filter(
                     list(call_mod_node.users.keys()),
                     lambda node: node.op == "call_function"
-                    and node.target == operator.getitem,
+                    and node.target is operator.getitem,
                 )
                 # get_item_node.args[1] is the idx referring to new_output[idx]
                 nodes_map(
