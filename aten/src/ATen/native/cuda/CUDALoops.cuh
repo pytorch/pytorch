@@ -904,9 +904,9 @@ struct type_specialized_broadcast_kernel_launcher {
         if (dtypes[0] == rt_binary_specializations[arg_index][0] &&
           dtypes[1] == rt_binary_specializations[arg_index][1] &&
           dtypes[2] == rt_binary_specializations[arg_index][2]) {
-            using arg0_cpp_t = decltype(c10::impl::ScalarTypeToCPPType<rt_binary_specializations[arg_index][1]>::t);
-            using arg1_cpp_t = decltype(c10::impl::ScalarTypeToCPPType<rt_binary_specializations[arg_index][2]>::t);
-            using ret_cpp_t = decltype(c10::impl::ScalarTypeToCPPType<rt_binary_specializations[arg_index][0]>::t);
+            using ret_cpp_t = c10::impl::ScalarTypeToCPPTypeT<rt_binary_specializations[arg_index][0]>;
+            using arg0_cpp_t = c10::impl::ScalarTypeToCPPTypeT<rt_binary_specializations[arg_index][1]>;
+            using arg1_cpp_t = c10::impl::ScalarTypeToCPPTypeT<rt_binary_specializations[arg_index][2]>;
             constexpr int grp_sz = 128;
             launch_legacy_kernel_manual_unroll<grp_sz, 4>(numel, [=] GPU_LAMBDA(int idx, bool unrl) {
               if (unrl) {
