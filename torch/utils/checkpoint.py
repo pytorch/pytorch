@@ -1518,7 +1518,7 @@ def _checkpoint_without_reentrant_generator(
     device_type = _infer_device_type(*args)
     device_module = _get_device_module(device_type)
     forward_context, recompute_context = context_fn()
-    if _is_compiling(fn, args, kwargs) and context_fn != noop_context_fn:
+    if _is_compiling(fn, args, kwargs) and context_fn is not noop_context_fn:
         if (
             not isinstance(forward_context, TorchDispatchMode)
             or not isinstance(recompute_context, TorchDispatchMode)

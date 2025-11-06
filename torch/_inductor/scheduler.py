@@ -15,14 +15,16 @@ import textwrap
 import traceback
 import typing
 from collections import Counter, defaultdict
-from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import ParamSpec, TypeAlias
+from typing import Any, Generic, Optional, TYPE_CHECKING, TypeAlias, TypeVar, Union
+from typing_extensions import ParamSpec
 
 from torch.utils._ordered_set import OrderedSet
 
+from .ir import ComputedBuffer
+
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Callable, Iterator, Sequence
     from types import ModuleType
 
 import sympy
@@ -103,11 +105,59 @@ class MixOrderReduction:
     """
 
     @staticmethod
+    def is_split_reduction(node: BaseSchedulerNode) -> bool:
+        return node.is_reduction() and all(
+            subnode.node._split_size is not None
+            for subnode in node.get_nodes()
+            if isinstance(subnode, SchedulerNode)
+            and subnode.is_reduction()
+            and isinstance(subnode.node, ComputedBuffer)
+        )
+
+    @classmethod
+    def get_numel_rnumel(cls, node: BaseSchedulerNode) -> tuple[sympy.Expr, sympy.Expr]:
+        if cls.is_split_reduction(node):
+            xnumel = None
+            rnumel = None
+            for subnode in node.get_nodes():
+                if not (
+                    isinstance(subnode, SchedulerNode)
+                    and subnode.is_reduction()
+                    and isinstance(subnode.node, ComputedBuffer)
+                ):
+                    continue
+
+                assert subnode.node._original_ranges is not None
+                curxnumel = V.graph.sizevars.simplify(
+                    sympy_product(subnode.node._original_ranges)
+                )
+                assert subnode.node._original_reduction_ranges is not None
+                currnumel = V.graph.sizevars.simplify(
+                    sympy_product(subnode.node._original_reduction_ranges)
+                )
+
+                if xnumel is None:
+                    xnumel = curxnumel
+                    rnumel = currnumel
+                else:
+                    assert V.graph.sizevars.statically_known_equals(
+                        xnumel, curxnumel
+                    ), f"{xnumel} v.s. {curxnumel}"
+                    assert V.graph.sizevars.statically_known_equals(
+                        rnumel, currnumel
+                    ), f"{rnumel} v.s. {currnumel}"
+
+            assert xnumel is not None
+            return (xnumel, rnumel)
+        else:
+            return node.group[1]  # type: ignore[return-value]
+
+    @classmethod
     def has_mix_reduction_orders(
-        node1: BaseSchedulerNode, node2: BaseSchedulerNode
+        cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
-        g1 = node1.group[1]
-        g2 = node2.group[1]
+        g1 = cls.get_numel_rnumel(node1)
+        g2 = cls.get_numel_rnumel(node2)
 
         if len(g1) != 2 or len(g2) != 2 or g1 == g2:
             return False
@@ -171,6 +221,7 @@ class MixOrderReduction:
     def can_fuse(cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
         if not config.triton.mix_order_reduction:
             return False
+
         if not node1.is_gpu() or not node2.is_gpu():
             return False
         device_type = node1.get_device().type  # type: ignore[union-attr]
@@ -191,18 +242,24 @@ class MixOrderReduction:
         if len(common_reads) == 0:
             return False
 
-        g1 = node1.group[1]
+        g1 = cls.get_numel_rnumel(node1)
         nrow = sympy.Max(g1[0], g1[1])
         ncol = sympy.Min(g1[0], g1[1])
 
         # We require more more row than columns since
         # 1, we prefer doing persistent reduction for each row
         # 2, we will split the reduction across the rows
-        if not V.graph.sizevars.statically_known_geq(nrow, ncol * 10):
+        if not V.graph.sizevars.statically_known_geq(nrow, ncol * 2):
+            return False
+
+        # When nrow is small, ncol should also be small (due to the check
+        # above). Thus the entire tensor should be well cached in L2.
+        # Mix order reduction is less beneficial.
+        if not V.graph.sizevars.statically_known_geq(nrow, 4096):
             return False
 
         contiguous_node, other_node = (
-            (node1, node2) if node1.group[1][1] == ncol else (node2, node1)
+            (node1, node2) if g1[1] == ncol else (node2, node1)
         )
 
         if not all(
@@ -223,12 +280,12 @@ class MixOrderReduction:
             return False
 
         # rnumel so large that we will not generated persistent reduction
-        if not V.graph.sizevars.statically_known_leq(ncol, 1024):
+        if not V.graph.sizevars.statically_known_leq(ncol, 1024 * 16):
             return False
 
         # Other reduction types like max/min is not supported yet.
         # There are no real use case as well.
-        return all(
+        out = all(
             subnode.node.get_reduction_type()  # type: ignore[union-attr]
             in {
                 "sum",
@@ -237,6 +294,7 @@ class MixOrderReduction:
             for subnode in other_node.get_nodes()
             if subnode.is_reduction()
         )
+        return out
 
     @classmethod
     def are_mix_order_reductions(
@@ -257,23 +315,23 @@ class MixOrderReduction:
 
             if len(index_names) == 0:
                 continue
-            assert len(index_names) == 1
-            index_name = index_names[0]
-            index_expr = loop_body.indexing_exprs[index_name]
-            var_ranges = loop_body.var_ranges
-            if len(var_ranges) != 2:
-                return False
 
-            var_symbols = list(var_ranges.keys())
-            stride_vars = V.graph.sizevars.stride_vars(
-                index_expr,
-                var_symbols,
-                var_symbols,
-            )
-            n_congituous_read += stride_vars[-1] == 1
-            if n_congituous_read > 0:
-                break
-        return n_congituous_read > 0
+            # there can be multiple index_names some times
+            for index_name in index_names:
+                index_expr = loop_body.indexing_exprs[index_name]
+                var_ranges = loop_body.var_ranges
+
+                # assumes the final symbol is for reduction
+                var_symbols = list(var_ranges.keys())
+                stride_vars = V.graph.sizevars.stride_vars(
+                    index_expr,
+                    var_symbols,
+                    var_symbols,
+                )
+                n_congituous_read += stride_vars[-1] == 1
+                if n_congituous_read > 0:
+                    return True
+        return False
 
 
 @dataclasses.dataclass
@@ -1423,14 +1481,25 @@ class SchedulerNode(BaseSchedulerNode):
         self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
 
     def swap_pw_red_dimension(self) -> None:
-        assert len(self._body.sizes[0]) == 2
-        self.apply_new_loop_order([1, 0])
+        num_rdims = self._body.get_original_num_rdims()
+        num_pwdims = len(self._body.iter_vars) - num_rdims
+        pwdims = tuple(range(num_pwdims))
+        rdims = tuple(range(num_pwdims, num_pwdims + num_rdims))
+
+        self.apply_new_loop_order(rdims + pwdims)
         assert len(self.group[1]) == 2
         self.group = self.group[0], (self.group[1][1], self.group[1][0])
 
     def extract_pw_from_reduction(self) -> BaseSchedulerNode:
         self._body = self._body.extract_pw_from_reduction()
         return self
+
+    def cancel_reduction_split(self) -> None:
+        if not MixOrderReduction.is_split_reduction(self):
+            return
+        assert isinstance(self.node, ir.ComputedBuffer)
+        with self.node.with_original_inner_fn():
+            self._compute_attrs()
 
     def expand_dimension_for_pointwise_node(
         self, dimension: int, new_range: int
@@ -2672,6 +2741,10 @@ class Scheduler:
             }
         )
 
+        # Unlike V.graph.removed_buffers, the op recorded here is removed but
+        # we still need the buffer (generated in alternative ways)
+        self.removed_ops: OrderedSet[str] = OrderedSet()
+
     def get_donated_buffers(self) -> dict[str, SchedulerDonatedBuffer]:
         name_to_donated_buf = {}
         for name in V.graph.graph_inputs_original:
@@ -3272,7 +3345,10 @@ class Scheduler:
                     )
                     break
 
-            if config.loop_ordering_after_fusion:
+            if (
+                config.loop_ordering_after_fusion
+                or config.loop_index_inversion_in_fusion
+            ):
                 nodes = self.fuse_nodes_once(nodes, is_reorder_round=True)
             return nodes
 
@@ -3479,8 +3555,8 @@ class Scheduler:
         device = node_list_1[0].get_device()
         assert device
 
-        # don't support benchmark fusion for CPU right now.
-        if device.type == "cpu":
+        # don't support benchmark fusion for CPU C++ backend right now.
+        if device.type == "cpu" and config.cpu_backend != "triton":
             return True
 
         node_list_2 = node2.get_nodes()
@@ -4229,6 +4305,148 @@ class Scheduler:
 
         return str(reasons)
 
+    def shared_data_after_inverting_indexing(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> int:
+        """
+        Attempts to enable fusion between two nodes by inverting indexing patterns.
+
+        This optimization targets cases where node1 has a contiguous write and
+        node2 has a contiguous write but discontiguous read. By inverting the
+        indexing in node2's read and write operations, we can make them compatible
+        with node1 for potential fusion.
+
+        Args:
+            node1: First scheduler node (source)
+            node2: Second scheduler node (target for inversion)
+
+        Returns:
+            int: Fusion score if successful, 0 if optimization not applicable
+        """
+
+        if not config.loop_index_inversion_in_fusion:
+            return -1
+
+        if any(n.is_cpu() for n in [node1, node2]):
+            return -1
+
+        # Check for shared buffers between nodes
+        node1_buffer_names = node1.read_writes.buffer_names()
+        node2_buffer_names = node2.read_writes.buffer_names()
+        common_buffer_names = node1_buffer_names & node2_buffer_names
+
+        if not common_buffer_names:
+            return -1
+
+        # only invert if node1 is single unmet dep
+        node2_unmet_dependencies = OrderedSet(
+            dep.name for dep in node2.unmet_dependencies
+        )
+        if node2_unmet_dependencies - node1_buffer_names:
+            return -1
+
+        if len(node2_unmet_dependencies) > 1:
+            return -1
+
+        # Currently only handle single read/write operations
+        if len(node2.read_writes.reads) > 1 or len(node2.read_writes.writes) > 1:
+            return -1
+
+        node2_read = next(iter(node2.read_writes.reads))
+        node2_write = next(iter(node2.read_writes.writes))
+
+        if not isinstance(node2_read, MemoryDep) or not isinstance(
+            node2_write, MemoryDep
+        ):
+            return -1
+
+        node1_writes = {dep.name: dep for dep in node1.read_writes.writes}
+        if node2_read.name not in node1_writes:
+            return -1
+
+        node1_write = node1_writes[node2_read.name]
+
+        if not isinstance(node1_write, MemoryDep):
+            return -1
+
+        # We are checking for compatibility with the normalized node1 write
+        # then modifying node2 reads/writes. since the node1 write will be just used
+        # for compatibility, while node2 will be used in actual modification, just
+        # normalize node1 not node2.
+        node1_write = node1_write.normalize()
+
+        if (
+            node1_write.index != node2_write.index
+            and node1_write.size != node2_write.size
+        ):
+            return -1
+
+        if node2_read.size != node2_write.size or len(node2_read.var_names) != 1:
+            return -1
+
+        # Verify we have exactly two indexing expressions (one read, one write)
+        if len(node2._body.indexing_exprs) != 2:  # type: ignore[attr-defined]
+            return -1
+
+        # No subblocks allowed for this optimization
+        if node2._body.subblocks:  # type: ignore[attr-defined]
+            return -1
+
+        assert (
+            "index0" in node2._body.indexing_exprs  # type: ignore[attr-defined]
+            and "index1" in node2._body.indexing_exprs  # type: ignore[attr-defined]
+        )
+
+        # Extract and verify single read expression
+        node2_read_exprs = OrderedSet(expr for expr in node2._body.get_read_exprs())  # type: ignore[attr-defined]
+        if len(node2_read_exprs) != 1:
+            return -1
+
+        read_expr = next(iter(node2_read_exprs))
+
+        # Determine which index is for reading vs writing
+        if read_expr == node2._body.indexing_exprs["index0"]:  # type: ignore[attr-defined]
+            read_expr_index = "index0"
+            write_expr_index = "index1"
+        else:
+            assert read_expr == node2._body.indexing_exprs["index1"]  # type: ignore[attr-defined]
+            read_expr_index = "index1"
+            write_expr_index = "index0"
+
+        from torch._inductor.invert_expr_analysis import generate_inverse_formula
+
+        index_vars = node2._body.vars[0]  # type: ignore[attr-defined]
+        if len(index_vars) != 1:
+            return -1
+
+        simplified_terms = []
+        for term in sympy.Add.make_args(read_expr):
+            simplified_terms.append(
+                V.graph.sizevars.combine_modular_indexing_pairs(term)
+            )
+        simplified_read_expr = sum(simplified_terms)
+
+        inverse_formula = generate_inverse_formula(simplified_read_expr, index_vars[0])
+
+        # formula is not invertible
+        if inverse_formula is None:
+            return -1
+
+        # === Apply Inversion ===
+
+        # Swap the indexing expressions using the inverse formula
+        node2._body.indexing_exprs[read_expr_index] = node2._body.indexing_exprs[  # type: ignore[attr-defined]
+            write_expr_index
+        ]
+        node2._body.indexing_exprs[write_expr_index] = inverse_formula  # type: ignore[attr-defined]
+
+        # Refresh dependencies and calculate fusion score
+        node2.refresh_dependencies(True, False)  # type: ignore[attr-defined]
+        score = self.score_fusion_memory(node1, node2)
+
+        fusion_log.info("Shared memory after inversion: %d", score)
+        return score
+
     def shared_data_after_reordering_loop(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> int:
@@ -4496,6 +4714,15 @@ class Scheduler:
         if node1 is node2:
             return False
 
+        # We don't further fuse with FusedMixOrderReductions for now.
+        # It's not a big deal since the score for fusion with
+        # mix order reduction is low. When we do this kind of fusion,
+        # the participants should have already been well fused.
+        if isinstance(node1, FusedMixOrderReductions) or isinstance(
+            node2, FusedMixOrderReductions
+        ):
+            return False
+
         why = WhyNoFuse(node1, node2)
 
         if node1.is_template() and self.get_backend(
@@ -4604,6 +4831,7 @@ class Scheduler:
         del device2
 
         shared_data_score = self.score_fusion_memory(node1, node2)
+
         if (
             can_reorder
             and shared_data_score < config.score_fusion_memory_threshold
@@ -4619,6 +4847,16 @@ class Scheduler:
             (expand_dim, smaller_node, expand_size) = expand_analysis
             smaller_node.expand_dimension_for_pointwise_node(expand_dim, expand_size)
             shared_data_score = self.score_fusion_memory(node1, node2)
+
+        if (
+            config.loop_index_inversion_in_fusion
+            and shared_data_score < config.score_fusion_memory_threshold
+        ):
+            new_shared_data_score = self.shared_data_after_inverting_indexing(
+                node1, node2
+            )
+            if new_shared_data_score >= 0:
+                shared_data_score = new_shared_data_score
 
         if loop_ordering_log.isEnabledFor(logging.DEBUG):
             loop_ordering_log.debug(
@@ -5839,8 +6077,8 @@ class Scheduler:
         subkernel_nodes = nodes
         device = subkernel_nodes[0].get_device()
 
-        # don't support benchmark fusion for CPU right now.
-        if device is None or device.type == "cpu":
+        # don't support benchmark fusion for CPU C++ backend right now.
+        if device is None or (device.type == "cpu" and config.cpu_backend != "triton"):
             return True
 
         from triton.compiler.errors import CompilationError
