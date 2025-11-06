@@ -1,4 +1,6 @@
 # Owner(s): ["module: dynamo"]
+# flake8: noqa: B950
+# flake8: noqa: E731
 import contextlib
 import copy
 import functools
@@ -15,7 +17,11 @@ import torch.nn as nn
 import torch.utils.checkpoint
 from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo.backends.common import aot_autograd
-from torch._dynamo.testing import CompileCounterWithBackend
+from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
+    CompileCounterWithBackend,
+    normalize_gm,
+)
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfHpu
@@ -1702,9 +1708,10 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
     @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=True)
     def test_nonlocal_list_mutation_hidden(self):
         def gn(x, z):
+            o = torch.matmul(x, x) @ x
             out = x.sin()
             z.append(out)
-            return torch.cos(torch.sin(torch.matmul(x, x) @ x))
+            return torch.cos(torch.sin(o))
 
         def fn(x):
             z = []
@@ -1721,10 +1728,53 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         x = torch.randn(4, 4, requires_grad=True)
         ref = fn(x)
 
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        backend = AotEagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1], res[1])
+
+        self.assertExpectedInline(
+            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[4, 4]"):
+        l_x_ = L_x_
+
+        wrap_body_0 = self.wrap_body_0
+        tag_activation_checkpoint = torch.ops.higher_order.tag_activation_checkpoint(wrap_body_0, l_x_, use_reentrant = False);  wrap_body_0 = l_x_ = None
+        out1: "f32[4, 4]" = tag_activation_checkpoint[0]
+        getitem_3: "f32[4, 4]" = tag_activation_checkpoint[3];  tag_activation_checkpoint = None
+        return (out1, getitem_3)
+
+    class wrap_body_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[4, 4]"):
+            matmul: "f32[4, 4]" = torch.matmul(l_x_, l_x_)
+            o: "f32[4, 4]" = matmul @ l_x_
+
+            out: "f32[4, 4]" = l_x_.sin();  l_x_ = None
+
+            sin_1: "f32[4, 4]" = torch.sin(o)
+            cos: "f32[4, 4]" = torch.cos(sin_1)
+            return (cos, matmul, o, out, sin_1)
+""",
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[4, 4]"):
+        mm: "f32[4, 4]" = torch.ops.aten.mm.default(primals_1, primals_1)
+        mm_1: "f32[4, 4]" = torch.ops.aten.mm.default(mm, primals_1);  mm = None
+
+        sin: "f32[4, 4]" = torch.ops.aten.sin.default(primals_1)
+
+        sin_1: "f32[4, 4]" = torch.ops.aten.sin.default(mm_1);  mm_1 = None
+        cos: "f32[4, 4]" = torch.ops.aten.cos.default(sin_1);  sin_1 = None
+        return (cos, sin, primals_1)
+""",
+        )
 
 
 devices = ["cuda", "hpu"]

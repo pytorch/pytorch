@@ -2995,7 +2995,7 @@ class SubgraphTracer(fx.Tracer):
                 "Inference mode is supposed to be disabled during compilation. Please open an issue."
             )
 
-        self.tracked_tensor_or_symint_vt : OrderedSet[VariableTracker] = OrderedSet()
+        self.tracked_tensor_or_symint_vt: OrderedSet[VariableTracker] = OrderedSet()
 
     def record_tensor_or_symint_vt(self, vt):
         self.tracked_tensor_or_symint_vt.add(vt)

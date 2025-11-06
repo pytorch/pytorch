@@ -1062,7 +1062,9 @@ def speculate_subgraph(
                     output_vts = {
                         vt
                         for vt in output.items
-                        if isinstance(vt, (variables.TensorVariable, variables.SymNodeVariable))
+                        if isinstance(
+                            vt, (variables.TensorVariable, variables.SymNodeVariable)
+                        )
                     }
 
                     # TODO - this should probably outside of should_flatten_outputs
@@ -1076,8 +1078,6 @@ def speculate_subgraph(
                         if out not in output_vts:
                             extra_outputs.append(out)
                     output = TupleVariable(output.items + extra_outputs)
-
-
 
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
