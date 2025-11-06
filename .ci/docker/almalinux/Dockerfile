@@ -48,13 +48,12 @@ COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
 COPY ./common/install_cusparselt.sh install_cusparselt.sh
 COPY --from=conda /opt/conda /opt/conda
 ADD ./common/install_jax.sh install_jax.sh
-ADD ./common/common_utils.sh common_utils.sh
 COPY ./ci_commit_pins/jax.txt /ci_commit_pins/jax.txt
 ENV CUDA_HOME=/usr/local/cuda-${CUDA_VERSION}
 # Preserve CUDA_VERSION for the builds
 ENV CUDA_VERSION=${CUDA_VERSION}
 # Make things in our path by default
-ENV PATH=/usr/local/cuda-${CUDA_VERSION}/bin:$PATH
+ENV PATH=/opt/conda/bin:/usr/local/cuda-${CUDA_VERSION}/bin:$PATH
 
 FROM cuda as cuda12.6
 RUN bash ./install_cuda.sh 12.6
