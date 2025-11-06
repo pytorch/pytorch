@@ -1534,7 +1534,7 @@ class Reduction(Loops):
                 # "all" is desugared to `!any(!val)`
             }
 
-            assert reduction_type in rtypes_to_inits.keys(), (
+            assert reduction_type in rtypes_to_inits, (
                 f"{reduction_type} not supported for zero-dimension tensors!"
             )
 
