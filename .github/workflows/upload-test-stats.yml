@@ -14,8 +14,11 @@ on:
       - unstable-periodic
       - inductor-periodic
       - rocm
+      - rocm-mi200
       - rocm-mi300
       - rocm-mi355
+      - inductor-rocm-mi200
+      - inductor-rocm-mi300
       - inductor-micro-benchmark
       - inductor-micro-benchmark-x86
       - inductor-cu124
