@@ -815,6 +815,24 @@ class TestInductorDynamic(TestCase):
         actual = cfn(5)
         self.assertEqual(expect, actual)
 
+    def test_replace_future_symints_with_constants(self, device):
+        def fn(arg0, sentinel):
+            t0 = arg0
+            t1 = t0.clone()
+            t1.zero_()
+            t2 = t1.contiguous().view((34, 9, 77))
+            t3 = t2.clone()
+            t3.zero_()
+            output = t3 + sentinel
+            return output
+
+        cfn = self.compile_fn(fn)
+        arg0 = torch.rand([714, 33], dtype=torch.float16, device=device)
+        sentinel = torch.rand([34, 9, 77], dtype=torch.float16, device=device)
+        expect = fn(arg0, sentinel)
+        actual = cfn(arg0, sentinel)
+        self.assertEqual(expect, actual)
+
     def test_interpolate_ceil_eq(self, device):
         ceiling = math.ceil
         IntTrueDiv = operator.truediv
