@@ -419,9 +419,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             self.value in {collections.OrderedDict, collections.defaultdict}
             and name == "fromkeys"
         ):
-            from .builtin import BuiltinVariable
-
-            return BuiltinVariable.call_custom_dict_fromkeys(
+            return variables.BuiltinVariable.call_custom_dict_fromkeys(
                 tx, self.value, *args, **kwargs
             )
         elif self.value is collections.OrderedDict and name == "move_to_end":
@@ -501,15 +499,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 [self, *args],
                 kwargs,
             )
-        elif (
-            self.value is collections.defaultdict
-            and len(args) <= 1
-            and DefaultDictVariable.is_supported_arg(args[0])
-        ):
+        elif self.value is collections.defaultdict:
+            if len(args) == 0:
+                default_factory = variables.ConstantVariable.create(None)
+            else:
+                default_factory, *args = args
+            dict_vt = variables.BuiltinVariable.call_custom_dict(
+                tx, dict, *args, **kwargs
+            )
             return DefaultDictVariable(
-                {},
+                dict_vt.items,
                 collections.defaultdict,
-                args[0],
+                default_factory,
                 mutation_type=ValueMutationNew(),
             )
         elif is_typeddict(self.value):
