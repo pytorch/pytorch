@@ -2,7 +2,8 @@ import collections
 import logging
 import operator
 from collections import defaultdict
-from typing import Any, Callable, Literal, TypeAlias
+from collections.abc import Callable
+from typing import Any, Literal, TypeAlias
 
 import torch
 import torch.distributed as dist
