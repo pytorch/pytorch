@@ -1604,6 +1604,8 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     def test_embedding_bag_device(self, device, dtypes):
         if IS_JETSON and torch.bfloat16 in dtypes and device == "cpu":
             self.skipTest("bfloat16 not supported with Jetson cpu")
+        if dtypes == (torch.int32, torch.int32, torch.float64) and "xpu" in device:
+            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/2295")
         with set_default_dtype(torch.double):
             self._test_EmbeddingBag(
                 device,
