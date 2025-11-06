@@ -1681,7 +1681,7 @@ class CudaKernelParamCache:
 
         if config.aot_inductor.emit_multi_arch_kernel:
             bin_type_to_ext = {"cubin": ".fatbin", "spv": ".spv"}
-            assert bin_type in bin_type_to_ext.keys(), (
+            assert bin_type in bin_type_to_ext, (
                 "multi_arch_kernel_binary only supported in CUDA/XPU"
             )
             base_path, _ = os.path.splitext(bin_path)
@@ -2969,6 +2969,12 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             if(unlikely(result == reinterpret_cast<void*>(-1) && PyErr_Occurred()))
                 throw std::runtime_error("expected int arg");
             return reinterpret_cast<uintptr_t>(result);
+        }}
+        template <> inline float parse_arg<float>(PyObject* args, size_t n) {{
+            auto result = PyFloat_AsDouble(PyTuple_GET_ITEM(args, n));
+            if(unlikely(result == -1.0 && PyErr_Occurred()))
+                throw std::runtime_error("expected float arg");
+            return static_cast<float>(result);
         }}
 
         {extra_parse_arg}
