@@ -13,6 +13,7 @@ class TestAugmentedGraphHelper(TestCase):
 
     def setUp(self):
         """Create a simple graph structure for testing."""
+        TestCase.setUp(self)
         # Create a torch.fx.Graph with multiple nodes
         self.graph = fx.Graph()
 

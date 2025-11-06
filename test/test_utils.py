@@ -649,6 +649,7 @@ class TestHipify(TestCase):
 
 class TestHipifyTrie(TestCase):
     def setUp(self):
+        TestCase.setUp(self)
         from torch.utils.hipify import hipify_python
 
         self.trie = hipify_python.Trie()

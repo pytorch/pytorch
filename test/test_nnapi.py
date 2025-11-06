@@ -28,6 +28,7 @@ def nhwc(t):
 )
 class TestNNAPI(TestCase):
     def setUp(self):
+        TestCase.setUp(self)
         # Avoid saturation in fbgemm
         torch.backends.quantized.engine = "qnnpack"
 

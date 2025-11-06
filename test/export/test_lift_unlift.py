@@ -138,6 +138,7 @@ class GraphBuilder:
 
 class TestLift(TestCase):
     def setUp(self):
+        TestCase.setUp(self)
         load_torchbind_test_lib()
 
     def test_lift_basic(self):
@@ -360,6 +361,7 @@ class TestLift(TestCase):
 
 class ConstantAttrMapTest(TestCase):
     def setUp(self):
+        TestCase.setUp(self)
         load_torchbind_test_lib()
 
     def test_dict_api(self):

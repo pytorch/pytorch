@@ -44,6 +44,7 @@ def g_op(graph: torch.Graph, op_name: str, *args, **kwargs):
 
 class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
     def setUp(self):
+        pytorch_test_common.ExportTestCase.setUp(self)
         self.opset_version = _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET
         GLOBALS.export_onnx_opset_version = self.opset_version
 
