@@ -767,32 +767,31 @@ if torch._C._has_mkldnn:
 
     def _qlinear_binary_can_be_inplace(_other):
         if isinstance(_other.data, ir.BaseView):
-            try:
+            def unwrap_buffer(data):
+                if isinstance(data, ir.StorageBox):
+                    return data.data
+                return data
+
+            data = _other.data.unwrap_view()
+            if isinstance(unwrap_buffer(data), ir.CppTemplateBuffer):
                 # It can be inplaced when _other is the 2D to 3D view of
-                # a CppTemplateBuffer/QLinearPointwiseBinaryPT2E
-                # because if there is a view of CppTemplateBuffer/QLinearPointwiseBinaryPT2E,
-                # CppTemplateBuffer/QLinearPointwiseBinaryPT2E will not be used directly but the view.
-                if isinstance(
-                    _other.data.data.data,  # type: ignore[attr-defined]
-                    (ir.CppTemplateBuffer, mkldnn_ir.QLinearPointwiseBinaryPT2E),
-                ):
-                    return True
-                else:
-                    # This is a special case on VIT model:
-                    # QLinearPointwiseBinaryPT2E(sum) -> QLinearPointwiseBinaryPT2E(sum) -> ...
-                    # That means the output of previous QLinearPointwiseBinaryPT2E is
-                    # the input x2 of current QLinearPointwiseBinaryPT2E.
-                    # Use V.graph.operations to check if _other is a view of the output
-                    # of previous QLinearPointwiseBinaryPT2E (the inputs[6]).
-                    for op in V.graph.operations:
-                        if (
-                            isinstance(op, mkldnn_ir.QLinearPointwiseBinaryPT2E)
-                            and _other.data.data.data == op.inputs[6]  # type: ignore[attr-defined]
-                        ):
-                            return True
-                return False
-            except AttributeError:
-                return False
+                # a CppTemplateBuffer because if there is a view of CppTemplateBuffer,
+                # CppTemplateBuffer will not be used directly but the view.
+                return True
+            else:
+                # This is a special case on VIT model:
+                # QLinearPointwiseBinaryPT2E(sum) -> QLinearPointwiseBinaryPT2E(sum) -> ...
+                # That means the output of previous QLinearPointwiseBinaryPT2E is
+                # the input x2 of current QLinearPointwiseBinaryPT2E.
+                # Use V.graph.operations to check if _other is a view of the output
+                # of previous QLinearPointwiseBinaryPT2E (the inputs[6]).
+                for op in V.graph.operations:
+                    if (
+                        isinstance(op, mkldnn_ir.QLinearPointwiseBinaryPT2E)
+                        and unwrap_buffer(data) == op.inputs[6]  # type: ignore[attr-defined]
+                    ):
+                        return True
+            return False
         elif len(_other.get_inputs_that_alias_output()) > 0:
             return False
         else:

@@ -1958,6 +1958,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         input3 = torch.randn(*B, out_features).to(dtype=torch.float32)
 
         other = torch.randn(*B, out_features).to(dtype=dtype)
+        # Avoid hitting qlinear inplace sum fusion
         if input_3d:
             other2 = torch.randn(B[0] * B[1], out_features).to(dtype=dtype)
         else:
@@ -1976,6 +1977,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
             def forward(self, x, other, other2):
                 res = self.epilogue(self.linear(x) + other)
+                # Avoid hitting qlinear inplace sum fusion
                 if self.input_3d:
                     other2 = other2.view(2, other2.size(0) // 2, other2.size(1))
                 else:
