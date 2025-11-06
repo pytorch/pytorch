@@ -338,10 +338,10 @@ def _preload_cuda_deps(err: _Optional[OSError] = None) -> None:
         "cufile": "libcufile.so.*[0-9]",
     }
 
-    # If error is passed, re-raise it if it's not about one of the abovmentioned
+    # If error is passed, re-raise it if it's not about one of the abovementioned
     # libraries
     if err is not None and [
-        lib for lib in cuda_libs.values() if lib.split(".")[0] in err.args[0]
+        lib for lib in cuda_libs.values() if lib.split(".", 1)[0] in err.args[0]
     ]:
         raise err
 
