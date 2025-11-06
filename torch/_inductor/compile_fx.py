@@ -104,7 +104,7 @@ from .._dynamo.exc import ShortenTraceback, SkipFrame
 from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
 from ..utils._triton import has_triton
-from . import config, metrics
+from . import config, distributed_autotune, metrics
 from .codegen.common import get_wrapper_codegen_for_device, init_backend_registration
 from .debug import DebugContext
 from .decomposition import select_decomp_table
@@ -1431,7 +1431,11 @@ class _InProcessFxCompile(FxCompile):
                 # We are going to start code generating runtime asserts, so make sure
                 # you don't start adding new ones in the lowering process
                 graph.freeze_runtime_asserts()
-                with V.set_graph_handler(graph), V.set_extern_kernel_nodes([]):
+                with (
+                    V.set_graph_handler(graph),
+                    V.set_extern_kernel_nodes([]),
+                    distributed_autotune.graph_context(),
+                ):
                     graph.run(*example_inputs)
                     output_strides: list[Optional[tuple[_StrideExprStr, ...]]] = []
                     if graph.graph_outputs is not None:

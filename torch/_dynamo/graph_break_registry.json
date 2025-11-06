@@ -2940,6 +2940,19 @@
   ],
   "GB0288": [
     {
+      "Gb_type": "Can't extract message from torch._check()",
+      "Context": "str(message_vt)",
+      "Explanation": "The second argument of torch._check() must be a functiondefined within the torch.compile regionthat does not reference a non-local variable.",
+      "Hints": [
+        "Make sure the message function is defined in the torch.compile region.",
+        "Remove any closure variables, e.g. ",
+        "remove references to closure variable `x` in `lambda: f'{x} failed check'`",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0289": [
+    {
       "Gb_type": "unsupported method call on `typing` variable",
       "Context": "typing variable: {self.value}, method name: {name}, args: {args}, kwargs: {kwargs}",
       "Explanation": "`torch.compile` does not support method call `{name}` on `typing` variable f{self.value}.",
@@ -2949,7 +2962,7 @@
       ]
     }
   ],
-  "GB0289": [
+  "GB0290": [
     {
       "Gb_type": "attempted to trace numpy.* function as a method",
       "Context": "numpy function: {self.value}, args: {args}, kwargs: {kwargs}",
@@ -2959,7 +2972,7 @@
       ]
     }
   ],
-  "GB0290": [
+  "GB0291": [
     {
       "Gb_type": "logging.Logger method not supported for non-export cases",
       "Context": "method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
@@ -2969,7 +2982,7 @@
       ]
     }
   ],
-  "GB0291": [
+  "GB0292": [
     {
       "Gb_type": "constant-like method call with unsupported return type",
       "Context": "{self._error_prefix}.{name}(*{args}, **{kwargs}) returned {result}",
@@ -2979,7 +2992,7 @@
       ]
     }
   ],
-  "GB0292": [
+  "GB0293": [
     {
       "Gb_type": "attempted to trace numpy function with config.trace_numpy=False",
       "Context": "numpy function: {self.value}, args: {args}, kwargs: {kwargs}",
@@ -2989,7 +3002,7 @@
       ]
     }
   ],
-  "GB0293": [
+  "GB0294": [
     {
       "Gb_type": "attempted to trace numpy function unsupported by PyTorch",
       "Context": "numpy function: {self.value}, args: {args}, kwargs: {kwargs} (corresponding torch function: {func})",
@@ -2999,7 +3012,7 @@
       ]
     }
   ],
-  "GB0294": [
+  "GB0295": [
     {
       "Gb_type": "cannot reconstruct NullVariable in Python < 3.11",
       "Context": "",
@@ -3009,7 +3022,7 @@
       ]
     }
   ],
-  "GB0295": [
+  "GB0296": [
     {
       "Gb_type": "attempted to reorder a debugging function that can't actually be reordered",
       "Context": "fn: {self.value}, args: {args}, kwargs: {kwargs}",
@@ -3019,7 +3032,7 @@
       ]
     }
   ],
-  "GB0296": [
+  "GB0297": [
     {
       "Gb_type": "random.Random() with improper arguments",
       "Context": "args: {args}, kwargs: {kwargs}",
@@ -3029,7 +3042,7 @@
       ]
     }
   ],
-  "GB0297": [
+  "GB0298": [
     {
       "Gb_type": "attempted to trace torch._numpy.random function with config.use_numpy_random_stream=True",
       "Context": "numpy function: {self.value}, args: {args}, kwargs: {kwargs} (corresponding torch function: {func})",
@@ -3040,7 +3053,7 @@
       ]
     }
   ],
-  "GB0298": [
+  "GB0299": [
     {
       "Gb_type": "constant-like method call with non-constant args",
       "Context": "{self._error_prefix}.{name}(*{args}, **{kwargs})",
@@ -3050,7 +3063,7 @@
       ]
     }
   ],
-  "GB0299": [
+  "GB0300": [
     {
       "Gb_type": "numpy function that produces a const collection type encountered non-const arguments",
       "Context": "numpy function: {self.value}, args: {args}, kwargs: {kwargs} (corresponding torch function: {func})",
