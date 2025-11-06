@@ -2950,5 +2950,127 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
+  ],
+  "GB0289": [
+    {
+      "Gb_type": "unsupported method call on `typing` variable",
+      "Context": "typing variable: {self.value}, method name: {name}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "`torch.compile` does not support method call `{name}` on `typing` variable f{self.value}.",
+      "Hints": [
+        "Avoid calling the {name} method on {self.value}.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0290": [
+    {
+      "Gb_type": "attempted to trace numpy.* function as a method",
+      "Context": "numpy function: {self.value}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "Tracing numpy.* functions as methods is not supported.",
+      "Hints": [
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
+  "GB0291": [
+    {
+      "Gb_type": "logging.Logger method not supported for non-export cases",
+      "Context": "method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "logging.Logger methods are not supported for non-export cases.",
+      "Hints": [
+        "Add the logging method to `torch._dynamo.config.ignore_logger_methods."
+      ]
+    }
+  ],
+  "GB0292": [
+    {
+      "Gb_type": "constant-like method call with unsupported return type",
+      "Context": "{self._error_prefix}.{name}(*{args}, **{kwargs}) returned {result}",
+      "Explanation": "Attempted to call {self._error_prefix}.{name}, got unsupported return value {result}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0293": [
+    {
+      "Gb_type": "attempted to trace numpy function with config.trace_numpy=False",
+      "Context": "numpy function: {self.value}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "Attempted to trace numpy function {self.value} while `torch._dynamo.config.trace_numpy` was set to False.",
+      "Hints": [
+        "Set `torch._dynamo.config.trace_numpy` to True to trace numpy functions."
+      ]
+    }
+  ],
+  "GB0294": [
+    {
+      "Gb_type": "attempted to trace numpy function unsupported by PyTorch",
+      "Context": "numpy function: {self.value}, args: {args}, kwargs: {kwargs} (corresponding torch function: {func})",
+      "Explanation": "Can't find numpy numpy function {self.value} in torch._numpy.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0295": [
+    {
+      "Gb_type": "cannot reconstruct NullVariable in Python < 3.11",
+      "Context": "",
+      "Explanation": "Attempted to generate PUSH_NULL instruction in Python < 3.11; where this instruction does not exist.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0296": [
+    {
+      "Gb_type": "attempted to reorder a debugging function that can't actually be reordered",
+      "Context": "fn: {self.value}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "`torch.compile` can only reorder functions where the arguments are Tensors, constants, or string formatters.",
+      "Hints": [
+        "Avoid calling the logging function {self.value} with args that are not supported."
+      ]
+    }
+  ],
+  "GB0297": [
+    {
+      "Gb_type": "random.Random() with improper arguments",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "random.Random() with > 1 arg or with kwargs is not supported.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0298": [
+    {
+      "Gb_type": "attempted to trace torch._numpy.random function with config.use_numpy_random_stream=True",
+      "Context": "numpy function: {self.value}, args: {args}, kwargs: {kwargs} (corresponding torch function: {func})",
+      "Explanation": "Attempted to trace {self.value} when `torch._dynamo.config.use_numpy_random_stream` is set to True.",
+      "Hints": [
+        "Set `torch._dynamo.config.use_numpy_random_stream` to False.",
+        "Avoid calling {self.value}."
+      ]
+    }
+  ],
+  "GB0299": [
+    {
+      "Gb_type": "constant-like method call with non-constant args",
+      "Context": "{self._error_prefix}.{name}(*{args}, **{kwargs})",
+      "Explanation": "Attempted to call {self._error_prefix}.{name} with non-constant args.",
+      "Hints": [
+        "Ensure that the args to the method call are constant (int, str, etc.)."
+      ]
+    }
+  ],
+  "GB0300": [
+    {
+      "Gb_type": "numpy function that produces a const collection type encountered non-const arguments",
+      "Context": "numpy function: {self.value}, args: {args}, kwargs: {kwargs} (corresponding torch function: {func})",
+      "Explanation": "numpy function {self.value} that produces a const collection type (e.g. np.dtype, np.iinfo/np.finfo) received arguments that are not constant.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
   ]
 }
