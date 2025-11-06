@@ -131,6 +131,7 @@ class PendingUnbackedSymbolNotFound(RuntimeError):
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
+    "size_hint",
     "guard_or_false",
     "guard_or_true",
     "has_symbolic_sizes_strides",

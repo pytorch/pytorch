@@ -4414,29 +4414,29 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         def run(a, b):
             self.assertEqual(compiled(a, b), func(a, b))
 
-        # # No 0/1 specializations, no broadcasts.
-        # # but a[0] == b[0] and a[1] == b[1] are asserted.
-        # run(torch.rand(1,10), torch.rand(1,10))
-        # run(torch.rand(1,1), torch.rand(1,1))
-        # run(torch.rand(10,10), torch.rand(10,10))
+        # No 0/1 specializations, no broadcasts.
+        # but a[0] == b[0] and a[1] == b[1] are asserted.
+        run(torch.rand(1, 10), torch.rand(1, 10))
+        run(torch.rand(1, 1), torch.rand(1, 1))
+        run(torch.rand(10, 10), torch.rand(10, 10))
 
-        # self.assertEqual(cnt.frame_count, 1)
-        # run(torch.rand(10,10), torch.rand(1,10))
-        # self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 1)
+        run(torch.rand(10, 10), torch.rand(1, 10))
+        self.assertEqual(cnt.frame_count, 2)
 
-        # cnt.clear()
-        # torch._dynamo.reset()
+        cnt.clear()
+        torch._dynamo.reset()
 
-        # # specialize a[0] == 1. b[0] not specialized.
-        # run(torch.rand(1,10), torch.rand(9,10))
-        # run(torch.rand(1,10), torch.rand(1,10))
-        # self.assertEqual(cnt.frame_count, 1)
-        # # if we change a[0] we get recompilation.
-        # run(torch.rand(10,10), torch.rand(10,10))
-        # self.assertEqual(cnt.frame_count, 2)
+        # specialize a[0] == 1. b[0] not specialized.
+        run(torch.rand(1, 10), torch.rand(9, 10))
+        run(torch.rand(1, 10), torch.rand(1, 10))
+        self.assertEqual(cnt.frame_count, 1)
+        # if we change a[0] we get recompilation.
+        run(torch.rand(10, 10), torch.rand(10, 10))
+        self.assertEqual(cnt.frame_count, 2)
 
-        # cnt.clear()
-        # torch._dynamo.reset()
+        cnt.clear()
+        torch._dynamo.reset()
 
         # TODO duck sizing shall be disabled when backed_size_oblivious
         # is on probably.

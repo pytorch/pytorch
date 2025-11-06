@@ -415,23 +415,6 @@ def _broadcast_shapes(*_shapes):
     ] * reduce(max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
         for idx in range(-1, -1 - len(shape), -1):
-            # When backed size oblivious is used, we specialize for broadcasting
-            # if its the only way to compile the example input.
-            # i.e: s0:1, s1:1 ==>
-            #           assert s0==s1, no specialization on ==1 or !=1.
-            #            The non-broadcast path is picked
-            #      s0:1, s1:4 ==>
-            #           specialize(s0) to be 1.
-            #      s0:4, s1:1 ==>
-            #           specialize(s1) to be 1.
-            a = size_hint(shape[idx], allow_none=True)
-            b = size_hint(common_shape[idx], allow_none=True)
-            if backed_so:
-                if a == 1 and b != 1:
-                    torch._check(shape[idx] == 1)
-                if b == 1 and a != 1:
-                    torch._check(common_shape[idx] == 1)
-
             # NB: handle nested ints specially to avoid invalid guarding on Ne(j0, 1).
             if is_nested_int(shape[idx]):
                 # Broadcasting is allowed for (j0, 1) or (j0, j0);
@@ -441,6 +424,22 @@ def _broadcast_shapes(*_shapes):
                 ):
                     continue
             else:
+                # When backed size oblivious is used, we specialize for broadcasting
+                # if its the only way to compile the example input.
+                # i.e: s0:1, s1:1 ==>
+                #           assert s0==s1, no specialization on ==1 or !=1.
+                #            The non-broadcast path is picked
+                #      s0:1, s1:4 ==>
+                #           specialize(s0) to be 1.
+                #      s0:4, s1:1 ==>
+                #           specialize(s1) to be 1.
+                if backed_so:
+                    a = size_hint(shape[idx], allow_none=True)
+                    b = size_hint(common_shape[idx], allow_none=True)
+                    if a == 1 and b != 1:
+                        torch._check(shape[idx] == 1)
+                    if b == 1 and a != 1:
+                        torch._check(common_shape[idx] == 1)
                 if guard_or_false(shape[idx] == common_shape[idx]):
                     continue
 
