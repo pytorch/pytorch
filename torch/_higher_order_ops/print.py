@@ -1,5 +1,4 @@
 import builtins
-from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -35,13 +34,6 @@ def print_proxy_torch_dispatch_mode(
 ) -> None:
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
     mode.tracer.create_proxy("call_function", print, (format_str,), proxy_kwargs)  # noqa: F841
-
-
-@print.py_functionalize_impl
-# pyre-ignore
-def print_functionalize(ctx: Any, format_str: str, **kwargs: object) -> None:
-    with ctx.redispatch_to_next():
-        return None
 
 
 @print.py_impl(torch._C.DispatchKey.CompositeExplicitAutograd)
