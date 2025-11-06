@@ -3304,7 +3304,8 @@ def gaussian_nll_loss(
         # or  input.size = (4, 3, 32, 32), var.size = (4, 1, 32, 32)
         elif (
             input.ndim == var.ndim
-            and sum(y for x, y in zip(input.size(), var.size()) if x != y) == 1
+            and sum(y for x, y in zip(input.size(), var.size(), strict=True) if x != y)
+            == 1
         ):  # Heteroscedastic case
             pass
 

@@ -681,7 +681,7 @@ def _insert_aten_to_metadata_assert_pass(gm: torch.fx.GraphModule) -> None:
     for node in gm.graph.nodes:
         if node.target in aten_to_variants:
             if (
-                node.prev.target == torch.ops.aten._assert_tensor_metadata.default
+                node.prev.target is torch.ops.aten._assert_tensor_metadata.default
                 and node.args[0] == node.prev.args[0]
             ):
                 # skip if already guarded
@@ -850,7 +850,7 @@ def node_inline_(call_mod_node: torch.fx.Node) -> Optional[torch.fx.GraphModule]
                 get_item_users = nodes_filter(
                     list(call_mod_node.users.keys()),
                     lambda node: node.op == "call_function"
-                    and node.target == operator.getitem,
+                    and node.target is operator.getitem,
                 )
                 # get_item_node.args[1] is the idx referring to new_output[idx]
                 nodes_map(

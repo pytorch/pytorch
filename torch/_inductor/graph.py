@@ -11,7 +11,7 @@ import sys
 import time
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
+from typing import Any, NoReturn, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -117,7 +117,7 @@ from .virtualized import NullHandler, V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
     from types import ModuleType
 
     from torch._higher_order_ops.effects import _EffectType
@@ -661,7 +661,7 @@ class GraphLowering(torch.fx.Interpreter):
             return True
 
         conv_nodes = [
-            n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default
+            n for n in gm.graph.nodes if n.target is torch.ops.aten.convolution.default
         ]
         nconv = len(conv_nodes)
 
@@ -860,7 +860,7 @@ class GraphLowering(torch.fx.Interpreter):
         nodes_cannot_propagate = [torch.ops.aten.bmm.default]
         output_set = OrderedSet[Node]()
         for n in reversed(self.module.graph.nodes):  # type: ignore[arg-type, union-attr]
-            if n.target == torch.ops.aten.convolution.default:
+            if n.target is torch.ops.aten.convolution.default:
                 output_set.add(n)
                 if last_conv is None:
                     last_conv = n
@@ -1988,7 +1988,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         if (
             full_aoti_runtime_assert()
-            and n.target == torch.ops.aten._assert_scalar.default
+            and n.target is torch.ops.aten._assert_scalar.default
             and self.aot_mode
         ):
             node_args, _ = self.fetch_args_kwargs_from_env(n)
