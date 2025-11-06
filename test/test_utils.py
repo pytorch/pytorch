@@ -1036,11 +1036,16 @@ class TestDeviceLazyInit(TestCase):
         p.join()
         self.assertTrue(not q.empty())
         exc = q.get()
+        pattern = (
+            r"Cannot re-initialize .* in forked subprocess\. "
+            r"To use .* with multiprocessing, you must use the 'spawn' start method"
+        )
         self.assertIsInstance(exc, RuntimeError)
+        self.assertRegex(str(exc), pattern)
 
 
 instantiate_device_type_tests(
-    TestDeviceLazyInit, globals(), except_for=["cpu"], allow_mps=True, allow_xpu=True
+    TestDeviceLazyInit, globals(), except_for=["cpu"], allow_xpu=True
 )
 
 
