@@ -1,11 +1,11 @@
-import unittest
-from unittest.mock import patch, MagicMock
 import tempfile
+import unittest
+from unittest.mock import MagicMock, patch
 
 from tools.linter.adapters.stable_shim_version_linter import (
-    get_current_version,
-    get_added_lines,
     check_file,
+    get_added_lines,
+    get_current_version,
 )
 
 
@@ -163,11 +163,20 @@ AOTI_TORCH_EXPORT int function_without_version();
                     self.assertIn("wrong-version-for-new-function", errors_by_name)
                     wrong_version_msg = errors_by_name["wrong-version-for-new-function"]
                     self.assertEqual(wrong_version_msg.line, 12)
-                    self.assertIn("should use TORCH_VERSION_2_10_0, but is wrapped in TORCH_VERSION_2_9_0", wrong_version_msg.description)
+                    self.assertIn(
+                        "should use TORCH_VERSION_2_10_0, but is wrapped in TORCH_VERSION_2_9_0",
+                        wrong_version_msg.description,
+                    )
 
                     # Check error 2: unversioned-function-declaration
                     self.assertIn("unversioned-function-declaration", errors_by_name)
                     unversioned_msg = errors_by_name["unversioned-function-declaration"]
                     self.assertEqual(unversioned_msg.line, 15)
-                    self.assertIn("outside of TORCH_FEATURE_VERSION block", unversioned_msg.description)
-                    self.assertIn("TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0", unversioned_msg.description)
+                    self.assertIn(
+                        "outside of TORCH_FEATURE_VERSION block",
+                        unversioned_msg.description,
+                    )
+                    self.assertIn(
+                        "TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0",
+                        unversioned_msg.description,
+                    )
