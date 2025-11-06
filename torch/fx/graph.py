@@ -443,6 +443,7 @@ class CodeGen:
         colored: bool = False,
         # Render each argument on its own line
         expanded_def: bool = False,
+        record_func: bool = False,
     ) -> PythonCode:
         free_vars: list[str] = []
         body: list[str] = []
@@ -647,6 +648,15 @@ class CodeGen:
 
             if verbose:
                 # override annotation with more detailed information
+                try:
+                    from torch.distributed.tensor._api import DTensor, DTensorSpec
+
+                    dtensorspec_format_shard_order_str = (
+                        DTensorSpec.format_shard_order_str
+                    )
+                except ModuleNotFoundError:
+                    DTensor = None  # type: ignore[assignment,misc]
+                    dtensorspec_format_shard_order_str = None
                 from torch.fx.experimental.proxy_tensor import py_sym_types
                 from torch.fx.passes.shape_prop import TensorMetadata
 
@@ -677,6 +687,16 @@ class CodeGen:
                     core = _tensor_annotation(meta_val)
                     if is_plain:
                         maybe_type_annotation = f': "{core}"'
+                    elif type(meta_val) is DTensor:
+                        assert dtensorspec_format_shard_order_str is not None
+                        dtensor_meta = dtensorspec_format_shard_order_str(
+                            meta_val._spec.placements,  # type: ignore[attr-defined]
+                            meta_val._spec.shard_order,  # type: ignore[attr-defined]
+                        )
+                        cls = meta_val.__class__.__name__
+                        maybe_type_annotation = (
+                            f': "{cls}({core}, {dim_green(dtensor_meta)})"'
+                        )
                     else:
                         cls = meta_val.__class__.__name__
                         maybe_type_annotation = f': "{cls}({core})"'
@@ -798,6 +818,10 @@ class CodeGen:
                 return
             raise NotImplementedError(f"node: {node.op} {node.target}")
 
+        if record_func:
+            body.append(
+                "_rf = torch._C._profiler._RecordFunctionFast('## ENTER_GRAPH_PLACEHOLDER_KEY ##'); _rf.__enter__()\n"
+            )
         for i, node in enumerate(nodes):
             # NOTE: emit_node does not emit a string with newline. It depends
             # on delete_unused_values to append one
@@ -807,8 +831,22 @@ class CodeGen:
             # node index, which will be deleted later
             # after going through _body_transformer
             body.append(f"# COUNTER: {i}\n")
+            do_record = record_func and node.op in (
+                "call_function",
+                "call_method",
+                "call_module",
+            )
+            if do_record:
+                # The double hash ## convention is used by post-processing to find the fx markers
+                body.append(
+                    f"_rf_{node.name} = torch._C._profiler._RecordFunctionFast('## {i} ##'); _rf_{node.name}.__enter__()\n"
+                )
             emit_node(node)
             delete_unused_values(node)
+            if do_record:
+                body.append(f"_rf_{node.name}.__exit__(None, None, None)\n")
+        if record_func:
+            body.append("_rf.__exit__(None, None, None)\n")
 
         if len(body) == 0:
             # If the Graph has no non-placeholder nodes, no lines for the body
@@ -1760,6 +1798,7 @@ class Graph:
         include_device: bool = False,
         colored: bool = False,
         expanded_def: bool = False,
+        record_func: bool = False,
     ) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
@@ -1827,6 +1866,7 @@ class Graph:
                 include_device=include_device,
                 colored=colored,
                 expanded_def=expanded_def,
+                record_func=record_func,
             )
 
     def _python_code(
@@ -1839,6 +1879,7 @@ class Graph:
         include_device: bool = False,
         colored: bool = False,
         expanded_def: bool = False,
+        record_func: bool = False,
     ) -> PythonCode:
         return self._codegen._gen_python_code(
             self.nodes,
@@ -1849,6 +1890,7 @@ class Graph:
             include_device=include_device,
             colored=colored,
             expanded_def=expanded_def,
+            record_func=record_func,
         )
 
     def __str__(self) -> str:
