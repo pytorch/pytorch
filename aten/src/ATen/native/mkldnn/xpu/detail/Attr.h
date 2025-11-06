@@ -461,8 +461,8 @@ static inline void construct_attr_by_post_op(
 }
 
 enum class ScalingType : std::uint8_t {
-  TensorWise, // fp32 scales
-  RowWise, // fp32 scales
+  TensorWise, // Supported scale dtype: fp32
+  RowWise, // Supported scale dtype: fp32
 };
 
 } // namespace at::native::onednn
