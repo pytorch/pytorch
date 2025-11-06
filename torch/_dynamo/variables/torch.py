@@ -1270,7 +1270,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # pyrefly: ignore [unbound-name]
             return VariableTracker.build(tx, module, new_source)
 
-        @register(torch.accelerator.current_stream)
+        @register(torch.accelerator.current_stream, torch.cuda.current_stream)
         def handle_current_stream(self, tx: "InstructionTranslator", *args, **kwargs):
             if len(args) + len(kwargs) > 1 or (kwargs and "device" not in kwargs):
                 unimplemented_v2(

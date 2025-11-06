@@ -3022,8 +3022,11 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         device_interface.current_stream
         for _, device_interface in get_registered_device_interfaces()
     ]:
+        index = None
+        if proxy.node.target == get_external_object_by_index:
+            index = proxy.node.args[0]
         set_example_value(proxy.node, example_value)
-        return EventVariable(proxy, example_value, proxy.node.args[0], **options)
+        return EventVariable(proxy, example_value, index, **options)
     elif (
         inspect.isclass(proxy.node.target)
         and issubclass(proxy.node.target, torch.Event)
@@ -3032,7 +3035,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         for _, device_interface in get_registered_device_interfaces()
     ]:
         set_example_value(proxy.node, example_value)
-        return EventVariable(proxy, example_value, proxy.node.args[0], **options)
+        return EventVariable(proxy, example_value, None, **options)
     elif proxy.node.target == "query" and proxy.node.op == "call_method":
         set_example_value(proxy.node, example_value)
         return ConstantVariable(example_value, **options)
@@ -3043,7 +3046,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         and proxy.node.op == "call_method"
     ):
         set_example_value(proxy.node, example_value)
-        return EventVariable(proxy, example_value, **options)
+        return EventVariable(proxy, example_value, None, **options)
     elif isinstance(example_value, int) and (
         proxy.node.target
         in [

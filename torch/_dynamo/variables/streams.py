@@ -327,7 +327,11 @@ class StreamVariable(StreamContextVariable):
 
 class EventVariable(VariableTracker):
     def __init__(
-        self, proxy: Proxy, value: torch.Event, user_object_index: int, **kwargs: Any
+        self,
+        proxy: Proxy,
+        value: torch.Event,
+        user_object_index: Optional[int],
+        **kwargs: Any,
     ) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value

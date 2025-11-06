@@ -446,7 +446,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         res = opt_fn(x)
         self.assertEqual(ref[0], res[0])
         self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 9)
+        self.assertEqual(cnts.op_count, 10)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_event_created_outside_of_graph(self):
@@ -478,7 +478,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         res = run_iters(func, compile=True)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 3)
+        self.assertEqual(cnts.op_count, 4)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_event_method_create_stream_outside_of_compile(self):
