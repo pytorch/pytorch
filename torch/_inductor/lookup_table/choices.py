@@ -235,6 +235,10 @@ class LookupTableChoices(InductorChoices):
             kernel_inputs, op_name
         )
 
+        print(
+            f"device_key: {device_key}, device_agnostic_key: {device_agnostic_key}, keys: {lookup_table.keys()}"
+        )
+
         config_list = []
 
         for key_type, key in [

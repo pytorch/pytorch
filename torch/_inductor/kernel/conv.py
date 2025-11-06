@@ -8,6 +8,7 @@ import torch
 from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
 
 from .. import config, ir
+from ..kernel_inputs import ConvKernelInputs
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
@@ -16,7 +17,9 @@ from ..lowering import (
 )
 from ..select_algorithm import (
     autotune_select_algorithm,
+    ChoiceCaller,
     ExternKernelChoice,
+    KernelTemplate,
     SymbolicGridFn,
     TritonTemplate,
 )
@@ -542,34 +545,40 @@ def convolution(
         x = ir.ExternKernel.require_stride_order(x, req_stride_order)  # type: ignore[assignment]
         weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)  # type: ignore[assignment]
 
-    ordered_kwargs_for_cpp_kernel = [
-        "stride",
-        "padding",
-        "dilation",
-        "transposed",
-        "output_padding",
-        "groups",
-    ]
-    if bias is None:
-        args = [x, weight]
-        kwargs["bias"] = None  # type: ignore[typeddict-unknown-key]
-        ordered_kwargs_for_cpp_kernel.insert(0, "bias")
-    else:
-        args = [x, weight, bias]
+    # Create ConvKernelInputs for unified template configuration
+    # Only include bias in input_nodes when it's not None
+    # - For Triton templates: bias is always None here (peeled off earlier), so input_nodes = [x, weight]
+    # - For ATEN: input_nodes = [x, weight] when bias is None, [x, weight, bias] when bias is present
+    if bias is not None:
         bias.realize()
         bias.freeze_layout()
         V.graph.sizevars.guard_int_seq(bias.get_size())
+        input_nodes = [x, weight, bias]
+        bias_idx = 2
+    else:
+        input_nodes = [x, weight]
+        bias_idx = None
 
-    choices = []
+    kernel_inputs = ConvKernelInputs(
+        input_nodes,
+        scalars={
+            "stride": stride,
+            "padding": padding,
+            "dilation": dilation,
+            "transposed": transposed,
+            "output_padding": output_padding,
+            "groups": groups,
+        },
+        x_idx=0,
+        weight_idx=1,
+        bias_idx=bias_idx,
+    )
+
+    # Build list of templates to try
+    templates: list[ExternKernelChoice | KernelTemplate] = []
+
     if torch._inductor.utils._use_conv_autotune_backend("ATEN"):
-        choices = [
-            aten_convolution.bind(
-                args,
-                layout,
-                ordered_kwargs_for_cpp_kernel,
-                **kwargs,
-            )
-        ]
+        templates.append(aten_convolution)
 
     if (
         torch._inductor.utils._use_conv_autotune_backend("TRITON")
@@ -581,66 +590,30 @@ def convolution(
         # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
         and V.graph.sizevars.statically_known_equals(in_chan * groups, x.get_size()[1])  # type: ignore[arg-type]
     ):
+        # 1x1 conv via mm
         if (
             is_ones(kernel_shape)
             and is_ones(stride)
             and is_zeros(padding)
             and groups == 1
         ):
-            choices.append(aten_conv1x1_via_mm.bind(args, layout))
+            templates.append(aten_conv1x1_via_mm)
 
-        conv_configs = V.choices.get_conv_configs(device_type)
+        # Add appropriate template based on ndim
+        if ndim == 2:
+            templates.append(conv2d_template)
+        elif ndim == 3:
+            templates.append(conv3d_template)
 
-        dtype_size = x.get_dtype().itemsize
-        for cfg in conv_configs(
-            sympy_product([x.get_size()[0], *x.get_size()[2:]]),
-            out_chan,
-            in_chan,
-            dtype_size=dtype_size,
-        ):
-            if ndim == 2:
-                conv2d_template.maybe_append_choice(
-                    choices,
-                    input_nodes=(x, weight),
-                    layout=layout,
-                    KERNEL_H=kernel_shape[0],
-                    KERNEL_W=kernel_shape[1],
-                    STRIDE_H=stride[0],
-                    STRIDE_W=stride[1],
-                    PADDING_H=padding[0],
-                    PADDING_W=padding[1],
-                    GROUPS=groups,
-                    # TODO(jansel): try unroll for bigger kernels once fixed:
-                    #               https://github.com/triton-lang/triton/issues/1254
-                    UNROLL=is_ones(kernel_shape),
-                    ALLOW_TF32=torch.backends.cudnn.allow_tf32,
-                    num_stages=cfg.num_stages,
-                    num_warps=cfg.num_warps,
-                    **cfg.kwargs,
-                )
-            elif ndim == 3:
-                conv3d_template.maybe_append_choice(
-                    choices,
-                    input_nodes=(x, weight),
-                    layout=layout,
-                    KERNEL_D=kernel_shape[0],
-                    KERNEL_H=kernel_shape[1],
-                    KERNEL_W=kernel_shape[2],
-                    STRIDE_D=stride[0],
-                    STRIDE_H=stride[1],
-                    STRIDE_W=stride[2],
-                    PADDING_D=padding[0],
-                    PADDING_H=padding[1],
-                    PADDING_W=padding[2],
-                    GROUPS=groups,
-                    # TODO(jansel): try unroll for bigger kernels once fixed:
-                    #               https://github.com/triton-lang/triton/issues/1254
-                    UNROLL=is_ones(kernel_shape),
-                    ALLOW_TF32=torch.backends.cudnn.allow_tf32,
-                    num_stages=cfg.num_stages,
-                    num_warps=cfg.num_warps,
-                    **cfg.kwargs,
-                )
+    # Initialize choices list and extend with template configs
+    choices: list[ChoiceCaller] = []
+    choices.extend(
+        V.choices.get_template_configs(
+            kernel_inputs,
+            templates,
+            "convolution",
+        )
+    )
     if use_ck_conv_template(layout):
         CKGroupedConvFwdTemplate.add_ck_conv_choices(
             choices,
@@ -652,7 +625,9 @@ def convolution(
             groups=groups,
             n_spatial_dimensions=ndim,
         )
-    return autotune_select_algorithm("convolution", choices, args, layout)
+    return autotune_select_algorithm(
+        "convolution", choices, kernel_inputs.nodes(), layout
+    )
 
 
 @register_lowering(aten._convolution)
