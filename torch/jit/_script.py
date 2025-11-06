@@ -881,7 +881,7 @@ if _enabled:
         def __copy__(self) -> Self:
             return torch.jit._recursive.wrap_cpp_module(copy.copy(self._c))
 
-        def __deepcopy__(self, memo: dict[str, Any]) -> Self:
+        def __deepcopy__(self, memo: dict[str, Any] | None) -> Self:
             return torch.jit._recursive.wrap_cpp_module(copy.deepcopy(self._c, memo))
 
         # Python magic methods do method lookups on an object's class type, instead of looking up
