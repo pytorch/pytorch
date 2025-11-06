@@ -449,7 +449,6 @@ class SchedulerDonatedBuffer(SchedulerBuffer):
 
 class BaseSchedulerNode:
     ancestors: OrderedSet[str]
-    debug_device_str: Callable[[BaseSchedulerNode], list[str]]
     group: tuple[torch.device, tuple[tuple[sympy.Expr, ...], ...]]
     last_usage: OrderedSet[str]
     # .min_order and .max_order are only relevant for "grouped" nodes such as FusedSchedulerNode.
@@ -461,21 +460,26 @@ class BaseSchedulerNode:
     max_order: int
     mpi_node: MemoryPlanningInfoForNode
     mutation_renames: dict[str, str]
-    node: Optional[ir.Operation]
+    node: Optional[ir.Operation] = None
     outputs: list[SchedulerBuffer]
     outputs_by_name: dict[str, SchedulerBuffer]
     override_estimated_runtime: Optional[float] = None
     read_writes: dependencies.ReadWrites
     unmet_dependencies: OrderedSet[Dep]
+    written: bool = False
 
     def __init__(self, scheduler: Scheduler) -> None:
-        self.scheduler = scheduler
-        self.debug_device_str = lambda *args, **kwargs: []
+        self.scheduler: Scheduler = scheduler
+        self.debug_device_str: Callable[[BaseSchedulerNode], list[str]] = (
+            lambda *args, **kwargs: []
+        )
 
     def _init_from_node(self, node: ir.Operation) -> None:
         self.node = node
         self.ancestors = OrderedSet()
-        self.last_usage = OrderedSet()  # buffers that won't be used after this kernel
+        self.last_usage = OrderedSet[
+            str
+        ]()  # buffers that won't be used after this kernel
         self.written = False
         self.outputs = [
             SchedulerBuffer(
@@ -2643,6 +2647,12 @@ class Scheduler:
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
 
+        if config.distributed_max_autotune_gemm:
+            from . import distributed_autotune
+
+            distributed_autotune.schedule(self)
+            self.compute_ancestors()
+
         self.nodes = self.fuse_nodes(self.nodes)
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
@@ -3515,6 +3525,7 @@ class Scheduler:
 
         new_scheduler_node.min_order = node.min_order
         new_scheduler_node.max_order = node.max_order
+        new_scheduler_node.ancestors = node.ancestors
         new_scheduler_node.last_usage = node.last_usage
 
     def _any_atomic_add(self, node_list: Sequence[BaseSchedulerNode]) -> bool:

@@ -799,7 +799,7 @@ def validate_args_and_maybe_create_graph_inputs(
                     gb_type="HOP body taking non-Tensor as input",
                     context=str(sub_args),
                     explanation=f"{description} with body that accepts non-Tensors as input. "
-                    "Got type {a.python_type()} at index {idx}.",
+                    f"Got type {a.python_type()} at index {idx}.",
                     hints=[
                         *graph_break_hints.USER_ERROR,
                     ],
