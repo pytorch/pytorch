@@ -1531,16 +1531,22 @@ def _addmm_can_fuse_bias(inp, mat1, mat2):
 
 
 def _can_dispatch_to_addmm(inp, mat1, mat2):
+    if not isinstance(inp, torch.Tensor):
+        return False
+
     if not inp.is_cuda:
         return False
 
     if inp.dtype != mat1.dtype or inp.dtype != mat2.dtype:
         return False
 
-    if inp.dim() == 2 and is_expandable_to(inp.shape, (mat1.shape[-2], mat2.shape[-1])):
-        return True
-
-    return _addmm_can_fuse_bias(inp, mat1, mat2)
+    if not is_expandable_to(inp.shape, (mat1.shape[-2], mat2.shape[-1])):
+        return False
+    else:
+        return (
+            _addmm_can_fuse_bias(inp, mat1, mat2)
+            or inp.dim() == 2
+        )
 
 
 def should_prefer_unfused_addmm(match):
