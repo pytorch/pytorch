@@ -266,7 +266,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-shared-with-deps-debug-upload:  # Uploading
+  libtorch-cpu-shared-with-deps-debug-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -287,7 +287,7 @@ jobs:
       build_name: libtorch-cpu-shared-with-deps-debug
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   libtorch-cuda12_6-shared-with-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -515,7 +515,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda12_6-shared-with-deps-debug-upload:  # Uploading
+  libtorch-cuda12_6-shared-with-deps-debug-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -537,7 +537,7 @@ jobs:
       build_name: libtorch-cuda12_6-shared-with-deps-debug
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   libtorch-cuda12_8-shared-with-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -765,7 +765,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda12_8-shared-with-deps-debug-upload:  # Uploading
+  libtorch-cuda12_8-shared-with-deps-debug-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -787,7 +787,7 @@ jobs:
       build_name: libtorch-cuda12_8-shared-with-deps-debug
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   libtorch-cuda13_0-shared-with-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -1015,7 +1015,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda13_0-shared-with-deps-debug-upload:  # Uploading
+  libtorch-cuda13_0-shared-with-deps-debug-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1037,4 +1037,4 @@ jobs:
       build_name: libtorch-cuda13_0-shared-with-deps-debug
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml

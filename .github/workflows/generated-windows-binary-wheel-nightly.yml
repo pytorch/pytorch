@@ -258,7 +258,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_10-cpu-upload:  # Uploading
+  wheel-py3_10-cpu-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -275,7 +275,7 @@ jobs:
       build_name: wheel-py3_10-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_10-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -495,7 +495,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_10-cuda12_6-upload:  # Uploading
+  wheel-py3_10-cuda12_6-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -513,7 +513,7 @@ jobs:
       build_name: wheel-py3_10-cuda12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_10-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -733,7 +733,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_10-cuda12_8-upload:  # Uploading
+  wheel-py3_10-cuda12_8-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -751,7 +751,7 @@ jobs:
       build_name: wheel-py3_10-cuda12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_10-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -971,7 +971,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_10-cuda13_0-upload:  # Uploading
+  wheel-py3_10-cuda13_0-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -989,7 +989,7 @@ jobs:
       build_name: wheel-py3_10-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_10-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -1208,7 +1208,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_10-xpu-upload:  # Uploading
+  wheel-py3_10-xpu-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1225,7 +1225,7 @@ jobs:
       build_name: wheel-py3_10-xpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_11-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -1443,7 +1443,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_11-cpu-upload:  # Uploading
+  wheel-py3_11-cpu-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1460,7 +1460,7 @@ jobs:
       build_name: wheel-py3_11-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_11-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -1680,7 +1680,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_11-cuda12_6-upload:  # Uploading
+  wheel-py3_11-cuda12_6-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1698,7 +1698,7 @@ jobs:
       build_name: wheel-py3_11-cuda12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_11-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -1918,7 +1918,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_11-cuda12_8-upload:  # Uploading
+  wheel-py3_11-cuda12_8-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1936,7 +1936,7 @@ jobs:
       build_name: wheel-py3_11-cuda12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_11-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -2156,7 +2156,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_11-cuda13_0-upload:  # Uploading
+  wheel-py3_11-cuda13_0-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -2174,7 +2174,7 @@ jobs:
       build_name: wheel-py3_11-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_11-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -2393,7 +2393,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_11-xpu-upload:  # Uploading
+  wheel-py3_11-xpu-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -2410,7 +2410,7 @@ jobs:
       build_name: wheel-py3_11-xpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_12-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -2628,7 +2628,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_12-cpu-upload:  # Uploading
+  wheel-py3_12-cpu-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -2645,7 +2645,7 @@ jobs:
       build_name: wheel-py3_12-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_12-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -2865,7 +2865,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_12-cuda12_6-upload:  # Uploading
+  wheel-py3_12-cuda12_6-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -2883,7 +2883,7 @@ jobs:
       build_name: wheel-py3_12-cuda12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_12-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -3103,7 +3103,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_12-cuda12_8-upload:  # Uploading
+  wheel-py3_12-cuda12_8-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -3121,7 +3121,7 @@ jobs:
       build_name: wheel-py3_12-cuda12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_12-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -3341,7 +3341,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_12-cuda13_0-upload:  # Uploading
+  wheel-py3_12-cuda13_0-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -3359,7 +3359,7 @@ jobs:
       build_name: wheel-py3_12-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_12-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -3578,7 +3578,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_12-xpu-upload:  # Uploading
+  wheel-py3_12-xpu-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -3595,7 +3595,7 @@ jobs:
       build_name: wheel-py3_12-xpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_13-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -3813,7 +3813,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_13-cpu-upload:  # Uploading
+  wheel-py3_13-cpu-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -3830,7 +3830,7 @@ jobs:
       build_name: wheel-py3_13-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_13-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -4050,7 +4050,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_13-cuda12_6-upload:  # Uploading
+  wheel-py3_13-cuda12_6-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -4068,7 +4068,7 @@ jobs:
       build_name: wheel-py3_13-cuda12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_13-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -4288,7 +4288,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_13-cuda12_8-upload:  # Uploading
+  wheel-py3_13-cuda12_8-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -4306,7 +4306,7 @@ jobs:
       build_name: wheel-py3_13-cuda12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_13-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -4526,7 +4526,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_13-cuda13_0-upload:  # Uploading
+  wheel-py3_13-cuda13_0-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -4544,7 +4544,7 @@ jobs:
       build_name: wheel-py3_13-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_13-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -4763,7 +4763,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_13-xpu-upload:  # Uploading
+  wheel-py3_13-xpu-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -4780,7 +4780,7 @@ jobs:
       build_name: wheel-py3_13-xpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_13t-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -4998,7 +4998,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_13t-cpu-upload:  # Uploading
+  wheel-py3_13t-cpu-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -5015,7 +5015,7 @@ jobs:
       build_name: wheel-py3_13t-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_13t-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -5235,7 +5235,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_13t-cuda12_6-upload:  # Uploading
+  wheel-py3_13t-cuda12_6-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -5253,7 +5253,7 @@ jobs:
       build_name: wheel-py3_13t-cuda12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_13t-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -5473,7 +5473,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_13t-cuda12_8-upload:  # Uploading
+  wheel-py3_13t-cuda12_8-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -5491,7 +5491,7 @@ jobs:
       build_name: wheel-py3_13t-cuda12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_13t-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -5711,7 +5711,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_13t-cuda13_0-upload:  # Uploading
+  wheel-py3_13t-cuda13_0-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -5729,7 +5729,7 @@ jobs:
       build_name: wheel-py3_13t-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_13t-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -5948,7 +5948,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_13t-xpu-upload:  # Uploading
+  wheel-py3_13t-xpu-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -5965,7 +5965,7 @@ jobs:
       build_name: wheel-py3_13t-xpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_14-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -6183,7 +6183,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_14-cpu-upload:  # Uploading
+  wheel-py3_14-cpu-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -6200,7 +6200,7 @@ jobs:
       build_name: wheel-py3_14-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_14-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -6420,7 +6420,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_14-cuda12_6-upload:  # Uploading
+  wheel-py3_14-cuda12_6-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -6438,7 +6438,7 @@ jobs:
       build_name: wheel-py3_14-cuda12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_14-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -6658,7 +6658,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_14-cuda12_8-upload:  # Uploading
+  wheel-py3_14-cuda12_8-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -6676,7 +6676,7 @@ jobs:
       build_name: wheel-py3_14-cuda12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_14-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -6896,7 +6896,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_14-cuda13_0-upload:  # Uploading
+  wheel-py3_14-cuda13_0-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -6914,7 +6914,7 @@ jobs:
       build_name: wheel-py3_14-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_14-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -7133,7 +7133,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_14-xpu-upload:  # Uploading
+  wheel-py3_14-xpu-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -7150,7 +7150,7 @@ jobs:
       build_name: wheel-py3_14-xpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_14t-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -7368,7 +7368,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_14t-cpu-upload:  # Uploading
+  wheel-py3_14t-cpu-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -7385,7 +7385,7 @@ jobs:
       build_name: wheel-py3_14t-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_14t-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -7605,7 +7605,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_14t-cuda12_6-upload:  # Uploading
+  wheel-py3_14t-cuda12_6-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -7623,7 +7623,7 @@ jobs:
       build_name: wheel-py3_14t-cuda12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_14t-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -7843,7 +7843,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_14t-cuda12_8-upload:  # Uploading
+  wheel-py3_14t-cuda12_8-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -7861,7 +7861,7 @@ jobs:
       build_name: wheel-py3_14t-cuda12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_14t-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -8081,7 +8081,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_14t-cuda13_0-upload:  # Uploading
+  wheel-py3_14t-cuda13_0-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -8099,7 +8099,7 @@ jobs:
       build_name: wheel-py3_14t-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_14t-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
@@ -8318,7 +8318,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_14t-xpu-upload:  # Uploading
+  wheel-py3_14t-xpu-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -8335,4 +8335,4 @@ jobs:
       build_name: wheel-py3_14t-xpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml

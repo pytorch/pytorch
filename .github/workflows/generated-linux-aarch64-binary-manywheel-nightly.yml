@@ -91,7 +91,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-cpu-aarch64-upload:  # Uploading
+  manywheel-py3_10-cpu-aarch64-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -110,7 +110,7 @@ jobs:
       build_name: manywheel-py3_10-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_10-cuda-aarch64-12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -136,7 +136,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-cuda-aarch64-12_6-upload:  # Uploading
+  manywheel-py3_10-cuda-aarch64-12_6-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -156,7 +156,7 @@ jobs:
       build_name: manywheel-py3_10-cuda-aarch64-12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_10-cuda-aarch64-12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -182,7 +182,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-cuda-aarch64-12_8-upload:  # Uploading
+  manywheel-py3_10-cuda-aarch64-12_8-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -202,7 +202,7 @@ jobs:
       build_name: manywheel-py3_10-cuda-aarch64-12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_10-cuda-aarch64-12_9-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -228,7 +228,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-cuda-aarch64-12_9-upload:  # Uploading
+  manywheel-py3_10-cuda-aarch64-12_9-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -248,7 +248,7 @@ jobs:
       build_name: manywheel-py3_10-cuda-aarch64-12_9
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_10-cuda-aarch64-13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -274,7 +274,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-cuda-aarch64-13_0-upload:  # Uploading
+  manywheel-py3_10-cuda-aarch64-13_0-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -294,7 +294,7 @@ jobs:
       build_name: manywheel-py3_10-cuda-aarch64-13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_11-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -340,7 +340,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_11-cpu-aarch64-upload:  # Uploading
+  manywheel-py3_11-cpu-aarch64-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -359,7 +359,7 @@ jobs:
       build_name: manywheel-py3_11-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_11-cuda-aarch64-12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -385,7 +385,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_11-cuda-aarch64-12_6-upload:  # Uploading
+  manywheel-py3_11-cuda-aarch64-12_6-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -405,7 +405,7 @@ jobs:
       build_name: manywheel-py3_11-cuda-aarch64-12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_11-cuda-aarch64-12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -431,7 +431,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_11-cuda-aarch64-12_8-upload:  # Uploading
+  manywheel-py3_11-cuda-aarch64-12_8-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -451,7 +451,7 @@ jobs:
       build_name: manywheel-py3_11-cuda-aarch64-12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_11-cuda-aarch64-12_9-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -477,7 +477,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_11-cuda-aarch64-12_9-upload:  # Uploading
+  manywheel-py3_11-cuda-aarch64-12_9-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -497,7 +497,7 @@ jobs:
       build_name: manywheel-py3_11-cuda-aarch64-12_9
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_11-cuda-aarch64-13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -523,7 +523,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_11-cuda-aarch64-13_0-upload:  # Uploading
+  manywheel-py3_11-cuda-aarch64-13_0-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -543,7 +543,7 @@ jobs:
       build_name: manywheel-py3_11-cuda-aarch64-13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_12-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -589,7 +589,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_12-cpu-aarch64-upload:  # Uploading
+  manywheel-py3_12-cpu-aarch64-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -608,7 +608,7 @@ jobs:
       build_name: manywheel-py3_12-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_12-cuda-aarch64-12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -634,7 +634,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_12-cuda-aarch64-12_6-upload:  # Uploading
+  manywheel-py3_12-cuda-aarch64-12_6-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -654,7 +654,7 @@ jobs:
       build_name: manywheel-py3_12-cuda-aarch64-12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_12-cuda-aarch64-12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -680,7 +680,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_12-cuda-aarch64-12_8-upload:  # Uploading
+  manywheel-py3_12-cuda-aarch64-12_8-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -700,7 +700,7 @@ jobs:
       build_name: manywheel-py3_12-cuda-aarch64-12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_12-cuda-aarch64-12_9-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -726,7 +726,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_12-cuda-aarch64-12_9-upload:  # Uploading
+  manywheel-py3_12-cuda-aarch64-12_9-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -746,7 +746,7 @@ jobs:
       build_name: manywheel-py3_12-cuda-aarch64-12_9
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_12-cuda-aarch64-13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -772,7 +772,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_12-cuda-aarch64-13_0-upload:  # Uploading
+  manywheel-py3_12-cuda-aarch64-13_0-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -792,7 +792,7 @@ jobs:
       build_name: manywheel-py3_12-cuda-aarch64-13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -838,7 +838,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13-cpu-aarch64-upload:  # Uploading
+  manywheel-py3_13-cpu-aarch64-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -857,7 +857,7 @@ jobs:
       build_name: manywheel-py3_13-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13-cuda-aarch64-12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -883,7 +883,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13-cuda-aarch64-12_6-upload:  # Uploading
+  manywheel-py3_13-cuda-aarch64-12_6-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -903,7 +903,7 @@ jobs:
       build_name: manywheel-py3_13-cuda-aarch64-12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13-cuda-aarch64-12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -929,7 +929,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13-cuda-aarch64-12_8-upload:  # Uploading
+  manywheel-py3_13-cuda-aarch64-12_8-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -949,7 +949,7 @@ jobs:
       build_name: manywheel-py3_13-cuda-aarch64-12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13-cuda-aarch64-12_9-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -975,7 +975,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13-cuda-aarch64-12_9-upload:  # Uploading
+  manywheel-py3_13-cuda-aarch64-12_9-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -995,7 +995,7 @@ jobs:
       build_name: manywheel-py3_13-cuda-aarch64-12_9
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13-cuda-aarch64-13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1021,7 +1021,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13-cuda-aarch64-13_0-upload:  # Uploading
+  manywheel-py3_13-cuda-aarch64-13_0-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1041,7 +1041,7 @@ jobs:
       build_name: manywheel-py3_13-cuda-aarch64-13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13t-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1087,7 +1087,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13t-cpu-aarch64-upload:  # Uploading
+  manywheel-py3_13t-cpu-aarch64-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1106,7 +1106,7 @@ jobs:
       build_name: manywheel-py3_13t-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13t-cuda-aarch64-12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1132,7 +1132,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13t-cuda-aarch64-12_6-upload:  # Uploading
+  manywheel-py3_13t-cuda-aarch64-12_6-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1152,7 +1152,7 @@ jobs:
       build_name: manywheel-py3_13t-cuda-aarch64-12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13t-cuda-aarch64-12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1178,7 +1178,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13t-cuda-aarch64-12_8-upload:  # Uploading
+  manywheel-py3_13t-cuda-aarch64-12_8-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1198,7 +1198,7 @@ jobs:
       build_name: manywheel-py3_13t-cuda-aarch64-12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13t-cuda-aarch64-12_9-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1224,7 +1224,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13t-cuda-aarch64-12_9-upload:  # Uploading
+  manywheel-py3_13t-cuda-aarch64-12_9-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1244,7 +1244,7 @@ jobs:
       build_name: manywheel-py3_13t-cuda-aarch64-12_9
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13t-cuda-aarch64-13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1270,7 +1270,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13t-cuda-aarch64-13_0-upload:  # Uploading
+  manywheel-py3_13t-cuda-aarch64-13_0-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1290,7 +1290,7 @@ jobs:
       build_name: manywheel-py3_13t-cuda-aarch64-13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1336,7 +1336,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_14-cpu-aarch64-upload:  # Uploading
+  manywheel-py3_14-cpu-aarch64-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1355,7 +1355,7 @@ jobs:
       build_name: manywheel-py3_14-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14-cuda-aarch64-12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1381,7 +1381,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_14-cuda-aarch64-12_6-upload:  # Uploading
+  manywheel-py3_14-cuda-aarch64-12_6-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1401,7 +1401,7 @@ jobs:
       build_name: manywheel-py3_14-cuda-aarch64-12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14-cuda-aarch64-12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1427,7 +1427,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_14-cuda-aarch64-12_8-upload:  # Uploading
+  manywheel-py3_14-cuda-aarch64-12_8-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1447,7 +1447,7 @@ jobs:
       build_name: manywheel-py3_14-cuda-aarch64-12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14-cuda-aarch64-12_9-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1473,7 +1473,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_14-cuda-aarch64-12_9-upload:  # Uploading
+  manywheel-py3_14-cuda-aarch64-12_9-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1493,7 +1493,7 @@ jobs:
       build_name: manywheel-py3_14-cuda-aarch64-12_9
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14-cuda-aarch64-13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1519,7 +1519,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_14-cuda-aarch64-13_0-upload:  # Uploading
+  manywheel-py3_14-cuda-aarch64-13_0-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1539,7 +1539,7 @@ jobs:
       build_name: manywheel-py3_14-cuda-aarch64-13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14t-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1585,7 +1585,7 @@ jobs:
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_14t-cpu-aarch64-upload:  # Uploading
+  manywheel-py3_14t-cpu-aarch64-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1604,7 +1604,7 @@ jobs:
       build_name: manywheel-py3_14t-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14t-cuda-aarch64-12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1630,7 +1630,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_14t-cuda-aarch64-12_6-upload:  # Uploading
+  manywheel-py3_14t-cuda-aarch64-12_6-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1650,7 +1650,7 @@ jobs:
       build_name: manywheel-py3_14t-cuda-aarch64-12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14t-cuda-aarch64-12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1676,7 +1676,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_14t-cuda-aarch64-12_8-upload:  # Uploading
+  manywheel-py3_14t-cuda-aarch64-12_8-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1696,7 +1696,7 @@ jobs:
       build_name: manywheel-py3_14t-cuda-aarch64-12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14t-cuda-aarch64-12_9-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1722,7 +1722,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_14t-cuda-aarch64-12_9-upload:  # Uploading
+  manywheel-py3_14t-cuda-aarch64-12_9-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1742,7 +1742,7 @@ jobs:
       build_name: manywheel-py3_14t-cuda-aarch64-12_9
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14t-cuda-aarch64-13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1768,7 +1768,7 @@ jobs:
       timeout-minutes: 420
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_14t-cuda-aarch64-13_0-upload:  # Uploading
+  manywheel-py3_14t-cuda-aarch64-13_0-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1788,4 +1788,4 @@ jobs:
       build_name: manywheel-py3_14t-cuda-aarch64-13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml

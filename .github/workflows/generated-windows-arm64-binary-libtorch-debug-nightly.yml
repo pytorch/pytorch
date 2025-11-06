@@ -184,7 +184,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
-  libtorch-cpu-shared-with-deps-debug-upload:  # Uploading
+  libtorch-cpu-shared-with-deps-debug-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -205,4 +205,4 @@ jobs:
       build_name: libtorch-cpu-shared-with-deps-debug
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml

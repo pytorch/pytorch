@@ -90,7 +90,7 @@ jobs:
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-cpu-shared-with-deps-release-upload:  # Uploading
+  libtorch-cpu-shared-with-deps-release-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -110,7 +110,7 @@ jobs:
       build_name: libtorch-cpu-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   libtorch-cuda12_6-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -157,7 +157,7 @@ jobs:
       runs_on: linux.4xlarge.nvidia.gpu  # 12.6 build can use maxwell (sm_50) runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-cuda12_6-shared-with-deps-release-upload:  # Uploading
+  libtorch-cuda12_6-shared-with-deps-release-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -178,7 +178,7 @@ jobs:
       build_name: libtorch-cuda12_6-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   libtorch-cuda12_8-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -225,7 +225,7 @@ jobs:
       runs_on: linux.g4dn.4xlarge.nvidia.gpu # 12.8+ builds need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-cuda12_8-shared-with-deps-release-upload:  # Uploading
+  libtorch-cuda12_8-shared-with-deps-release-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -246,7 +246,7 @@ jobs:
       build_name: libtorch-cuda12_8-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   libtorch-cuda12_9-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -293,7 +293,7 @@ jobs:
       runs_on: linux.g4dn.4xlarge.nvidia.gpu # 12.8+ builds need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-cuda12_9-shared-with-deps-release-upload:  # Uploading
+  libtorch-cuda12_9-shared-with-deps-release-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -314,7 +314,7 @@ jobs:
       build_name: libtorch-cuda12_9-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   libtorch-cuda13_0-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -361,7 +361,7 @@ jobs:
       runs_on: linux.g4dn.4xlarge.nvidia.gpu # 12.8+ builds need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-cuda13_0-shared-with-deps-release-upload:  # Uploading
+  libtorch-cuda13_0-shared-with-deps-release-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -382,7 +382,7 @@ jobs:
       build_name: libtorch-cuda13_0-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   libtorch-rocm7_0-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -479,7 +479,7 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-  libtorch-rocm7_0-shared-with-deps-release-upload:  # Uploading
+  libtorch-rocm7_0-shared-with-deps-release-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -500,7 +500,7 @@ jobs:
       build_name: libtorch-rocm7_0-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   libtorch-rocm7_1-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -597,7 +597,7 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-  libtorch-rocm7_1-shared-with-deps-release-upload:  # Uploading
+  libtorch-rocm7_1-shared-with-deps-release-upload-r2:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -618,4 +618,4 @@ jobs:
       build_name: libtorch-rocm7_1-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
+    uses: ./.github/workflows/_binary-upload-r2.yml

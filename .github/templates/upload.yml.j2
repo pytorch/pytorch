@@ -66,3 +66,28 @@
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 {%- endmacro %}
+
+{%- macro upload_binaries(config, is_windows=False, has_test=True, use_s3=True) -%}
+!{{ config["build_name"] }}-upload-r2:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+{%- if has_test %}
+    {%- if config["gpu_arch_type"] == "cuda-aarch64" %}
+    needs: !{{ config["build_name"] }}-build
+    {%- else %}
+    needs: !{{ config["build_name"] }}-test
+    {%- endif %}
+{%- else %}
+    needs: !{{ config["build_name"] }}-build
+{%- endif %}
+    with:!{{ binary_env_as_input(config, is_windows) }}
+      build_name: !{{ config["build_name"] }}
+      {%- if not use_s3 %}
+      use_s3: False
+      {%- endif %}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
+{%- endmacro %}

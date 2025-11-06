@@ -14,7 +14,9 @@ UPLOAD_CHANNEL=${UPLOAD_CHANNEL:-nightly}
 UPLOAD_SUBFOLDER=${UPLOAD_SUBFOLDER:-}
 UPLOAD_BUCKET="s3://pytorch"
 BACKUP_BUCKET="s3://pytorch-backup"
+
 BUILD_NAME=${BUILD_NAME:-}
+UPLOAD_ENDPOINT=${R2_UPLOAD_ENDPOINT:-}
 
 DRY_RUN=${DRY_RUN:-enabled}
 # Don't actually do work unless explicit
@@ -23,11 +25,10 @@ if [[ "${DRY_RUN}" = "disabled" ]]; then
   AWS_S3_CP="aws s3 cp"
 fi
 
-# this is special build with all dependencies packaged
-if [[ ${BUILD_NAME} == *-full* ]]; then
-  UPLOAD_SUBFOLDER="${UPLOAD_SUBFOLDER}_full"
+if [[ -n "$UPLOAD_ENDPOINT" ]]; then
+  UPLOAD_BUCKET="s3://pytorch-downloads/"
+  UPLOAD_ENDPOINT="--endpoint-url ${UPLOAD_ENDPOINT}"
 fi
-
 
 do_backup() {
   local backup_dir
@@ -56,7 +57,7 @@ s3_upload() {
         set -x
         shm_id=$(sha256sum "${pkg}" | awk '{print $1}')
         ${AWS_S3_CP} --no-progress --acl public-read "${pkg}" "${s3_upload_dir}" \
-          --metadata "checksum-sha256=${shm_id}"
+          --metadata "checksum-sha256=${shm_id}" "${UPLOAD_ENDPOINT}"
       )
     done
   )
