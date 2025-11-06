@@ -374,6 +374,13 @@ saved_tensors_hooks_filtering_mode = "donated"
 # This callback is invoked on the joint graph before partitioning
 joint_custom_pass: Callable = None  # type: ignore[assignment]
 
+# Note [Selective Decomposition]
+# This config allows for selective decomposition of certain operators in the graph.
+# The current use case is regional inductor compile, where users specify nodes that
+# should be decomposed and compiled with inductor. When true, we skip decomposition
+# for all operators except the user specified nodes.
+selective_decompose: bool = False
+
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

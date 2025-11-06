@@ -13563,6 +13563,50 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             size_assert_pattern = r"assert_size_stride.[a-z]+[0-9]+, .2, 3, 16, 32, 32., .49152, 16384, 1, 512, 16.."
         FileCheck().check_regex(size_assert_pattern).run(code)
 
+    @skip_if_cpu
+    @torch._functorch.config.patch("selective_decompose", True)
+    def test_lite_inductor_regional_compile(self):
+        import torch.fx.traceback as fx_traceback
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        def _squared(score, b, h, m, n):
+            return score * score
+
+        def mask_mod(b, h, q, k):
+            return q >= 0
+
+        a = 12
+        b = 64
+        block_mask = create_block_mask(
+            mask_mod, None, None, a * b, a * b, device=self.device
+        )
+
+        def fn(x):
+            x = torch.sin(x)
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                x = flex_attention(x, x, x, block_mask=block_mask, score_mod=_squared)
+            return torch.cos(x)
+
+        x = torch.randn(
+            1,
+            1,
+            a * b,
+            b,
+            dtype=torch.bfloat16,
+            device=self.device,
+            requires_grad=True,
+        )
+
+        opt_fn = torch.compile(
+            fn,
+            mode="lite",
+            fullgraph=True,
+        )
+
+        # Check that inductor compilation is called twice
+        _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
+        self.assertEqual(len(codes), 2)
+
     @lowering.force_fallback(aten.sort.default)
     @unittest.skipIf(
         config.cpp_wrapper,

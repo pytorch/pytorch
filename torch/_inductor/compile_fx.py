@@ -2643,9 +2643,6 @@ def _compile_fx_main(
             decompositions if decompositions is not None else select_decomp_table()
         )
 
-        if not config.use_decomposition:
-            decompositions = None
-
         def fw_compiler_base(
             gm: GraphModule,
             example_inputs: Sequence[InputType],
