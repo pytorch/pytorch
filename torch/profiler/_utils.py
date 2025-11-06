@@ -1,9 +1,11 @@
 # mypy: allow-untyped-defs
 import functools
+import json
 import operator
 import re
 from collections import deque
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Literal, Optional, TYPE_CHECKING
 
 from torch.autograd.profiler import profile
@@ -402,13 +404,31 @@ def _init_for_cuda_graphs() -> None:
         pass
 
 
+class ContextType(Enum):
+    """Types of contexts in the profiler stack."""
+
+    FX_GRAPH = "filename"
+    FX_NODE = "node"
+    COMPILED_GRAPH = "compiled_graph"
+    INDUCTOR_NODE = "inductor_node"
+
+
+def get_parent_context_type(context_type: ContextType) -> Optional[ContextType]:
+    if context_type == ContextType.FX_NODE:
+        return ContextType.FX_GRAPH
+    elif context_type == ContextType.INDUCTOR_NODE:
+        return ContextType.COMPILED_GRAPH
+    else:
+        return None
+
+
 @dataclass
 class TimelineEvent:
     """Represents an event in the profiler timeline."""
 
     timestamp: int
     event_type: Literal["start", "end", "regular"]
-    marker_type: Optional[Literal["filename", "node"]]
+    marker_type: Optional[ContextType]
     identifier: Optional[str | int]
     event: dict[str, Any]
 
@@ -417,7 +437,7 @@ class TimelineEvent:
 class ContextStackEntry:
     """Represents a context (filename or node) in the stack."""
 
-    context_type: Literal["filename", "node"]
+    context_type: ContextType
     identifier: str | int
     metadata: Optional[dict]
     tid: Optional[int] = None  # Thread ID associated with this context
@@ -438,6 +458,8 @@ def map_recorded_events_to_aten_ops_with_stack_trace(traced_data):
     Returns:
         Dict mapping recorded event names to their aten operations with added stack traces
     """
+    from torch._inductor.output_code import CALL_COMPILED_PREFIX
+    from torch.fx.graph_module import FX_GRAPH_MODULE_FILE_PREFIX
     from torch.fx.traceback import _FX_METADATA_REGISTRY
 
     trace_events = traced_data.get("traceEvents", [])
@@ -447,7 +469,7 @@ def map_recorded_events_to_aten_ops_with_stack_trace(traced_data):
 
     def is_fx_marker_event(event):
         return (
-            event.get("cat") == "cpu_op"
+            event.get("cat") in ("cpu_op", "user_annotation")
             and event.get("name", "").startswith("## ")
             and event.get("name", "").endswith(" ##")
         )
@@ -469,14 +491,27 @@ def map_recorded_events_to_aten_ops_with_stack_trace(traced_data):
         if is_fx_marker_event(event):
             content = event["name"][3:-3]
 
-            if content.endswith(".py"):
-                append_fx_marker_event("filename", content, event)
+            # Try different event types
+            if content.startswith(FX_GRAPH_MODULE_FILE_PREFIX) and content.endswith(
+                ".py"
+            ):
+                # FX graph event
+                append_fx_marker_event(ContextType.FX_GRAPH, content, event)
+            elif content.startswith(CALL_COMPILED_PREFIX):
+                # Inductor compiled graph event
+                append_fx_marker_event(ContextType.COMPILED_GRAPH, content, event)
+            elif content.startswith("inductor_kernel:"):
+                append_fx_marker_event(
+                    ContextType.INDUCTOR_NODE, content[len("inductor_kernel:") :], event
+                )
             else:
+                # Try to parse as node index for FX graph
+                # TODO: change to start with fx_node
                 try:
                     node_index = int(content)
+                    append_fx_marker_event(ContextType.FX_NODE, node_index, event)
                 except ValueError:
                     pass
-                append_fx_marker_event("node", node_index, event)  # type: ignore[possibly-undefined]
 
         else:
             # Regular event that needs augmentation
@@ -495,23 +530,37 @@ def map_recorded_events_to_aten_ops_with_stack_trace(traced_data):
             case "start":
                 assert timeline_event.identifier is not None
 
-                if timeline_event.marker_type == "filename":
+                if timeline_event.marker_type in (
+                    ContextType.FX_GRAPH,
+                    ContextType.COMPILED_GRAPH,
+                ):
                     assert isinstance(timeline_event.identifier, str)
                     # Push filename context - query metadata registry on-demand
                     metadata = _FX_METADATA_REGISTRY.get(timeline_event.identifier)
                     tid = timeline_event.event.get("tid")
+
+                    # TODO: add get method in traceback to try - catch and get
+                    if isinstance(metadata, str):
+                        metadata = json.loads(metadata)
                     context_stack.append(
                         ContextStackEntry(
-                            "filename", timeline_event.identifier, metadata, tid
+                            timeline_event.marker_type,
+                            timeline_event.identifier,
+                            metadata,
+                            tid,
                         )
                     )
-                elif timeline_event.marker_type == "node":
+                elif timeline_event.marker_type in (
+                    ContextType.FX_NODE,
+                    ContextType.INDUCTOR_NODE,
+                ):
                     # Find the current filename from stack
                     current_file_metadata = None
                     tid = timeline_event.event.get("tid")
+                    parent_type = get_parent_context_type(timeline_event.marker_type)
                     for ctx_entry in reversed(context_stack):
                         if (
-                            ctx_entry.context_type == "filename"
+                            ctx_entry.context_type == parent_type
                             and ctx_entry.tid == tid
                         ):
                             current_file_metadata = ctx_entry.metadata
@@ -520,14 +569,39 @@ def map_recorded_events_to_aten_ops_with_stack_trace(traced_data):
                     if current_file_metadata:
                         node_metadata = current_file_metadata.get("node_metadata", {})
                         if timeline_event.identifier in node_metadata:
-                            node_meta: Optional[dict] = node_metadata[
-                                timeline_event.identifier
-                            ]
-                            context_stack.append(
-                                ContextStackEntry(
-                                    "node", timeline_event.identifier, node_meta, tid
+                            if ctx_entry.context_type == ContextType.FX_NODE:
+                                node_meta: Optional[dict] = node_metadata[
+                                    timeline_event.identifier
+                                ]
+                                context_stack.append(
+                                    ContextStackEntry(
+                                        ContextType.FX_NODE,
+                                        timeline_event.identifier,
+                                        node_meta,
+                                        tid,
+                                    )
                                 )
+
+                        if timeline_event.marker_type == ContextType.INDUCTOR_NODE:
+                            # Look up stack traces for this kernel
+                            # TODO: make a dictionary that maps from compiled key to stack traces dictionary
+                            stack_traces = current_file_metadata.get(
+                                timeline_event.identifier, []
                             )
+                            if stack_traces:
+                                # Store all stack traces as metadata
+                                node_meta: Optional[dict] = {
+                                    "stack_trace": stack_traces,
+                                    "name": timeline_event.identifier,
+                                }
+                                context_stack.append(
+                                    ContextStackEntry(
+                                        ContextType.INDUCTOR_NODE,
+                                        timeline_event.identifier,
+                                        node_meta,
+                                        tid,
+                                    )
+                                )
 
             case "end":
                 # Pop from stack - search backwards to find matching context
@@ -551,13 +625,29 @@ def map_recorded_events_to_aten_ops_with_stack_trace(traced_data):
                 for ctx_entry in reversed(context_stack):
                     # Only apply metadata from contexts with matching tid
                     if ctx_entry.tid == event_tid:
-                        if ctx_entry.context_type == "node" and ctx_entry.metadata:
+                        if (
+                            ctx_entry.context_type == ContextType.FX_NODE
+                            and ctx_entry.metadata
+                        ):
                             current_stack_trace = ctx_entry.metadata.get(
                                 "stack_trace", "No model stack trace available"
                             )
                             current_node_name = ctx_entry.metadata.get("name", "")
                             # Do we want to only attach the stack trace of the lowest node or stack trace of all nodes
                             # if nodes are nested, e.g. in nested graph modules
+                            break
+                        elif (
+                            ctx_entry.context_type == ContextType.INDUCTOR_NODE
+                            and ctx_entry.metadata
+                        ):
+                            # For inductor nodes, stack_trace is a list of traces
+                            stack_traces_list = ctx_entry.metadata.get(
+                                "stack_trace", []
+                            )
+                            if stack_traces_list:
+                                # Store as a list - each trace gets its own entry
+                                current_stack_trace = stack_traces_list
+                            current_node_name = ctx_entry.metadata.get("name", "")
                             break
 
                 # Augment the event
@@ -567,3 +657,81 @@ def map_recorded_events_to_aten_ops_with_stack_trace(traced_data):
                         args["stack_trace"] = current_stack_trace
                     if current_node_name:
                         args["node_name"] = current_node_name
+
+import tempfile
+import os
+
+# Collect all events with stack traces and format them canonically
+def _canonicalize_profiler_events(events):
+    """
+    Extract and format all events with stack traces in a canonical way
+    for deterministic testing.
+    """
+    events_with_traces = []
+
+    for event in events:
+        # Extract relevant fields
+        event_name = event.get("name", "")
+        node_name = event["args"].get("node_name", "")
+        stack_trace = event["args"].get("stack_trace", "")
+
+        if isinstance(stack_trace, list):
+            stack_trace = "\n".join(stack_trace)
+
+        # Get the last non-empty line of the stack trace
+        lines = [s.strip() for s in stack_trace.split("\n") if s.strip()]
+        stack_trace = lines[-1] if lines else ""
+
+        events_with_traces.append(
+            {
+                "event_name": event_name[:20],
+                "node_name": node_name,
+                "stack_trace": stack_trace,
+                "start_time": event.get("ts", 0),
+            }
+        )
+
+    # Sort by node_name for deterministic ordering
+    events_with_traces.sort(key=lambda x: x["start_time"])
+
+    # Format as a string
+    lines: list[str] = []
+    for evt in events_with_traces:
+        lines.append(
+            f"event={evt['event_name']} node={evt['node_name']} stack_trace={evt['stack_trace']}"
+        )
+
+    return "\n".join(lines)
+
+
+def _enrich_profiler_traces(prof):
+    """
+    Helper function to extract and augment profiler events with stack traces.
+
+    Args:
+        prof: A torch.profiler.profile object
+
+    Returns:
+        A string representing enriched events
+    """
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        trace_file = f.name
+
+    try:
+        prof.export_chrome_trace(trace_file)
+
+        with open(trace_file) as f:
+            trace_data = json.load(f)
+
+        map_recorded_events_to_aten_ops_with_stack_trace(trace_data)
+
+        events = []
+        for event in trace_data["traceEvents"]:
+            if "args" in event and "stack_trace" in event["args"]:
+                events.append(event)
+
+        actual_traces = _canonicalize_profiler_events(events)
+        return actual_traces
+    finally:
+        if os.path.exists(trace_file):
+            os.remove(trace_file)

@@ -70,7 +70,7 @@ from .common import (
 )
 from .cpp_utils import cexpr
 from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
-
+from torch.fx.experimental import _config as fx_experimental_config
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -1120,6 +1120,37 @@ class PythonWrapperCodegen(CodeGen):
         # Additional files that are dependent to the wrapper (ex. cubin files)
         self.additional_files = []
 
+        # This is used to emit RecordFunctionFast markers that can be matched
+        # with profiler traces for provenance tracking.
+        #
+        # Stores the (kernel_name, debug_handle) tuple
+        # for the currently being generated kernel.
+        self.current_kernel_debug_handle: Optional[tuple[str, int]] = None
+
+        # set_current_kernel_debug_handle: Flag that controls whether
+        # write_provenance_debug_handle() should update current_kernel_debug_handle.
+        # This flag is automatically managed by kernel_debug_handle_context().
+        self.set_current_kernel_debug_handle: bool = False
+
+    @contextlib.contextmanager
+    def kernel_debug_handle_context(self):
+        """
+        Context manager for kernel debug handle tracking.
+
+        self.current_kernel_debug_handle can be updated within the context
+        with wrapper.write_provenance_debug_handle
+        and it will be reset after the context
+        """
+        old_flag_value = self.set_current_kernel_debug_handle
+        old_handle_value = self.current_kernel_debug_handle
+        self.set_current_kernel_debug_handle = True
+
+        try:
+            yield
+        finally:
+            self.set_current_kernel_debug_handle = old_flag_value
+            self.current_kernel_debug_handle = old_handle_value
+
     @staticmethod
     def create(
         is_subgraph: bool,
@@ -1510,8 +1541,27 @@ class PythonWrapperCodegen(CodeGen):
     def generate_end(self, result: IndentedBuffer) -> None:
         return
 
+    def generate_record_function_start(self) -> Optional[str]:
+        record_func = self.current_kernel_debug_handle and fx_experimental_config.enrich_profiler_metadata
+        if record_func:
+            assert self.current_kernel_debug_handle
+            kernel_name, debug_handle = self.current_kernel_debug_handle
+            kernel_debug_handle = f"{kernel_name}:{debug_handle}"
+            self.writeline(
+                f"_rf_enter = torch._C._profiler._RecordFunctionFast('## inductor_kernel:{kernel_debug_handle} ##'); _rf_enter.__enter__()"
+            )
+            return "_rf_enter"
+        else:
+            return None
+
+    def generate_record_function_end(self, record_func_var: Optional[str]):
+        if record_func_var:
+            self.writeline(f"{record_func_var}.__exit__(None, None, None)")
+
     def generate_fallback_kernel(self, node: ir.FallbackKernel) -> None:
+        record_func_var = self.generate_record_function_start()
         self.writeline(ExternKernelAllocLine(self, node))
+        self.generate_record_function_end(record_func_var)
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
         node.codegen_comment(self)
@@ -1671,7 +1721,9 @@ class PythonWrapperCodegen(CodeGen):
         raw_args: Sequence[Any],
         outputs: Sequence[ir.Buffer],
     ) -> None:
+        record_func_var = self.generate_record_function_start()
         self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(get_args())})")
+        self.generate_record_function_end(record_func_var)
 
     def generate(self, is_inference):
         with dynamo_timed("PythonWrapperCodegen.generate"):
@@ -3142,6 +3194,8 @@ class PythonWrapperCodegen(CodeGen):
             self.writeline(
                 f"{self.comment} [Provenance debug handles] {kernel_name}:{debug_handle}"
             )
+            if self.set_current_kernel_debug_handle:
+                self.current_kernel_debug_handle = (kernel_name, debug_handle)
 
     def make_buffer_reuse(self, old: BufferLike, new: BufferLike, delete_old: bool):
         assert old.get_dtype() == new.get_dtype()

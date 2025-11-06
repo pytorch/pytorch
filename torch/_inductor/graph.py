@@ -1628,6 +1628,7 @@ class GraphLowering(torch.fx.Interpreter):
                         "inductor", "lowerings", lambda: repr(n)
                     )
                 )
+                or (n.op == "call_function" and config.fallback_by_default)
             ):
                 debug("fallback_handler")
                 result = fallback_handler(n.target, add_to_fallback_set=False)(

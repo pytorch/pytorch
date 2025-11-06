@@ -76,11 +76,8 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
-import json
-import tempfile
 from torch.profiler import profile, ProfilerActivity
-from torch.profiler._utils import map_recorded_events_to_aten_ops_with_stack_trace
-from torch.autograd.profiler_util import _canonicalize_profiler_events
+from torch.profiler._utils import _enrich_profiler_traces
 
 try:
     from torchvision import models as torchvision_models
@@ -206,36 +203,6 @@ class Add(torch.nn.Module):
 @torch.fx.wrap
 def side_effect_func(x: torch.Tensor):
     print(x)
-
-
-def _enrich_profiler_traces(prof):
-    """
-    Helper function to extract and augment profiler events with stack traces.
-
-    Args:
-        prof: A torch.profiler.profile object
-
-    Returns:
-        A string representing enriched events
-    """
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json') as f:
-        trace_file = f.name
-        prof.export_chrome_trace(trace_file)
-
-        with open(trace_file) as f:
-            trace_data = json.load(f)
-
-        map_recorded_events_to_aten_ops_with_stack_trace(
-            trace_data
-        )
-
-        events = []
-        for event in trace_data["traceEvents"]:
-            if "args" in event and "stack_trace" in event["args"]:
-                events.append(event)
-
-        actual_traces = _canonicalize_profiler_events(events)
-        return actual_traces
 
 
 class TestFX(JitTestCase):

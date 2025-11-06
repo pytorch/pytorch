@@ -25,6 +25,8 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
+import random
+import string
 from functools import partial
 from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
 
@@ -69,6 +71,10 @@ if TYPE_CHECKING:
     from .triton_bundler import TritonBundle
 
 log = logging.getLogger(__name__)
+
+# Used for profiler post-processing to match
+# for the same compiled run
+CALL_COMPILED_PREFIX = "Call CompiledFxGraph"
 
 
 @dataclasses.dataclass
@@ -612,9 +618,18 @@ class CompiledFxGraph(OutputCode):
         try:
             # Checking the profiler directly is faster than nullcontext
             if torch.autograd.profiler._is_profiler_enabled:
-                with record_function(
-                    f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"
-                ):
+                # generate a random string to represent this unique run if no cache key
+                run_key = (
+                    self._fx_graph_cache_key
+                    if self._fx_graph_cache_key
+                    else "".join(random.choices(string.ascii_lowercase, k=51))
+                )
+                run_name = f"{CALL_COMPILED_PREFIX} {run_key}"
+                if self.inductor_provenance_stack_traces_str:
+                    torch.fx.traceback._register_fx_metadata(
+                        run_name, self.inductor_provenance_stack_traces_str
+                    )
+                with record_function(f"## {run_name} ##"):
                     return self.current_callable(inputs)
             else:
                 return self.current_callable(inputs)

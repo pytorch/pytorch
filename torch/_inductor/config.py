@@ -1179,6 +1179,8 @@ torchinductor_worker_logpath: str = Config(
     default="",
 )
 
+fallback_by_default: bool = False
+
 
 # config specific to codegen/cpp.py
 class cpp:

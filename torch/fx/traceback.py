@@ -43,10 +43,10 @@ should_preserve_node_meta = False
 # =============================================================================
 # Global in-memory registry for FX metadata
 # Maps module_name -> metadata dict containing lineno_map and node_metadata
-_FX_METADATA_REGISTRY: dict[str, dict[str, Any]] = {}
+_FX_METADATA_REGISTRY: dict[str, str | dict[str, Any]] = {}
 
 
-def _register_fx_metadata(module_name: str, metadata: dict[str, Any]) -> None:
+def _register_fx_metadata(module_name: str, metadata: str | dict[str, Any]) -> None:
     """
     Register FX metadata in the global in-memory registry.
 
@@ -55,7 +55,7 @@ def _register_fx_metadata(module_name: str, metadata: dict[str, Any]) -> None:
 
     Args:
         module_name: The module identifier (content-addressed filename)
-        metadata: Metadata dict containing lineno_map, node_metadata, and source_code
+        metadata: Metadata dict containing lineno_map, node_metadata, and source_code. If a str, it's a json dump that can be json loaded as a dict.
     """
     # TODO: add logging to tlparse
     _FX_METADATA_REGISTRY[module_name] = metadata

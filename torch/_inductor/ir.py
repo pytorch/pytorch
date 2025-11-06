@@ -8079,27 +8079,28 @@ class FallbackKernel(ExternKernelAlloc):
                 for v, a in zip(args_iter, kernel._schema.arguments)
             )
 
-        self.codegen_comment(wrapper)
-        if self.use_runtime_dispatch:
-            exported_args = self.export_extern_kernel_node()
-            assert self.python_kernel_name is not None
-            assert self.op_overload is not None
+        with wrapper.kernel_debug_handle_context():
+            self.codegen_comment(wrapper)
+            if self.use_runtime_dispatch:
+                exported_args = self.export_extern_kernel_node()
+                assert self.python_kernel_name is not None
+                assert self.op_overload is not None
 
-            wrapper.generate_fallback_kernel_with_runtime_lookup(
-                self.get_name(),
-                self.python_kernel_name,
-                lambda: [*self.codegen_args(), *self.codegen_kwargs()],
-                self.op_overload,
-                exported_args,
-                # NOTE: [special handling of all_reduce_coalesced_'s return value]
-                self.outputs if self.outputs else self.mutation_outputs,
-            )
-        else:
-            wrapper.generate_fallback_kernel(self)
-            if isinstance(self.layout, Layout):
-                self.codegen_size_asserts(wrapper)
-                self.codegen_alignment_asserts(wrapper)
-                self.codegen_memory_tracking(wrapper)
+                wrapper.generate_fallback_kernel_with_runtime_lookup(
+                    self.get_name(),
+                    self.python_kernel_name,
+                    lambda: [*self.codegen_args(), *self.codegen_kwargs()],
+                    self.op_overload,
+                    exported_args,
+                    # NOTE: [special handling of all_reduce_coalesced_'s return value]
+                    self.outputs if self.outputs else self.mutation_outputs,
+                )
+            else:
+                wrapper.generate_fallback_kernel(self)
+                if isinstance(self.layout, Layout):
+                    self.codegen_size_asserts(wrapper)
+                    self.codegen_alignment_asserts(wrapper)
+                    self.codegen_memory_tracking(wrapper)
 
         self.codegen_unbacked_symbol_defs(wrapper)
 
