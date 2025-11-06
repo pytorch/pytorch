@@ -204,11 +204,11 @@ class StreamVariable(StreamContextVariable):
         self,
         proxy: Proxy,
         value: torch.Stream,
+        user_object_index: int,
         **kwargs: Any,
     ) -> None:
         # Index into the user object table
         # used to pass arbitrary objects to the graph
-        user_object_index = kwargs.pop("user_obj_index", None)
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
 
