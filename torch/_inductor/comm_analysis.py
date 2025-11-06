@@ -359,6 +359,7 @@ def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
 def estimate_nccl_collective_runtime_from_fx_node(
     fx_node: torch.fx.Node,
     override_size: Optional[int] = None,
+    # TODO(ivankobzarev): NCCL estimator sometimes fail unexpectedly, enable back after fix.
     use_nccl_estimator: bool = True,
 ) -> float:
     """
@@ -423,6 +424,10 @@ def estimate_nccl_collective_runtime_from_fx_node(
         from torch.distributed.distributed_c10d import _resolve_process_group
 
         pg = _resolve_process_group(group_name)
+        if torch.distributed.distributed_c10d.get_backend(pg) == "fake":
+            # nccl estimator requires real process group
+            return None
+
         fn = fx_node.target
         assert isinstance(fn, torch._ops.OpOverload)
         with torch.distributed._time_estimator(group=pg) as time_estimator:
