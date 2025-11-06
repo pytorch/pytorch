@@ -1,0 +1,150 @@
+# Workflow: Dynamo Unit Test
+# runs unit tests for dynamo.
+name: dynamo-unittest
+
+on:
+  pull_request:
+    branches-ignore:
+      - nightly
+  push:
+    branches:
+      - main
+      - release/*
+      - landchecks/*
+    tags:
+      - ciflow/pull/*
+  # workflow_dispatch:
+  # schedule:
+  #   - cron: 29 8 * * *  # about 1:29am PDT
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
+
+  ########
+  # 3.10 #
+  ########
+
+  dynamo-py3_10-build:
+    name: dynamo-build-py3_10
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.10-clang12
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang12
+      test-matrix: |
+        { include: [
+          { config: "dynamo_core", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+        ]}
+    secrets: inherit
+
+  dynamo-py3_10-test:
+    name: dynamo-test-py3_10
+    uses: ./.github/workflows/_linux-test.yml
+    needs: dynamo-py3_10-build
+    with:
+      build-environment: linux-jammy-py3.10-clang12
+      docker-image: ${{ needs.dynamo-py3_10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.dynamo-py3_10-build.outputs.test-matrix }}
+    secrets: inherit
+
+  ########
+  # 3.11 #
+  ########
+
+  dynamo-py3_11-build:
+    name: dynamo-build-py3_11
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.11-clang12
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.11-clang12
+      test-matrix: |
+        { include: [
+          { config: "dynamo_core", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+        ]}
+    secrets: inherit
+
+  dynamo-py3_11-test:
+    name: dynamo-test-py3_11
+    uses: ./.github/workflows/_linux-test.yml
+    needs: dynamo-py3_11-build
+    with:
+      build-environment: linux-jammy-py3.11-clang12
+      docker-image: ${{ needs.dynamo-py3_11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.dynamo-py3_11-build.outputs.test-matrix }}
+    secrets: inherit
+
+  ########
+  # 3.12 #
+  ########
+
+  dynamo-py3_12-build:
+    name: dynamo-build-py3_12
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.12-clang12
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.12-clang12
+      test-matrix: |
+        { include: [
+          { config: "dynamo_core", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+        ]}
+    secrets: inherit
+
+  dynamo-py3_12-test:
+    name: dynamo-test-py3_12
+    uses: ./.github/workflows/_linux-test.yml
+    needs: dynamo-py3_12-build
+    with:
+      build-environment: linux-jammy-py3.12-clang12
+      docker-image: ${{ needs.dynamo-py3_12-build.outputs.docker-image }}
+      test-matrix: ${{ needs.dynamo-py3_12-build.outputs.test-matrix }}
+    secrets: inherit
+
+  ########
+  # 3.13 #
+  ########
+
+  dynamo-py3_13-build:
+    name: dynamo-build-py3_13
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.13-clang12
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.13-clang12
+      test-matrix: |
+        { include: [
+          { config: "dynamo_core", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+        ]}
+    secrets: inherit
+
+  dynamo-py3_13-test:
+    name: dynamo-test-py3_13
+    uses: ./.github/workflows/_linux-test.yml
+    needs: dynamo-py3_13-build
+    with:
+      build-environment: linux-jammy-py3.13-clang12
+      docker-image: ${{ needs.dynamo-py3_13-build.outputs.docker-image }}
+      test-matrix: ${{ needs.dynamo-py3_13-build.outputs.test-matrix }}
+    secrets: inherit
