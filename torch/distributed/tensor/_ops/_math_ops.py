@@ -27,6 +27,7 @@ from torch.distributed.tensor._ops.utils import (
     normalize_dims,
     register_op_strategy,
 )
+from torch.distributed.tensor._ops._pointwise_ops import linear_pointwise_strategy
 from torch.distributed.tensor._utils import normalize_to_torch_size
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
@@ -481,79 +482,40 @@ def dist_strategy(op_schema: OpSchema) -> OpStrategy:
     """
     Sharding strategy for torch.dist(input, other, p=2).
 
-    torch.dist computes the p-norm of (input - other):
-      ||input - other||_p = (Σ |input_i - other_i|^p)^(1/p)
-
-    Strategy:
-    1. Align input and other tensors (prefer more sharded strategy)
-    2. Subtraction is pointwise (preserves sharding)
-    3. Apply full reduction with NormReduction(p)
+    Leverages pointwise_strategy for input alignment (a - b),
+    then applies reduction to get scalar norm.
     """
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
     other_strategy = args_schema[1]
+    norm_type = args_schema[2] if len(args_schema) > 2 else 2
 
     if not isinstance(input_strategy, OpStrategy):
         raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
     if not isinstance(other_strategy, OpStrategy):
         raise AssertionError(f"Expected OpStrategy, got {type(other_strategy)}")
-
-    norm_type = args_schema[2] if len(args_schema) > 2 else 2
     if not isinstance(norm_type, (int, float, str)):
         raise AssertionError(f"Expected int, float, or str, got {type(norm_type)}")
 
-    # Align the two input strategies - prefer the one with more shards for better parallelism
+    # Use linear_pointwise_strategy to align inputs (handles Partial→Replicate, sharding, etc.)
+    # aten.sub.Tensor defaults to linearity=-1 (no Partial propagation since dist reduces to scalar)
+    sub_schema = OpSchema(
+        op=aten.sub.Tensor,
+        args_schema=(input_strategy, other_strategy),
+        kwargs_schema={},
+    )
+    aligned_strategy = linear_pointwise_strategy(sub_schema)
+
+    # Apply reduction to aligned strategy
     output_strategy = OpStrategy([])
-    for input_spec, other_spec in zip(
-        input_strategy.strategies, other_strategy.strategies
-    ):
-        input_src = input_spec.output_spec
-        other_src = other_spec.output_spec
-
-        # Validate shapes match (torch.dist requires same shape inputs)
-        if input_src.tensor_meta.shape != other_src.tensor_meta.shape:
-            raise ValueError(
-                f"torch.dist requires inputs of same shape, got "
-                f"{input_src.tensor_meta.shape} and {other_src.tensor_meta.shape}"
-            )
-
-        # Choose the placement with more shards for better parallelism
-        target_placements = (
-            input_src.placements
-            if input_src.num_shards >= other_src.num_shards
-            else other_src.placements
-        )
-
-        # Both inputs need to have the same placement for pointwise subtraction
-        input_target_spec = DTensorSpec(
-            mesh=input_strategy.mesh,
-            placements=target_placements,
-            tensor_meta=input_src.tensor_meta,
-        )
-        other_target_spec = DTensorSpec(
-            mesh=input_strategy.mesh,
-            placements=target_placements,
-            tensor_meta=other_src.tensor_meta,
-        )
-
-        # Calculate redistribution costs
-        input_redist_cost = generate_redistribute_costs(
-            input_strategy, input_target_spec
-        )
-        other_redist_cost = generate_redistribute_costs(
-            other_strategy, other_target_spec
-        )
-
-        # After subtraction (pointwise), apply full reduction
-        # Reduction over all dimensions since dist returns a scalar
+    for aligned_spec in aligned_strategy.strategies:
         reduce_dims = list(range(input_strategy.ndim))
         reduce_dims_map = _infer_reduce_dims_map(
             reduce_dims, input_strategy.ndim, keep_dim=False
         )
 
-        # Map output placement after reduction (scalar output)
         out_placements = map_placements_after_reduction(
-            target_placements,
+            aligned_spec.output_spec.placements,
             reduce_dims,
             reduce_dims_map,
             NormReduction(norm_type),
@@ -565,8 +527,8 @@ def dist_strategy(op_schema: OpSchema) -> OpStrategy:
                     mesh=input_strategy.mesh,
                     placements=out_placements,
                 ),
-                input_specs=(input_target_spec, other_target_spec),
-                redistribute_cost=[input_redist_cost, other_redist_cost],
+                input_specs=aligned_spec.input_specs,
+                redistribute_cost=aligned_spec.redistribute_cost,
             )
         )
 
