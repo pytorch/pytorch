@@ -1549,7 +1549,7 @@ def _allgather_orig_param_states(
             fsdp_state._device_handle.memory_summary(),
         )
 
-    output_states: dict[str, dict[str, Any]] = {fqn: {} for fqn in input_states.keys()}
+    output_states: dict[str, dict[str, Any]] = {fqn: {} for fqn in input_states}
 
     dtype, state_buffers = _convert_all_state_info(
         fsdp_param_info, gathered_state_info, input_states, output_states

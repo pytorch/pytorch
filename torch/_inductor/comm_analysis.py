@@ -360,7 +360,7 @@ def estimate_nccl_collective_runtime_from_fx_node(
     fx_node: torch.fx.Node,
     override_size: Optional[int] = None,
     # TODO(ivankobzarev): NCCL estimator sometimes fail unexpectedly, enable back after fix.
-    use_nccl_estimator: bool = False,
+    use_nccl_estimator: bool = True,
 ) -> float:
     """
     Returns estimated NCCL collective runtime in nanoseconds (ns).
