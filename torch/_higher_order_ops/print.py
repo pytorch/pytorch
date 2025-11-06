@@ -1,10 +1,10 @@
 import builtins
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
 from torch._ops import HigherOrderOperator
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
-from typing import Any
 
 
 class Print(HigherOrderOperator):
