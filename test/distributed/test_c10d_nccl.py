@@ -5789,6 +5789,229 @@ class NCCLTraceTest(NCCLTraceTestBase):
         else:
             self.assertTrue("duration_ms" not in t["entries"][0])
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("timing_enabled", [True, False])
+    def test_fr_record_reset_circular_buffer_full(self, timing_enabled):
+        """
+        Test that when the circular buffer in entries_ is full and we call reset,
+        then fill the buffer with new entries, dump_entries returns only the new
+        entries and not the old ones.
+        """
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+
+        # Override buffer size to 10 for faster testing
+        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "10"
+
+        pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
+        device = self.local_device
+        self.set_thread_name("fr_test_thread")
+        a = torch.full((3, 4), float(self.rank), device=device)
+
+        # Fill the buffer completely with 10 entries
+        for _ in range(10):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+
+        # Verify buffer is full with 10 entries
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+        self.assertEqual(len(t["entries"]), 10)
+
+        # Now reset the flight recorder
+        torch._C._distributed_c10d._reset_fr_recording_nccl()
+
+        # Add new entries after reset - fill the buffer completely again
+        for _ in range(10):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+
+        # Verify we get exactly 10 new entries, not 20
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+        self.assertEqual(len(t["entries"]), 10)
+
+        # Verify all entries have the expected properties (from after reset)
+        # After reset, record IDs should start from 0 again
+        for i, entry in enumerate(t["entries"]):
+            self.assertIn("profiling_name", entry)
+            self.assertEqual(entry["profiling_name"], "nccl:all_reduce")
+            self.assertIn("record_id", entry)
+            # Record IDs should be sequential starting from 0 after reset
+            self.assertEqual(entry["record_id"], i)
+
+        dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("timing_enabled", [True, False])
+    def test_fr_record_reset_partial_overwrite(self, timing_enabled):
+        """
+        Test that when the circular buffer is full, we reset, and then add fewer
+        entries than the buffer size, we only get the new entries.
+        This tests that old entries at the end of the circular buffer are properly
+        filtered out based on reset_epoch.
+        """
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+
+        # Override buffer size to 10 for faster testing
+        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "10"
+
+        pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
+        device = self.local_device
+        self.set_thread_name("fr_test_thread")
+        a = torch.full((3, 4), float(self.rank), device=device)
+
+        # Fill the buffer completely
+        for _ in range(10):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+
+        # Reset the flight recorder
+        torch._C._distributed_c10d._reset_fr_recording_nccl()
+
+        # Add only 3 new entries (much less than buffer size)
+        for _ in range(3):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+
+        # Verify we only get the 3 new entries, not 10
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+        self.assertEqual(len(t["entries"]), 3)
+
+        # Verify record IDs start from 0 after reset
+        for i, entry in enumerate(t["entries"]):
+            self.assertIn("record_id", entry)
+            self.assertEqual(entry["record_id"], i)
+
+        dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("timing_enabled", [True, False])
+    def test_fr_record_reset_wraparound(self, timing_enabled):
+        """
+        Test that when we reset in the middle of the circular buffer and then
+        wrap around, dump_entries correctly returns only entries from the current
+        epoch in the correct order.
+        """
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+
+        # Override buffer size to 10 for faster testing
+        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "10"
+
+        pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
+        device = self.local_device
+        self.set_thread_name("fr_test_thread")
+        a = torch.full((3, 4), float(self.rank), device=device)
+
+        # Fill half the buffer
+        for _ in range(5):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+
+        # Reset at this point (reset happens at index 5)
+        torch._C._distributed_c10d._reset_fr_recording_nccl()
+
+        # Now add 8 entries, which will wrap around
+        # (5->9 fills rest of buffer, then 0->2 wraps around)
+        for _ in range(8):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+
+        # Should get exactly 8 entries, properly ordered
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+        self.assertEqual(len(t["entries"]), 8)
+
+        # Entries should be in chronological order
+        # The dump_entries() method returns entries from next_ to end, then 0 to next_
+        # After filtering old entries, we should have 8 entries in order
+        # Verify record IDs start from 0 after reset (id_ is reset in reset_all())
+        for i, entry in enumerate(t["entries"]):
+            self.assertIn("profiling_name", entry)
+            self.assertIn("record_id", entry)
+            self.assertEqual(entry["record_id"], i)
+
+        dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("timing_enabled", [True, False])
+    def test_fr_record_multiple_resets(self, timing_enabled):
+        """
+        Test multiple consecutive resets to ensure each reset properly increments
+        the epoch and filters out entries from previous epochs.
+        """
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+
+        # Override buffer size to 10 for faster testing
+        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "10"
+
+        pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
+        device = self.local_device
+        self.set_thread_name("fr_test_thread")
+        a = torch.full((3, 4), float(self.rank), device=device)
+
+        # First batch: 2 entries
+        for _ in range(2):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+
+        # First reset
+        torch._C._distributed_c10d._reset_fr_recording_nccl()
+
+        # Second batch: 3 entries
+        for _ in range(3):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+
+        # Second reset
+        torch._C._distributed_c10d._reset_fr_recording_nccl()
+
+        # Third batch: 4 entries
+        for _ in range(4):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+
+        # Should only see the last 4 entries
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+        self.assertEqual(len(t["entries"]), 4)
+
+        # Verify record IDs start from 0 after the last reset
+        for i, entry in enumerate(t["entries"]):
+            self.assertIn("record_id", entry)
+            self.assertEqual(entry["record_id"], i)
+
+        dist.destroy_process_group()
+
 
 def check_if_test_is_skipped(fn):
     def wrapper(self, *args, **kwargs):
@@ -6120,6 +6343,14 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         if self.rank == 6 or self.rank == 7:
             dist.broadcast(tensor2, 6, group=ng2)
             self.assertEqual(tensor2, torch.full((1,), 6))
+
+        # Test the case when the split changes the pg option of split group
+        # while the parent pg option is not changed.
+        new_pg = c10d.new_group([0, 1, 2, 3, 4, 5, 6, 7], device_id=device)
+        backend_new_pg = new_pg._get_backend(torch.device(device))
+        self.assertEqual(len(backend_new_pg.options.global_ranks_in_group), 8)
+        c10d.split_group(new_pg, [[0, 2, 4, 6], [1, 3, 5, 7]])
+        self.assertEqual(len(backend_new_pg.options.global_ranks_in_group), 8)
         # a barrier and a cuda sync before destroying all pgs.
         dist.barrier(pg)
         torch.cuda.synchronize()
