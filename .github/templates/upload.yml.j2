@@ -64,7 +64,7 @@
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-!{{ config["build_name"] }}-upload-r2:  # Uploading to r2
+  !{{ config["build_name"] }}-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
