@@ -2660,6 +2660,7 @@ coverage_ignore_classes = [
     "PartitionerConfig",
     # torch.fx.experimental.proxy_tensor
     "DecompositionInterpreter",
+    "SelectiveDecomposeInterpreter",
     "PreDispatchTorchFunctionMode",
     "ProxySymDispatchMode",
     "ProxyTorchDispatchMode",

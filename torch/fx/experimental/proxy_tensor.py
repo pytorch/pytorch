@@ -91,6 +91,8 @@ __all__ = [
     "dispatch_trace",
     "make_fx",
     "DecompositionInterpreter",
+    "selective_decompose",
+    "SelectiveDecomposeInterpreter",
     "py_sym_types",
     "get_innermost_proxy_mode",
     "get_proxy_mode",
