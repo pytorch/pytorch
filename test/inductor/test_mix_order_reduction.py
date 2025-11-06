@@ -117,6 +117,25 @@ class MixOrderReductionTest(TestBase):
             metrics.codegen_mix_order_reduction,
         )
 
+    def test_avoid_non_coalesced_access(self):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x, y):
+            return (x + y).sum(dim=-1), x.sum(dim=(0, 1))
+
+        x = torch.randn(128, 256, 768, device=GPU_TYPE)
+        y = torch.randn(128, 768, 256, device=GPU_TYPE).transpose(1, 2)
+        self.check_numeric(f, (x, y))
+
+        # we skip mix order reduction for such kernel since
+        # we force XBLOCK to be 1, the access to tensor y would be
+        # very inefficient.
+        # TODO: support XBLOCK larger than 1. But in that case, we
+        # would have bigger restriction on rnumel to avoid exploding
+        # shared memory.
+        self.assertEqual(metrics.codegen_mix_order_reduction, 0)
+
     @inductor_config.patch(coordinate_descent_tuning=True)
     def test_XBLOCK_coordest_tuning(self):
         """
@@ -199,8 +218,8 @@ class MixOrderReductionTest(TestBase):
         def f(x, y):
             return x.sum(dim=0), x.sum(dim=1), y.sum(dim=0), y.sum(dim=1)
 
-        x = torch.randn(4096, 32, device=GPU_TYPE)
-        y = torch.randn(4098, 34, device=GPU_TYPE)
+        x = torch.randn(4096 * 64, 32, device=GPU_TYPE)
+        y = torch.randn(4098 * 64, 34, device=GPU_TYPE)
 
         self.check_numeric(f, (x, y))
         expected_mix_order_reduction = (

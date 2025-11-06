@@ -1648,7 +1648,11 @@ class SIMDScheduling(BaseScheduling):
         if (
             not torch._inductor.config.deterministic
             and config.triton.mix_order_reduction_split_size is None
-            and config.triton.mix_order_reduction_autotune_split_size
+            and (
+                config.triton.mix_order_reduction_autotune_split_size
+                or config.max_autotune
+                or config.coordinate_descent_tuning
+            )
         ):
 
             def _bench(candidate_split_size):

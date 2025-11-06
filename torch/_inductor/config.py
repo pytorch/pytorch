@@ -1575,11 +1575,15 @@ class triton:
     enable_pdl = False
 
     mix_order_reduction = (
-        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0") == "1"
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0" if is_fbcode() else "1")
+        == "1"
     )
 
     mix_order_reduction_split_size: Optional[int] = None
-    mix_order_reduction_autotune_split_size = True
+    mix_order_reduction_autotune_split_size = (
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_AUTOTUNE_SPLIT_SIZE", "0")
+        == "1"
+    )
 
 
 class aot_inductor:
