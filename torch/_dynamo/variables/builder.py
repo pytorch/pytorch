@@ -1235,7 +1235,7 @@ class VariableBuilder:
             tracing_symint = (
                 new_symint if isinstance(value, torch.SymInt) else new_symint == 1
             )  # cast it back to symbool for tracing
-            return SymNodeVariable.create(self.tx, sym_node_proxy, tracing_symint)
+            return SymNodeVariable(sym_node_proxy, tracing_symint)
 
         elif isinstance(value, (JITFunction, Autotuner)):
             self.install_guards(GuardBuilder.ID_MATCH)
