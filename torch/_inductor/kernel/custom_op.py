@@ -350,9 +350,71 @@ def autotune_custom_op(
     return selected_result
 
 
+def _generate_dynamic_configs(
+    tensor_inputs: list[Buffer],
+    config_generator: Callable,
+    default_impl: Callable,
+    name: str,
+) -> list[CustomOpConfig]:
+    """Generate configs dynamically based on input shapes at lowering time.
+
+    Args:
+        tensor_inputs: List of input tensors (IR Buffers)
+        config_generator: User-provided config generator function
+        default_impl: Default implementation function
+        name: Operation name for error messages
+
+    Returns:
+        List of dynamically generated CustomOpConfig objects
+
+    Raises:
+        TypeError: If config_generator returns invalid type
+        ValueError: If config_generator returns empty list
+    """
+    import inspect
+    from torch._inductor.virtualized import V
+
+    # Extract parameter names from custom op signature
+    sig = inspect.signature(default_impl)
+    param_names = list(sig.parameters.keys())
+
+    # Build shape dict using parameter names
+    shapes_dict = {}
+    tensor_arg_idx = 0
+    for param_name in param_names:
+        if tensor_arg_idx < len(tensor_inputs):
+            node = tensor_inputs[tensor_arg_idx]
+            raw_shape = node.get_size()
+            concrete_shape = V.graph.sizevars.size_hints(
+                raw_shape, fallback=config.unbacked_symint_fallback
+            )
+            shapes_dict[param_name] = tuple(concrete_shape)
+            tensor_arg_idx += 1
+
+    # Call user's config generator with shape dict
+    configs = config_generator(shapes_dict)
+
+    # Validate return value
+    if not isinstance(configs, (list, tuple)):
+        raise TypeError(
+            f"config_generator must return a list or tuple of CustomOpConfig, "
+            f"got {type(configs)}"
+        )
+    if not configs:
+        raise ValueError(
+            f"config_generator returned empty list for {name}. "
+            f"Input shapes: {shapes_dict}"
+        )
+
+    return configs
+
+
 def register_custom_op_autotuning(
     custom_op: torch._library.custom_ops.CustomOpDef,
-    configs: Union[list[CustomOpConfig], list[Callable[..., Any]]],
+    configs: Optional[Union[list[CustomOpConfig], list[Callable[..., Any]]]] = None,
+    config_generator: Optional[
+        Callable[[dict[str, tuple[int, ...]]], list[CustomOpConfig]]
+    ] = None,
     name: Optional[str] = None,
     input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]] = None,
 ) -> None:
@@ -361,11 +423,15 @@ def register_custom_op_autotuning(
 
     Args:
         custom_op: Custom operation (decorated function from @torch.library.custom_op)
-        configs: List of CustomOpConfig objects
+        configs: List of CustomOpConfig objects for static inputs. Mutually exclusive with config_generator.
+        config_generator: Dynamic config generator function that takes shape dict mapping
+                          parameter names to shape tuples, and returns list[CustomOpConfig]
+                          based on input shapes. Mutually exclusive with configs.
         name: Operation name (default: "{op_name}_autotuned")
         input_gen_fns: Custom input generators for benchmarking
 
     Examples:
+        # Static configs
         @torch.library.custom_op("mylib::attention", mutates_args=())
         def my_attention(query, key, value, head_dim=32):
             ...
@@ -383,6 +449,17 @@ def register_custom_op_autotuning(
                 "value": lambda fake: torch.randn_like(fake, device='cuda'),
             },
         )
+
+        # Dynamic config generation
+        def generate_k_split_configs(shapes: dict[str, tuple]) -> list[CustomOpConfig]:
+            k_splits = ... # all posisble k splits for the given shapes
+            return [CustomOpConfig(k_splits=k) for k in k_splits]
+
+        register_custom_op_autotuning(
+            matmul_decomposeK_op,
+            config_generator=generate_k_split_configs,
+            input_gen_fns={...},
+        )
     """
     from torch._library.custom_ops import CustomOpDef
 
@@ -392,23 +469,36 @@ def register_custom_op_autotuning(
             f"got {type(custom_op)}."
         )
 
+    # Validate configs and config_generator are mutually exclusive
+    if configs is not None and config_generator is not None:
+        raise ValueError(
+            "Cannot specify both 'configs' and 'config_generator'. "
+            "Use 'config_generator' for shape-dependent configs."
+        )
+
+    if configs is None and config_generator is None:
+        raise ValueError("Must specify either 'configs' or 'config_generator'")
+
     op_overload = custom_op._opoverload
     default_impl = custom_op._init_fn
 
-    if not isinstance(configs, (list, tuple)):
-        raise TypeError(f"configs must be a list or tuple, got {type(configs)}")
+    # Process static configs if provided (at registration time)
+    processed_configs = None
+    if configs is not None:
+        if not isinstance(configs, (list, tuple)):
+            raise TypeError(f"configs must be a list or tuple, got {type(configs)}")
 
-    processed_configs = []
-    for cfg in configs:
-        if isinstance(cfg, CustomOpConfig):
-            processed_configs.append(cfg)
-        else:
-            raise TypeError(
-                f"Each config must be a CustomOpConfig object, got {type(cfg)}"
-            )
+        processed_configs = []
+        for cfg in configs:
+            if isinstance(cfg, CustomOpConfig):
+                processed_configs.append(cfg)
+            else:
+                raise TypeError(
+                    f"Each config must be a CustomOpConfig object, got {type(cfg)}"
+                )
 
-    if not processed_configs:
-        raise ValueError("At least one config must be provided")
+        if not processed_configs:
+            raise ValueError("At least one config must be provided")
 
     if name is None:
         name = f"{op_overload._name}_autotuned"
@@ -419,11 +509,19 @@ def register_custom_op_autotuning(
         # Extract tensor inputs and non-tensor parameters (runtime kwargs)
         tensor_inputs, runtime_kwargs = _extract_tensor_inputs(args, kwargs)
 
-        # Prepare decompositions and kwargs by merging config params with runtime kwargs
+        # Resolve configs (either dynamic or static)
+        if config_generator is not None:
+            configs_to_use = _generate_dynamic_configs(
+                tensor_inputs, config_generator, default_impl, name
+            )
+        else:
+            configs_to_use = processed_configs
+
+        # Prepare decompositions and kwargs for autotuning
         decompositions = []
         non_tensor_args = []
 
-        for cfg in processed_configs:
+        for cfg in configs_to_use:
             decomp = cfg.get_decomposition(default_impl=default_impl)
             decompositions.append(decomp)
 

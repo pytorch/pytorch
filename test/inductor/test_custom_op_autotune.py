@@ -217,26 +217,41 @@ class TestCustomOpAutoTune(TestCase):
             )
 
     def _create_decompose_k_inputs(self, m=256, k=65536, n=1024):
-        """Create test inputs for decompose_k matrix multiplication - divisible by all k_splits values."""
+        """Create test inputs for decompose_k matrix multiplication.
+
+        Returns:
+            Tuple of (a, b, bias) where:
+            - a: Input matrix of shape (m, k)
+            - b: Weight matrix of shape (k, n)
+            - bias: Bias vector of shape (n,)
+        """
         # Ensure k is divisible by all k_splits values: [2, 32, 64, 128, 256]
         k = ((k + 255) // 256) * 256  # Round up to nearest multiple of 256
         a = torch.randn(m, k, device=self.device, dtype=self.dtype, requires_grad=False)
         b = torch.randn(k, n, device=self.device, dtype=self.dtype, requires_grad=False)
-        return a, b
+        bias = (
+            torch.randn(n, device=self.device, dtype=self.dtype, requires_grad=False)
+            * 0.1
+        )
+        return a, b, bias
 
     @skipIfXpu
-    def test_decompose_k_custom_op_autotune(self):
-        """Test decompose_k autotuning with epilogue fusion (matmul + bias + relu + scale).
+    def test_decompose_k_custom_op_autotune_dynamic_config_for_input_shape(self):
+        """Test decompose_k autotuning with with epilogue fusion(matmul+bias+relu+scale) and
+        dynamic config generation based on matmul input shapes.
 
-        Validates that the custom op encapsulates the entire fused operation with parametric
-        tuning for k_splits values controlling how the K dimension is decomposed.
+        Validates that the custom op encapsulates the entire fused operation (matmul + bias
+        + relu + scale) with parametric tuning for k_splits values controlling how the K
+        dimension is decomposed. The config generator receives correct parameter names and
+        shapes, dynamically generates different k_split configs using get_k_splits for
+        different input shapes, and produces correct results matching the reference implementation.
         """
-        test_op_name = f"test_lib::matmul_relu_epilogue_{id(self)}"
+        test_op_name = f"test_lib::matmul_relu_epilogue_dynamic_{id(self)}"
 
         def decompose_k_implementation(
             a: torch.Tensor, b: torch.Tensor, k_splits: int = 4
         ) -> torch.Tensor:
-            """Matrix multiply with k-way decomposition - Python implementation."""
+            """Matrix multiply with k-way decomposition."""
             m = a.shape[0]
             n = b.shape[1]
             k = a.shape[1]
@@ -254,7 +269,7 @@ class TestCustomOpAutoTune(TestCase):
             return torch.sum(result, dim=0)  # [m, n]
 
         @torch.library.custom_op(test_op_name, mutates_args=())
-        def matmul_relu_epilogue_op(
+        def matmul_relu_epilogue_dynamic_op(
             a: torch.Tensor, b: torch.Tensor, bias: torch.Tensor, k_splits: int = 4
         ) -> torch.Tensor:
             """Matmul with decompose_k + bias + relu + scale (complete epilogue fusion)."""
@@ -264,23 +279,29 @@ class TestCustomOpAutoTune(TestCase):
             scaled = activated * 2.0
             return scaled
 
-        @matmul_relu_epilogue_op.register_fake
+        @matmul_relu_epilogue_dynamic_op.register_fake
         def _(a: torch.Tensor, b: torch.Tensor, bias: torch.Tensor, k_splits: int = 4):
             return torch.empty(a.shape[0], b.shape[1], device=a.device, dtype=a.dtype)
 
-        # Register autotuning with different k_splits values
+        # Define dynamic config generator using get_k_splits
+        def generate_k_split_configs(shapes: dict[str, tuple]) -> list[CustomOpConfig]:
+            """Generate k_split configs based on input matrix dimensions."""
+            from torch._inductor.utils import get_k_splits
+
+            # Extract matrix dimensions using parameter names (matches input_gen_fns)
+            m, k = shapes["a"][-2:]
+            _, n = shapes["b"][-2:]
+
+            # Use get_k_splits to automatically determine optimal k_split candidates
+            k_splits_list = get_k_splits(m, n, k)
+
+            return [CustomOpConfig(k_splits=k) for k in k_splits_list]
+
+        # Register autotuning with dynamic config generator
         register_custom_op_autotuning(
-            matmul_relu_epilogue_op,
-            configs=[
-                CustomOpConfig(k_splits=2),
-                CustomOpConfig(k_splits=4),
-                CustomOpConfig(k_splits=8),
-                CustomOpConfig(k_splits=16),
-                CustomOpConfig(k_splits=32),
-                CustomOpConfig(k_splits=64),
-                CustomOpConfig(k_splits=128),
-            ],
-            name="matmul_relu_epilogue_autotuned",
+            matmul_relu_epilogue_dynamic_op,
+            config_generator=generate_k_split_configs,
+            name="matmul_relu_epilogue_dynamic_autotuned",
             input_gen_fns={
                 "a": lambda fake_tensor: torch.randn_like(
                     fake_tensor, device=self.device
@@ -297,38 +318,46 @@ class TestCustomOpAutoTune(TestCase):
             },
         )
 
-        # Create test inputs
-        a, b = self._create_decompose_k_inputs()
-        bias = torch.randn(b.shape[1], device=self.device, dtype=self.dtype) * 0.1
+        # Test multiple shapes to verify dynamic config generation
+        test_shapes = [
+            (256, 16384, 1024),
+            (256, 65536, 1024),
+        ]
 
-        # Compile the model using the custom op
-        @torch.compile
-        def test_model(a, b, bias):
-            return matmul_relu_epilogue_op(a, b, bias)
+        for m, k, n in test_shapes:
+            # Use helper function to create test inputs
+            a, b, bias = self._create_decompose_k_inputs(m, k, n)
 
-        torch._dynamo.reset()
+            # Compile the model using the custom op
+            @torch.compile
+            def test_model(a, b, bias):
+                return matmul_relu_epilogue_dynamic_op(a, b, bias)
 
-        with config.patch(
-            max_autotune=True,
-            benchmark_fusion=True,
-        ):
-            compiled_result = test_model(a, b, bias)
+            torch._dynamo.reset()
 
-        def reference_model(a, b, bias):
-            matmul_result = a @ b
-            biased = matmul_result + bias
-            activated = torch.relu(biased)
-            scaled = activated * 2.0
-            return scaled
+            with config.patch(
+                max_autotune=True,
+                benchmark_fusion=True,
+            ):
+                compiled_result = test_model(a, b, bias)
 
-        expected = reference_model(a, b, bias)
+            # Reference implementation
+            def reference_model(a, b, bias):
+                matmul_result = a @ b
+                biased = matmul_result + bias
+                activated = torch.relu(biased)
+                scaled = activated * 2.0
+                return scaled
 
-        torch.testing.assert_close(
-            compiled_result,
-            expected,
-            rtol=2e-1,
-            atol=5e-1,
-        )
+            expected = reference_model(a, b, bias)
+
+            torch.testing.assert_close(
+                compiled_result,
+                expected,
+                rtol=2e-1,
+                atol=5e-1,
+                msg=f"Failed for shape ({m}, {k}, {n})",
+            )
 
     @skipIfXpu
     def test_multi_parameter_tuning(self):
