@@ -89,6 +89,8 @@ class OutputSpec:
     # that this is the same length as the mask, we just look at the indices
     # where mask is True.
     const_values: Optional[list[Any]] = None
+    # Number of intermediate nodes that are also made subgraph outputs.
+    num_intermediate_nodes_as_outputs: int = 0
 
     def __post_init__(self):
         if (
@@ -274,6 +276,13 @@ def _call_function_and_unflatten_output(
                     subgraph_vt, (variables.SymNodeVariable, variables.TensorVariable)
                 )
                 orig_vt.proxy = subgraph_vt.proxy
+
+    if ret_spec.num_intermediate_nodes_as_outputs:
+        # The treespec was computed w/o any extra intermediate outputs. At this
+        # point, it is safe to just get rid of the extra outputs
+        flat_variable = TupleVariable(
+            flat_variable.items[: -ret_spec.num_intermediate_nodes_as_outputs]
+        )
 
     if ret_spec.masks_to_filter_const_values:
         from torch._dynamo.external_utils import insert_const_values_with_mask
@@ -1046,38 +1055,58 @@ def speculate_subgraph(
                         output, masks_to_filter_const_values
                     )
 
-                # Make intermediates output of the subgraph. This helps HOPs
-                # which allow side effects. Consider a scenario where  we have a
-                # list in the outer scope, which gets appended in the subgraph
-                # code - lets calls it `sin`, without subgraph returning `sin`
-                # as output. Since this `sin` is not an output of the subgraph,
-                # there is no way for the outer scope list to access the
-                # subgraph intermediate node - `sin`. Therefore, we make all
-                # intermediates outputs of the subgraph.
+            # NOTE - [Return subgraph intermediates as subgraph outputs]
+            # This helps HOPs which allow side effects. Consider the
+            # following example
+            #
+            # def gn(x, z):
+            #     o = torch.matmul(x, x) @ x
+            #     out = x.sin()
+            #     z.append(out)
+            #     return torch.cos(torch.sin(o))
 
-                # One of the inefficiencies of this approach is that
-                if under_activation_checkpoint:
-                    #
-                    # TODO - We should enable this for more HOPs specifically invoke_subgraph and autograd.Function.
-                    output_vts = {
-                        vt
-                        for vt in output.items
-                        if isinstance(
-                            vt, (variables.TensorVariable, variables.SymNodeVariable)
-                        )
-                    }
+            # def fn(x):
+            #     z = []
+            #     out1 = torch.utils.checkpoint.checkpoint(
+            #         gn,
+            #         x,
+            #         z,
+            #         use_reentrant=False,
+            #     )
+            #     return out1, z[0]
+            #
+            # In this example, list `z` is in outer scope and gets appended
+            # in the subgraph with `out`. But `out` is not an output of the
+            # subgraph. This can cause issue because later on when the outer
+            # graph returns `z[0]` it needs to have access to the graph node
+            # `out`. To solve this problem, we just return all intermediates
+            # from the subgraph.
 
-                    # TODO - this should probably outside of should_flatten_outputs
-                    # TODO - I think this will mess up the pytree_unflatten later
-                    # on, when we undo the flattening for outputs.
-
-                    # Force the extra outputs, the TensorVariable cache in
-                    # output_graph.py will rewrite the proxy
-                    extra_outputs = []
-                    for out in subtracer.tracked_tensor_or_symint_vt:
-                        if out not in output_vts:
-                            extra_outputs.append(out)
-                    output = TupleVariable(output.items + extra_outputs)
+            # TODO - Today this is supported only for AC. AC HOP gets
+            # desugared in AOTDispatcher so even though subgraph has extra
+            # unused outputs in Dynamo, its ok even if we don't DCE them in
+            # Dynamo. As AOTDispatcher desugars/inlines the subgraph, the
+            # subgraph boundary disappears. And even for AC, today this only
+            # works when the skip_fwd_side_effects_in_bwd_under_checkpoint
+            # flag is True, i.e., only when we allow side-effects. But, we
+            # want this to be supported for other Hops as well, specifically
+            # nested_compile_region and autograd.Function. Today, its safe
+            # because we error out on seeing a side-effect.
+            num_intermediate_nodes_as_outputs = 0
+            if under_activation_checkpoint and should_flatten_outputs:
+                output_vts = {
+                    vt
+                    for vt in output.items
+                    if isinstance(
+                        vt, (variables.TensorVariable, variables.SymNodeVariable)
+                    )
+                }
+                extra_outputs = []
+                for out in subtracer.tracked_tensor_or_symint_vt:
+                    if out not in output_vts:
+                        extra_outputs.append(out)
+                output = TupleVariable(output.items + extra_outputs)
+                num_intermediate_nodes_as_outputs = len(extra_outputs)
 
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
@@ -1090,7 +1119,10 @@ def speculate_subgraph(
                     (
                         output,
                         OutputSpec(
-                            treespec, masks_to_filter_const_values, const_values
+                            treespec,
+                            masks_to_filter_const_values,
+                            const_values,
+                            num_intermediate_nodes_as_outputs,
                         ),
                     ),
                     tx.output.graph,
@@ -1214,7 +1246,10 @@ def speculate_subgraph(
                     (
                         output,
                         OutputSpec(
-                            treespec, masks_to_filter_const_values, const_values
+                            treespec,
+                            masks_to_filter_const_values,
+                            const_values,
+                            num_intermediate_nodes_as_outputs,
                         ),
                     ),
                     graph,

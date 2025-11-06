@@ -1433,7 +1433,8 @@ class SymNodeVariable(VariableTracker):
             return ConstantVariable.create(sym_num)
 
         out = SymNodeVariable(proxy, sym_num, **options)
-        tx.output.current_tracer.record_tensor_or_symint_vt(out)
+        if proxy.node.op != "placeholder":
+            tx.output.current_tracer.record_tensor_or_symint_vt(out)
         return out
 
     def __init__(self, proxy, sym_num, **kwargs) -> None:

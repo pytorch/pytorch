@@ -1711,19 +1711,22 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             o = torch.matmul(x, x) @ x
             out = x.sin()
             z.append(out)
-            return torch.cos(torch.sin(o))
+            return torch.cos(torch.sin(o)), torch.sin(x)
 
         def fn(x):
             z = []
 
-            out1 = torch.utils.checkpoint.checkpoint(
+            outs = torch.utils.checkpoint.checkpoint(
                 gn,
                 x,
                 z,
                 use_reentrant=False,
             )
+            out1 = outs[0]
+            # Check that the extra output pytree handling is done properly
+            out2 = outs[-1]
 
-            return out1, z[0]
+            return out1 + out2, z[0]
 
         x = torch.randn(4, 4, requires_grad=True)
         ref = fn(x)
@@ -1744,19 +1747,23 @@ class GraphModule(torch.nn.Module):
         wrap_body_0 = self.wrap_body_0
         tag_activation_checkpoint = torch.ops.higher_order.tag_activation_checkpoint(wrap_body_0, l_x_, use_reentrant = False);  wrap_body_0 = l_x_ = None
         out1: "f32[4, 4]" = tag_activation_checkpoint[0]
-        getitem_3: "f32[4, 4]" = tag_activation_checkpoint[3];  tag_activation_checkpoint = None
-        return (out1, getitem_3)
+        out2: "f32[4, 4]" = tag_activation_checkpoint[1]
+        getitem_4: "f32[4, 4]" = tag_activation_checkpoint[4];  tag_activation_checkpoint = None
+
+        add: "f32[4, 4]" = out1 + out2;  out1 = out2 = None
+        return (add, getitem_4)
 
     class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[4, 4]"):
             matmul: "f32[4, 4]" = torch.matmul(l_x_, l_x_)
             o: "f32[4, 4]" = matmul @ l_x_
 
-            out: "f32[4, 4]" = l_x_.sin();  l_x_ = None
+            out: "f32[4, 4]" = l_x_.sin()
 
             sin_1: "f32[4, 4]" = torch.sin(o)
-            cos: "f32[4, 4]" = torch.cos(sin_1)
-            return (cos, matmul, o, out, sin_1)
+            child: "f32[4, 4]" = torch.cos(sin_1)
+            child_1: "f32[4, 4]" = torch.sin(l_x_);  l_x_ = None
+            return (child, child_1, matmul, o, out, sin_1)
 """,
         )
 
@@ -1772,7 +1779,10 @@ class GraphModule(torch.nn.Module):
 
         sin_1: "f32[4, 4]" = torch.ops.aten.sin.default(mm_1);  mm_1 = None
         cos: "f32[4, 4]" = torch.ops.aten.cos.default(sin_1);  sin_1 = None
-        return (cos, sin, primals_1)
+        sin_2: "f32[4, 4]" = torch.ops.aten.sin.default(primals_1)
+
+        add: "f32[4, 4]" = torch.ops.aten.add.Tensor(cos, sin_2);  cos = sin_2 = None
+        return (add, sin, primals_1)
 """,
         )
 

@@ -2800,12 +2800,15 @@ def wrap_fx_proxy_cls(
             example_value, tx, proxy, options, subclass_type, target_cls
         )
 
-    if isinstance(
-        out,
-        (
-            torch._dynamo.variables.TensorVariable,
-            torch._dynamo.variables.SymNodeVariable,
-        ),
+    if (
+        isinstance(
+            out,
+            (
+                torch._dynamo.variables.TensorVariable,
+                torch._dynamo.variables.SymNodeVariable,
+            ),
+        )
+        and proxy.node.op != "placeholder"
     ):
         tx.output.current_tracer.record_tensor_or_symint_vt(out)
     return out
