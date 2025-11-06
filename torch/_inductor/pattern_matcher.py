@@ -2179,8 +2179,6 @@ def fx_to_pattern(
         call_method = _not_implemented
         # pyrefly: ignore [bad-override]
         call_module = _not_implemented
-        # pyrefly: ignore  # bad-override
-        get_attr = _not_implemented
 
         # pyrefly: ignore [bad-override]
         def placeholder(
