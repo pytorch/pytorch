@@ -525,30 +525,6 @@ def is_view(op: torch._ops.OpOverload) -> bool:
     return any(a.alias_info is not None for a in op._schema.arguments)
 
 
-def is_pointwise_use(
-    use: Node,
-    is_pointwise_fn: Callable[[torch._ops.OpOverload], bool] = lambda _: False,
-) -> bool:
-    """
-    Do all uses of this op have torch.Tag.pointwise or return True for optional `is_pointwise_fn`
-
-    Uses in views ops will follow the views uses
-    """
-
-    if use.op != "call_function":
-        return False
-    if not (
-        isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
-    ):
-        return False
-
-    target = cast(torch._ops.OpOverload, use.target)
-    if target is operator.getitem or is_view(target):
-        return all(is_pointwise_use(u, is_pointwise_fn) for u in use.users)
-
-    return torch.Tag.pointwise in target.tags or is_pointwise_fn(target)
-
-
 class LogicalConnective(enum.Enum):
     OR = enum.auto()
     AND = enum.auto()
@@ -558,6 +534,8 @@ def has_uses(
     target: Node,
     use_selector_fn: Callable[[torch._ops.OpOverload], bool] = lambda _: False,
     use_aggregate_type: LogicalConnective = LogicalConnective.OR,
+    *,
+    select_output: bool = False,
 ) -> bool:
     """
     Given a target, explore the uses of `target` by applying `use_selector_fn`
@@ -581,6 +559,8 @@ def has_uses(
     use_aggregate_fn = get_use_aggregate_fn(use_aggregate_type)
 
     def has_uses_impl(use: Node) -> bool:
+        if select_output and use.op == "output":
+            return True
         if use.op != "call_function":
             return False
         if not (
@@ -599,17 +579,52 @@ def has_uses(
     return use_aggregate_fn(has_uses_impl(user) for user in target.users)
 
 
+def has_only_uses(
+    target: Node,
+    use_selector_fn: Callable[[torch._ops.OpOverload], bool] = lambda _: False,
+    *,
+    select_output: bool = False,
+) -> bool:
+    return has_uses(
+        target, use_selector_fn, LogicalConnective.AND, select_output=select_output
+    )
+
+
 def has_uses_tagged_as(
     target: Node,
     use_tags: Collection[torch.Tag],
     use_aggregate_type: LogicalConnective = LogicalConnective.OR,
+    *,
+    select_output: bool = False,
 ) -> bool:
     """
     Is there a use with given tags?
     """
 
     return has_uses(
-        target, lambda use: any(tag in use_tags for tag in use.tags), use_aggregate_type
+        target,
+        lambda use: any(tag in use_tags for tag in use.tags),
+        use_aggregate_type,
+        select_output=select_output,
+    )
+
+
+def has_only_pointwise_uses(
+    target: Node,
+    *,
+    select_output: bool = False,
+) -> bool:
+    """
+    Do all uses of target have torch.Tag.pointwise?
+
+    Uses in views ops will follow the views uses
+    """
+
+    return has_uses_tagged_as(
+        target,
+        use_tags=(torch.Tag.pointwise,),
+        use_aggregate_type=LogicalConnective.AND,
+        select_output=select_output,
     )
 
 
