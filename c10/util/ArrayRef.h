@@ -51,9 +51,9 @@ namespace c10 {
 /// of TORCH_CHECK will lead to better user-facing error messages.
 template <typename T>
 class ArrayRef
-#if !defined(__INTEL_LLVM_COMPILER)
-    // workaround ICX bug: c10::ArrayRef is not regonized as template when
-    // using `final`:
+#if !(defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER))
+    // workaround a ICX bug: ICX does not recognize c10::ArrayRef as a
+    // template when ArrayRef is specified as `final`:
     final
 #endif
     : public HeaderOnlyArrayRef<T> {
