@@ -443,7 +443,7 @@ def _verify_state_dict(
                 f"or load but optim state_dict is empty. {optim_state_dict}"
             )
 
-    for key in model_state_dict.keys():
+    for key in model_state_dict:
         if _FLAT_PARAM in key:
             raise RuntimeError(
                 f"{key} contains {_FLAT_PARAM}. This can happen if the model "
@@ -578,7 +578,7 @@ def _load_model_state_dict(
     assign = False
     if info.broadcast_from_rank0 or info.full_state_dict:
         devices = set()
-        for key, value in local_state_dict.items():
+        for value in local_state_dict.values():
             if torch.is_tensor(value) and value.dim() > 0:
                 devices.add(value.device)
         # In lora state_dict, there could be multiple devices, with meta device inside.
@@ -1007,7 +1007,14 @@ def _split_optim_state_dict(
                     raise AssertionError(f"Expected list, got {type(params)}")
                 params.append(fqn)
                 if param.requires_grad:
-                    state[fqn] = cast(DictValueType, optim_state_dict[_STATE])[fqn]
+                    if fqn in cast(DictValueType, optim_state_dict[_STATE]):
+                        state[fqn] = cast(DictValueType, optim_state_dict[_STATE])[fqn]
+                    elif info.strict:
+                        raise RuntimeError(
+                            f"Missing optimizer state for parameter '{fqn}' in checkpoint. "
+                            "The parameter requires gradients but has no saved optimizer state. "
+                            "To load anyway, use StateDictOptions(strict=False)."
+                        )
                 for loaded_param_group in cast(
                     ListDictValueType, optim_state_dict[_PG]
                 ):

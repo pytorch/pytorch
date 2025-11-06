@@ -1223,7 +1223,8 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
             # When all strides are integral, we can sort, and the size for the
             # largest stride doesn't matter and can be arbitrarily symbolic
             s_sizes, s_strides = zip(
-                *sorted(zip(sizes, strides), key=operator.itemgetter(1))
+                *sorted(zip(sizes, strides, strict=True), key=operator.itemgetter(1)),
+                strict=True,
             )
             # Put something arbitrary in the max size spot, it'll be ignored
             if all(isinstance(a, sympy.Integer) for a in s_sizes[:-1]):
