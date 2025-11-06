@@ -1355,7 +1355,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     not isinstance(message_vt, NestedUserFunctionVariable)
                     or message_vt.has_closure()
                 ):
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Can't extract message from torch._check()",
                         context=str(message_vt),
                         explanation=(
