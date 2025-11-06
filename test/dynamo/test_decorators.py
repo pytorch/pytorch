@@ -9,7 +9,7 @@ from unittest.mock import patch
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.exc import IncorrectUsage, Unsupported
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import skipIfWindows
 
@@ -237,7 +237,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 3)
 
     def test_incorrect_usage_disallow_in_graph(self):
-        with self.assertRaises(IncorrectUsage):
+        with self.assertRaises(RuntimeError):
 
             @torch._dynamo.disallow_in_graph
             def fn1(x):
