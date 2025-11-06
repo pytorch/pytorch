@@ -115,6 +115,8 @@ class CoordescTuner:
         if self.is_native_matmul:
             out.append("num_stages")
             out.remove("ZBLOCK")  # ZBLOCK=1 always in native matmul
+        if 'r0_' in self.size_hints and self.size_hints['r0_'] >= 1024:
+            out.append("NUM_STAGES")
 
 
         return out
@@ -249,7 +251,7 @@ class CoordescTuner:
             return False, float("inf")
 
         if self.has_improvement(best_timing, candidate_timing):
-            log.debug(
+            log.error(
                 "Tune from %s %f -> %s %f",
                 best_config,
                 best_timing,
@@ -341,26 +343,4 @@ class CoordescTuner:
         log.error(f"Size hints: {self.size_hints}")
         log.error(f"Inductor meta: {self.inductor_meta}")
 
-        if 'r0_' in self.size_hints and self.size_hints['r0_'] >= 1024:
-            post_tuned_field = "NUM_STAGES"
-            orig_best_config, orig_best_timing = copy.deepcopy(best_config), best_timing
-            for i in range(6):
-                candidate_config = copy.deepcopy(best_config)
-                set_field(candidate_config, post_tuned_field, i)
-                cmp_res, candidate_timing = self.compare_config(
-                    func, candidate_config, best_config, best_timing
-                )
-                if cmp_res:
-                    best_config, best_timing = candidate_config, candidate_timing
-            log.error(
-                "%s: Improve from %s %f -> %s %f, %.3fx",
-                self.name,
-                orig_best_config,
-                orig_best_timing,
-                best_config,
-                best_timing,
-                orig_best_timing / best_timing,
-            )
-        
-        else:
-            return best_config
+        return best_config
