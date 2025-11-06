@@ -263,15 +263,7 @@ bool ConcretePyInterpreterVTable::try_incref(
   if (!pyobj) {
     return false;
   }
-#if IS_PYTHON_3_14_PLUS
   return PyUnstable_TryIncRef(pyobj);
-#else
-  if (Py_REFCNT(pyobj) > 0) {
-    Py_INCREF(pyobj);
-    return true;
-  }
-  return false;
-#endif
 }
 
 size_t ConcretePyInterpreterVTable::refcnt(PyObject* pyobj) const {
