@@ -2521,7 +2521,7 @@ class Module:
             unexpected_keys.append(extra_state_key)
 
         if strict:
-            for key in state_dict.keys():
+            for key in state_dict:
                 if key.startswith(prefix) and key != extra_state_key:
                     input_name = key[len(prefix) :].split(".", 1)
                     # Must be Module if it have attributes
