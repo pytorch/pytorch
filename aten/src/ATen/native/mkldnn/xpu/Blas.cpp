@@ -57,9 +57,10 @@ bool is_desired_scaling(
     const at::Tensor& t,
     const at::Tensor& scale,
     ScalingType desired_scaling) {
-  auto result = desired_scaling == ScalingType::TensorWise ? is_tensorwise_scaling(t, scale) : is_rowwise_scaling(t, scale);
-  return res;
-  }
+  auto result = desired_scaling == ScalingType::TensorWise
+      ? is_tensorwise_scaling(t, scale)
+      : is_rowwise_scaling(t, scale);
+  return result;
 }
 
 std::pair<ScalingType, ScalingType> get_joint_scaling(
