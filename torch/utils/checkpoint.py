@@ -106,7 +106,7 @@ class DefaultDeviceType:
     to save and restore for recomputation.
     """
 
-    _default_device_type = None
+    _default_device_type: Optional[str] = None
 
     @staticmethod
     def set_device_type(device: str = "cuda") -> None:
