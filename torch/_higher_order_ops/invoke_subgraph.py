@@ -79,7 +79,8 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 
         assert all(
             isinstance(o, (torch.Tensor, int, torch.SymInt, torch.Generator))
-            for o in operands if o is not None
+            for o in operands
+            if o is not None
         ), (
             f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator {operands}"
         )
@@ -564,7 +565,8 @@ def _(ctx, subgraph, identifier, *operands):
 
     tokens_before = set(ctx.mode._tokens.keys())
 
-    if effects := subgraph.meta.get("_effects", None):
+    effects = subgraph.meta.get("_effects", None)
+    if effects:
         assert len(effects) == 1, "Multiple effects within a subgraph NYI"
         tokens = ctx.mode._tokens
         effects = next(iter(effects))

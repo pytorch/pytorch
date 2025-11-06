@@ -511,7 +511,9 @@ class FunctionalTensorMode(TorchDispatchMode):
             # and cannot recognize FakeScriptObject.
             ctx = PythonFunctionalizeAPI()
             fully_unwrapped_args = ctx.unwrap_tensors(args)
-            fully_unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
+            fully_unwrapped_kwargs = ctx.unwrap_tensors(
+                kwargs  # pyrefly: ignore[bad-argument-type]
+            )
             outs_unwrapped = func(
                 *fully_unwrapped_args,
                 **fully_unwrapped_kwargs,

@@ -756,7 +756,8 @@ class Node(_NodeBase):
 
             return (
                 self.target in _side_effectful_functions
-                or _get_effect(self.target) == EffectType.ORDERED
+                or _get_effect(self.target)  # pyrefly: ignore[bad-argument-type]
+                == EffectType.ORDERED
             )
 
         def subgraph_has_impure_ops(module: torch.fx.GraphModule) -> bool:
