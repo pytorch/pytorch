@@ -982,6 +982,9 @@ class _PipelineStageBase(ABC):
         """
         Called as a part of schedule IR.
         REDUCE_GRAD action is scheduled after all microbatches W, B actions.
+
+        Currently contains "post_backward" functionality for FSDP.
+        We can try to extract post_backward in a separate IR action in future.
         """
         # Manually call post backward for FSDP
         if isinstance(self.submod, FSDPModule):
