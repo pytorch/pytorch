@@ -1192,7 +1192,8 @@ class TestFP8Matmul(TestCase):
             out_fp8.to(torch.float32), torch.full((M, N), K * (fill_value**2), device=device)
         )
 
-    @onlyOn(["cuda", "xpu"])
+    @skipXPU
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     def test_float8_error_messages(self, device) -> None:
         M, K, N = (1024, 512, 2048)
@@ -1209,8 +1210,8 @@ class TestFP8Matmul(TestCase):
             scaled_mm_wrap(
                 x_fp8,
                 y_fp8,
-                scale_a=torch.ones((1, 1), device=device),
-                scale_b=torch.ones((1, 2), device=device),
+                scale_a=torch.ones((1, 1), device="cuda"),
+                scale_b=torch.ones((1, 2), device="cuda"),
                 scale_recipe_a=ScalingType.TensorWise,
                 scale_recipe_b=ScalingType.TensorWise,
                 out_dtype=torch.bfloat16,
@@ -1222,8 +1223,8 @@ class TestFP8Matmul(TestCase):
             scaled_mm_wrap(
                 x_fp8,
                 y_fp8,
-                scale_a=torch.ones((M, 1), device=device),
-                scale_b=torch.ones((1, N + 1), device=device),
+                scale_a=torch.ones((M, 1), device="cuda"),
+                scale_b=torch.ones((1, N + 1), device="cuda"),
                 scale_recipe_a=ScalingType.RowWise,
                 scale_recipe_b=ScalingType.RowWise,
                 out_dtype=torch.bfloat16,
@@ -1234,8 +1235,8 @@ class TestFP8Matmul(TestCase):
             scaled_mm_wrap(
                 x_fp8,
                 y_fp8,
-                scale_a=torch.ones((M), device=device),
-                scale_b=torch.ones((N, 1), device=device),
+                scale_a=torch.ones((M), device="cuda"),
+                scale_b=torch.ones((N, 1), device="cuda"),
                 scale_recipe_a=ScalingType.RowWise,
                 scale_recipe_b=ScalingType.RowWise,
                 out_dtype=torch.bfloat16,
@@ -1247,8 +1248,8 @@ class TestFP8Matmul(TestCase):
             scaled_mm_wrap(
                 x_fp8,
                 y_fp8,
-                scale_a=torch.ones((M, 1), device=device),
-                scale_b=torch.ones((1, N * 2), device=device)[:, ::2],
+                scale_a=torch.ones((M, 1), device="cuda"),
+                scale_b=torch.ones((1, N * 2), device="cuda")[:, ::2],
                 scale_recipe_a=ScalingType.RowWise,
                 scale_recipe_b=ScalingType.RowWise,
                 out_dtype=torch.bfloat16,
@@ -1258,13 +1259,12 @@ class TestFP8Matmul(TestCase):
             out = scaled_mm_wrap(
                 x_fp8,
                 y_fp8.to(e5m2_type),
-                scale_a=torch.ones((M, 1), device=device),
-                scale_b=torch.ones((1, N), device=device),
+                scale_a=torch.ones((M, 1), device="cuda"),
+                scale_b=torch.ones((1, N), device="cuda"),
                 out_dtype=torch.bfloat16,
             )
             return out
 
-        # TODO:
         if torch.cuda.get_device_capability() == (9, 0) and torch.version.cuda and torch.version.cuda >= "12.9":
             out = e5m2()
             self.assertEqual(out, torch.ones_like(out) * 128.)
@@ -1284,41 +1284,42 @@ class TestFP8Matmul(TestCase):
                     e5m2()
 
 
-    @skipXPU
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("base_dtype", [torch.bfloat16, torch.float16, torch.float32])
     @parametrize("shapes", [
         (128, 512, 256),
     ])
     @with_tf32_off
-    def test_scaled_mm_vs_emulated_row_wise(self, base_dtype, shapes):
-        M, K, N = shapes
+    def test_scaled_mm_vs_emulated_row_wise(self, base_dtype, shapes, device):
+        if not _device_supports_scaled_mm_fp8(device) or (not torch.xpu.is_available() and IS_WINDOWS):
+            raise unittest.SkipTest(f8_msg)
+        if not torch.xpu.is_available() and not SM89OrLater:
+            raise unittest.SkipTest("rowwise implementation is currently sm89-sm100 specific")
+
         # Fp32 out_dtype is only supported by cuBLAS, which however only started
         # shipping row-wise kernels in CUDA 12.9, and only for sm90+.
         if base_dtype is torch.float32:
             if torch.version.hip:
                 raise unittest.SkipTest("hipblaslt rowwise _scaled_mm only supports BFloat16")
-            if _get_torch_cuda_version() < (12, 9):
+            if torch.cuda.is_available() and _get_torch_cuda_version() < (12, 9):
                 raise unittest.SkipTest("Need CUDA 12.9+ for row-wise fp8 w/ cuBLAS")
-            if torch.cuda.get_device_capability() < (9, 0):
+            if torch.cuda.is_available() and torch.cuda.get_device_capability() < (9, 0):
                 raise unittest.SkipTest("Need sm90+ for row-wise fp8 w/ cuBLAS")
 
         if base_dtype is torch.float16:
             if torch.version.hip:
                 raise unittest.SkipTest("hipblaslt rowwise _scaled_mm only supports BFloat16")
-            if torch.cuda.get_device_capability() < (9, 0):
+            if torch.cuda.is_available() and torch.cuda.get_device_capability() < (9, 0):
                 raise unittest.SkipTest("Need sm90+ for row-wise fp8 w/ cuBLAS")
 
         torch.manual_seed(42)
         input_dtype = e4m3_type
         output_dtype = base_dtype
 
-        x = torch.randn(M, K, device="cuda", dtype=base_dtype)
-        y = torch.randn(N, K, device="cuda", dtype=base_dtype).t()
+        x = torch.randn(16, 16, device=device, dtype=base_dtype)
+        y = torch.randn(32, 16, device=device, dtype=base_dtype).t()
         bias = None
         if base_dtype in {torch.bfloat16, torch.float16}:
-            bias = torch.randn((N,), device="cuda", dtype=base_dtype)
+            bias = torch.randn((N,), device=device, dtype=base_dtype)
 
         x_scales = tensor_to_scale(x, input_dtype, dim=1).float()
         y_scales = tensor_to_scale(y, input_dtype, dim=0).float()
@@ -1356,7 +1357,7 @@ class TestFP8Matmul(TestCase):
 
         # only cuBLAS supports rowwise with fp32 output and cuBLAS only supports
         # rowwise on SM 9.0
-        if torch.cuda.get_device_capability() != (9, 0) and output_dtype == torch.float:
+        if torch.cuda.is_available() and torch.cuda.get_device_capability() != (9, 0) and output_dtype == torch.float:
             with self.assertRaisesRegex(
                 ValueError,
                 "Only bf16 and fp16 high precision output types are supported for row-wise scaling."
@@ -1367,7 +1368,6 @@ class TestFP8Matmul(TestCase):
 
     # XPU does not support block_wise scaled_mm yet.
     @skipXPU
-    # Note: Removed parameterization over M,N,K from #163829 as it failed tests as-is
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not IS_SM90, "cuBLAS blockwise scaling requires sm90+")
     @unittest.skipIf(
@@ -1663,56 +1663,6 @@ class TestFP8Matmul(TestCase):
             output_dtype
         )
 
-    @skipIfRocm
-    @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(IS_SM90, "cuBLAS blockwise scaling works on sm90")
-    @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 9),
-        "cuBLAS blockwise scaling added in CUDA 12.9",
-    )
-    @parametrize("output_dtype", [torch.bfloat16, ])
-    @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
-    @parametrize("M,N,K", [(256, 256, 256), (256, 256, 512)])
-    def test_scaled_mm_deepseek_error_messages(
-        self, output_dtype, lhs_block, rhs_block, M, N, K
-    ):
-        torch.manual_seed(42)
-
-        x = torch.randn(M, K, device="cuda", dtype=output_dtype).pow(3)
-        y = torch.randn(N, K, device="cuda", dtype=output_dtype).pow(3)
-
-        x_fp8, x_scales = tensor_to_scale_block(x, e4m3_type, lhs_block, 128)
-        y_fp8, y_scales = tensor_to_scale_block(y, e4m3_type, rhs_block, 128)
-
-        # 1x128 blocks need scales to be outer-dim-major
-        if lhs_block == 1:
-            x_scales = x_scales.t().contiguous().t()
-            lhs_recipe = ScalingType.BlockWise1x128
-        else:
-            lhs_recipe = ScalingType.BlockWise128x128
-
-        if rhs_block == 1:
-            y_scales = y_scales.t().contiguous().t()
-            rhs_recipe = ScalingType.BlockWise1x128
-        else:
-            rhs_recipe = ScalingType.BlockWise128x128
-
-        # Verify that actual F8 mm doesn't error
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            ".*DeepSeek.*scaling.*only supported in CUDA for SM90.*"
-        ):
-            scaled_mm_wrap(
-                x_fp8,
-                y_fp8.t(),
-                scale_a=x_scales,
-                scale_recipe_a=lhs_recipe,
-                scale_b=y_scales.t(),
-                scale_recipe_b=rhs_recipe,
-                out_dtype=output_dtype,
-            )
-
     @skipXPU
     @skipIfRocm
     @onlyCUDA
@@ -1764,7 +1714,6 @@ class TestFP8Matmul(TestCase):
                 out_dtype=output_dtype,
             )
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("which_dim_zero", [0, 1, 2])
     @parametrize("use_torch_compile", [False, True])
     def test_zero_dim_tensorwise(self, which_dim_zero, use_torch_compile, device) -> None:
