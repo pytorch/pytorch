@@ -137,12 +137,9 @@ class DefaultSavePlanner(SavePlanner):
         global_plan, metadata = create_default_global_save_plan(deduped_plans)
 
         if self.flatten_state_dict:
-            # | does not work for Python 3.8 or older version.
-            # merged_mappings = reduce(
-            #     lambda x, y: x | y, (p.planner_data for p in global_plan)
-            # )
-            planner_data_dict = [p.planner_data for p in global_plan]
-            merged_mappings = dict(ChainMap(*planner_data_dict))
+            merged_mappings = reduce(
+                lambda x, y: x | y, (p.planner_data for p in global_plan)
+            )
             metadata = dataclasses.replace(metadata, planner_data=merged_mappings)
 
         if not _validate_global_plan(global_plan, metadata):
