@@ -1860,7 +1860,7 @@ class MetaConverter(Generic[_TensorT]):
                     nt_tensor_id=t.nested_int
                 )
 
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore [bad-argument-type, unbound-name]
             self.set_tensor_memo(t, r)
 
         return self._checked_get_tensor_memo(t)

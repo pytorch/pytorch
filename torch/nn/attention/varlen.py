@@ -7,7 +7,7 @@ that calls into the optimized Flash Attention kernels.
 
 import logging
 from functools import lru_cache
-from typing import NamedTuple, Optional, Union
+from typing import Any, NamedTuple, Optional, Union
 
 import torch
 
@@ -33,8 +33,7 @@ class AuxRequest(NamedTuple):
     lse: bool = False
 
 
-# import failures when I try to register as custom op
-# @torch.library.custom_op("torch_nn_attention::_varlen_attn", mutates_args={})
+@torch.library.custom_op("torch_attn::_varlen_attn", mutates_args={})
 def _varlen_attn(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -44,7 +43,7 @@ def _varlen_attn(
     max_q: int,
     max_k: int,
     is_causal: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention.
 
@@ -70,7 +69,7 @@ def _varlen_attn(
             False,  # return_debug_mask
         )
         # cuDNN returns: (output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask)
-        output, softmax_lse = result[0], result[1]
+        output, softmax_lse, rng_state = result[0], result[1], result[6]
     else:
         log.info("Using Flash Attention backend for varlen_attn")
         output, softmax_lse, rng_state, _, _ = torch.ops.aten._flash_attention_forward(
@@ -86,10 +85,13 @@ def _varlen_attn(
             return_debug_mask=False,
         )
 
-    return output, softmax_lse
+    rng_state_ = torch.zeros(
+        (2,), dtype=torch.uint64, device=query.device
+    )  # hardcoded since dropout is hardcoded to 0
+    return output, softmax_lse, rng_state_
 
 
-# @_varlen_attn.register_fake
+@_varlen_attn.register_fake
 def _varlen_attn_fake(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -99,7 +101,7 @@ def _varlen_attn_fake(
     max_q: int,
     max_k: int,
     is_causal: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
 
@@ -117,7 +119,9 @@ def _varlen_attn_fake(
         (num_heads, total_q), dtype=torch.float, device=query.device
     )
 
-    return output, logsumexp
+    rng_state = torch.empty((2,), dtype=torch.uint64, device=query.device)
+
+    return output, logsumexp, rng_state
 
 
 def varlen_attn(
@@ -191,9 +195,132 @@ def varlen_attn(
         ...     query, key, value, cu_seq, cu_seq, max_len, max_len, is_causal=False
         ... )
     """
-    out, lse = _varlen_attn(
+    out, lse, _ = torch.ops.torch_attn._varlen_attn(
         query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal
     )
     if return_aux is not None and return_aux.lse:
         return out, lse
     return out
+
+
+def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
+    query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal = inputs
+    out, lse, rng_state = output
+
+    ctx.save_for_backward(query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state)
+
+    ctx.max_q = max_q
+    ctx.max_k = max_k
+    ctx.is_causal = is_causal
+
+
+@torch.library.custom_op("torch_attn::_varlen_attn_backward", mutates_args={})
+def _varlen_attn_backward(
+    grad_out: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    out: torch.Tensor,
+    lse: torch.Tensor,
+    cu_seq_q: torch.Tensor,
+    cu_seq_k: torch.Tensor,
+    max_q: int,
+    max_k: int,
+    is_causal: bool,
+    rng_state: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    unused = torch.empty(0, device=query.device)
+
+    use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
+    if use_cudnn:
+        log.info("Using cuDNN backend for varlen_attn")
+        dq, dk, dv = torch.ops.aten._cudnn_attention_backward(
+            grad_out,
+            query,
+            key,
+            value,
+            out,
+            lse,
+            cu_seq_q,
+            cu_seq_k,
+            max_q,
+            max_k,
+            0.0,
+            is_causal,
+            rng_state,
+            unused,
+        )
+    else:
+        log.info("Using Flash Attention backend for varlen_attn")
+        dq, dk, dv = torch.ops.aten._flash_attention_backward(
+            grad_out,
+            query,
+            key,
+            value,
+            out,
+            lse,
+            cu_seq_q,
+            cu_seq_k,
+            max_q,
+            max_k,
+            0.0,
+            is_causal,
+            rng_state,
+            unused,
+        )
+    return dq, dk, dv
+
+
+@_varlen_attn_backward.register_fake
+def _varlen_attn_backward_fake(
+    grad_out: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    out: torch.Tensor,
+    lse: torch.Tensor,
+    cu_seq_q: torch.Tensor,
+    cu_seq_k: torch.Tensor,
+    max_q: int,
+    max_k: int,
+    is_causal: bool,
+    rng_state: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Fake implementation for meta tensor computation and tracing.
+    """
+
+    grad_query = torch.empty_like(query)
+    grad_key = torch.empty_like(key)
+    grad_value = torch.empty_like(value)
+
+    return grad_query, grad_key, grad_value
+
+
+def _backward(
+    ctx: Any, grad_out: torch.Tensor, grad_lse: torch.Tensor, grad_rng: torch.Tensor
+) -> tuple[Optional[torch.Tensor], ...]:
+    query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state = ctx.saved_tensors
+
+    max_q = ctx.max_q
+    max_k = ctx.max_k
+    is_causal = ctx.is_causal
+
+    dq, dk, dv = torch.ops.torch_attn._varlen_attn_backward(
+        grad_out,
+        query,
+        key,
+        value,
+        out,
+        lse,
+        cu_seq_q,
+        cu_seq_k,
+        max_q,
+        max_k,
+        is_causal,
+        rng_state,
+    )
+    return dq, dk, dv, None, None, None, None, None, None
+
+
+_varlen_attn.register_autograd(_backward, setup_context=_setup_context)
