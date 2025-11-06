@@ -217,7 +217,7 @@ def _get_edge_or_node_to_group_id(
     # means the observer of key should be shared with observer with value, by default it will
     # be shared with itself
     shared_with_map: dict[EdgeOrNode, EdgeOrNode] = {
-        k: k for k in edge_or_node_to_qspec.keys()
+        k: k for k in edge_or_node_to_qspec
     }
     for edge_or_node, qspec in edge_or_node_to_qspec.items():
         if isinstance(edge_or_node, torch.fx.Node):
@@ -282,7 +282,7 @@ def _get_edge_or_node_to_group_id(
     # now that we get the sharing relations between all edges and nodes, we can assign group ids
     cur_group_id = 0
     edge_or_node_to_group_id: dict[EdgeOrNode, int] = {}
-    for edge_or_node in shared_with_map.keys():
+    for edge_or_node in shared_with_map:
         root = _find_root_edge_or_node(edge_or_node, shared_with_map)
         if root not in edge_or_node_to_group_id:
             edge_or_node_to_group_id[root] = cur_group_id
