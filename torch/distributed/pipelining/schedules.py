@@ -1637,7 +1637,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         # the stages in the pipeline_order
         all_prev_ranks: set[int] = set()
         all_next_ranks: set[int] = set()
-        for stage_index in stage_index_to_stage.keys():
+        for stage_index in stage_index_to_stage:
             # TODO: assumption that stages only communicate from distances of +1/-1 (no skip connections)
             if stage_index > 0:
                 all_prev_ranks.add(self.stage_index_to_group_rank[stage_index - 1])
@@ -2033,12 +2033,6 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
             is_next_stage_on_this_rank = stage_idx + 1 in stage_index_to_stage
             is_prev_stage_on_this_rank = stage_idx - 1 in stage_index_to_stage
 
-            logger.debug(
-                "_PipelineScheduleRuntime running time_step %d, action %s",
-                time_step,
-                action,
-            )
-
             # TODO(whc) it's not actually safe to use _batch_p2p here in the uncommon case the model has skip-connections,
             # since we do not want to batch up ops between more than a pair of ranks.  _sorted_batch_p2p would be
             # safe to use instead.
@@ -2191,6 +2185,11 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
         # count either full_backward or backward_weight together, to determine when to sync DP grads
         self.backward_counter.clear()
         for time_step, action in enumerate(self.pipeline_order_with_comms[self.rank]):
+            logger.debug(
+                "_PipelineScheduleRuntime running time_step %d, action %s",
+                time_step,
+                action,
+            )
             try:
                 with record_function(_get_profiler_function_name(action)):
                     if action.computation_type in self._comp_type_to_function_map:
@@ -3176,7 +3175,7 @@ def get_schedule_class(schedule_name: str):
         "ZBVZeroBubble": ScheduleZBVZeroBubble,
         "DualPipeV": ScheduleDualPipeV,
     }
-    lowercase_keys = {k.lower(): k for k in schedule_map.keys()}
+    lowercase_keys = {k.lower(): k for k in schedule_map}
     lowercase_schedule_name = schedule_name.lower()
     if lowercase_schedule_name not in lowercase_keys:
         raise ValueError(
