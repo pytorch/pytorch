@@ -1067,7 +1067,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             elif isinstance(expr, ConstantVariable):
                 val = expr.value
             else:
-                raise torch._dynamo.exc.Unsupported("branch not supported")
+                unimplemented(
+                    gb_type="torch.fx.experimental.symbolic_shapes.guard_scalar branch not supported",
+                    context=f"expr: {expr}",
+                    explanation="Expected `expr` to be a symbolic variable or constant.",
+                    hints=[],
+                )
             return variables.ConstantVariable.create(
                 # pyrefly: ignore [bad-argument-type]
                 torch.fx.experimental.symbolic_shapes.guard_scalar(val)
