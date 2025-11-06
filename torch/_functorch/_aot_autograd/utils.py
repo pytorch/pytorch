@@ -3,6 +3,7 @@
 Contains various utils for AOTAutograd, including those for handling collections.
 """
 
+import copy
 import dataclasses
 import logging
 import operator
@@ -295,7 +296,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
         for output_token_node in output_token_nodes:
             assert (
                 output_token_node.op == "call_function"
-                and output_token_node.target == operator.getitem
+                and output_token_node.target is operator.getitem
                 and output_token_node.args[1] == 0
             )
         with module.graph.inserting_before(node):
@@ -327,7 +328,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                     if (
                         isinstance(out, torch.fx.node.Node)
                         and out.op == "call_function"
-                        and out.target == operator.getitem
+                        and out.target is operator.getitem
                         and out.args[1] == 0
                         and out.args[0] in with_effect_nodes
                     ):
@@ -459,7 +460,9 @@ def _copy_metadata_to_bw_nodes_in_subgraph(
             node.meta["fwd_nn_module_stack"] = fwd_node.meta.get("nn_module_stack")
             node.meta["fwd_source_fn_stack"] = fwd_node.meta.get("source_fn_stack")
             # TODO: better to change to a specific field of custom?
-            node.meta["custom"] = fwd_node.meta.get("custom")
+            custom = fwd_node.meta.get("custom")
+            if custom is not None:
+                node.meta["custom"] = copy.deepcopy(custom)
 
 
 def copy_fwd_metadata_to_bw_nodes(fx_g: torch.fx.GraphModule) -> None:
