@@ -10,6 +10,8 @@ from typing import Optional
 import torch
 from torch._inductor.utils import clear_on_fresh_cache
 from torch._logging import getArtifactLogger
+from torch.distributed.distributed_c10d import _get_group_size_by_name
+from torch.fx.operator_schemas import normalize_function
 
 
 # Setup logger for artifact logging
@@ -94,8 +96,19 @@ def _benchmark_collective_with_cuda_events_impl(
     return comm_time / nruns
 
 
-@torch.utils._python_dispatch._disable_current_modes()
 def benchmark_collective_with_cuda_events(
+    n: torch.fx.Node,
+    nruns: int = 2,
+) -> tuple[float | None, str]:
+    """
+    Benchmark collective with CUDA events. Returns (runtime_ms, cache_key) or (None, "") on failure.
+    """
+    # context manager not allowed with profiler.
+    with torch.utils._python_dispatch._disable_current_modes():
+        return benchmark_collective_with_cuda_events_impl(n, nruns)
+
+
+def benchmark_collective_with_cuda_events_impl(
     n: torch.fx.Node,
     nruns: int = 2,
 ) -> tuple[float | None, str]:
@@ -109,6 +122,17 @@ def benchmark_collective_with_cuda_events(
         return None, ""
 
     success, args, kwargs = fx_utils.get_fake_args_kwargs(n)
+
+    opt_args_kwargs = normalize_function(
+        n.target,
+        args=n.args,
+        kwargs=n.kwargs,
+        normalize_to_only_use_kwargs=True,
+    )
+    assert opt_args_kwargs is not None
+    group_name = opt_args_kwargs[1]["group_name"]
+    group_size = _get_group_size_by_name(group_name)
+
     if not success:
         return None, ""
 
@@ -137,7 +161,7 @@ def benchmark_collective_with_cuda_events(
         return None, ""
 
     # Cache key by BYTES (dtype-agnostic)
-    key = f"{n.target}: ({actual_bytes} bytes)"
+    key = f"{n.target}: ({group_size} group size, {actual_bytes} bytes)"
 
     # Check cache
     if (cached := get_cached_runtime(key)) is not None:
