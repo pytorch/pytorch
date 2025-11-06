@@ -539,6 +539,7 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
     # For Autotuner, we need to look at the underlying JITFunction's cache
     # since the Autotuner itself doesn't have a cache
     is_autotuner = isinstance(kernel, Autotuner)
+    # pyrefly: ignore [missing-attribute]
     actual_kernel = kernel.fn if is_autotuner else kernel
 
     if hasattr(actual_kernel, "device_caches"):
@@ -552,6 +553,7 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
         cache = next(iter(caches.values()))
     else:
         raise AssertionError(
+            # pyrefly: ignore [missing-attribute]
             f"kernel caches not found for kernel {actual_kernel.__name__}"
         )
 
@@ -566,8 +568,11 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
 
     if has_constexprs:
         constexpr_vals = {}
+        # pyrefly: ignore [missing-attribute]
         for constexpr_idx in actual_kernel.constexprs:
+            # pyrefly: ignore [missing-attribute]
             if constexpr_idx < len(actual_kernel.arg_names):
+                # pyrefly: ignore [missing-attribute]
                 param_name = actual_kernel.arg_names[constexpr_idx]
                 kwargs_dict = node.kwargs.get("kwargs", {})
                 if isinstance(kwargs_dict, dict):
@@ -575,8 +580,11 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
                         constexpr_vals[param_name] = kwargs_dict[param_name]
 
         expected_values = [
+            # pyrefly: ignore [missing-attribute]
             constexpr_vals[actual_kernel.arg_names[idx]]
+            # pyrefly: ignore [missing-attribute]
             for idx in actual_kernel.constexprs
+            # pyrefly: ignore [missing-attribute]
             if actual_kernel.arg_names[idx] in constexpr_vals
         ]
 
@@ -600,6 +608,7 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
 
     if len(matching_entries) == 0:
         raise AssertionError(
+            # pyrefly: ignore [missing-attribute]
             f"couldn't find a kernel cache entry with metadata matching the autotuner configs for kernel {actual_kernel.__name__}. "
             f"Available cache keys: {list(cache.keys())}"
         )
@@ -610,17 +619,20 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
     if is_autotuner:
         for sig_key, cache_entry in matching_entries:
             entry_metadata = cache_entry.metadata
+            # pyrefly: ignore [missing-attribute]
             for config in kernel.configs:
                 if is_metadata_matched(config, entry_metadata):
                     return actual_kernel, cache_entry
 
         raise AssertionError(
+            # pyrefly: ignore [missing-attribute]
             f"Multiple cache entries found for autotuned kernel {actual_kernel.__name__} "
             f"{'with same constexpr values' if has_constexprs else 'with no constexpr'} "
             f"and couldn't disambiguate using configs. "
         )
 
     raise AssertionError(
+        # pyrefly: ignore [missing-attribute]
         f"Multiple cache entries found for non-autotuned kernel {actual_kernel.__name__} "
         f"{'with same constexpr values' if has_constexprs else 'with no constexpr'}. "
         f"This should not happen. Available cache keys: {[key for key, _ in matching_entries]}"
@@ -3219,7 +3231,7 @@ def serialize(
 
 def _dict_to_dataclass(cls, data):
     assert not isinstance(cls, str), f"Unresolved class type: '{cls}'."
-    if typing.get_origin(cls) == Annotated:
+    if typing.get_origin(cls) is Annotated:
         return _dict_to_dataclass(cls.__origin__, data)
     if typing.get_origin(cls) == typing.Union and type(None) in typing.get_args(cls):
         if data is None:
