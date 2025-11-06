@@ -17,14 +17,11 @@ using torch::headeronly::DefaultPtrTraits;
   using torch::headeronly::RestrictPtrTraits;
 #endif
 
-
-// The _ArrayRefCls argument is used to workaround an icx issue of not
-// recognizing c10::ArrayRef as a template.
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using TensorAccessorBase = torch::headeronly::detail::TensorAccessorBase<::c10::ArrayRef, T, N, PtrTraits, index_t>;
+using TensorAccessorBase = torch::headeronly::detail::TensorAccessorBase<c10::IntArrayRef, T, N, PtrTraits, index_t>;
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using TensorAccessor = torch::headeronly::detail::TensorAccessor<::c10::ArrayRef, T, N, PtrTraits, index_t>;
+using TensorAccessor = torch::headeronly::detail::TensorAccessor<c10::IntArrayRef, T, N, PtrTraits, index_t>;
 
 namespace {
 

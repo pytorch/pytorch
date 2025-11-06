@@ -29,7 +29,7 @@ struct RestrictPtrTraits {
 namespace detail {
 
 template <
-    template <typename I> class ArrayRef,
+    class ArrayRefCls,
     typename T,
     size_t N,
     template <typename U> class PtrTraits = DefaultPtrTraits,
@@ -37,7 +37,6 @@ template <
 class TensorAccessorBase {
  public:
   typedef typename PtrTraits<T>::PtrType PtrType;
-  using ArrayRefCls = ArrayRef<int64_t>;
 
   C10_HOST_DEVICE TensorAccessorBase(
       PtrType data_,
@@ -74,13 +73,13 @@ class TensorAccessorBase {
 // For CUDA `Tensor`s, `GenericPackedTensorAccessor` is used on the host and
 // only indexing on the device uses `TensorAccessor`s.
 template <
-    template <typename I> class ArrayRef,
+    class ArrayRefCls,
     typename T,
     size_t N,
     template <typename U> class PtrTraits = DefaultPtrTraits,
     typename index_t = int64_t>
 class TensorAccessor
-    : public TensorAccessorBase<ArrayRef, T, N, PtrTraits, index_t> {
+    : public TensorAccessorBase<ArrayRefCls, T, N, PtrTraits, index_t> {
  public:
   typedef typename PtrTraits<T>::PtrType PtrType;
 
@@ -88,22 +87,27 @@ class TensorAccessor
       PtrType data_,
       const index_t* sizes_,
       const index_t* strides_)
-      : TensorAccessorBase<ArrayRef, T, N, PtrTraits, index_t>(
+      : TensorAccessorBase<ArrayRefCls, T, N, PtrTraits, index_t>(
             data_,
             sizes_,
             strides_) {}
 
-  C10_HOST_DEVICE TensorAccessor<ArrayRef, T, N - 1, PtrTraits, index_t>
+  C10_HOST_DEVICE TensorAccessor<ArrayRefCls, T, N - 1, PtrTraits, index_t>
   operator[](index_t i) {
-    return TensorAccessor<ArrayRef, T, N - 1, PtrTraits, index_t>(
+    return TensorAccessor<ArrayRefCls, T, N - 1, PtrTraits, index_t>(
         this->data_ + this->strides_[0] * i,
         this->sizes_ + 1,
         this->strides_ + 1);
   }
 
-  C10_HOST_DEVICE const TensorAccessor<ArrayRef, T, N - 1, PtrTraits, index_t>
+  C10_HOST_DEVICE const TensorAccessor<
+      ArrayRefCls,
+      T,
+      N - 1,
+      PtrTraits,
+      index_t>
   operator[](index_t i) const {
-    return TensorAccessor<ArrayRef, T, N - 1, PtrTraits, index_t>(
+    return TensorAccessor<ArrayRefCls, T, N - 1, PtrTraits, index_t>(
         this->data_ + this->strides_[0] * i,
         this->sizes_ + 1,
         this->strides_ + 1);
@@ -111,12 +115,12 @@ class TensorAccessor
 };
 
 template <
-    template <typename I> class ArrayRef,
+    class ArrayRefCls,
     typename T,
     template <typename U> class PtrTraits,
     typename index_t>
-class TensorAccessor<ArrayRef, T, 1, PtrTraits, index_t>
-    : public TensorAccessorBase<ArrayRef, T, 1, PtrTraits, index_t> {
+class TensorAccessor<ArrayRefCls, T, 1, PtrTraits, index_t>
+    : public TensorAccessorBase<ArrayRefCls, T, 1, PtrTraits, index_t> {
  public:
   typedef typename PtrTraits<T>::PtrType PtrType;
 
@@ -124,7 +128,7 @@ class TensorAccessor<ArrayRef, T, 1, PtrTraits, index_t>
       PtrType data_,
       const index_t* sizes_,
       const index_t* strides_)
-      : TensorAccessorBase<ArrayRef, T, 1, PtrTraits, index_t>(
+      : TensorAccessorBase<ArrayRefCls, T, 1, PtrTraits, index_t>(
             data_,
             sizes_,
             strides_) {}
@@ -396,8 +400,12 @@ template <
     size_t N,
     template <typename U> class PtrTraits = DefaultPtrTraits,
     typename index_t = int64_t>
-using TensorAccessorBase = detail::
-    TensorAccessorBase<c10::HeaderOnlyArrayRef, T, N, PtrTraits, index_t>;
+using TensorAccessorBase = detail::TensorAccessorBase<
+    torch::headeronly::IntHeaderOnlyArrayRef,
+    T,
+    N,
+    PtrTraits,
+    index_t>;
 
 // TensorAccessor is same as at::TensorAccessor except sizes() and strides()
 // return HeaderOnlyArrayRef<int64_t>
@@ -406,8 +414,12 @@ template <
     size_t N,
     template <typename U> class PtrTraits = DefaultPtrTraits,
     typename index_t = int64_t>
-using TensorAccessor =
-    detail::TensorAccessor<c10::HeaderOnlyArrayRef, T, N, PtrTraits, index_t>;
+using TensorAccessor = detail::TensorAccessor<
+    torch::headeronly::IntHeaderOnlyArrayRef,
+    T,
+    N,
+    PtrTraits,
+    index_t>;
 
 // GenericPackedTensorAccessorBase is same as
 // at::GenericPackedTensorAccessorBase except sizes() and strides() return
