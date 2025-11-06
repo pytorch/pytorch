@@ -1930,7 +1930,8 @@ class OutputGraph(OutputGraphCommon):
                 assert self.backward_state_var is not None
                 cg.append_output(cg.create_load(self.backward_state_var))
                 cg.store_attr(name)
-        self.side_effects.codegen_hooks(cg)
+        if config.replay_side_effects:
+            self.side_effects.codegen_hooks(cg)
 
         # TODO get debug_locals working for nested graph breaks
         # Return variables used for logging at the end
@@ -1945,7 +1946,8 @@ class OutputGraph(OutputGraphCommon):
         self.codegen_cells(tx, cg)
 
         cg.restore_stack(stack_values, value_from_source=not tx.export)
-        self.side_effects.codegen_update_mutated(cg)
+        if config.replay_side_effects:
+            self.side_effects.codegen_update_mutated(cg)
 
     def cleanup_graph(self) -> None:
         """

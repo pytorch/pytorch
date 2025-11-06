@@ -5471,6 +5471,29 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertTrue(same(res11, res12))
         self.assertTrue(same(res21, res22))
 
+    def test_replay_side_effects_config(self):
+        # Test that replay_side_effects config controls mutation replay
+        def fn(x, lst):
+            lst.append(x + 1)
+            return x * 2
+
+        x = torch.tensor([5.0])
+
+        # Test with replay enabled (default)
+        lst_with_replay = []
+        opt_fn_with_replay = torch.compile(fn, backend="eager")
+        result1 = opt_fn_with_replay(x, lst_with_replay)
+        self.assertEqual(len(lst_with_replay), 1)  # Mutation should be replayed
+        self.assertTrue(same(result1, x * 2))
+
+        # Test with replay disabled
+        lst_without_replay = []
+        with torch._dynamo.config.patch(replay_side_effects=False):
+            opt_fn_without_replay = torch.compile(fn, backend="eager")
+            result2 = opt_fn_without_replay(x, lst_without_replay)
+            self.assertEqual(len(lst_without_replay), 0)  # Mutation should NOT be replayed
+            self.assertTrue(same(result2, x * 2))
+
     def test_list_append_return_none(self):
         def fn(x):
             alist = []
