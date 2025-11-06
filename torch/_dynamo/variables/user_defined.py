@@ -722,7 +722,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 # Structseq objects are just tuples - use TupleVariable
                 return variables.TupleVariable(items)
             else:
-                # Real namedtuples - use NewNamedTupleVariable
+                # Real namedtuples - use NamedTupleVariable
                 field_defaults = self.value._field_defaults
 
                 items = list(args)
@@ -749,7 +749,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # Modify mutability of namedtuple for sourcelesss instantiations.
             from .base import AttributeMutationNew
 
-            return NewNamedTupleVariable(
+            return NamedTupleVariable(
                 items, self.value, mutation_type=AttributeMutationNew()
             )
         elif self.value is torch.Size:
@@ -2260,7 +2260,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         raise NotImplementedError
 
 
-class NewNamedTupleVariable(UserDefinedTupleVariable):
+class NamedTupleVariable(UserDefinedTupleVariable):
     """Handles both namedtuples and structseq objects.
 
     Dynamic case: Regular namedtuples (collections.namedtuple)
@@ -2311,9 +2311,9 @@ class NewNamedTupleVariable(UserDefinedTupleVariable):
         # Runtime dynamic attributes are tracked via side effects system
         self.dynamic_attributes = dynamic_attributes if dynamic_attributes else {}
 
-        # Debug: Verify NewNamedTupleVariable is being used
+        # Debug: Verify NamedTupleVariable is being used
         print(
-            f"[NewNamedTupleVariable] Created for {tuple_cls.__name__} with {len(items)} items"
+            f"[NamedTupleVariable] Created for {tuple_cls.__name__} with {len(items)} items"
         )
 
     @property
@@ -2674,7 +2674,7 @@ class NewNamedTupleVariable(UserDefinedTupleVariable):
                 new_items[field_index] = new_value
 
             # Create new instance with replaced fields
-            return NewNamedTupleVariable(
+            return NamedTupleVariable(
                 new_items, self.tuple_cls, self.dynamic_attributes
             )
 
