@@ -561,7 +561,6 @@ def cat(tensors: list[list[int]], dim: int):
     for i in range(len(tensors)):
         tensor = tensors[i]
         if not should_skip(tensor):
-            # pyrefly: ignore  # bad-argument-type
             check_cat_shape_except_dim(not_skipped_tensor, tensor, dim, i)
             cat_dim_size = cat_dim_size + tensor[dim]
 

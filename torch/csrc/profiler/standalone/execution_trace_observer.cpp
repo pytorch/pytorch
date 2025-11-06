@@ -138,8 +138,7 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
         // So we need to remove the key and insert the key with the new value.
         data_ptr_to_storage_id.erase(raw_data_ptr);
         data_ptr_to_storage_id[raw_data_ptr] = id;
-        data_ptr_to_weak_storage_ptr.erase(raw_data_ptr);
-        data_ptr_to_weak_storage_ptr.emplace(
+        data_ptr_to_weak_storage_ptr.insert_or_assign(
             raw_data_ptr, t_storage.getWeakStorageImpl());
         return id;
       } else {

@@ -375,7 +375,7 @@ class TestIndexing(TestCase):
         assert_array_equal(a[idx], idx)
 
         # this case must not go into the fast path, note that idx is
-        # a non-contiuguous none 1D array here.
+        # a non-contiguous none 1D array here.
         a[idx] = -1
         res = np.arange(6)
         res[0] = -1

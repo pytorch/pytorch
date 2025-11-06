@@ -137,8 +137,8 @@ class Weights {
   // every instance of Weight has a unique version number
   static WeightVersion globalVersion_;
 
-  std::function<bool(const std::string&)> skipSizeCheck_ = {};
-  std::function<bool(const std::string&)> skipDtypeCheck_ = {};
+  std::function<bool(const std::string&)> skipSizeCheck_;
+  std::function<bool(const std::string&)> skipDtypeCheck_;
 
   // save the names of unused weights
   std::unordered_set<std::string> unusedWeights_;

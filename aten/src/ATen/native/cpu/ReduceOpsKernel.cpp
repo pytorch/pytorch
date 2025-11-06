@@ -3,6 +3,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/OpMathType.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/functional.h>
@@ -28,7 +29,7 @@ namespace at::native { namespace {
 using namespace vec;
 
 template <typename scalar_t, typename func_t>
-static inline void cpu_cum_base_kernel(const Tensor& result,
+inline void cpu_cum_base_kernel(const Tensor& result,
     const Tensor& self,
     int64_t dim,
     const func_t& f,
@@ -76,7 +77,7 @@ static inline void cpu_cum_base_kernel(const Tensor& result,
   iter.for_each(loop, grain_size);
 }
 
-static void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
+void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
@@ -95,7 +96,7 @@ static void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t 
   });
 }
 
-static void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
+void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
@@ -114,7 +115,7 @@ static void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t
   });
 }
 
-static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
+void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
@@ -135,7 +136,7 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
   });
 }
 
-static void std_var_kernel_impl(TensorIterator& iter, double correction, bool take_sqrt) {
+void std_var_kernel_impl(TensorIterator& iter, double correction, bool take_sqrt) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "std_cpu", [&] {
     binary_kernel_reduce(
         iter,
@@ -148,7 +149,7 @@ static void std_var_kernel_impl(TensorIterator& iter, double correction, bool ta
   });
 }
 
-static void prod_kernel_impl(TensorIterator& iter) {
+void prod_kernel_impl(TensorIterator& iter) {
   // Workaround for the error: '*' in boolean context, suggest '&&' instead
   if (iter.dtype() == ScalarType::Bool) {
     using scalar_t = bool;
@@ -203,7 +204,7 @@ void norm_kernel_cpu_impl(TensorIterator& iter, const double& val) {
   }
 }
 
-static void norm_kernel_tensor_iterator_impl(
+void norm_kernel_tensor_iterator_impl(
     TensorIterator& iter,
     const Scalar& p) {
   double val = 0;
@@ -256,10 +257,10 @@ static void norm_kernel_tensor_iterator_impl(
   } else {
     if (iter.input_dtype() == kHalf && iter.dtype(0) == kFloat) {
       // type promotion that does cast and reduction in a single kernel
-      return norm_kernel_cpu_impl<at::Half, float>(iter, val);
+      norm_kernel_cpu_impl<at::Half, float>(iter, val); return;
     } else if (iter.input_dtype() == kBFloat16 && iter.dtype(0) == kFloat) {
       // type promotion that does cast and reduction in a single kernel
-      return norm_kernel_cpu_impl<at::BFloat16, float>(iter, val);
+      norm_kernel_cpu_impl<at::BFloat16, float>(iter, val); return;
     }
 
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND3(kHalf, kBFloat16, kComplexHalf, iter.input_dtype(), "norm_cpu", [&] {
@@ -274,7 +275,7 @@ static void norm_kernel_tensor_iterator_impl(
   }
 }
 
-static void and_kernel_impl(TensorIterator& iter) {
+void and_kernel_impl(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Byte) {
     // Refer [all, any : uint8 compatibility]
     binary_kernel_reduce_vec(
@@ -312,7 +313,7 @@ static void and_kernel_impl(TensorIterator& iter) {
   }
 }
 
-static void or_kernel_impl(TensorIterator& iter) {
+void or_kernel_impl(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Byte) {
     // Refer [all, any : uint8 compatibility]
     binary_kernel_reduce_vec(
@@ -338,46 +339,27 @@ static void or_kernel_impl(TensorIterator& iter) {
   }
 }
 
-template<typename scalar_t>
-struct MinValuesOps: public at::native::MinOps<scalar_t> {
-  using arg_t = typename MinOps<scalar_t>::arg_t;
-  static scalar_t project(arg_t arg) {
-    return arg.first;
-  }
-};
-
-static void min_values_kernel_impl(TensorIterator& iter) {
-  if (iter.dtype() == kLong) {
-    // This case is special because of Vectorized<int64_t> does not
-    // handle upper_bound<int64_t>().
-    // See: https://github.com/pytorch/pytorch/issues/43254
-    using scalar_t = int64_t;
-    binary_kernel_reduce(
-      iter,
-      MinValuesOps<scalar_t>{},
-      std::pair<scalar_t, int64_t>(upper_bound<scalar_t>(), -1));
-    return;
-  }
-  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(), "min_values_cpu", [&iter] {
+void min_values_kernel_impl(TensorIterator& iter) {
+  AT_DISPATCH_V2(iter.dtype(), "min_values_cpu", AT_WRAP([&iter] {
     binary_kernel_reduce_vec(
       iter,
       [](scalar_t a, scalar_t b) -> scalar_t { return min_impl(a, b); },
       [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return minimum(a, b); },
-      static_cast<double>(upper_bound<scalar_t>()));
-  });
+      upper_bound<scalar_t>());
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf, kBool);
 }
 
-static void max_values_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(), "max_values_cpu", [&iter] {
+void max_values_kernel_impl(TensorIterator& iter) {
+  AT_DISPATCH_V2(iter.dtype(), "max_values_cpu", AT_WRAP([&iter] {
     binary_kernel_reduce_vec(
       iter,
       [](scalar_t a, scalar_t b) -> scalar_t { return max_impl(a, b); },
       [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return maximum(a, b); },
       lower_bound<scalar_t>());
-  });
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf, kBool);
 }
 
-static void argmax_kernel_impl(TensorIterator &iter) {
+void argmax_kernel_impl(TensorIterator &iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(1), "argmax_cpu", [&] {
     if (is_reduce_lastdim(iter)) {
       using arg_t = std::pair<scalar_t, int64_t>;
@@ -401,7 +383,7 @@ static void argmax_kernel_impl(TensorIterator &iter) {
   });
 }
 
-static void argmin_kernel_impl(TensorIterator &iter) {
+void argmin_kernel_impl(TensorIterator &iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(1), "argmin_cpu", [&] {
     if (is_reduce_lastdim(iter)) {
       using arg_t = std::pair<scalar_t, int64_t>;
@@ -459,7 +441,7 @@ struct XorSumOps {
   }
 };
 
-static void xor_sum_kernel_impl(TensorIterator& iter) {
+void xor_sum_kernel_impl(TensorIterator& iter) {
   // Use iter.dtype(1) to dispatch based on the type of the input tensor
   AT_DISPATCH_ALL_TYPES_AND3(
       kBFloat16, kHalf, kBool, iter.dtype(1), "xor_sum_cpu", [&] {
