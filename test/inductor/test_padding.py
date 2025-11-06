@@ -500,8 +500,13 @@ class PaddingTest(TestCaseBase):
         forward_wrapper = wrapper_codes[0]
 
         # make sure the load for softmax is aligned
+        if bias:
+            # addmm -> mm + bias and bias is fused with softmax
+            softmax_load_str = "tl.load(in_out_ptr0 + (r0_1 + 30528*x0)"
+        else:
+            softmax_load_str = "tl.load(in_ptr0 + (r0_1 + 30528*x0)"
         self.assertTrue(
-            "tl.load(in_ptr0 + (r0_1 + 30528*x0)" in forward_wrapper,
+            softmax_load_str in forward_wrapper,
             f"forward_wrapper: {forward_wrapper}",
         )
 
