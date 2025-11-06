@@ -476,7 +476,6 @@ if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
     # them into a shared library for Caffe2, so they need PIC.
     set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
-  list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 endif()
 
 
