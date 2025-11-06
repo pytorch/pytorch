@@ -110,7 +110,6 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-
 manywheel-py3_10-cpu-s390x-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -198,7 +197,6 @@ manywheel-py3_10-cpu-s390x-upload-r2:  # Uploading to r2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-
 manywheel-py3_11-cpu-s390x-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -286,7 +284,6 @@ manywheel-py3_11-cpu-s390x-upload-r2:  # Uploading to r2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-
 manywheel-py3_12-cpu-s390x-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -374,7 +371,6 @@ manywheel-py3_12-cpu-s390x-upload-r2:  # Uploading to r2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-
 manywheel-py3_13-cpu-s390x-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -462,7 +458,6 @@ manywheel-py3_13-cpu-s390x-upload-r2:  # Uploading to r2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-
 manywheel-py3_13t-cpu-s390x-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -550,7 +545,6 @@ manywheel-py3_13t-cpu-s390x-upload-r2:  # Uploading to r2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-
 manywheel-py3_14-cpu-s390x-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -638,7 +632,6 @@ manywheel-py3_14-cpu-s390x-upload-r2:  # Uploading to r2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-
 manywheel-py3_14t-cpu-s390x-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:

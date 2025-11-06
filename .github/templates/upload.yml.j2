@@ -41,7 +41,6 @@
 {%- endif %}
 {%- endmacro %}
 
-
 {%- macro upload_binaries(config, is_windows=False, has_test=True, use_s3=True) -%}
 !{{ config["build_name"] }}-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -65,7 +64,6 @@
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-
 !{{ config["build_name"] }}-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:

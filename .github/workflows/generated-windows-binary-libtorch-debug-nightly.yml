@@ -288,7 +288,6 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-
 libtorch-cpu-shared-with-deps-debug-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -564,7 +563,6 @@ libtorch-cpu-shared-with-deps-debug-upload-r2:  # Uploading to r2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-
 libtorch-cuda12_6-shared-with-deps-debug-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -841,7 +839,6 @@ libtorch-cuda12_6-shared-with-deps-debug-upload-r2:  # Uploading to r2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-
 libtorch-cuda12_8-shared-with-deps-debug-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1118,7 +1115,6 @@ libtorch-cuda12_8-shared-with-deps-debug-upload-r2:  # Uploading to r2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-
 libtorch-cuda13_0-shared-with-deps-debug-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:

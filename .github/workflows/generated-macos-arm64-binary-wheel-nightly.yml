@@ -139,7 +139,6 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-
 wheel-py3_10-cpu-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -273,7 +272,6 @@ wheel-py3_10-cpu-upload-r2:  # Uploading to r2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-
 wheel-py3_11-cpu-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -407,7 +405,6 @@ wheel-py3_11-cpu-upload-r2:  # Uploading to r2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-
 wheel-py3_12-cpu-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -541,7 +538,6 @@ wheel-py3_12-cpu-upload-r2:  # Uploading to r2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-
 wheel-py3_13-cpu-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -675,7 +671,6 @@ wheel-py3_13-cpu-upload-r2:  # Uploading to r2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-
 wheel-py3_13t-cpu-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -809,7 +804,6 @@ wheel-py3_13t-cpu-upload-r2:  # Uploading to r2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-
 wheel-py3_14-cpu-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -943,7 +937,6 @@ wheel-py3_14-cpu-upload-r2:  # Uploading to r2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-
 wheel-py3_14t-cpu-upload-r2:  # Uploading to r2
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
