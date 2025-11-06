@@ -1,5 +1,6 @@
+from collections.abc import Sequence
 from inspect import getattr_static
-from typing import Any, Sequence, TYPE_CHECKING, TypeGuard
+from typing import Any, TYPE_CHECKING, TypeGuard
 
 from torch._guards import Source
 from torch.backends.cuda import SDPAParams
