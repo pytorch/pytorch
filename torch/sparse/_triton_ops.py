@@ -121,7 +121,7 @@ def slicer(dim, slice_range, *tensors):
 def multidim_slicer(dims, slices, *tensors):
     for t in tensors:
         s = [slice(None)] * t.dim()
-        for d, d_slice in zip(dims, slices, strict=False):
+        for d, d_slice in zip(dims, slices):
             if d is not None:
                 s[d] = d_slice
         yield t[tuple(s)]
@@ -140,7 +140,7 @@ def grid_partitioner(full_grid, grid_blocks, tensor_dims_map):
     import itertools
 
     def generate_grid_points():
-        for fg, mg in zip(full_grid, grid_blocks, strict=False):
+        for fg, mg in zip(full_grid, grid_blocks):
             yield range(0, fg, mg)
 
     def generate_sliced_tensors(slices):
@@ -149,10 +149,9 @@ def grid_partitioner(full_grid, grid_blocks, tensor_dims_map):
 
     for grid_point in itertools.product(*generate_grid_points()):
         grid = [
-            min(fg - gp, mg)
-            for fg, gp, mg in zip(full_grid, grid_point, grid_blocks, strict=False)
+            min(fg - gp, mg) for fg, gp, mg in zip(full_grid, grid_point, grid_blocks)
         ]
-        slices = [slice(gp, gp + g) for gp, g in zip(grid_point, grid, strict=False)]
+        slices = [slice(gp, gp + g) for gp, g in zip(grid_point, grid)]
         # grid_points are iterated in a "contiguous" order, i.e.
         # left dimensions traversed slower than right dimensions.
         # This order is reversed for CUDA grids.
@@ -174,8 +173,7 @@ def launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks=None):
                 return max(1, min(g, mg))
 
         grid_blocks = tuple(
-            valid_grid_dim(g, mg)
-            for g, mg in zip(grid_blocks, cuda_max_grid, strict=False)
+            valid_grid_dim(g, mg) for g, mg in zip(grid_blocks, cuda_max_grid)
         )  # type: ignore[assignment]
 
     for grid, *sliced_tensors in grid_partitioner(
@@ -1299,31 +1297,20 @@ def bsr_dense_addmm(
     assert alpha != 0
 
     def kernel(grid, *sliced_tensors):
-        # pyrefly: ignore [unsupported-operation]
+        # pyrefly: ignore  # unsupported-operation
         _bsr_strided_addmm_kernel[grid](
             *ptr_stride_extractor(*sliced_tensors),
-            # pyrefly: ignore  # bad-argument-count
             beta,
             alpha,
-            # pyrefly: ignore  # bad-keyword-argument, bad-argument-type
             beta_is_one=beta == 1,
-            # pyrefly: ignore  # bad-keyword-argument, bad-argument-type
             beta_is_nonzero=beta != 0,
-            # pyrefly: ignore  # bad-keyword-argument, bad-argument-type
             alpha_is_one=alpha == 1,
-            # pyrefly: ignore  # bad-keyword-argument, bad-argument-type
             left_alpha_is_one=left_alpha_is_one,
-            # pyrefly: ignore  # bad-keyword-argument, bad-argument-type
             right_alpha_is_one=right_alpha_is_one,
-            # pyrefly: ignore  # bad-keyword-argument, bad-argument-type
             BLOCKSIZE_ROW=BM,
-            # pyrefly: ignore  # bad-keyword-argument, bad-argument-type
             BLOCKSIZE_INNER=BK,
-            # pyrefly: ignore  # bad-keyword-argument
             BLOCKSIZE_COL=BN,
-            # pyrefly: ignore  # bad-keyword-argument
             allow_tf32=dot_out_dtype == tl.float32,
-            # pyrefly: ignore  # bad-keyword-argument, bad-argument-type
             acc_dtype=dot_out_dtype,
             **meta,
         )
@@ -1440,7 +1427,7 @@ if has_triton():
 
                 mat1_block = tl.load(
                     mat1_block_ptrs + mat1_col_block_stride * k_offsets[None, :],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore  # index-error
                     mask=mask_k[None, :],
                     other=0.0,
                 )
@@ -1449,7 +1436,7 @@ if has_triton():
                     mat2_block_ptrs
                     + mat2_tiled_col_stride * col_block
                     + mat2_row_block_stride * k_offsets[:, None],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore  # index-error
                     mask=mask_k[:, None],
                     other=0.0,
                 )
@@ -1644,17 +1631,12 @@ if has_triton():
                 beta,
                 is_beta_zero,
                 *blocksize,
-                # pyrefly: ignore  # bad-argument-count
                 k,
                 tile_k,
                 *ptr_stride_extractor(*sliced_tensors),
-                # pyrefly: ignore  # bad-keyword-argument, bad-argument-type
                 acc_dtype=acc_dtype,
-                # pyrefly: ignore  # bad-keyword-argument, bad-argument-type
                 allow_tf32=allow_tf32,
-                # pyrefly: ignore  # unexpected-keyword
                 num_stages=1,
-                # pyrefly: ignore  # unexpected-keyword
                 num_warps=4,
             )
 
@@ -1939,7 +1921,6 @@ if has_triton():
         def kernel(grid, *sliced_tensors):
             _bsr_softmax_kernel[grid](
                 *ptr_stride_extractor(*sliced_tensors),
-                # pyrefly: ignore  # bad-argument-count
                 row_block,
                 col_block,
                 max_row_nnz,
@@ -1993,7 +1974,7 @@ if has_triton():
         if attn_mask.dtype is not torch.bool:
             check_dtype(f_name, attn_mask, query.dtype)
 
-        # pyrefly: ignore [not-callable]
+        # pyrefly: ignore  # not-callable
         sdpa = sampled_addmm(
             attn_mask, query, key.transpose(-2, -1), beta=0.0, skip_checks=False
         )
@@ -2005,10 +1986,10 @@ if has_triton():
             )
         scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
         sdpa.values().mul_(scale_factor)
-        # pyrefly: ignore [not-callable]
+        # pyrefly: ignore  # not-callable
         sdpa = bsr_softmax(sdpa)
         torch.nn.functional.dropout(sdpa.values(), p=dropout_p, inplace=True)
-        # pyrefly: ignore [not-callable]
+        # pyrefly: ignore  # not-callable
         sdpa = bsr_dense_mm(sdpa, value)
         return sdpa
 
@@ -2113,11 +2094,8 @@ if has_triton():
         if "allow_tf32" not in meta:
             meta.update(allow_tf32=dot_out_dtype == tl.float32)
         _scatter_mm2_kernel[grid](
-            # pyrefly: ignore  # bad-argument-type
             M,
-            # pyrefly: ignore  # bad-argument-type
             K,
-            # pyrefly: ignore  # bad-argument-type
             N,
             blocks,
             blocks.stride(0),
@@ -2136,9 +2114,7 @@ if has_triton():
             pq_indices,
             pq_indices.stride(0),
             pq_indices.stride(1),
-            # pyrefly: ignore  # bad-argument-type
             dot_out_dtype=dot_out_dtype,
-            # pyrefly: ignore  # bad-argument-type
             **meta,
         )
 
@@ -2321,7 +2297,6 @@ if has_triton():
         _scatter_mm6_kernel[grid](
             B,
             Ms,
-            # pyrefly: ignore  # bad-argument-type
             Ks,
             N,
             blocks,
@@ -2340,7 +2315,6 @@ if has_triton():
             r_offsets,
             p_offsets,
             q_offsets,
-            # pyrefly: ignore  # bad-argument-type
             dot_out_dtype=dot_out_dtype,
             **meta,
         )

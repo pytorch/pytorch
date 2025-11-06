@@ -492,11 +492,7 @@ def foreach_reduce(
             force_sum_reduction_for_comms,
         )
     )
-
-    if reduce_scatter_group is None:
-        world_size = 1
-    else:
-        world_size = reduce_scatter_group.size()
+    world_size = reduce_scatter_group.size()
     device_handle = _get_device_handle(device.type)
     current_stream = device_handle.current_stream()
 
@@ -551,7 +547,7 @@ def foreach_reduce(
             reduce_output.copy_(reduce_scatter_input)
         reduce_scatter_event = reduce_scatter_stream.record_event()
         post_reduce_stream = reduce_scatter_stream
-        if all_reduce_group is not None:  # HSDP or DDP/replicate
+        if all_reduce_group is not None:  # HSDP
             # Accumulations must run in the reduce-scatter stream
             if not all_reduce_grads:
                 if partial_reduce_output is not None:
@@ -694,7 +690,7 @@ def _get_all_gather_input_metadatas(
 
 
 def _get_gradient_divide_factors(
-    reduce_scatter_group: Optional[dist.ProcessGroup],
+    reduce_scatter_group: dist.ProcessGroup,
     all_reduce_group: Optional[dist.ProcessGroup],
     reduce_dtype: torch.dtype,
     device_type: str = "",
@@ -713,11 +709,8 @@ def _get_gradient_divide_factors(
     # For fp32/bf16, we do not need to worry about overflow/underflow, so we
     # use NCCL's built-in division to avoid separate div kernels
     overflow_risk = reduce_dtype not in (torch.float32, torch.bfloat16)
-    if reduce_scatter_group is not None:
-        data_parallel_size = reduce_scatter_group.size()
-    else:
-        data_parallel_size = 1
 
+    data_parallel_size = reduce_scatter_group.size()
     if all_reduce_group is not None:
         data_parallel_size *= all_reduce_group.size()
 

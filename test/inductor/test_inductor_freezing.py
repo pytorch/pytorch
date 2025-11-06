@@ -970,7 +970,9 @@ class OptimizeForInferenceTemplate(TestCase):
 
         self.assertEqual(len(actual_outputs), len(expected_outputs))
         self.assertEqual(2, len(actual_outputs))
-        for actual, expected in zip(actual_outputs, expected_outputs):
+        for i, actual, expected in zip(
+            itertools.count(), actual_outputs, expected_outputs
+        ):
             self.assertEqual(expected, actual)
 
         if self.device == "cpu":

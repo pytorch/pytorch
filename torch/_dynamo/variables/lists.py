@@ -294,8 +294,6 @@ class BaseListVariable(VariableTracker):
                 [variables.BuiltinVariable(cmp_name_to_op_mapping[name]), left, right],
                 {},
             )
-        elif name == "__iter__":
-            return ListIteratorVariable(self.items, mutation_type=ValueMutationNew())
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -474,9 +472,9 @@ class RangeVariable(BaseListVariable):
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> "VariableTracker":
-        if self.python_type() is range:
-            return variables.ConstantVariable.create(name in range.__dict__)
-        return super().call_obj_hasattr(tx, name)
+        if self.python_type() is not range:
+            return super().call_obj_hasattr(tx, name)
+        return variables.ConstantVariable.create(hasattr(range(0), name))
 
     def range_equals(self, other: "RangeVariable"):
         r0, r1 = self, other
@@ -1066,13 +1064,6 @@ class DequeVariable(CommonListMethodsVariable):
             self.items[:] = self.items[slice_within_maxlen]
         return result
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslator", name: str
-    ) -> "VariableTracker":
-        if self.python_type() is collections.deque:
-            return variables.ConstantVariable.create(name in collections.deque.__dict__)
-        return super().call_obj_hasattr(tx, name)
-
 
 class TupleVariable(BaseListVariable):
     def python_type(self):
@@ -1512,7 +1503,7 @@ class NamedTupleVariable(TupleVariable):
 
 
 class SliceVariable(VariableTracker):
-    def __init__(self, items, tx=None, **kwargs) -> None:
+    def __init__(self, items, **kwargs) -> None:
         items_to_map = items
         start, stop, step = [variables.ConstantVariable.create(None)] * 3
 
@@ -1525,24 +1516,18 @@ class SliceVariable(VariableTracker):
         else:
             raise AssertionError
 
-        # Convert TensorVariable to SymIntVariable by calling .item()
-        # This decomposes a[:t] to u=t.item(); a[:u] at the dynamo level
-        if isinstance(start, variables.TensorVariable):
-            assert tx is not None, (
-                "tx is required when slice indices are TensorVariables"
+        if isinstance(start, variables.TensorVariable) or isinstance(
+            stop, variables.TensorVariable
+        ):
+            unimplemented_v2(
+                gb_type="Dynamic slicing with Tensor arguments",
+                context=f"SliceVariable start: {start}, stop: {stop}, step: {step}",
+                explanation="Creating slices with Tensor arguments is not supported. "
+                "e.g. `l[:x]`, where `x` is a 1-element tensor.",
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
-            start = start.call_method(tx, "item", [], {})
-        if isinstance(stop, variables.TensorVariable):
-            assert tx is not None, (
-                "tx is required when slice indices are TensorVariables"
-            )
-            stop = stop.call_method(tx, "item", [], {})
-        if isinstance(step, variables.TensorVariable):
-            assert tx is not None, (
-                "tx is required when slice indices are TensorVariables"
-            )
-            step = step.call_method(tx, "item", [], {})
-
         self.items = (start, stop, step)
 
         super().__init__(**kwargs)
@@ -1593,7 +1578,6 @@ class ListIteratorVariable(IteratorVariable):
         # assert all(isinstance(x, VariableTracker) for x in items)
         self.items = items
         self.index = index
-        self.is_exhausted = False
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(length={len(self.items)}, index={repr(self.index)})"
@@ -1601,8 +1585,7 @@ class ListIteratorVariable(IteratorVariable):
     def next_variable(self, tx):
         assert self.is_mutable()
         old_index = self.index
-        if old_index >= len(self.items) or self.is_exhausted:
-            self.is_exhausted = True
+        if old_index >= len(self.items):
             raise_observed_exception(StopIteration, tx)
 
         tx.output.side_effects.mutation(self)
@@ -1624,19 +1607,15 @@ class ListIteratorVariable(IteratorVariable):
         return True
 
     def unpack_var_sequence(self, tx):
-        if self.is_exhausted:
-            return []
-        self.is_exhausted = True
-        return list(self.items[self.index :])
+        r = list(self.items[self.index :])
+        self.index = len(self.items)
+        return r
 
     def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         return self.unpack_var_sequence(tx)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        if not self.is_exhausted:
-            remaining_items = self.items[self.index :]
-        else:
-            remaining_items = []
+        remaining_items = self.items[self.index :]
         codegen.foreach(remaining_items)
         codegen.extend_output(
             [

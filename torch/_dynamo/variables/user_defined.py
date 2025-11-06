@@ -58,7 +58,6 @@ from ..exc import (
     raise_observed_exception,
     unimplemented_v2,
 )
-from ..graph_bytecode_inputs import get_external_object_by_index
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -95,7 +94,7 @@ from ..utils import (
     unpatched_nn_module_getattr,
 )
 from .base import raise_type_error_exc, ValueMutationNew, VariableTracker
-from .dicts import ConstDictVariable, DefaultDictVariable
+from .dicts import DefaultDictVariable
 from .lists import SizeVariable
 
 
@@ -419,7 +418,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             self.value in {collections.OrderedDict, collections.defaultdict}
             and name == "fromkeys"
         ):
-            return variables.BuiltinVariable.call_custom_dict_fromkeys(
+            from .builtin import BuiltinVariable
+
+            return BuiltinVariable.call_custom_dict_fromkeys(
                 tx, self.value, *args, **kwargs
             )
         elif self.value is collections.OrderedDict and name == "move_to_end":
@@ -499,18 +500,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 [self, *args],
                 kwargs,
             )
-        elif self.value is collections.defaultdict:
-            if len(args) == 0:
-                default_factory = variables.ConstantVariable.create(None)
-            else:
-                default_factory, *args = args
-            dict_vt = variables.BuiltinVariable.call_custom_dict(
-                tx, dict, *args, **kwargs
-            )
+        elif (
+            self.value is collections.defaultdict
+            and len(args) <= 1
+            and DefaultDictVariable.is_supported_arg(args[0])
+        ):
             return DefaultDictVariable(
-                dict_vt.items,
+                {},
                 collections.defaultdict,
-                default_factory,
+                args[0],
                 mutation_type=ValueMutationNew(),
             )
         elif is_typeddict(self.value):
@@ -811,44 +809,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
                 args = [stacked]
 
-            if issubclass(self.value, torch.Stream):
-                from .constant import ConstantVariable
-                from .lists import TupleVariable
-
-                # Register newly created stream for reconstruction
-                var_kwargs = ConstDictVariable(
-                    {ConstantVariable(k): v for k, v in kwargs.items()}
-                )
-                var_args = TupleVariable(list(args))
-                stream = self.value(
-                    *(var_args.as_python_constant()),
-                    **(var_kwargs.as_python_constant()),
-                )
-                from ..graph_bytecode_inputs import register_graph_created_object
-                from .streams import StreamVariable
-
-                ind = register_graph_created_object(
-                    stream,
-                    StreamVariable.make_construct_in_graph_stream_fn(
-                        var_args, var_kwargs
-                    ),
-                )
-                tensor_variable = wrap_fx_proxy(
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_function", get_external_object_by_index, (ind,), {}
-                    ),
-                    user_obj_index=ind,
-                )
-            else:
-                tensor_variable = wrap_fx_proxy(
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_function",
-                        self.value,
-                        *proxy_args_kwargs(args, kwargs),
-                    ),
-                )
+            tensor_variable = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    self.value,
+                    *proxy_args_kwargs(args, kwargs),
+                ),
+            )
 
             return tensor_variable
         elif self.value is random.Random:
@@ -969,12 +937,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # rid of these workarounds here and in `GetAttrVariable`.
         self.attrs_directly_modifed_on_dict = set()
 
-        import torch.utils._pytree as pytree
-
-        self.is_pytree_constant_class = pytree.is_constant_class(self.value_type)
-        if pytree.is_constant_class(self.value_type) and self.source:
-            install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
-
     def __str__(self) -> str:
         inner = self.value_type.__name__
         if inner in [
@@ -996,10 +958,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return self.value_type
 
     def as_python_constant(self):
-        if self.is_pytree_constant_class and self.source:
-            # NOTE pytree constants created in the torch.compile region will
-            # NOT be guarded (even though they have a source set)
-            return self.value
+        import torch.utils._pytree as pytree
+
+        if pytree.is_constant_class(self.value_type):
+            if self.source is not None:
+                install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
+                return self.value
             # TODO else try reconstructing the object by, e.g., leveraging side
             # effects and `as_python_constant`.
         return super().as_python_constant()

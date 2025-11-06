@@ -5,7 +5,7 @@ import math
 from collections.abc import Sequence
 from functools import partial
 from pathlib import Path
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, Union
 
 import sympy
 
@@ -13,13 +13,6 @@ import torch
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map, tree_map_only
-
-
-if TYPE_CHECKING:
-    from torch._inductor.codegen.cuda_combined_scheduling import _IntLike
-else:
-    _IntLike = Union[int, sympy.Expr]
-
 
 from ...ir import (
     ComputedBuffer,
@@ -221,18 +214,18 @@ def create_placeholder(
 
 
 def construct_strides(
-    sizes: Sequence[_IntLike],
+    sizes: Sequence[int],
     fill_order: Sequence[int],
-) -> Sequence[_IntLike]:
+) -> Sequence[int]:
     """From a list of sizes and a fill order, construct the strides of the permuted tensor."""
     # Initialize strides
     assert len(sizes) == len(fill_order), (
         "Length of sizes must match the length of the fill order"
     )
-    strides: list[_IntLike] = [0] * len(sizes)
+    strides = [0] * len(sizes)
 
     # Start with stride 1 for the innermost dimension
-    current_stride: _IntLike = 1
+    current_stride = 1
 
     # Iterate through the fill order populating strides
     for dim in fill_order:
@@ -242,10 +235,7 @@ def construct_strides(
     return strides
 
 
-def infer_dense_strides(
-    size: Sequence[_IntLike],
-    orig_strides: Sequence[_IntLike],
-):
+def infer_dense_strides(size: Sequence[int], orig_strides: Sequence[int]):
     """This is a mirror of the same function in aten/src/ATen/ExpandUtils.cpp
 
     Args:

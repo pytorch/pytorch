@@ -2,8 +2,7 @@
 import contextlib
 import operator
 from collections import defaultdict
-from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import sympy
 
@@ -147,7 +146,7 @@ class FakeTensorUpdater:
                             (torch._ops.OpOverload, torch._ops.HigherOrderOperator),
                         )
                         or user.target
-                        is torch._inductor.fx_passes.reinplace._generalized_scatter
+                        == torch._inductor.fx_passes.reinplace._generalized_scatter
                     ):
                         return True
                     if isinstance(user.target, torch._ops.HigherOrderOperator):
@@ -201,9 +200,9 @@ class FakeTensorUpdater:
             # tensors from an op.
             return node.op == "call_function" and (
                 isinstance(node.target, torch._ops.OpOverload)
-                or node.target is operator.getitem
+                or node.target == operator.getitem
                 or node.target
-                is torch._inductor.fx_passes.reinplace._generalized_scatter
+                == torch._inductor.fx_passes.reinplace._generalized_scatter
             )
 
         to_process = OrderedSet[int]()

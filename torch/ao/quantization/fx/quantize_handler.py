@@ -119,11 +119,10 @@ def _get_quantize_handler_cls(
         ):
             super().__init__(node_pattern, modules, root_node_getter)
             if num_tensor_args_to_observation_type:
-                if self.num_tensor_args not in num_tensor_args_to_observation_type:
-                    raise AssertionError(
-                        f"Must provide observation_type config for tensor number {self.num_tensor_args}"
-                        f" in num_tensor_args_to_observation_type for {node_pattern}"
-                    )
+                assert self.num_tensor_args in num_tensor_args_to_observation_type, (
+                    f"Must provide observation_type config for tensor number {self.num_tensor_args}"
+                    f" in num_tensor_args_to_observation_type for {node_pattern}"
+                )
                 self.observation_type = num_tensor_args_to_observation_type[
                     self.num_tensor_args
                 ]

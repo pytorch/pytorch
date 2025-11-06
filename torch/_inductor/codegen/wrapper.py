@@ -12,9 +12,8 @@ import operator
 import random
 import re
 import tempfile
-from collections.abc import Callable
 from itertools import chain, count
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -78,8 +77,6 @@ if TYPE_CHECKING:
     import triton
 
     from ..graph import GraphLowering
-    from ..ir import ExternKernel
-    from ..scheduler import BaseSchedulerNode
     from .wrapper_fxir import FxConverter
 
 
@@ -290,15 +287,11 @@ def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
                 if isinstance(symbol, JITFunction):
                     compile_wrapper.newline()
                     compile_wrapper.writeline("@triton.jit")
-                    # pyrefly: ignore  # missing-attribute
                     compile_wrapper.splice(symbol.src, strip=True)
                     symbols_included.add(symbol_name)
                     traverse(symbol)
                 elif hasattr(triton, "constexpr_function") and isinstance(
-                    # pyrefly: ignore  # missing-attribute
-                    symbol,
-                    # pyrefly: ignore  # missing-attribute
-                    triton.runtime.jit.ConstexprFunction,
+                    symbol, triton.runtime.jit.ConstexprFunction
                 ):
                     compile_wrapper.newline()
                     compile_wrapper.writeline("@triton.constexpr_function")
@@ -535,7 +528,6 @@ class ExternKernelOutLine(WrapperLine):
             node.output_view.codegen_reference() if node.output_view else None,
             args,
             device,
-            self.node.get_stack_traces(),
         )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -1562,7 +1554,6 @@ class PythonWrapperCodegen(CodeGen):
         out_view: Optional[str],
         args: list[str],
         device: str,
-        stack_traces: Optional[OrderedSet[str]] = None,
     ) -> None:
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer
@@ -2063,8 +2054,7 @@ class PythonWrapperCodegen(CodeGen):
             neg = self.codegen_sizevar(
                 sympy.Max(0, sympy.Min(x + node.size, node.size))
             )
-            x_cond = self.codegen_sizevar(x)
-            return f"{pos} if {x_cond} >= 0 else {neg}"
+            return f"{pos} if {x} >= 0 else {neg}"
 
         def codegen_with_step(start_var, end_var, step):
             if step == 1:
@@ -3610,12 +3600,16 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline("if not should_loop:")
         if stack_output:
             # Handle the case when loop never executes
-            for i, carried_input in enumerate(outer_carried_inputs):
+            for i, (carried_input, carried_buf) in enumerate(
+                zip(outer_carried_inputs, while_loop.carried_inputs)
+            ):
                 self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
                 self.writeline(f"{name}[{i}] = {carried_input}.unsqueeze(0).clone()")
                 self.writeline(ExitSubgraphLine(self))
         else:
-            for i, carried_input in enumerate(outer_carried_inputs):
+            for i, (carried_input, carried_buf) in enumerate(
+                zip(outer_carried_inputs, while_loop.carried_inputs)
+            ):
                 self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
                 self.writeline(f"{name}[{i}] = {carried_input}.clone()")
                 self.writeline(ExitSubgraphLine(self))
@@ -3695,29 +3689,6 @@ class PythonWrapperCodegen(CodeGen):
     @staticmethod
     def can_prove_buffer_has_static_shape(buffer):
         return PythonWrapperCodegen.static_shape_for_buffer_or_none(buffer) is not None
-
-    def write_kernel_context_guard(
-        self,
-        kernel_name: str,
-        node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
-    ):
-        return
-
-    def write_kernel_context_guard_begin(
-        self,
-    ):
-        """
-        Mark the beginning of kernel context guard
-        """
-        return
-
-    def write_kernel_context_guard_end(
-        self,
-    ):
-        """
-        Mark the end of kernel context guard
-        """
-        return
 
 
 class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):

@@ -278,7 +278,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
                 tmp.append(torch.rand(10 ** (3 + i), device=local_device))
             race_tensors.append(tmp)
 
-        for _ in range(10):
+        for i in range(10):
             race_tensors.pop()
             work = pg.alltoall_base(output, input, [], [], opts)
             # this triggers cudaFree

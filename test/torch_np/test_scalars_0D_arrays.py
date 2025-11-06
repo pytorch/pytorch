@@ -68,7 +68,7 @@ class TestArrayScalars(TestCase):
         assert product.shape == (3,)
         assert_equal(product, [42, 42 * 2, 42 * 3])
 
-        # repeat with right-multiply
+        # repeat with right-mulitply
         product = lst * value
         assert isinstance(product, np.ndarray)
         assert product.shape == (3,)

@@ -8,15 +8,6 @@ import torch
 import torch.nn.functional as F
 
 
-# more important shapes used by internal models
-extra_shapes_for_norm = (
-    (1152 * 500, 384),
-    (1152 * 500, 512),
-    (1152 * 1000, 384),
-    (1152 * 1000, 512),
-)
-
-
 class CrossEntropyForward(BenchmarkKernel):
     def __init__(self, script_args):
         super().__init__(script_args)
@@ -355,7 +346,7 @@ class RMSNormForward(BenchmarkKernel):
             (32768, 65536),
             (16384, 131072),
             (8192, 262144),
-        ) + extra_shapes_for_norm
+        )
 
     def get_memory_bytes(self, args, kwargs) -> int:
         x, w = args
@@ -447,7 +438,8 @@ class RMSNormBackward(BenchmarkKernel):
             (32768, 4096),
             (32768, 8192),
             (32768, 16384),
-        ) + extra_shapes_for_norm
+            (32768, 32768),
+        )
 
     def get_memory_bytes(self, args, kwargs) -> int:
         x, w, dy = args
@@ -561,7 +553,7 @@ class LayerNormForward(BenchmarkKernel):
             (32768, 16384),
             (32768, 32768),
             (32768, 65536),
-        ) + extra_shapes_for_norm
+        )
 
     def get_memory_bytes(self, args, kwargs) -> int:
         x, w = args
@@ -635,7 +627,7 @@ class LayerNormBackward(BenchmarkKernel):
             (32768, 16384),
             (32768, 32768),
             (32768, 65536),
-        ) + extra_shapes_for_norm
+        )
 
     def get_memory_bytes(self, args, kwargs) -> int:
         x, w, dy = args

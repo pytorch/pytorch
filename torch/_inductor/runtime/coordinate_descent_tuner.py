@@ -2,10 +2,7 @@
 import copy
 import itertools
 import logging
-from collections.abc import Callable
-from typing import TYPE_CHECKING
-
-from torch.utils._ordered_set import OrderedSet
+from typing import Callable, TYPE_CHECKING
 
 from .hints import TRITON_MAX_BLOCK, ReductionHint
 from .runtime_utils import red_text, triton_config_to_hashable
@@ -56,7 +53,6 @@ class CoordescTuner:
         name="unknown",
         size_hints=None,
         inductor_meta=None,
-        frozen_fields=None,
     ):
         self.is_mm = is_mm  # we will tune num_stages for mm
 
@@ -69,9 +65,6 @@ class CoordescTuner:
         self.name = name
         self.size_hints = size_hints
         self.inductor_meta = inductor_meta or {}
-        self.frozen_fields: OrderedSet[str] = (
-            OrderedSet(frozen_fields) if frozen_fields is not None else OrderedSet()
-        )
 
     def get_config_max(self, prefix: str) -> int:
         max_block = TRITON_MAX_BLOCK[prefix.upper()]
@@ -122,11 +115,9 @@ class CoordescTuner:
         if self.is_native_matmul:
             out.append("num_stages")
             out.remove("ZBLOCK")  # ZBLOCK=1 always in native matmul
-        if self.inductor_meta.get("reduction_hint", None) == ReductionHint.OUTER:
-            out.append("NUM_STAGES")
 
 
-        return [f for f in out if f not in self.frozen_fields]
+        return out
 
     def value_too_large(self, name: str, val: int) -> bool:
         block_suffix = "BLOCK"
@@ -162,7 +153,7 @@ class CoordescTuner:
             radius = max(radius, 2)
 
         def update(cur_val, inc=True):
-            if name == ["num_stages", "NUM_STAGES"]:
+            if name in ["num_stages", "NUM_STAGES"]:
                 if inc:
                     return cur_val + 1
                 else:
@@ -250,7 +241,7 @@ class CoordescTuner:
         Return a tuple of (compare_result, candidate_timing).
         compare_result is true iff candidate_config is better.
         """
-        log.error("Try config %s", candidate_config)
+        log.debug("Try config %s", candidate_config)
         try:
             candidate_timing = self.call_func(func, candidate_config)
         except Exception as e:
@@ -258,7 +249,7 @@ class CoordescTuner:
             return False, float("inf")
 
         if self.has_improvement(best_timing, candidate_timing):
-            log.error(
+            log.debug(
                 "Tune from %s %f -> %s %f",
                 best_config,
                 best_timing,
@@ -281,7 +272,7 @@ class CoordescTuner:
             baseline_timing = self.call_func(func, baseline_config)
 
         reduction_hint = self.inductor_meta.get("reduction_hint", None)
-        if reduction_hint != ReductionHint.OUTER or len(baseline_config.kwargs) != 2:
+        if reduction_hint != ReductionHint.OUTER or len(baseline_config.kwargs) != 3:
             return baseline_config
         log.debug("= Do coordinate descent tuning for %s =", self.name)
         log.debug(
@@ -347,42 +338,29 @@ class CoordescTuner:
             best_timing,
             baseline_timing / best_timing,
         )
+        log.error(f"Size hints: {self.size_hints}")
+        log.error(f"Inductor meta: {self.inductor_meta}")
 
-        return best_config
-
-    @staticmethod
-    def autotune_single_field(fn, init_val, min_val=None, max_val=None):
-        """
-        fn is a function that takes the field value and returns the benchmarking result
-        init_val is the starting point of autotuning.
-
-        Should work well for parabola like curve. Here is a real example
-        for split-size of mix-order-reduction: https://github.com/pytorch/pytorch/pull/166461
-        """
-        cache = {}
-
-        def _bench(val):
-            if val not in cache:
-                cache[val] = fn(val)
-                # print(f"split size {val} -> {cache[val]:.3f} ms")
-            return cache[val]
-
-        if min_val is None:
-            min_val = 1
-        if max_val is None:
-            max_val = 2**30  # some arbitrary large value
-
-        best_val = init_val
-        improved = True
-        while improved:
-            improved = False
-            candlist = [best_val // 2, best_val * 2]
-            for cand in candlist:
-                cand = max(cand, min_val)
-                cand = min(cand, max_val)
-
-                if _bench(cand) < _bench(best_val):
-                    best_val = cand
-                    improved = True
-
-        return best_val
+        if 'r0_' in self.size_hints and self.size_hints['r0_'] >= 1024:
+            post_tuned_field = "NUM_STAGES"
+            orig_best_config, orig_best_timing = copy.deepcopy(best_config), best_timing
+            for i in range(6):
+                candidate_config = copy.deepcopy(best_config)
+                set_field(candidate_config, post_tuned_field, i)
+                cmp_res, candidate_timing = self.compare_config(
+                    func, candidate_config, best_config, best_timing
+                )
+                if cmp_res:
+                    best_config, best_timing = candidate_config, candidate_timing
+            log.error(
+                "%s: Improve from %s %f -> %s %f, %.3fx",
+                self.name,
+                orig_best_config,
+                orig_best_timing,
+                best_config,
+                best_timing,
+                orig_best_timing / best_timing,
+            )
+        
+        else:
+            return best_config

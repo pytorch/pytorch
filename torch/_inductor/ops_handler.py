@@ -6,16 +6,7 @@ import itertools
 import re
 import warnings
 from io import StringIO
-from typing import (
-    Any,
-    Generic,
-    Literal,
-    NamedTuple,
-    Optional,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Generic, Literal, NamedTuple, Optional, TypeVar, Union
 from unittest.mock import patch
 
 import sympy
@@ -25,10 +16,6 @@ import torch.utils._pytree as pytree
 
 from ..utils._ordered_set import OrderedSet
 from .utils import IndentedBuffer, reduction_num_outputs, sympy_index_symbol, sympy_str
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 
 T = TypeVar("T")
@@ -299,15 +286,6 @@ class OpsHandler(Generic[T]):
         sorter_indices: Optional[T] = None,
     ) -> T:
         # See [Note: Inductor bucketize op]
-        raise NotImplementedError
-
-    def partial_accumulate(
-        self,
-        name: str,
-        reduction_type: ReductionType,
-        value: T,
-        extra_meta: dict[str, Any],
-    ) -> None:
         raise NotImplementedError
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

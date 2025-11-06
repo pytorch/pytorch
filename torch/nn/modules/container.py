@@ -150,9 +150,7 @@ class Sequential(Module):
             delattr(self, key)
         # To preserve numbering
         str_indices = [str(i) for i in range(len(self._modules))]
-        self._modules = OrderedDict(
-            zip(str_indices, self._modules.values(), strict=True)
-        )
+        self._modules = OrderedDict(list(zip(str_indices, self._modules.values())))
 
     @_copy_to_script_wrapper
     def __len__(self) -> int:
@@ -397,9 +395,7 @@ class ModuleList(Module):
             delattr(self, self._get_abs_string_index(idx))
         # To preserve numbering, self._modules is being reconstructed with modules after deletion
         str_indices = [str(i) for i in range(len(self._modules))]
-        self._modules = OrderedDict(
-            zip(str_indices, self._modules.values(), strict=True)
-        )
+        self._modules = OrderedDict(list(zip(str_indices, self._modules.values())))
 
     @_copy_to_script_wrapper
     def __len__(self) -> int:
@@ -436,9 +432,7 @@ class ModuleList(Module):
 
         lines = []
         main_str = self._get_name() + "("
-        for (start_id, end_id), b in zip(
-            start_end_indices, repeated_blocks, strict=True
-        ):
+        for (start_id, end_id), b in zip(start_end_indices, repeated_blocks):
             local_repr = f"({start_id}): {b}"  # default repr
 
             if start_id != end_id:

@@ -20,14 +20,8 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     skipIf,
-    skipXPUIf,
 )
-from torch.testing._internal.common_utils import (
-    parametrize,
-    run_tests,
-    TEST_WITH_SLOW,
-    TestCase,
-)
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
 
@@ -388,11 +382,7 @@ class TestAnalysis(TestCase):
 
         verify_triton(comp_omni)
 
-    @skipIf(
-        (not torch.xpu.is_available()) and (not SM80OrLater),
-        "Requires XPU or CUDA SM80",
-    )
-    @skipXPUIf(TEST_WITH_SLOW, "Skip because test too slow on XPU")
+    @skipIf(not SM80OrLater, "Requires SM80")
     @dtypes(torch.float, torch.float16)
     @parametrize(
         "maxat",
@@ -477,7 +467,6 @@ class TestAnalysis(TestCase):
                         "aten::cudnn_convolution",
                         "aten::convolution",
                         "aten::_convolution",
-                        "aten::convolution_overrideable",
                     )
                 )
                 or "conv" in name

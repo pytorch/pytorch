@@ -28,10 +28,6 @@ namespace flatbuffers = flatbuffers_fbsource;
 #include <torch/csrc/jit/serialization/mobile_bytecode_generated.h> // NOLINT
 #endif
 
-C10_CLANG_DIAGNOSTIC_PUSH()
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wswitch-default")
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wswitch-enum")
-
 namespace torch::jit {
 
 using flatbuffers::FlatBufferBuilder;
@@ -862,5 +858,3 @@ bool register_flatbuffer_serializer() {
 }
 
 } // namespace torch::jit
-
-C10_CLANG_DIAGNOSTIC_POP()

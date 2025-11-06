@@ -100,12 +100,6 @@ DTensor supports the following types of {class}`Placement` on each {class}`Devic
 ```
 
 ```{eval-rst}
-.. autoclass:: MaskPartial
-  :members:
-  :undoc-members:
-```
-
-```{eval-rst}
 .. autoclass:: Placement
   :members:
   :undoc-members:

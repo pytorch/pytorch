@@ -380,12 +380,12 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   }
 
   template <typename T>
-  auto visit(T&& visitor) {
+  decltype(auto) visit(T&& visitor) {
     return std::visit(std::forward<T>(visitor), extra_fields_);
   }
 
   template <typename T>
-  auto visit(T&& visitor) const {
+  decltype(auto) visit(T&& visitor) const {
     return std::visit(std::forward<T>(visitor), extra_fields_);
   }
 

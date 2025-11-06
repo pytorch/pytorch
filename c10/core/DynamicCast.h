@@ -69,7 +69,6 @@ template <typename dest_t>
 C10_HOST_DEVICE inline dest_t fetch_and_cast(
     const ScalarType src_type,
     const void* ptr) {
-  C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
   switch (src_type) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(FETCH_AND_CAST_CASE)
     FETCH_AND_CAST_CASE(uint16_t, UInt16)
@@ -78,7 +77,6 @@ C10_HOST_DEVICE inline dest_t fetch_and_cast(
     default:
       ERROR_UNSUPPORTED_CAST
   }
-  C10_DIAGNOSTIC_POP()
   return dest_t(0); // just to avoid compiler warning
 }
 
@@ -93,7 +91,6 @@ C10_HOST_DEVICE inline void cast_and_store(
     const ScalarType dest_type,
     void* ptr,
     src_t value) {
-  C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
   switch (dest_type) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(CAST_AND_STORE_CASE)
     CAST_AND_STORE_CASE(uint16_t, UInt16)
@@ -101,7 +98,6 @@ C10_HOST_DEVICE inline void cast_and_store(
     CAST_AND_STORE_CASE(uint64_t, UInt64)
     default:;
   }
-  C10_DIAGNOSTIC_POP()
   ERROR_UNSUPPORTED_CAST
 }
 

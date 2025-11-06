@@ -1,10 +1,9 @@
 name: inductor-rocm
 
 on:
-  schedule:
-    - cron: 0 * * * *
   push:
     branches:
+      - main
       - release/*
     tags:
       - ciflow/inductor-rocm/*

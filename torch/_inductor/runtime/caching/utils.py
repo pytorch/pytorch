@@ -6,9 +6,8 @@ utilities used throughout the caching system.
 """
 
 import pickle
-from collections.abc import Callable
 from functools import lru_cache, partial, wraps
-from typing import Any
+from typing import Any, Callable
 from typing_extensions import ParamSpec, TypeVar
 
 from . import exceptions

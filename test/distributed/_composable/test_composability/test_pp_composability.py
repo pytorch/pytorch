@@ -336,7 +336,7 @@ class ComposabilityTest(MultiProcessTestCase):
             for model in partial_models
         ]
 
-        for _train_step in range(5):
+        for train_step in range(5):
             for optimizer in optimizers:
                 optimizer.zero_grad()
             inputs = torch.rand((num_microbatches, dim), device=self.device)
@@ -392,11 +392,11 @@ class ComposabilityTest(MultiProcessTestCase):
         replicate_size = self.world_size // (pp_size)
         device_mesh = init_device_mesh(
             device_type,
-            mesh_shape=(replicate_size, pp_size),
-            mesh_dim_names=("replicate", "pp"),
+            mesh_shape=(replicate_size, 1, pp_size),
+            mesh_dim_names=("replicate", "shard", "pp"),
         )
         torch.manual_seed(42)
-        dp_mesh = device_mesh["replicate"]
+        dp_mesh = device_mesh["replicate", "shard"]
         pp_mesh = device_mesh["pp"]
         pp_group = device_mesh["pp"].get_group()
 
@@ -416,13 +416,15 @@ class ComposabilityTest(MultiProcessTestCase):
                 param_dtype=MixedPrecisionParam,
                 reduce_dtype=torch.float32,
             )
-            replicate_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
+            replicate_config = {"mp_policy": mp_policy}
             for layer_id in range(len(partial_model)):
                 replicate(
                     partial_model[layer_id],
+                    device_mesh=dp_mesh,
                     **replicate_config,
+                    reshard_after_forward=False,
                 )
-            dp_model = replicate(partial_model, **replicate_config)
+            dp_model = replicate(partial_model, device_mesh=dp_mesh, **replicate_config)
             return dp_model
 
         # Apply same precision to reference model (without replicate)
@@ -515,7 +517,7 @@ class ComposabilityTest(MultiProcessTestCase):
             for model in ref_partial_models
         ]
 
-        for _train_step in range(5):
+        for train_step in range(5):
             for optimizer in optimizers:
                 optimizer.zero_grad()
             for ref_optimizer in ref_optimizers:
@@ -580,11 +582,11 @@ class ComposabilityTest(MultiProcessTestCase):
         replicate_size = self.world_size // (pp_size)
         device_mesh = init_device_mesh(
             device_type,
-            mesh_shape=(replicate_size, pp_size),
-            mesh_dim_names=("replicate", "pp"),
+            mesh_shape=(replicate_size, 1, pp_size),
+            mesh_dim_names=("replicate", "shard", "pp"),
         )
         torch.manual_seed(42)
-        dp_mesh = device_mesh["replicate"]
+        dp_mesh = device_mesh["replicate", "shard"]
         pp_mesh = device_mesh["pp"]
         pp_group = device_mesh["pp"].get_group()
         dp_group = device_mesh["replicate"].get_group()
@@ -646,9 +648,10 @@ class ComposabilityTest(MultiProcessTestCase):
             for layer_id in range(len(partial_model)):
                 replicate(
                     partial_model[layer_id],
-                    mesh=dp_mesh,
+                    device_mesh=dp_mesh,
+                    reshard_after_forward=False,
                 )
-            dp_model = replicate(partial_model, mesh=dp_mesh)
+            dp_model = replicate(partial_model, device_mesh=dp_mesh)
             return dp_model
 
         def pipelined_models_parameters(start_layer, model):
