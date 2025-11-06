@@ -4,7 +4,7 @@ import itertools
 import logging
 from typing import Callable, TYPE_CHECKING
 
-from .hints import TRITON_MAX_BLOCK
+from .hints import TRITON_MAX_BLOCK, ReductionHint
 from .runtime_utils import red_text, triton_config_to_hashable
 
 
@@ -243,7 +243,7 @@ class CoordescTuner:
             return False, float("inf")
 
         if self.has_improvement(best_timing, candidate_timing):
-            log.debug(
+            log.error(
                 "Tune from %s %f -> %s %f",
                 best_config,
                 best_timing,
@@ -265,7 +265,11 @@ class CoordescTuner:
         if baseline_timing is None:
             baseline_timing = self.call_func(func, baseline_config)
 
-        log.debug("= Do coordinate descent tuning for %s =", self.name)
+        reduction_hint = self.inductor_meta.get("reduction_hint", None)
+        if reduction_hint != ReductionHint.OUTER:
+            return baseline_config
+
+        log.error("= Do coordinate descent tuning for %s =", self.name)
         log.debug(
             "%s: Baseline Config %s, baseline timing %f",
             self.name,
@@ -320,7 +324,7 @@ class CoordescTuner:
                         old_best_timing / best_timing,
                     )
 
-        log.debug(
+        log.error(
             "%s: Improve from %s %f -> %s %f, %.3fx",
             self.name,
             baseline_config,
@@ -329,5 +333,7 @@ class CoordescTuner:
             best_timing,
             baseline_timing / best_timing,
         )
+        log.error(f"Size hints: {self.size_hints}")
+        log.error(f"Inductor meta: {self.inductor_meta}")
 
         return best_config
