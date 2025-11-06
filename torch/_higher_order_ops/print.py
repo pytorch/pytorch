@@ -1,10 +1,13 @@
+from torch.distributed.utils import _unpack_kwargs
 import builtins
 
 import torch
 import torch.utils._pytree as pytree
 from torch._ops import HigherOrderOperator
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
+from typing import Any
 
 class Print(HigherOrderOperator):
     """
@@ -39,7 +42,14 @@ def print_proxy_torch_dispatch_mode(
 # pyre-ignore
 def print_functionalize(ctx: Any, format_str: str, **kwargs: object) -> None:
     with ctx.redispatch_to_next():
-        return None
+        res = print_cpu(format_str, **kwargs)
+        return ctx.wrap_tensors(res)
+
+@print.py_impl(FakeTensorMode)
+# pyre-ignore
+def call_delegate_fake_tensor_mode(mode, format_str: str, **kwargs: object):
+    with mode:
+        return print_cpu(format_str, *kwargs)
 
 @print.py_impl(torch._C.DispatchKey.CompositeExplicitAutograd)
 # pyre-ignore
