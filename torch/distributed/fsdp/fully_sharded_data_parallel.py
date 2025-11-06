@@ -2074,7 +2074,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 self._flat_param_handle = flat_param_handle
                 self._unshard_event = unshard_event
 
-            def wait(self):
+            def wait(self) -> None:
                 if self._flat_param_handle is not None:
                     current_stream = (
                         self._flat_param_handle._device_handle.current_stream()
@@ -2097,7 +2097,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         unshard_handle.wait()
         return None
 
-    def _wait_unshard_streams_on_current_stream(self):
+    def _wait_unshard_streams_on_current_stream(self) -> None:
         _wait_for_computation_stream(
             self._device_handle.current_stream(),
             self._unshard_stream,

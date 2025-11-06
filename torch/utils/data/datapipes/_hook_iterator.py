@@ -52,7 +52,7 @@ def _generate_iterdatapipe_msg(datapipe, simplify_dp_name: bool = False):
     return output_string
 
 
-def _gen_invalid_iterdatapipe_msg(datapipe):
+def _gen_invalid_iterdatapipe_msg(datapipe) -> str:
     return (
         "This iterator has been invalidated because another iterator has been created "
         f"from the same IterDataPipe: {_generate_iterdatapipe_msg(datapipe)}\n"
@@ -119,7 +119,7 @@ def _set_datapipe_valid_iterator_id(datapipe):
     return datapipe._valid_iterator_id
 
 
-def hook_iterator(namespace):
+def hook_iterator(namespace) -> None:
     r"""
     Define a hook that is applied to all `__iter__` of metaclass `_DataPipeMeta`.
 

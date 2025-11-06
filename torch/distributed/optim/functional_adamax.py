@@ -64,7 +64,7 @@ class _FunctionalAdamax:
         # param group as it's not a common use case.
         self.param_group = {"params": params}
 
-    def step(self, gradients: list[Optional[Tensor]]):
+    def step(self, gradients: list[Optional[Tensor]]) -> None:
         params = self.param_group["params"]
         params_with_grad = []
         grads = []

@@ -177,7 +177,7 @@ class MaskedTensor(torch.Tensor):
         # pyrefly: ignore [bad-argument-type]
         return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)
 
-    def _preprocess_data(self, data, mask):
+    def _preprocess_data(self, data, mask) -> None:
         from .._ops import _sparse_coo_where, _sparse_csr_where
 
         if data.layout != mask.layout:
@@ -195,7 +195,7 @@ class MaskedTensor(torch.Tensor):
         self._masked_data = data.clone()
         self._masked_mask = mask.clone()
 
-    def _validate_members(self):
+    def _validate_members(self) -> None:
         data = self._masked_data
         mask = self.get_mask()
         if type(data) is not type(mask):
@@ -256,7 +256,7 @@ class MaskedTensor(torch.Tensor):
         result = Constructor.apply(data, mask)
         return result
 
-    def _set_data_mask(self, data, mask):
+    def _set_data_mask(self, data, mask) -> None:
         self._masked_data = data
         self._masked_mask = mask
         self._validate_members()

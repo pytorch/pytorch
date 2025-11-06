@@ -28,11 +28,11 @@ class _OptimizerHookState:
         self._check_valid_functional_optim()
         self._set_params_to_optimize(params)
 
-    def _set_params_to_optimize(self, params):
+    def _set_params_to_optimize(self, params) -> None:
         if params is not None:
             self.params_to_optimize = set(params)
 
-    def _check_valid_functional_optim(self):
+    def _check_valid_functional_optim(self) -> None:
         if not hasattr(self.functional_optimizer, _FUNCTIONAL_OPTIM_STEP_METHOD_NAME):
             raise ValueError(
                 f"Class {type(self.functional_optimizer)} must implement method "
@@ -99,7 +99,7 @@ def _apply_optim_in_backward_hook(
 
         # enqueue a callback to wait for this optimizer stream at the end of
         # backward and set all DDP managed grads to None.
-        def wait_for_optim_stream_callback():
+        def wait_for_optim_stream_callback() -> None:
             torch.accelerator.current_stream().wait_stream(
                 optim_stream_state.optim_stream
             )

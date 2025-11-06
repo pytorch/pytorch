@@ -59,7 +59,7 @@ def register_decomposition_for_jvp(fn):
     return register_decomposition(fn, registry=decomposition_table_for_jvp)
 
 
-def _register_jit_decomposition_for_jvp(decomp, use_python=False):
+def _register_jit_decomposition_for_jvp(decomp, use_python=False) -> None:
     if decomp in decomposition_table_for_jvp:
         decomposition_table_used = decomposition_table_for_jvp
     elif decomp in decomposition_table:
@@ -82,7 +82,7 @@ def _register_jit_decomposition_for_jvp(decomp, use_python=False):
         # def wrapped_decomp(x: torch.Tensor, y: int, z: int):
         #   return decomp_fn(x, y, z)
         # Thanks copilot!
-        def get_function_def(sig):
+        def get_function_def(sig) -> str:
             param_def = [f"{param_str}" for param_str in sig.parameters.values()]
             param_use = [f"{param_str}" for param_str in sig.parameters.keys()]
 

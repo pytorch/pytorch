@@ -102,7 +102,7 @@ def _get_default_signal() -> signal.Signals:
         return signal.SIGTERM
 
 
-def _validate_full_rank(d: dict[int, Any], nprocs: int, what: str):
+def _validate_full_rank(d: dict[int, Any], nprocs: int, what: str) -> None:
     actual_keys = set(d.keys())
     expected_keys = set(range(nprocs))
 
@@ -743,7 +743,7 @@ class MultiprocessContext(PContext):
 
         self._numa_options: Optional[NumaOptions] = numa_options
 
-    def _start(self):
+    def _start(self) -> None:
         if self._pc:
             raise ValueError(
                 "The process context already initialized."
@@ -922,7 +922,7 @@ class SubprocessContext(PContext):
         self.subprocess_handlers: dict[int, SubprocessHandler] = {}
         self._numa_options: Optional[NumaOptions] = numa_options
 
-    def _start(self):
+    def _start(self) -> None:
         if self.subprocess_handlers:
             raise ValueError(
                 "The subprocess handlers already initialized. Most likely the start method got called twice."
@@ -940,7 +940,7 @@ class SubprocessContext(PContext):
             for local_rank in range(self.nprocs)
         }
 
-    def _capture_process_failures(self, done_local_ranks: set[int]):
+    def _capture_process_failures(self, done_local_ranks: set[int]) -> None:
         for local_rank in self._running_local_ranks:
             handler = self.subprocess_handlers[local_rank]
             exitcode = handler.proc.poll()

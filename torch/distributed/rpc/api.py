@@ -122,7 +122,7 @@ _all_gather_sequence_id_to_states: collections.defaultdict = collections.default
 )
 
 
-def _init_rpc_states(agent):
+def _init_rpc_states(agent) -> None:
     worker_infos = agent.get_worker_infos()
     global _ALL_WORKER_NAMES
     _ALL_WORKER_NAMES = {worker_info.name for worker_info in worker_infos}
@@ -132,7 +132,7 @@ def _init_rpc_states(agent):
         _set_and_start_rpc_agent(agent)
 
 
-def _gather_to_leader(sequence_id, worker_name, obj, worker_names=None):
+def _gather_to_leader(sequence_id, worker_name, obj, worker_names=None) -> None:
     with _all_gather_dict_lock:
         if not worker_names:
             worker_names = _ALL_WORKER_NAMES
@@ -148,7 +148,7 @@ def _gather_to_leader(sequence_id, worker_name, obj, worker_names=None):
             states.proceed_signal.set()
 
 
-def _broadcast_to_followers(sequence_id, objects_map):
+def _broadcast_to_followers(sequence_id, objects_map) -> None:
     with _all_gather_dict_lock:
         states = _all_gather_sequence_id_to_states[sequence_id]
 
@@ -282,7 +282,7 @@ def _all_gather(obj, worker_names=None, timeout: float = UNSET_RPC_TIMEOUT):
 
 
 @_require_initialized
-def _barrier(worker_names):
+def _barrier(worker_names) -> None:
     r"""
     Synchronizes local and remote RPC processes.
 
@@ -300,7 +300,7 @@ def _barrier(worker_names):
 
 
 @_require_initialized
-def _wait_all_workers(timeout=DEFAULT_SHUTDOWN_TIMEOUT):
+def _wait_all_workers(timeout=DEFAULT_SHUTDOWN_TIMEOUT) -> None:
     r"""
     Block until all local and remote RPC processes reach this method and wait
     for all outstanding work to complete. Every RPC process must call this
@@ -395,7 +395,7 @@ def shutdown(graceful=True, timeout=DEFAULT_SHUTDOWN_TIMEOUT):
         _finalize_shutdown()
 
 
-def _finalize_shutdown():
+def _finalize_shutdown() -> None:
     try:
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
         _destroy_rref_context(_ignore_rref_leak)

@@ -73,7 +73,7 @@ if is_available():
         _DistributedPdb().set_trace()
         """
 
-        def interaction(self, *args, **kwargs):
+        def interaction(self, *args, **kwargs) -> None:
             _stdin = sys.stdin
             try:
                 sys.stdin = open("/dev/stdin")

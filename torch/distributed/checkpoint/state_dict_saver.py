@@ -344,7 +344,7 @@ def async_save(
         def callback(
             original_staging_future: Future[STATE_DICT_TYPE],
             return_staging_future: Future[None] = return_staging_future,
-        ):
+        ) -> None:
             try:
                 original_staging_future.result()
                 return_staging_future.set_result(None)
@@ -363,7 +363,7 @@ def async_save(
     else:
 
         @_dcp_method_logger(log_exceptions=True)
-        def maybe_synchronize_staging():
+        def maybe_synchronize_staging() -> None:
             if async_stager.should_synchronize_after_execute:
                 async_stager.synchronize_staging()
 

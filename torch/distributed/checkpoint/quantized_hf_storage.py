@@ -66,7 +66,7 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
 
         return metadata
 
-    def _load_quantization_metadata(self):
+    def _load_quantization_metadata(self) -> None:
         """Load quantization metadata from the checkpoint."""
         checkpoint_path = Path(self.path)
         # Load weight mapping from index file
@@ -77,7 +77,7 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
             weight_map = index_data.get("weight_map", {})
             self._build_weight_scale_mapping(weight_map)
 
-    def _build_weight_scale_mapping(self, weight_map: dict[str, str]):
+    def _build_weight_scale_mapping(self, weight_map: dict[str, str]) -> None:
         """Analyze and build weight-scale tensor pairs from weight mapping."""
         # Store the complete weight map for file location lookups
         self._weight_map = weight_map

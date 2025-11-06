@@ -208,7 +208,9 @@ if is_available():
         # Initialize RPC.
         _init_rpc_backend(backend, store, name, rank, world_size, rpc_backend_options)
 
-    def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options):
+    def _validate_rpc_args(
+        backend, store, name, rank, world_size, rpc_backend_options
+    ) -> None:
         type_mapping = {
             backend: backend_registry.BackendType,
             store: dist.Store,
@@ -231,7 +233,7 @@ if is_available():
         rank=-1,
         world_size=None,
         rpc_backend_options=None,
-    ):
+    ) -> None:
         _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options)
 
         if _is_current_rpc_agent_set():

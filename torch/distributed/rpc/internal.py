@@ -47,7 +47,7 @@ class _InternalRPCPickler:
         # Used for registering customized picklers.
         self._class_reducer_dict = {}
 
-    def _register_reducer(self, obj_class, reducer):
+    def _register_reducer(self, obj_class, reducer) -> None:
         # For the same class, only register the reducer once.
         if obj_class not in self._class_reducer_dict:
             self._class_reducer_dict[obj_class] = reducer
@@ -218,7 +218,7 @@ def _run_function(python_udf):
     return result
 
 
-def _handle_exception(result):
+def _handle_exception(result) -> None:
     if isinstance(result, RemoteException):
         exception_msg = result.msg.encode("utf-8").decode("unicode_escape")
         # We wrap exception re-creation here in case some exception classes

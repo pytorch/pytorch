@@ -157,7 +157,7 @@ class ProcessFailure:
             timestamp = int(message["extraInfo"]["timestamp"])
         return (message, timestamp)
 
-    def _set_no_reply_file(self):
+    def _set_no_reply_file(self) -> None:
         self.error_file = _NOT_AVAILABLE
         self.error_file_data = _EMPTY_ERROR_DATA
         self.message = ""

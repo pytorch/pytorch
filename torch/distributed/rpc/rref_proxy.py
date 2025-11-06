@@ -50,13 +50,13 @@ def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
         # To address that, we return a Future that is completed with the result of the async call.
         result: Future = Future()
 
-        def _wrap_rref_type_cont(fut):
+        def _wrap_rref_type_cont(fut) -> None:
             try:
                 _rref_type_cont(fut).then(_complete_op)
             except BaseException as ex:  # noqa: B036
                 result.set_exception(ex)
 
-        def _complete_op(fut):
+        def _complete_op(fut) -> None:
             try:
                 result.set_result(fut.value())
             except BaseException as ex:  # noqa: B036

@@ -87,7 +87,7 @@ class _CommModeModuleTracker(ModTracker):
         self.activation_checkpointing = False
         self.name = ""
 
-    def _fw_set_module_hook(self, mod, input, output):
+    def _fw_set_module_hook(self, mod, input, output) -> None:
         """
         Updates the current module after module finishes running and
         all other hooks are resolved
@@ -105,7 +105,7 @@ class _CommModeModuleTracker(ModTracker):
             # set current module to previous parent module
             self.name = self.parent_list[-1]
 
-    def _fw_pre_hook(self, mod, input):
+    def _fw_pre_hook(self, mod, input) -> None:
         """
         This function is called before the forward pass of a module. It
         collects the parameters and sharding information of a module and
@@ -172,7 +172,7 @@ class _CommModeModuleTracker(ModTracker):
                 self._fw_set_module_hook
             )
 
-    def _fw_post_hook(self, mod, input, output):
+    def _fw_post_hook(self, mod, input, output) -> None:
         """
         This function is called when the forward pass of a module is called.
         It updates the module tracker and removes the module from parent data
@@ -180,7 +180,7 @@ class _CommModeModuleTracker(ModTracker):
 
         super()._fw_post_hook(mod, input, output)
 
-    def _bw_hook(self, mod, output):
+    def _bw_hook(self, mod, output) -> None:
         """
         This function is called when the backward pass of a module is called. It
         updates the current module for backward passes
@@ -212,10 +212,10 @@ class _CommModeModuleTracker(ModTracker):
         for handle in self.register_forward_hook_handles.values():
             handle.remove()
 
-    def print_paramater_info(self):
+    def print_paramater_info(self) -> None:
         print(self.module_parameters_dict)
 
-    def print_sharding_info(self):
+    def print_sharding_info(self) -> None:
         for key, value in self.sharding_dict.items():
             print(key + ": " + str(value))
 
@@ -251,7 +251,7 @@ class CommDebugMode(TorchDispatchMode):
         self.comm_registry.add(torch.ops._dtensor.shard_dim_alltoall)
         self.advanced_module_tracker = _CommModeModuleTracker()
 
-    def generate_json_dump(self, file_name="comm_mode_log.json", noise_level=3):
+    def generate_json_dump(self, file_name="comm_mode_log.json", noise_level=3) -> None:
         """
         Creates json file used to build browser visual
         0. prints module-level collective counts
@@ -601,7 +601,7 @@ class CommDebugMode(TorchDispatchMode):
 
     def log_comm_debug_tracing_table_to_file(
         self, file_name="comm_mode_log.txt", noise_level=3
-    ):
+    ) -> None:
         """
         Alternative to console CommDebugMode output, writes to file specified by the user
         """

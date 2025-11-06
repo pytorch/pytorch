@@ -624,7 +624,7 @@ class FlatParamHandle:
     def __repr__(self):
         return f"FlatParamHandle(flat_param.fqns={self.flat_param._fqns})"
 
-    def _init_setattr_fns(self):
+    def _init_setattr_fns(self) -> None:
         use_unsafe_setattr = os.environ.get(_FSDP_USE_UNSAFE_SETATTR, "") == "1"
         self._setattr_tensor: Callable[[nn.Module, str, Tensor], None]
         self._setattr_param: Callable[[nn.Module, str, nn.Parameter], None]
@@ -635,7 +635,7 @@ class FlatParamHandle:
             self._setattr_tensor = _safe_setattr_tensor_or_param
             self._setattr_param = _safe_setattr_tensor_or_param
 
-    def _init_get_unflat_views_fn(self, align_addresses: bool):
+    def _init_get_unflat_views_fn(self, align_addresses: bool) -> None:
         self._get_unflat_views = (
             self._get_unflat_views_aligned
             if align_addresses
@@ -945,7 +945,7 @@ class FlatParamHandle:
     # SHARD INITIALIZATION & METADATA #
     ###################################
     @torch.no_grad()
-    def shard(self):
+    def shard(self) -> None:
         """
         Shard the handle's ``FlatParameter``.
 
@@ -1342,7 +1342,7 @@ class FlatParamHandle:
         self._check_on_compute_device(self.flat_param)
         return ret
 
-    def _use_low_precision_shard(self):
+    def _use_low_precision_shard(self) -> None:
         """Allocate on the compute device and switch to using the low precision sharded flat parameter."""
         self._check_low_precision_shard()
         flat_param = self.flat_param
@@ -1359,7 +1359,7 @@ class FlatParamHandle:
         # Invariant: `_mp_shard` is always on the compute device.
         flat_param.data = flat_param._mp_shard  # type: ignore[attr-defined]
 
-    def unshard(self):
+    def unshard(self) -> None:
         """
         Run the unshard logic.
 
@@ -1523,7 +1523,7 @@ class FlatParamHandle:
         elif in_forward:
             self._use_unsharded_views(as_params=False)
 
-    def post_unshard(self):
+    def post_unshard(self) -> None:
         """
         Run the post-unshard logic.
 
@@ -1533,7 +1533,7 @@ class FlatParamHandle:
             self._free_low_precision_sharded_param()
         self._check_on_compute_device(self.flat_param)
 
-    def _free_low_precision_sharded_param(self):
+    def _free_low_precision_sharded_param(self) -> None:
         """Frees the low precision sharded flat parameter."""
         self._check_low_precision_shard()
         # `_mp_shard` is allocated in the pre-unshard stream, consumed in the
@@ -1550,7 +1550,7 @@ class FlatParamHandle:
         _free_storage(self.flat_param._mp_shard)  # type: ignore[attr-defined]
 
     @torch.no_grad()
-    def unshard_grad(self):
+    def unshard_grad(self) -> None:
         """
         Unshard the handle's ``FlatParameter``'s gradient.
 
@@ -1608,7 +1608,7 @@ class FlatParamHandle:
         )
         self._use_unsharded_grad_views()
 
-    def reshard_grad(self):
+    def reshard_grad(self) -> None:
         if self._use_orig_params:
             self._use_sharded_grad_views()
         if not self.uses_sharded_strategy:
@@ -1616,7 +1616,7 @@ class FlatParamHandle:
         self.flat_param.grad = self.flat_param._saved_grad_shard  # type: ignore[attr-defined]
         delattr(self.flat_param, "_saved_grad_shard")
 
-    def prepare_gradient_for_backward(self):
+    def prepare_gradient_for_backward(self) -> None:
         """
         Prepare the gradient for the backward computation.
 
@@ -1681,10 +1681,10 @@ class FlatParamHandle:
                 )
             flat_param.grad = None
 
-    def prepare_gradient_for_optim(self):
+    def prepare_gradient_for_optim(self) -> None:
         """Prepare the gradient for optimizer computation by moving the sharded gradient to the ``.grad`` attribute."""
 
-        def cast_grad_to_param_dtype_if_needed(flat_param):
+        def cast_grad_to_param_dtype_if_needed(flat_param) -> None:
             # TODO (rohan-varma): test for full precision with keep_low_precision_grads
             if not self._force_full_precision and self._keep_low_precision_grads:
                 _p_assert(flat_param.grad is not None, "Unexpected None grad!")
@@ -1768,7 +1768,7 @@ class FlatParamHandle:
             )
             self._use_unsharded_flat_param(padded_unsharded_flat_param)
 
-    def reshard(self, free_unsharded_flat_param: bool):
+    def reshard(self, free_unsharded_flat_param: bool) -> None:
         """
         Run the reshard logic.
 
@@ -1786,7 +1786,7 @@ class FlatParamHandle:
         if free_unsharded_flat_param:
             self._free_unsharded_flat_param()
 
-    def post_reshard(self):
+    def post_reshard(self) -> None:
         """
         Run the post-reshard logic.
 
@@ -1807,7 +1807,7 @@ class FlatParamHandle:
         ):
             self._free_low_precision_sharded_param()
 
-    def _free_unsharded_flat_param(self):
+    def _free_unsharded_flat_param(self) -> None:
         """
         Free the padded unsharded flat parameter. We allow this
         function to be called even when storage is not allocated
@@ -2451,7 +2451,7 @@ class FlatParamHandle:
                 raise AssertionError("Expected _is_grad_none_mask to be not None")
             self.flat_param._is_grad_none_mask[tensor_index] = True
 
-    def _reset_flat_param_grad_info_if_needed(self):
+    def _reset_flat_param_grad_info_if_needed(self) -> None:
         """
         Reset ``flat_param.grad`` if needed.
 
@@ -2480,7 +2480,7 @@ class FlatParamHandle:
         # must require gradient
         flat_param.requires_grad = requires_grad
 
-    def _deregister_orig_params(self):
+    def _deregister_orig_params(self) -> None:
         for param_info in self.flat_param._param_infos:
             param_name, module, _ = param_info
             if hasattr(module, param_name):
@@ -2492,7 +2492,7 @@ class FlatParamHandle:
     ###########
     # HELPERS #
     ###########
-    def flat_param_to(self, *args, **kwargs):
+    def flat_param_to(self, *args, **kwargs) -> None:
         """Wrap an in-place call to ``.to()`` for ``self.flat_param``."""
         # pyrefly: ignore [not-iterable]
         self.flat_param.data = self.flat_param.to(*args, **kwargs)
@@ -2628,16 +2628,16 @@ class FlatParamHandle:
     #######################
     # CHECKS & INVARIANTS #
     #######################
-    def _check_sharded_strategy(self):
+    def _check_sharded_strategy(self) -> None:
         _p_assert(self.uses_sharded_strategy, "Expects sharded strategy")
 
-    def _check_on_compute_device(self, tensor: Tensor):
+    def _check_on_compute_device(self, tensor: Tensor) -> None:
         _p_assert(
             tensor.device == self.device,
             f"Expects tensor to be on the compute device {self.device}, was on {tensor.device}",
         )
 
-    def _check_on_cpu(self, tensor: Tensor):
+    def _check_on_cpu(self, tensor: Tensor) -> None:
         _p_assert(
             tensor.device == torch.device("cpu"),
             f"Expects tensor to be on CPU but got {tensor.device}",
@@ -2656,7 +2656,7 @@ class FlatParamHandle:
     def _check_storage_allocated(tensor: Tensor):
         _p_assert(_storage_size_allocated(tensor), "Expects storage to be allocated")
 
-    def _check_low_precision_shard(self):
+    def _check_low_precision_shard(self) -> None:
         _p_assert(
             self._uses_param_mixed_precision,
             "Not using low precision for parameters",
@@ -2671,7 +2671,7 @@ class FlatParamHandle:
             f"Expects the low precision shard to be on {self.device} but got {device}",
         )
 
-    def _check_unsharded(self, tensor: Tensor):
+    def _check_unsharded(self, tensor: Tensor) -> None:
         msg_prefix = "Expects tensor to be unsharded "
         _p_assert(tensor is not None, msg_prefix + "but got `None`")
         unsharded_size = self.flat_param._unpadded_unsharded_size
@@ -2680,7 +2680,7 @@ class FlatParamHandle:
             msg_prefix + f"with size {unsharded_size} but got {tensor.size()}",
         )
 
-    def _check_sharded(self, tensor: Tensor):
+    def _check_sharded(self, tensor: Tensor) -> None:
         msg_prefix = "Expects tensor to be sharded "
         _p_assert(tensor is not None, msg_prefix + "but got `None`")
         sharded_size = self.flat_param._sharded_size  # type: ignore[attr-defined]
@@ -2746,7 +2746,7 @@ def _unsafe_setattr_tensor(module: nn.Module, param_name: str, tensor: Tensor) -
 
 def _safe_setattr_tensor_or_param(
     module: nn.Module, param_name: str, tensor_or_param: Union[Tensor, nn.Parameter]
-):
+) -> None:
     # Call `delattr()` and `setattr()` to go through `nn.Module` checks
     if hasattr(module, param_name):
         delattr(module, param_name)
@@ -2804,19 +2804,19 @@ def _construct_padding_tensor(
 # Use `lru_cache(1)` to only log the warning once (assuming the fixed warning
 # message is passed in)
 @functools.lru_cache(1)
-def _warn_skip_writeback_check(log: logging.Logger, warning: str):
+def _warn_skip_writeback_check(log: logging.Logger, warning: str) -> None:
     logger.warning(warning)
 
 
 # Use `lru_cache(1)` to only log the warning once
 @functools.lru_cache(1)
-def _warn_use_fake_all_gather(log: logging.Logger, warning: str):
+def _warn_use_fake_all_gather(log: logging.Logger, warning: str) -> None:
     logger.warning(warning)
 
 
 # Use `lru_cache(1)` to only log the warning once
 @functools.lru_cache(1)
-def _warn_use_fake_reduce(log: logging.Logger, warning: str):
+def _warn_use_fake_reduce(log: logging.Logger, warning: str) -> None:
     logger.warning(warning)
 
 

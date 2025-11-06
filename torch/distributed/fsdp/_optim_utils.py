@@ -1051,7 +1051,7 @@ def _get_flat_param_to_fqn(model: torch.nn.Module) -> dict[FlatParameter, str]:
 
     """
 
-    def module_fn(module, prefix, tree_level, flat_param_to_fqn):
+    def module_fn(module, prefix, tree_level, flat_param_to_fqn) -> None:
         for param_name, param in _named_parameters_with_duplicates(
             module, recurse=False
         ):
@@ -2079,7 +2079,7 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> dict[str, FSDPParamInfo]:
     parameter. Thus, the keys in the mapping are guaranteed to map to unique parameters.
     """
 
-    def module_fn(module, prefix, tree_level, fqn_to_param_info):
+    def module_fn(module, prefix, tree_level, fqn_to_param_info) -> None:
         fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
         if fsdp_state is None:
             return

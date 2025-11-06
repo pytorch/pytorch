@@ -49,7 +49,7 @@ if IS_WINDOWS:
 
             self.manager_dead = False
 
-        def is_alive(self):
+        def is_alive(self) -> bool:
             if not self.manager_dead:
                 # Value obtained from https://msdn.microsoft.com/en-us/library/windows/desktop/ms687032.aspx
                 self.manager_dead = (
@@ -64,7 +64,7 @@ else:
             self.manager_pid = os.getppid()
             self.manager_dead = False
 
-        def is_alive(self):
+        def is_alive(self) -> bool:
             if not self.manager_dead:
                 self.manager_dead = os.getppid() != self.manager_pid
             return not self.manager_dead
@@ -240,7 +240,7 @@ def _worker_loop(
     num_workers,
     persistent_workers,
     shared_seed,
-):
+) -> None:
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
 

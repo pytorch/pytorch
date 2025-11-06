@@ -310,7 +310,7 @@ def _get_sycl_arch_list():
 # If arch list returned by _get_sycl_arch_list() is empty, then sycl kernels will be compiled
 # for default spir64 target and avoid device specific compilations entirely. Further, kernels
 # will be JIT compiled at runtime.
-def _append_sycl_targets_if_missing(cflags):
+def _append_sycl_targets_if_missing(cflags) -> None:
     if any(flag.startswith('-fsycl-targets=') for flag in cflags):
         # do nothing: user has manually specified sycl targets
         return
@@ -367,7 +367,7 @@ def _accepted_compilers_for_platform() -> list[str]:
     # gnu-c++ and gnu-cc are the conda gcc compilers
     return ['clang++', 'clang'] if IS_MACOS else ['g++', 'gcc', 'gnu-c++', 'gnu-cc', 'clang++', 'clang']
 
-def _maybe_write(filename, new_content):
+def _maybe_write(filename, new_content) -> None:
     r'''
     Equivalent to writing the content into the file but will not touch the file
     if it already had the right content (to avoid triggering recompile).
@@ -559,7 +559,7 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
 
 
 # Specify Visual Studio C runtime library for hipcc
-def _set_hipcc_runtime_lib(is_standalone, debug):
+def _set_hipcc_runtime_lib(is_standalone, debug) -> None:
     if is_standalone:
         if debug:
             COMMON_HIP_FLAGS.append('-fms-runtime-lib=static_dbg')
@@ -571,7 +571,7 @@ def _set_hipcc_runtime_lib(is_standalone, debug):
         else:
             COMMON_HIP_FLAGS.append('-fms-runtime-lib=dll')
 
-def _append_sycl_std_if_no_std_present(cflags):
+def _append_sycl_std_if_no_std_present(cflags) -> None:
     if not any(flag.startswith('-sycl-std=') for flag in cflags):
         cflags.append('-sycl-std=2020')
 
@@ -742,7 +742,7 @@ class BuildExtension(build_ext):
 
             return cflags
 
-        def convert_to_absolute_paths_inplace(paths):
+        def convert_to_absolute_paths_inplace(paths) -> None:
             # Helper function. See Note [Absolute include_dirs]
             if paths is not None:
                 for i in range(len(paths)):
@@ -1123,7 +1123,7 @@ class BuildExtension(build_ext):
             raise UserWarning(msg)
         return compiler, version
 
-    def _add_compile_flag(self, extension, flag):
+    def _add_compile_flag(self, extension, flag) -> None:
         extension.extra_compile_args = copy.deepcopy(extension.extra_compile_args)
         if isinstance(extension.extra_compile_args, dict):
             for args in extension.extra_compile_args.values():
@@ -1133,7 +1133,7 @@ class BuildExtension(build_ext):
 
     # Simple hipify, replace the first occurrence of CUDA with HIP
     # in flags starting with "-" and containing "CUDA", but exclude -I flags
-    def _hipify_compile_flags(self, extension):
+    def _hipify_compile_flags(self, extension) -> None:
         if isinstance(extension.extra_compile_args, dict) and 'nvcc' in extension.extra_compile_args:
             modified_flags = []
             for flag in extension.extra_compile_args['nvcc']:
@@ -1154,7 +1154,7 @@ class BuildExtension(build_ext):
                     modified_flags.append(flag)
             extension.extra_compile_args['nvcc'] = modified_flags
 
-    def _define_torch_extension_name(self, extension):
+    def _define_torch_extension_name(self, extension) -> None:
         # pybind11 doesn't support dots in the names
         # so in order to support extensions in the packages
         # like torch._C, we take the last part of the string
@@ -1760,7 +1760,7 @@ def check_compiler_is_gcc(compiler):
 def _check_and_build_extension_h_precompiler_headers(
         extra_cflags,
         extra_include_paths,
-        is_standalone=False):
+        is_standalone=False) -> None:
     r'''
     Precompiled Headers(PCH) can pre-build the same headers and reduce build time for pytorch load_inline modules.
     GCC official manual: https://gcc.gnu.org/onlinedocs/gcc-4.0.4/gcc/Precompiled-Headers.html
@@ -1821,7 +1821,7 @@ def _check_and_build_extension_h_precompiler_headers(
             # check if string present in a file
             return signature == content
 
-    def _create_if_not_exist(path_dir):
+    def _create_if_not_exist(path_dir) -> None:
         if not os.path.exists(path_dir):
             try:
                 Path(path_dir).mkdir(parents=True, exist_ok=True)
@@ -1829,13 +1829,13 @@ def _check_and_build_extension_h_precompiler_headers(
                 if exc.errno != errno.EEXIST:
                     raise RuntimeError(f"Fail to create path {path_dir}") from exc
 
-    def write_pch_signature_to_file(file_path, pch_sign):
+    def write_pch_signature_to_file(file_path, pch_sign) -> None:
         _create_if_not_exist(os.path.dirname(file_path))
         with open(file_path, "w") as f:
             f.write(pch_sign)
             f.close()
 
-    def build_precompile_header(pch_cmd):
+    def build_precompile_header(pch_cmd) -> None:
         try:
             subprocess.check_output(pch_cmd, shell=True, stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
@@ -1877,7 +1877,7 @@ def _check_and_build_extension_h_precompiler_headers(
             write_pch_signature_to_file(head_file_signature, pch_sign)
 
 def remove_extension_h_precompiler_headers():
-    def _remove_if_file_exists(path_file):
+    def _remove_if_file_exists(path_file) -> None:
         if os.path.exists(path_file):
             os.remove(path_file)
 

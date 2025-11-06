@@ -70,7 +70,7 @@ def _create_rich_table(
     scale: float = 1.0,
     min_width: int = 9,
     max_width: int = 80,
-):
+) -> None:
     import matplotlib
     import rich.align
     import rich.box
@@ -152,7 +152,7 @@ def _create_rich_table(
     console.print(table, end="\n\n")
 
 
-def visualize_sharding(dtensor, header="", use_rich: bool = False):
+def visualize_sharding(dtensor, header="", use_rich: bool = False) -> None:
     """
     Visualizes sharding in the terminal for :class:`DTensor` that are 1D or 2D.
 

@@ -157,7 +157,7 @@ class MemoryTracker:
     def show_traces(self, path: str = "") -> None:
         import matplotlib.pyplot as plt
 
-        def _plot_figure(x, y_values, labels):
+        def _plot_figure(x, y_values, labels) -> None:
             min_val = min(chain.from_iterable(y_values)) * 0.999
             max_val = max(chain.from_iterable(y_values)) * 1.001
             plt.figure()

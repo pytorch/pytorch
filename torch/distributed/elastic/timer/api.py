@@ -179,14 +179,14 @@ class TimerServer(abc.ABC):
             )
             return True
 
-    def _watchdog_loop(self):
+    def _watchdog_loop(self) -> None:
         while not self._stop_signaled:
             try:
                 self._run_watchdog()
             except Exception:
                 logger.exception("Error running watchdog")
 
-    def _run_watchdog(self):
+    def _run_watchdog(self) -> None:
         batch_size = max(1, self._request_queue.size())
         timer_requests = self._request_queue.get(batch_size, self._max_interval)
         self.register_timers(timer_requests)

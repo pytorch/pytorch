@@ -183,7 +183,7 @@ class RendezvousTimeout:
         """Get the keep-alive heartbeat timeout."""
         return self._heartbeat
 
-    def _set_timeouts(self, **timeouts: Optional[timedelta]):
+    def _set_timeouts(self, **timeouts: Optional[timedelta]) -> None:
         for name, timeout in timeouts.items():
             if timeout is None:
                 timeout = self._DEFAULT_TIMEOUTS[name]
@@ -395,7 +395,7 @@ class _BackendRendezvousStateHolder(_RendezvousStateHolder):
         self._last_sync_time = -1
         self._dead_nodes = []
 
-    def _record(self, message: str, node_state: NodeState = NodeState.RUNNING):
+    def _record(self, message: str, node_state: NodeState = NodeState.RUNNING) -> None:
         construct_and_record_rdzv_event(
             name=f"{self.__class__.__name__}.{get_method_name()}",
             run_id=self._settings.run_id,

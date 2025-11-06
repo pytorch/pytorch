@@ -147,7 +147,7 @@ class ErrorHandler:
                 rootcause_error_file,
             )
 
-    def _rm(self, my_error_file):
+    def _rm(self, my_error_file) -> None:
         if os.path.isfile(my_error_file):
             # Log the contents of the original file.
             with open(my_error_file) as fp:

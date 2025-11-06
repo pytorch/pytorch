@@ -242,7 +242,7 @@ class IterDataPipe(IterableDataset[_T_co], metaclass=_IterDataPipeMeta):
 
 
 class DFIterDataPipe(IterDataPipe):
-    def _is_dfpipe(self):
+    def _is_dfpipe(self) -> bool:
         return True
 
 

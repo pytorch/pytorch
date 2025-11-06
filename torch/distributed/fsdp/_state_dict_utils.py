@@ -542,7 +542,7 @@ def _sharded_post_state_dict_hook(
     with a unflattened, sharded parameter (a ShardedTensor).
     """
 
-    def param_hook(state_dict: dict[str, Any], prefix: str, fqn: str):
+    def param_hook(state_dict: dict[str, Any], prefix: str, fqn: str) -> None:
         param = state_dict[fqn]
         if not fsdp_state._state_dict_config._use_dtensor:
             sharded_tensor = _ext_chunk_tensor(
@@ -895,7 +895,7 @@ def _post_load_state_dict_hook(
         SimpleProfiler.dump_and_reset("FSDP model load_state_dict profiling: ")
 
 
-def _register_all_state_dict_hooks(state: _FSDPState):
+def _register_all_state_dict_hooks(state: _FSDPState) -> None:
     """
     Registers pre-save, post-save, pre-load, and post-load state dict hooks.
     """

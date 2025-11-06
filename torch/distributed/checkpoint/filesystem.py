@@ -267,7 +267,7 @@ class _StorageWriterTransforms:
             def write(self, b: Buffer) -> int:
                 return self.raw.write(b)
 
-            def close(self):
+            def close(self) -> None:
                 self.flush()
                 self.raw.flush()
                 # but not close.

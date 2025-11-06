@@ -5,7 +5,7 @@ import torch
 from torch.utils import _pytree as pytree
 
 
-def _basic_validation(op, args=(), kwargs=None):
+def _basic_validation(op, args=(), kwargs=None) -> None:
     """
     Common validation across all ops go in here.
     """
@@ -17,7 +17,7 @@ def _basic_validation(op, args=(), kwargs=None):
     # Validate types
     has_distributed_tensor = False
 
-    def is_distributed_tensor(e):
+    def is_distributed_tensor(e) -> None:
         nonlocal has_distributed_tensor
         if isinstance(e, ShardedTensor):
             has_distributed_tensor = True
@@ -34,7 +34,7 @@ def _basic_validation(op, args=(), kwargs=None):
     # Validate all distributed tensors use the same PG.
     cur_pg: Optional[torch.distributed.ProcessGroup] = None
 
-    def validate_pg(e):
+    def validate_pg(e) -> None:
         nonlocal cur_pg
         if isinstance(e, ShardedTensor):
             if cur_pg is not None and e._process_group is not cur_pg:
@@ -48,7 +48,7 @@ def _basic_validation(op, args=(), kwargs=None):
     pytree.tree_map_(validate_pg, kwargs)
 
 
-def _register_default_op(op, decorator):
+def _register_default_op(op, decorator) -> None:
     @decorator(op)
     def tensor_default_op(types, args=(), kwargs=None, pg=None):
         """

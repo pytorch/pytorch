@@ -128,7 +128,7 @@ def sharded_embedding(types, args, kwargs, pg):
         )
 
 
-def _validate_embedding_param(args, kwargs):
+def _validate_embedding_param(args, kwargs) -> None:
     """
     Validate input params of sharded embedding op.
 
