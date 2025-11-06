@@ -726,6 +726,32 @@ class DistMathOpsTest(DTensorTestBase):
             result_rep = dtensor_dist_rep.full_tensor()
             self.assertEqual(result_rep, ref_dist)
 
+        # Test with Partial placement inputs (result from reductions)
+        # Create tensors that will produce Partial placements after reduction
+        tensor_c = torch.randn(12, 8, device=self.device_type)
+        tensor_d = torch.randn(12, 8, device=self.device_type)
+
+        # Shard on dim 0, then sum on dim 0 (sharded dim) to get Partial
+        dtensor_c_sharded = distribute_tensor(tensor_c, device_mesh, [Shard(0)])
+        dtensor_d_sharded = distribute_tensor(tensor_d, device_mesh, [Shard(0)])
+
+        # Sum on sharded dimension creates Partial placement
+        partial_c = dtensor_c_sharded.sum(dim=0, keepdim=True)
+        partial_d = dtensor_d_sharded.sum(dim=0, keepdim=True)
+
+        # Verify inputs are Partial
+        self.assertTrue(partial_c.placements[0].is_partial())
+        self.assertTrue(partial_d.placements[0].is_partial())
+
+        # dist should handle Partial inputs correctly via redistribution
+        dist_partial = torch.dist(partial_c, partial_d, 2)
+
+        # Compare against reference (full tensors)
+        ref_partial_c = partial_c.full_tensor()
+        ref_partial_d = partial_d.full_tensor()
+        ref_partial_dist = torch.dist(ref_partial_c, ref_partial_d, 2)
+        self.assertEqual(dist_partial.full_tensor(), ref_partial_dist)
+
     @with_comms
     def test_foreach_norm(self):
         device_mesh = self.build_device_mesh()
