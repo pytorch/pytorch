@@ -131,6 +131,9 @@ manywheel-py3_10-cpu-aarch64-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_10-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_10-cuda-aarch64-12_6-build:
@@ -199,6 +202,9 @@ manywheel-py3_10-cuda-aarch64-12_6-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_10-cuda-aarch64-12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_10-cuda-aarch64-12_8-build:
@@ -267,6 +273,9 @@ manywheel-py3_10-cuda-aarch64-12_8-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_10-cuda-aarch64-12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_10-cuda-aarch64-12_9-build:
@@ -335,6 +344,9 @@ manywheel-py3_10-cuda-aarch64-12_9-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_10-cuda-aarch64-12_9
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_10-cuda-aarch64-13_0-build:
@@ -403,6 +415,9 @@ manywheel-py3_10-cuda-aarch64-13_0-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_10-cuda-aarch64-13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_11-cpu-aarch64-build:
@@ -489,6 +504,9 @@ manywheel-py3_11-cpu-aarch64-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_11-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_11-cuda-aarch64-12_6-build:
@@ -557,6 +575,9 @@ manywheel-py3_11-cuda-aarch64-12_6-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_11-cuda-aarch64-12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_11-cuda-aarch64-12_8-build:
@@ -625,6 +646,9 @@ manywheel-py3_11-cuda-aarch64-12_8-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_11-cuda-aarch64-12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_11-cuda-aarch64-12_9-build:
@@ -693,6 +717,9 @@ manywheel-py3_11-cuda-aarch64-12_9-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_11-cuda-aarch64-12_9
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_11-cuda-aarch64-13_0-build:
@@ -761,6 +788,9 @@ manywheel-py3_11-cuda-aarch64-13_0-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_11-cuda-aarch64-13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_12-cpu-aarch64-build:
@@ -847,6 +877,9 @@ manywheel-py3_12-cpu-aarch64-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_12-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_12-cuda-aarch64-12_6-build:
@@ -915,6 +948,9 @@ manywheel-py3_12-cuda-aarch64-12_6-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_12-cuda-aarch64-12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_12-cuda-aarch64-12_8-build:
@@ -983,6 +1019,9 @@ manywheel-py3_12-cuda-aarch64-12_8-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_12-cuda-aarch64-12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_12-cuda-aarch64-12_9-build:
@@ -1051,6 +1090,9 @@ manywheel-py3_12-cuda-aarch64-12_9-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_12-cuda-aarch64-12_9
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_12-cuda-aarch64-13_0-build:
@@ -1119,6 +1161,9 @@ manywheel-py3_12-cuda-aarch64-13_0-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_12-cuda-aarch64-13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13-cpu-aarch64-build:
@@ -1205,6 +1250,9 @@ manywheel-py3_13-cpu-aarch64-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_13-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13-cuda-aarch64-12_6-build:
@@ -1273,6 +1321,9 @@ manywheel-py3_13-cuda-aarch64-12_6-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_13-cuda-aarch64-12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13-cuda-aarch64-12_8-build:
@@ -1341,6 +1392,9 @@ manywheel-py3_13-cuda-aarch64-12_8-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_13-cuda-aarch64-12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13-cuda-aarch64-12_9-build:
@@ -1409,6 +1463,9 @@ manywheel-py3_13-cuda-aarch64-12_9-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_13-cuda-aarch64-12_9
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13-cuda-aarch64-13_0-build:
@@ -1477,6 +1534,9 @@ manywheel-py3_13-cuda-aarch64-13_0-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_13-cuda-aarch64-13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13t-cpu-aarch64-build:
@@ -1563,6 +1623,9 @@ manywheel-py3_13t-cpu-aarch64-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_13t-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13t-cuda-aarch64-12_6-build:
@@ -1631,6 +1694,9 @@ manywheel-py3_13t-cuda-aarch64-12_6-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_13t-cuda-aarch64-12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13t-cuda-aarch64-12_8-build:
@@ -1699,6 +1765,9 @@ manywheel-py3_13t-cuda-aarch64-12_8-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_13t-cuda-aarch64-12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13t-cuda-aarch64-12_9-build:
@@ -1767,6 +1836,9 @@ manywheel-py3_13t-cuda-aarch64-12_9-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_13t-cuda-aarch64-12_9
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13t-cuda-aarch64-13_0-build:
@@ -1835,6 +1907,9 @@ manywheel-py3_13t-cuda-aarch64-13_0-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_13t-cuda-aarch64-13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14-cpu-aarch64-build:
@@ -1921,6 +1996,9 @@ manywheel-py3_14-cpu-aarch64-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_14-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14-cuda-aarch64-12_6-build:
@@ -1989,6 +2067,9 @@ manywheel-py3_14-cuda-aarch64-12_6-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_14-cuda-aarch64-12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14-cuda-aarch64-12_8-build:
@@ -2057,6 +2138,9 @@ manywheel-py3_14-cuda-aarch64-12_8-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_14-cuda-aarch64-12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14-cuda-aarch64-12_9-build:
@@ -2125,6 +2209,9 @@ manywheel-py3_14-cuda-aarch64-12_9-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_14-cuda-aarch64-12_9
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14-cuda-aarch64-13_0-build:
@@ -2193,6 +2280,9 @@ manywheel-py3_14-cuda-aarch64-13_0-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_14-cuda-aarch64-13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14t-cpu-aarch64-build:
@@ -2279,6 +2369,9 @@ manywheel-py3_14t-cpu-aarch64-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_14t-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14t-cuda-aarch64-12_6-build:
@@ -2347,6 +2440,9 @@ manywheel-py3_14t-cuda-aarch64-12_6-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_14t-cuda-aarch64-12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14t-cuda-aarch64-12_8-build:
@@ -2415,6 +2511,9 @@ manywheel-py3_14t-cuda-aarch64-12_8-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_14t-cuda-aarch64-12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14t-cuda-aarch64-12_9-build:
@@ -2483,6 +2582,9 @@ manywheel-py3_14t-cuda-aarch64-12_9-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_14t-cuda-aarch64-12_9
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14t-cuda-aarch64-13_0-build:
@@ -2551,4 +2653,7 @@ manywheel-py3_14t-cuda-aarch64-13_0-upload-r2:  # Uploading to r2
       build_name: manywheel-py3_14t-cuda-aarch64-13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml

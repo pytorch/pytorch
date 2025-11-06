@@ -132,6 +132,9 @@ libtorch-cpu-shared-with-deps-release-upload-r2:  # Uploading to r2
       build_name: libtorch-cpu-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   libtorch-cuda12_6-shared-with-deps-release-build:
@@ -223,6 +226,9 @@ libtorch-cuda12_6-shared-with-deps-release-upload-r2:  # Uploading to r2
       build_name: libtorch-cuda12_6-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   libtorch-cuda12_8-shared-with-deps-release-build:
@@ -314,6 +320,9 @@ libtorch-cuda12_8-shared-with-deps-release-upload-r2:  # Uploading to r2
       build_name: libtorch-cuda12_8-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   libtorch-cuda12_9-shared-with-deps-release-build:
@@ -405,6 +414,9 @@ libtorch-cuda12_9-shared-with-deps-release-upload-r2:  # Uploading to r2
       build_name: libtorch-cuda12_9-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   libtorch-cuda13_0-shared-with-deps-release-build:
@@ -496,6 +508,9 @@ libtorch-cuda13_0-shared-with-deps-release-upload-r2:  # Uploading to r2
       build_name: libtorch-cuda13_0-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   libtorch-rocm7_0-shared-with-deps-release-build:
@@ -637,6 +652,9 @@ libtorch-rocm7_0-shared-with-deps-release-upload-r2:  # Uploading to r2
       build_name: libtorch-rocm7_0-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
 
   libtorch-rocm7_1-shared-with-deps-release-build:
@@ -778,4 +796,7 @@ libtorch-rocm7_1-shared-with-deps-release-upload-r2:  # Uploading to r2
       build_name: libtorch-rocm7_1-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload-r2.yml
