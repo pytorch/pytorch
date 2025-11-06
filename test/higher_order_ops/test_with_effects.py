@@ -1,8 +1,10 @@
 # Owner(s): ["module: functorch"]
 # ruff: noqa: F841
 # flake8: noqa: B950
+import copy
 import unittest
 from collections import deque
+from contextlib import ExitStack
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -17,7 +19,13 @@ from functorch.compile import (
     min_cut_rematerialization_partition,
     nop,
 )
-from torch._functorch.aot_autograd import aot_export_module
+from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+from torch._functorch.aot_autograd import (
+    aot_export_joint_with_descriptors,
+    aot_compile_joint_with_descriptors,
+    aot_export_module,
+)
+from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.effects import (
     _deregister_effectful_op,
     _EffectType,
@@ -870,6 +878,180 @@ def forward(self, primals_2, getitem_1, tangents_1, tangents_token):
             )
         finally:
             _deregister_effectful_op(torch.ops.aten.cos.default)
+
+    def test_export_invoke_subgraph(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            recorded_list = []
+
+            @torch.library.custom_op("mylib::record_memory", mutates_args=())
+            def record_memory(prefix: str, module_name: str) -> None:
+                torch.cuda.synchronize()
+                mem_alloc = torch.cuda.memory_allocated() / 1024**2
+                mem_reserved = torch.cuda.memory_reserved() / 1024**2
+                memory_str = f"[{prefix}] {module_name}: allocated={mem_alloc:.2f} MB, reserved={mem_reserved:.2f} MB"
+                recorded_list.append(memory_str)
+
+            @record_memory.register_fake
+            def record_memory_fake(prefix, module_name):
+                return
+
+            record_memory.register_effect(_EffectType.ORDERED)
+
+            class N(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear1 = torch.nn.Linear(1024, 1024)
+                    self.relu = torch.nn.ReLU()
+                    self.linear2 = torch.nn.Linear(1024, 1024)
+
+                @torch.compiler.nested_compile_region
+                def forward(self, x):
+                    torch.ops.mylib.record_memory("forward", "N")
+                    x = self.linear1(x)
+                    x = self.relu(x)
+                    x = self.linear2(x)
+                    return x
+
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.mod_list = torch.nn.ModuleList(N() for _ in range(3))
+
+                def forward(self, x):
+                    for m in self.mod_list:
+                        x = m(x)
+                    return x
+
+        model = M().to("cuda")
+        torch.cuda.reset_peak_memory_stats()
+
+        x = torch.randn(32, 1024, requires_grad=True, device="cuda")
+
+        ep = torch.export.export(model, (x,))
+        ep = ep.run_decompositions()
+        self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
+
+        self.assertExpectedInline(
+            ep.graph_module.code.strip(),
+            """\
+def forward(self, token, p_mod_list_0_linear1_weight, p_mod_list_0_linear1_bias, p_mod_list_0_linear2_weight, p_mod_list_0_linear2_bias, p_mod_list_1_linear1_weight, p_mod_list_1_linear1_bias, p_mod_list_1_linear2_weight, p_mod_list_1_linear2_bias, p_mod_list_2_linear1_weight, p_mod_list_2_linear1_bias, p_mod_list_2_linear2_weight, p_mod_list_2_linear2_bias, x):
+    repeated_subgraph0 = self.repeated_subgraph0
+    invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', token, x, p_mod_list_0_linear1_weight, p_mod_list_0_linear1_bias, p_mod_list_0_linear2_weight, p_mod_list_0_linear2_bias);  repeated_subgraph0 = token = x = p_mod_list_0_linear1_weight = p_mod_list_0_linear1_bias = p_mod_list_0_linear2_weight = p_mod_list_0_linear2_bias = None
+    getitem = invoke_subgraph[0]
+    getitem_1 = invoke_subgraph[1];  invoke_subgraph = None
+    repeated_subgraph0_1 = self.repeated_subgraph0
+    invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'subgraph_0', getitem, getitem_1, p_mod_list_1_linear1_weight, p_mod_list_1_linear1_bias, p_mod_list_1_linear2_weight, p_mod_list_1_linear2_bias);  repeated_subgraph0_1 = getitem = getitem_1 = p_mod_list_1_linear1_weight = p_mod_list_1_linear1_bias = p_mod_list_1_linear2_weight = p_mod_list_1_linear2_bias = None
+    getitem_2 = invoke_subgraph_1[0]
+    getitem_3 = invoke_subgraph_1[1];  invoke_subgraph_1 = None
+    repeated_subgraph0_2 = self.repeated_subgraph0
+    invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_2, 'subgraph_0', getitem_2, getitem_3, p_mod_list_2_linear1_weight, p_mod_list_2_linear1_bias, p_mod_list_2_linear2_weight, p_mod_list_2_linear2_bias);  repeated_subgraph0_2 = getitem_2 = getitem_3 = p_mod_list_2_linear1_weight = p_mod_list_2_linear1_bias = p_mod_list_2_linear2_weight = p_mod_list_2_linear2_bias = None
+    getitem_4 = invoke_subgraph_2[0]
+    getitem_5 = invoke_subgraph_2[1];  invoke_subgraph_2 = None
+    return (getitem_4, getitem_5)""",
+        )
+
+        self.assertExpectedInline(
+            ep.graph_module.repeated_subgraph0.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops.mylib.record_memory.default, 'forward', 'N');  arg0_1 = None
+    getitem = with_effects[0];  with_effects = None
+    permute = torch.ops.aten.permute.default(arg2_1, [1, 0]);  arg2_1 = None
+    addmm = torch.ops.aten.addmm.default(arg3_1, arg1_1, permute);  arg3_1 = arg1_1 = permute = None
+    relu = torch.ops.aten.relu.default(addmm);  addmm = None
+    permute_1 = torch.ops.aten.permute.default(arg4_1, [1, 0]);  arg4_1 = None
+    addmm_1 = torch.ops.aten.addmm.default(arg5_1, relu, permute_1);  arg5_1 = relu = permute_1 = None
+    return (getitem, addmm_1)""",
+        )
+
+        recorded_list.clear()
+        # TODO: seems like invoke_subgraph's py_autograd impl calls the subgraph
+        # eagerly twice. Once for get_output_metadata and then once for
+        # InvokeSubgraphAutogradOp. This causes record_memory to be called twice.
+        with torch.no_grad():
+            out2 = ep.module()(x)
+        self.assertEqual(len(recorded_list), 3)
+        self.assertTrue(torch.allclose(model(x), out2))
+
+    def test_invoke_subgraph_joint(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            recorded_dict = []
+
+            @torch.library.custom_op("mylib::record_memory", mutates_args=())
+            def record_memory(prefix: str, module_name: str) -> None:
+                torch.cuda.synchronize()
+                mem_alloc = torch.cuda.memory_allocated() / 1024**2
+                mem_reserved = torch.cuda.memory_reserved() / 1024**2
+                memory_str = f"[{prefix}] {module_name}: allocated={mem_alloc:.2f} MB, reserved={mem_reserved:.2f} MB"
+                recorded_dict.append(memory_str)
+
+            @record_memory.register_fake
+            def record_memory_fake(prefix, module_name):
+                return
+
+            record_memory.register_effect(_EffectType.ORDERED)
+
+            class N(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear1 = torch.nn.Linear(1024, 1024)
+                    self.relu = torch.nn.ReLU()
+                    self.linear2 = torch.nn.Linear(1024, 1024)
+
+                @torch.compiler.nested_compile_region
+                def forward(self, x):
+                    torch.ops.mylib.record_memory("forward", "N")
+                    x = self.linear1(x)
+                    x = self.relu(x)
+                    x = self.linear2(x)
+                    return x
+
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.mod_list = torch.nn.ModuleList(N() for _ in range(3))
+
+                def forward(self, x):
+                    for m in self.mod_list:
+                        x = m(x)
+                    return x
+
+        model = M().to("cuda")
+        torch.cuda.reset_peak_memory_stats()
+
+        x = torch.randn(32, 1024, requires_grad=True, device="cuda")
+        out1 = model(x)
+        out1.sum().backward()
+
+        model2 = copy.deepcopy(model)
+        x2 = x.clone()
+
+        gm = _dynamo_graph_capture_for_export(model2)(x2)
+        fake_mode = gm.meta.get("fake_mode", None)
+        with tracing(TracingContext(fake_mode)):
+            with ExitStack() as stack:
+                joint = aot_export_joint_with_descriptors(
+                    stack,
+                    gm,
+                    (x2,),
+                )
+                joint.graph_module.print_readable()
+
+            compiled_fn = aot_compile_joint_with_descriptors(
+                joint
+            )
+
+        out2 = compiled_fn(
+            *dict(model2.named_parameters()).values(),
+            *dict(model2.named_buffers()).values(),
+            x2,
+        )
+        out2.sum().backward()
+
+        self.assertTrue(torch.allclose(out1, out2))
+
+    # Test nested invoke subclass
+    # test autofunctionalize invoke subclass?
 
 
 if __name__ == "__main__":

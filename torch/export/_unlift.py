@@ -750,6 +750,8 @@ def _unlift_exported_program_lifted_states(
 
     # TODO T206340015
     if ep.verifiers[0].dialect != "TRAINING":
+        ep = copy.copy(ep)
+        ep._graph_module = copy.deepcopy(ep._graph_module)
         ep = _remove_effect_tokens(ep)
 
     new_gm = torch.fx.GraphModule(ep.graph_module, copy.deepcopy(ep.graph))

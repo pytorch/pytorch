@@ -37,8 +37,8 @@ def _get_op_qualname(op: _op_identifier) -> str:
         return op._qualname
     elif isinstance(op, str):
         return op
-
-    raise ValueError(f"Invalid operator input {op}")
+    else:
+        return str(op)
 
 
 def _register_effectful_op(op: _op_identifier, effect: Optional[EffectType]) -> None:
