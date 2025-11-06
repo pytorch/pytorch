@@ -205,6 +205,7 @@ class cuBLASModule:
             return torch._C._set_fp32_precision_setter("cuda", "matmul", value)
         raise AttributeError("Unknown attribute " + name)
 
+
 class MathSDPModule:
     def __getattr__(self, name):
         if name == "fp32_precision":
