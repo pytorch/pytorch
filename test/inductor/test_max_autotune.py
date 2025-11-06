@@ -1913,6 +1913,9 @@ class TestMaxAutotune(TestCase):
             # Check that contiguous transform was used
             FileCheck().check("contiguous_mm").run(code[0])
 
+    @unittest.skipIf(
+        config.cpp_wrapper, "out_dtype override not supported for AOTI"
+    )
     @unittest.skipIf(TEST_WITH_ROCM, "out_dtype override only available on NVIDIA")
     def test_bmm_out_dtype(self):
         def f(a, b):
