@@ -199,7 +199,6 @@ def get_shim_functions(
     with open(shim_file) as f:
         lines = f.readlines()
 
-    # Use PreprocessorTracker to track version blocks
     tracker = PreprocessorTracker()
 
     # Match function declarations like: AOTI_TORCH_EXPORT ... function_name(
@@ -208,7 +207,6 @@ def get_shim_functions(
     typedef_pattern = re.compile(r"typedef\s+.*\(\*(\w+)\)")
 
     for line in lines:
-        # Process line with tracker - returns True if it's a comment or preprocessor directive
         is_directive_or_comment = tracker.process_line(line)
 
         # Only look for function declarations if not a comment/directive and inside a version block
@@ -267,33 +265,26 @@ def write_shim_function_versions(
             f.write(f"{func_name}: TORCH_VERSION_{major}_{minor}_0\n")
 
 
-def check_file(filename: str) -> list[LintMessage]:
+def check_file(
+    filename: str, shim_functions: dict[str, tuple[int, int]]
+) -> list[LintMessage]:
     """
     Check if the file is in torch/csrc/stable and lint it for proper
     usage of versioned shim functions.
     """
     lint_messages: list[LintMessage] = []
 
-    # Get versioned shim functions
-    shim_functions = get_shim_functions()
-    if not shim_functions:
-        raise RuntimeError("Could not extract any shim_functions")
-
     with open(filename) as f:
         lines = f.readlines()
 
-    # Use PreprocessorTracker to track version blocks
     tracker = PreprocessorTracker()
 
     for line_num, line in enumerate(lines, 1):
-        # Process line with tracker - returns True if it's a comment or preprocessor directive
         is_directive_or_comment = tracker.process_line(line)
 
-        # Skip if it's a comment or directive - only check regular code lines
         if is_directive_or_comment:
             continue
 
-        # Check for calls to versioned shim functions
         current_version = tracker.get_current_version()
 
         for func_name, required_version in shim_functions.items():
@@ -302,7 +293,6 @@ def check_file(filename: str) -> list[LintMessage]:
             # 2. Type usage like: func_name variable_name
             # Use word boundaries to avoid matching partial names
 
-            # Check for function calls or type usage
             if re.search(rf"\b{re.escape(func_name)}\b", line):
                 major, minor = required_version
                 required_macro = f"TORCH_VERSION_{major}_{minor}_0"
@@ -389,7 +379,7 @@ if __name__ == "__main__":
 
     lint_messages = []
     for filename in args.filenames:
-        lint_messages.extend(check_file(filename))
+        lint_messages.extend(check_file(filename, shim_functions))
 
     for lint_message in lint_messages:
         print(json.dumps(lint_message._asdict()), flush=True)

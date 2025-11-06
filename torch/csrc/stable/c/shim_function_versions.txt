@@ -6,4 +6,3 @@
 
 torch_call_dispatcher: TORCH_VERSION_2_10_0
 torch_library_impl: TORCH_VERSION_2_10_0
-torch_library_impl2: TORCH_VERSION_2_10_0

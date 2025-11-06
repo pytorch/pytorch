@@ -1,7 +1,6 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from tools.linter.adapters.stable_shim_usage_linter import (
     check_file,
@@ -36,7 +35,6 @@ class TestStableShimUsageLinter(unittest.TestCase):
 
         result = get_shim_functions(sample_shim)
 
-        # Expected results based on the sample_shim.h file
         expected = {
             # Simple versioned function (2.10)
             "simple_versioned_func": (2, 10),
@@ -82,11 +80,9 @@ class TestStableShimUsageLinter(unittest.TestCase):
             with open(tmp_path) as f:
                 content = f.read()
 
-            # Verify header
             self.assertIn("Auto-generated file", content)
             self.assertIn("DO NOT EDIT MANUALLY", content)
 
-            # Verify functions are sorted by version then name
             lines = [
                 line
                 for line in content.split("\n")
@@ -121,12 +117,8 @@ class TestStableShimUsageLinter(unittest.TestCase):
             sample_usage.exists(), f"Sample usage not found at {sample_usage}"
         )
 
-        # Mock get_shim_functions to use our sample shim
-        with patch(
-            "tools.linter.adapters.stable_shim_usage_linter.get_shim_functions"
-        ) as mock_get_shim:
-            mock_get_shim.return_value = get_shim_functions(sample_shim)
-            lint_messages = check_file(str(sample_usage))
+        shim_functions = get_shim_functions(sample_shim)
+        lint_messages = check_file(str(sample_usage), shim_functions)
 
         # Expected errors based on sample_usage.h:
         # Line 15: unversioned call to simple_versioned_func
