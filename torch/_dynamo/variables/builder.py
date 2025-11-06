@@ -293,7 +293,7 @@ from .user_defined import (
     IntWrapperVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
-    NewNamedTupleVariable,
+    NamedTupleVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedDictVariable,
@@ -766,7 +766,7 @@ class VariableBuilder:
                 )
                 for name in namedtuple_fields(type(value))
             ]
-            result = NewNamedTupleVariable(
+            result = NamedTupleVariable(
                 output, tuple_cls=type(value), source=self.source
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
@@ -3250,11 +3250,11 @@ def handle_traced_output(
         elif istype(example_value, (list, immutable_list)):
             return ListVariable(unpacked, **options)
         else:
-            # Only real namedtuples should use NewNamedTupleVariable
+            # Only real namedtuples should use NamedTupleVariable
             assert hasattr(example_value, "_fields"), (
                 f"expected named tuple but got {type(example_value)}"
             )
-            return NewNamedTupleVariable(
+            return NamedTupleVariable(
                 unpacked, example_value.__class__, **options
             )
     elif example_value is None or proxy.node.target is torch.manual_seed:
@@ -4064,12 +4064,12 @@ class SourcelessBuilder:
                     for i in range(len(value))
                 ]
                 return TupleVariable(output)
-            # Real namedtuples - use NewNamedTupleVariable
+            # Real namedtuples - use NamedTupleVariable
             output = [
                 SourcelessBuilder.create(tx, getattr(value, name))
                 for name in namedtuple_fields(type(value))
             ]
-            return NewNamedTupleVariable(output, tuple_cls=type(value))
+            return NamedTupleVariable(output, tuple_cls=type(value))
         elif (
             isinstance(value, torch.SymInt)
             and value.node.expr in tx.output.bound_symbols
