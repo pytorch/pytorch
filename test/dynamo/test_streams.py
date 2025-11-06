@@ -7,6 +7,10 @@ import weakref
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.graph_bytecode_inputs import (
+    reset_user_object_tracking,
+    store_user_object_weakrefs,
+)
 from torch._dynamo.testing import extract_graph, remove_trailing_space
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import requires_cuda
@@ -437,17 +441,66 @@ class GraphModule(torch.nn.Module):
         )
 
     @requires_cuda
-    def test_run_opcheck(self):
+    def test_run_opcheck_fork_join(self):
         from torch._dynamo.variables.streams import fork_stream, join_stream
         from torch.library import opcheck
 
-        sample_inputs = [
-            (0, torch.device("cuda:0"), 1, torch.device("cuda:1")),
-            (2, torch.device("cuda:2"), 3, torch.device("cuda:1")),
-        ]
-        for args in sample_inputs:
-            opcheck(fork_stream, args)
-            opcheck(join_stream, args)
+        original_stream = torch.accelerator.current_stream()
+        try:
+            s0 = torch.Stream()
+            s1 = torch.Stream()
+            store_user_object_weakrefs(s0, s1)
+
+            sample_inputs = [
+                (0, 1),
+                (1, 0),
+            ]
+            for args in sample_inputs:
+                opcheck(fork_stream, args)
+                opcheck(join_stream, args)
+        finally:
+            torch.accelerator.set_stream(original_stream)
+            reset_user_object_tracking()
+
+    @requires_cuda
+    def test_run_opcheck_wait_record(self):
+        from torch._dynamo.variables.streams import record_event, wait_event
+        from torch.library import opcheck
+
+        original_stream = torch.accelerator.current_stream()
+        try:
+            s0 = torch.Stream()
+            s1 = torch.Stream()
+            e0 = torch.Event()
+            e1 = torch.Event()
+            store_user_object_weakrefs(s0, s1, e0, e1)
+
+            sample_inputs = [
+                (2, 0),
+                (3, 1),
+            ]
+            for args in sample_inputs:
+                opcheck(wait_event, args)
+                opcheck(record_event, args)
+        finally:
+            torch.accelerator.set_stream(original_stream)
+            reset_user_object_tracking()
+
+    def test_is_marked_side_effectful(self):
+        self.assertIn(
+            torch.ops.streams.fork.default, torch.fx.node._side_effectful_functions
+        )
+        self.assertIn(
+            torch.ops.streams.join.default, torch.fx.node._side_effectful_functions
+        )
+        self.assertIn(
+            torch.ops.streams.wait_event.default,
+            torch.fx.node._side_effectful_functions,
+        )
+        self.assertIn(
+            torch.ops.streams.record_event.default,
+            torch.fx.node._side_effectful_functions,
+        )
 
 
 if __name__ == "__main__":
