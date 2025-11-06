@@ -4036,7 +4036,7 @@ Eq(s20, s77)""",
 
     @parametrize(
         "nt_view_name",
-        [k for k in VIEW_TEST_CASES.keys() if k != "subclass_dense_subclass_dense"],
+        [k for k in VIEW_TEST_CASES if k != "subclass_dense_subclass_dense"],
     )
     def test_inputs_to_compiled_fn_are_views(self, nt_view_name):
         self._input_view_test(nt_view_name)

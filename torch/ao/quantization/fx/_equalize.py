@@ -350,7 +350,7 @@ def get_op_node_and_weight_eq_obs(
 
     # Find the op node that comes directly after the input equalization observer
     op_node = None
-    for user in input_eq_obs_node.users.keys():
+    for user in input_eq_obs_node.users:
         if node_supports_equalization(user, modules):
             op_node = user
             break

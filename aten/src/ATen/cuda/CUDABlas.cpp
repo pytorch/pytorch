@@ -388,6 +388,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
 #ifndef USE_ROCM
   at::Half halpha;
   at::Half hbeta;
+  uint32_t mask = -1;
 #endif
   void * alpha_ptr = &alpha;
   void * beta_ptr = &beta;
@@ -427,7 +428,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
     auto fp16_reduction = at::globalContext().allowFP16ReductionCuBLAS();
     if (fp16_reduction !=
         at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK) {
-      uint32_t mask =
+      mask =
           fp16_reduction ==
                   at::CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK
               ? (CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE |
@@ -444,7 +445,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
     auto bf16_reduction = at::globalContext().allowBF16ReductionCuBLAS();
     if (bf16_reduction !=
         at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK) {
-      uint32_t mask =
+      mask =
           bf16_reduction ==
                   at::CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK
               ? (CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE |
@@ -511,17 +512,41 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
   cublasStatus_t cublasStatus = CUBLAS_STATUS_SUCCESS;
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
-      ltHandle,
-      computeDesc.descriptor(),
-      Adesc.descriptor(),
-      Bdesc.descriptor(),
-      Cdesc.descriptor(),
-      Cdesc.descriptor(),
-      preference.descriptor(),
-      1,
-      &heuristicResult,
-      &returnedResult));
+  // on Blackwell+, we fake a n > 1 matmul when querying heuristics
+  // to prevent cuBLASLt from dispatching to a GEMV kernel for batch-invariance
+#ifndef USE_ROCM
+  const bool lie_to_cublaslt = mask == CUBLASLT_REDUCTION_SCHEME_NONE && n == 1 && at::cuda::getCurrentDeviceProperties()->major >= 10;
+#else
+  const bool lie_to_cublaslt = false;
+#endif
+  if (lie_to_cublaslt) {
+     CuBlasLtMatrixLayout FakeBdesc(abType, k, 2, ldb, opb == CUBLAS_OP_T);
+     CuBlasLtMatrixLayout FakeCdesc(cType, m, 2, ldc);
+
+     TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+        ltHandle,
+        computeDesc.descriptor(),
+        Adesc.descriptor(),
+        FakeBdesc.descriptor(),
+        FakeCdesc.descriptor(),
+        FakeCdesc.descriptor(),
+        preference.descriptor(),
+        1,
+        &heuristicResult,
+        &returnedResult));
+  } else {
+    TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+        ltHandle,
+        computeDesc.descriptor(),
+        Adesc.descriptor(),
+        Bdesc.descriptor(),
+        Cdesc.descriptor(),
+        Cdesc.descriptor(),
+        preference.descriptor(),
+        1,
+        &heuristicResult,
+        &returnedResult));
+  }
   if (returnedResult == 0) {
     cublasStatus = CUBLAS_STATUS_NOT_SUPPORTED;
   }

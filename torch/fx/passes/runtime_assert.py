@@ -373,11 +373,9 @@ def insert_deferred_runtime_asserts(
                     shape_env, node.meta.get("unbacked_bindings", {})
                 )
 
-                assert resolved_unbacked_bindings is not None
-
                 def has_new_unbacked_bindings():
-                    # pyrefly: ignore [missing-attribute]
-                    for key in resolved_unbacked_bindings.keys():
+                    assert resolved_unbacked_bindings is not None
+                    for key in resolved_unbacked_bindings:
                         if key not in expr_to_proxy:
                             return True
                     return False
