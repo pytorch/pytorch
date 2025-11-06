@@ -2337,12 +2337,12 @@ end
                 generated_files.append(constants_config_json)
 
             cache_cls = {
-                "xpu": XPUCodeCache,
                 "rocm": ROCmCodeCache,
                 "cuda": CUDACodeCache,
-            }["rocm" if torch.version.hip else device_type]
-            gpu_codecache = cache_cls()
+                "xpu": XPUCodeCache,
+            }.get("rocm" if torch.version.hip else device_type, CUDACodeCache)
 
+            gpu_codecache = cache_cls()
             gpu_kernels_o = gpu_codecache.aot_kernels_o.copy()
             # clear the list of aot kernels after each linking
             gpu_codecache.aot_kernels_o.clear()

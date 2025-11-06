@@ -73,7 +73,7 @@ class CUTLASSTemplate(KernelTemplate):
         self.output_node: Buffer = Buffer(name="buf_out", layout=layout)
         self.input_reorder = input_reorder
         self.layout = layout
-        self.device_type = layout.device.type if input_nodes else "cuda"
+        self.device_type = layout.device.type
 
     @classmethod
     @functools.lru_cache(None)
