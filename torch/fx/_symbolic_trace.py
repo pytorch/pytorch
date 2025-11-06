@@ -18,6 +18,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import ScriptObject  # type: ignore[attr-defined]
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 
 from ._compatibility import compatibility
 from ._lazy_graph_module import _make_graph_module
@@ -421,7 +422,7 @@ class Tracer(TracerBase):
         # a get_attr to retrieve that tensor. Otherwise, we'll store away the
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
-        if isinstance(a, _constant_attribute_types):
+        if isinstance(a, _constant_attribute_types) or is_opaque_type(type(a)):
             qualname: Optional[str] = self.tensor_attrs.get(a)
 
             # Tensor was not found in the Module hierarchy, stow it away in a
@@ -433,6 +434,8 @@ class Tracer(TracerBase):
                     base_name = "_torchbind_obj"
                 elif isinstance(a, pytree.TreeSpec):
                     base_name = "_tree_spec_constant"
+                elif is_opaque_type(type(a)):
+                    base_name = "_opaque_obj"
                 else:
                     raise RuntimeError(
                         f"cannot create constant arg for {a} of type {type(a)}."
