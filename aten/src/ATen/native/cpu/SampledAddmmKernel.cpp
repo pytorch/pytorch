@@ -50,6 +50,7 @@ void sampled_addmm_sparse_csr_kernel_impl(
   // but for most commonly used case (mat1 and mat2 is 2d tensor), B = 1,
   // balance partition M by using parallel_sparse_csr.
   using Vec = vec::Vectorized<scalar_t>;
+  using fVec = vec::Vectorized<vec::vec_scalar_t<scalar_t>>;
   for (const auto b : c10::irange(B)) {
     auto crow_slice = crow_acc[b];
     auto col_slice = col_acc[b];
@@ -65,8 +66,8 @@ void sampled_addmm_sparse_csr_kernel_impl(
           int64_t n = col_slice[e];
           scalar_t val = values_slice[e];
           scalar_t dot = vec::map2_reduce_all<scalar_t>(
-              [](Vec x, Vec y) { return x * y; },
-              [](Vec x, Vec y) { return x + y; },
+              [](fVec x, fVec y) { return x * y; },
+              [](fVec x, fVec y) { return x + y; },
               mat1_ptr + m * K,
               mat2_ptr + n * K,
               K);
@@ -85,7 +86,7 @@ void sampled_addmm_sparse_csr_kernel(
     const Scalar& alpha,
     const Tensor& result) {
   const auto index_type = result.crow_indices().scalar_type();
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(mat1.scalar_type(), "sampled_addmm_sparse_csr_kernel", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, mat1.scalar_type(), "sampled_addmm_sparse_csr_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(index_type, "sampled_addmm_sparse_csr_index", [&]() {
       sampled_addmm_sparse_csr_kernel_impl<scalar_t, index_t>(mat1, mat2, beta, alpha, result);
     });
