@@ -1192,9 +1192,7 @@ struct SmallVectorStorage {
 template <typename T>
 struct alignas(T) SmallVectorStorage<T, 0> {};
 
-/// Forward declaration of SmallVector so that
-/// calculateSmallVectorDefaultInlinedElements can reference
-/// `sizeof(SmallVector<T, 0>)`.
+/// Forward declaration of SmallVector.
 template <typename T, unsigned N>
 class /* LLVM_GSL_OWNER */ SmallVector;
 
@@ -1242,7 +1240,7 @@ constexpr size_t calculateSmallVectorDefaultInlinedElements() {
   // Discount the size of the header itself when calculating the maximum inline
   // bytes.
   constexpr size_t PreferredInlineBytes =
-      kPreferredSmallVectorSizeof - sizeof(SmallVector<T, 0>);
+      kPreferredSmallVectorSizeof - sizeof(SmallVectorImpl<T>);
   constexpr size_t NumElementsThatFit = PreferredInlineBytes / sizeof(T);
   return NumElementsThatFit == 0 ? 1 : NumElementsThatFit;
 }
