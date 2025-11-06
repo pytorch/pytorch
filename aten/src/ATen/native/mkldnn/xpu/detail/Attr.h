@@ -465,19 +465,4 @@ enum class ScalingType : std::uint8_t {
   RowWise, // fp32 scales
 };
 
-static inline int get_onednn_mask_from_scaling_type(ScalingType scaling_type) {
-  // Set according to
-  // https://github.com/uxlfoundation/oneDNN/blob/main/tests/benchdnn/doc/knobs_attr.md#--attr-scales
-  switch (scaling_type) {
-    case ScalingType::TensorWise:
-      return 0;
-    case ScalingType::RowWise:
-      return 1 << 0;
-
-    default:
-      TORCH_CHECK(false, "Unsupported scaling type for oneDNN matmul");
-  }
-  return 0;
-}
-
 } // namespace at::native::onednn
