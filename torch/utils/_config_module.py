@@ -175,7 +175,13 @@ def install_config_module(module: ModuleType) -> None:
             if (
                 key.startswith("__")
                 or isinstance(value, (ModuleType, FunctionType))
-                or (hasattr(value, "__module__") and value.__module__ == "typing")
+                or (
+                    hasattr(value, "__module__")
+                    and (
+                        value.__module__ == "typing"
+                        or value.__module__.startswith("collections.abc")
+                    )
+                )
                 # Handle from torch.utils._config_module import Config
                 or (isinstance(value, type) and issubclass(value, _Config))
             ):
