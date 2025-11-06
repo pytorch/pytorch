@@ -585,7 +585,7 @@ class TORCH_API OperatorHandle {
 
   // We need to store this iterator in order to make
   // Dispatcher::cleanup() fast -- it runs a lot on program
-  // termination (and presuambly library unloading).
+  // termination (and presumably library unloading).
   std::list<Dispatcher::OperatorDef>::iterator operatorIterator_;
 };
 

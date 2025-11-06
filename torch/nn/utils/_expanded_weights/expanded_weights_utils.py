@@ -8,7 +8,7 @@ from .expanded_weights_impl import ExpandedWeight
 
 def is_batch_first(expanded_args_and_kwargs):
     batch_first = None
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     for arg in expanded_args_and_kwargs:
         if not isinstance(arg, ExpandedWeight):
             continue
@@ -32,7 +32,7 @@ def standard_kwargs(kwarg_names, expanded_args):
     expanded_args_without_kwargs = expanded_args[
         : len(expanded_args) - len(kwarg_names)
     ]
-    expanded_kwargs = dict(zip(kwarg_names, kwarg_values))
+    expanded_kwargs = dict(zip(kwarg_names, kwarg_values, strict=True))
     return expanded_args_without_kwargs, expanded_kwargs
 
 
@@ -123,7 +123,7 @@ def maybe_scale_by_batch_size(grad_sample, expanded_weight):
         return grad_sample
 
 
-def set_grad_sample_if_exists(maybe_expanded_weight, per_sample_grad_fn):
+def set_grad_sample_if_exists(maybe_expanded_weight, per_sample_grad_fn) -> None:
     unpacked = unpack_expanded_weight_or_tensor(maybe_expanded_weight)
     if isinstance(maybe_expanded_weight, ExpandedWeight):
         grad_sample_contribution = maybe_scale_by_batch_size(

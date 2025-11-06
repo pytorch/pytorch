@@ -13,6 +13,7 @@ from torch._inductor.fx_passes.memory_estimator import (
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map_only
 from torch.utils.weak import WeakIdKeyDictionary
@@ -23,7 +24,7 @@ def tensor_storage_id(tensor):
 
 
 def device_filter(device):
-    return device.type == "cuda"
+    return device.type == GPU_TYPE
 
 
 class FakeTensorMemoryProfilerMode(TorchDispatchMode):
@@ -83,10 +84,10 @@ class TestMemoryProfilingResNet(InductorTestCase):
 
         def create_inputs_and_weights():
             """Create inputs and weights on CUDA."""
-            x = torch.randn(32, 1000, device="cuda")
-            w1 = torch.randn(500, 1000, device="cuda")
-            w2 = torch.randn(100, 500, device="cuda")
-            w3 = torch.randn(10, 100, device="cuda")
+            x = torch.randn(32, 1000, device=GPU_TYPE)
+            w1 = torch.randn(500, 1000, device=GPU_TYPE)
+            w2 = torch.randn(100, 500, device=GPU_TYPE)
+            w3 = torch.randn(10, 100, device=GPU_TYPE)
             return x, w1, w2, w3
 
         def fn(x, w1, w2, w3):
@@ -128,10 +129,10 @@ class TestMemoryProfilingResNet(InductorTestCase):
 
         def create_inputs_and_weights():
             """Create inputs and weights on CUDA."""
-            x = torch.randn(8, 3, 224, 224, device="cuda")
-            conv1_weight = torch.randn(64, 3, 3, 3, device="cuda")
-            conv2_weight = torch.randn(128, 64, 3, 3, device="cuda")
-            linear_weight = torch.randn(10, 128 * 56 * 56, device="cuda")
+            x = torch.randn(8, 3, 224, 224, device=GPU_TYPE)
+            conv1_weight = torch.randn(64, 3, 3, 3, device=GPU_TYPE)
+            conv2_weight = torch.randn(128, 64, 3, 3, device=GPU_TYPE)
+            linear_weight = torch.randn(10, 128 * 56 * 56, device=GPU_TYPE)
             return x, conv1_weight, conv2_weight, linear_weight
 
         def fn(x, conv1_weight, conv2_weight, linear_weight):
@@ -175,9 +176,9 @@ class TestMemoryTracker(InductorTestCase):
 
         def create_inputs_and_weights():
             """Create inputs and weights on CUDA."""
-            x = torch.randn(32, 100, device="cuda")
-            w1 = torch.randn(100, 50, device="cuda")
-            w2 = torch.randn(50, 10, device="cuda")
+            x = torch.randn(32, 100, device=GPU_TYPE)
+            w1 = torch.randn(100, 50, device=GPU_TYPE)
+            w2 = torch.randn(50, 10, device=GPU_TYPE)
             return x, w1, w2
 
         def fn(x, w1, w2):
@@ -240,7 +241,7 @@ class TestMemoryTracker(InductorTestCase):
 
         with FakeTensorMode():
             # Create input
-            primals_1 = torch.randn(1000, 1000, device="cuda")
+            primals_1 = torch.randn(1000, 1000, device=GPU_TYPE)
 
             # Trace the function
             fx_graph = make_fx(foo)(primals_1)
@@ -340,4 +341,5 @@ class TestMemoryTracker(InductorTestCase):
 
 
 if __name__ == "__main__":
-    run_tests(needs="filelock")
+    if HAS_GPU:
+        run_tests(needs="filelock")

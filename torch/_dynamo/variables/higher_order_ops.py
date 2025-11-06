@@ -1183,7 +1183,7 @@ def speculate_subgraph(
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
         log.info(msg)
-        log.info(ex)
+        log.info(ex)  # noqa: G200
         raise ex
 
 
@@ -1371,6 +1371,11 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 supports_aliasing=self.supports_aliasing,
             )
 
+            # need to ensure we increase epoch so we don't memoize unbacked bindings
+            # across different subgraphs which can interfere with runtime assertion
+            # generation.
+            tx.fake_mode.epoch += 1
+
             if not only_consist_of(ret_val, (TensorVariable, ConstantVariable)):
                 unimplemented(
                     "Expected branches to return a possibly nested pytree of tensors "
@@ -1397,8 +1402,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         same_spec = _make_inlined(tx, pytree.TreeSpec.__eq__)(
             true_spec.treespec, false_spec.treespec
-        )
-        if not same_spec.as_python_constant():
+        ).as_python_constant()
+        # 3.14: NotImplemented cannot be converted to bool
+        if same_spec is not NotImplemented and not same_spec:
             unimplemented("Expected branches to return the same pytree structure.")
 
         (
@@ -1655,8 +1661,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # We need to have this check this way, because in case init is a TreeSpec and carry
         # but carry is only a LeafSpec, these two cannot be compared correctly.
         if (
-            isinstance(xs_treespec.as_python_constant(), pytree.LeafSpec)
-            != isinstance(_combine_treespec.as_python_constant(), pytree.LeafSpec)
+            xs_treespec.as_python_constant().is_leaf()
+            != _combine_treespec.as_python_constant().is_leaf()
         ) or not _make_inlined(tx, pytree.TreeSpec.__eq__)(
             xs_treespec, _combine_treespec
         ).as_python_constant():
@@ -1691,9 +1697,11 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         with tx.fake_mode:
             sub_args_fake = [
-                leaf.node.meta["example_value"].clone()
-                if hasattr(leaf.node.meta["example_value"], "clone")
-                else leaf.node.meta["example_value"]
+                (
+                    leaf.node.meta["example_value"].clone()
+                    if hasattr(leaf.node.meta["example_value"], "clone")
+                    else leaf.node.meta["example_value"]
+                )
                 for leaf in pytree.tree_leaves(proxy_vars_inputcheck)
             ]
             pre_dispatch = False
@@ -2145,6 +2153,9 @@ class ReparametrizeModuleCallVariable(FunctorchHigherOrderVariable):
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     supports_input_mutation = True
     supports_aliasing = True
+    # TODO - Go through all subclasses of WrapHigherOrderVariable to see if
+    # restore_side_effects can be ignored. For now, this is conservative.
+    restore_side_effects = True
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
@@ -2178,6 +2189,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             kwargs,
             description,
             source_target=self.value,
+            restore_side_effects=self.restore_side_effects,
             should_flatten_outputs=True,
             under_activation_checkpoint=under_activation_checkpoint,
             supports_input_mutation=self.supports_input_mutation,
@@ -2565,6 +2577,14 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # If side effects are allowed under checkpoint, we should not restore
+        # the side effects after speculate subgraph.
+        self.restore_side_effects = (
+            not torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint
+        )
+
     def _call_function(
         self,
         tx: "InstructionTranslator",
@@ -2575,7 +2595,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         from torch.utils.checkpoint import noop_context_fn
 
         context_fn = None
-        if "context_fn" in kwargs and kwargs["context_fn"] != noop_context_fn:
+        if "context_fn" in kwargs and kwargs["context_fn"] is not noop_context_fn:
             ctx = kwargs.pop("context_fn")
             if isinstance(ctx, torch._dynamo.variables.UserFunctionVariable):
                 context_fn = ctx.fn
@@ -2823,8 +2843,6 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         fn_name: str,
     ):
         from .._trace_wrapped_higher_order_op import TransformGetItemToIndex
-
-        tx: InstructionTranslator = tx
 
         def create_scalar():
             return query.call_method(
@@ -3542,7 +3560,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         if type(value) is not type(_local_map_wrapped):
             return False
 
-        return value == _local_map_wrapped and cls._enabled
+        return value is _local_map_wrapped and cls._enabled
 
     @staticmethod
     def build(**options):
@@ -3696,6 +3714,23 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
                 make_error_msg(expected_num_outputs, actual_num_outputs, "outputs")
             )
 
+        if inputs_none_placements > 0:
+            expected_input_nodes = [
+                arg.as_proxy().node for arg in user_args[:-inputs_none_placements]
+            ]
+        else:
+            expected_input_nodes = [arg.as_proxy().node for arg in user_args]
+        actual_input_nodes = [proxy.node for proxy in p_args]
+        assert actual_input_nodes[0].op == "get_attr"
+        assert "subgraph" in actual_input_nodes[0].target
+        assert len(expected_input_nodes) == len(actual_input_nodes) - 1
+        for expected_order, actual_order in zip(
+            expected_input_nodes, actual_input_nodes[1:]
+        ):
+            assert expected_order == actual_order, (
+                "Dynamo changed the order of inputs to the local_map function, please adjust "
+                f"the order of inputs and input_placements from {expected_input_nodes}, to: {actual_input_nodes[1:]}"
+            )
         assert len(p_kwargs) == 0
 
         flat_example_value = pytree.tree_map_only(
@@ -3736,6 +3771,8 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 
             vt.as_proxy().node.meta["example_value"] = global_tensor
             vt.synchronize_attributes(tx)
+
+        # TODO: Figure out how to handle output order diverging from eager
 
         # Treat as const, so we don't have to deal with Placement types in fx IR
         # Guarded with EQUALS_MATCH on local_map call's arguments

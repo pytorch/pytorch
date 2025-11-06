@@ -34,7 +34,7 @@ from pathlib import Path
 from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
 from types import ModuleType
-from typing import Any, Callable, cast, Generic, NoReturn, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, Generic, NoReturn, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import override, Self
 
 import torch
@@ -42,7 +42,12 @@ import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.exc import SkipFrame
-from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
+from torch._dynamo.utils import (
+    CompileEventLogger,
+    counters,
+    dynamo_timed,
+    get_metrics_context,
+)
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.common import (
     custom_backend_codegen_configs,
@@ -121,7 +126,7 @@ if config.is_fbcode():
 T = TypeVar("T")
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, KeysView, Sequence
+    from collections.abc import Callable, Generator, KeysView, Sequence
     from concurrent.futures import Future
 
     from .compile_fx import _CompileFxKwargs
@@ -339,7 +344,7 @@ def sha256_hash(data: bytes) -> str:
     return base64.b32encode(hashlib.sha256(data).digest())[:51].decode("utf-8").lower()
 
 
-def code_hash(code: Union[str, bytes], extra: Union[str, bytes] = "") -> str:
+def code_hash(code: str | bytes, extra: str | bytes = "") -> str:
     hashing_str = code if isinstance(code, bytes) else code.encode("utf-8")
     if extra:
         extra_b = extra if isinstance(extra, bytes) else extra.encode("utf-8")
@@ -361,9 +366,7 @@ def get_path(
     return basename, subdir, path
 
 
-def get_hash(
-    content: Union[str, bytes], extra: str = "", hash_type: str = "code"
-) -> str:
+def get_hash(content: str | bytes, extra: str = "", hash_type: str = "code") -> str:
     if hash_type in {"amdgcn", "code", "ptx", "spv"}:
         return code_hash(content, extra)
     if hash_type in {"cubin", "hsaco", "spv"}:
@@ -409,7 +412,7 @@ class WritableTempFile:
 
 
 def write(
-    content: Union[str, bytes],
+    content: str | bytes,
     extension: str,
     extra: str = "",
     hash_type: str = "code",
@@ -436,7 +439,7 @@ def write_text(text: str) -> str:
 
 def write_atomic(
     path_: str,
-    content: Union[str, bytes],
+    content: str | bytes,
     make_dirs: bool = False,
     encode_utf_8: bool = False,
 ) -> None:
@@ -547,7 +550,7 @@ class FxGraphCachePickler(pickle.Pickler):
 
     def _reduce_tensor(
         self, t: Tensor
-    ) -> tuple[Callable[[T], T], tuple[Union[TensorMetadata, TensorMetadataAndValues]]]:
+    ) -> tuple[Callable[[T], T], tuple[TensorMetadata | TensorMetadataAndValues]]:
         """
         Custom reducer to pickle Tensors.  If we see tensors, we know they're constants
         stored as attributes on the GraphModule.
@@ -943,7 +946,7 @@ class FxGraphHashDetails:
         raise AssertionError(f"unknown config type: {str(type(custom_pass))}")
 
     def _get_custom_pass_detail(
-        self, custom_pass: Union[CustomGraphPassType, CustomGraphModulePass]
+        self, custom_pass: CustomGraphPassType | CustomGraphModulePass
     ) -> Any | None:
         if not custom_pass:
             return None
@@ -1058,7 +1061,7 @@ class GuardedCache(Generic[T]):
         key: str,
         local: bool,
         remote_cache: RemoteCache[JsonDataTy] | None,
-        evaluate_guards: Callable[[str, Union[list[int], list[torch.SymInt]]], bool],
+        evaluate_guards: Callable[[str, list[int] | list[torch.SymInt]], bool],
         hints: list[int],
     ) -> tuple[T | None, bytes | None, dict[str, str]]:
         """
@@ -1283,6 +1286,13 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             },
             payload_fn=lambda: graph.inductor_provenance_stack_traces_str,
         )
+        if (
+            get_metrics_context().in_progress()
+            and graph.inductor_provenance_stack_traces_str
+        ):
+            get_metrics_context().add_to_set(
+                "inductor_provenance", graph.inductor_provenance_stack_traces_str
+            )
         return graph, cache_info
 
     @staticmethod
@@ -1292,7 +1302,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         local: bool,
         remote_cache: RemoteCache[JsonDataTy] | None,
         constants: CompiledFxGraphConstants,
-        evaluate_guards: Callable[[str, Union[list[int], list[torch.SymInt]]], bool]
+        evaluate_guards: Callable[[str, list[int] | list[torch.SymInt]], bool]
         | None = None,
     ) -> tuple[CompiledFxGraph | None, dict[str, Any]]:
         """
@@ -1509,7 +1519,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             )
         except BypassFxGraphCache as e:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
-            log.info("Bypassing FX Graph Cache because '%s'", e)
+            log.info("Bypassing FX Graph Cache because '%s'", e)  # noqa: G200
             if remote:
                 log_cache_bypass("bypass_fx_graph", str(e))
             cache_info = {
@@ -1543,7 +1553,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         remote_cache: RemoteCache[JsonDataTy] | None,
         is_backward: bool,
         constants: CompiledFxGraphConstants,
-        evaluate_guards: Callable[[str, Union[list[int], list[torch.SymInt]]], bool]
+        evaluate_guards: Callable[[str, list[int] | list[torch.SymInt]], bool]
         | None = None,
     ) -> tuple[CompiledFxGraph | None, dict[str, Any]]:
         """
@@ -1670,30 +1680,42 @@ class CudaKernelParamCache:
         basename, _ = get_name_and_dir_from_output_file_path(bin_path)
 
         if config.aot_inductor.emit_multi_arch_kernel:
-            bin_type_to_ext = {"cubin": ".fatbin", "spv": ".spv"}
+            bin_type_to_ext = {"cubin": ".fatbin", "spv": ".spv", "hsaco": ".hsaco"}
             assert bin_type in bin_type_to_ext.keys(), (
-                "multi_arch_kernel_binary only supported in CUDA/XPU"
+                "multi_arch_kernel_binary only supported in CUDA/XPU/ROCm"
             )
             base_path, _ = os.path.splitext(bin_path)
             bin_path = base_path + bin_type_to_ext[bin_type]
 
         asm_path: str = ""
+
+        # Kernel assembly/IR requirements for AOT Inductor:
+        # - CUDA/XPU: Always require PTX/SPV
+        # - ROCm multi-arch: Require LLVM IR (.ll) for bundle compilation
         if (
             config.aot_inductor.emit_multi_arch_kernel
             or config.aot_inductor.package_cpp_only
         ):
-            assert asm, "Missing kernel assembly code"
-            assert asm_type, "Missing kernel assembly type"
-            _, asm_path = write(
-                asm,
-                asm_type,
-                hash_type=asm_type,
-                specified_dir=split_aot_inductor_output_path(
-                    config.aot_inductor.output_path
-                )[0],
-                # make sure asm file has the same basename
-                key=basename,
-            )
+            # Allow ROCm single-arch to skip (asm=None OK), require for everything else
+            if torch.version.hip is None or (asm and asm_type):
+                assert asm, "Missing kernel assembly code"
+                assert asm_type, "Missing kernel assembly type"
+
+                # Cache directory mapping: asm_type → hash_type
+                # Problem: LLVM IR extension ".ll" isn't a recognized cache category
+                # Solution: Map to "code" (generic category for non-standard formats)
+                # Recognized categories: "ptx", "amdgcn", "spv", "code"
+                hash_kind = asm_type if asm_type in {"amdgcn", "ptx", "spv"} else "code"
+
+                _, asm_path = write(
+                    asm,
+                    asm_type,
+                    hash_type=hash_kind,
+                    specified_dir=split_aot_inductor_output_path(
+                        config.aot_inductor.output_path
+                    )[0],
+                    key=basename,
+                )
 
         params[get_cpp_wrapper_cubin_path_name()] = bin_path
         params["asm"] = asm_path
@@ -1723,12 +1745,12 @@ class AotCodeCompiler:
         *,
         device_type: str,
         additional_files: list[str],
-    ) -> Union[list[Union[str, Weights]], str]:
+    ) -> list[Union[str, Weights]] | str:
         """
         Returns the .so path, or returns a list of files that were generated if
         config.aot_inductor.package=True.
         """
-        generated_files: list[Union[str, Weights]] = additional_files  # type: ignore[assignment]
+        generated_files: list[str | Weights] = additional_files  # type: ignore[assignment]
 
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
@@ -2160,7 +2182,7 @@ end
                     data_ptr,
                     ctypes.POINTER(ctypes.c_ubyte * nbytes),
                 )
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 raw_bytes = bytes(raw_array.contents)
                 return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
 
@@ -2342,7 +2364,7 @@ end
                     f.write(json.dumps(qual_name_to_id))
                 generated_files.append(constants_config_json)
 
-            gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
+            gpu_codecache: ROCmCodeCache | CUDACodeCache = (
                 ROCmCodeCache() if torch.version.hip else CUDACodeCache()
             )
             gpu_kernels_o = gpu_codecache.aot_kernels_o.copy()
@@ -2373,28 +2395,57 @@ end
                         config.aot_inductor.emit_multi_arch_kernel
                         and device_type == "cuda"
                     ):
-                        current_arch = _nvcc_arch_as_compile_option()
-                        cmd = (
-                            # pyrefly: ignore  # unbound-name
-                            f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
-                            # Triton only allows generating PTX version as same as the current arch
-                            f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
-                            # Include SASS for the current specific arch
-                            f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
-                        )
-                        try:
-                            subprocess.run(
-                                cmd.split(),
-                                capture_output=True,
-                                text=True,
-                                check=True,
+                        if torch.version.hip is None:
+                            current_arch = _nvcc_arch_as_compile_option()
+                            cmd = (
+                                # pyrefly: ignore [unbound-name]
+                                f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
+                                # Triton only allows generating PTX version as same as the current arch
+                                f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
+                                # Include SASS for the current specific arch
+                                f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
                             )
-                        except subprocess.CalledProcessError as e:
-                            print(
-                                f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
-                                file=sys.stderr,
+                            try:
+                                subprocess.run(
+                                    cmd.split(),
+                                    capture_output=True,
+                                    text=True,
+                                    check=True,
+                                )
+                            except subprocess.CalledProcessError as e:
+                                print(
+                                    f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
+                                    file=sys.stderr,
+                                )
+                                raise
+
+                        else:
+                            # ROCm multi-arch: compile LLVM IR to multi-arch bundle
+                            from torch._inductor.rocm_multiarch_utils import (
+                                compile_multiarch_bundle_from_llvm_ir,
                             )
-                            raise
+
+                            if not os.path.exists(asm_file):
+                                raise RuntimeError(
+                                    f"Multi-arch ROCm compilation requires LLVM IR file, "
+                                    f"but {asm_file} not found. "
+                                    f"Ensure asm_type='ll' is captured in triton_heuristics.py"
+                                )
+
+                            # Compile for multiple archs and bundle them
+                            success = compile_multiarch_bundle_from_llvm_ir(
+                                llvm_ir_path=asm_file,
+                                output_bundle_path=cubin_file,
+                                target_archs=None,
+                            )
+
+                            if not success:
+                                raise RuntimeError(
+                                    f"Failed to compile multi-arch bundle for kernel {kernel_name}. "
+                                    f"Check that ROCm toolchain is available and LLVM IR is valid."
+                                )
+
+                            log.info("Created multi-arch bundle: %s", cubin_file)
 
                     if config.aot_inductor.embed_kernel_binary:
                         # Embed cubin files into model.so using objcopy
@@ -2461,10 +2512,18 @@ end
                     generated_files.append(consts_o)
                     so_builder.save_src_to_cmake(cmake_path, consts_o)
 
-                if config.aot_inductor.emit_multi_arch_kernel:
+                # Different CMake strategies for CUDA vs ROCm:
+                # - CUDA: Save asm for CMake to recompile (user has nvcc)
+                # - ROCm: Link pre-compiled bundle (user may lack dev tools)
+                if (
+                    config.aot_inductor.emit_multi_arch_kernel
+                    and torch.version.hip is None
+                ):
                     so_builder.save_kernel_asm_to_cmake(cmake_path, asm_files)
                     generated_files.extend(asm_files)
                 else:
+                    # ROCm multi-arch + all single-arch: Link pre-compiled objects
+                    # Bundle already embedded in .o files - just link into .so
                     obj_srcs = [*gpu_kernels_o, *cubins_o]
                     generated_files.extend(obj_srcs)
                     for obj in obj_srcs:
@@ -2555,7 +2614,7 @@ end
 _libgomp: CDLL | None = None
 
 
-def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p, None]:
+def custom_op_wrapper(op: str, *args: Any) -> list[c_void_p] | c_void_p | None:
     # This function will be called from generated cpp wrapper code in the JIT mode.
     # Because tensors will be passed in as AtenTensorHandle, we need to explicitly convert them.
     def convert_arg(arg: Any) -> Any:
@@ -2582,7 +2641,7 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p, No
 
     # convert any kwarg-only arguments to kwargs
     kwargs = dict()
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     for func_arg, conv_arg in zip(func._schema.arguments, converted_args):
         if func_arg.kwarg_only:
             kwargs[func_arg.name] = conv_arg
@@ -2596,7 +2655,7 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p, No
     if isinstance(result, (list, tuple)):
         # unsafe_alloc_void_ptrs_from_tensors expects result contains tensor only
         result = [torch.tensor([]) if r is None else r for r in result]
-        for i, r in enumerate(result):
+        for r in result:
             assert isinstance(r, torch.Tensor), op + " returns a list of non-tensors"
         return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)  # type: ignore[arg-type]
 
@@ -2698,16 +2757,16 @@ class CppCodeCache:
     """Compiles and caches C++ libraries.  Users of this class supply the source code to
     be compiled, while compilation flags are set by CppBuilder."""
 
-    cache: dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
+    cache: dict[str, Callable[[], CDLL | ModuleType]] = {}
     cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags: dict[str, Any] = {}
 
     @staticmethod
-    def _load_library_inner(path: str, key: str) -> Union[CDLL, ModuleType]:
+    def _load_library_inner(path: str, key: str) -> CDLL | ModuleType:
         return cdll.LoadLibrary(path)
 
     @classmethod
-    def _load_library(cls, path: str, key: str) -> Union[CDLL, ModuleType]:
+    def _load_library(cls, path: str, key: str) -> CDLL | ModuleType:
         try:
             result = cls._load_library_inner(path, key)
             result.key = key  # type: ignore[union-attr]
@@ -2764,13 +2823,13 @@ class CppCodeCache:
         main_build_option = CppTorchDeviceOptions(
             compile_only=bool(optimized_code),
             min_optimize=optimized_code is not None,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             **compile_command,
         )
         optimized_build_option = CppTorchDeviceOptions(
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             compile_only=True,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             **compile_command,
         )
 
@@ -2820,7 +2879,7 @@ class CppCodeCache:
                 # decision if that ever changes.
                 if optimized_code and (header := _get_cpp_prefix_header(device_type)):
                     optimized_build_option.precompiled_header = _precompile_header(
-                        # pyrefly: ignore  # unbound-name
+                        # pyrefly: ignore [unbound-name]
                         header,
                         optimized_cmd_line,
                         **compile_command,
@@ -2851,7 +2910,7 @@ class CppCodeCache:
                         main_builder.get_target_file_path(),
                         optimized_builder.get_target_file_path(),
                     ],
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     BuildOption=CppTorchDeviceOptions(**compile_command),
                     output_dir=output_dir,
                 )
@@ -2910,7 +2969,7 @@ def _worker_compile_cpp(
 # Customized Python binding for cpp kernels
 @clear_on_fresh_cache
 class CppPythonBindingsCodeCache(CppCodeCache):
-    cache: dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
+    cache: dict[str, Callable[[], CDLL | ModuleType]] = {}
     cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
         # kernels have no dependency on libtorch
@@ -2959,6 +3018,12 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             if(unlikely(result == reinterpret_cast<void*>(-1) && PyErr_Occurred()))
                 throw std::runtime_error("expected int arg");
             return reinterpret_cast<uintptr_t>(result);
+        }}
+        template <> inline float parse_arg<float>(PyObject* args, size_t n) {{
+            auto result = PyFloat_AsDouble(PyTuple_GET_ITEM(args, n));
+            if(unlikely(result == -1.0 && PyErr_Occurred()))
+                throw std::runtime_error("expected float arg");
+            return static_cast<float>(result);
         }}
 
         {extra_parse_arg}
@@ -3010,7 +3075,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
     )
 
     @classmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def _load_library_inner(cls, path: str, key: str) -> ModuleType:
         os.environ["_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR"] = str(
             torch._C._dynamo.guards._torchinductor_pyobject_tensor_data_ptr  # type: ignore[attr-defined]
@@ -3092,7 +3157,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
 @clear_on_fresh_cache
 class CppWrapperCodeCache(CppPythonBindingsCodeCache):
-    cache: dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
+    cache: dict[str, Callable[[], CDLL | ModuleType]] = {}
     cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
         "include_pytorch": True,
@@ -3161,7 +3226,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
 
 @clear_on_fresh_cache
 class HalideCodeCache(CppPythonBindingsCodeCache):
-    cache: dict[str, Callable[[], Union[ModuleType, CDLL]]] = {}
+    cache: dict[str, Callable[[], ModuleType | CDLL]] = {}
     cache_clear = staticmethod(cache.clear)
     _standalone_runtime_path: str | None = None
     prefix = textwrap.dedent(
@@ -3282,12 +3347,12 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         buffer_names = []
         for i, arg in enumerate(meta.argtypes):
             if arg.is_buffer():
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 buffer_names.append(f"&hl_buf_{i}")
                 buffers.extend(cls._codegen_buffer(f"hl_buf_{i}", arg, is_cuda))
             else:
                 assert "*" not in arg.ctype
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 buffer_names.append(arg.name)
         buffers = "\n".join([f"    {line}" for line in buffers]).lstrip()
 
@@ -3542,7 +3607,7 @@ def _worker_task_halide(lockfile: str, jobs: list[partial[Any]]) -> None:
 
                 ci = cmd.index("-o")
                 assert isinstance(ci, int)
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 cmd[ci + 1] = Out()
                 repl = textwrap.indent(
                     textwrap.dedent(

@@ -133,7 +133,7 @@ def _insert_stage_symbolic_backward(
             # In the forward pass, only emit placeholder, module calls, and
             # getitem calls. If we have a target other than getitem in this
             # (forward-only) code, there is a bug.
-            assert node.target == operator.getitem, (
+            assert node.target is operator.getitem, (
                 "Found non-getitem call in forward pass. Please report a bug to PiPPy"
             )
             assert len(node.args) == 2, (
@@ -282,7 +282,7 @@ class LossWrapper(torch.nn.Module):
 
 
 class TrivialLossWrapper(LossWrapper):
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(self, x, targets):
         model_out = self.module(x)
         return self.loss_fn(model_out, targets)
@@ -407,7 +407,7 @@ class DetachExecutor(fx.Interpreter):
 
     def call_function(self, target, args, kwargs):
         # HACK to reroute saved input tensors to point to the detach()ed version
-        if target == stage_backward:
+        if target is stage_backward:
             kwargs = dict(kwargs)
             kwargs["input_values"] = [
                 self.value_remap.get(v, v) for v in kwargs["input_values"]
@@ -924,7 +924,7 @@ class Pipe(torch.nn.Module):
                 pass
 
         # This is done by (1) `_sink_params` at each submodule;
-        for name, submod in split.named_children():
+        for submod in split.children():
             if isinstance(submod, fx.GraphModule):
                 _sink_params(submod, inputs_to_state, [])
                 submod.graph.lint()

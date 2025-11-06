@@ -680,6 +680,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             "#torch.distributed.checkpoint.state_dict.get_state_dict ."
             "Tutorial: https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html .",
             FutureWarning,
+            stacklevel=2,
         )
         _state_dict_type_to_config = {
             StateDictType.FULL_STATE_DICT: FullStateDictConfig,
@@ -1208,7 +1209,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             warnings.warn(
                 f"Called FSDP.clip_grad_norm_() on rank {self.rank} with no "
                 "gradients -- returning the total norm in the default dtype "
-                f"{total_norm.dtype}"
+                f"{total_norm.dtype}",
+                stacklevel=2,
             )  # warn since this is generally unexpected
             return total_norm
         total_norm_dtype = functools.reduce(

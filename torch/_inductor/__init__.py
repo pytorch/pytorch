@@ -132,7 +132,6 @@ def aoti_compile_and_package(
         )
         or (
             isinstance(package_path, (str, os.PathLike))
-            # pyrefly: ignore  # no-matching-overload
             and os.fspath(package_path).endswith(".pt2")
         )
     ), (
@@ -152,7 +151,7 @@ def aoti_compile_and_package(
     return aot_inductor_minifier_wrapper(
         _aoti_compile_and_package_inner,
         exported_program,
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         package_path=package_path,
         inductor_configs=inductor_configs,
     )
@@ -391,6 +390,7 @@ def standalone_compile(
         "from_example_inputs", "from_tracing_context", "from_graph"
     ] = "from_graph",
     options: Optional[dict[str, Any]] = None,
+    aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
 ) -> CompiledArtifact:
     """
     Precompilation API for inductor.
@@ -422,5 +422,5 @@ def standalone_compile(
 
     options = options if options else {}
     return standalone_compile(
-        gm, example_inputs, dynamic_shapes=dynamic_shapes, options=options
+        gm, example_inputs, dynamic_shapes=dynamic_shapes, options=options, aot=aot
     )

@@ -292,7 +292,7 @@ class TestCUDA(JitTestCase):
             default_stream_id: int
             user_stream_id: int
 
-        # The test aims at checking different stream proporties.
+        # The test aims at checking different stream properties.
         @torch.jit.script
         def test_get_stream():
             device_index = torch.cuda.current_device()
@@ -499,7 +499,7 @@ class TestCUDA(JitTestCase):
 
         # Record the CUDA event for operation torch.mm on the current stream
         # and then test if the elapsed time is greater than 0. This test is also
-        # an adaption from eager mdoe CUDA tests available at test/test_cuda.py
+        # an adaption from eager mode CUDA tests available at test/test_cuda.py
         @torch.jit.script
         def test_event():
             device_index = torch.cuda.current_device()
@@ -522,7 +522,7 @@ class TestCUDA(JitTestCase):
         self.assertGreater(test_event(), 0)
 
         # Check for stream synchronization , when a large tensor multiplication is
-        # computed on the stream. The stream.query should be true once the synchroniztion is done
+        # computed on the stream. The stream.query should be true once the synchronization is done
         @torch.jit.script
         def test_stream_synchronize() -> float:
             device_index = torch.cuda.current_device()

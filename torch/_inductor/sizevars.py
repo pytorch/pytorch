@@ -3,8 +3,8 @@ import functools
 import itertools
 import logging
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
-from typing import Any, Callable, cast, Optional, Union
+from collections.abc import Callable, Iterable, Sequence
+from typing import Any, cast, Optional, Union
 
 import sympy
 from sympy import Expr
@@ -181,7 +181,7 @@ class SizeVarAllocator:
         def statically_known(expr):
             evaluated = self.shape_env._maybe_evaluate_static(
                 expr,
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 axioms=axioms,
                 var_to_range=var_to_range_tuple,
             )
@@ -834,7 +834,7 @@ class SizeVarAllocator:
                     any_unbacked_lhs = has_free_unbacked_symbols(lhs)
                     any_unbacked_rhs = has_free_unbacked_symbols(rhs)
                     if any_unbacked_lhs != any_unbacked_rhs:
-                        return True if any_unbacked_rhs else False
+                        return bool(any_unbacked_rhs)
 
                     # Handles cases where LHS contains the RHS. In other words,
                     # RHS is a sub-expression of LHS. For example:
@@ -848,12 +848,12 @@ class SizeVarAllocator:
                     degrees_lhs = len(self.eq_graph[lhs])
                     degrees_rhs = len(self.eq_graph[rhs])
                     if degrees_lhs != degrees_rhs:
-                        return True if degrees_lhs > degrees_rhs else False
+                        return degrees_lhs > degrees_rhs
 
                     # Try to apply union-by-rank optimization to flatten the
                     # leader trees.
                     if self.rank[x] != self.rank[y]:
-                        return True if self.rank[x] > self.rank[y] else False
+                        return self.rank[x] > self.rank[y]
 
                     # Fallback to sympy.Basic.compare for a deterministic ordering.
                     return lhs.compare(rhs) == -1

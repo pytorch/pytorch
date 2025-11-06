@@ -13,7 +13,7 @@ import torch.fx.traceback as fx_traceback
 import torch.nn as nn
 import torch.utils._pytree as pytree
 from torch._decomp import decomposition_table
-from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._dynamo.testing import normalize_gm
 from torch._functorch._aot_autograd.descriptors import (
     BufferAOTInput,
@@ -38,26 +38,27 @@ from torch._functorch.aot_autograd import (
 )
 from torch._guards import tracing, TracingContext
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    requires_cuda,
+    run_tests,
+    skipIfCrossRef,
+    TestCase,
+)
 
 
 def graph_capture(model, inputs, with_export):
     gm = model
-    fake_mode = None
+    tracing_context = None
     if with_export:
-        with (
-            torch._dynamo.config.patch(install_free_tensors=True),
-            fx_traceback.preserve_node_meta(),
-        ):
-            # TODO: switch to use the official graph_capture API once it is ready
-            gm = _dynamo_graph_capture_for_export(model)(*inputs)
-            fake_mode = gm.meta.get("fake_mode", None)
+        with fx_traceback.preserve_node_meta():
+            gm = dynamo_graph_capture_for_export(model)(*inputs)
+            tracing_context = gm.meta.get("tracing_context", None)
 
-    with tracing(TracingContext(fake_mode)):
+    with tracing(tracing_context):
         with ExitStack() as stack:
             joint_with_descriptors = aot_export_joint_with_descriptors(
                 stack,
-                model,
+                gm,
                 inputs,
             )
             return joint_with_descriptors.graph_module
@@ -313,17 +314,19 @@ class inner_f(torch.nn.Module):
                 super().__init__()
                 self.linear = nn.Linear(3, 2)
 
-            def forward(self, x, scale=1.0):
+            def forward(self, x, *, scale):
                 return self.linear(x) * scale
 
         model = ModuleWithKwargs()
         inputs = (torch.randn(4, 3),)
-        kwargs = {"scale": 2.0}
+        kwargs = {"scale": torch.tensor(2.0)}
+
+        gm = dynamo_graph_capture_for_export(model)(*inputs, **kwargs)
 
         with ExitStack() as stack:
             # Export joint with descriptors
             joint_with_descriptors = aot_export_joint_with_descriptors(
-                stack, model, inputs, kwargs, decompositions=decomposition_table
+                stack, gm, inputs, kwargs, decompositions=decomposition_table
             )
 
             # Test the exported graph structure
@@ -331,9 +334,17 @@ class inner_f(torch.nn.Module):
                 print_output=False, expanded_def=True
             )
 
+            # For some reason PYTORCH_TEST_WITH_CROSSREF will add extra spaces.
+            # I tried to fix this in normalize_gm but there are too many files
+            # depending on that behavior..
+            graph_code_str = normalize_gm(graph_code)
+            graph_code_str = "\n".join(
+                [line for line in graph_code_str.split("\n") if len(line.rstrip()) > 0]
+            )
+
             # Expect test on the printed graph
             self.assertExpectedInline(
-                normalize_gm(graph_code),
+                graph_code_str,
                 """\
 class inner_f(torch.nn.Module):
     def forward(
@@ -344,16 +355,17 @@ class inner_f(torch.nn.Module):
         primals_1: "f32[2, 3]"  # ParamAOTInput(target='linear.weight')
         primals_2: "f32[2]"  # ParamAOTInput(target='linear.bias')
         primals_3: "f32[4, 3]"  # PlainAOTInput(idx=0)
+        primals_4: "f32[]"  # PlainAOTInput(idx=1)
         tangents_1: "f32[4, 2]"  # TangentAOTInput(output=PlainAOTOutput(idx=0))
-        primals_1, primals_2, primals_3, primals_4  , tangents_1, = fx_pytree.tree_flatten_spec([primals, tangents], self._in_spec)
+        primals_1, primals_2, primals_3, primals_4, tangents_1, = fx_pytree.tree_flatten_spec([primals, tangents], self._in_spec)
         transpose: "f32[3, 2]" = torch.ops.prims.transpose.default(primals_1, [1, 0]);  primals_1 = None
         mm: "f32[4, 2]" = torch.ops.aten.mm.default(primals_3, transpose);  transpose = None
         mul: "f32[4, 2]" = torch.ops.prims.mul.default(mm, 1.0);  mm = None
         mul_1: "f32[2]" = torch.ops.prims.mul.default(primals_2, 1.0);  primals_2 = None
         broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(mul_1, [4, 2], [1]);  mul_1 = None
         add: "f32[4, 2]" = torch.ops.prims.add.default(mul, broadcast_in_dim);  mul = broadcast_in_dim = None
-        mul_2: "f32[4, 2]" = torch.ops.prims.mul.default(add, 2.0);  add = None
-        mul_3: "f32[4, 2]" = torch.ops.prims.mul.default(tangents_1, 2.0);  tangents_1 = None
+        mul_2: "f32[4, 2]" = torch.ops.prims.mul.default(add, primals_4);  add = None
+        mul_3: "f32[4, 2]" = torch.ops.prims.mul.default(tangents_1, primals_4);  tangents_1 = primals_4 = None
         transpose_1: "f32[2, 4]" = torch.ops.prims.transpose.default(mul_3, [1, 0])
         mm_1: "f32[2, 3]" = torch.ops.aten.mm.default(transpose_1, primals_3);  transpose_1 = primals_3 = None
         transpose_2: "f32[3, 2]" = torch.ops.prims.transpose.default(mm_1, [1, 0]);  mm_1 = None
@@ -367,8 +379,7 @@ class inner_f(torch.nn.Module):
             as_strided,  # GradAOTOutput(grad_of=ParamAOTInput(target='linear.bias'))
             None,  # None
             None,  # None
-        ], self._out_spec)
-""",
+        ], self._out_spec)""",
             )
 
             # Compile the result
@@ -660,7 +671,7 @@ class inner_f(torch.nn.Module):
 
             # Verify buffer handling
             buffer_count = 0
-            for desc, (node, grad_node) in input_grad_nodes.items():
+            for desc, (node, _grad_node) in input_grad_nodes.items():
                 if isinstance(desc, BufferAOTInput):
                     buffer_count += 1
                     self.assertIsNotNone(node)
@@ -749,13 +760,13 @@ class inner_f(torch.nn.Module):
                 self.assertIn(node, named_params.values())
 
             # Check that param_grads contains the same parameter nodes
-            for desc, (param_node, grad_node) in param_grads.items():
+            for desc, (param_node, _grad_node) in param_grads.items():
                 self.assertIn(param_node, param_nodes)
                 self.assertEqual(param_node, named_params[desc.target])
 
             # Check that all_input_grads contains the parameter nodes
             param_count = 0
-            for desc, (input_node, grad_node) in all_input_grads.items():
+            for desc, (input_node, _grad_node) in all_input_grads.items():
                 if isinstance(desc, ParamAOTInput):
                     param_count += 1
                     self.assertIn(input_node, param_nodes)
@@ -921,6 +932,165 @@ class inner_f(torch.nn.Module):
             "('call_function', 'flex_attention_backward', {'compile_with_inductor': 'flex_attention'})"
             in custom_metadata
         )
+
+    def test_preserve_annotate_function(self):
+        """Test basic annotate_fn usage"""
+
+        @fx_traceback.annotate_fn({"pp_stage": 1})
+        def example_function(x):
+            return x * x
+
+        class SimpleLinear(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 2)
+
+            def forward(self, x):
+                with fx_traceback.annotate({"pp_stage": 0}):
+                    y = self.linear(x)
+                y = example_function(y)
+                return y - 1
+
+        inputs = (torch.randn(4, 3),)
+        model = SimpleLinear()
+
+        for with_export in [True, False]:
+            graph_module = graph_capture(model, inputs, with_export)
+            custom_metadata = fx_traceback._get_custom_metadata(graph_module)
+            self.assertExpectedInline(
+                str(custom_metadata),
+                """\
+('call_function', 't', {'pp_stage': 0})
+('call_function', 'addmm', {'pp_stage': 0})
+('call_function', 'mul', {'pp_stage': 1})
+('call_function', 'mul_1', {'pp_stage': 1})
+('call_function', 'mul_2', {'pp_stage': 1})
+('call_function', 't_1', {'pp_stage': 0})
+('call_function', 'mm', {'pp_stage': 0})
+('call_function', 't_2', {'pp_stage': 0})
+('call_function', 'sum_1', {'pp_stage': 0})
+('call_function', 'view', {'pp_stage': 0})
+('call_function', 't_3', {'pp_stage': 0})""",
+            )
+
+    @skipIfCrossRef
+    def test_custom_op_stack_trace(self):
+        @torch.library.custom_op("my_lib::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x + y
+
+        @foo.register_fake
+        def foo_fake_impl(x, y):
+            return torch.empty_like(x)
+
+        def foo_setup_context(ctx, inputs, output):
+            pass
+
+        def foo_backward(ctx, grad_output):
+            return grad_output, grad_output
+
+        foo.register_autograd(foo_backward, setup_context=foo_setup_context)
+
+        class CustomOpModule(torch.nn.Module):
+            def forward(self, x, y):
+                return foo(x, y)
+
+        model = CustomOpModule()
+        inputs = (torch.randn(4, 3), torch.randn(4, 3))
+
+        gm = graph_capture(model, inputs, with_export=True)
+
+        foo_node = None
+        for node in gm.graph.nodes:
+            if node.op == "call_function" and node.name == "foo":
+                foo_node = node
+                break
+
+        self.assertTrue(foo_node is not None)
+        self.assertTrue("return foo(x, y)" in foo_node.meta.get("stack_trace", None))
+        self.assertTrue("return foo(x, y)" in gm.print_readable(print_output=False))
+        self.assertFalse("self._opoverload" in foo_node.meta.get("stack_trace", None))
+        self.assertFalse("self._opoverload" in gm.print_readable(print_output=False))
+
+    def test_preserve_annotate_replay_view(self):
+        """Test stack trace and annotation are correct on nodes regenerated in functionalization"""
+
+        def _unpermute(out, input_shape, permuted_indices):
+            """
+            Unpermute operation from torchtitan MoE utils.
+            """
+            out_unpermuted = out.new_empty(input_shape)
+            out_unpermuted[permuted_indices, :] = out
+            out = out_unpermuted[:-1]
+            return out
+
+        class Module(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.input_shape = (5, 3)
+                self.permuted_indices = torch.tensor([2, 0, 3, 1])
+
+            def forward(self, x):
+                with fx_traceback.annotate({"pp_stage": 0}):
+                    routed_output = _unpermute(
+                        x, self.input_shape, self.permuted_indices
+                    )
+                return routed_output.cos()
+
+        inputs = (torch.randn(4, 3, requires_grad=True),)
+        model = Module()
+
+        graph_module = graph_capture(model, inputs, True)
+        custom_metadata = fx_traceback._get_custom_metadata(graph_module)
+        slice_nodes = graph_module.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.slice.Tensor
+        )
+        self.assertEqual(len(slice_nodes), 1)
+        slice_backward_nodes = graph_module.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.slice_backward.default
+        )
+        self.assertEqual(len(slice_backward_nodes), 1)
+        slice_node = slice_nodes[0]
+        slice_backward_node = slice_backward_nodes[0]
+
+        self.assertEqual(slice_node.meta["seq_nr"], slice_backward_node.meta["seq_nr"])
+        self.assertTrue("out = out_unpermuted[:-1]" in slice_node.meta["stack_trace"])
+        self.assertExpectedInline(
+            str(custom_metadata),
+            """\
+('call_function', 'new_empty', {'pp_stage': 0})
+('get_attr', '_tensor_constant0', {'pp_stage': 0})
+('call_function', 'index_put', {'pp_stage': 0})
+('call_function', 'slice_2', {'pp_stage': 0})
+('call_function', 'slice_backward', {'pp_stage': 0})
+('get_attr', '_tensor_constant0_1', {'pp_stage': 0})
+('call_function', 'index', {'pp_stage': 0})""",
+        )
+
+    def test_static_input_indices(self):
+        """Test basic linear module with aot_export_joint_with_descriptors"""
+
+        class SimpleLinear(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = SimpleLinear()
+        inputs = (torch.randn(4, 3),)
+        gm = dynamo_graph_capture_for_export(model)(*inputs)
+        fake_mode = gm.meta.get("fake_mode", None)
+
+        with tracing(TracingContext(fake_mode)):
+            with ExitStack() as stack:
+                joint = aot_export_joint_with_descriptors(
+                    stack,
+                    gm,
+                    inputs,
+                )
+        self.assertEqual(joint._aot_state.fw_metadata.static_input_indices, [0, 1])
 
 
 if __name__ == "__main__":

@@ -3,7 +3,9 @@
 Contains various utils for AOTAutograd, including those for handling collections.
 """
 
+import copy
 import dataclasses
+import logging
 import operator
 import warnings
 from collections.abc import Callable
@@ -40,6 +42,7 @@ KNOWN_TYPES = [
 original_zip = zip
 
 aot_graphs_effects_log = getArtifactLogger(__name__, "aot_graphs_effects")
+annotation_log = getArtifactLogger(__name__, "annotation")
 
 
 def strict_zip(*iterables, strict=True, **kwargs):
@@ -135,7 +138,8 @@ def call_func_at_runtime_with_args(
             warnings.warn(
                 "Your compiler for AOTAutograd is returning a function that doesn't take boxed arguments. "
                 "Please wrap it with functorch.compile.make_boxed_func or handle the boxed arguments yourself. "
-                "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
+                "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale.",
+                stacklevel=2,
             )
             out = normalize_as_list(f(*args))
     return out
@@ -155,7 +159,7 @@ class PytreeThunk:
         assert spec is not None
         self.spec: pytree.TreeSpec = spec
         if self.spec.type in {tuple, list} and all(
-            child.is_leaf() for child in spec.children_specs
+            child.is_leaf() for child in spec.children()
         ):
             self.is_simple = True
         if self.spec.is_leaf():
@@ -246,7 +250,7 @@ def maybe_to_fresh_input(idx, t, meta):
 def is_with_effects(node):
     return (
         node.op == "call_function"
-        and node.target == torch.ops.higher_order.with_effects
+        and node.target is torch.ops.higher_order.with_effects
     )
 
 
@@ -292,7 +296,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
         for output_token_node in output_token_nodes:
             assert (
                 output_token_node.op == "call_function"
-                and output_token_node.target == operator.getitem
+                and output_token_node.target is operator.getitem
                 and output_token_node.args[1] == 0
             )
         with module.graph.inserting_before(node):
@@ -324,11 +328,11 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                     if (
                         isinstance(out, torch.fx.node.Node)
                         and out.op == "call_function"
-                        and out.target == operator.getitem
+                        and out.target is operator.getitem
                         and out.args[1] == 0
                         and out.args[0] in with_effect_nodes
                     ):
-                        # pyrefly: ignore  # missing-attribute
+                        # pyrefly: ignore [missing-attribute]
                         output_token_nodes.append(out)
                     else:
                         other_output_nodes.append(out)
@@ -443,6 +447,10 @@ def _copy_metadata_to_bw_nodes_in_subgraph(
 ) -> None:
     """Copy metadata from forward nodes to backward nodes in a single subgraph."""
     for node in fx_g.graph.nodes:
+        annotation_log.debug("node: %s", node.name)
+        seq_nr = node.meta.get("seq_nr")
+        annotation_log.debug("seq_nr: %s", seq_nr)
+
         if not _is_backward_node_with_seq_nr(node):
             continue
 
@@ -452,7 +460,9 @@ def _copy_metadata_to_bw_nodes_in_subgraph(
             node.meta["fwd_nn_module_stack"] = fwd_node.meta.get("nn_module_stack")
             node.meta["fwd_source_fn_stack"] = fwd_node.meta.get("source_fn_stack")
             # TODO: better to change to a specific field of custom?
-            node.meta["custom"] = fwd_node.meta.get("custom")
+            custom = fwd_node.meta.get("custom")
+            if custom is not None:
+                node.meta["custom"] = copy.deepcopy(custom)
 
 
 def copy_fwd_metadata_to_bw_nodes(fx_g: torch.fx.GraphModule) -> None:
@@ -477,6 +487,10 @@ def copy_fwd_metadata_to_bw_nodes(fx_g: torch.fx.GraphModule) -> None:
     for submod in fx_g.modules():
         if isinstance(submod, torch.fx.GraphModule):
             _collect_fwd_nodes_from_subgraph(submod, fwd_seq_nr_to_node)
+
+    if annotation_log.isEnabledFor(logging.DEBUG):
+        for k, v in fwd_seq_nr_to_node.items():
+            annotation_log.debug("forward:: key: %s, value: %s", k, v)
 
     # Second pass: copy metadata to backward nodes in all subgraphs
     # using the global forward mapping
@@ -562,10 +576,10 @@ def without_output_descs(f: Callable[_P, tuple[_T, _S]]) -> Callable[_P, _T]:
     @wraps(f)
     @simple_wraps(f)
     def inner(*args, **kwargs):
-        # pyrefly: ignore  # invalid-param-spec
+        # pyrefly: ignore [invalid-param-spec]
         return f(*args, **kwargs)[0]
 
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return inner
 
 

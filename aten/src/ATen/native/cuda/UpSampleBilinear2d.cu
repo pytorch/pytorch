@@ -145,8 +145,8 @@ __device__ __forceinline__ void compute_output_range(
       lo = (input_pos - static_cast<accscalar_t>(0.5)) / scale - static_cast<accscalar_t>(0.5);
       hi = (input_pos + static_cast<accscalar_t>(1.5)) / scale - static_cast<accscalar_t>(0.5);
   }
-  min_output = max(0, static_cast<int>(ceil(lo)));
-  max_output = min(output_size - 1, static_cast<int>(floor(hi)));
+  min_output = max(0, static_cast<int>(std::ceil(lo)));
+  max_output = min(output_size - 1, static_cast<int>(std::floor(hi)));
 }
 #endif
 
