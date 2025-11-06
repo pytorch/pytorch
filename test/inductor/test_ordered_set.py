@@ -1536,6 +1536,7 @@ class TestOnlySetsString(TestOnlySetsInBinaryOps, TestCase):
 class TestOnlySetsGenerator(TestOnlySetsInBinaryOps, TestCase):
     def setUp(self):
         TestCase.setUp(self)
+
         def gen():
             for i in range(0, 10, 2):  # noqa: UP028
                 yield i
