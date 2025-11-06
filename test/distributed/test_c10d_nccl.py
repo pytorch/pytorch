@@ -6343,6 +6343,14 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         if self.rank == 6 or self.rank == 7:
             dist.broadcast(tensor2, 6, group=ng2)
             self.assertEqual(tensor2, torch.full((1,), 6))
+
+        # Test the case when the split changes the pg option of split group
+        # while the parent pg option is not changed.
+        new_pg = c10d.new_group([0, 1, 2, 3, 4, 5, 6, 7], device_id=device)
+        backend_new_pg = new_pg._get_backend(torch.device(device))
+        self.assertEqual(len(backend_new_pg.options.global_ranks_in_group), 8)
+        c10d.split_group(new_pg, [[0, 2, 4, 6], [1, 3, 5, 7]])
+        self.assertEqual(len(backend_new_pg.options.global_ranks_in_group), 8)
         # a barrier and a cuda sync before destroying all pgs.
         dist.barrier(pg)
         torch.cuda.synchronize()
