@@ -5,7 +5,7 @@ on:
     branches:
       - release/*
     tags:
-      - ciflow/rocm/*
+      - ciflow/rocm-mi200/*
   workflow_dispatch:
   schedule:
     - cron: 29 8 * * *  # about 1:29am PDT
