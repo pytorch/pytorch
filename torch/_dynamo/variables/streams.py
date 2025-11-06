@@ -10,6 +10,7 @@ from torch.fx import Proxy
 from .. import graph_break_hints
 from ..bytecode_transformation import create_call_function
 from ..exc import TYPE_CHECKING, unimplemented_v2
+from ..graph_bytecode_inputs import get_external_object_by_index
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import FxTracebackAnnotateVariable
@@ -29,40 +30,37 @@ Tensor = torch.Tensor
 
 @custom_op("streams::fork", mutates_args=())
 def fork_stream(
-    from_index: int,
-    from_device: torch.device,
+    from_index: int,  # kept to make stream transitions clearer
     to_index: int,
-    to_device: torch.device,
 ) -> None:
-    pass
+    stream = get_external_object_by_index(to_index)
+    assert isinstance(stream, torch.Stream), (
+        f"fork_stream expects a stream object at index {to_index}"
+    )
+    torch.accelerator.set_stream(stream)
 
 
 @fork_stream.register_fake
 def _(
-    from_index: int,
-    from_device: torch.device,
+    from_index: int,  # kept to make stream transitions clearer
     to_index: int,
-    to_device: torch.device,
 ) -> None:
     pass
 
 
 @custom_op("streams::join", mutates_args=())
-def join_stream(
-    from_index: int,
-    from_device: torch.device,
-    to_index: int,
-    to_device: torch.device,
-) -> None:
-    pass
+def join_stream(from_index: int, to_index: int) -> None:
+    stream = get_external_object_by_index(to_index)
+    assert isinstance(stream, torch.Stream), (
+        f"join_stream expects a stream object at index {to_index}"
+    )
+    torch.accelerator.set_stream(stream)
 
 
 @join_stream.register_fake
 def _(
     from_index: int,
-    from_device: torch.device,
     to_index: int,
-    to_device: torch.device,
 ) -> None:
     pass
 

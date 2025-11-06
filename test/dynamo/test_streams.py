@@ -7,6 +7,10 @@ import weakref
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.graph_bytecode_inputs import (
+    reset_user_object_tracking,
+    store_user_object_weakrefs,
+)
 from torch._dynamo.testing import extract_graph, remove_trailing_space
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import requires_cuda
@@ -441,13 +445,22 @@ class GraphModule(torch.nn.Module):
         from torch._dynamo.variables.streams import fork_stream, join_stream
         from torch.library import opcheck
 
-        sample_inputs = [
-            (0, torch.device("cuda:0"), 1, torch.device("cuda:1")),
-            (2, torch.device("cuda:2"), 3, torch.device("cuda:1")),
-        ]
-        for args in sample_inputs:
-            opcheck(fork_stream, args)
-            opcheck(join_stream, args)
+        original_stream = torch.accelerator.current_stream()
+        try:
+            s0 = torch.Stream()
+            s1 = torch.Stream()
+            store_user_object_weakrefs(s0, s1)
+
+            sample_inputs = [
+                (0, 1),
+                (1, 0),
+            ]
+            for args in sample_inputs:
+                opcheck(fork_stream, args)
+                opcheck(join_stream, args)
+        finally:
+            torch.accelerator.set_stream(original_stream)
+            reset_user_object_tracking()
 
 
 if __name__ == "__main__":
