@@ -72,6 +72,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
+    skipIfRocm,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -2069,6 +2070,31 @@ class TestFX(JitTestCase):
         input = torch.randn(3, 4)
         self.assertEqual(interpreter.run(input), gm(input))
         self.assertEqual(interpreter.run(input), m(input))
+
+    def test_interpreter_boxed_run_argument_validation(self):
+        class AddModule(torch.nn.Module):
+            def forward(self, lhs, rhs):
+                return lhs + rhs
+
+        gm = torch.fx.symbolic_trace(AddModule())
+        interpreter = Interpreter(gm)
+
+        lhs = torch.tensor(1.0)
+        rhs = torch.tensor(2.0)
+        good_args = [lhs.clone(), rhs.clone()]
+        result = interpreter.boxed_run(good_args)
+        torch.testing.assert_close(result, lhs + rhs)
+        self.assertEqual(good_args, [])
+
+        extra_args = [lhs.clone(), rhs.clone(), torch.tensor(3.0)]
+        with self.assertRaisesRegex(RuntimeError, "extra arguments"):
+            interpreter.boxed_run(extra_args)
+        self.assertEqual(len(extra_args), 3)
+
+        missing_args = [lhs.clone()]
+        with self.assertRaisesRegex(RuntimeError, "missing arguments"):
+            interpreter.boxed_run(missing_args)
+        self.assertEqual(len(missing_args), 1)
 
     def test_interpreter_other_graph(self):
         class MyModule(torch.nn.Module):
@@ -4224,6 +4250,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         torch.fx.proxy.TracerBase.check_mutable_operations = orig_tracer_mutable_flag
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @skipIfRocm
     @torch._dynamo.config.patch("enrich_profiler_metadata", True)
     def test_profiler_stack_trace_augmentation(self):
         """
@@ -4279,6 +4306,7 @@ event=cudaLaunchKernel node=addmm_1 stack_trace=x = self.linear2(x)"""
             )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @skipIfRocm
     @torch._dynamo.config.patch("enrich_profiler_metadata", True)
     def test_profiler_multiple_modules(self):
         """
@@ -4322,6 +4350,7 @@ event=cudaLaunchKernel node=sub stack_trace=return x - 1"""
             )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @skipIfRocm
     @torch._dynamo.config.patch("enrich_profiler_metadata", True)
     def test_profiler_nested_graph_modules(self):
         """
@@ -4717,7 +4746,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         check_symbols_have_bc_designation(torch.fx.passes, set())
 
         non_back_compat_strs = [
-            torch.typename(obj) for obj in non_back_compat_objects.keys()
+            torch.typename(obj) for obj in non_back_compat_objects
         ]
         # Only want objects in torch.fx
         non_back_compat_strs = [
