@@ -2012,7 +2012,7 @@ class TestTorchDeviceType(TestCase):
             res = x.scatter_add(dim, idx, src)
 
             # Checking if scatter_add is deterministic
-            for i in range(5):
+            for _ in range(5):
                 res_next = x.scatter_add(dim, idx, src)
                 self.assertEqual(res, res_next, atol=0, rtol=0)
                 res = res_next
@@ -2263,8 +2263,8 @@ class TestTorchDeviceType(TestCase):
             if num_observations > 0:
                 fweights = torch.randint(1, 10, (num_observations,), device=device)
                 aweights = make_tensor((num_observations,), dtype=torch.float, device=device, low=1)
-                for correction, _fw, _aw in product([0, 1, 2], [None, fweights], [None, aweights]):
-                    check(x, correction, fweights, aweights)
+                for correction, fw, aw in product([0, 1, 2], [None, fweights], [None, aweights]):
+                    check(x, correction, fw, aw)
 
     @skipIfNoSciPy
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
@@ -2479,7 +2479,8 @@ class TestTorchDeviceType(TestCase):
                         self.assertEqual(x1.grad, x2.grad, rtol=0, atol=0.001)
                         self.assertEqual(y1.grad, y2.grad, rtol=0, atol=0.001)
 
-    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @skipIfRocmArch(MI300_ARCH)
+    @tf32_on_and_off(0.005)
     @reduced_f32_on_and_off(0.08)
     def test_cdist_large(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
