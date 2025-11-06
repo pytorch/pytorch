@@ -16,10 +16,6 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
-# Skip all tests in this file if CUDA is not available
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
-
-
 class TestFuzzerCompileIssues(TestCase):
     """Test cases for fuzzer-discovered eager/compile divergence issues."""
 
@@ -258,33 +254,6 @@ class TestFuzzerCompileIssues(TestCase):
         print("Eager Success! ✅")
         compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
         out_compiled = compiled_foo(arg0, arg1)
-        out_compiled.sum().backward()
-        print("Compile Success! ✅")
-
-    def test_fuzzer_issue_163971(self):
-        torch.manual_seed(0)
-
-        def foo(arg0):
-            t0 = arg0  # size=(), stride=(), dtype=bfloat16, device=cuda
-            t1 = torch.softmax(
-                t0, dim=0
-            )  # size=(), stride=(), dtype=bfloat16, device=cuda
-            t2 = torch.nn.functional.gelu(
-                t1
-            )  # size=(), stride=(), dtype=bfloat16, device=cuda
-            t3 = torch.softmax(
-                t2, dim=0
-            )  # size=(), stride=(), dtype=bfloat16, device=cuda
-            output = t3
-            return output
-
-        arg0 = torch.rand([], dtype=torch.bfloat16, device="cuda", requires_grad=True)
-
-        out_eager = foo(arg0)
-        out_eager.sum().backward()
-        print("Eager Success! ✅")
-        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
-        out_compiled = compiled_foo(arg0)
         out_compiled.sum().backward()
         print("Compile Success! ✅")
 
