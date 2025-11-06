@@ -216,7 +216,7 @@ def upload_adhoc_failure_json(invoking_file: str) -> None:
     since xml was probably not generated in this case
     """
     try:
-        job_id = int(os.environ.get["JOB_ID"])
+        job_id = int(os.environ["JOB_ID"])
         workflow_id = int(os.environ["GITHUB_RUN_ID"])
     except Exception as e:
         print(f"Failed to get job_id or workflow_id: {e}")
