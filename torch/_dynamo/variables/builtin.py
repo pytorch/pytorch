@@ -2391,9 +2391,17 @@ class BuiltinVariable(VariableTracker):
             isinstance(arg, variables.UserDefinedObjectVariable)
             and "__instancecheck__" in isinstance_type.__class__.__dict__
         ):
+            # Check if the variable has a custom isinstance check method
+            if hasattr(arg, "call_isinstance_check"):
+                return arg.call_isinstance_check(tx, isinstance_type)
             return variables.ConstantVariable.create(
                 isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value)
             )
+
+        # Check if variable has custom isinstance handling (e.g., NewNamedTupleVariable)
+        if isinstance(arg, variables.UserDefinedObjectVariable):
+            if hasattr(arg, "call_isinstance_check"):
+                return arg.call_isinstance_check(tx, isinstance_type)
 
         if isinstance(arg, variables.UserDefinedExceptionClassVariable):
             # pyrefly: ignore [unbound-name]

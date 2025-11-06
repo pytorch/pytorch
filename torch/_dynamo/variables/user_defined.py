@@ -2841,6 +2841,18 @@ class NewNamedTupleVariable(UserDefinedTupleVariable):
             source = NamedTupleFieldsSource(self.source) if self.source else None
             return VariableTracker.build(tx, self.fields(), source=source)
 
+        # Handle __class__ specially - return tuple_cls instead of type(self.value)
+        # Since self.value is tuple_cls (a class), type(self.value) would be 'type',
+        # but we want the actual namedtuple class
+        if name == "__class__":
+            from ..source import AttrSource
+
+            cls_source = AttrSource(self.source, name) if self.source else None
+            if cls_source is None:
+                cls_source = self.cls_source
+            options = {"source": cls_source}
+            return UserDefinedClassVariable(self.tuple_cls, **options)
+
         # Check dynamic attributes (stored via side effects)
         # Parent class already checks this, but we check here first for field
         # name mapping
@@ -2946,7 +2958,13 @@ class NewNamedTupleVariable(UserDefinedTupleVariable):
             # effects). This already handles descriptor protocols and
             # AttributeMutation tracking.
             # method_setattr_standard expects VariableTracker for name, not string
-            return self.method_setattr_standard(tx, attr_var, value)
+            result = self.method_setattr_standard(tx, attr_var, value)
+
+            # Also update self.dynamic_attributes so as_python_constant() can
+            # include runtime dynamic attributes
+            self.dynamic_attributes[attr] = value
+
+            return result
 
         elif name == "_replace":
             # NamedTuple._replace should create a new instance with replaced
@@ -3001,6 +3019,13 @@ class NewNamedTupleVariable(UserDefinedTupleVariable):
             # Delegate to tuple's __getitem__ via _tuple_vt
             return self._tuple_vt.call_method(tx, name, args, kwargs)
 
+        # Handle __iter__ explicitly - needed because self.value is tuple_cls (a class),
+        # not an instance, so _maybe_get_baseclass_method won't find tuple.__iter__
+        if name == "__iter__":
+            # Namedtuples subclass tuple, so they support __iter__
+            # Delegate to tuple's __iter__ via _tuple_vt
+            return self._tuple_vt.call_method(tx, name, args, kwargs)
+
         # Delegate tuple methods to _tuple_vt
         method = self._maybe_get_baseclass_method(name)
         if method in tuple_methods:
@@ -3016,6 +3041,57 @@ class NewNamedTupleVariable(UserDefinedTupleVariable):
             The namedtuple/structseq class.
         """
         return self.tuple_cls
+
+    def call_isinstance_check(
+        self, tx: "InstructionTranslator", isinstance_type: type
+    ) -> "VariableTracker":
+        """Handle isinstance check for this variable.
+
+        Override to handle the case where self.value is tuple_cls (a class)
+        rather than an instance. For isinstance checks, we use python_type()
+        which returns the correct instance type.
+
+        Args:
+            tx: InstructionTranslator instance.
+            isinstance_type: The type to check against.
+
+        Returns:
+            ConstantVariable with True/False indicating if this is an instance
+            of isinstance_type.
+        """
+        from ..variables import ConstantVariable
+        import types
+
+        arg_type = self.python_type()
+        isinstance_type_tuple: tuple[type, ...]
+        if isinstance(isinstance_type, type) or callable(
+            getattr(isinstance_type, "__instancecheck__", None)
+        ):
+            isinstance_type_tuple = (isinstance_type,)
+        elif isinstance(isinstance_type, types.UnionType):
+            isinstance_type_tuple = isinstance_type.__args__
+        elif isinstance(isinstance_type, tuple) and all(
+            isinstance(tp, type) or callable(getattr(tp, "__instancecheck__", None))
+            for tp in isinstance_type
+        ):
+            isinstance_type_tuple = isinstance_type
+        else:
+            from ..exc import raise_observed_exception
+
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    variables.ConstantVariable.create(
+                        "isinstance() arg 2 must be a type, a tuple of types, or a union"
+                    )
+                ],
+            )
+        try:
+            val = issubclass(arg_type, isinstance_type_tuple)
+        except TypeError:
+            val = arg_type in isinstance_type_tuple
+        return ConstantVariable.create(val)
 
     def getitem_const(
         self, tx: "InstructionTranslator", arg: VariableTracker
