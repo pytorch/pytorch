@@ -1,12 +1,13 @@
 """torch.ops.aten operators under the `core` module."""
 # mypy: disable-error-code="misc,arg-type,type-arg,valid-type,assignment,return-value,type-var,operator,no-untyped-def,index"
 # pyrefly: ignore-errors
-# ruff: noqa: TCH001,TCH002
+# ruff: noqa: TC001,TC002
 # flake8: noqa: B950
 
 from __future__ import annotations
 
-from typing import Optional, Sequence, TYPE_CHECKING
+from collections.abc import Sequence
+from typing import Optional, TYPE_CHECKING
 
 from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
     opset20 as op20,
