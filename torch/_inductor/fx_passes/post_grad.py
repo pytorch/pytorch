@@ -1513,11 +1513,12 @@ def _cublaslt_can_fuse_bias_epilogue(inp, mat1, mat2):
     if config.max_autotune_gemm:
         return False
 
-    # match the dispatch logic for cuBLASLT at aten/src/ATen/native/cuda/Blas.cpp
+    if not (inp.is_cuda and inp.is_contiguous()):
+        return False
+
     if not (
-        inp.is_cuda
-        and (inp.dim() == 1 or inp.squeeze().dim == 1)
-        and inp.is_contiguous()
+        ((inp.dim() == 1 or inp.squeeze().dim() == 1) and (inp.size(-1) == mat2.size(-1)))
+        or (inp.dim() == 2 and (inp.size(-2) == mat1.size(-2)) and (inp.size(-1) == mat2.size(-1)))
     ):
         return False
 
