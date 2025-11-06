@@ -378,7 +378,7 @@ struct ToImpl<torch::stable::Tensor> {
 // std::vector<T> should be represented as a StableListHandle
 // filled with StableIValues
 // The new std::vector steals ownership of the underlying elements
-// and StableListHandle is freed.
+// and we free the underlying list referred by the input StableListHandle.
 template <typename T>
 struct ToImpl<std::vector<T>> {
   static std::vector<T> call(
@@ -392,8 +392,8 @@ struct ToImpl<std::vector<T>> {
     result.reserve(size);
     for (size_t i = 0; i < size; i++) {
       StableIValue element;
-      TORCH_ERROR_CODE_CHECK(torch_list_at(list_handle, i, &element));
-      result.emplace_back(to<T>(element));
+      TORCH_ERROR_CODE_CHECK(torch_list_get_item(list_handle, i, &element));
+      result.push_back(to<T>(element));
     }
 
     TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));

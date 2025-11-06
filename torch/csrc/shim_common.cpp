@@ -25,13 +25,23 @@ torch_list_size(StableListHandle list_handle, size_t* size) {
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError torch_list_at(
+AOTI_TORCH_EXPORT AOTITorchError torch_list_get_item(
     StableListHandle list_handle,
     size_t index,
     StableIValue* element) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     std::vector<StableIValue>* list = list_handle_to_list_pointer(list_handle);
     *element = list->at(index);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_list_set_item(
+    StableListHandle list_handle,
+    size_t index,
+    StableIValue element) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::vector<StableIValue>* list = list_handle_to_list_pointer(list_handle);
+    list->at(index) = element;
   });
 }
 
