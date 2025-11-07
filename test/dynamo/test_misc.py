@@ -19,6 +19,7 @@ import operator
 import os
 import pickle
 import random
+import re
 import sys
 import tempfile
 import threading
@@ -5486,13 +5487,99 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertEqual(len(lst_with_replay), 1)  # Mutation should be replayed
         self.assertTrue(same(result1, x * 2))
 
+        torch._dynamo.reset()
+
         # Test with replay disabled
         lst_without_replay = []
-        with torch._dynamo.config.patch(replay_side_effects=False):
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy=2
+        ):
             opt_fn_without_replay = torch.compile(fn, backend="eager")
             result2 = opt_fn_without_replay(x, lst_without_replay)
-            self.assertEqual(len(lst_without_replay), 0)  # Mutation should NOT be replayed
+            self.assertEqual(
+                len(lst_without_replay), 0
+            )  # Mutation should NOT be replayed
             self.assertTrue(same(result2, x * 2))
+
+        torch._dynamo.reset()
+        lst_without_replay = []
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy=3
+        ):
+            opt_fn_without_replay = torch.compile(fn, backend="eager")
+            with self.assertRaisesRegex(
+                RuntimeError,
+                re.escape(
+                    "While compiling, we found certain side effects happened in the model.forward. Here are the list of potential sources you can double check: [\"L['lst']\"]"
+                ),
+            ):
+                _ = opt_fn_without_replay(x, lst_without_replay)
+
+    def test_replay_side_effects_model_attr(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = 4
+
+            def forward(self, x):
+                return x.cos()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = 4
+                self.tensor = None
+                self.bar = Bar()
+
+            def forward(self, x):
+                self.const = 5
+                self.tensor = x.sin()
+                res = self.bar(x)
+                return x.cos() + res.sum() + self.tensor
+
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy=3
+        ):
+            foo = Foo()
+            with self.assertRaisesRegex(
+                RuntimeError,
+                re.escape(
+                    "While compiling, we found certain side effects happened in the model.forward. Here are the list of potential sources you can double check: [\"L['self']\"]"
+                ),
+            ):
+                torch.compile(foo, fullgraph=True)(torch.randn(4, 4))
+
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy=1
+        ):
+            foo_v2_compile = Foo()
+            foo_v2_eager = Foo()
+            inp = torch.randn(4, 4)
+            res = torch.compile(foo_v2_compile, fullgraph=True)(torch.randn(4, 4))
+            self.assertEqual(foo_v2_compile.tensor, None)
+            self.assertEqual(foo_v2_compile.const, 4)
+            self.assertEqual(foo_v2_compile.bar.const, 4)
+            same(res, foo_v2_eager(inp))
+
+    def test_replay_side_effects_input_mut(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = 4
+                self.tensor = None
+
+            def forward(self, x):
+                x.add_(5)
+                return x.cos()
+
+        # This is ok because we actually capture the graph which
+        # has mutation. In export, we never retrace the actual
+        # gm so we won't see any mutation applied to inputs
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy=3
+        ):
+            foo = Foo()
+            torch.compile(foo, fullgraph=True)(torch.randn(4, 4))
 
     def test_list_append_return_none(self):
         def fn(x):

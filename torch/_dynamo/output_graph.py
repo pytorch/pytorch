@@ -1845,7 +1845,7 @@ class OutputGraph(OutputGraphCommon):
                 [create_instruction("DELETE_FAST", argval=graph_output_var)]
             )
 
-        if self.export:
+        if torch._dynamo.config.side_effect_replay_policy in [2, 3]:
             from torch.export._trace import _ExportModuleSpecTrackerDict
 
             potential_side_effects = []
@@ -1881,10 +1881,16 @@ class OutputGraph(OutputGraphCommon):
             ]
 
             if side_effect_refs:
-                warnings.warn(
-                    f"While exporting, we found certain side effects happened in the model.forward. "
-                    f"Here are the list of potential sources you can double check: {side_effect_refs}"
-                )
+                if torch._dynamo.config.side_effect_replay_policy == 2:
+                    warnings.warn(
+                        f"While compiling, we found certain side effects happened in the model.forward. "
+                        f"Here are the list of potential sources you can double check: {side_effect_refs}"
+                    )
+                else:
+                    raise RuntimeError(
+                        f"While compiling, we found certain side effects happened in the model.forward. "
+                        f"Here are the list of potential sources you can double check: {side_effect_refs}"
+                    )
 
         return all_stack_locals_metas
 

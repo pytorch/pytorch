@@ -51,6 +51,13 @@ dead_code_elimination = True
 # [@compile_ignored: runtime_behaviour]
 replay_side_effects = True
 
+# Configure side effect warning level
+# If 1, we silently allow side effects
+# If 2, we warn side effects
+# If 3, we error on side effects
+# [@compile_ignored: runtime_behaviour]
+side_effect_replay_policy = 1
+
 # disable (for a function) when cache reaches this size
 
 # controls the maximum number of cache entries with a guard on same ID_MATCH'd
