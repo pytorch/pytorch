@@ -3598,45 +3598,13 @@
   ],
   "GB0355": [
     {
-      "Gb_type": "@triton.heurstics expected to have constant return",
-      "Context": "str(result)",
-      "Explanation": "@triton.heuristics must return constant values because configs can only contain constant values.Got {result}.",
-      "Hints": []
-    }
-  ],
-  "GB0356": [
-    {
-      "Gb_type": "triton kernel should be called with only a single grid",
-      "Context": "variable.grid: {variable.grid}, args: {args}",
-      "Explanation": "Triton kernels should be caleld with only a single grid.",
-      "Hints": []
-    }
-  ],
-  "GB0357": [
-    {
-      "Gb_type": "CreateTMADescriptorExperimentalVariable: expected .data_ptr()",
-      "Context": "args: {args}, kwargs: {kwargs}, ptr: {ptr}",
-      "Explanation": "Expected `ptr` argument to be from a `.data_ptr()` call. Please ensure there were no graph breaks between create_{self.rank}d_tma_descriptor and the upstream .data_ptr() call.",
-      "Hints": []
-    }
-  ],
-  "GB0358": [
-    {
-      "Gb_type": "unexpected triton kernel argument type",
-      "Context": "non_constant_args: {non_constant_args}",
-      "Explanation": "Unexpected argument type for a Triton kernel: {repr(v)}. Expected tensor or symbolic variable for non-constant arguments.",
-      "Hints": []
-    }
-  ],
-  "GB0359": [
-    {
       "Gb_type": "non-single Tensor return unsupported",
       "Context": "api: {api}, ret: {ret}",
       "Explanation": "{api} over function that returns something other than one Tensor.",
       "Hints": []
     }
   ],
-  "GB0360": [
+  "GB0356": [
     {
       "Gb_type": "failed to handle argument for FlexAttentionBackward HOP",
       "Context": "args: {args}, kwargs: {kwargs}",
@@ -3646,7 +3614,7 @@
       ]
     }
   ],
-  "GB0361": [
+  "GB0357": [
     {
       "Gb_type": "UnspecializedNNModuleVariable wrapped around ScriptModules unsupported",
       "Context": "str(value)",
@@ -3656,7 +3624,7 @@
       ]
     }
   ],
-  "GB0362": [
+  "GB0358": [
     {
       "Gb_type": "optimizer: pending mutation on parameter",
       "Context": "variable: {variable}, parameter: {p}",
@@ -3664,7 +3632,7 @@
       "Hints": []
     }
   ],
-  "GB0363": [
+  "GB0359": [
     {
       "Gb_type": "unsupported torch._C._SDPAParams attribute",
       "Context": "name: {name}",
@@ -3674,11 +3642,19 @@
       ]
     }
   ],
-  "GB0364": [
+  "GB0360": [
     {
       "Gb_type": "torch.fx.experimental.symbolic_shapes.guard_scalar branch not supported",
       "Context": "expr: {expr}",
       "Explanation": "Expected `expr` to be a symbolic variable or constant.",
+      "Hints": []
+    }
+  ],
+  "GB0361": [
+    {
+      "Gb_type": "triton kernel unsupported feature",
+      "Context": "",
+      "Explanation": "Encountered triton kernel unsupported feature: {msg}",
       "Hints": []
     }
   ]

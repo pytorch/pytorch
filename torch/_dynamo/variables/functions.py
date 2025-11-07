@@ -34,6 +34,7 @@ import types
 from collections.abc import Callable, Sequence
 from types import FunctionType
 from typing import Any, Optional, TYPE_CHECKING, TypeVar
+from typing_extensions import Never
 from weakref import WeakKeyDictionary
 
 import torch
@@ -2166,6 +2167,14 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 
 
 class DynamoTritonHOPifier(TritonHOPifier):
+    def raise_unsupported(self, msg: str) -> Never:
+        unimplemented(
+            gb_type="triton kernel unsupported feature",
+            context="",
+            explanation=f"Encountered triton kernel unsupported feature: {msg}",
+            hints=[],
+        )
+
     def is_callable(self, maybe_callable: Any) -> bool:
         return isinstance(
             maybe_callable, (NestedUserFunctionVariable, UserFunctionVariable)
@@ -2221,12 +2230,8 @@ class DynamoTritonHOPifier(TritonHOPifier):
 
     def maybe_unpack_heuristic_result(self, result: Any) -> Any:
         if not result.is_python_constant():
-            unimplemented(
-                gb_type="@triton.heurstics expected to have constant return",
-                context=str(result),
-                explanation="@triton.heuristics must return constant values because configs can only contain constant values."
-                f"Got {result}.",
-                hints=[],
+            self.raise_unsupported(
+                "@triton.heuristics must return constant values because configs can only contain constant values."
             )
 
         return result.guard_as_python_constant()
@@ -2241,11 +2246,8 @@ class DynamoTritonHOPifier(TritonHOPifier):
         # __getitem__ should only be called if we don't already have a grid
         # Only grid needs to be passed
         if variable.grid is not None or len(args) != 1:
-            unimplemented(
-                gb_type="triton kernel should be called with only a single grid",
-                context=f"variable.grid: {variable.grid}, args: {args}",
-                explanation="Triton kernels should be caleld with only a single grid.",
-                hints=[],
+            self.raise_unsupported(
+                "Triton kernels should be called with only a single grid"
             )
         return type(variable)(
             kernel=variable.kernel,
@@ -2300,12 +2302,8 @@ class DynamoTritonHOPifier(TritonHOPifier):
         for v in non_constant_args.values():
             v = v.realize()
             if not isinstance(v, (variables.TensorVariable, variables.SymNodeVariable)):
-                unimplemented(
-                    gb_type="unexpected triton kernel argument type",
-                    context=f"non_constant_args: {non_constant_args}",
-                    explanation=f"Unexpected argument type for a Triton kernel: {repr(v)}. "
-                    "Expected tensor or symbolic variable for non-constant arguments.",
-                    hints=[],
+                self.raise_unsupported(
+                    f"Unexpected argument type for a Triton kernel: {repr(v)}."
                 )
 
         constant_args_idx = kernel_side_table.add_constant_args(constant_args)
@@ -2468,14 +2466,10 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
         ptr = kwargs["ptr"] if "ptr" in kwargs else args[0]
 
         if not isinstance(ptr, variables.DataPtrVariable):
-            unimplemented(
-                gb_type="CreateTMADescriptorExperimentalVariable: expected .data_ptr()",
-                context=f"args: {args}, kwargs: {kwargs}, ptr: {ptr}",
-                explanation="Expected `ptr` argument to be from a `.data_ptr()` call. "
+            raise Unsupported(
                 "Please ensure there were no graph breaks between "
                 f"create_{self.rank}d_tma_descriptor and the upstream "
-                ".data_ptr() call.",
-                hints=[],
+                ".data_ptr() call."
             )
 
         if self.rank == 1:
