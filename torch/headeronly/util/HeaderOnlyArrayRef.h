@@ -10,6 +10,7 @@
 #include <iterator>
 #include <type_traits>
 #include <vector>
+#include <algorithm>
 
 namespace c10 {
 
