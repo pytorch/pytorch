@@ -5,7 +5,7 @@ Collective runtime estimation using CUDA events and power-of-2 rounding.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Optional
+from typing import Any, Optional
 
 import torch
 from torch._inductor.utils import clear_on_fresh_cache
