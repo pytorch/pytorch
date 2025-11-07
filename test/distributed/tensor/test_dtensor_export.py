@@ -520,8 +520,6 @@ class DTensorExportTest(TestCase):
             2,
         )
 
-    # "Explanation: SourcelessBuilder.create does not know how to wrap <class 'types.UnionType'>"
-    @unittest.expectedFailure
     def test_union_typed_annotation(self):
         def fn(leaf: torch.Tensor | DTensor):
             def nest_fn(leaf: torch.Tensor | DTensor):
@@ -535,7 +533,7 @@ class DTensorExportTest(TestCase):
         z = torch.randn(16, 16)
         gm = graph_capture_and_aot_export_joint_with_descriptors(fn, (z,))
 
-        print(gm)
+        self.assertEqual(fn(z), gm(z)[0])
 
 
 instantiate_parametrized_tests(DTensorExportTest)

@@ -23,6 +23,7 @@ import functools
 from collections.abc import Callable
 from typing import Any, Optional, TYPE_CHECKING, Union
 
+from torch import device as device_type
 from torch._guards import ChainedSource, Guard, GuardSource, Source
 
 from . import utils
@@ -111,11 +112,14 @@ def is_constant_source(source: Source) -> bool:
     return False
 
 
-def _get_source_debug_name(source: Source) -> str:
-    try:
-        return source.name()
-    except NotImplementedError:
+def _get_source_debug_name(source: Optional[Source]) -> str:
+    if source is None:
         return "<unknown source>"
+    else:
+        try:
+            return source.name()
+        except NotImplementedError:
+            return "<unknown source>"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -145,6 +149,23 @@ class LocalSource(Source):
 
     def name(self) -> str:
         return f"L[{repr(self.local_name)}]"
+
+
+@dataclasses.dataclass(frozen=True)
+class TempLocalSource(Source):
+    # like LocalSource, but cannot be guarded on
+    local_name: str
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.append_output(codegen.create_load(self.local_name))
+
+    def guard_source(self) -> GuardSource:
+        return GuardSource.TEMP_LOCAL
+
+    def name(self) -> str:
+        raise NotImplementedError(
+            "Cannot create guard on TempLocalSource - this is an internal Dynamo bug. Please file an issue on GitHub."
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1077,6 +1098,30 @@ class ShapeEnvSource(Source):
 
     def guard_source(self) -> GuardSource:
         return GuardSource.SHAPE_ENV
+
+
+@dataclasses.dataclass(frozen=True)
+class CurrentStreamSource(Source):
+    device: device_type
+
+    def name(self) -> str:
+        return f"___get_current_stream(torch.device('{self.device.type}', {self.device.index}))"
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        num_args = 1
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(utils.__name__, "get_current_stream")
+        )
+        codegen.add_push_null(lambda: codegen.load_import_from("torch", "device"))
+        codegen.extend_output([codegen.create_load_const(self.device.type)])
+        if self.device.index is not None:
+            num_args += 1
+            codegen.extend_output([codegen.create_load_const(self.device.index)])
+        codegen.extend_output(create_call_function(num_args, False))
+        codegen.extend_output(create_call_function(1, False))
+
+    def guard_source(self) -> GuardSource:
+        return GuardSource.GLOBAL
 
 
 @dataclasses.dataclass(frozen=True)

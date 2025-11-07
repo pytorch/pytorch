@@ -619,6 +619,10 @@ Available options:
   and reallocate buffers across multiple streams, especially when the capture DAG frequently
   reaches joined frontiers.
 
+* ``per_process_memory_fraction`` option limits the amount of memory that can be allocated
+  on all the CUDA devices to a specified fraction of the available memory. This is a value
+  between 0 and 1. Attempting to allocate more memory will raise an out of memory error.
+
 .. note::
 
     Some stats reported by the
@@ -1719,6 +1723,16 @@ and can be used to share memory across graphs as shown::
     static_in_2.copy_(real_data_2)
     g1.replay()
     g2.replay()
+
+It's also safe to share a memory pool across separate graphs that do not depend
+on each other's outputs, provided they never run concurrently.
+Be aware that replaying one graph can clobber another graph's outputs when
+they share a pool, unless :meth:`~torch.Tensor.clone` is called on the outputs
+beforehand.
+This pattern is frequently used in inference servers that accept variable batch
+sizes at runtime.
+vLLM is a notable example; see `here <https://github.com/vllm-project/vllm/blob/938a81692ea318e59ead4750e7e7425bfd6a4896/vllm/platforms/interface.py#L508-L515>`__
+and `here <https://github.com/vllm-project/vllm/blob/938a81692ea318e59ead4750e7e7425bfd6a4896/vllm/compilation/cuda_graph.py#L86-L89>`__.
 
 With :func:`torch.cuda.make_graphed_callables`, if you want to graph several
 callables and you know they'll always run in the same order (and never concurrently)
