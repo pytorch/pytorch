@@ -4,7 +4,6 @@
 #include <c10/util/SmallVector.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include <c10/util/Exception.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/core/NamedTensor.h>
@@ -148,14 +147,24 @@ static bool isGloballyDisabledAddmmCudaLt(const at::Device& device) {
 /*
  * Check whether for the given input we want to enable the Lt interface
  */
-static bool isInputCompliesAddmmCudaLt(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
+static bool isInputCompliesAddmmCudaLt(
+    Tensor& result,
+    const Tensor& self,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Scalar& beta,
+    const Scalar& alpha,
+    Activation activation
+) {
+  #ifdef USE_ROCM
   // Implies 2D bias which we currently not send through Lt.
   // TODO: this check is done pre col-major input preparation,
   // so, this condition can be ralexed in cases when a col-major
   // copy of result is needed.
-  if (result.is_same(self)) {
+  if (self.is_same(result) || self.dim() == 2) {
     return false;
   }
+  #endif
 
   #if defined(USE_ROCM) && ROCM_VERSION == 60400
   // hipblaslt TT fp32 regression on ROCm 6.4, cannot use
@@ -170,10 +179,34 @@ static bool isInputCompliesAddmmCudaLt(Tensor& result, const Tensor& self, const
   #if defined(CUDA_VERSION) || defined(USE_ROCM)
   const auto scalar_type = mat1.scalar_type();
   return (beta.toComplexDouble() == 1.0
-    // self.dim() == 1 && result.dim() == 2 && self.sizes()[0] == mat2_sizes[1]
-    // is to use lt interface only when self is bias.
-    && self.dim() == 1 && self.sizes()[0] == mat2_sizes[1] && self.is_contiguous()
+    // NOTE: row-major result is important when bias is 1D.
+    // This is because Lt broadcasts 1D bias over the columns
+    // while the aten::addmm API broadcasts it over the rows,
+    // and this is in conjuction with the data preparation
+    // procedure that does not transpose arguments with
+    // col-major result. For col-major result we need
+    // to explicitly transpose the problem so that bias is
+    // correctly applied.
+    // TODO: enable col-major result if needed.
+    // TODO: no need to check result's layout when
+    // !result.is_same(self) and self.dim() == 2, because
+    // self needs to be copied into result and the bias ptr
+    // will be ignored.
     && result.dim() == 2 && result.is_contiguous()
+    && (
+      ( // Conditions for bias to be fusable -- implies direct Lt path without copies.
+        self.is_contiguous() &&
+        // NOTE: fine to have 1-len dims to the left from the right-most one
+        (self.dim() == 1 || self.squeeze().dim() == 1) &&
+        self.sizes().back() == mat2_sizes[1]
+      )
+      || ( // 2D bias restrictions. self.is_contiguous() is implicit when result.is_same(self),
+        // and we need to copy self into result otherwise, so the self's layout becomes irrelevant.
+        // See also TODO from above.
+        activation != Activation::None && // Lt is faster when activation is fused
+        (self.dim() == 2 && at::is_expandable_to(self.sizes(), {mat1_sizes[0], mat2_sizes[1]}))
+      )
+    )
     && ( // some dtype restrictions
       #ifndef USE_ROCM
       scalar_type == at::ScalarType::Double ||
@@ -202,8 +235,8 @@ static bool isInputCompliesAddmmCudaLt(Tensor& result, const Tensor& self, const
       // and the leading stride is at least max(1, other dim length), so we might
       // end up with contiguous cols but not rows (i.e. holes between different rows)
       // and vice versa.
-      && mat2_sizes[0] < 65535 * 32 && mat2_sizes[1] < 65535 * 32 &&
-      mat1_sizes[0] < 65535 * 32 && mat1_sizes[1] < 65535 * 32 &&
+      && mat2_sizes[0] < 65535 * 32 && mat2_sizes[1] < 65535 * 32
+      && mat1_sizes[0] < 65535 * 32 && mat1_sizes[1] < 65535 * 32
       && (
         // filter by dtype
         (scalar_type != at::ScalarType::Half && scalar_type != at::ScalarType::BFloat16) ||
@@ -267,7 +300,16 @@ bool launchGemmAndBiasCublasLt(
     const Scalar& alpha,
     Activation activation = Activation::None
 ) {
-  const auto* self_ptr = self.const_data_ptr<scalar_t>();
+  // We apply bias in the epilogue only when it is 1D,
+  // or when it can be squeezed to 1D.
+  // self_ptr == nullptr implies ignore bias epilogue
+  // and use standard gemm-like API.
+  const auto* self_ptr = [&]() -> auto {
+    if (self.dim() == 1 || self.squeeze().dim() == 1) {
+      return self.const_data_ptr<scalar_t>();
+    }
+    return static_cast<const scalar_t*>(nullptr);
+  }();
 
   const auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
@@ -353,7 +395,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   disable_addmm_cuda_lt = isGloballyDisabledAddmmCudaLt(self.device()) || disable_addmm_cuda_lt;
   #endif
   // Condition on the input
-  disable_addmm_cuda_lt = !isInputCompliesAddmmCudaLt(result, self, mat1, mat2, beta, alpha) || disable_addmm_cuda_lt;
+  disable_addmm_cuda_lt = !isInputCompliesAddmmCudaLt(result, self, mat1, mat2, beta, alpha, activation) || disable_addmm_cuda_lt;
   // }
 
   at::ScalarType scalar_type = mat1.scalar_type();
@@ -363,19 +405,20 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   if (!result.is_same(self)) {
     at::native::resize_output(result, {mat1.sizes()[0], mat2.sizes()[1]});
 
+    // We use bias ptr in the Lt path only when bias is 1D
+    const auto use_bias_ptr_lt = (self.dim() == 1) && !disable_addmm_cuda_lt;
     const auto self_maybe_expanded = [&]() -> c10::MaybeOwned<Tensor> {
-      if (disable_addmm_cuda_lt) {
-        // When in non-Lt path we do expand self even before
+      if (!use_bias_ptr_lt) {
+        // We do expand self even before
         // check for beta != 0.0 to make sure that
         // test_sparse_csr.py::TestSparseCSRCUDA::test_addmm_errors_*
         // runs green.
         return expand_size(self, result.sizes(), "addmm");
       }
-      // copy next, should broadcast
       return c10::MaybeOwned<Tensor>::borrowed(self);
     }();
-    // We copy bias when in the non-Lt path
-    if (beta.toComplexDouble() != 0.0 && disable_addmm_cuda_lt) {
+    // We do not copy bias only when we need the bias ptr
+    if (beta.toComplexDouble() != 0.0 && !use_bias_ptr_lt) {
       // NOTE: self should broadcast over result
       at::native::copy_(result, *self_maybe_expanded);
     }

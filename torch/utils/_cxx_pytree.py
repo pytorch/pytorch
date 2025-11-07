@@ -15,8 +15,8 @@ collection support for PyTorch APIs.
 import functools
 import types
 from collections.abc import Callable, Iterable, Mapping
-from typing import Any, Optional, overload, TypeVar, Union
-from typing_extensions import deprecated, Self, TypeAlias, TypeIs
+from typing import Any, Optional, overload, TypeAlias, TypeVar, Union
+from typing_extensions import deprecated, Self, TypeIs
 
 import torch.utils._pytree as python_pytree
 from torch.torch_version import TorchVersion as _TorchVersion
@@ -53,6 +53,7 @@ __all__ = [
     "DumpableContext",
     "ToDumpableContextFn",
     "FromDumpableContextFn",
+    "PyTreeSpec",
     "TreeSpec",
     "LeafSpec",
     "keystr",
