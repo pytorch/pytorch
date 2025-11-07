@@ -38,7 +38,7 @@ def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]]
         if not get_raw:
             flop_formula = shape_wrapper(flop_formula)
 
-        def register(target):
+        def register(target) -> None:
             if not isinstance(target, torch._ops.OpOverloadPacket):
                 raise ValueError(
                     f"register_flop_formula(targets): expected each target to be "
@@ -149,7 +149,11 @@ def conv_flop_count(
     flop = prod(conv_shape) * prod(filter_size) * batch_size * c_out * c_in * 2
     return flop
 
-@register_flop_formula([aten.convolution, aten._convolution, aten.cudnn_convolution, aten._slow_conv2d_forward])
+@register_flop_formula([aten.convolution,
+                        aten._convolution,
+                        aten.cudnn_convolution,
+                        aten._slow_conv2d_forward,
+                        aten.convolution_overrideable])
 def conv_flop(x_shape, w_shape, _bias, _stride, _padding, _dilation, transposed, *args, out_shape=None, **kwargs) -> int:
     """Count flops for convolution."""
     # pyrefly: ignore [bad-argument-type]
@@ -582,6 +586,7 @@ flop_registry = {
     aten.convolution: conv_flop,
     aten._convolution: conv_flop,
     aten.cudnn_convolution: conv_flop,
+    aten.convolution_overrideable: conv_flop,
     aten._slow_conv2d_forward: conv_flop,
     aten.convolution_backward: conv_backward_flop,
     aten._scaled_dot_product_efficient_attention: sdpa_flop,
@@ -619,7 +624,7 @@ def convert_num_with_suffix(number, suffix):
     # Return the value and the suffix as a string
     return value + suffixes[index]
 
-def convert_to_percent_str(num, denom):
+def convert_to_percent_str(num, denom) -> str:
     if denom == 0:
         return "0%"
     return f"{num / denom:.2%}"
@@ -659,7 +664,7 @@ class FlopCounterMode:
             mods: Optional[Union[torch.nn.Module, list[torch.nn.Module]]] = None,
             depth: int = 2,
             display: bool = True,
-            custom_mapping: Optional[dict[Any, Any]] = None):
+            custom_mapping: Optional[dict[Any, Any]] = None) -> None:
         super().__init__()
         self.flop_counts: dict[str, dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
@@ -782,7 +787,7 @@ class FlopCounterMode:
 class _FlopCounterMode(TorchDispatchMode):
     supports_higher_order_operators = True
 
-    def __init__(self, counter: FlopCounterMode):
+    def __init__(self, counter: FlopCounterMode) -> None:
         self.counter = counter
 
     def _execute_with_isolated_flop_counting(self, branch_fn, operands):
