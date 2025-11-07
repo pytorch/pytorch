@@ -316,6 +316,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         GraphTransformObserver(
             gm, "post_grad_mutable_custom_post_pass"
         ).apply_graph_pass(post_grad_mutable_custom_post_pass)
+        gm.graph.eliminate_dead_code()
     else:
         GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
             decompose_auto_functionalized
