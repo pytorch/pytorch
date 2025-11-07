@@ -117,7 +117,6 @@ def benchmark_collective_with_cuda_events_impl(
     from torch._inductor import fx_utils
     from torch.distributed.distributed_c10d import _get_group_size_by_name
 
-
     # Early check: can we actually run collectives?
     if not can_benchmark_collective():
         return None, ""
