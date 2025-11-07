@@ -1,10 +1,13 @@
+from torch.distributed.utils import _unpack_kwargs
 import builtins
 
 import torch
 import torch.utils._pytree as pytree
 from torch._ops import HigherOrderOperator
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
+from typing import Any
 
 class Print(HigherOrderOperator):
     """
@@ -35,10 +38,22 @@ def print_proxy_torch_dispatch_mode(
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)  # type: ignore[union-attr]  # noqa: F841
     mode.tracer.create_proxy("call_function", print, (format_str,), proxy_kwargs)
 
+@print.py_functionalize_impl
+# pyre-ignore
+def print_functionalize(ctx: Any, format_str: str, **kwargs: object) -> None:
+    with ctx.redispatch_to_next():
+        res = print_impl(format_str, **kwargs)
+        return ctx.wrap_tensors(res)
+
+@print.py_impl(FakeTensorMode)
+# pyre-ignore
+def call_delegate_fake_tensor_mode(mode, format_str: str, **kwargs: object):
+    with mode:
+        return None
 
 @print.py_impl(torch._C.DispatchKey.CompositeExplicitAutograd)
 # pyre-ignore
-def print_cpu(format_str: str, **kwargs: object) -> None:
+def print_impl(format_str: str, **kwargs: object) -> None:
     # Ensure all immutable_dict/list in kwargs are converted to regular dict/list
     map_types: dict[type, type] = {
         torch.fx.immutable_collections.immutable_dict: dict,
