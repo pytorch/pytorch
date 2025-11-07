@@ -290,6 +290,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             "max_compute_pre_fetch",
             "custom_runtime_estimation",
             "insert_overlap_deps",
+            "collective_estimator",
         )
         for key in config_keys:
             if (val := getattr(dist_opts, key)) is not None:
