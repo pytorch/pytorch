@@ -35,7 +35,7 @@ from .common import (
 )
 from .simd import NodeInfo, prefix_is_reduction, SIMDScheduling
 from .simd_kernel_features import SIMDKernelFeatures
-from .triton import gen_common_triton_imports, TritonKernel
+from .triton import TritonKernel, TritonScheduling
 from .triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 
 
@@ -615,12 +615,18 @@ class ComboKernel(Kernel):
         mutated_args = self.get_mutated_args_sub_kernels()
         dispatch = self.dispatch_class
         assert dispatch is not None
+
+        triton_scheduler = V.graph.scheduler
+        assert isinstance(V.graph.scheduler, TritonScheduling)
+        triton_scheduler = cast(TritonScheduling, V.graph.scheduler)
+        triton_kernel_cls: TritonKernel = triton_scheduler.kernel_type
+
         inductor_meta = {
             "grid_type": dispatch.grid_expr.__name__,
             "combo_grid_meta": self.combo_grid_meta(),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
-            **TritonKernel.inductor_meta_common(),
+            **triton_kernel_cls.inductor_meta_common(),
         }
 
         sub_kernel = selected_kernel

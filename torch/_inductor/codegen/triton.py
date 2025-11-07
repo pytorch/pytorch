@@ -187,47 +187,6 @@ def gen_attr_descriptor_import() -> str:
         return ""
 
 
-@lru_cache(None)
-def gen_common_triton_imports() -> str:
-    imports = IndentedBuffer()
-    imports.splice(
-        """
-        import triton
-        import triton.language as tl
-        """
-    )
-    try:
-        import triton.language.extra.tlx  # noqa: F401
-
-        imports.splice(
-            """
-           import triton.language.extra.tlx as tlx  # noqa: F401
-           """
-        )
-    except ImportError:
-        pass
-    if attr_desc := gen_attr_descriptor_import():
-        imports.writeline(attr_desc)
-
-    imports.splice(
-        """
-        from torch._inductor.runtime import triton_helpers, triton_heuristics
-        from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
-        from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
-        """
-    )
-    if config.triton.proton_profiling:
-        imports.splice(
-            """
-            import triton.profiler as proton
-            import triton.profiler.language as pl
-            pl.enable_semantic('triton')
-            """
-        )
-
-    return imports.getvalue()
-
-
 class TritonSymbols:
     """
     Stores sympy.Symbol instances and constants associated with triton codegen.
@@ -5196,8 +5155,49 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return "reduction"
         return "pointwise"
 
-    @staticmethod
-    def inductor_meta_common():
+    @classmethod
+    @lru_cache(None)
+    def gen_common_triton_imports(cls) -> str:
+        imports = IndentedBuffer()
+        imports.splice(
+            """
+            import triton
+            import triton.language as tl
+            """
+        )
+        try:
+            import triton.language.extra.tlx  # noqa: F401
+
+            imports.splice(
+                """
+               import triton.language.extra.tlx as tlx  # noqa: F401
+               """
+            )
+        except ImportError:
+            pass
+        if attr_desc := gen_attr_descriptor_import():
+            imports.writeline(attr_desc)
+
+        imports.splice(
+            """
+            from torch._inductor.runtime import triton_helpers, triton_heuristics
+            from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
+            from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
+            """
+        )
+        if config.triton.proton_profiling:
+            imports.splice(
+                """
+                import triton.profiler as proton
+                import triton.profiler.language as pl
+                pl.enable_semantic('triton')
+                """
+            )
+
+        return imports.getvalue()
+
+    @classmethod
+    def inductor_meta_common(cls):
         inductor_meta = {
             "backend_hash": torch.utils._triton.triton_hash_with_backend(),
             "assert_indirect_indexing": config.assert_indirect_indexing,
@@ -5275,7 +5275,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             size_hints[prefix] = size_hint
 
         if name is None:
-            code.splice(gen_common_triton_imports())
+            code.splice(self.gen_common_triton_imports())
             device_type = V.graph.get_current_device_or_throw().type
             if device_type == "cpu":
                 code.splice("triton_helpers.set_driver_to_cpu()")
