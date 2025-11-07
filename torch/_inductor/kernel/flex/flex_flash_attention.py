@@ -3,12 +3,16 @@
 
 import functools
 import importlib
-from typing import Any
+from collections.abc import Callable, Sequence
+from contextlib import contextmanager
+from typing import Any, Optional
 
 import sympy
+from sympy import Expr, Integer
 
 import torch
 from torch.fx import GraphModule
+from torch.utils._sympy.functions import Identity
 
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
@@ -27,7 +31,7 @@ def ensure_flash_available() -> bool:
     in the same interpreter to retry the import.
     """
     try:
-        return importlib.util.find_spec("flash_attn.cute") is not None
+        return importlib.util.find_spec("flash_attn.cute") is not None  # type: ignore[attr-defined]
     except ImportError:
         return False
 
@@ -38,6 +42,63 @@ from ...codegen.cutedsl.cutedsl_template import CuteDSLTemplate
 flash_attention_cutedsl_template = CuteDSLTemplate(
     name="flash_attention_cutedsl", source=load_flex_template("flash_attention")
 )
+
+
+def _fixed_indexer_cute(
+    size: Sequence[int],
+    stride: Optional[Sequence[int]] = None,
+    offset: Expr = Integer(0),
+) -> Callable[[Sequence[Expr]], Expr]:
+    """
+    Colexicographic indexer for CuteDSL - matches CuTe's coordinate interpretation.
+
+    CuTe interprets linear indices in colexicographic (column-major) order,
+    whereas Inductor's default _fixed_indexer uses lexicographic (row-major) order.
+
+    For size=[4, 128] with index=[b, q_idx]:
+    - Lexicographic:    b*128 + q_idx*1
+    - Colexicographic:  b*1 + q_idx*2
+
+    CuTe then applies the tensor's actual memory strides to get the correct offset.
+    """
+
+    def indexer(index: Sequence[Expr]) -> Expr:
+        assert offset == Integer(0), "Offset not supported for colexicographic indexing"
+        if not index:
+            return Integer(0)
+
+        result = index[0]
+        runner = size[0]
+
+        for idx, sz in zip(index[1:], size[1:], strict=True):
+            result = result + runner * Identity(idx)
+            runner = runner * sz
+
+        return result
+
+    return indexer
+
+
+@contextmanager
+def patch_fixed_layout_indexer_for_cutedsl():
+    """
+    Temporarily swap FixedLayout.make_indexer so CuteDSL sees colexicographic indexing.
+
+    Note [CuteDSL indexer patch]:
+    Flex flash attention only supports a limited set of IR ops (pointwise, reads, no stores),
+    so temporarily changing the indexing order is safe for the kernels we emit today.
+    TODO(dynamic shapes): Reconfirm once flex flash attention supports dynamic shapes.
+    """
+    original_make_indexer = FixedLayout.make_indexer
+
+    def cutedsl_make_indexer(self):
+        return _fixed_indexer_cute(self.size, self.stride, self.offset)
+
+    FixedLayout.make_indexer = cutedsl_make_indexer  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        FixedLayout.make_indexer = original_make_indexer  # type: ignore[assignment]
 
 
 def input_buffers_require_grads(graph_module, num_score_mod_placeholders: int):
@@ -142,6 +203,7 @@ def create_flex_flash_attention_kernel(
     full_kv_num_blocks: TensorBox | None,
     full_kv_indices: TensorBox | None,
     mask_graph: Subgraph,
+    subgraph: Subgraph | None = None,
 ) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox | ShapeAsConstantBuffer]:
     """Create a flex flash attention kernel using CuteDSL template."""
     if not ensure_flash_available():
@@ -210,6 +272,24 @@ def create_flex_flash_attention_kernel(
         SM_SCALE=scale,
         NEEDS_BLOCK_MASK=needs_block_mask,
     )
+
+    def wrap_choice_render(choice):
+        # See Note [CuteDSL indexer patch]
+        original_make_kernel_render = choice.make_kernel_render
+
+        def make_kernel_render_with_patch(*args, **kwargs):
+            render_kernel, render = original_make_kernel_render(*args, **kwargs)
+
+            # Let the template construct its closures, then scope the indexer patch
+            # to the actual render call that emits the kernel
+            render_with_patch = patch_fixed_layout_indexer_for_cutedsl()(render)
+
+            return render_kernel, render_with_patch
+
+        choice.make_kernel_render = make_kernel_render_with_patch
+
+    for choice in choices:
+        wrap_choice_render(choice)
 
     if error or not choices:
         # Fallback to original implementation

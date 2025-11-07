@@ -581,7 +581,7 @@ class Partitioner:
                 break
             if node.op in {"placeholder", "get_attr"}:
                 continue
-            if node.target == operator.__getitem__:
+            if node.target is operator.__getitem__:
                 continue
             input_nodes: dict[Node, None] = {}
             map_arg(node.args, input_nodes.setdefault)

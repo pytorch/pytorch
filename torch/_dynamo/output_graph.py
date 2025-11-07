@@ -101,7 +101,7 @@ from .exc import (
     unimplemented_v2,
     unimplemented_v2_with_warning,
 )
-from .graph_bytecode_inputs import has_user_objects, index_to_source
+from .graph_bytecode_inputs import has_user_objects, index_to_bytecode_constructor
 from .graph_deduplication import apply_graph_deduplication
 from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
@@ -1541,9 +1541,19 @@ class OutputGraph(OutputGraphCommon):
                     "store_user_object_weakrefs",
                 )
             )
-            for source in reversed(index_to_source.values()):
-                codegen(source)
-            codegen.call_function(len(index_to_source), False)
+            tmp_vars = []
+            for constructor in index_to_bytecode_constructor.values():
+                constructor(codegen)
+                var_name = (
+                    self.new_var()
+                )  # keep alive any temp objects for the rest of the frame
+                codegen.store(var_name)
+                tmp_vars.append(var_name)
+
+            for var_name in tmp_vars:
+                codegen.append_output(codegen.create_load(var_name))
+
+            codegen.call_function(len(index_to_bytecode_constructor), False)
             codegen.pop_top()
             self.add_output_instructions(codegen.get_instructions())
 
@@ -2577,7 +2587,7 @@ class OutputGraph(OutputGraphCommon):
                             real_script_obj
                         ):
                             flat_dict = dict(real_script_obj.__obj_flatten__())  # type: ignore[attr-defined]
-                            for attr in flat_dict.keys():
+                            for attr in flat_dict:
                                 fake_attr_val = getattr(
                                     fake_script_obj.wrapped_obj, attr
                                 )
@@ -3245,7 +3255,7 @@ class SubgraphTracer(fx.Tracer):
     def remove_node(self, node: fx.Node) -> None:
         if len(node.users) > 0:
             user_graph_nodes: list[torch.fx.Node] = []
-            for user in node.users.keys():
+            for user in node.users:
                 # For the case where user.graph == self.graph, that is a real bug and will raise
                 # properly.
                 if user.graph != self.graph:
