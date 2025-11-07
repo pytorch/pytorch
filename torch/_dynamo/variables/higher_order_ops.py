@@ -247,7 +247,7 @@ def _make_inlined(tx: "InstructionTranslator", f):
 
 
 def _call_function_and_unflatten_output(
-    tx, fn, args, kwargs, flat_example_value, ret_spec
+    tx, fn, args, kwargs, flat_example_value, ret_spec, body_r
 ):
     from .builder import wrap_fx_proxy
 
@@ -262,6 +262,21 @@ def _call_function_and_unflatten_output(
         ),
         example_value=flat_example_value,
     )
+
+    # wrap_fx_proxy creates fresh variable trackers. However, the main program
+    # after the speculate subgraph can still use the original tensor vts that
+    # are still pointing to the nodes present in the subgraph. So, we reproxify
+    # the original tensor vts with the subgraph outputs. This way, whenever the
+    # outer graph uses an original vt, it uses the subgraph output.
+    if body_r is not None:
+        for orig_vt, subgraph_vt in zip(body_r.items, flat_variable.items):
+            if isinstance(
+                orig_vt, (variables.SymNodeVariable, variables.TensorVariable)
+            ):
+                assert isinstance(
+                    subgraph_vt, (variables.SymNodeVariable, variables.TensorVariable)
+                )
+                orig_vt.proxy = subgraph_vt.proxy
 
     if ret_spec.masks_to_filter_const_values:
         from torch._dynamo.external_utils import insert_const_values_with_mask
@@ -572,6 +587,7 @@ def _call_while_loop(
         {},
         None,
         body_treespec,
+        body_r,
     )
 
 
@@ -1535,6 +1551,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             {},
             None,
             true_spec,
+            true_r,
         )
 
 
@@ -1858,6 +1875,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             {},
             None,
             OutputSpec(xs_treespec),
+            None,
         )
 
 
@@ -2090,7 +2108,13 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.scan, p_args, {}, None, _combine_spec
+            tx,
+            torch.ops.higher_order.scan,
+            p_args,
+            {},
+            None,
+            _combine_spec,
+            None,
         )
 
 
@@ -2213,7 +2237,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.map_impl, p_args, {}, None, body_spec
+            tx, torch.ops.higher_order.map_impl, p_args, {}, None, body_spec, body_r
         )
 
 
@@ -2419,7 +2443,13 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         return _call_function_and_unflatten_output(
-            tx, self.value, tuple(p_args), p_kwargs, flat_example_value, treespec
+            tx,
+            self.value,
+            tuple(p_args),
+            p_kwargs,
+            flat_example_value,
+            treespec,
+            body_r,
         )
 
 
@@ -2506,7 +2536,7 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
             body_r.as_proxy(),
         )
         return _call_function_and_unflatten_output(
-            tx, self.value, proxy_args, {}, example_value, treespec
+            tx, self.value, proxy_args, {}, example_value, treespec, body_r
         )
 
 
@@ -2601,7 +2631,7 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         return _call_function_and_unflatten_output(
-            tx, self.value, proxy_args, {}, example_value, treespec
+            tx, self.value, proxy_args, {}, example_value, treespec, body_r
         )
 
 
@@ -2674,7 +2704,7 @@ class HintsWrapperHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         return _call_function_and_unflatten_output(
-            tx, self.value, p_args, p_kwargs, flat_example_value, treespec
+            tx, self.value, p_args, p_kwargs, flat_example_value, treespec, body_r
         )
 
 
@@ -2793,6 +2823,7 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             {},
             flat_example_value,
             ret_spec,
+            ret_val,
         )
 
 
@@ -2860,6 +2891,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             checkpoint_kwargs,
             example_value,
             out_spec,
+            _body_r,
         )
 
 
@@ -2913,6 +2945,7 @@ class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
             {},
             example_value,
             out_spec,
+            _body_r,
         )
 
 
@@ -3652,7 +3685,13 @@ class BaseHOPVariable(WrapHigherOrderVariable):
 
         p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
         return _call_function_and_unflatten_output(
-            tx, self.value, p_args, p_kwargs, flat_example_value, treespec
+            tx,
+            self.value,
+            p_args,
+            p_kwargs,
+            flat_example_value,
+            treespec,
+            body_r,
         )
 
 
@@ -3768,6 +3807,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             p_kwargs,
             flat_example_value,
             treespec,
+            body_r,
         )
 
 
@@ -3991,7 +4031,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         # Step 5: Install local_map subgraph
         p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
         out = _call_function_and_unflatten_output(
-            tx, self.value, p_args, p_kwargs, flat_example_value, treespec
+            tx, self.value, p_args, p_kwargs, flat_example_value, treespec, body_r
         )
 
         # Step 6: Restore inputs and outputs to global shapes
