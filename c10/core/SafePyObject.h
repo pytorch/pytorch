@@ -40,14 +40,24 @@ struct C10_API SafePyObject {
     if (this == &other) {
       return *this; // Handle self-assignment
     }
+    // Increment first to provide strong exception guarantee
+    // If incref throws, our state remains unchanged
     if (other.data_ != nullptr) {
       (*other.pyinterpreter_)->incref(other.data_);
     }
-    if (data_ != nullptr) {
-      (*pyinterpreter_)->decref(data_, /*has_pyobj_slot*/ false);
-    }
+    
+    // Now it's safe to modify our state - store old values
+    PyObject* old_data = data_;
+    c10::impl::PyInterpreter* old_interp = pyinterpreter_;
+    
+    // Update to new values
     data_ = other.data_;
     pyinterpreter_ = other.pyinterpreter_;
+    
+    // Decrement old reference after assignment (no-throw operation)
+    if (old_data != nullptr) {
+      (*old_interp)->decref(old_data, /*has_pyobj_slot*/ false);
+    }
     return *this;
   }
 
