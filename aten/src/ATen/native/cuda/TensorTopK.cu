@@ -211,6 +211,330 @@ void launch(
 }
 } // namespace sbtopk
 
+namespace warptopk {
+
+constexpr int MAX_WARP_TOPK_SLICE = 512;
+constexpr int WARPS_PER_BLOCK = 4;
+
+template <typename scalar_t>
+struct WarpEntry {
+  using Bitwise = typename TopKTypeConfig<scalar_t>::RadixType;
+  scalar_t value;
+  Bitwise key;
+  int index;
+  int valid;
+};
+
+template <typename Bitwise>
+__device__ __forceinline__ bool entry_greater(
+    Bitwise lhs,
+    Bitwise rhs,
+    int lhs_valid,
+    int rhs_valid) {
+  if (lhs_valid != rhs_valid) {
+    return lhs_valid < rhs_valid;
+  }
+  if (!lhs_valid) {
+    return false;
+  }
+  return lhs > rhs;
+}
+
+template <typename Bitwise>
+__device__ __forceinline__ bool entry_before(
+    Bitwise lhs,
+    Bitwise rhs,
+    int lhs_valid,
+    int rhs_valid) {
+  if (lhs_valid != rhs_valid) {
+    return lhs_valid > rhs_valid;
+  }
+  if (!lhs_valid) {
+    return false;
+  }
+  return lhs < rhs;
+}
+
+// Fast LDS-based topk for tiny sizes (n≤256), optimized for small k
+template <typename scalar_t, typename IndexType, int Dim, int MaxSize>
+__global__ void tinyTopKKernel(
+    at::cuda::detail::TensorInfo<const scalar_t, IndexType> input,
+    IndexType inputSliceSize,
+    IndexType k,
+    bool largest,
+    IndexType numInputSlices,
+    IndexType inputWithinSliceStride,
+    at::cuda::detail::TensorInfo<scalar_t, IndexType> topK,
+    IndexType topKWithinSliceStride,
+    at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
+    IndexType indicesWithinSliceStride) {
+#if defined(USE_ROCM)
+  const IndexType slice = blockIdx.x;
+  if (slice >= numInputSlices || inputSliceSize == 0 || k == 0) {
+    return;
+  }
+
+  const IndexType sliceStartIndex =
+      at::cuda::detail::IndexToOffset<const scalar_t, IndexType, Dim>::get(slice, input);
+  const IndexType topKSliceStartIndex =
+      at::cuda::detail::IndexToOffset<scalar_t, IndexType, Dim>::get(slice, topK);
+  const IndexType indicesSliceStartIndex =
+      at::cuda::detail::IndexToOffset<int64_t, IndexType, Dim>::get(slice, indices);
+
+  const scalar_t* inputSliceStart = &input.data[sliceStartIndex];
+  scalar_t* topKSliceStart = &topK.data[topKSliceStartIndex];
+  int64_t* indicesSliceStart = &indices.data[indicesSliceStartIndex];
+
+  // LDS arrays sized for MaxSize (64 or 256)
+  __shared__ scalar_t s_values[MaxSize];
+  __shared__ int s_indices[MaxSize];
+
+  const int tid = threadIdx.x;
+
+  // Load data into LDS (coalesced when stride=1, one element per thread)
+  if (tid < MaxSize) {
+    bool valid = (tid < inputSliceSize);
+    if (valid) {
+      s_values[tid] = doLdg(&inputSliceStart[tid * inputWithinSliceStride]);
+      s_indices[tid] = tid;
+    } else {
+      s_values[tid] = largest ? -INFINITY : INFINITY;
+      s_indices[tid] = -1;
+    }
+  }
+  __syncthreads();
+
+  // Bitonic sort with compile-time unrolling
+  // Note: Cannot skip __syncthreads even within wave - LDS needs sync!
+  #pragma unroll
+  for (int size = 2; size <= MaxSize; size <<= 1) {
+    #pragma unroll
+    for (int stride = size >> 1; stride > 0; stride >>= 1) {
+      __syncthreads();
+      if (tid < MaxSize) {
+        int partner = tid ^ stride;
+        if (partner > tid && partner < MaxSize) {
+          scalar_t v1 = s_values[tid];
+          scalar_t v2 = s_values[partner];
+          bool ascending = ((tid & size) == 0);
+          // Conditional move instead of branch to reduce divergence
+          bool swap = ascending ? (v1 > v2) : (v1 < v2);
+          scalar_t new_v1 = swap ? v2 : v1;
+          scalar_t new_v2 = swap ? v1 : v2;
+          int new_i1 = swap ? s_indices[partner] : s_indices[tid];
+          int new_i2 = swap ? s_indices[tid] : s_indices[partner];
+          s_values[tid] = new_v1;
+          s_values[partner] = new_v2;
+          s_indices[tid] = new_i1;
+          s_indices[partner] = new_i2;
+        }
+      }
+    }
+  }
+  __syncthreads();
+
+  // Write top-k results (coalesced)
+  if (tid < k) {
+    int src = largest ? (inputSliceSize - 1 - tid) : tid;
+    if (src >= 0 && src < inputSliceSize && s_indices[src] >= 0) {
+      topKSliceStart[tid * topKWithinSliceStride] = s_values[src];
+      indicesSliceStart[tid * indicesWithinSliceStride] = static_cast<int64_t>(s_indices[src]);
+    }
+  }
+#endif
+}
+
+// Backward compatibility wrapper (delegates to tinyTopKKernel with MaxSize=64)
+template <typename scalar_t, typename IndexType, int Dim>
+__global__ void warpBitonicTopK(
+    at::cuda::detail::TensorInfo<const scalar_t, IndexType> input,
+    IndexType inputSliceSize,
+    IndexType k,
+    bool largest,
+    IndexType numInputSlices,
+    IndexType inputWithinSliceStride,
+    at::cuda::detail::TensorInfo<scalar_t, IndexType> topK,
+    IndexType topKWithinSliceStride,
+    at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
+    IndexType indicesWithinSliceStride) {
+  tinyTopKKernel<scalar_t, IndexType, Dim, 64>(
+      input, inputSliceSize, k, largest, numInputSlices, inputWithinSliceStride,
+      topK, topKWithinSliceStride, indices, indicesWithinSliceStride);
+}
+
+template <typename scalar_t>
+struct SharedEntry {
+  using Bitwise = typename TopKTypeConfig<scalar_t>::RadixType;
+  scalar_t value;
+  Bitwise key;
+  int64_t index;
+  unsigned char valid;
+};
+
+template <typename scalar_t>
+__device__ __forceinline__ void swap_entries(
+    SharedEntry<scalar_t>* entries,
+    int a,
+    int b) {
+  auto tmp = entries[a];
+  entries[a] = entries[b];
+  entries[b] = tmp;
+}
+
+template <typename scalar_t, typename IndexType, int Dim, int SortSize>
+C10_LAUNCH_BOUNDS_1(SortSize)
+__global__ void blockBitonicTopKKernel(
+    at::cuda::detail::TensorInfo<const scalar_t, IndexType> input,
+    IndexType inputSliceSize,
+    IndexType k,
+    bool largest,
+    IndexType numInputSlices,
+    IndexType inputWithinSliceStride,
+    at::cuda::detail::TensorInfo<scalar_t, IndexType> topK,
+    IndexType topKWithinSliceStride,
+    at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
+    IndexType indicesWithinSliceStride) {
+  const IndexType slice = getLinearBlockId<IndexType>();
+  if (slice >= numInputSlices || inputSliceSize == 0 || k == 0) {
+    return;
+  }
+
+  const IndexType sliceStartIndex =
+      at::cuda::detail::IndexToOffset<const scalar_t, IndexType, Dim>::get(slice, input);
+  const IndexType topKSliceStartIndex =
+      at::cuda::detail::IndexToOffset<scalar_t, IndexType, Dim>::get(slice, topK);
+  const IndexType indicesSliceStartIndex =
+      at::cuda::detail::IndexToOffset<int64_t, IndexType, Dim>::get(slice, indices);
+
+  const scalar_t* inputSliceStart = &input.data[sliceStartIndex];
+  scalar_t* topKSliceStart = &topK.data[topKSliceStartIndex];
+  int64_t* indicesSliceStart = &indices.data[indicesSliceStartIndex];
+
+  __shared__ SharedEntry<scalar_t> shared_entries[SortSize];
+
+  const int tid = threadIdx.x;
+  if (tid < SortSize) {
+    bool valid = tid < inputSliceSize;
+    shared_entries[tid].valid = static_cast<unsigned char>(valid);
+    if (valid) {
+      scalar_t value = doLdg(&inputSliceStart[tid * inputWithinSliceStride]);
+      shared_entries[tid].value = value;
+      shared_entries[tid].key = TopKTypeConfig<scalar_t>::convert(value);
+      shared_entries[tid].index = tid;
+    } else {
+      shared_entries[tid].value = scalar_t(0);
+      shared_entries[tid].key = TopKTypeConfig<scalar_t>::convert(static_cast<scalar_t>(0));
+      shared_entries[tid].index = -1;
+    }
+  }
+  __syncthreads();
+
+  for (int size = 2; size <= SortSize; size <<= 1) {
+    bool dir_ascending = ((tid & size) == 0);
+    for (int stride = size >> 1; stride > 0; stride >>= 1) {
+      __syncthreads();
+      int partner = tid ^ stride;
+      if (tid < SortSize && partner < SortSize && partner > tid) {
+        auto& self_entry = shared_entries[tid];
+        auto& partner_entry = shared_entries[partner];
+        bool swap = dir_ascending
+            ? entry_greater(self_entry.key, partner_entry.key, self_entry.valid, partner_entry.valid)
+            : entry_greater(partner_entry.key, self_entry.key, partner_entry.valid, self_entry.valid);
+        if (swap) {
+          swap_entries(shared_entries, tid, partner);
+        }
+      }
+    }
+  }
+  __syncthreads();
+
+  IndexType valid_count = min<IndexType>(inputSliceSize, static_cast<IndexType>(SortSize));
+  if (tid < k && tid < valid_count) {
+    IndexType src = largest ? (valid_count - 1 - tid) : tid;
+    const auto& entry = shared_entries[src];
+    topKSliceStart[tid * topKWithinSliceStride] = entry.value;
+    indicesSliceStart[tid * indicesWithinSliceStride] = entry.index;
+  }
+}
+
+template <typename scalar_t, typename IndexType, int Dim, int SortSize>
+void launch_block_bitonic(
+    at::cuda::detail::TensorInfo<const scalar_t, IndexType> input,
+    IndexType inputSliceSize,
+    IndexType k,
+    bool largest,
+    IndexType numInputSlices,
+    IndexType inputWithinSliceStride,
+    at::cuda::detail::TensorInfo<scalar_t, IndexType> topK,
+    IndexType topKWithinSliceStride,
+    at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
+    IndexType indicesWithinSliceStride,
+    cudaStream_t stream) {
+  dim3 grid;
+  TORCH_INTERNAL_ASSERT(
+      getGridFromTiles(numInputSlices, grid),
+      "Too many slices for warp topk block path");
+  dim3 block(SortSize);
+  blockBitonicTopKKernel<scalar_t, IndexType, Dim, SortSize><<<grid, block, 0, stream>>>(
+      input,
+      inputSliceSize,
+      k,
+      largest,
+      numInputSlices,
+      inputWithinSliceStride,
+      topK,
+      topKWithinSliceStride,
+      indices,
+      indicesWithinSliceStride);
+}
+
+template <typename scalar_t, typename IndexType, int Dim>
+void launch(
+    at::cuda::detail::TensorInfo<const scalar_t, IndexType> input,
+    IndexType inputSliceSize,
+    IndexType k,
+    bool largest,
+    IndexType numInputSlices,
+    IndexType inputWithinSliceStride,
+    at::cuda::detail::TensorInfo<scalar_t, IndexType> topK,
+    IndexType topKWithinSliceStride,
+    at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
+    IndexType indicesWithinSliceStride) {
+#if !defined(USE_ROCM)
+  TORCH_INTERNAL_ASSERT(false, "warp topk path is ROCm-only");
+#else
+  TORCH_INTERNAL_ASSERT(inputSliceSize <= MAX_WARP_TOPK_SLICE);
+  const auto stream = c10::cuda::getCurrentCUDAStream();
+  dim3 grid(numInputSlices);
+
+  // Use optimized LDS-based tinyTopKKernel for n≤256
+  if (inputSliceSize <= 64) {
+    dim3 block(64);
+    tinyTopKKernel<scalar_t, IndexType, Dim, 64><<<grid, block, 0, stream>>>(
+        input, inputSliceSize, k, largest, numInputSlices, inputWithinSliceStride,
+        topK, topKWithinSliceStride, indices, indicesWithinSliceStride);
+  } else if (inputSliceSize <= 128) {
+    dim3 block(128);
+    tinyTopKKernel<scalar_t, IndexType, Dim, 128><<<grid, block, 0, stream>>>(
+        input, inputSliceSize, k, largest, numInputSlices, inputWithinSliceStride,
+        topK, topKWithinSliceStride, indices, indicesWithinSliceStride);
+  } else if (inputSliceSize <= 256) {
+    dim3 block(256);
+    tinyTopKKernel<scalar_t, IndexType, Dim, 256><<<grid, block, 0, stream>>>(
+        input, inputSliceSize, k, largest, numInputSlices, inputWithinSliceStride,
+        topK, topKWithinSliceStride, indices, indicesWithinSliceStride);
+  } else {
+    // For n>256, fall back to blockBitonicTopKKernel
+    launch_block_bitonic<scalar_t, IndexType, Dim, 512>(
+        input, inputSliceSize, k, largest, numInputSlices, inputWithinSliceStride,
+        topK, topKWithinSliceStride, indices, indicesWithinSliceStride, stream);
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+#endif
+}
+
+} // namespace warptopk
+
 namespace mbtopk { // multi_block_topk
 
 // Assumptions:
@@ -792,6 +1116,23 @@ bool should_use_multiblock(int64_t num_slices, int64_t slice_size) {
       (num_slices > 4000 && slice_size >= 400);
 }
 
+bool should_use_warp_topk(int64_t slice_size, int64_t k) {
+#if defined(USE_ROCM)
+  if (slice_size <= 0 || k <= 0) {
+    return false;
+  }
+  // Use optimized LDS-based tinyTopKKernel for n≤256 with small k
+  // This beats sbtopk (radixSelect) for tiny sizes
+  if (slice_size > 256) {
+    return false;
+  }
+  // Only enable for small k where full sort is acceptable
+  return k <= 64;
+#else
+  return false;
+#endif
+}
+
 void launch_gather_topk_kernel(
     const TensorBase& self, int64_t k, int64_t dim, bool largest,
     const TensorBase& values, const TensorBase& indices) {
@@ -818,11 +1159,13 @@ void launch_gather_topk_kernel(
       indicesInfo,                                                      \
       static_cast<INDEX_T>(indicesInfo.strides[collapseIndicesDim]));
 
-#define RUN_MB(INDEX_T, DIM)                                            \
-  if (should_use_multiblock(numInputSlices, sliceSize)) {               \
-    RUN_K(INDEX_T, DIM, mbtopk::launch);                                \
-  } else {                                                              \
-    RUN_K(INDEX_T, DIM, sbtopk::launch);                                \
+#define RUN_MB(INDEX_T, DIM)                                              \
+  if (should_use_warp_topk(sliceSize, k)) {                               \
+    RUN_K(INDEX_T, DIM, warptopk::launch);                                \
+  } else if (should_use_multiblock(numInputSlices, sliceSize)) {          \
+    RUN_K(INDEX_T, DIM, mbtopk::launch);                                  \
+  } else {                                                                \
+    RUN_K(INDEX_T, DIM, sbtopk::launch);                                  \
   }
 
 #define RUN_DIM(INDEX_T)                        \
@@ -862,6 +1205,7 @@ void launch_gather_topk_kernel(
     topKInfo.sizes[dim] = 1;                                              \
     indicesInfo.sizes[dim] = 1;                                           \
     /* stash the stride of dim because it can be accidentally collapsed */ \
+    auto strideInput = inputInfo.strides[dim];                            \
     auto strideTopK = topKInfo.strides[dim];                              \
     auto strideIndices = indicesInfo.strides[dim];                        \
     /* Collapse all other dims */                                         \
@@ -869,6 +1213,7 @@ void launch_gather_topk_kernel(
     int collapseTopKDim = topKInfo.collapseDims(dim);                     \
     int collapseIndicesDim = indicesInfo.collapseDims(dim);               \
     /* restore stride in case it was collapsed */                         \
+    inputInfo.strides[collapseInputDim] = strideInput;                    \
     topKInfo.strides[collapseTopKDim] = strideTopK;                       \
     indicesInfo.strides[collapseIndicesDim] = strideIndices;              \
     int64_t numInputSlices = 1;                                           \
