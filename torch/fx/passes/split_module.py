@@ -326,18 +326,18 @@ def split_module(
         instantiate_node_partition_mapping(node)
 
         if node.op == "call_function" and node.target in GLOBAL_STATE_NODES:
-            if node.target == torch._C._set_grad_enabled:
+            if node.target is torch._C._set_grad_enabled:
                 assert len(node.args) == 1
                 assert isinstance(node.args[0], bool)
                 active_grad = node
                 grad_regions[active_grad] = set({split_callback(node)})
-            elif node.target == torch.amp._enter_autocast:
+            elif node.target is torch.amp._enter_autocast:
                 # Should all be python constants
                 assert all(not isinstance(arg, Node) for arg in node.args)
                 active_autocasts.add(node)
                 autocast_regions[node] = set({split_callback(node)})
                 autocast_exits[node] = None
-            elif node.target == torch.amp._exit_autocast:
+            elif node.target is torch.amp._exit_autocast:
                 assert len(node.args) == 1
                 autocast_regions[node.args[0]].add(split_callback(node))
                 active_autocasts.remove(node.args[0])
@@ -351,9 +351,9 @@ def split_module(
 
     assert all(v is not None for v in autocast_exits.values()), "autocast must exit"
 
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     autocast_regions = {k: sorted(v) for k, v in autocast_regions.items()}
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     grad_regions = {k: sorted(v) for k, v in grad_regions.items()}
 
     if _LOGGER.isEnabledFor(logging.DEBUG):
@@ -418,9 +418,9 @@ def split_module(
     for regions_mapping in [autocast_regions, grad_regions]:
         for node, regions in regions_mapping.items():
             assert len(regions) > 0
-            # pyrefly: ignore  # index-error
+            # pyrefly: ignore [index-error]
             partitions[str(regions[0])].environment[node] = node
-            # pyrefly: ignore  # index-error
+            # pyrefly: ignore [index-error]
             for r in regions[1:]:
                 partition = partitions[str(r)]
                 new_node = partition.graph.create_node(
@@ -520,7 +520,7 @@ def split_module(
         for node in reversed(regions_mapping):
             regions = regions_mapping[node]
             assert len(regions) > 0
-            # pyrefly: ignore  # index-error
+            # pyrefly: ignore [index-error]
             for r in regions[:-1]:
                 partition = partitions[str(r)]
                 exit_node = autocast_exits[node]

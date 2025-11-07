@@ -823,7 +823,7 @@ if has_triton():
         mask = offsets < n_elements
         x = tl.load(in_ptr0 + offsets, mask=mask)
         y = tl.load(in_ptr1 + offsets, mask=mask)
-        for i in range(2):
+        for _ in range(2):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
         i = 2

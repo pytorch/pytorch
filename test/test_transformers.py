@@ -24,6 +24,8 @@ from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     skipIfRocm,
+    skipIfRocmArch,
+    MI300_ARCH,
     skipIfTorchDynamo,
     TEST_FAIRSEQ,
     run_tests,
@@ -303,7 +305,7 @@ class TestTransformers(NNTestCase):
         encoder = nn.TransformerEncoder(layer, 2).to(device)
         optimizer = optim.SGD(encoder.parameters(), lr=0.1, momentum=0.9)
         encoder.train()
-        for i in range(iters):
+        for _ in range(iters):
             encoder.train()
             optimizer.zero_grad()
             inputs = torch.cat([torch.randn(1, 2, 2), torch.zeros(1, 2, 2)], dim=1).to(device)
@@ -427,7 +429,8 @@ class TestTransformers(NNTestCase):
         # remove hook
         handle.remove()
 
-    @tf32_on_and_off(0.0021 if TEST_WITH_ROCM else 0.001)
+    @skipIfRocmArch(MI300_ARCH)
+    @tf32_on_and_off(0.001)
     @parametrize("use_torchscript", [False])
     @parametrize("enable_nested_tensor", [True, False])
     @parametrize("use_autocast", [True, False])
@@ -537,7 +540,7 @@ class TestTransformers(NNTestCase):
 
         with torch.no_grad():
             # set constant weights of the model
-            for idx, p in enumerate(model.parameters()):
+            for p in model.parameters():
                 x = p.data
                 sz = x.view(-1).size(0)
                 shape = x.shape
@@ -587,7 +590,7 @@ class TestTransformers(NNTestCase):
 
             with torch.no_grad():
                 # set constant weights of the model
-                for idx, p in enumerate(layer.parameters()):
+                for p in layer.parameters():
                     x = p.data
                     sz = x.view(-1).size(0)
                     shape = x.shape
@@ -1107,6 +1110,7 @@ class TestTransformers(NNTestCase):
                 )[0]
 
     @tf32_on_and_off(0.003)
+    @parametrize("batch_size", [0, 5])
     @parametrize("input_dim,attn_mask_dim,is_causal",
                  [(3, None, False), (3, 2, False), (3, 2, True), (3, 3, False), (3, 3, True),
                   (4, None, False), (4, 2, False), (4, 2, True), (4, 4, False), (4, 4, True)],
@@ -1116,7 +1120,7 @@ class TestTransformers(NNTestCase):
                          if attn_dim is not None else "no_attn_mask")))
     @parametrize("dropout_p", [0.0, 0.2, 0.5])
     @sdpa_kernel(backends=[SDPBackend.MATH])
-    def test_scaled_dot_product_attention(self, device, input_dim, attn_mask_dim, is_causal, dropout_p):
+    def test_scaled_dot_product_attention(self, device, batch_size, input_dim, attn_mask_dim, is_causal, dropout_p):
         def sdp_ref(
                 q,
                 k,
@@ -1140,12 +1144,13 @@ class TestTransformers(NNTestCase):
         # TODO: Support cross-device / dtype testing properly when instantiate_device_type_tests() is used.
         dtypes = [torch.double, torch.float]
         for dtype in dtypes:
+            N = batch_size
 
             def rand_tensor(*shape):
                 return torch.randn(shape, device=device, dtype=dtype)
 
             # This test compares python and C++ implementations of SDP.
-            N, N_prime, L, S, E = 5, 2, 4, 3, 6
+            N_prime, L, S, E = 2, 4, 3, 6
             if input_dim == 3:
                 query = rand_tensor(N, L, E)
                 key = rand_tensor(N, S, E)
@@ -1909,6 +1914,7 @@ class TestSDPAFailureModes(NNTestCase):
                     q, k, v, None, 0.0, is_causal=True))
 
     @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
     def test_mem_eff_attention_fail_with_batch_size_geq_65536(self):
         batch_size = 2**16
         query = torch.rand([batch_size, 2, 2, 8], device='cuda', dtype=torch.float16, requires_grad=True)
@@ -1930,6 +1936,7 @@ class TestSDPAFailureModes(NNTestCase):
         self.assertEqual(value.grad, v_cpu.grad, atol=2e-3, rtol=1e-4)
 
     @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
     def test_mem_eff_attention_fail_with_batch_size_geq_65536_error(self):
         query = torch.rand([2**16, 2, 2, 8], device='cuda', dtype=torch.float16)
         key = torch.rand([2**16, 2, 2, 8], device='cuda', dtype=torch.float16)
@@ -1943,6 +1950,7 @@ class TestSDPAFailureModes(NNTestCase):
 
     @largeTensorTest("15GB", "cuda")
     @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
     def test_mem_eff_attention_large_seq_len_uniform_attention(self):
         device = torch.device("cuda")
         dtype = torch.bfloat16
@@ -2842,6 +2850,30 @@ class TestSDPACudaOnly(NNTestCase):
         with torch.nn.attention.sdpa_kernel([SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION]):
             out = torch.nn.functional.scaled_dot_product_attention(q, q, q, dropout_p=0.5)
             out.backward(grad)
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    def test_cudnn_attention_broken_166211(self):
+        # https://github.com/pytorch/pytorch/issues/166211#issue-3551350377
+        shape = (20, 4, 4, 32)
+        scale = 10
+        for _ in range(100):
+            q = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
+            k = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
+            v = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
+            q.requires_grad = True
+            k.requires_grad = True
+            v.requires_grad = True
+
+            grad_attn_output = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
+
+            with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.CUDNN_ATTENTION):
+                attn_output = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+                dq, dk, dv = torch.autograd.grad(outputs=attn_output, inputs=(q, k, v), grad_outputs=grad_attn_output)
+
+            self.assertFalse(dq.isnan().any())
+            self.assertFalse(dk.isnan().any())
+            self.assertFalse(dv.isnan().any())
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
@@ -4318,8 +4350,8 @@ class TestSDPAXpuOnly(NNTestCase):
             _ = F.scaled_dot_product_attention(q, k, v)
 
     def test_default_priority_order(self, device):
-        # The default priority order of xpu is overrideable, math, flash, efficient, cudnn
-        # For xpu backend, we need to make sure that overrideable > math > flash
+        # The default priority order of xpu is overridable, math, flash, efficient, cudnn
+        # For xpu backend, we need to make sure that overridable > math > flash
         dtype = torch.bfloat16
         shape = SdpaShape(1, 1, 1, 1)
         make_tensor = partial(torch.rand, shape, device=device, dtype=dtype)

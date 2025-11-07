@@ -6,19 +6,21 @@ on:
       - pull
       - trunk
       - periodic
+      - periodic-rocm-mi200
       - periodic-rocm-mi300
       - inductor
       - unstable
       - slow
+      - slow-rocm-mi200
       - unstable-periodic
       - inductor-periodic
-      - rocm
+      - rocm-mi200
       - rocm-mi300
       - rocm-mi355
       - inductor-micro-benchmark
       - inductor-micro-benchmark-x86
       - inductor-cu124
-      - inductor-rocm
+      - inductor-rocm-mi200
       - inductor-rocm-mi300
       - mac-mps
       - linux-aarch64

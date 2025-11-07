@@ -281,7 +281,7 @@ def _split_decomp_table_to_cia_and_python_decomp(
     for op in list(decomp_table.keys()):
         # TODO we are silently allowing non-safe(non-functional) ops through a crack
         # due to core aten decomp table having non-functional entries. Once we have
-        # a tigher check around core aten decomp, we should warn users about them.
+        # a tighter check around core aten decomp, we should warn users about them.
         # Tracking issue: (https://github.com/pytorch/pytorch/issues/135759)
 
         # if it is a valid CIA op we can mess with in export, we check if it is:
@@ -391,7 +391,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # aot_export expect the return type to always be a tuple.
         assert out_spec is not None
         if out_spec.type not in (list, tuple):
-            out_spec = pytree.TreeSpec(tuple, None, [out_spec])
+            out_spec = pytree.treespec_tuple([out_spec])
 
         mod.graph._codegen = _PyTreeCodeGen(
             _PyTreeInfo(
@@ -798,7 +798,7 @@ def _remove_unnecessary_copy_op_pass(
                     ):
                         if (
                             out.op == "call_function"
-                            and out.target == torch.ops.aten.copy.default
+                            and out.target is torch.ops.aten.copy.default
                         ):
                             out.replace_all_uses_with(out.args[1])  # type: ignore[arg-type]
                             gm.graph.erase_node(out)
@@ -817,7 +817,7 @@ def _common_getitem_elimination_pass(
             node_id: dict[torch.fx.Node, str] = {}
             getitems: dict[str, torch.fx.Node] = {}
             for node in list(module.graph.nodes):
-                if node.op == "call_function" and node.target == operator.getitem:
+                if node.op == "call_function" and node.target is operator.getitem:
                     source, idx = node.args
                     new_id = f"{node_id[source]}.{idx}"
                     if new_id in getitems:
@@ -1500,7 +1500,7 @@ class ExportedProgram:
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
 
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         if transformed_gm is self.graph_module and not res.modified:
             return self
 
@@ -1579,7 +1579,7 @@ class ExportedProgram:
             verifiers=self.verifiers,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
         return transformed_ep
 
