@@ -138,7 +138,7 @@ def forward(self, arg1_1):
     with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.aten._print.default, 'moo');  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
     _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem_2]);  getitem_2 = _sink_tokens_default = None
-    return [add]""",  # noqa: B950
+    return (add,)""",  # noqa: B950
             )
 
     def test_torchbind_custom_op(self):
