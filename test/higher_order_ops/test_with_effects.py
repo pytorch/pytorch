@@ -871,6 +871,7 @@ def forward(self, primals_2, getitem_1, tangents_1, tangents_token):
         finally:
             _deregister_effectful_op(torch.ops.aten.cos.default)
 
+    @unittest.skipIf(not TEST_CUDA, "triton")
     def test_export_invoke_subgraph(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             recorded_list = []
@@ -912,7 +913,8 @@ def forward(self, primals_2, getitem_1, tangents_1, tangents_token):
                 def forward(self, x):
                     for m in self.mod_list:
                         x = m(x)
-                    return x
+                    torch.ops.mylib.record_memory("forward", "N")
+                    return (x,)
 
         model = M().to("cuda")
         torch.cuda.reset_peak_memory_stats()
@@ -939,7 +941,9 @@ def forward(self, token, p_mod_list_0_linear1_weight, p_mod_list_0_linear1_bias,
     invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_2, 'subgraph_0', getitem_2, getitem_3, p_mod_list_2_linear1_weight, p_mod_list_2_linear1_bias, p_mod_list_2_linear2_weight, p_mod_list_2_linear2_bias);  repeated_subgraph0_2 = getitem_2 = getitem_3 = p_mod_list_2_linear1_weight = p_mod_list_2_linear1_bias = p_mod_list_2_linear2_weight = p_mod_list_2_linear2_bias = None
     getitem_4 = invoke_subgraph_2[0]
     getitem_5 = invoke_subgraph_2[1];  invoke_subgraph_2 = None
-    return (getitem_4, getitem_5)""",
+    with_effects = torch.ops.higher_order.with_effects(getitem_4, torch.ops.mylib.record_memory.default, 'forward', 'N');  getitem_4 = None
+    getitem_6 = with_effects[0];  with_effects = None
+    return (getitem_6, getitem_5)""",
         )
 
         self.assertExpectedInline(
@@ -958,8 +962,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
 
         recorded_list.clear()
         out2 = ep.module()(x)
-        self.assertEqual(len(recorded_list), 3)
-        self.assertTrue(torch.allclose(model(x), out2))
+        self.assertEqual(len(recorded_list), 4)
+        self.assertTrue(torch.allclose(model(x)[0], out2[0]))
 
 
 if __name__ == "__main__":
