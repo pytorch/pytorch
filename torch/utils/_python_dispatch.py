@@ -217,11 +217,11 @@ class TorchDispatchMode:
         return instance
 
     @classmethod
-    def is_infra_mode(cls):
+    def is_infra_mode(cls) -> bool:
         return False
 
     @classmethod
-    def ignore_compile_internals(cls):
+    def ignore_compile_internals(cls) -> bool:
         """Ignore operators that are compiled via torch.compile.
 
         If ``True``, then this TorchDispatchMode ignores operators that
@@ -333,7 +333,7 @@ def _get_current_dispatch_mode_stack() -> list[TorchDispatchMode]:
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
 
-def _push_mode(mode: TorchDispatchMode):
+def _push_mode(mode: TorchDispatchMode) -> None:
     k = mode._dispatch_key if hasattr(mode, "_dispatch_key") else None
     if k is not None and k != torch._C.DispatchKey.PreDispatch:
         raise AssertionError(
@@ -590,7 +590,7 @@ def transform_subclass(t, callback, outer_size=None, outer_stride=None):
     return sub
 
 
-def _correct_storage_aliasing(func, schema_info, args, outs):
+def _correct_storage_aliasing(func, schema_info, args, outs) -> None:
     """
     Given: an OpOverload, a SchemaInfo (cached information from torchgen about schema),
     and the inputs/outputs to the OpOverload,
@@ -609,7 +609,7 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
     if not isinstance(outs, (list, tuple)):
         raise AssertionError(f"outs must be a list or tuple, got {type(args)}")
 
-    def alias_non_inplace_storage(arg, ret):
+    def alias_non_inplace_storage(arg, ret) -> None:
         # This is hopefully a reasonable assert:
         # subclasses that rely on this API for output aliasing
         # should always return wrapper tensor subclasses for us to manually alias.

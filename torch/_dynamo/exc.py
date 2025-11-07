@@ -28,7 +28,6 @@ Error Formatting:
 
 import json
 import logging
-import os
 import re
 import textwrap
 import typing
@@ -451,42 +450,6 @@ exceptions_allowed_to_be_fallback = (
 )
 
 
-def unimplemented_with_warning(
-    e: Exception, code: types.CodeType, msg: str
-) -> NoReturn:
-    # This function calls unimplemented internally and eventually graph breaks
-    # or falls to eager. unimplemented itself does not print any user warnings,
-    # i.e., its very silent. This helper function is intended when an error is
-    # encountered in the torch.compile stack which is worth showing as warning
-    # to the user. For example, if AOT Autograd backend fails with a fake tensor
-    # exception, its ok to fallback to eager but not silently. Here, we can use
-    # this function to log the message and the stack trace.
-    graph_break_msg = format_error_msg_verbose(e, code)
-    torch._logging.trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "dynamo_graph_break_reason",
-            "encoding": "string",
-        },
-        payload_fn=lambda: graph_break_msg,
-    )
-    graph_breaks_log.debug("%s", graph_break_msg)
-    log.warning(msg)
-    unimplemented(msg, from_exc=e)
-
-
-_NOTHING = object()
-
-
-def unimplemented(
-    msg: str, *, from_exc: Any = _NOTHING, case_name: Optional[str] = None
-) -> NoReturn:
-    assert msg != os.environ.get("BREAK", False)
-    if from_exc is not _NOTHING:
-        raise Unsupported(msg, case_name=case_name) from from_exc
-    raise Unsupported(msg, case_name=case_name)
-
-
 def unimplemented_v2_with_warning(
     e: Exception,
     code: types.CodeType,
@@ -585,6 +548,9 @@ def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
         )
 
     return None
+
+
+_NOTHING = object()
 
 
 # TODO replace old unimplemented later
