@@ -1183,6 +1183,7 @@ class OutputGraph(OutputGraphCommon):
                 # sourceless, so let's return a unspecializedNNModule variable
                 # tracker.
                 def wrap_name(module_key: str) -> VariableTracker:
+                    # pyrefly: ignore[bad-argument-type]
                     return variables.UnspecializedNNModuleVariable(target, **options)
 
         elif isinstance(target, (torch.SymInt, torch.SymFloat)):
