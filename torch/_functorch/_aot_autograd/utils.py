@@ -394,7 +394,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                 subgraph_node, identifier, *operands = node.args
 
                 # Check if subgraph has effects by looking in the cache
-                from torch._guards import TracingContext, InvokeSubgraphCache
+                from torch._guards import InvokeSubgraphCache, TracingContext
 
                 effects = None
                 tracing_ctx = TracingContext.try_get()

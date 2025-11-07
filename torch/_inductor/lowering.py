@@ -7460,26 +7460,69 @@ def _sink_tokens(tokens):
     return None
 
 
+@register_lowering(torch.ops.prims._make_token.default)
+def _make_token():
+    return None
+
+
 @register_lowering(torch.ops.higher_order.with_effects, type_promotion_kind=None)
 def with_effects(token, op, *args, **kwargs):
-    result = ir.EffectfulKernel.create(op, *args, **kwargs)
-
+    """
+    We lower the operator directly, and then we add StarDep dependencies to all
+    the newly created nodes in the graph.
+    """
     from torch._higher_order_ops.effects import _get_effect
 
+    # Get effect type
     effect_type = _get_effect(op)
-    assert effect_type is not None
-    effectful_kernel = V.graph.effectful_ops[effect_type]
+    if effect_type is None and op is torch.ops.higher_order.invoke_subgraph:
+        from torch._guards import InvokeSubgraphCache, TracingContext
 
-    if result is None:
-        return (effectful_kernel,)
+        tracing_ctx = TracingContext.try_get()
+        if tracing_ctx:
+            invoke_subgraph_cache = tracing_ctx.hop_dispatch_set_cache.get_cache(
+                torch.ops.higher_order.invoke_subgraph
+            )
+            if invoke_subgraph_cache:
+                assert isinstance(invoke_subgraph_cache, InvokeSubgraphCache)
+                # args[1] is identifier
+                effects = invoke_subgraph_cache.get_effects(args[1])
+                if effects:
+                    assert len(effects) == 1, "Multiple effects NYI"
+                    effect_type = next(iter(effects))
 
-    result = pytree.tree_map_only(ir.MultiOutput, TensorBox.create, result)
-    # See [NOTE: with_effects return type]
-    # Only return `result` if it is a tuple, not list.
-    if not isinstance(result, tuple):
-        return (effectful_kernel, result)
+    # Track operations before
+    operation_len = len(V.graph.operations)
+
+    # Lower the op
+    if op in lowerings:
+        result = lowerings[op](*args, **kwargs)
     else:
-        return (effectful_kernel, *result)
+
+        def wrap_tensors(x):
+            return TensorBox.create(x) if isinstance(x, ir.IRNode) else x
+
+        result = pytree.tree_map(
+            wrap_tensors, ir.FallbackKernel.create(op, *args, **kwargs)
+        )
+
+    # Get all the operations created during the lowering above, and add StarDeps
+    # to the previous node with the same effect
+    if effect_type:
+        prev_effect_buffer = V.graph.effectful_ops.get(effect_type)
+        for new_op in V.graph.operations[operation_len:]:
+            # Patch has_side_effects to return True
+            new_op.has_side_effects = lambda: True
+            if prev_effect_buffer:
+                op_name = new_op.get_name()
+                V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
+        # Update the effectful ops chain to point to the latest operation
+        V.graph.effectful_ops[effect_type] = new_op
+
+    if isinstance(result, (list, tuple)):
+        return (token, *result)
+    else:
+        return (token, result)
 
 
 from .comm_lowering import register_comm_lowerings

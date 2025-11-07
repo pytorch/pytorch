@@ -946,7 +946,7 @@ def forward(self, token, p_mod_list_0_linear1_weight, p_mod_list_0_linear1_bias,
     with_effects = torch.ops.higher_order.with_effects(getitem_4, torch.ops.mylib.record_memory.default, 'forward', 'N');  getitem_4 = None
     getitem_6 = with_effects[0];  with_effects = None
     return (getitem_6, getitem_5)""",
-        )
+            )
 
             self.assertExpectedInline(
                 decomp.graph_module.repeated_subgraph0.code.strip(),
@@ -1010,6 +1010,11 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
     _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem]);  getitem = _sink_tokens_default = None
     return (addmm_1,)""",  # noqa: B950
                 )
+
+        recorded_list.clear()
+        out2 = torch.compile(model)(x)
+        self.assertEqual(len(recorded_list), 4)
+        self.assertTrue(torch.allclose(model(x)[0], out2[0], atol=1e-7, rtol=1e-4))
 
 
 if __name__ == "__main__":
