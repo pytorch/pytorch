@@ -92,7 +92,6 @@ __all__ = [
     "make_fx",
     "DecompositionInterpreter",
     "selective_decompose",
-    "SelectiveDecomposeInterpreter",
     "py_sym_types",
     "get_innermost_proxy_mode",
     "get_proxy_mode",
@@ -1884,7 +1883,7 @@ class DecompositionInterpreter(fx.Interpreter):
             return super().run(*args, **kwargs)  # type: ignore[arg-type]
 
 
-class SelectiveDecomposeInterpreter(fx.Interpreter):
+class _SelectiveDecomposeInterpreter(fx.Interpreter):
     def __init__(
         self,
         module: fx.GraphModule,
@@ -1906,7 +1905,7 @@ class SelectiveDecomposeInterpreter(fx.Interpreter):
         should_decompose: Callable[[fx.Node], bool],
         decomposition_table: Mapping[OpOverload, Callable],
         **kwargs: object,
-    ) -> SelectiveDecomposeInterpreter:
+    ) -> _SelectiveDecomposeInterpreter:
         """
         Recursively wrap gm and its sub graph modules. Specifically, HOP takes
         sub graph module as args. We may not want to decompose all nodes within
@@ -1923,7 +1922,7 @@ class SelectiveDecomposeInterpreter(fx.Interpreter):
                 new_args = []
                 for arg in node.args:
                     if isinstance(arg, fx.GraphModule):
-                        new_arg = SelectiveDecomposeInterpreter.recursive_wrap(
+                        new_arg = _SelectiveDecomposeInterpreter.recursive_wrap(
                             arg, should_decompose, decomposition_table, **kwargs
                         )
                     else:
@@ -1931,7 +1930,7 @@ class SelectiveDecomposeInterpreter(fx.Interpreter):
                     new_args.append(new_arg)
                 node.args = tuple(new_args)
 
-        return SelectiveDecomposeInterpreter(
+        return _SelectiveDecomposeInterpreter(
             gm, should_decompose, decomposition_table, **kwargs
         )
 
@@ -1958,13 +1957,13 @@ def selective_decompose(
         # make_fx keeps the name in the traced graph and partitioner later relies
         # on the name to partition joint graph correctly.
         def wrap_fn(primals: list[Any], tangents: list[Any]):
-            return SelectiveDecomposeInterpreter.recursive_wrap(
+            return _SelectiveDecomposeInterpreter.recursive_wrap(
                 joint_gm, should_decompose, decomposition
             ).run(*args)
     else:
 
         def wrap_fn(*args):
-            return SelectiveDecomposeInterpreter.recursive_wrap(
+            return _SelectiveDecomposeInterpreter.recursive_wrap(
                 joint_gm, should_decompose, decomposition
             ).run(*args)
 
