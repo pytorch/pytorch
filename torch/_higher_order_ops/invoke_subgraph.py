@@ -563,9 +563,15 @@ def _(ctx, subgraph, identifier, *operands):
         do_auto_functionalize_v2,
     )
 
-    tokens_before = set(ctx.mode._tokens.keys())
+    # (in the functionalization metadata phase) Capture tokens before
+    tokens_before = dict(ctx.mode._tokens)
 
-    effects = subgraph.meta.get("_effects", None)
+    # Check if this subgraph has effects stored in the cache
+    invoke_subgraph_cache = get_invoke_subgraph_cache()
+    effects = None
+    if invoke_subgraph_cache:
+        effects = invoke_subgraph_cache.get_effects(identifier)
+
     if effects:
         assert len(effects) == 1, "Multiple effects within a subgraph NYI"
         tokens = ctx.mode._tokens
@@ -614,12 +620,22 @@ def _(ctx, subgraph, identifier, *operands):
         (new_token, *out) = out
         ctx.mode._tokens[effects] = new_token
 
-    tokens_after = set(ctx.mode._tokens.keys())
-    if tokens_before != tokens_after:
+    # (in the functionalization metadata phase) Capture tokens after and see if
+    # there are any differences (there are new effects or the token value for an
+    # effect type has changed)
+    tokens_after = dict(ctx.mode._tokens)
+    discovered_effects = set()
+    for effect_type, token in tokens_after.items():
+        if effect_type not in tokens_before or tokens_before[effect_type] is not token:
+            discovered_effects.add(effect_type)
+
+    if discovered_effects:
         assert ctx.mode._allow_token_discovery, (
-            f"Number of tokens changed by {len(tokens_after - tokens_before)} when tracing subgraph {subgraph}."
+            f"Number of tokens changed by {len(discovered_effects)} when tracing subgraph {subgraph}."
         )
-        subgraph.meta["_effects"] = tokens_after.difference(tokens_before)
+        # Store discovered effects in the cache by identifier
+        if invoke_subgraph_cache:
+            invoke_subgraph_cache.add_effects(identifier, discovered_effects)
 
     return ctx.wrap_tensors(out)
 
