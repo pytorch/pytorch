@@ -6,8 +6,16 @@ import unittest
 import torch
 import torch.distributed as dist
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.distributed.tensor import DeviceMesh, DTensor, Partial, Replicate, Shard
+from torch.distributed.tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    DTensor,
+    Partial,
+    Replicate,
+    Shard,
+)
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -443,7 +451,7 @@ class TestDTensorDebugMode(TestCase):
         def call_triton(x, y):
             output = torch.zeros_like(x)
             n_elements = output.numel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
             add_kernel_autotuned[grid](x, y, output, n_elements)
             return output
 
@@ -490,7 +498,7 @@ class TestDTensorDebugMode(TestCase):
         def call_triton(x, y):
             output = torch.zeros_like(x)
             n_elements = output.numel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
             add_kernel_autotuned[grid](x, y, output, n_elements)
             return output
 
@@ -507,8 +515,6 @@ class TestDTensorDebugMode(TestCase):
             torch.compile(call_triton)(a, c)
 
         # Compare triton kernel hashes
-        triton_calls_1 = [op for op in dm_t1.logs if isinstance(op, _TritonKernelCall)]
-        triton_calls_2 = [op for op in dm_t2.logs if isinstance(op, _TritonKernelCall)]
         mismatches = DebugMode.check_hash_mismatches(
             dm_t1.logs, dm_t2.logs, compare_inputs=True
         )
@@ -536,6 +542,31 @@ class TestDTensorDebugMode(TestCase):
 
         with self.assertRaisesRegex(ValueError, "Log lengths don't match"):
             DebugMode.check_hash_mismatches(dm1.logs, dm3.logs)
+
+    def test_pretty_print_dtensor_make_fx(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        A = torch.randn(8, 32)
+        B = torch.randn(32, 32)
+        dA = distribute_tensor(A, mesh, [Shard(0)]).requires_grad_()
+        dB = distribute_tensor(B, mesh, [Replicate()]).requires_grad_()
+
+        def f(dA, dB):
+            dy = dA @ dB
+            loss = dy.sum()
+            loss.backward()
+            return dA.grad, dB.grad
+
+        # We actually need the tracing_mode='fake' here, or to trace under a FakeTensorMode.
+        # make_fx has some logic to ensure we don't accidentally stash real tensors in the graph
+        # so we won't stash our DTensors properly if they don't hold Fake inner tensors
+        gm = make_fx(f, tracing_mode="fake")(dA, dB)
+        # DCE isn't necessary here, there were just a lot of dead detach() nodes that spammed the graph
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+        # Colored is nice for actual viewing, not using in this test though
+        gm_str = gm.print_readable(colored=False, print_output=False)
+        self.assertTrue('"DTensor(f32[8, 32], S(0))" = torch.ops.aten.mm' in gm_str)
 
 
 instantiate_parametrized_tests(TestDTensorDebugMode)

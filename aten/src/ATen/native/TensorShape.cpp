@@ -1711,6 +1711,29 @@ Tensor narrow_symint(
       "], but got ",
       start,
       ")")
+
+  auto cond1 = TORCH_GUARD_OR_FALSE(start.sym_lt(0));
+  auto cond2 = TORCH_GUARD_OR_FALSE(start.sym_ge(0));
+
+  if (cond1 || cond2) {
+    if (cond1) {
+      start = start + cur_size;
+    }
+
+    TORCH_SYM_CHECK(
+        start.sym_le(cur_size - length),
+        "start (",
+        start,
+        ") + length (",
+        length,
+        ") exceeds dimension size (",
+        cur_size,
+        ").");
+    return at::slice_symint(self, dim, start, start + length, 1);
+  }
+
+  // Unbacked start handling!
+
   // Bounds check without converting start:
   // - If start < 0: need (start + cur_size) + length <= cur_size, i.e., start +
   // length <= 0
@@ -1727,11 +1750,8 @@ Tensor narrow_symint(
       cur_size,
       ").");
 
-  if (TORCH_GUARD_OR_FALSE(start.sym_ge(0).sym_or(end.sym_ne(0)))) {
+  if (TORCH_GUARD_OR_FALSE(end.sym_ne(0))) {
     return at::slice_symint(self, dim, start, end, 1);
-  } else if (TORCH_GUARD_OR_FALSE(start.sym_lt(0))) {
-    // Avoid the complex symbolic expressions path for non-unbacked.
-    return at::slice_symint(self, dim, start + cur_size, end + cur_size, 1);
   } else {
     // Cannot statically determine the condition due to unbacked.
     // This is an interesting situation; when start is negative and
