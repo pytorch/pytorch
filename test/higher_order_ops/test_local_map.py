@@ -4,8 +4,9 @@
 
 import functools
 import unittest
+from collections.abc import Callable
 from contextlib import contextmanager, ExitStack
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import torch
 import torch._dynamo
@@ -15,6 +16,7 @@ import torch._inductor.decomposition
 import torch.fx.traceback as fx_traceback
 import torch.nn.functional as F
 from torch import nn
+from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._dynamo.variables.higher_order_ops import LocalMapWrappedHigherOrderVariable
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -51,24 +53,6 @@ def enable_local_map_wrapping():
         yield
 
 
-def _export(model: torch.nn.Module, inputs: tuple[Any]) -> torch.nn.Module:
-    from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
-    from torch.export._trace import _restore_state_dict
-
-    """
-    Thin wrapper around graph capture output that restores the
-    original calling convention and attribute fqn. TODO:
-    1) Use bytecode for calling convention instead of pytree for more
-       seamless UX.
-    2) Attach guards
-    3) Be more careful about tensor constants names.
-    """
-    with torch._dynamo.config.patch(install_free_tensors=True):
-        gm = _dynamo_graph_capture_for_export(model)(*inputs)
-        _restore_state_dict(model, gm)
-        return gm
-
-
 def ap_style_initial_capture(
     model: torch.nn.Module, inputs_fn: Callable
 ) -> torch.nn.Module:
@@ -90,7 +74,7 @@ def ap_style_initial_capture(
         enable_local_map_wrapping(),
         torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
     ):
-        torch_ir_with_fqn = _export(model, inputs)
+        torch_ir_with_fqn = dynamo_graph_capture_for_export(model)(*inputs)
         unused = ExitStack()
         joint_with_descriptors = aot_export_joint_with_descriptors(
             unused,

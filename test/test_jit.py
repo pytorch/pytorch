@@ -9459,7 +9459,7 @@ dedent """
                 return self.mods(input)
 
         m = M()
-        self.assertTrue('mods.conv.weight' in m.state_dict().keys())
+        self.assertTrue('mods.conv.weight' in m.state_dict())
 
     def test_script_sequential_multi_output_fail(self):
         class Sub(torch.jit.ScriptModule):
@@ -11954,7 +11954,7 @@ dedent """
             # type: (Dict[str, int]) -> Tuple[str, int]
             key_str = ""
             sum = 0
-            for key in x.keys():
+            for key in x:
                 key_str += key
             for val in x.values():
                 sum += val
