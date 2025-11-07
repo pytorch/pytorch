@@ -1361,9 +1361,7 @@ class X86InductorQuantizer(Quantizer):
             elif (
                 node.target is torch.ops.aten.flatten.using_ints
                 and len(node.users) > 0
-                and not any(
-                    user.target in quantizable_ops for user in node.users.keys()
-                )
+                and not any(user.target in quantizable_ops for user in node.users)
             ):
                 # Recipe of flatten: check if any users of flatten node are quantizable ops or not
                 return
