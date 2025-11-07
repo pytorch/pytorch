@@ -81,33 +81,8 @@ jobs:
       test-matrix: ${{ needs.inductor-halide-build.outputs.test-matrix }}
     secrets: inherit
 
-  inductor-pallas-cuda12-build:
-    name: inductor-pallas-cuda12-build
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      build-environment: linux-jammy-py3.12-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-py3.12-pallas
-      cuda-arch-list: '8.6'
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      test-matrix: |
-        { include: [
-          { config: "inductor-pallas", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-        ]}
-    secrets: inherit
-
-  inductor-pallas-cuda12-test:
-    name: inductor-pallas-cuda12-test
-    uses: ./.github/workflows/_linux-test.yml
-    needs: inductor-pallas-cuda12-build
-    with:
-      build-environment: linux-jammy-py3.12-gcc11
-      docker-image: ${{ needs.inductor-pallas-cuda12-build.outputs.docker-image }}
-      test-matrix: ${{ needs.inductor-pallas-cuda12-build.outputs.test-matrix }}
-    secrets: inherit
-
-  inductor-pallas-cuda13-build:
-    name: inductor-pallas-cuda13-build
+  inductor-pallas-build:
+    name: inductor-pallas-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
@@ -121,14 +96,14 @@ jobs:
         ]}
     secrets: inherit
 
-  inductor-pallas-cuda13-test:
-    name: inductor-pallas-cuda13-test
+  inductor-pallas-test:
+    name: inductor-pallas-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: inductor-pallas-cuda13-build
+    needs: inductor-pallas-build
     with:
       build-environment: linux-jammy-py3.12-gcc11
-      docker-image: ${{ needs.inductor-pallas-cuda13-build.outputs.docker-image }}
-      test-matrix: ${{ needs.inductor-pallas-cuda13-build.outputs.test-matrix }}
+      docker-image: ${{ needs.inductor-pallas-build.outputs.docker-image }}
+      test-matrix: ${{ needs.inductor-pallas-build.outputs.test-matrix }}
     secrets: inherit
 
   inductor-triton-cpu-build:
