@@ -1145,7 +1145,7 @@ class _FindNodesLookupTable:
             return [*self.table[(op, None)].keys()]
 
         # op is call_method, get_attr, call_module
-        return [node for node in self.table[(op, None)].keys() if node.target == target]
+        return [node for node in self.table[(op, None)] if node.target == target]
 
 
 @compatibility(is_backward_compatible=True)
