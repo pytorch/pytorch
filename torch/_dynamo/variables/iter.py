@@ -63,7 +63,7 @@ class ItertoolsVariable(VariableTracker):
         # See also: module `torch._dynamo.polyfills.itertools`
 
         if self.value is itertools.product:
-            if any(kw != "repeat" for kw in kwargs.keys()):
+            if any(kw != "repeat" for kw in kwargs):
                 unimplemented_v2(
                     gb_type="Unsupported kwargs for itertools.product",
                     context=f"call_function {self} {args} {kwargs}",
@@ -72,7 +72,7 @@ class ItertoolsVariable(VariableTracker):
                     hints=[*graph_break_hints.USER_ERROR],
                 )
 
-            if "repeat" in kwargs.keys():
+            if "repeat" in kwargs:
                 r = kwargs["repeat"].as_python_constant()
             else:
                 r = 1
@@ -103,7 +103,7 @@ class ItertoolsVariable(VariableTracker):
                 mutation_type=ValueMutationNew(),
             )
         elif self.value is itertools.groupby:
-            if any(kw != "key" for kw in kwargs.keys()):
+            if any(kw != "key" for kw in kwargs):
                 unimplemented_v2(
                     gb_type="Unsupported kwargs for itertools.groupby",
                     context=f"call_function {self} {args} {kwargs}",

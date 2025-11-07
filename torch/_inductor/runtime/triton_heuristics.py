@@ -832,7 +832,7 @@ class CachingAutotuner(KernelInterface):
                 # only add inductor_args if the hook takes it
                 sig = inspect.signature(hook)
                 params = sig.parameters
-                if "inductor_args" in params:
+                if "inductor_args" in params and "config_args" in self.inductor_meta:
                     call_kwargs["inductor_args"] = self.inductor_meta["config_args"]
 
                 hook(**call_kwargs)
