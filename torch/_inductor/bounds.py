@@ -86,7 +86,7 @@ class BoundVars:
         self, submodules: dict[str, Callable[..., Any]]
     ) -> dict[str, Callable[..., ValueRanges[Expr]]]:
         result: dict[str, Callable[..., ValueRanges[Expr]]] = {}
-        for key in submodules.keys():
+        for key in submodules:
             if key == "get_index":
                 result[key] = self.get_index
             elif "masked_subblock" in key:
