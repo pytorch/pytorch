@@ -1777,3 +1777,17 @@ command = [
     '--',
     '@{{PATHSFILE}}'
 ]
+
+[[linter]]
+code = 'STABLE_NATIVE_FUNCTION_SCHEMA'
+include_patterns = [
+    'aten/src/ATen/native/native_functions.yaml',
+    'torch/csrc/stable/ops.h',
+    'torch/csrc/stable/native_ops.txt',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/native_function_schema_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
