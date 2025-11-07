@@ -10,7 +10,7 @@ function install_jax_12() {
   pip_install "jax[cuda12]==${JAX_VERSION}" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
   # Verify installation
-  python -c "import halide"  # check for errors
+  python -c "import jax"  # check for errors
   echo "JAX ${JAX_VERSION} installation completed successfully for CUDA 12"
 }
 
@@ -20,7 +20,7 @@ function install_jax_13() {
   pip_install "jax[cuda13]==${JAX_VERSION}" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
   # Verify installation
-  python -c "import halide"  # check for errors
+  python -c "import jax"  # check for errors
   echo "JAX ${JAX_VERSION} installation completed successfully for CUDA 13"
 }
 
