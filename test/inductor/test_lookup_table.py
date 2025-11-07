@@ -9,7 +9,11 @@ import torch
 import torch.nn as nn
 from torch._inductor import config as inductor_config
 from torch._inductor.choices import InductorChoices
-from torch._inductor.kernel_inputs import ConvKernelInputs, MMKernelInputs
+from torch._inductor.kernel_inputs import (
+    ConvKernelInputs,
+    MMKernelInputs,
+    SerializableValue,
+)
 from torch._inductor.lookup_table.choices import LookupTableChoices
 from torch._inductor.select_algorithm import (
     add_preprocessing_fn,
@@ -54,7 +58,7 @@ class MockMMKernelInputs(MMKernelInputs):
     def __init__(
         self,
         tensors: list[torch.Tensor],
-        scalars: Optional[dict[str, Union[float, int]]] = None,
+        scalars: Optional[dict[str, SerializableValue]] = None,
         mat1_idx: int = -2,
         mat2_idx: int = -1,
     ):
@@ -86,9 +90,7 @@ class MockConvKernelInputs(ConvKernelInputs):
     def __init__(
         self,
         tensors: list[torch.Tensor],
-        scalars: Optional[
-            dict[str, Union[float, int, tuple[Union[float, int], ...]]]
-        ] = None,
+        scalars: Optional[dict[str, SerializableValue]] = None,
         x_idx: int = 0,
         weight_idx: int = 1,
         bias_idx: Optional[int] = None,
@@ -136,7 +138,7 @@ class BaseLookupTableTest(TestCase):
         shapes: Optional[list[tuple[int, ...]]] = None,
         device: torch.device = torch.device("cuda"),
         dtype: torch.dtype = torch.float32,
-        scalars: Optional[dict[str, Union[float, int]]] = None,
+        scalars: Optional[dict[str, SerializableValue]] = None,
     ) -> MockMMKernelInputs:
         """Create MockMMKernelInputs with real tensors"""
         if shapes is None:

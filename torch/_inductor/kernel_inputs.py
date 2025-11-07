@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional, TYPE_CHECKING, Union
+from collections.abc import Sequence
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.config
@@ -12,9 +13,11 @@ from .ir import FixedLayout, FlexibleLayout, Layout
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     import sympy
+
+# Type aliases for serializable scalar values
+Serializable = Union[int, float, bool]
+SerializableValue = Union[Serializable, Sequence[Serializable]]
 
 
 class KernelInputs(ABC):
@@ -27,9 +30,7 @@ class KernelInputs(ABC):
     def __init__(
         self,
         input_nodes: list[Any],
-        scalars: Optional[
-            dict[str, Union[float, int, bool, tuple[Union[float, bool, int], ...]]]
-        ] = None,
+        scalars: Optional[dict[str, SerializableValue]] = None,
         out_dtype: Optional[torch.dtype] = None,
     ):
         """
@@ -185,7 +186,7 @@ class KernelInputs(ABC):
             The output dtype
         """
 
-    def get_scalar(self, name: str) -> Union[float, int, tuple[Union[float, int], ...]]:
+    def get_scalar(self, name: str) -> SerializableValue:
         """
         Get the scalar value for a given name.
 
@@ -193,7 +194,7 @@ class KernelInputs(ABC):
             name: Name of the scalar to get
 
         Returns:
-            The scalar value (can be float, int, or tuple of float/int)
+            The scalar value (can be int, float, bool, or tuple of these types)
         """
         assert name in self._scalars, f"Scalar {name} not found, but required"
         return self._scalars[name]
@@ -218,9 +219,7 @@ class MMKernelInputs(KernelInputs):
     def __init__(
         self,
         input_nodes: list[Any],
-        scalars: Optional[
-            dict[str, Union[float, int, bool, tuple[Union[float, bool, int], ...]]]
-        ] = None,
+        scalars: Optional[dict[str, SerializableValue]] = None,
         out_dtype: Optional[torch.dtype] = None,
         mat1_idx: int = -2,
         mat2_idx: int = -1,
@@ -351,9 +350,7 @@ class ConvKernelInputs(KernelInputs):
     def __init__(
         self,
         input_nodes: list[Any],
-        scalars: Optional[
-            dict[str, Union[float, int, bool, tuple[Union[float, bool, int], ...]]]
-        ] = None,
+        scalars: Optional[dict[str, SerializableValue]] = None,
         out_dtype: Optional[torch.dtype] = None,
         x_idx: int = 0,
         weight_idx: int = 1,
@@ -417,12 +414,12 @@ class ConvKernelInputs(KernelInputs):
         bias = self._input_nodes[self._bias_idx] if self._bias_idx is not None else None
 
         # Extract conv params from scalars
-        stride: tuple[int] = self._scalars["stride"]  # type: ignore[assignment]
-        padding: tuple[int] = self._scalars["padding"]  # type: ignore[assignment]
-        dilation: tuple[int] = self._scalars["dilation"]  # type: ignore[assignment]
-        transposed: bool = self._scalars["transposed"]  # type: ignore[assignment]
-        output_padding: tuple[int] = self._scalars["output_padding"]  # type: ignore[assignment]
-        groups: int = self._scalars["groups"]  # type: ignore[assignment]
+        stride = cast(tuple[int, ...], self._scalars["stride"])
+        padding = cast(tuple[int, ...], self._scalars["padding"])
+        dilation = cast(tuple[int, ...], self._scalars["dilation"])
+        transposed = cast(bool, self._scalars["transposed"])
+        output_padding = cast(tuple[int, ...], self._scalars["output_padding"])
+        groups = cast(int, self._scalars["groups"])
 
         # Use existing conv_layout function
         layout = conv_layout(

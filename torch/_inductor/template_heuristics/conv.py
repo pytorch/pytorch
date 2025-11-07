@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 
@@ -65,15 +65,15 @@ class ConvTemplateConfigMixin(TemplateConfigHeuristics):
         ndim = len(kernel_shape)
 
         # Extract scalars
-        stride = kernel_inputs.get_scalar("stride")
-        padding = kernel_inputs.get_scalar("padding")
-        groups = kernel_inputs.get_scalar("groups")
+        stride = cast(tuple[int, ...], kernel_inputs.get_scalar("stride"))
+        padding = cast(tuple[int, ...], kernel_inputs.get_scalar("padding"))
+        groups = cast(int, kernel_inputs.get_scalar("groups"))
 
         # Check if we should unroll (only for 1x1 kernels)
         unroll = is_ones(kernel_shape)
 
         # Build kwargs dict based on ndim
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "GROUPS": groups,
             "UNROLL": unroll,
             "ALLOW_TF32": torch.backends.cudnn.allow_tf32,
@@ -187,19 +187,21 @@ class ATenConvConfigHeuristic(TemplateConfigHeuristics):
         assert isinstance(kernel_inputs, ConvKernelInputs)
 
         # Extract scalar values from kernel_inputs
-        stride = kernel_inputs.get_scalar("stride")
-        padding = kernel_inputs.get_scalar("padding")
-        dilation = kernel_inputs.get_scalar("dilation")
-        transposed = kernel_inputs.get_scalar("transposed")
-        output_padding = kernel_inputs.get_scalar("output_padding")
-        groups = kernel_inputs.get_scalar("groups")
+        stride = cast(tuple[int, ...], kernel_inputs.get_scalar("stride"))
+        padding = cast(tuple[int, ...], kernel_inputs.get_scalar("padding"))
+        dilation = cast(tuple[int, ...], kernel_inputs.get_scalar("dilation"))
+        transposed = cast(bool, kernel_inputs.get_scalar("transposed"))
+        output_padding = cast(
+            tuple[int, ...], kernel_inputs.get_scalar("output_padding")
+        )
+        groups = cast(int, kernel_inputs.get_scalar("groups"))
 
         # Check if bias is None to match old behavior
         # When bias is None: input_nodes = [x, weight], add 'bias' to kwargs and ordered list
         # When bias is present: input_nodes = [x, weight, bias], don't add 'bias' to kwargs
         x, weight, bias = kernel_inputs.get_x_weight_bias()
 
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "stride": stride,
             "padding": padding,
             "dilation": dilation,
