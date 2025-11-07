@@ -8,6 +8,7 @@ import os
 from model_registry import MultiMLP
 
 import torch
+from torch._dynamo import OptimizedModule
 from torch.distributed.pipelining import (
     Schedule1F1B,
     ScheduleDualPipeV,
@@ -20,6 +21,7 @@ from torch.distributed.pipelining import (
 from torch.distributed.pipelining._utils import generate_stage_to_rank_mapping
 from torch.distributed.pipelining.schedules import (
     _Action,
+    _add_reduce_grad,
     _add_send_recv,
     _add_unshard_reshard,
     _format_pipeline_order,
@@ -65,7 +67,7 @@ class MockPipelineStage(_PipelineStageBase):
         self.num_stages = kwargs.get("num_stages", 1)
         self.group_size = kwargs.get("group_size", 1)
         self.group_rank = kwargs.get("group_rank", 0)
-        self.group = kwargs.get("group", None)
+        self.group = kwargs.get("group")
 
     def _create_grad_recv_info(self, *args, **kwargs):
         return None
@@ -258,7 +260,15 @@ class ScheduleTest(TestCase):
         finally:
             torch.distributed.destroy_process_group()
 
-    def test_zero_bubble_schedule_errors_with_compile(self):
+    @parametrize(
+        "ScheduleClass",
+        [
+            ScheduleInterleavedZeroBubble,
+            ScheduleZBVZeroBubble,
+            ScheduleDualPipeV,
+        ],
+    )
+    def test_zero_bubble_schedule_errors_with_compile(self, ScheduleClass):
         """
         Test that zero bubble schedules raise an error when used with torch.compile.
         """
@@ -271,16 +281,18 @@ class ScheduleTest(TestCase):
         model = MultiMLP(8, n_layers=n_stages)
         # full_mod
         compiled_model = torch.compile(model)
+        self.assertTrue(isinstance(compiled_model, OptimizedModule))
         stage = PipelineStage(
             compiled_model,
             0,
             n_stages,
             device,
         )
-        with self.assertRaises(RuntimeError):
-            ScheduleInterleavedZeroBubble([stage], 2)
-
-        torch.distributed.destroy_process_group()
+        try:
+            with self.assertRaises(RuntimeError):
+                ScheduleClass([stage], 2)
+        finally:
+            torch.distributed.destroy_process_group()
 
 
 instantiate_parametrized_tests(ScheduleTest)
@@ -525,6 +537,23 @@ class TestScheduleLowering(TestCase):
                 "compute": ["0F0", "0F1", "   ", "0B0", "0B1"],
                 "comms": ["0UNSHARD", "0F0", "0F1", "0B0", "0B1", "0RESHARD"],
             },
+            {
+                "compute": ["0F0", "0F1", "1F0", "1F1", "1B0", "1B1", "0B0", "0B1"],
+                "comms": [
+                    "0UNSHARD",
+                    "1UNSHARD",
+                    "0F0",
+                    "0F1",
+                    "1F0",
+                    "1F1",
+                    "1B0",
+                    "1B1",
+                    "1RESHARD",
+                    "0B0",
+                    "0B1",
+                    "0RESHARD",
+                ],
+            },
         ],
     )
     def test_unshard_reshard(self, test_info):
@@ -537,6 +566,45 @@ class TestScheduleLowering(TestCase):
 
         comms_sch = _add_unshard_reshard(compute_sch)
         for expected, actual in zip(expected_comms_sch, comms_sch):
+            self.assertEqual(
+                expected,
+                actual,
+                (
+                    f"Mismatch: expected action {expected} but found {actual}."
+                    f"\nWhole Schedule: {comms_sch}"
+                ),
+            )
+
+    @parametrize(
+        "test_info",
+        [
+            {
+                "compute": ["0F0", "0F1", "   ", "0B0", "0B1"],
+                "comms": ["0F0", "0F1", "0B0", "0B1", "0REDUCE_GRAD"],
+            },
+            {
+                "compute": ["0F0", "0F1", "1F0", "1F1", "1B0", "1B1", "0B0", "0B1"],
+                "comms": [
+                    "0F0",
+                    "0F1",
+                    "1F0",
+                    "1F1",
+                    "1B0",
+                    "1B1",
+                    "1REDUCE_GRAD",
+                    "0B0",
+                    "0B1",
+                    "0REDUCE_GRAD",
+                ],
+            },
+        ],
+    )
+    def test_reduce_grad(self, test_info):
+        compute_sch = self._parse_actions(test_info["compute"])
+        expected_comms_sch = self._parse_actions(test_info["comms"])
+
+        comms_sch = _add_reduce_grad(compute_sch, 2)
+        for expected, actual in zip(expected_comms_sch, comms_sch, strict=True):
             self.assertEqual(
                 expected,
                 actual,

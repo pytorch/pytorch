@@ -126,6 +126,11 @@ static std::vector<std::string> TORCH_NCCL_COORD_CHECK_MILSEC = {
 static std::vector<std::string> TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN = {
     "TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN"};
 
+// Whether to include only active collectives in the Flight Recorder trace
+// (default false)
+static std::vector<std::string> TORCH_NCCL_EXTRA_DUMP_ON_EXEC = {
+    "TORCH_NCCL_EXTRA_DUMP_ON_EXEC"};
+
 // Control whether to use CudaEventCache for the collective in watchdog thread.
 // We noticed in the past when cuda global lock is held, destroying CudaEvent
 // can cause a hang.
@@ -500,6 +505,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // unique id used to tell the trace buffer that this
     // work has completed
     std::optional<uint64_t> trace_id_;
+    std::optional<uint64_t> trace_reset_epoch_;
     DebugLevel distDebugLevel_;
     friend class ProcessGroupNCCL;
   };
@@ -992,6 +998,21 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   ErrorType getError() override;
 
+  bool supportsShrinking() const override {
+#ifdef NCCL_HAS_COMM_SHRINK
+    return true;
+#else
+    return false;
+#endif
+  }
+
+  // Backend-style shrink override that returns a Backend instance.
+  c10::intrusive_ptr<Backend> shrink(
+      const std::vector<int64_t>& ranks_to_exclude,
+      int shrink_flags = 0,
+      const c10::intrusive_ptr<Backend::Options>& opts_override =
+          nullptr) override;
+
   std::shared_ptr<c10::Allocator> getMemAllocator() override;
 
   // Allocate tensor from communication-optimized memory pool
@@ -1060,6 +1081,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       int p2pRank = 0,
       bool isSendRecvSelf = false);
 
+  // Initialize device-specific state (comm, stream, event, bookkeeping) for a
+  // given communicator on this process group instance.
+  void initializeDeviceStateForComm(
+      const at::Device& device,
+      std::shared_ptr<NCCLComm> comm);
+
   // Wrapper method which can be overridden for tests.
   virtual std::exception_ptr checkForNCCLErrors(
       std::shared_ptr<NCCLComm>& ncclComm);
@@ -1079,7 +1106,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // In the timeout case and we will dump debug info such as the NCCL flight
   // recorder to storage. Down the road, if we have more complicated or blocking
   // operations, we might need to use a side thread to do it.
-  bool dumpDebuggingInfo(bool includeStackTrace = true);
+  bool dumpDebuggingInfo(
+      bool includeStackTrace = true,
+      bool onlyActive = false);
+
+  void dumpExtraDebuggingInfo();
 
   // Abort all communicators on this rank.
   bool abortComms(const std::optional<std::string>& abortReason = std::nullopt);
@@ -1462,6 +1493,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Communication-optimized memory pool associated with this PG
   std::unique_ptr<c10::cuda::MemPool> memPool_ = nullptr;
 };
+
+// Reset the flighrecorder recordings for the current rank.
+TORCH_API void reset_nccl_trace();
 
 // Dumps the NCCL comm traces and additional information about the Process
 // Group.

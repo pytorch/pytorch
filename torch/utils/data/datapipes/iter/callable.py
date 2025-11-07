@@ -118,7 +118,7 @@ class MapperIterDataPipe(IterDataPipe[_T_co]):
                 for idx in sorted(self.input_col[1:], reverse=True):
                     del data[idx]
             else:
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 data[self.input_col] = res
         else:
             if self.output_col == -1:
@@ -149,7 +149,7 @@ def _collate_helper(conversion, item):
     tuple_names: list = []
     tuple_values: list = []
 
-    for name in conversion.keys():
+    for name in conversion:
         if name not in columns_name:
             raise RuntimeError("Conversion keys mismatch")
 

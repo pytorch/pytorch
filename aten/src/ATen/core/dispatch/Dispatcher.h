@@ -585,7 +585,7 @@ class TORCH_API OperatorHandle {
 
   // We need to store this iterator in order to make
   // Dispatcher::cleanup() fast -- it runs a lot on program
-  // termination (and presuambly library unloading).
+  // termination (and presumably library unloading).
   std::list<Dispatcher::OperatorDef>::iterator operatorIterator_;
 };
 
@@ -633,7 +633,7 @@ class TypedOperatorHandle<Return(Args...)> final : public OperatorHandle {
 
 namespace detail {
 template <class... Args>
-inline void unused_arg_(const Args&...) {}
+inline void unused_arg_(const Args&... /*unused*/) {}
 
 // CaptureKernelCall is intended to capture return values from Dispatcher
 // unboxed kernel calls. A record function may request to get outputs from the

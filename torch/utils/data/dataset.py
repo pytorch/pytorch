@@ -198,15 +198,14 @@ class TensorDataset(Dataset[tuple[Tensor, ...]]):
     tensors: tuple[Tensor, ...]
 
     def __init__(self, *tensors: Tensor) -> None:
-        assert all(tensors[0].size(0) == tensor.size(0) for tensor in tensors), (
-            "Size mismatch between tensors"
-        )
+        if all(tensors[0].size(0) != tensor.size(0) for tensor in tensors):
+            raise AssertionError("Size mismatch between tensors")
         self.tensors = tensors
 
     def __getitem__(self, index):
         return tuple(tensor[index] for tensor in self.tensors)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.tensors[0].size(0)
 
 
@@ -268,10 +267,10 @@ class StackDataset(Dataset[_T_stack]):
                             "Nested dataset's output size mismatch."
                             f" Expected {len(indices)}, got {len(items)}"
                         )
-                    for data, d_sample in zip(items, dict_batch):
+                    for data, d_sample in zip(items, dict_batch, strict=True):
                         d_sample[k] = data
                 else:
-                    for idx, d_sample in zip(indices, dict_batch):
+                    for idx, d_sample in zip(indices, dict_batch, strict=True):
                         d_sample[k] = dataset[idx]
             return dict_batch
 
@@ -285,15 +284,15 @@ class StackDataset(Dataset[_T_stack]):
                         "Nested dataset's output size mismatch."
                         f" Expected {len(indices)}, got {len(items)}"
                     )
-                for data, t_sample in zip(items, list_batch):
+                for data, t_sample in zip(items, list_batch, strict=True):
                     t_sample.append(data)
             else:
-                for idx, t_sample in zip(indices, list_batch):
+                for idx, t_sample in zip(indices, list_batch, strict=True):
                     t_sample.append(dataset[idx])
         tuple_batch: list[_T_tuple] = [tuple(sample) for sample in list_batch]
         return tuple_batch
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self._length
 
 
@@ -321,14 +320,14 @@ class ConcatDataset(Dataset[_T_co]):
     def __init__(self, datasets: Iterable[Dataset]) -> None:
         super().__init__()
         self.datasets = list(datasets)
-        assert len(self.datasets) > 0, "datasets should not be an empty iterable"
+        if len(self.datasets) == 0:
+            raise AssertionError("datasets should not be an empty iterable")
         for d in self.datasets:
-            assert not isinstance(d, IterableDataset), (
-                "ConcatDataset does not support IterableDataset"
-            )
+            if isinstance(d, IterableDataset):
+                raise AssertionError("ConcatDataset does not support IterableDataset")
         self.cumulative_sizes = self.cumsum(self.datasets)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.cumulative_sizes[-1]
 
     def __getitem__(self, idx):
@@ -371,17 +370,15 @@ class ChainDataset(IterableDataset):
 
     def __iter__(self):
         for d in self.datasets:
-            assert isinstance(d, IterableDataset), (
-                "ChainDataset only supports IterableDataset"
-            )
+            if not isinstance(d, IterableDataset):
+                raise AssertionError("ChainDataset only supports IterableDataset")
             yield from d
 
-    def __len__(self):
+    def __len__(self) -> int:
         total = 0
         for d in self.datasets:
-            assert isinstance(d, IterableDataset), (
-                "ChainDataset only supports IterableDataset"
-            )
+            if not isinstance(d, IterableDataset):
+                raise AssertionError("ChainDataset only supports IterableDataset")
             total += len(d)  # type: ignore[arg-type]
         return total
 
@@ -415,7 +412,7 @@ class Subset(Dataset[_T_co]):
         else:
             return [self.dataset[self.indices[idx]] for idx in indices]
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.indices)
 
 
@@ -466,7 +463,8 @@ def random_split(
             if length == 0:
                 warnings.warn(
                     f"Length of split at index {i} is 0. "
-                    f"This might result in an empty dataset."
+                    f"This might result in an empty dataset.",
+                    stacklevel=2,
                 )
 
     # Cannot verify that dataset is Sized
@@ -479,5 +477,5 @@ def random_split(
     lengths = cast(Sequence[int], lengths)
     return [
         Subset(dataset, indices[offset - length : offset])
-        for offset, length in zip(itertools.accumulate(lengths), lengths)
+        for offset, length in zip(itertools.accumulate(lengths), lengths, strict=True)
     ]

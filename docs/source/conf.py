@@ -206,6 +206,41 @@ templates_path = [
     os.path.join(os.path.dirname(pytorch_sphinx_theme2.__file__), "templates"),
 ]
 # TODO: document these and remove them from here.
+# Fixes the duplicated
+autosummary_filename_map = {
+    "torch.nn.utils.prune.identity": "torch.nn.utils.prune.identity_function",
+    "torch.nn.utils.prune.Identity": "torch.nn.utils.prune.Identity_class",
+    "torch.optim.adamw.adamw": "torch.optim.adamw.adamw_function",
+    "torch.optim.adamw.AdamW": "torch.optim.adamw.AdamW_class",
+    "torch.optim.asgd.asgd": "torch.optim.asgd.asgd_function",
+    "torch.optim.asgd.ASGD": "torch.optim.asgd.ASGD_class",
+    "torch.optim.nadam.nadam": "torch.optim.nadam.nadam_function",
+    "torch.optim.nadam.NAdam": "torch.optim.nadam.NAdam_class",
+    "torch.optim.radam.radam": "torch.optim.radam.radam_function",
+    "torch.optim.radam.RAdam": "torch.optim.radam.RAdam_class",
+    "torch.optim.rmsprop.rmsprop": "torch.optim.rmsprop.rmsprop_function",
+    "torch.optim.rmsprop.RMSprop": "torch.optim.rmsprop.RMSprop_class",
+    "torch.optim.rprop.rprop": "torch.optim.rprop.rprop_function",
+    "torch.optim.rprop.Rprop": "torch.optim.rprop.Rprop_class",
+    "torch.optim.sgd.sgd": "torch.optim.sgd.sgd_function",
+    "torch.optim.sgd.SGD": "torch.optim.sgd.SGD_class",
+    "torch.optim.adadelta.adadelta": "torch.optim.adadelta.adadelta_function",
+    "torch.optim.adadelta.Adadelta": "torch.optim.adadelta.Adadelta_class",
+    "torch.optim.adagrad.adagrad": "torch.optim.adagrad.adagrad_function",
+    "torch.optim.adagrad.Adagrad": "torch.optim.adagrad.Adagrad_class",
+    "torch.optim.adam.adam": "torch.optim.adam.adam_function",
+    "torch.optim.adam.Adam": "torch.optim.adam.Adam_class",
+    "torch.optim.adamax.adamax": "torch.optim.adamax.adamax_function",
+    "torch.optim.adamax.Adamax": "torch.optim.adamax.Adamax_class",
+    "torch.mtia.stream": "torch.mtia.stream_function",
+    "torch.mtia.Stream": "torch.mtia.Stream_class",
+    "torch.cpu.stream": "torch.cpu.stream_function",
+    "torch.cpu.Stream": "torch.cpu.Stream_class",
+    "torch.cuda.stream": "torch.cuda.stream_function",
+    "torch.cuda.Stream": "torch.cuda.Stream_class",
+    "torch.xpu.stream": "torch.xpu.stream_function",
+    "torch.xpu.Stream": "torch.xpu.Stream_class",
+}
 
 coverage_ignore_functions = [
     # torch
@@ -217,9 +252,7 @@ coverage_ignore_functions = [
     "is_available",
     # torch.distributed.checkpoint.state_dict
     "gc_context",
-    "state_dict",
     # torch.distributed.elastic.events
-    "construct_and_record_rdzv_event",
     "record_rdzv_event",
     # torch.distributed.elastic.metrics
     "initialize_metrics",
@@ -430,7 +463,6 @@ coverage_ignore_functions = [
     "get_default_qconfig_dict",
     "qconfig_equals",
     # torch.ao.quantization.quantization_mappings
-    "get_default_compare_output_module_list",
     "get_default_dynamic_quant_module_mappings",
     "get_default_dynamic_sparse_quant_module_mappings",
     "get_default_float_to_quantized_operator_mappings",
@@ -473,29 +505,13 @@ coverage_ignore_functions = [
     "get_weight_qspec",
     "propagate_annotation",
     "register_annotator",
-    # torch.ao.quantization.utils
     "activation_dtype",
-    "activation_is_dynamically_quantized",
-    "activation_is_int32_quantized",
-    "activation_is_int8_quantized",
-    "activation_is_statically_quantized",
-    "calculate_qmin_qmax",
-    "check_min_max_valid",
     "check_node",
-    "determine_qparams",
-    "get_combined_dict",
-    "get_fqn_to_example_inputs",
-    "get_qconfig_dtypes",
-    "get_qparam_dict",
-    "get_quant_type",
-    "get_swapped_custom_module_class",
-    "getattr_from_fqn",
     "has_no_children_ignoring_parametrizations",
     "is_per_channel",
     "is_per_tensor",
     "op_is_int8_dynamically_quantized",
     "to_underlying_dtype",
-    "validate_qmin_qmax",
     "weight_dtype",
     "weight_is_quantized",
     "weight_is_statically_quantized",
@@ -553,42 +569,6 @@ coverage_ignore_functions = [
     # torch.distributed.checkpoint.utils
     "find_state_dict_object",
     "find_tensor_shard",
-    # torch.distributed.collective_utils
-    "all_gather",
-    "all_gather_object_enforce_type",
-    "broadcast",
-    # torch.distributed.distributed_c10d
-    "all_gather",
-    "all_gather_coalesced",
-    "all_gather_into_tensor",
-    "all_gather_object",
-    "all_reduce",
-    "all_reduce_coalesced",
-    "all_to_all",
-    "all_to_all_single",
-    "barrier",
-    "batch_isend_irecv",
-    "broadcast",
-    "broadcast_object_list",
-    "destroy_process_group",
-    "gather",
-    "gather_object",
-    "get_backend",
-    "get_backend_config",
-    "get_global_rank",
-    "get_group_rank",
-    "get_process_group_ranks",
-    "get_rank",
-    "get_world_size",
-    "init_process_group",
-    "irecv",
-    "is_backend_available",
-    "is_gloo_available",
-    "is_initialized",
-    "is_mpi_available",
-    "is_nccl_available",
-    "is_torchelastic_launched",
-    "is_ucc_available",
     "isend",
     "monitored_barrier",
     "new_group",
@@ -662,15 +642,8 @@ coverage_ignore_functions = [
     "transformer_auto_wrap_policy",
     "wrap",
     # torch.distributed.nn.functional
-    "all_gather",
-    "all_reduce",
     "all_to_all",
     "all_to_all_single",
-    "broadcast",
-    "gather",
-    "reduce",
-    "reduce_scatter",
-    "scatter",
     # torch.distributed.nn.jit.instantiator
     "get_arg_return_types_from_interface",
     "instantiate_non_scriptable_remote_module_template",
@@ -1081,6 +1054,8 @@ coverage_ignore_functions = [
     "loop_pass",
     "these_before_those_pass_constraint",
     "this_before_that_pass_constraint",
+    # torch.fx.passes.regional_inductor
+    "regional_inductor",
     # torch.fx.passes.reinplace
     "reinplace",
     # torch.fx.passes.split_module
@@ -1126,6 +1101,8 @@ coverage_ignore_functions = [
     "set_current_meta",
     "set_grad_fn_seq_nr",
     "set_stack_trace",
+    "set_current_replay_node",
+    "get_current_replay_node",
     # torch.jit.annotations
     "ann_to_type",
     "check_fn",
@@ -3252,6 +3229,11 @@ autodoc_type_aliases = {
 
 # Enable overriding of function signatures in the first line of the docstring.
 autodoc_docstring_signature = True
+
+# Exclude inherited IntEnum methods that have RST formatting issues in their docstrings
+autodoc_default_options = {
+    "exclude-members": "from_bytes, to_bytes",
+}
 
 # -- katex javascript in header
 #
