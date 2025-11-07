@@ -226,10 +226,13 @@ template <
     typename B = HostBlock<S>>
 struct CachingHostAllocatorImpl {
   virtual ~CachingHostAllocatorImpl() {
-    active_ = false;
-    if (pinned_use_background_threads()) {
+    if (active_) {
+      active_ = false;
       getBackgroundThreadPool()->waitWorkComplete();
     }
+  }
+
+  CachingHostAllocatorImpl(): active_(c10::CachingAllocator::AcceleratorAllocatorConfig::pinned_use_background_threads()) {
   }
 
  public:
@@ -241,7 +244,7 @@ struct CachingHostAllocatorImpl {
 
     // If we are using background threads, we can process events in the
     // background.
-    if (!pinned_use_background_threads()) {
+    if (!active_) {
       process_events();
     }
 
@@ -257,7 +260,7 @@ struct CachingHostAllocatorImpl {
 
     // Check in the recently freed blocks with pending events to see if we
     // can reuse them. Call get_free_block again after processing events
-    if (pinned_use_background_threads()) {
+    if (active_) {
       // Launch the background thread and process events in a loop.
       static bool background_thread_flag [[maybe_unused]] = [this] {
         getBackgroundThreadPool()->run([&]() {
@@ -391,11 +394,6 @@ struct CachingHostAllocatorImpl {
 
   inline size_t size_index(size_t size) {
     return c10::llvm::Log2_64_Ceil(size);
-  }
-
-  virtual bool pinned_use_background_threads() {
-    return c10::CachingAllocator::AcceleratorAllocatorConfig::
-        pinned_use_background_threads();
   }
 
   virtual void copy_data(void* dest [[maybe_unused]], const void* src [[maybe_unused]], std::size_t count [[maybe_unused]]) const {
@@ -685,7 +683,7 @@ struct CachingHostAllocatorImpl {
 
   // Indicates whether the object is active.
   // Set to false in the destructor to signal background threads to stop.
-  std::atomic<bool> active_{true};
+  std::atomic<bool> active_;
 protected:
   alignas(hardware_destructive_interference_size) HostStatsStaged stats_;
 };
