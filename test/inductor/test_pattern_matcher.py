@@ -1225,7 +1225,7 @@ class TestPatternMatcher(TestCase):
         b = torch.rand(3, 2, device=GPU_TYPE)
 
         def f(x, a, b):
-            return torch.nn.functional.relu(torch.addmm(x, a, b, alpha=0.5, beta=0.5))
+            return torch.nn.functional.relu(torch.addmm(x, a, b, alpha=0.8, beta=0.2))
 
         fc = torch.compile(f)
 
