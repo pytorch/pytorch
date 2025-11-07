@@ -1338,6 +1338,7 @@ class CachingAutotuner(KernelInterface):
         benchmark_run=False,
         **kwargs,
     ):  # type:ignore[override]
+        """Launch triton kernel call and return result."""
         debug_mode = get_active_debug_mode()
         debug_call = None
         if debug_mode:

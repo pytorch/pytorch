@@ -25,7 +25,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.testing._internal.triton_utils import add_kernel_autotuned
 from torch.utils._debug_mode import (
     _OpCall,
     _RedistributeCall,
@@ -448,6 +447,8 @@ class TestDTensorDebugMode(TestCase):
     def test_triton_kernel_logs(self):
         import triton
 
+        from torch.testing._internal.triton_utils import add_kernel_autotuned
+
         def call_triton(x, y):
             output = torch.zeros_like(x)
             n_elements = output.numel()
@@ -494,6 +495,8 @@ class TestDTensorDebugMode(TestCase):
     @unittest.skipIf(not has_triton_package(), "requires triton")
     def test_check_triton_hash_mismatches(self):
         import triton
+
+        from torch.testing._internal.triton_utils import add_kernel_autotuned
 
         def call_triton(x, y):
             output = torch.zeros_like(x)
