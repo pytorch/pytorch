@@ -29,10 +29,11 @@ inline Device::Device(const std::string& device_string) {
   TORCH_ERROR_CODE_CHECK(torch_parse_device_string(
       device_string.c_str(), &device_type, &device_index));
 
-  type_ = torch::stable::detail::to<DeviceType>(
+  DeviceType dt = torch::stable::detail::to<DeviceType>(
       torch::stable::detail::from(device_type));
-  index_ = static_cast<DeviceIndex>(device_index);
-  validate();
+  DeviceIndex di = static_cast<DeviceIndex>(device_index);
+
+  *this = Device(dt, di);
 }
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
