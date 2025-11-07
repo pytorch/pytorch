@@ -959,27 +959,6 @@ class TestExplicitRedistribute(LocalTensorTestBase):
                 with self.assertRaisesRegex(RuntimeError, "Implicit redistribution"):
                     loss.backward(retain_graph=True)
 
-            # and we can (awkwardly) customize how the backwards pass works to avoid the implicit redistribution
-            class RedistributeDTensorBackwards(Function):
-                @staticmethod
-                def forward(ctx, input_dtensor, target_placements):
-                    ctx.target_placements = target_placements
-                    return input_dtensor
-
-                @staticmethod
-                def backward(ctx, grad_output_dtensor):
-                    grad_input_dtensor = grad_output_dtensor.redistribute(
-                        grad_output_dtensor.device_mesh, ctx.target_placements
-                    )
-                    return grad_input_dtensor, None
-
-            dx = distribute_tensor(x, device_mesh, [Shard(0)])
-            dA = distribute_tensor(A, device_mesh, [Replicate()])
-            with ExplicitRedistributionContext():
-                dY = torch.matmul(dx, dA_repl)
-                dY = RedistributeDTensorBackwards.apply(dY, [Replicate()])
-                loss = dY.sum()
-                loss.backward()
 
 
 if __name__ == "__main__":

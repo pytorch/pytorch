@@ -386,7 +386,6 @@ class OpDispatcher:
                         if debug_mode is not None
                         else contextlib.nullcontext()
                     )
-                    arg_spec.placements
                     if not ExplicitRedistributionContext.is_redistribute_allowed(
                         arg_spec,
                         # pyrefly: ignore [bad-argument-type]
