@@ -7329,11 +7329,11 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         m2 = torch.randn(50, 25, device=device).to(dtype)
         self._test_addmm_addmv(func, M, m1, m2, activation=activation)
 
-        # vector-shaped bias (or with 1-len dims on the left from the leading dim)
+        # vector (or with 1-len dims in shape[:-1])/matrix-shaped bias
         # and beta=1 result in epilogue fusion in CUDA
         V = torch.randn(25, device=device).to(dtype)
-        self._test_addmm_addmv(func, V, m1, m2, beta=1, activation=activation)
-        self._test_addmm_addmv(func, V.unsqueeze(0), m1, m2, beta=1, activation=activation)
+        for c in (V, V.unsqueeze(0), M):
+            self._test_addmm_addmv(func, c, m1, m2, beta=1, activation=activation)
 
         # Test 0-strided
         M = torch.randn(10, 1, device=device).to(dtype).expand(10, 25)
@@ -7357,12 +7357,10 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
             m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
             m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
-            self._test_addmm_addmv(func, M, m1, m2, transpose_out=t4, activation=activation)
 
-            if t1:
-                # use vector/(1 by k)-shaped V instead of matrix M for epilogue fusion in CUDA (doesn't depend on t1)
-                self._test_addmm_addmv(func, V, m1, m2, beta=1, transpose_out=t4, activation=activation,)
-                self._test_addmm_addmv(func, V.unsqueeze(0), m1, m2, beta=1, transpose_out=t4, activation=activation,)
+            for c, beta in itertools.product((M, V, V.unsqueeze(0)), (0, 1)):
+                # beta=1 to test epilogue fusions with either vector or matrix input
+                self._test_addmm_addmv(func, c, m1, m2, beta=beta, transpose_out=t4, activation=activation)
 
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
@@ -10004,7 +10002,18 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         A = torch.ones(n, n, dtype=dtype, device=device)
         B = torch.rand(n, dtype=dtype, device=device)
         C = torch.matmul(A, B)
-        self.assertEqual(C, B.sum().expand(B.shape))
+
+        # due to large N ( 50_000 ), accumulation and assosiativity errors can occur
+        # therefore we calculate appropriate rtol and atol based on N and machine epsilon.
+        
+        b_sum_f32 = B.float().sum() # compute sum, ensure f32 accumulation
+        safety_factor = 3
+        eps = torch.finfo(dtype).eps
+        u = eps / 2.0         # unit roundoff for dtype
+        rtol = min(5e-2, max(eps, safety_factor * u * math.sqrt(n)))   # ~ O(u * sqrt(N)) with small safety factor
+        atol = rtol * b_sum_f32.abs().item()
+
+        self.assertEqual(C, b_sum_f32.to(dtype).expand(B.shape), atol=atol, rtol=rtol)
 
     @onlyCUDA
     @largeTensorTest("40GB")
