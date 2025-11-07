@@ -255,7 +255,7 @@ class PyTreeSpec:
         return self.num_nodes == 1 and self.num_leaves == 1
 
     def paths(self, /) -> list[tuple[Any, ...]]:
-        def helper(treespec: Self, path_prefix: tuple[Any, ...]) -> None:
+        def helper(treespec: Self, path_prefix: list[Any]) -> None:
             if treespec.is_leaf():
                 paths.append(path_prefix)
                 return
@@ -265,27 +265,29 @@ class PyTreeSpec:
                 treespec._children,
                 strict=True,
             ):
-                helper(subspec, path_prefix + (entry,))
+                helper(subspec, path_prefix + [entry])
 
-        paths: list[tuple[Any, ...]] = []
-        helper(self, ())
-        return paths
+        paths: list[list[Any]] = []
+        helper(self, [])
+        return [tuple(path) for path in paths]
 
     def accessors(self, /) -> list[optree.PyTreeAccessor]:
         def helper(
             treespec: Self,
-            entry_path_prefix: tuple[tuple[optree.PyTreeEntry], ...],
+            entry_path_prefix: list[optree.PyTreeEntry],
         ) -> None:
             if treespec.is_leaf():
                 entry_paths.append(entry_path_prefix)
                 return
 
+            node_type = treespec.type
+            assert node_type is not None
             handler = optree.register_pytree_node.get(
-                treespec.type, namespace=treespec.namespace
+                node_type, namespace=treespec.namespace
             )
             assert handler is not None
-            kind = handler.kind
-            path_entry_type = handler.path_entry_type
+            kind: optree.PyTreeKind = handler.kind
+            path_entry_type: type[optree.PyTreeEntry] = handler.path_entry_type
 
             for entry, subspec in zip(
                 treespec._entries,
@@ -294,14 +296,11 @@ class PyTreeSpec:
             ):
                 helper(
                     subspec,
-                    (
-                        entry_path_prefix
-                        + (path_entry_type(entry, treespec.type, kind),)
-                    ),
+                    entry_path_prefix + [path_entry_type(entry, node_type, kind)],
                 )
 
-        entry_paths: list[tuple[optree.PyTreeEntry, ...]] = []
-        helper(self, ())
+        entry_paths: list[list[optree.PyTreeEntry]] = []
+        helper(self, [])
         return [optree.PyTreeAccessor(path) for path in entry_paths]
 
     def children(self, /) -> list[Self]:
