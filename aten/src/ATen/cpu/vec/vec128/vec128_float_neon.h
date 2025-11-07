@@ -307,11 +307,52 @@ class Vectorized<float> {
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(exp)
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(exp2)
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(expm1)
+  // Implementation copied from Arm Optimized Routine
+  // https://github.com/ARM-software/optimized-routines/blob/master/math/aarch64/advsimd/expf.c
+  inline Vectorized<float> vexpq_f32_u20() const {
+    // bail out to sleef if it's a special case:
+    // i.e. there's an input s.t. |input| > 87.3....
+    const float32x4_t special_bound = vdupq_n_f32(0x1.5d5e2ap+6f);
+    uint32x4_t cmp = vcagtq_f32(values, special_bound);
+    if (vpaddd_u64(vreinterpretq_u64_u32(cmp)) != 0) {
+      return exp();
+    }
+
+    const float32x4_t inv_ln2 = vdupq_n_f32(0x1.715476p+0f);
+    const float ln2_hi = 0x1.62e4p-1f;
+    const float ln2_lo = 0x1.7f7d1cp-20f;
+    const float c0 = 0x1.0e4020p-7f;
+    const float c2 = 0x1.555e66p-3f;
+    const float32x4_t ln2_c02 = {ln2_hi, ln2_lo, c0, c2};
+
+    const uint32x4_t exponent_bias = vdupq_n_u32(0x3f800000);
+    const float32x4_t c1 = vdupq_n_f32(0x1.573e2ep-5f);
+    const float32x4_t c3 = vdupq_n_f32(0x1.fffdb6p-2f);
+    const float32x4_t c4 = vdupq_n_f32(0x1.ffffecp-1f);
+
+    /* exp(x) = 2^n (1 + poly(r)), with 1 + poly(r) in [1/sqrt(2),sqrt(2)]
+      x = ln2*n + r, with r in [-ln2/2, ln2/2].  */
+
+    float32x4_t n = vrndaq_f32(vmulq_f32(values, inv_ln2));
+    float32x4_t r = vfmsq_laneq_f32(values, n, ln2_c02, 0);
+    r = vfmsq_laneq_f32(r, n, ln2_c02, 1);
+    uint32x4_t e = vshlq_n_u32(vreinterpretq_u32_s32(vcvtq_s32_f32(n)), 23);
+    float32x4_t scale = vreinterpretq_f32_u32(vaddq_u32(e, exponent_bias));
+
+    float32x4_t r2 = vmulq_f32(r, r);
+    float32x4_t p = vfmaq_laneq_f32(c1, r, ln2_c02, 2);
+    float32x4_t q = vfmaq_laneq_f32(c3, r, ln2_c02, 3);
+    q = vfmaq_f32(q, p, r2);
+    p = vmulq_f32(c4, r);
+    float32x4_t poly = vfmaq_f32(p, q, r2);
+
+    return vfmaq_f32(scale, poly, scale);
+  }
   Vectorized<float> exp_u20() const {
-    return exp();
+    return vexpq_f32_u20();
   }
   Vectorized<float> fexp_u20() const {
-    return exp();
+    return exp_u20();
   }
   DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
       fmod,
@@ -541,42 +582,6 @@ inline Vectorized<float> Vectorized<float>::le(
 }
 
 template <>
-inline void convert(const float* src, int32_t* dst, int64_t n) {
-  int64_t i;
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (i = 0; i <= (n - Vectorized<float>::size());
-       i += Vectorized<float>::size()) {
-    vst1q_s32(dst + i, vcvtq_s32_f32(vld1q_f32(src + i)));
-  }
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (; i < n; i++) {
-    dst[i] = static_cast<int32_t>(src[i]);
-  }
-}
-
-template <>
-inline void convert(const int32_t* src, float* dst, int64_t n) {
-  int64_t i;
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (i = 0; i <= (n - Vectorized<float>::size());
-       i += Vectorized<float>::size()) {
-    vst1q_f32(dst + i, vcvtq_f32_s32(vld1q_s32(src + i)));
-  }
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (; i < n; i++) {
-    dst[i] = static_cast<float>(src[i]);
-  }
-}
-
-template <>
 Vectorized<float> inline fmadd(
     const Vectorized<float>& a,
     const Vectorized<float>& b,
@@ -632,8 +637,7 @@ inline Vectorized<float> Vectorized<float>::erf() const {
   // - exp(- x * x)
   auto pow_2 = (*this) * (*this);
   auto neg_pow_2 = pow_2 ^ neg_zero_vec;
-  auto tmp4 = neg_pow_2.map(
-      std::exp); // This can be swapped for a faster implementation of exp.
+  auto tmp4 = neg_pow_2.vexpq_f32_u20();
   auto tmp5 = tmp4 ^ neg_zero_vec;
   // erf(x) = sign(x) * (1 - r * t * exp(- x * x))
   auto tmp6 = t * tmp5;

@@ -59,7 +59,7 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager, contextmanager
 from threading import local
-from typing import Any, Callable, cast, Generic, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, Generic, TYPE_CHECKING, TypeVar, Union
 
 from torch.utils._ordered_set import OrderedSet
 
@@ -75,6 +75,8 @@ from .ops_handler import (  # noqa: F401
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import torch
     from torch._inductor.choices import InductorChoices
     from torch._inductor.codegen.cpp_utils import LocalBufferContext
@@ -83,6 +85,8 @@ if TYPE_CHECKING:
     from torch._inductor.ir import ExternKernelNode
     from torch._inductor.loop_body import InterpreterShim
     from torch._subclasses import FakeTensorMode
+
+    from .distributed_autotune import _DistributedAutotuneState
 
 threadlocal = local()
 
@@ -199,6 +203,9 @@ _current_node: Virtualized[torch.fx.Node] = Virtualized("current_node", NullHand
 _local_buffer_context: Virtualized[LocalBufferContext] = Virtualized(
     "local_buffer_context", NullHandler
 )
+_distributed_autotune_state: Virtualized[_DistributedAutotuneState] = Virtualized(
+    "distributed_autotune_state", NullHandler
+)
 
 
 def _choices_default():
@@ -207,9 +214,13 @@ def _choices_default():
 
     We virtualize InductorChoices to allow changing inductor heuristics from out of tree.
     """
+    from torch._inductor import config
     from torch._inductor.choices import InductorChoices
 
-    rv = InductorChoices()
+    if config.inductor_choices_class is not None:
+        rv = config.inductor_choices_class()
+    else:
+        rv = InductorChoices()
     setattr(threadlocal, _choices._key, rv)
     return rv
 
@@ -364,6 +375,12 @@ class _V:
     set_local_buffer_context: Callable[[Any], Any] = _local_buffer_context._set_handler
     get_local_buffer_context: Callable[[], Any] = _local_buffer_context._get_handler
     set_choices_handler: Callable[[Any], Any] = _choices._set_handler
+    set_distributed_autotune_state: Callable[[Any], Any] = (
+        _distributed_autotune_state._set_handler
+    )
+    get_distributed_autotune_state: Callable[[], Any] = (
+        _distributed_autotune_state._get_handler
+    )
 
     @property
     def ops(self) -> OpsHandler[Any]:
@@ -422,6 +439,10 @@ class _V:
     @property
     def choices(self) -> InductorChoices:
         return _choices._get_handler()
+
+    @property
+    def distributed_autotune_state(self):
+        return _distributed_autotune_state._get_handler()
 
 
 V = _V()

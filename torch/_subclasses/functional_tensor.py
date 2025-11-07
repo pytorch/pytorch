@@ -8,6 +8,7 @@ from contextlib import AbstractContextManager
 from typing import Any, Optional, Union
 
 import torch
+import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
@@ -146,7 +147,7 @@ class FunctionalTensor(torch.Tensor):
         out.elem = elem
 
         if (
-            not mode.export
+            torch._export.config.enable_auto_functionalized_v2_for_export
             and torch.is_inference_mode_enabled()
             and torch._inductor.config.enable_auto_functionalized_v2
         ):
@@ -268,6 +269,7 @@ class FunctionalTensor(torch.Tensor):
                 device=self.device,
                 layout=self.layout,
             )
+        # pyrefly: ignore [not-iterable]
         return super().to(*args, **kwargs)
 
     def cuda(self, device=None, *args, **kwargs):
@@ -375,7 +377,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         def _can_decompose(func):
             # See https://github.com/pytorch/pytorch/pull/115258#issuecomment-1900755832
             # Never decompose dropout in export
-            if self.export and func == torch.ops.aten.dropout.default:
+            if self.export and func is torch.ops.aten.dropout.default:
                 return False
 
             # We unconditionally decompose ops that are maybe aliasing or mutating ops
@@ -405,7 +407,8 @@ class FunctionalTensorMode(TorchDispatchMode):
                         warnings.warn(
                             f"At pre-dispatch tracing, we assume that any custom op marked with "
                             f"CompositeImplicitAutograd and have functional schema are safe to not decompose. "
-                            f"Found {func} to be one such op."
+                            f"Found {func} to be one such op.",
+                            stacklevel=2,
                         )
                     return False
                 return True
@@ -453,12 +456,18 @@ class FunctionalTensorMode(TorchDispatchMode):
         ) and not torch._C._dispatch_has_kernel_for_dispatch_key(
             func.name(), torch._C.DispatchKey.Functionalize
         ):
+            import torch._export.config as export_config
             import torch._inductor.config as inductor_config
 
-            if self.export or not inductor_config.enable_auto_functionalized_v2:
+            if torch.compiler.is_exporting():
+                if export_config.enable_auto_functionalized_v2_for_export:
+                    return do_auto_functionalize_v2(self, func, args, kwargs)
+
                 return do_auto_functionalize(self, func, args, kwargs)
-            else:
+
+            if inductor_config.enable_auto_functionalized_v2:
                 return do_auto_functionalize_v2(self, func, args, kwargs)
+            return do_auto_functionalize(self, func, args, kwargs)
 
         from torch._higher_order_ops.effects import handle_effects, has_effects
 
@@ -510,6 +519,30 @@ class FunctionalTensorMode(TorchDispatchMode):
                         torch.Tensor, wrap, outs_unwrapped
                     )
                 else:
+                    # Note: [Functionalization View Replay Annotation]
+                    # When functionalization encounters a mutation, it handles aliases by lazily regenerating the aliases
+                    # at the first time they are next used.
+                    # This is a problem when plumbing user annotations during tracing. We want the view ops from view replay
+                    # to have the same annotation that the user specified on the original views. But view replay in
+                    # functionalization happens the next time the alias is used (e.g. second_op(alias_with_pending_mutation)),
+                    # so when we regenerate views before calling into second_op, those views will end up getting the metadata
+                    # for second_op!
+                    #
+                    # Instead, we need to remember the node metadata from the original views, and ensure that this node metadata
+                    # is globally set when we lazily perform view replay.
+                    # The globally set metadata will be used to populate the fx node created for the replayed operation.
+                    if m := torch._C._get_dispatch_mode(
+                        torch._C._TorchDispatchModeKey.PROXY
+                    ):
+                        for a in pytree.tree_leaves([args, kwargs]):
+                            if not isinstance(a, FunctionalTensor):
+                                continue
+                            curr_node = m.tracer.tensor_tracker[
+                                torch._from_functional_tensor(a.elem)
+                            ].proxy.node
+                            with fx_traceback.set_current_replay_node(curr_node):
+                                torch._sync(a)
+
                     # When we dispatch to the C++ functionalization kernel, we might need to jump back to the
                     # PreDispatch mode stack afterwards, to handle any other PreDispatch modes underneath
                     # FunctionalTensorMode. If we call func() directly, we would need to exclude PreDispatch
@@ -522,7 +555,7 @@ class FunctionalTensorMode(TorchDispatchMode):
                     )
 
                     if self.export:
-                        if func == torch.ops.aten.dropout.default:
+                        if func is torch.ops.aten.dropout.default:
                             torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
                     outs_wrapped = pytree.tree_map_only(
                         torch.Tensor, wrap, outs_unwrapped
@@ -549,7 +582,7 @@ class FunctionalTensorMode(TorchDispatchMode):
             # aliasing correction step. Otherwise, we would be setting the storage of a
             # lifted tensor to that of an unlifted tensor.
             # Ref: https://github.com/pytorch/pytorch/issues/111506
-            or func == torch.ops.aten.lift_fresh.default
+            or func is torch.ops.aten.lift_fresh.default
         ):
             return outs_wrapped
         # for metadata mutations, need to manually mutate the metadata of the FunctionalTensor wrapper

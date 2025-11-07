@@ -427,7 +427,6 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   // on the current device each later call sees.
   void init(int dev_count) override {
     static bool called = [](int dev_count) {
-      ;
       // Are there external guarantees init will be called before
       // any of the allocator's other functions?
       // std::lock_guard<std::mutex> lk(general_mutex);
@@ -913,7 +912,9 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     }
   }
   std::string name() override {
-    return "cudaMallocAsync";
+    // break up token to trick hipify
+    return "c"
+           "udaMallocAsync";
   }
   void copy_data(void* dest, const void* src, std::size_t count) const final {
     C10_CUDA_CHECK(

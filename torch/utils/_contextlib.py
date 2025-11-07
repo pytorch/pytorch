@@ -7,7 +7,8 @@ import inspect
 import sys
 import warnings
 from collections.abc import Callable
-from typing import Any, cast, TypeVar
+from typing import Any, cast, overload, TypeVar
+from typing_extensions import Self
 
 
 # Used for annotating the decorator usage of _DecoratorContextManager (e.g.,
@@ -118,7 +119,7 @@ def context_decorator(ctx, func):
 
     @functools.wraps(func)
     def decorate_context(*args, **kwargs):
-        # pyrefly: ignore  # bad-context-manager
+        # pyrefly: ignore [bad-context-manager]
         with ctx_factory():
             return func(*args, **kwargs)
 
@@ -158,7 +159,12 @@ class _DecoratorContextManager:
 class _NoParamDecoratorContextManager(_DecoratorContextManager):
     """Allow a context manager to be used as a decorator without parentheses."""
 
-    def __new__(cls, orig_func=None):
+    @overload
+    def __new__(cls, orig_func: F) -> F: ...  # type: ignore[misc]
+    @overload
+    def __new__(cls, orig_func: None = None) -> Self: ...
+
+    def __new__(cls, orig_func: F | None = None) -> Self | F:  # type: ignore[misc]
         if orig_func is None:
             return super().__new__(cls)
         return cls()(orig_func)

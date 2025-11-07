@@ -19,7 +19,7 @@ namespace at::native::mps {
 
 // For both scatter and gather kernels, there are 4 specized ones (for 1D to 4D tensor)
 // and one generic, for 5+D ones. Assumption (to be tested) about specialized kernels
-// is that reduction of n-dimentional vector, where n is 2, should be slower
+// is that reduction of n-dimensional vector, where n is 2, should be slower
 // than reduction of 2D one, as n is not known at compiler time, therefore compiler
 // could not do loop unrolls, that is
 // float sum(float* v, int n) {

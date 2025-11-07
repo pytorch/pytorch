@@ -24,24 +24,19 @@ class DeterministicTest(TestCase):
         super().setUp()
         self._exit_stack = contextlib.ExitStack()
         self._exit_stack.enter_context(fresh_cache())
-        self._exit_stack.enter_context(
-            getattr(torch.backends, "__allow_nonbracketed_mutation")()  # noqa: B009
-        )
-
-        self.old_flags = [
-            torch.backends.cudnn.deterministic,
-            torch.backends.cudnn.benchmark,
-            torch.backends.mkldnn.deterministic,
-        ]
 
     def tearDown(self) -> None:
-        (
-            torch.backends.cudnn.deterministic,
-            torch.backends.cudnn.benchmark,
-            torch.backends.mkldnn.deterministic,
-        ) = self.old_flags
         self._exit_stack.close()
         super().tearDown()
+
+    def test_use_deterministic_algorithsm(self):
+        old_val = torch.are_deterministic_algorithms_enabled()
+        try:
+            for new_val in [True, False, True]:
+                torch.use_deterministic_algorithms(new_val, warn_only=True)
+                self.assertEqual(inductor_config.deterministic, new_val)
+        finally:
+            torch.use_deterministic_algorithms(old_val, warn_only=True)
 
     @parametrize("deterministic", [False, True])
     def test_mm_padding(self, deterministic):

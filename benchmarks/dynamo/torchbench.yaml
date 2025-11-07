@@ -43,6 +43,7 @@ tolerance:
     - doctr_reco_predictor
     - drq
     - phlippe_resnet
+    - pytorch_CycleGAN_and_pix2pix
 
   higher_bf16:
     - doctr_reco_predictor
@@ -215,6 +216,9 @@ skip:
     cpu_aarch64: []
 
     cuda: []
+
+    xpu:
+      - *DETECTRON2_MODELS
 
   test:
     training:

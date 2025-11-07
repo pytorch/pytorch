@@ -139,11 +139,14 @@ def _from_local_no_grad(
     """
 
     if not compiled_autograd_enabled():
+        # pyrefly: ignore [bad-argument-type]
         return DTensor(
             # Use the local tensor directly instead of constructing a new tensor
             # variable, e.g. with `view_as()`, since this is not differentiable
+            # pyrefly: ignore [bad-argument-count]
             local_tensor,
             sharding_spec,
+            # pyrefly: ignore [unexpected-keyword]
             requires_grad=local_tensor.requires_grad,
         )
     else:

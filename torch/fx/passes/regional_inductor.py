@@ -43,6 +43,8 @@ def _partition_by_supported_nodes(gm, supported_ops, prefix):
 
 
 def _compile_submod(gm, prefix):
+    from torch._inductor.standalone_compile import AOTCompiledArtifact
+
     for node in gm.graph.nodes:
         if node.op == "call_module" and node.target.startswith(prefix):
             fake_inputs = []
@@ -56,13 +58,47 @@ def _compile_submod(gm, prefix):
 
             submod = getattr(gm, node.target)
 
-            # _dummy_wrapper is to make call_function happy
-            compiled_submod = _dummy_wrapper(
-                torch._inductor.standalone_compile(
-                    submod, fake_inputs, dynamic_shapes="from_tracing_context"
-                )
+            # Get inductor configs from annotation
+            # TODO we should change partition when there are multiple differently
+            # annotated regions.
+            inductor_options = {}
+            for sub_node in submod.graph.nodes:
+                if hasattr(sub_node, "meta") and sub_node.meta.get("custom", None):
+                    custom = sub_node.meta["custom"]
+                    if isinstance(custom, dict) and "compile_with_inductor" in custom:
+                        compile_value = custom["compile_with_inductor"]
+                        if (
+                            isinstance(compile_value, dict)
+                            and "inductor_configs" in compile_value
+                        ):
+                            inductor_options = compile_value["inductor_configs"]
+                            break
+
+            # Log the options being used
+            logger.info(
+                "Compiling submodule %s with inductor options: %s",
+                node.target,
+                inductor_options,
             )
 
+            # Apply config patches before compilation
+            import torch._inductor.config as inductor_config
+
+            # Validate that all config keys exist
+            for key in inductor_options:
+                if not hasattr(inductor_config, key):
+                    raise ValueError(
+                        f"Invalid inductor config key '{key}' in regional_inductor annotation. "
+                        f"Available config keys can be found in torch._inductor.config"
+                    )
+
+            with inductor_config.patch(inductor_options):
+                compiled_fn = torch._inductor.standalone_compile(
+                    submod, fake_inputs, dynamic_shapes="from_tracing_context", aot=True
+                )
+            assert isinstance(compiled_fn, AOTCompiledArtifact)
+            # _dummy_wrapper is to make call_function happy
+            compiled_submod = _dummy_wrapper(compiled_fn)
             with gm.graph.inserting_after(node):
                 new_node = gm.graph.call_function(
                     compiled_submod, args=node.args, kwargs=node.kwargs
@@ -126,6 +162,16 @@ def _recursive_compile_fx_annotated_nodes_with_inductor(gm):
 def regional_inductor(gm, *example_args):
     """
     Scoops out inductor marked regions and compiles them with inductor.
+
+    Inductor options should be provided via the annotation API:
+    with fx_traceback.annotate({
+        "compile_with_inductor": {
+            "inductor_configs": {
+                "max_autotune": True,
+                "triton.cudagraphs": False
+            }
+        }
+    }):
     """
     # fuser utils create new nodes using create_proxy which retains the seq_nr
     # metadata and cause issues

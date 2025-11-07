@@ -180,6 +180,7 @@ def _extract_graph_with_inputs_outputs(
     outputs: list[fx.Node],
     outputs_descs: list[AOTOutput],
     subgraph: Optional[str] = None,
+    ignore_must_be_in_fw_bw: bool = False,
 ) -> fx.Graph:
     """
     Given a graph, extracts out a subgraph that takes the specified nodes as
@@ -199,17 +200,26 @@ def _extract_graph_with_inputs_outputs(
         new_node = new_graph.placeholder(node.name)
         # Can't use node_copy here as we may be turning previous call_function into placeholders
         new_node.meta = node.meta
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         env[node] = new_node
 
     for node in joint_graph.nodes:
-        if _must_be_in_backward(node) and subgraph != "backward" and node not in inputs:
-            env[node] = InvalidNode  # type: ignore[assignment]
-            continue
+        if not ignore_must_be_in_fw_bw:
+            if (
+                _must_be_in_backward(node)
+                and subgraph != "backward"
+                and node not in inputs
+            ):
+                env[node] = InvalidNode  # type: ignore[assignment]
+                continue
 
-        if _must_be_in_forward(node) and subgraph != "forward" and node not in inputs:
-            env[node] = InvalidNode  # type: ignore[assignment]
-            continue
+            if (
+                _must_be_in_forward(node)
+                and subgraph != "forward"
+                and node not in inputs
+            ):
+                env[node] = InvalidNode  # type: ignore[assignment]
+                continue
 
         if node in env:
             # Node must be one of our inputs. (Any member of env which wasn't an
@@ -228,10 +238,10 @@ def _extract_graph_with_inputs_outputs(
             if any(all_args):
                 env[node] = InvalidNode  # type: ignore[assignment]
                 continue
-            # pyrefly: ignore  # unsupported-operation, bad-argument-type
+            # pyrefly: ignore [unsupported-operation, bad-argument-type]
             env[node] = new_graph.node_copy(node, lambda x: env[x])
         elif node.op == "get_attr":
-            # pyrefly: ignore  # unsupported-operation, bad-argument-type
+            # pyrefly: ignore [unsupported-operation, bad-argument-type]
             env[node] = new_graph.node_copy(node, lambda x: env[x])
         elif node.op == "output":
             pass
@@ -628,7 +638,7 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
         position_to_quant.get(i, node) for i, node in enumerate(fwd_outputs)
     ]
     # add the scale nodes to the output find the first sym_node in the output
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     idx = find_first_sym_node(output_updated_args)
     scale_nodes = tensor_scale_nodes + sym_scale_nodes
     if scale_nodes:
@@ -1086,7 +1096,7 @@ def default_partition(
         ):
             # Since we can't save tuple of tensor values, we need to flatten out what we're saving
             users = node.users
-            assert all(user.target == operator.getitem for user in users)
+            assert all(user.target is operator.getitem for user in users)
             saved_values.extend(users)
         else:
             backward_usages = [
@@ -1234,7 +1244,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
             # critical path first.
             cur_nodes += node.all_input_nodes
 
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         insertable_nodes = sorted(insertable_nodes, key=lambda n: order[n])
         for node in insertable_nodes:
             env[node] = new_graph.node_copy(node, lambda x: env[x])
@@ -1256,7 +1266,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     # Build the graph op-by-op by starting from the node all the way to the end
     # copy_ can be not using tangents at all, we must copy it.
     for node in list(gm.graph.nodes)[: order[first_node_in_bwd]]:
-        if node.op == "call_function" and node.target == torch.ops.aten.copy_.default:
+        if node.op == "call_function" and node.target is torch.ops.aten.copy_.default:
             insert_node_in_graph(node)
 
     for node in list(gm.graph.nodes)[order[first_node_in_bwd] :]:
@@ -1463,14 +1473,14 @@ def functionalize_rng_ops(
     devices = OrderedSet(
         get_device(node_pair["fwd"]) for node_pair in recomputable_rng_ops_map.values()
     )
-    # pyrefly: ignore  # unbound-name
+    # pyrefly: ignore [unbound-name]
     devices.discard(torch.device("cpu"))
     # multiple cuda devices won't work with cudagraphs anyway,
     # fallback to non graphsafe rng checkpointing
     multi_cuda_devices = len(devices) > 1
 
     # this changes numerics, so if fallback_random is set we will not use it
-    # pyrefly: ignore  # unbound-name
+    # pyrefly: ignore [unbound-name]
     ind_config = torch._inductor.config
     use_rng_graphsafe_rng_functionalization = (
         config.graphsafe_rng_functionalization
@@ -1481,9 +1491,7 @@ def functionalize_rng_ops(
         )
     )
 
-    for rng_count, (base_node, node_pair) in enumerate(
-        recomputable_rng_ops_map.items()
-    ):
+    for rng_count, node_pair in enumerate(recomputable_rng_ops_map.values()):
         # Step 2 - Modify the fwd pass such that
         fw_node = node_pair["fwd"]
         bw_node = node_pair["bwd"]
@@ -1598,7 +1606,7 @@ def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
         if node.op == "output":
             continue
 
-        is_copy_ = node.target == torch.ops.aten.copy_.default
+        is_copy_ = node.target is torch.ops.aten.copy_.default
         if is_copy_:
             if _has_tag_must_be_in_backward(node):
                 has_mutation_in_bw.add(node.args[0])
@@ -1744,7 +1752,7 @@ def solve_min_cut(
     def should_ban_recomputation(node):
         if node.op != "call_function":
             return False
-        if node.target == operator.getitem:
+        if node.target is operator.getitem:
             return False
         if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
             return True
@@ -2714,9 +2722,7 @@ def thread_graphsafe_rng_from_hops(module, is_backward):
         subgraph = getattr(module, hop_node.args[0].target)
         if isinstance(subgraph, fx.GraphModule):
             new_rng_inputs = []
-            for idx, placeholder_node in enumerate(
-                subgraph.graph.find_nodes(op="placeholder")
-            ):
+            for placeholder_node in subgraph.graph.find_nodes(op="placeholder"):
                 if rng_string in placeholder_node.name:
                     # Found a rng state placeholder in the hop graph, lets add
                     # the corresponding node in the outer graph
@@ -2902,7 +2908,7 @@ def min_cut_rematerialization_partition(
         node_info,
         memory_budget=memory_budget,
     )
-    # pyrefly: ignore  # unbound-name
+    # pyrefly: ignore [unbound-name]
     if config._sync_decision_cross_ranks:
         saved_values = _sync_decision_cross_ranks(joint_graph, saved_values)
     # save_for_backward on tensors and stashes symints in autograd .ctx
@@ -2913,7 +2919,7 @@ def min_cut_rematerialization_partition(
     fw_module, bw_module = _extract_fwd_bwd_modules(
         joint_module,
         saved_values,
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
         static_lifetime_input_nodes=node_info.static_lifetime_input_nodes,

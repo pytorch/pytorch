@@ -156,7 +156,7 @@ class TestIndexing(TestCase):
             torch.DoubleTensor if not device.startswith("mps") else torch.FloatTensor
         )
         tensor = _make_tensor(lst).to(device)
-        for _i in range(100):
+        for _ in range(100):
             idx1_start = random.randrange(10)
             idx1_end = idx1_start + random.randrange(1, 10 - idx1_start + 1)
             idx1_step = random.randrange(1, 8)
@@ -247,7 +247,7 @@ class TestIndexing(TestCase):
                 x[ri([0, 2, 4]),], torch.tensor([5, 4, 3], dtype=dtype, device=device)
             )
 
-        # Only validates indexing and setting for Halfs
+        # Only validates indexing and setting for Halves
         if dtype == torch.half:
             reference = consec((10,))
             validate_indexing(reference)

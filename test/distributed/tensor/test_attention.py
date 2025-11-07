@@ -3,7 +3,8 @@
 import itertools
 import random
 import unittest
-from typing import Any, Callable, ClassVar, Optional
+from collections.abc import Callable
+from typing import Any, ClassVar, Optional
 
 import torch
 import torch.distributed as dist
@@ -20,18 +21,18 @@ from torch.distributed.tensor.experimental._attention import (
     _cp_options,
     _disable_context_parallel_dispatcher,
     _enable_context_parallel_dispatcher,
+    _HeadTailLoadBalancer,
     _is_causal_behavior,
+    _LoadBalancer,
+    _PerDocumentHeadTailLoadBalancer,
+    _PTRRLoadBalancer,
     _RotateMethod,
     context_parallel,
     context_parallel_unshard,
     set_rotate_method,
 )
-from torch.distributed.tensor.experimental._cp_custom_ops import flex_cp_allgather
-from torch.distributed.tensor.experimental._load_balancer import (
-    _HeadTailLoadBalancer,
-    _LoadBalancer,
-    _PerDocumentHeadTailLoadBalancer,
-    _PTRRLoadBalancer,
+from torch.distributed.tensor.experimental._context_parallel._cp_custom_ops import (
+    flex_cp_allgather,
 )
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
@@ -52,7 +53,9 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
+    map_local_tensor_for_rank,
     with_comms,
 )
 
@@ -158,7 +161,7 @@ class RingAttentionTest(DTensorTestBase):
             # parameters because when require_grad is True, resize_ is not
             # allowed. But requires_grad of cp_q, cp_k, and cp_v are False
             # now. So we can just use context_parallel() to shard q, k, v.
-            # In reality, context_paralle() should be used to shard the input.
+            # In reality, context_parallel() should be used to shard the input.
             # In reality, context_parallel() should only be used to shard
             # the model inputs (batch).
 
@@ -701,7 +704,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         )
 
         # TODO: change this for-loop to run_subtests
-        # Use a for-loop instead of run_subtests because we need to intialize the mask
+        # Use a for-loop instead of run_subtests because we need to initialize the mask
         # for each subtest. This can be baked into self._test_cp_flex_attention as
         # a str argument denoting mask type.
         for batch_size, max_seq_len, lb_type in itertools.product(
@@ -800,10 +803,46 @@ class TestSharding(DTensorTestBase):
         chunks = freqs_cis.chunk(self.world_size * 2)
         self.assertEqual(
             freqs_cis_shard,
-            torch.cat(
-                [chunks[self.rank], chunks[self.world_size * 2 - self.rank - 1]], dim=0
+            map_local_tensor_for_rank(
+                chunks,
+                self.rank,
+                lambda chunks, rank: torch.cat(
+                    [chunks[rank], chunks[self.world_size * 2 - rank - 1]],
+                    dim=0,
+                ),
             ),
         )
+
+
+RingAttentionTestWithLocalTensor = create_local_tensor_test_class(
+    RingAttentionTest,
+    skipped_tests=[
+        # Need to make attention implementation local tensor friendly, e.g.
+        # rewrite "rank local" logic
+        "test_ring_attention_sdpa",
+    ],
+)
+
+CPFlexAttentionTestWithLocalTensor = create_local_tensor_test_class(
+    CPFlexAttentionTest,
+    skipped_tests=[
+        # Missing support for batched tensors
+        "test_cp_flex_attention_causal_mask",
+        "test_cp_flex_attention_document_mask",
+    ],
+)
+
+TestCPCustomOpsWithLocalTensor = create_local_tensor_test_class(
+    TestCPCustomOps,
+    skipped_tests=[
+        # Missing support for fake tensors
+        "test_flex_cp_custom_op",
+    ],
+)
+
+TestShardingWithLocalTensor = create_local_tensor_test_class(
+    TestSharding,
+)
 
 
 if __name__ == "__main__":

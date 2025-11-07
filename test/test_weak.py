@@ -582,6 +582,7 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
         return x
 
     def setUp(self):
+        super().setUp()
         if IS_MACOS:
             raise unittest.SkipTest("non-portable load_library call used in test")
 

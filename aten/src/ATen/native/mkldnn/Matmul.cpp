@@ -540,7 +540,7 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
   args.insert({DNNL_ARG_WEIGHTS, expected_weight});
   args.insert({DNNL_ARG_DST, dst});
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
-  // Create primitve and execute
+  // Create primitive and execute
   auto primitive = dnnl::matmul(prim_desc);
   primitive.execute(ideep::stream::default_stream(), args);
 }
@@ -576,14 +576,14 @@ static void _mkldnn_gemm_i8i8i32_with_blas(
         n,
         k,
         alpha,
-        (int8_t*)self.data_ptr(),
+        static_cast<int8_t*>(self.data_ptr()),
         lda,
         ao,
-        (int8_t*)mat2.data_ptr(),
+        static_cast<int8_t*>(mat2.data_ptr()),
         ldb,
         bo,
         beta,
-        (int32_t*)result.data_ptr(),
+        static_cast<int32_t*>(result.data_ptr()),
         ldc,
         &co);
   }

@@ -496,7 +496,7 @@ class OpCheckMode(TorchFunctionMode):
 
     def maybe_raise_errors_on_exit(self) -> None:
         # Check expected failures first
-        for qualname in self.seen_ops_to_errors.keys():
+        for qualname in self.seen_ops_to_errors:
             option = self.failures_dict.get_status(qualname, self.test_name)
             if len(self.seen_ops_to_errors[qualname]) == 0:
                 if should_update_failures_dict():
@@ -518,7 +518,7 @@ class OpCheckMode(TorchFunctionMode):
                         )
                 continue
         failed_ops = []
-        for qualname in self.seen_ops_to_errors.keys():
+        for qualname in self.seen_ops_to_errors:
             option = self.failures_dict.get_status(qualname, self.test_name)
             if option != "xsuccess":
                 continue

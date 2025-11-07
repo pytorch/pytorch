@@ -163,9 +163,7 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
     c10::setThreadName("pt_workerserver");
 
     try {
-      if (!server_.listen_after_bind()) {
-        throw std::runtime_error("failed to listen");
-      }
+      TORCH_CHECK(server_.listen_after_bind(), "failed to listen");
     } catch (std::exception& e) {
       C10D_ERROR("Error while running server: {}", e.what());
       throw;

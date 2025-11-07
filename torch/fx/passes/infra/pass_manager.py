@@ -31,7 +31,7 @@ def pass_result_wrapper(fn: Callable) -> Callable:
         wrapped_fn (Callable[Module, PassResult])
     """
     if fn is None:
-        # pyrefly: ignore  # bad-return
+        # pyrefly: ignore [bad-return]
         return None
 
     @wraps(fn)

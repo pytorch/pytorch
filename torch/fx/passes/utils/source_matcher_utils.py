@@ -85,7 +85,6 @@ def get_source_partitions(
         if (source_fn_st := node.meta.get("source_fn_stack", None)) is None and (
             torch_fn := node.meta.get("torch_fn", None)
         ) is not None:
-            # pyrefly: ignore  # unbound-name
             node_fqn, source_fn = torch_fn
             source_fn_name = source_fn.split(".")[1]
             if source_fn_name in wanted_sources:
@@ -114,7 +113,7 @@ def get_source_partitions(
                 # get_attr nodes won't be output nodes
                 continue
 
-            for user in node.users.keys():
+            for user in node.users:
                 if user not in nodes:
                     output_nodes.add(node)
 
@@ -158,7 +157,7 @@ def check_subgraphs_connected(
     """
 
     for node in reversed(subgraph1.nodes):
-        for user in node.users.keys():
+        for user in node.users:
             if user in subgraph2.nodes:
                 return True
     return False

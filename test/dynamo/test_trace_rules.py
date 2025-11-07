@@ -466,6 +466,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             "handle_cudnn_is_acceptable",  # No global state
             "handle_assert",  # No global state (constant)
             "handle_nested_tensor",  # No global state
+            "handle_current_stream",  # Safely implemented
         )
         for fn in handlers:
             if isinstance(fn, staticmethod) or inspect.ismethod(fn):

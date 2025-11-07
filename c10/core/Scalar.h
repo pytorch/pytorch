@@ -336,7 +336,7 @@ class C10_API Scalar {
     } else if (isBoolean()) {
       return ScalarType::Bool;
     } else {
-      throw std::runtime_error("Unknown scalar type.");
+      TORCH_CHECK(false, "Unknown scalar type.");
     }
   }
 

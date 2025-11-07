@@ -906,7 +906,7 @@ void initPythonIRBindings(PyObject* module_) {
           "scalarType",
           [](Type& t) {
             auto scalar_type = t.expectRef<TensorType>().scalarType();
-            return (scalar_type) ? toString(*scalar_type) : nullptr;
+            return scalar_type ? toString(*scalar_type) : nullptr;
           })
       .def(
           "device",

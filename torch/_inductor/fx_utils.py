@@ -2,7 +2,8 @@
 import contextlib
 import operator
 from collections import defaultdict
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import sympy
 
@@ -146,7 +147,7 @@ class FakeTensorUpdater:
                             (torch._ops.OpOverload, torch._ops.HigherOrderOperator),
                         )
                         or user.target
-                        == torch._inductor.fx_passes.reinplace._generalized_scatter
+                        is torch._inductor.fx_passes.reinplace._generalized_scatter
                     ):
                         return True
                     if isinstance(user.target, torch._ops.HigherOrderOperator):
@@ -200,9 +201,9 @@ class FakeTensorUpdater:
             # tensors from an op.
             return node.op == "call_function" and (
                 isinstance(node.target, torch._ops.OpOverload)
-                or node.target == operator.getitem
+                or node.target is operator.getitem
                 or node.target
-                == torch._inductor.fx_passes.reinplace._generalized_scatter
+                is torch._inductor.fx_passes.reinplace._generalized_scatter
             )
 
         to_process = OrderedSet[int]()
@@ -238,7 +239,7 @@ class FakeTensorUpdater:
                 symbol_to_path := compute_unbacked_bindings(shape_env, new_fake_tensor)
             ):
                 # Refresh the bindings to the new symbols
-                # pyrefly: ignore  # unbound-name
+
                 node.meta["unbacked_bindings"] = symbol_to_path
 
             existing_storages[get_node_storage(node)] += 1

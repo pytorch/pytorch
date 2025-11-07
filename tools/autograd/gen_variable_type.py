@@ -763,6 +763,12 @@ auto ${inp_name}_t = (${inp_name}_t_raw.defined() || !${inp_name}_tensor.defined
 """
 )
 
+FW_DERIVATIVE_UPDATE_WRAPPED_NUM_TEMPLATE = CodeTemplate(
+    """\
+update_wrapped_number(${inp_name}_tensor, ${inp_name}_t);
+"""
+)
+
 FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE = CodeTemplate(
     """\
 auto ${inp_name}_p = toNonOptPrimal(${inp});
@@ -1495,7 +1501,7 @@ def emit_body(
                 else:
                     expr = f"SavedVariable({var}, {str(is_output).lower()})"
                     if foreacharg is not None and "original_selfs" not in expr:
-                        # pyrefly: ignore  # unbound-name
+                        # pyrefly: ignore [unbound-name]
                         expr = expr.replace(src_name, name_in_expr)
             elif (
                 type == BaseCType(tensorListT)
@@ -1845,14 +1851,14 @@ def emit_body(
                                 )
                             )
                         cur_derivative_conditions.append(
-                            # pyrefly: ignore  # bad-argument-type
+                            # pyrefly: ignore [bad-argument-type]
                             FW_DERIVATIVE_CHECK_TEMPLATE.substitute(
                                 req_inp=inp_name + "[i]"
                             )
                         )
                     else:
                         cur_derivative_conditions.append(
-                            # pyrefly: ignore  # bad-argument-type
+                            # pyrefly: ignore [bad-argument-type]
                             FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp_name)
                         )
 
@@ -1911,6 +1917,13 @@ def emit_body(
                             zeros_fn=zeros_fn,
                         )
                     )
+                    if zeros_fn == "_efficientzerotensor_symint":
+                        unpacked_arguments += (
+                            FW_DERIVATIVE_UPDATE_WRAPPED_NUM_TEMPLATE.substitute(
+                                inp_name=inp.name
+                            )
+                        )
+
                 if inp.name in (derivative.required_inputs_primal or []):
                     unpacked_arguments += (
                         FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(
@@ -1923,7 +1936,7 @@ def emit_body(
                 unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(
                     inp_name="original_self",
                     inp="original_self" + input_suffix,
-                    # pyrefly: ignore  # unbound-name
+                    # pyrefly: ignore [unbound-name]
                     zeros_fn=zeros_fn,
                 )
                 unpacked_arguments += FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(

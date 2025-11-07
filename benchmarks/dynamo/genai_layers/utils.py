@@ -1,10 +1,12 @@
 import os
+import sys
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Optional
 
 import matplotlib.pyplot as plt
+from scipy.stats import gmean
 
 import torch
 from torch._inductor.runtime.benchmarking import benchmarker
@@ -43,10 +45,11 @@ class Performance:
 
 
 class BenchmarkKernel:
-    def __init__(self, compile_mode: str = "max-autotune-no-cudagraphs"):
+    def __init__(self, script_args):
+        self.script_args = script_args
         self.name = self.__class__.__name__
         self.available_backends: list[str] = []
-        self.compile_mode: str = compile_mode
+        self.compile_mode: str = script_args.compile_mode
 
         # mapping from backend to list of performance results
         self.profiling_results: defaultdict[str, list[Performance]] = defaultdict(list)
@@ -105,15 +108,34 @@ class BenchmarkKernel:
         for backend in self.available_backends:
             args_ref, kwargs_ref = self.clone_inputs(args, kwargs)
             res[backend] = getattr(self, backend)(args_ref, kwargs_ref)()
+
+        if (
+            "compiled" in self.available_backends
+            and self.script_args.custom_compile_options
+        ):
+            torch._dynamo.reset()  # cause recompile
+            with torch._inductor.config.patch(self.script_args.custom_compile_options):
+                args_ref, kwargs_ref = self.clone_inputs(args, kwargs)
+                res[self.script_args.custom_compile_name] = self.compiled(
+                    args_ref, kwargs_ref
+                )()
+
         gold = res["eager"]
-        for backend in self.available_backends:
+
+        tol = {}
+        if self.script_args.tolerance:
+            tol = {
+                "atol": self.script_args.tolerance,
+                "rtol": self.script_args.tolerance,
+            }
+        for backend in res:
             if backend == "eager":
                 continue
             try:
-                torch.testing.assert_close(res[backend], gold)
+                torch.testing.assert_close(res[backend], gold, **tol)
                 for t, gold_t in zip(res[backend], gold):
                     if t.requires_grad:
-                        torch.testing.assert_close(t.grad, gold_t.grad)
+                        torch.testing.assert_close(t.grad, gold_t.grad, **tol)
                 print(
                     f"Accuracy check \033[92m✓ succeed\033[0m for {backend} backend on {self.name} kernel"
                 )
@@ -121,37 +143,86 @@ class BenchmarkKernel:
                 print(
                     f"Accuracy check \033[91m✗ failed\033[0m for {backend} backend on {self.name} kernel. Error {e}"
                 )
+                if self.script_args.exit_on_accuracy_failure:
+                    print("Exit right away since --exit-on-accuracy-failure is set")
+                    sys.exit(1)
+
+    def benchmark_single_shape_for_backend(
+        self, backend, args, kwargs, setting, fn=None
+    ) -> bool:
+        if fn is None:
+            fn = getattr(self, backend)
+        args_ref, kwargs_ref = self.clone_inputs(args, kwargs)
+        try:
+            avg_time = benchmark_kernel_in_milliseconds(fn(args_ref, kwargs_ref))
+        except Exception as e:
+            print(
+                f"Failed to run {backend} backend on {self.name} kernel for {setting} due to {e}"
+            )
+            self.available_backends.remove(backend)  # noqa: B909
+            return False
+        mem_bytes = self.get_memory_bytes(args_ref, kwargs_ref)
+        perf = Performance(setting, avg_time, mem_bytes)
+        print(f"{self.name} kernel on {backend} backend. {perf}")
+        self.profiling_results[backend].append(perf)
+        return True
 
     def benchmark_single_shape(
         self, args, kwargs=None, should_check_accuracy=True, setting: str = ""
     ):
         for backend in self.available_backends:
-            args_ref, kwargs_ref = self.clone_inputs(args, kwargs)
-            try:
-                avg_time = benchmark_kernel_in_milliseconds(
-                    getattr(self, backend)(args_ref, kwargs_ref)
+            self.benchmark_single_shape_for_backend(backend, args, kwargs, setting)
+        if (
+            "compiled" in self.available_backends
+            and self.script_args.custom_compile_options
+        ):
+            torch._dynamo.reset()  # cause recompile
+            with torch._inductor.config.patch(self.script_args.custom_compile_options):
+                status = self.benchmark_single_shape_for_backend(
+                    self.script_args.custom_compile_name,
+                    args,
+                    kwargs,
+                    setting,
+                    fn=self.compiled,
                 )
-            except Exception as e:
-                print(
-                    f"Failed to run {backend} backend on {self.name} kernel for {setting} due to {e}"
+            if not status:
+                self.script_args.custom_compile_options = (
+                    None  # once fail, don't run again
                 )
-                self.available_backends.remove(backend)  # noqa: B909
-                continue
-            mem_bytes = self.get_memory_bytes(args_ref, kwargs_ref)
-            perf = Performance(setting, avg_time, mem_bytes)
-            print(f"{self.name} kernel on {backend} backend. {perf}")
-            self.profiling_results[backend].append(perf)
 
         if should_check_accuracy:
             self.check_accuracy(args, kwargs)
 
     def visualize(self) -> None:
+        device_name = torch.cuda.get_device_name(0)
         visualize_comparison(
             self.profiling_results,
-            title=f"{self.name}",
+            title=f"{self.name} ({device_name})",
             output_path=f"{self.name}_bench",
         )
         return
+
+    def report_geomean_speedup(self) -> None:
+        print(f"Geomean speedup for benchmark {self.name}")
+        eager_result = {
+            result.setting: result for result in self.profiling_results["eager"]
+        }
+        print(f"  eager {len(eager_result)} data points")
+        for backend, backend_result in self.profiling_results.items():
+            if backend == "eager":
+                continue
+            speeduplist = []
+            for result in backend_result:
+                eager_latency = eager_result[result.setting].latency
+                backend_latency = result.latency
+                speeduplist.append(
+                    eager_latency / backend_latency if backend_latency != 0 else 0.0
+                )
+
+            if len(speeduplist) > 0:
+                print(
+                    f"  {backend} {len(speeduplist)} data points, {gmean(speeduplist):.2f}x speedup"
+                )
 
 
 def get_backend_colors() -> dict[str, str]:
@@ -240,5 +311,6 @@ def visualize_comparison(
         os.makedirs("pics", exist_ok=True)
         full_path = os.path.join("pics", output_path + ".png")
         plt.savefig(full_path, dpi=300, bbox_inches="tight", facecolor="white")
+        print(f"Chart saved to {full_path}")
 
     plt.close()

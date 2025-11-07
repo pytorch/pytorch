@@ -333,6 +333,11 @@ AArch64 CPU
 
 -  Sunita Nadampalli (`snadampal <https://github.com/snadampal>`__)
 
+Out-of-tree Backend Integration (PrivateUse1)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Jiawei Li (`fffrog <https://github.com/fffrog>`__)
+
 Docs / Tutorials
 ~~~~~~~~~~~~~~~~
 

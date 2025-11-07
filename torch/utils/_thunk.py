@@ -17,7 +17,7 @@ class Thunk(Generic[R]):
 
     __slots__ = ["f", "r"]
 
-    def __init__(self, f: Callable[[], R]):
+    def __init__(self, f: Callable[[], R]) -> None:
         self.f = f
         self.r = None
 

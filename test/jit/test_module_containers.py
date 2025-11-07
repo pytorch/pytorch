@@ -300,7 +300,7 @@ class TestModuleContainers(JitTestCase):
 
                 # note: unable to index moduledict with a string variable currently
                 i = 0
-                for key in self.moduledict:
+                for _ in self.moduledict:
                     i += 1
                 assert i == len(self.moduledict), "iteration failing for ModuleDict"
 

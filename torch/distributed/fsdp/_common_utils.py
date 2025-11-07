@@ -65,7 +65,7 @@ class _FSDPDeviceHandle:
         if backend is None:
             try:
                 self.__backend = getattr(torch, device.type)
-                # pyrefly: ignore  # read-only
+                # pyrefly: ignore [read-only]
                 self.__device = device
             except AttributeError as exc:
                 raise AttributeError(
@@ -336,7 +336,8 @@ def _get_param_to_fqns(
                     warnings.warn(
                         "FlatParameter is being traversed more than once. "
                         "This case should only happen when using "
-                        "DistributedModelParallel with FullyShardedDataParallel."
+                        "DistributedModelParallel with FullyShardedDataParallel.",
+                        stacklevel=2,
                     )
                     param_to_fqns[param] = global_fqns
                 elif not dedup_shared_params:

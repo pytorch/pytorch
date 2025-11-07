@@ -8,7 +8,7 @@ from typing_extensions import deprecated
 
 try:
     from torchgen.api.python import format_function_signature
-    from torchgen.utils import FileManager as FileManager
+    from torchgen.utils import FileManager
 except ImportError:
     import sys
 
@@ -52,7 +52,7 @@ def gen_from_template(
     template_name: str,
     output_name: str,
     replacements: list[tuple[str, Any, int]],
-):
+) -> None:
     template_path = os.path.join(dir, template_name)
     output_path = os.path.join(dir, output_name)
 

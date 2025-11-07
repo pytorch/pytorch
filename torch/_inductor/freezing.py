@@ -153,7 +153,7 @@ class ErasedTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
         erased_tensors = [
             e
-            # pyrefly: ignore  # bad-unpacking
+            # pyrefly: ignore [bad-unpacking]
             for e in pytree.arg_tree_leaves(*args, **kwargs)
             if isinstance(e, ErasedTensor)
         ]
@@ -178,7 +178,7 @@ def invalidate_eager_modules():
             for attr_name, tensor in list(
                 itertools.chain(
                     mod.named_parameters(recurse=False),
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     mod.named_buffers(recurse=False),
                 )
             ):
@@ -195,7 +195,7 @@ def discard_traced_gm_params(mod: torch.fx.GraphModule):
         for attr_name, tensor in list(
             itertools.chain(
                 mod.named_parameters(recurse=False),
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 mod.named_buffers(recurse=False),
             )
         ):
@@ -271,7 +271,7 @@ def convert_conv_weights_to_channels_last(gm: torch.fx.GraphModule):
     folded by freezing.
     """
     with dynamo_timed("convert_conv_weights_to_channels_last"):
-        convs = [n for n in gm.graph.nodes if n.target == aten.convolution.default]
+        convs = [n for n in gm.graph.nodes if n.target is aten.convolution.default]
         for conv in convs:
             weight_node = conv.args[1]
             if len(weight_node.meta["val"].size()) != 4 or weight_node.meta[

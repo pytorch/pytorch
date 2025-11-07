@@ -298,7 +298,7 @@ def update_in(d, keys, func, default=None, factory=dict):
     rv = inner = factory()
     rv.update(d)
 
-    # pyrefly: ignore  # not-iterable
+    # pyrefly: ignore [not-iterable]
     for key in ks:
         if k in d:
             d = d[k]

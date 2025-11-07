@@ -185,12 +185,7 @@ if RUN_GPU:
 
     # XPU Not implemented yet
     XPU_BASE_TEST_SKIP = [
-        "test_foreach_cpp_wrapper",
-        "test_enable_dynamic_shapes_cpp_wrapper",
         "test_dynamic_shapes_persistent_reduction_mixed_x_dim",
-        "test_cat_slice_cat",
-        "test_fft_real_input",
-        "test_fft_real_input_real_output",
     ]
 
     # Maintain two separate test lists for cuda and cpp for now

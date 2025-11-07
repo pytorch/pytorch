@@ -205,12 +205,23 @@ class DefaultFuzzTemplate(FuzzTemplate):
                 "torch.sub",
                 "torch.mul",
                 "torch.div",
+                "torch.clamp",
+                "torch.cumsum",
                 # Tensor shape operations
                 "torch.Tensor.view",
                 "torch.reshape",
                 "torch.flatten",
                 "torch.squeeze",
                 "torch.unsqueeze",
+                "torch.split",
+                "torch.chunk",
+                "torch.expand",
+                "torch.cat",
+                "torch.stack",
+                # Indexing operations
+                "torch.gather",
+                "torch.index_select",
+                "torch.argsort",
                 # Matrix operations
                 "torch.mm",
                 "torch.addmm",
@@ -219,6 +230,8 @@ class DefaultFuzzTemplate(FuzzTemplate):
                 # Neural network operations
                 "torch.nn.functional.embedding",
                 "torch.nn.functional.linear",
+                "torch.nn.functional.scaled_dot_product_attention",
+                "torch.nn.functional.multi_head_attention_forward",
                 # Activation functions
                 "torch.nn.functional.relu",
                 "torch.nn.functional.leaky_relu",

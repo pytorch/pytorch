@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import sys
 
 import torch
 import torch._dynamo.test_case
@@ -72,15 +73,7 @@ del test
 global1, global2, global3, global4 = (torch.zeros(3),) * 4
 
 
-class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
-    def setUp(self):
-        super().setUp()
-        torch._dynamo.config.nested_graph_breaks = True
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.nested_graph_breaks = False
-
+class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     def test_single_graph_break(self):
         # NOTE marking f1, f2, f3 as global
         # prevents them from being freevars
@@ -210,6 +203,30 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 14)
+
+    def test_counters(self):
+        global f1, f2, f3, f4
+
+        def f1(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def f2(x):
+            return f1(x + 4) + 8
+
+        def f3(x):
+            x = x + 16
+            for _ in range(1):
+                x = f2(x)
+            return x + 32
+
+        @torch.compile(backend="eager")
+        def f4(x):
+            return f3(x + 64) + 128
+
+        self.assertEqual(f4(torch.zeros(3)), torch.zeros(3) + 255)
+        self.assertEqual(len(torch._dynamo.utils.counters["graph_break"]), 2)
 
     def test_supported_ctx_manager(self):
         global check, check_disabled, f1, f2, f3
@@ -362,6 +379,41 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 13)
+
+    def test_dead_nested_cells(self):
+        global f1, f2, f3
+
+        def f3(x, cell1):
+            cell1 += 2
+            x = x + cell1
+            torch._dynamo.graph_break()
+            return x + cell1
+
+        def f1(cell1=0):
+            def inner(x):
+                x += 4
+                x = f3(x, cell1)
+                return x + 8
+
+            return inner
+
+        def f2(x):
+            return f1()(x + 16) + 32
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f2)
+        x = torch.zeros(3)
+        res = f2(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        # If we don't handle dead cells in nested functions correctly,
+        # frame_count will increase since we also
+        # graph break when we attempt to codegen inner.
+        # The exact issue was that side_effects was failing to codegen inner's cell's creation.
+        # So when we try to codegen cells for resume functions, we end up trying to codegen
+        # a CellVariable without a source, which leads to a graph break we can't resume from.
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 6)
 
     def test_cells_double_graph_break(self):
         def f1(x1):
@@ -611,6 +663,216 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         # all ops except + 4
         self.assertEqual(cnts.op_count, 4)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], 3)
+
+    def test_generator_nested_graph_break(self):
+        def gen(x):
+            yield x + 1
+            torch._dynamo.graph_break()
+            yield x + 2
+
+        def fn(x):
+            x = x + 4
+            return list(gen(x))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(fn)
+        x = torch.zeros(3)
+        res = fn(x)
+        # NOTE: if we enable nested graph breaks on inlined generators, we expect
+        # some sort of internal dynamo failure
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        # fn should be skipped
+        self.assertEqual(cnts.frame_count, 0)
+
+        def outer(x):
+            x = x + 8
+            return fn(x)[0] + 16
+
+        cnts.clear()
+        torch.compiler.reset()
+
+        opt_fn = torch._dynamo.optimize(backend=cnts)(outer)
+        x = torch.zeros(3)
+        res = outer(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        # only outer should be traced
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 2)
+
+    def test_return_after_graph_break_nested(self):
+        # With improper implementation, returning immediately after a nested graph
+        # break may skip the rest of the top-level frame.
+        def f2(inner, x):
+            x += 2
+            return inner(x)
+
+        @torch.compile(backend="eager")
+        def f3(inner, x):
+            result = f2(inner, x)
+            x += 4
+            if result is not None:
+                x += result
+            return x
+
+        # test normal graph break
+        x = torch.zeros(3)
+
+        def inner1(x):
+            x += 1
+            return torch._dynamo.graph_break()
+
+        ref = f3(inner1, x)
+        self.assertEqual(ref, torch.zeros(3) + 7)
+
+        # test step graph break
+        x = torch.zeros(3)
+
+        def inner2(x):
+            x += 1
+            return torch._dynamo.step_unsupported()
+
+        ref = f3(inner2, x)
+        self.assertEqual(ref, torch.zeros(3) + 7)
+
+        # test store attr graph break
+        # NOTE: we do this manual bytecode generation hack since the only RETURN_*
+        # instruction that can follow STORE_ATTR is RETURN_CONST, which was removed in 3.14+.
+
+        # make sure inner3's code options are compatible with the instructions below
+        global y
+
+        def y():
+            pass
+
+        def inner3(x):
+            x.attr = 1000
+            y.attr = 2000
+
+        new_inst = torch._dynamo.bytecode_transformation.create_instruction
+        insts = [
+            new_inst("LOAD_CONST", argval=1000),
+            new_inst("LOAD_CONST", argval=2000),
+            new_inst("LOAD_GLOBAL", argval="y"),
+            # NOTE: this should cause a graph break - change y if it doesn't work!
+            new_inst("STORE_ATTR", argval="attr"),
+            new_inst("RETURN_VALUE"),
+        ]
+        if sys.version_info >= (3, 11):
+            insts = [new_inst("RESUME", arg=0)] + insts
+        code_keys = torch._dynamo.bytecode_transformation.get_code_keys()
+        code_options = {k: getattr(inner3.__code__, k) for k in code_keys}
+        _, inner3_code = (
+            torch._dynamo.bytecode_transformation.clean_and_assemble_instructions(
+                insts, code_keys, code_options
+            )
+        )
+        inner3.__code__ = inner3_code
+
+        torch._dynamo.utils.counters.clear()
+        x = torch.zeros(3)
+        ref = f3(inner3, x)
+        self.assertEqual(ref, torch.zeros(3) + 1006)
+        # make sure we're actually STORE_ATTR graph breaking
+        self.assertEqual(len(torch._dynamo.utils.counters["graph_break"]), 1)
+
+        # dynamic branching is harder to test - the other tests should be enough cover
+
+        # test every function returning
+        @torch.compiler.disable
+        def inner5(x):
+            x += 8
+            return x
+
+        def inner4(x):
+            x += 1
+            return inner5(x)
+
+        @torch.compile(backend="eager")
+        def f4(x):
+            x += 4
+            return f2(inner4, x)
+
+        x = torch.zeros(3)
+        ref = f4(x)
+        self.assertEqual(ref, torch.zeros(3) + 15)
+
+    def test_return_after_graph_break_deep_nested(self):
+        @torch.compiler.disable
+        def f1(x):
+            return x + 1
+
+        def f2(x):
+            return f1(x + 2)
+
+        def f3(x):
+            return f2(x + 4)
+
+        def f4(x):
+            x = f3(x + 8)
+            return x + 16
+
+        def f5(x):
+            return f4(x + 32)
+
+        def f6(x):
+            return f5(x + 64)
+
+        def f7(x):
+            x = f6(x + 128)
+            return x + 256
+
+        @torch.compile(backend="eager")
+        def f8(x):
+            return f7(x + 512)
+
+        x = torch.zeros(3)
+        ref = f8(x)
+        self.assertEqual(ref, torch.zeros(3) + 1023)
+
+        # check that only 2 resume functions are created
+        self.assertEqual(len(torch._dynamo.utils.counters["resumes"]), 2)
+        for name in ("resume_in_f4", "resume_in_f7"):
+            self.assertTrue(
+                any(
+                    name in key
+                    for key in torch._dynamo.utils.counters["resumes"].keys()
+                )
+            )
+
+    def test_disable_nested_graph_breaks(self):
+        global f1, f2, f3, f4, f5
+
+        def f1(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def f2(x):
+            return f1(x + 4) + 8
+
+        # NOTE since the disable_nested_graph_breaks decorator is implemented as a
+        # context manager, we don't need to separately test context manager usage.
+        @torch._dynamo.disable_nested_graph_breaks
+        def f3(x):
+            return f2(x + 16) + 32
+
+        def f4(x):
+            return f3(x + 64) + 128
+
+        def f5(x):
+            return f4(x + 256) + 512
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f5)
+        x = torch.zeros(3)
+        res = f5(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        # 2 frames from each of f5+f4, f3, f2, f1
+        self.assertEqual(cnts.frame_count, 8)
+        self.assertEqual(cnts.op_count, 10)
 
 
 if __name__ == "__main__":

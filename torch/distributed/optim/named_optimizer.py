@@ -87,7 +87,8 @@ class _NamedOptimizer(optim.Optimizer):
         else:
             warnings.warn(
                 "Since we pass in param_groups, we will use param_groups to "
-                "initialize the optimizer, not all parameters of the module."
+                "initialize the optimizer, not all parameters of the module.",
+                stacklevel=2,
             )
             param_to_key = {param: key for key, param in self.named_parameters.items()}  # type: ignore[misc, has-type]
             ordered_param_keys = []
@@ -202,7 +203,7 @@ class _NamedOptimizer(optim.Optimizer):
 
         for idx, param_key in enumerate(self.ordered_param_keys):
             # When the conditional training is performed, not all parameters are updated in the optim.
-            if param_key not in state.keys():
+            if param_key not in state:
                 continue
             if len(state[param_key]) != len(new_state[idx]):
                 raise ValueError(

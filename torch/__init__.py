@@ -303,8 +303,8 @@ def _get_cuda_dep_paths(path: str, lib_folder: str, lib_name: str) -> list[str]:
     return nvidia_lib_paths + lib_paths
 
 
-def _preload_cuda_deps(lib_folder: str, lib_name: str, required: bool = True) -> None:  # type: ignore[valid-type]
-    """Preloads cuda deps if they could not be found otherwise."""
+def _preload_cuda_lib(lib_folder: str, lib_name: str, required: bool = True) -> None:  # type: ignore[valid-type]
+    """Preloads cuda library if it could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == "Linux", "Should only be called on Linux"
 
@@ -318,6 +318,39 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str, required: bool = True) ->
         raise ValueError(f"{lib_name} not found in the system path {sys.path}")
     if lib_path:
         ctypes.CDLL(lib_path)
+
+
+def _preload_cuda_deps(err: _Optional[OSError] = None) -> None:
+    cuda_libs: dict[str, str] = {
+        "cublas": "libcublas.so.*[0-9]",
+        "cudnn": "libcudnn.so.*[0-9]",
+        "cuda_nvrtc": "libnvrtc.so.*[0-9]",
+        "cuda_runtime": "libcudart.so.*[0-9]",
+        "cuda_cupti": "libcupti.so.*[0-9]",
+        "cufft": "libcufft.so.*[0-9]",
+        "curand": "libcurand.so.*[0-9]",
+        "nvjitlink": "libnvJitLink.so.*[0-9]",
+        "cusparse": "libcusparse.so.*[0-9]",
+        "cusparselt": "libcusparseLt.so.*[0-9]",
+        "cusolver": "libcusolver.so.*[0-9]",
+        "nccl": "libnccl.so.*[0-9]",
+        "nvshmem": "libnvshmem_host.so.*[0-9]",
+        "cufile": "libcufile.so.*[0-9]",
+    }
+
+    # If error is passed, re-raise it if it's not about one of the abovementioned
+    # libraries
+    if err is not None and [
+        lib for lib in cuda_libs.values() if lib.split(".", 1)[0] in err.args[0]
+    ]:
+        raise err
+
+    # Otherwise, try to preload dependencies from site-packages
+    for lib_folder, lib_name in cuda_libs.items():
+        _preload_cuda_lib(lib_folder, lib_name)
+
+    # libnvToolsExt is Optional Dependency
+    _preload_cuda_lib("nvtx", "libnvToolsExt.so.*[0-9]", required=False)
 
 
 # See Note [Global dependencies]
@@ -346,43 +379,15 @@ def _load_global_deps() -> None:
             # libtorch_global_deps.so always depends in cudart, check if its installed and loaded
             if "libcudart.so" not in _maps:
                 return
-            # If all above-mentioned conditions are met, preload nvrtc and nvjitlink
-            _preload_cuda_deps("cuda_nvrtc", "libnvrtc.so.*[0-9]")
-            _preload_cuda_deps("cuda_nvrtc", "libnvrtc-builtins.so.*[0-9]")
-            _preload_cuda_deps("nvjitlink", "libnvJitLink.so.*[0-9]")
+            # If all above-mentioned conditions are met, preload CUDA dependencies
+            _preload_cuda_deps()
         except Exception:
             pass
 
     except OSError as err:
-        # Can only happen for wheel with cuda libs as PYPI deps
+        # Can happen for wheel with cuda libs as PYPI deps
         # As PyTorch is not purelib, but nvidia-*-cu12 is
-        cuda_libs: dict[str, str] = {
-            "cublas": "libcublas.so.*[0-9]",
-            "cudnn": "libcudnn.so.*[0-9]",
-            "cuda_nvrtc": "libnvrtc.so.*[0-9]",
-            "cuda_runtime": "libcudart.so.*[0-9]",
-            "cuda_cupti": "libcupti.so.*[0-9]",
-            "cufft": "libcufft.so.*[0-9]",
-            "curand": "libcurand.so.*[0-9]",
-            "nvjitlink": "libnvJitLink.so.*[0-9]",
-            "cusparse": "libcusparse.so.*[0-9]",
-            "cusparselt": "libcusparseLt.so.*[0-9]",
-            "cusolver": "libcusolver.so.*[0-9]",
-            "nccl": "libnccl.so.*[0-9]",
-            "nvshmem": "libnvshmem_host.so.*[0-9]",
-            "cufile": "libcufile.so.*[0-9]",
-        }
-
-        is_cuda_lib_err = [
-            lib for lib in cuda_libs.values() if lib.split(".")[0] in err.args[0]
-        ]
-        if not is_cuda_lib_err:
-            raise err
-        for lib_folder, lib_name in cuda_libs.items():
-            _preload_cuda_deps(lib_folder, lib_name)
-
-        # libnvToolsExt is Optional Dependency
-        _preload_cuda_deps("nvtx", "libnvToolsExt.so.*[0-9]", required=False)
+        _preload_cuda_deps(err)
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
@@ -663,6 +668,9 @@ class SymFloat:
     def __float__(self):
         return self.node.guard_float("", 0)
 
+    def __int__(self):
+        return self.__trunc__().__int__()
+
     # Symbolic power does NOT work with negative base, this is to avoid
     # potential complex outputs
     def __pow__(self, other):
@@ -810,6 +818,15 @@ class SymBool:
         else:
             # Force specialization
             return hash(builtins.bool(self))
+
+    def __sym_float__(self):
+        """
+        Provides a SymFloat representation (0.0 or 1.0) for this SymBool.
+        Called by torch.sym_float() when casting SymBool to float.
+        """
+        from torch.fx.experimental.sym_node import wrap_node
+
+        return wrap_node(self.node.sym_float())
 
 
 def sym_not(a):
@@ -1009,7 +1026,6 @@ try:
 except ImportError:
     import torch._C as _C_for_compiled_check
 
-    # The __file__ check only works for Python 3.7 and above.
     if _C_for_compiled_check.__file__ is None:
         raise ImportError(
             textwrap.dedent(
@@ -1412,7 +1428,6 @@ def use_deterministic_algorithms(
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor and ``weights``
           tensor is given
-        * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
         * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
@@ -1426,6 +1441,27 @@ def use_deterministic_algorithms(
 
     Note that deterministic operations tend to have worse performance than
     nondeterministic operations.
+
+
+    When this setting is turned on, the Inductor deterministic mode is also tuned on
+    automatically. In deterministic mode, Inductor would avoid doing on device benchmarking
+    that affect numerics. This includes:
+
+      - don't pad matmul input shapes. Without enabling deterministic mode, Inductor would do
+        benchmarking to check if padding matmul shape is beneficial.
+      - don't autotune templates. Inductor has templates for kernels like matmul/conv/attention.
+        Without enabling deterministic mode, Inductor would do autotuning to
+        pick the best configs for those templates and adopt it if it's faster
+        than the kernel in eager mode. In deterministic mode, we pick the eager kernel.
+      - don't autotune triton configs for reduction. Reduction numerics are
+        very sensitive to triton configs. In deterministic mode, Inductor
+        will use some heuristics to pick the most promising configs rather
+        than do autotuning.
+      - Skip autotuning for reduction in coordinate descent tuning.
+      - Don't benchmarking for the computation/communication reordering pass
+      - Disable the feature that dynamically scale down RBLOCK triton config for higher
+        occupancy.
+
 
     .. note::
 
@@ -1450,16 +1486,14 @@ def use_deterministic_algorithms(
         >>> # xdoctest: +SKIP
         >>> torch.use_deterministic_algorithms(True)
 
-        # Forward mode nondeterministic error
-        >>> torch.randn(10, device='cuda').kthvalue(1)
-        ...
-        RuntimeError: kthvalue CUDA does not have a deterministic implementation...
-
         # Backward mode nondeterministic error
         >>> torch.nn.AvgPool3d(1)(torch.randn(3, 4, 5, 6, requires_grad=True).cuda()).sum().backward()
         ...
         RuntimeError: avg_pool3d_backward_cuda does not have a deterministic implementation...
     """
+    import torch._inductor.config as inductor_config
+
+    inductor_config.deterministic = mode
     _C._set_deterministic_algorithms(mode, warn_only=warn_only)
 
 
@@ -1685,7 +1719,7 @@ def _check(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(RuntimeError, cond, message)  # pyrefly: ignore  # bad-argument-type
+    _check_with(RuntimeError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
 # TODO add deprecation annotation
@@ -1735,7 +1769,7 @@ def _check_index(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(IndexError, cond, message)  # pyrefly: ignore  # bad-argument-type
+    _check_with(IndexError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
 def _check_value(cond, message=None):  # noqa: F811
@@ -1753,7 +1787,7 @@ def _check_value(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(ValueError, cond, message)  # pyrefly: ignore  # bad-argument-type
+    _check_with(ValueError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
 def _check_type(cond, message=None):  # noqa: F811
@@ -1771,7 +1805,7 @@ def _check_type(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(TypeError, cond, message)  # pyrefly: ignore  # bad-argument-type
+    _check_with(TypeError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
 def _check_not_implemented(cond, message=None):  # noqa: F811
@@ -1792,7 +1826,7 @@ def _check_not_implemented(cond, message=None):  # noqa: F811
     _check_with(
         NotImplementedError,
         cond,
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         message,
     )
 
@@ -2626,7 +2660,16 @@ def compile(
     from torch._inductor.compiler_bisector import CompilerBisector
 
     if bisect_backend := CompilerBisector.get_backend():
-        backend = bisect_backend
+        import torch._inductor.config as inductor_config
+
+        # don't override the backend for use cases like vllm
+        # which leverages their custom backend.
+        if not (
+            inductor_config.test_configs.bisect_keep_custom_backend_for_inductor
+            and bisect_backend == "inductor"
+            and not isinstance(backend, str)
+        ):
+            backend = bisect_backend
 
     guard_filter_fn = None
     if options and isinstance(options, dict):
@@ -2635,7 +2678,8 @@ def compile(
     if torch.compiler.is_exporting():
         warnings.warn(
             "You are calling torch.compile inside torch.export region. "
-            "To capture an useful graph, we will implicitly switch to torch.compile(backend=eager)"
+            "To capture an useful graph, we will implicitly switch to torch.compile(backend=eager)",
+            stacklevel=2,
         )
         from torch._higher_order_ops.utils import setup_compilation_env
 
@@ -2650,7 +2694,7 @@ def compile(
                     dynamic=dynamic,
                     disable=disable,
                     guard_filter_fn=guard_filter_fn,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                 )(model)(*args, **kwargs)
 
         return export_wrapped_fn
