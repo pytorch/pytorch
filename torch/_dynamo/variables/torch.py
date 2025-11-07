@@ -472,12 +472,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             )
         elif self.value is torch.nn.attention.sdpa_kernel.__wrapped__:  # type: ignore[attr-defined]
             name_to_arg_map = bind_args_cached(
-                # pyrefly: ignore[bad-argument-type]
-                self.value,
-                tx,
-                self.source,
-                args,
-                kwargs,
+                self.value, tx, self.source, args, kwargs
             )
             backends = name_to_arg_map["backends"].as_python_constant()
             set_priority = name_to_arg_map["set_priority"].as_python_constant()
@@ -1275,7 +1270,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # pyrefly: ignore [unbound-name]
             return VariableTracker.build(tx, module, new_source)
 
-        @register(torch.accelerator.current_stream)
+        @register(torch.accelerator.current_stream, torch.cuda.current_stream)
         def handle_current_stream(self, tx: "InstructionTranslator", *args, **kwargs):
             if len(args) + len(kwargs) > 1 or (kwargs and "device" not in kwargs):
                 unimplemented_v2(
@@ -1434,7 +1429,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             packed_input_vt = TupleVariable.build(
                 tx, (TupleVariable.build(tx, args), ConstDictVariable.build(tx, kwargs))
             )
-            out_vt = variables.UserFunctionVariable(tree_flatten).call_function(  # type: ignore[arg-type]
+            out_vt = variables.UserFunctionVariable(tree_flatten).call_function(
                 tx, [packed_input_vt], {}
             )
             assert isinstance(out_vt, TupleVariable) and len(out_vt.items) == 2

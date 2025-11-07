@@ -337,7 +337,7 @@ def analyze_potential_input_alias_or_mutation(name, aliases, input_mutations):
         raise RuntimeError(
             f"{name} where aliases appear. "
             + f"In particular, these inputs \
-            {set(el for el_map in aliases if len(el_map.keys()) > 0 for el in el_map.keys())} "  # noqa: C401
+            {set(el for el_map in aliases if len(el_map.keys()) > 0 for el in el_map)} "  # noqa: C401
             + "get aliased. Please ensure that this doesn't happen."
         )
     if len(input_mutations):

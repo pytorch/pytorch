@@ -326,12 +326,19 @@ class StreamVariable(StreamContextVariable):
 
 
 class EventVariable(VariableTracker):
-    def __init__(self, proxy: Proxy, value: torch.Event, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        proxy: Proxy,
+        value: torch.Event,
+        user_object_index: Optional[int],
+        **kwargs: Any,
+    ) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value
+        self.user_object_index = user_object_index
 
     def call_method(
         self,
@@ -343,7 +350,29 @@ class EventVariable(VariableTracker):
         from ..utils import proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
 
-        if name in ("wait", "record", "synchronize"):
+        if name == "wait":
+            tx.output.create_proxy(
+                "call_function",
+                torch.ops.streams.wait_event,
+                (
+                    self.user_object_index,
+                    EventVariable._get_stream_arg(tx, args, kwargs).user_object_index,
+                ),
+                {},
+            )
+            return ConstantVariable(None)
+        elif name == "record":
+            tx.output.create_proxy(
+                "call_function",
+                torch.ops.streams.record_event,
+                (
+                    self.user_object_index,
+                    EventVariable._get_stream_arg(tx, args, kwargs).user_object_index,
+                ),
+                {},
+            )
+            return ConstantVariable(None)
+        elif name == "synchronize":
             tx.output.create_proxy(
                 "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
             )
@@ -372,6 +401,39 @@ class EventVariable(VariableTracker):
 
     def as_proxy(self) -> Proxy:
         return self.proxy
+
+    @staticmethod
+    def _get_stream_arg(
+        tx: "InstructionTranslator",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> "StreamVariable":
+        stream_arg = None
+        if args:
+            stream_arg = args[0]
+        elif kwargs:
+            stream_arg = kwargs.get("stream")
+
+        if not stream_arg:
+            stream_arg = tx.symbolic_stream_state.cur_stream()
+
+        return stream_arg  # type: ignore[return-value]
+
+    @staticmethod
+    def make_construct_in_graph_event_fn(
+        args: TupleVariable, kwargs: ConstDictVariable
+    ) -> Callable[[int, "PyCodegen"], None]:
+        def fn(index: int, codegen: "PyCodegen") -> None:
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
+                    torch._dynamo.utils.__name__, "build_event"
+                )
+            )
+            codegen(args)
+            codegen(kwargs)
+            codegen.extend_output(create_call_function(2, False))
+
+        return fn
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # If we got here, this event is fully subsumed by the graph - this means it is

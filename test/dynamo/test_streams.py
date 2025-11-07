@@ -3,6 +3,7 @@ import functools
 import re
 import unittest
 import weakref
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.test_case
@@ -446,6 +447,37 @@ class GraphModule(torch.nn.Module):
         )
 
     @requires_cuda
+    def test_event_tracing(self):
+        def fn(x) -> None:
+            e = torch.Event()
+            e.record()
+            x.add_(1)
+            return x
+
+        inp = (torch.ones(2, 2, device="cuda"),)
+        (
+            _,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+
+        self.assertExpectedInline(
+            print_graph(fw_graphs[0]),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]"):
+        #
+        record_event = torch.ops.streams.record_event.default(0, 1);  record_event = None
+
+        #
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+        copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = None
+        return (copy_,)
+""",
+        )
+
+    @requires_cuda
     def test_run_opcheck_fork_join(self):
         from torch._dynamo.variables.streams import fork_stream, join_stream
         from torch.library import opcheck
@@ -490,6 +522,20 @@ class GraphModule(torch.nn.Module):
         finally:
             torch.accelerator.set_stream(original_stream)
             reset_user_object_tracking()
+
+    @requires_cuda
+    def test_inductor_lowering(self):
+        with patch("torch._inductor.config.implicit_fallbacks", False):
+
+            @torch.compile()
+            def fn(x):
+                e = torch.Event()
+                x += x + 1
+                e.record()
+                return x
+
+            inp = (torch.ones(2, 2, device="cuda"),)
+            fn(*inp)
 
     def test_is_marked_side_effectful(self):
         self.assertIn(
