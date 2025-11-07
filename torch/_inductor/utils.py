@@ -1226,7 +1226,7 @@ def unload_xpu_triton_pyds() -> None:
         if not module_name.startswith("torch._inductor.runtime.compile_tasks."):
             continue
         m = sys.modules[module_name]
-        for attr_name in m.__dict__.keys():
+        for attr_name in m.__dict__:
             if attr_name.startswith("triton_"):
                 kernel = getattr(m, attr_name)
                 if isinstance(

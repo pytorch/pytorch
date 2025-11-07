@@ -2833,7 +2833,7 @@ def check_if_enable(test: unittest.TestCase):
         # parametrized ones (TestSuite disables TestSuiteCPU)
         return classname.startswith(target_classname) and (target_testname in (test._testMethodName, sanitized_testname))
 
-    if any(matches_test(x) for x in slow_tests_dict.keys()):
+    if any(matches_test(x) for x in slow_tests_dict):
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
@@ -3000,7 +3000,7 @@ class RelaxedNumberPair(NumberPair):
             return int(number_like)  # type: ignore[call-overload]
         else:
             number = super()._to_number(number_like, id=id)
-            if type(number) not in self._TYPE_TO_DTYPE.keys():
+            if type(number) not in self._TYPE_TO_DTYPE:
                 self._inputs_not_supported()
             return number
 
