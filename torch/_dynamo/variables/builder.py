@@ -1170,7 +1170,7 @@ class VariableBuilder:
                 f"{sym_expr} is not a basic Symbol."
             )
             self.tx.output.tracked_fakes.append(TrackedFake(node, source, None))
-            return SymNodeVariable(sym_node_proxy, node)
+            return SymNodeVariable.create(self.tx, sym_node_proxy, node)
         elif is_torch_sym(value):
             # Note: this doesn't handle nested symints.
             # For SymBool input, we reuse the infra for SymInt by simulating SymBool with a SymInt in dynamo.
@@ -2455,7 +2455,7 @@ class VariableBuilder:
         sym_expr = wrapped_value.node.expr
         assert isinstance(sym_expr, sympy.Symbol), f"{sym_expr} is not a basic Symbol."
         self.tx.output.root_tracer.bound_symbols[sym_expr] = proxy
-        unspec_var = SymNodeVariable(proxy, wrapped_value, **options)
+        unspec_var = SymNodeVariable.create(self.tx, proxy, wrapped_value, **options)
         self.tx.output.unspec_variable_map[self.name] = unspec_var
 
         if not is_constant_source(self.get_source()):
@@ -2785,20 +2785,33 @@ def wrap_fx_proxy_cls(
     target_cls, tx, proxy, example_value=None, subclass_type=None, **options
 ):
     if example_value is None:
-        return _wrap_fx_proxy(
+        out = _wrap_fx_proxy(
             target_cls, tx, proxy, example_value, subclass_type, **options
         )
     elif isinstance(example_value, torch.Tensor):
-        return _wrap_fx_preexisting_tensor(
+        out = _wrap_fx_preexisting_tensor(
             target_cls, tx, proxy, example_value, subclass_type, **options
         )
     else:
         # This will skip tracing an op and recursively reinvoke wrap_fx_proxy_cls on supported
         # data structures. In essence this just handles tracing some other value which may
         # contain Fake Tensors or is otherwise proxyable.
-        return handle_traced_output(
+        out = handle_traced_output(
             example_value, tx, proxy, options, subclass_type, target_cls
         )
+
+    if (
+        isinstance(
+            out,
+            (
+                torch._dynamo.variables.TensorVariable,
+                torch._dynamo.variables.SymNodeVariable,
+            ),
+        )
+        and proxy.node.op != "placeholder"
+    ):
+        tx.output.current_tracer.record_tensor_or_symint_vt(out)
+    return out
 
 
 # This is 1 above (wrapping a preexisting tensor)
@@ -3003,7 +3016,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         tx.output.current_tracer.track_produced_symints(example_value, proxy)
         set_example_value(proxy.node, example_value)
-        return SymNodeVariable(proxy, example_value, **options)
+        return SymNodeVariable.create(tx, proxy, example_value, **options)
     elif (
         isinstance(example_value, torch.Stream)
         and proxy.node.target
