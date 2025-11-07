@@ -7,7 +7,7 @@ on:
     branches:
       - release/*
     tags:
-      - ciflow/inductor-rocm/*
+      - ciflow/inductor-rocm-mi200/*
   workflow_dispatch:
 
 concurrency:

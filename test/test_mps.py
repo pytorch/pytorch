@@ -4910,7 +4910,7 @@ class TestMPS(TestCaseMPS):
             input_xs.append(torch.ones(prod, dtype=torch.int).reshape(shape).bool())
             input_xs.append(torch.zeros(prod, dtype=torch.int).reshape(shape).bool())
 
-            for i, cpu_x in enumerate(input_xs):
+            for cpu_x in input_xs:
                 x = cpu_x.detach().clone().to('mps')
                 y = torch.any(x)
                 ref_y = torch.any(cpu_x)
