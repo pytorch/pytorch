@@ -2,7 +2,7 @@
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/csrc/stable/device.h>
+#include <torch/csrc/stable/device_struct.h>
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/headeronly/core/DeviceType.h>
 #include <torch/headeronly/core/ScalarType.h>
@@ -33,10 +33,8 @@ template <typename T>
 struct FromImpl {
   static StableIValue call(
       T val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     static_assert(
         sizeof(T) <= sizeof(StableIValue),
         "StableLibrary stack does not support parameter types larger than 64 bits.");
@@ -77,10 +75,8 @@ template <>
 struct FromImpl<ScalarType> {
   static StableIValue call(
       ScalarType val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     switch (val) {
       case ScalarType::Byte:
         return from(aoti_torch_dtype_uint8());
@@ -168,10 +164,8 @@ template <>
 struct FromImpl<std::nullopt_t> {
   static StableIValue call(
       std::nullopt_t val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     return from(nullptr);
   }
 };
@@ -225,10 +219,8 @@ template <>
 struct FromImpl<torch::stable::Tensor> {
   static StableIValue call(
       const torch::stable::Tensor& val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     AtenTensorHandle new_ath;
     TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle(val.get(), &new_ath));
     return from(new_ath);
@@ -238,8 +230,8 @@ struct FromImpl<torch::stable::Tensor> {
 // Specialization for torch::stable::Device => StableIValue
 // Pack the device type and index into a StableIValue in a platform-independent
 // format. We use the shim representation for DeviceType (int32_t) for ABI
-// stability. StableIValue layout: DeviceType (shim int32_t) in lower 32 bits,
-// DeviceIndex in upper 32 bits
+// stability. StableIValue layout: DeviceIndex in lower 32 bits,
+// DeviceType (shim int32_t) in upper 32 bits
 template <>
 struct FromImpl<torch::stable::Device> {
   static StableIValue call(
@@ -250,12 +242,12 @@ struct FromImpl<torch::stable::Device> {
     (void)is_internal; // Unused parameter
     // Convert DeviceType to shim representation (int32_t)
     StableIValue device_type_shim = from(val.type());
-    // Pack: lower 32 bits = device type (shim), upper 32 bits = device index
-    uint64_t device_type_bits =
-        static_cast<uint64_t>(static_cast<uint32_t>(device_type_shim));
+    // Pack: lower 32 bits = device index, upper 32 bits = device type (shim)
     uint64_t device_index_bits =
-        static_cast<uint64_t>(static_cast<uint32_t>(val.index())) << 32;
-    return device_type_bits | device_index_bits;
+        static_cast<uint64_t>(static_cast<uint32_t>(val.index()));
+    uint64_t device_type_bits =
+        static_cast<uint64_t>(static_cast<uint32_t>(device_type_shim)) << 32;
+    return device_index_bits | device_type_bits;
   }
 };
 
@@ -268,10 +260,8 @@ template <typename T>
 struct ToImpl {
   static T call(
       StableIValue val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     static_assert(std::is_trivially_copyable_v<T>);
     // T may not have a default constructor. (For example, it might be
     // c10::Device.) However, std::memcpy implicitly creates a T at the
@@ -308,10 +298,8 @@ template <>
 struct ToImpl<ScalarType> {
   static ScalarType call(
       StableIValue val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     int32_t shim_scalartype = to<int32_t>(val);
     if (shim_scalartype == aoti_torch_dtype_uint8()) {
       return ScalarType::Byte;
@@ -400,10 +388,8 @@ template <>
 struct ToImpl<std::nullopt_t> {
   static std::nullopt_t call(
       StableIValue val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     // val should be equivalent to from(nullptr)
     return std::nullopt;
   }
@@ -441,18 +427,16 @@ template <>
 struct ToImpl<torch::stable::Tensor> {
   static torch::stable::Tensor call(
       StableIValue val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     return torch::stable::Tensor(to<AtenTensorHandle>(val));
   }
 };
 
 // Specialization for StableIValue => torch::stable::Device
 // Unpack device type and index from StableIValue in platform-independent
-// format. StableIValue layout: DeviceType (shim int32_t) in lower 32 bits,
-// DeviceIndex in upper 32 bits
+// format. StableIValue layout: DeviceIndex in lower 32 bits,
+// DeviceType (shim int32_t) in upper 32 bits
 template <>
 struct ToImpl<torch::stable::Device> {
   static torch::stable::Device call(
@@ -461,10 +445,10 @@ struct ToImpl<torch::stable::Device> {
       bool is_internal) {
     (void)extension_build_version; // Unused parameter
     (void)is_internal; // Unused parameter
-    // Unpack: lower 32 bits = device type (shim), upper 32 bits = device index
-    StableIValue device_type_shim = val & 0xFFFFFFFF;
+    // Unpack: lower 32 bits = device index, upper 32 bits = device type (shim)
+    int32_t device_index = static_cast<int32_t>(val & 0xFFFFFFFF);
+    StableIValue device_type_shim = (val >> 32) & 0xFFFFFFFF;
     DeviceType device_type = to<DeviceType>(device_type_shim);
-    int32_t device_index = static_cast<int32_t>((val >> 32) & 0xFFFFFFFF);
     return torch::stable::Device(device_type, device_index);
   }
 };
