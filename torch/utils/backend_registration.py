@@ -82,7 +82,7 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     _privateuse1_backend_name = backend_name
 
 
-def _check_register_once(module, attr):
+def _check_register_once(module, attr) -> None:
     if hasattr(module, attr):
         raise RuntimeError(
             f"The custom device module of {module} has already been registered with {attr}"
@@ -202,6 +202,7 @@ def _generate_module_methods_for_privateuse1_backend(custom_backend_name: str) -
         Args:
             device (int, optional): if specified, all parameters will be copied to that device
         """
+        # pyrefly: ignore [missing-attribute]
         return self._apply(lambda t: getattr(t, custom_backend_name)(device))
 
     _check_register_once(torch.nn.Module, custom_backend_name)
@@ -251,11 +252,15 @@ def _generate_packed_sequence_methods_for_privateuse1_backend(
             device (int, optional): if specified, all parameters will be copied to that device
         """
         ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(
-            *args, **kwargs
+            # pyrefly: ignore [not-iterable]
+            *args,
+            **kwargs,
         )
         if ex.device.type == custom_backend_name:
+            # pyrefly: ignore [not-iterable]
             return self.to(*args, **kwargs)
         kwargs.update({"device": custom_backend_name})
+        # pyrefly: ignore [not-iterable]
         return self.to(*args, **kwargs)
 
     _check_register_once(torch.nn.utils.rnn.PackedSequence, custom_backend_name)
@@ -429,9 +434,8 @@ def _get_custom_mod_func(func_name: str):
     it is marked as private. It is a convenience function for backend implementers to
     more easily call the hooks into their backend extensions.
     """
-    assert isinstance(func_name, str), (
-        f"func_name must be `str`, but got `{type(func_name)}`."
-    )
+    if not isinstance(func_name, str):
+        raise AssertionError(f"func_name must be `str`, but got `{type(func_name)}`.")
     backend_name = _get_privateuse1_backend_name()
     custom_device_mod = getattr(torch, backend_name, None)
     function = getattr(custom_device_mod, func_name, None)
@@ -444,33 +448,33 @@ def _get_custom_mod_func(func_name: str):
 
 
 class _DummyBackendModule:
-    def is_initialized(self):
+    def is_initialized(self) -> bool:
         return True
 
-    def is_available(self):
+    def is_available(self) -> bool:
         return True
 
-    def current_device(self):
+    def current_device(self) -> int:
         return 0
 
-    def _is_in_bad_fork(self):
+    def _is_in_bad_fork(self) -> bool:
         return False
 
-    def manual_seed_all(self, seed: int):
+    def manual_seed_all(self, seed: int) -> None:
         pass
 
-    def device_count(self):
+    def device_count(self) -> int:
         return 1
 
 
 class _DummyPrivateUse1Hook(torch._C._acc.PrivateUse1Hooks):
-    def is_available(self):
+    def is_available(self) -> bool:
         return True
 
-    def has_primary_context(self, dev_id):
+    def has_primary_context(self, dev_id) -> bool:
         return True
 
-    def is_built(self):
+    def is_built(self) -> bool:
         return True
 
 
@@ -481,7 +485,7 @@ class _DummyDeviceGuard(torch._C._acc.DeviceGuard):
 
 def _setup_privateuseone_for_python_backend(
     rename=None, backend_module=None, hook=None, device_guard=None
-):
+) -> None:
     """This function will prepare the PrivateUse1 dispatch key to be used as a python backend.
 
     WARNING: this API is experimental and might change without notice.

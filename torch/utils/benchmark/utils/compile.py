@@ -15,6 +15,7 @@ _warned_tensor_cores = False
 _default_float_32_precision = torch.get_float32_matmul_precision()
 
 try:
+
     from tabulate import tabulate
 
     HAS_TABULATE = True
@@ -24,7 +25,7 @@ except ModuleNotFoundError:
     print("tabulate is not installed, please pip install tabulate to use this utility")
 
 if HAS_TABULATE:
-    def _enable_tensor_cores():
+    def _enable_tensor_cores() -> None:
         global _warned_tensor_cores
 
         if torch.cuda.is_available():
@@ -35,7 +36,7 @@ if HAS_TABULATE:
                     print("we will enable it automatically by setting `torch.set_float32_matmul_precision('high')`")
                     _warned_tensor_cores = True
 
-    def _disable_tensor_cores():
+    def _disable_tensor_cores() -> None:
         torch.set_float32_matmul_precision(_default_float_32_precision)
 
     def bench_loop(
@@ -169,6 +170,7 @@ if HAS_TABULATE:
                             _disable_tensor_cores()
                             table.append([
                                 ("Training" if optimizer else "Inference"),
+                                # pyrefly: ignore [redundant-condition]
                                 backend if backend else "-",
                                 mode if mode is not None else "-",
                                 f"{compilation_time} ms " if compilation_time else "-",
@@ -189,4 +191,5 @@ if HAS_TABULATE:
                     ])
 
 
+        # pyrefly: ignore [not-callable]
         return tabulate(table, headers=field_names, tablefmt="github")

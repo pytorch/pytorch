@@ -161,14 +161,19 @@ class _KinetoProfile:
         self.mem_tl: Optional[MemoryProfileTimeline] = None
         self.use_device = None
         if ProfilerActivity.CUDA in self.activities:
+            # pyrefly: ignore [bad-assignment]
             self.use_device = "cuda"
         elif ProfilerActivity.XPU in self.activities:
+            # pyrefly: ignore [bad-assignment]
             self.use_device = "xpu"
         elif ProfilerActivity.MTIA in self.activities:
+            # pyrefly: ignore [bad-assignment]
             self.use_device = "mtia"
         elif ProfilerActivity.HPU in self.activities:
+            # pyrefly: ignore [bad-assignment]
             self.use_device = "hpu"
         elif ProfilerActivity.PrivateUse1 in self.activities:
+            # pyrefly: ignore [bad-assignment]
             self.use_device = _get_privateuse1_backend_name()
 
         # user-defined metadata to be amended to the trace
@@ -205,7 +210,8 @@ class _KinetoProfile:
     def start_trace(self) -> None:
         if self.execution_trace_observer:
             self.execution_trace_observer.start()
-        assert self.profiler is not None
+        if self.profiler is None:
+            raise AssertionError("Profiler must be initialized before starting trace")
         self.profiler._start_trace()
 
         if self.profile_memory:
@@ -251,7 +257,8 @@ class _KinetoProfile:
     def stop_trace(self) -> None:
         if self.execution_trace_observer:
             self.execution_trace_observer.stop()
-        assert self.profiler is not None
+        if self.profiler is None:
+            raise AssertionError("Profiler must be initialized before stopping trace")
         self.profiler.__exit__(None, None, None)
 
     def export_chrome_trace(self, path: str):
@@ -259,7 +266,10 @@ class _KinetoProfile:
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
         """
-        assert self.profiler
+        if self.profiler is None:
+            raise AssertionError(
+                "Profiler must be initialized before exporting chrome trace"
+            )
         if path.endswith(".gz"):
             fp = tempfile.NamedTemporaryFile("w+b", suffix=".json", delete=False)
             fp.close()
@@ -279,7 +289,8 @@ class _KinetoProfile:
             path (str): save stacks file to this location;
             metric (str): metric to use: "self_cpu_time_total" or "self_cuda_time_total"
         """
-        assert self.profiler
+        if self.profiler is None:
+            raise AssertionError("Profiler must be initialized before exporting stacks")
         return self.profiler.export_stacks(path, metric)
 
     def toggle_collection_dynamic(
@@ -311,7 +322,7 @@ class _KinetoProfile:
             print(p.key_averages().table(
                 sort_by="self_cuda_time_total", row_limit=-1))
         """
-        if not self.profiler:
+        if self.profiler is None:
             return
         self.profiler.toggle_collection_dynamic(enable, activities)
 
@@ -328,7 +339,10 @@ class _KinetoProfile:
             To use shape/stack functionality make sure to set record_shapes/with_stack
             when creating profiler context manager.
         """
-        assert self.profiler
+        if self.profiler is None:
+            raise AssertionError(
+                "Profiler must be initialized before getting key averages"
+            )
         return self.profiler.key_averages(
             group_by_input_shape, group_by_stack_n, group_by_overload_name
         )
@@ -338,7 +352,8 @@ class _KinetoProfile:
         Returns the list of unaggregated profiler events,
         to be used in the trace callback or after the profiling is finished
         """
-        assert self.profiler
+        if self.profiler is None:
+            raise AssertionError("Profiler must be initialized before accessing events")
         return self.profiler.function_events
 
     def add_metadata(self, key: str, value: str) -> None:
@@ -380,6 +395,7 @@ class _KinetoProfile:
         }
         if backend == "nccl":
             nccl_version = torch.cuda.nccl.version()
+            # pyrefly: ignore [unsupported-operation]
             dist_info["nccl_version"] = ".".join(str(v) for v in nccl_version)
         return dist_info
 
@@ -389,7 +405,10 @@ class _KinetoProfile:
         if missing:
             raise ValueError(f"{', '.join(missing)} required for memory profiling.")
 
-        assert self.profiler is not None and self.profiler.kineto_results is not None
+        if self.profiler is None or self.profiler.kineto_results is None:
+            raise AssertionError(
+                "Profiler and kineto_results must be initialized for memory profiling"
+            )
         return MemoryProfile(self.profiler.kineto_results)
 
     def export_memory_timeline(self, path: str, device: Optional[str] = None) -> None:
@@ -479,7 +498,8 @@ def schedule(
     """
 
     def schedule_fn(step: int) -> ProfilerAction:
-        assert step >= 0
+        if step < 0:
+            raise AssertionError(f"Step must be non-negative. Got {step}.")
         if step < skip_first:
             return ProfilerAction.NONE
         else:
@@ -502,11 +522,16 @@ def schedule(
                 else ProfilerAction.RECORD_AND_SAVE
             )
 
-    assert (
-        wait >= 0 and warmup >= 0 and active > 0 and repeat >= 0 and skip_first >= 0
-    ), "Invalid profiler schedule arguments"
+    if wait < 0 or warmup < 0 or active <= 0 or repeat < 0 or skip_first < 0:
+        raise AssertionError(
+            f"Invalid profiler schedule arguments. Got wait={wait} (need >= 0), warmup={warmup} (need >= 0), "
+            f"active={active} (need > 0), repeat={repeat} (need >= 0), skip_first={skip_first} (need >= 0)."
+        )
     if warmup == 0:
-        warn("Profiler won't be using warmup, this can skew profiler results")
+        warn(
+            "Profiler won't be using warmup, this can skew profiler results",
+            stacklevel=2,
+        )
     return schedule_fn
 
 
@@ -708,7 +733,8 @@ class profile(_KinetoProfile):
                 activities_set.add(ProfilerActivity.CUDA)
             elif ProfilerActivity.CUDA in activities_set:
                 activities_set.remove(ProfilerActivity.CUDA)
-        assert len(activities_set) > 0, "No valid profiler activities found"
+        if len(activities_set) == 0:
+            raise AssertionError("No valid profiler activities found")
 
         super().__init__(
             activities=activities,
@@ -924,7 +950,8 @@ class ExecutionTraceObserver(_ITraceObserver):
                 fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
             except Exception as e:
                 warn(
-                    f"Execution trace will not be recorded. Exception on creating default temporary file: {e}"
+                    f"Execution trace will not be recorded. Exception on creating default temporary file: {e}",
+                    stacklevel=2,
                 )
                 return None
             fp.close()
@@ -1009,7 +1036,10 @@ class ExecutionTraceObserver(_ITraceObserver):
                 try:
                     os.mkdir(resource_dir)
                 except Exception:
-                    warn(f"Execution trace exception when creating {resource_dir}")
+                    warn(
+                        f"Execution trace exception when creating {resource_dir}",
+                        stacklevel=2,
+                    )
                     return None
             else:
                 return None
@@ -1025,14 +1055,15 @@ class ExecutionTraceObserver(_ITraceObserver):
                 resource_dir = self.get_resources_dir()
             except Exception as e:
                 warn(
-                    f"Execution trace exception when generating resource directory: {e}"
+                    f"Execution trace exception when generating resource directory: {e}",
+                    stacklevel=2,
                 )
                 return
             if not resource_dir:
                 return
 
             # Save the kernel paths for the generated kernels
-            from torch._inductor.codecache import PyCodeCache as PyCodeCache
+            from torch._inductor.codecache import PyCodeCache
 
             kernel_files = [
                 v.__file__
@@ -1060,7 +1091,7 @@ class ExecutionTraceObserver(_ITraceObserver):
             try:
                 _save_triton_kernels()
             except Exception as e:
-                warn(f"Execution trace failed to save kernels: {e}")
+                warn(f"Execution trace failed to save kernels: {e}", stacklevel=2)
 
             _remove_execution_trace_observer()
             if self.output_file_path.endswith("gz"):
