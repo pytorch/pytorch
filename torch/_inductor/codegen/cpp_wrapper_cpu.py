@@ -222,7 +222,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
 
         for device in V.graph.device_types:
-            self.add_device_include(device)
+            if device != "meta":
+                self.add_device_include(device)
 
         if V.graph.aot_mode:
             if config.aot_inductor.dynamic_linkage:
