@@ -1757,6 +1757,7 @@ command = [
 code = 'STABLE_SHIM_VERSION'
 include_patterns = [
     'torch/csrc/stable/c/shim.h',
+    'torch/csrc/inductor/aoti_torch/c/shim.h'
 ]
 command = [
     'python3',
@@ -1769,9 +1770,6 @@ command = [
 code = 'STABLE_SHIM_USAGE'
 include_patterns = [
     'torch/csrc/stable/**/*.h',
-]
-exclude_patterns = [
-    'torch/csrc/stable/c/shim.h',
 ]
 command = [
     'python3',
