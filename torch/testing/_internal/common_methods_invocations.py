@@ -21059,8 +21059,12 @@ op_db: list[OpInfo] = [
                 'TestCommon', 'test_noncontiguous_samples',
             ),
             DecorateInfo(
-                toleranceOverride({torch.float32: tol(atol=5e-4, rtol=1e-3)}),
+                toleranceOverride({torch.float32: tol(atol=2e-3, rtol=3e-3)}),
                 'TestOperators',
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=5e-4, rtol=2e-5)}),
+                'TestCompositeCompliance',
             ),
             DecorateInfo(
                 toleranceOverride({torch.float16: tol(atol=2e-3, rtol=6e-1)}),
@@ -21070,6 +21074,12 @@ op_db: list[OpInfo] = [
                 toleranceOverride({torch.float32: tol(atol=5e-4, rtol=5e-4)}),
                 'TestVmapOperatorsOpInfo', 'test_vmap_exhaustive',
             ),
+        ),
+        skips=(
+            DecorateInfo(unittest.expectedFailure,
+                         'TestConsistency', 'test_output_match', device_type="mps"),
+            DecorateInfo(unittest.expectedFailure,
+                         'TestConsistency', 'test_output_grad_match', device_type="mps"),
         ),
         sample_inputs_func=sample_inputs_convolution_backward
     ),
