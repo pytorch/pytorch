@@ -1614,13 +1614,14 @@ class BuiltinVariable(VariableTracker):
             repr_method = arg.value.__repr__
 
             if type(arg.value).__repr__ is object.__repr__:
-                # Default repr - just call it
-                return variables.ConstantVariable.create(value=repr_method())
+                # Default repr - build and trace it
+                fn_vt = VariableTracker.build(tx, repr_method)
+                return fn_vt.call_function(tx, [], {})
             else:
                 # Custom repr - inline the method for tracing
                 bound_method = repr_method.__func__
-                user_func_variable = variables.UserFunctionVariable(bound_method)
-                return tx.inline_user_function_return(user_func_variable, [arg], {})
+                fn_vt = VariableTracker.build(tx, bound_method)
+                return tx.inline_user_function_return(fn_vt, [arg], {})
 
     def call_str(
         self, tx: "InstructionTranslator", arg: VariableTracker
