@@ -17,12 +17,12 @@ struct C10_API AutogradState {
       bool inference_mode,
       bool fw_grad_mode,
       bool multithreading_enabled)
-      : grad_mode_(grad_mode),
+      : graph_exec_group_(std::nullopt),
+        grad_mode_(grad_mode),
         inference_mode_(inference_mode),
         fw_grad_mode_(fw_grad_mode),
         multithreading_enabled_(multithreading_enabled),
-        view_replay_enabled_(false),
-        graph_exec_group_(std::nullopt) {}
+        view_replay_enabled_(false) {}
 
   void set_grad_mode(bool enabled) {
     grad_mode_ = enabled;
@@ -73,13 +73,13 @@ struct C10_API AutogradState {
   }
 
  private:
+  std::optional<SafePyObject> graph_exec_group_;
   bool grad_mode_ : 1;
   bool inference_mode_ : 1;
   bool fw_grad_mode_ : 1;
   bool multithreading_enabled_ : 1;
   // NOLINTNEXTLINE(cppcoreguidelines-use-default-member-init)
   bool view_replay_enabled_ : 1;
-  std::optional<SafePyObject> graph_exec_group_;
 };
 
 } // namespace c10
