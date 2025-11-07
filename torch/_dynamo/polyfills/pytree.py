@@ -55,10 +55,6 @@ __all__ = [
     "tree_flatten_with_path",
     "tree_structure",
     "tree_unflatten",
-    "tree_map",
-    "tree_map_",
-    "tree_map_with_path",
-    "tree_map_with_path_",
 ]
 
 
@@ -607,6 +603,27 @@ def tree_flatten(
 
 
 @substitute_in_graph(  # type: ignore[arg-type]
+    optree._C.flatten,
+    # We need to disable constant folding here because we want the function to reference the
+    # PyTreeSpec class defined above, not the one in the C++ module.
+    can_constant_fold_through=False,
+)
+def _C_flatten(
+    tree: PyTree,
+    /,
+    leaf_predicate: Callable[[PyTree], bool] | None = None,
+    none_is_leaf: bool = False,
+    namespace: str = "",
+) -> tuple[list[Any], PyTreeSpec]:
+    return tree_flatten(  # type: ignore[return-value]
+        tree,
+        is_leaf=leaf_predicate,
+        none_is_leaf=none_is_leaf,
+        namespace=namespace,
+    )
+
+
+@substitute_in_graph(  # type: ignore[arg-type]
     optree.tree_flatten_with_path,
     # We need to disable constant folding here because we want the function to reference the
     # PyTreeSpec class defined above, not the one in the C++ module.
@@ -627,6 +644,27 @@ def tree_flatten_with_path(
         namespace=namespace,
     )
     return treespec.paths(), leaves, treespec  # type: ignore[return-value]
+
+
+@substitute_in_graph(  # type: ignore[arg-type]
+    optree._C.flatten_with_path,
+    # We need to disable constant folding here because we want the function to reference the
+    # PyTreeSpec class defined above, not the one in the C++ module.
+    can_constant_fold_through=False,
+)
+def _C_flatten_with_path(
+    tree: PyTree,
+    /,
+    leaf_predicate: Callable[[PyTree], bool] | None = None,
+    none_is_leaf: bool = False,
+    namespace: str = "",
+) -> tuple[list[tuple[Any, ...]], list[Any], PyTreeSpec]:
+    return tree_flatten_with_path(  # type: ignore[return-value]
+        tree,
+        is_leaf=leaf_predicate,
+        none_is_leaf=none_is_leaf,
+        namespace=namespace,
+    )
 
 
 @substitute_in_graph(  # type: ignore[arg-type]
@@ -664,89 +702,6 @@ def tree_unflatten(treespec: PyTreeSpec, leaves: Iterable[Any]) -> PyTree:
             f"PyTreeSpec but got item of type {type(treespec)}."
         )
     return treespec.unflatten(leaves)
-
-
-@substitute_in_graph(optree.tree_map, can_constant_fold_through=True)  # type: ignore[arg-type]
-def tree_map(
-    func: Callable[..., Any],
-    tree: PyTree,
-    /,
-    *rests: PyTree,
-    is_leaf: Callable[[PyTree], bool] | None = None,
-    none_is_leaf: bool = False,
-    namespace: str = "",
-) -> PyTree:
-    leaves, treespec = tree_flatten(
-        tree,
-        is_leaf=is_leaf,
-        none_is_leaf=none_is_leaf,
-        namespace=namespace,
-    )
-    flat_args = [leaves] + [treespec.flatten_up_to(r) for r in rests]
-    return treespec.unflatten(map(func, *flat_args))
-
-
-@substitute_in_graph(optree.tree_map_, can_constant_fold_through=True)  # type: ignore[arg-type]
-def tree_map_(
-    func: Callable[..., Any],
-    tree: PyTree,
-    /,
-    *rests: PyTree,
-    is_leaf: Callable[[PyTree], bool] | None = None,
-    none_is_leaf: bool = False,
-    namespace: str = "",
-) -> PyTree:
-    leaves, treespec = tree_flatten(
-        tree,
-        is_leaf=is_leaf,
-        none_is_leaf=none_is_leaf,
-        namespace=namespace,
-    )
-    flat_args = [leaves] + [treespec.flatten_up_to(r) for r in rests]
-    deque(map(func, *flat_args), maxlen=0)  # consume and exhaust the iterable
-    return tree
-
-
-@substitute_in_graph(optree.tree_map_with_path, can_constant_fold_through=True)  # type: ignore[arg-type]
-def tree_map_with_path(
-    func: Callable[..., Any],
-    tree: PyTree,
-    /,
-    *rests: PyTree,
-    is_leaf: Callable[[PyTree], bool] | None = None,
-    none_is_leaf: bool = False,
-    namespace: str = "",
-) -> PyTree:
-    paths, leaves, treespec = tree_flatten_with_path(
-        tree,
-        is_leaf=is_leaf,
-        none_is_leaf=none_is_leaf,
-        namespace=namespace,
-    )
-    flat_args = [leaves] + [treespec.flatten_up_to(r) for r in rests]
-    return treespec.unflatten(map(func, paths, *flat_args))
-
-
-@substitute_in_graph(optree.tree_map_with_path_, can_constant_fold_through=True)  # type: ignore[arg-type]
-def tree_map_with_path_(
-    func: Callable[..., Any],
-    tree: PyTree,
-    /,
-    *rests: PyTree,
-    is_leaf: Callable[[PyTree], bool] | None = None,
-    none_is_leaf: bool = False,
-    namespace: str = "",
-) -> PyTree:
-    paths, leaves, treespec = tree_flatten_with_path(
-        tree,
-        is_leaf=is_leaf,
-        none_is_leaf=none_is_leaf,
-        namespace=namespace,
-    )
-    flat_args = [leaves] + [treespec.flatten_up_to(r) for r in rests]
-    # consume and exhaust the iterable
-    deque(map(func, paths, *flat_args), maxlen=0)
-    return tree
 
 
 _none_registration = optree.register_pytree_node.get(type(None))
