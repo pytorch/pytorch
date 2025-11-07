@@ -788,6 +788,7 @@ class Test_StridedShard_with_shard_order(LocalDTensorTestBase):
 
     @with_comms
     def test_StridedShard_to_shard_order(self):
+        torch.manual_seed(0)
         with LocalTensorMode(ranks=self.world_size):
             mesh = DeviceMesh("cpu", torch.arange(self.world_size).view(2, 2, 2, 2, 2))
             shard_iter = generate_shard_orders(mesh, 3)

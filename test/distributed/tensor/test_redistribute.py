@@ -22,7 +22,7 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor._collective_utils import shard_dim_alltoall
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.distributed.tensor.placement_types import _StridedShard
+from torch.distributed.tensor.placement_types import _StridedShard, MaskPartial
 from torch.testing._internal.common_utils import (
     distribute_tensor as _distribute_tensor,
     generate_shard_orders,
@@ -1032,14 +1032,12 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
     @with_comms
     def test_ordered_redistribute_for_special_placement(self):
         """Test ordered redistribution with special placement"""
-        from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
-
         torch.manual_seed(21)
         mesh = init_device_mesh(self.device_type, (8,))
         input_data = torch.randn((8, 8), device=self.device_type)
         src_placement = [Shard(1)]
         tgt_placement = [
-            (_MaskPartial(offset_shape=torch.Size([10, 20]), offset_dim=0),)
+            (MaskPartial(offset_shape=torch.Size([10, 20]), offset_dim=0),)
         ]
         sharded_dt = _distribute_tensor(
             input_data.clone(),

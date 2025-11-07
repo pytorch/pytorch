@@ -55,7 +55,9 @@ void initPlacementBindings(PyObject* module) {
       .def("is_shard", &StridedShard::is_shard, py::arg("dim") = py::none())
       .def(
           "__eq__",
-          [](const StridedShard& lhs, const Shard& rhs) { return lhs == rhs; },
+          [](const StridedShard& lhs, const StridedShard& rhs) {
+            return lhs == rhs;
+          },
           py::is_operator())
       .def(py::pickle(
           [](const StridedShard& shard) {

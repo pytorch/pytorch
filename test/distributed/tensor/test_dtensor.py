@@ -1173,45 +1173,75 @@ class TestDTensorSpec(DTensorTestBase):
         tensor_global = DTensor.from_local(
             tensor_local, mesh, [Shard(1), Shard(1), Shard(0)]
         )
-        tensor_global._spec.shard_order = (
-            ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
-            ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
+        tensor_global._spec._verify_shard_order(
+            tensor_global.placements,
+            (
+                (
+                    ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+                    ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
+                )
+            ),
         )
         with self.assertRaisesRegex(
             AssertionError, r"shard_order .* has empty mesh dim"
         ):
-            tensor_global._spec.shard_order = (
-                ShardOrderEntry(tensor_dim=1, mesh_dims=()),
-                ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+            tensor_global._spec._verify_shard_order(
+                tensor_global.placements,
+                (
+                    (
+                        ShardOrderEntry(tensor_dim=1, mesh_dims=()),
+                        ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+                    )
+                ),
             )
         with self.assertRaisesRegex(
             AssertionError, "tensor dim should be sorted in shard_order"
         ):
-            tensor_global._spec.shard_order = (
-                ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
-                ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+            tensor_global._spec._verify_shard_order(
+                tensor_global.placements,
+                (
+                    (
+                        ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
+                        ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+                    )
+                ),
             )
         with self.assertRaisesRegex(
             AssertionError,
             r"placement\[\d+\] doesn't have a matching shard in shard_order",
         ):
-            tensor_global._spec.shard_order = (
-                ShardOrderEntry(tensor_dim=0, mesh_dims=(1,)),
-                ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
+            tensor_global._spec._verify_shard_order(
+                tensor_global.placements,
+                (
+                    (
+                        ShardOrderEntry(tensor_dim=0, mesh_dims=(1,)),
+                        ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
+                    )
+                ),
             )
         with self.assertRaisesRegex(
             AssertionError, r"shard_order .* has invalid mesh dim \([\d,]+\)"
         ):
-            tensor_global._spec.shard_order = (
-                ShardOrderEntry(tensor_dim=0, mesh_dims=(3,)),
-                ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
+            tensor_global._spec._verify_shard_order(
+                tensor_global.placements,
+                (
+                    (
+                        ShardOrderEntry(tensor_dim=0, mesh_dims=(3,)),
+                        ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
+                    )
+                ),
             )
         with self.assertRaisesRegex(
             AssertionError, r"shard_order .* has invalid tensor dim -?\d+"
         ):
-            tensor_global._spec.shard_order = (
-                ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
-                ShardOrderEntry(tensor_dim=-1, mesh_dims=(1, 0)),
+            tensor_global._spec._verify_shard_order(
+                tensor_global.placements,
+                (
+                    (
+                        ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+                        ShardOrderEntry(tensor_dim=-1, mesh_dims=(1, 0)),
+                    )
+                ),
             )
 
     @with_comms
@@ -1229,9 +1259,11 @@ class TestDTensorSpec(DTensorTestBase):
         self.assertEqual(hash(tensor_global_1._spec), hash(tensor_global_2._spec))
         self.assertEqual(tensor_global_1._spec, tensor_global_2._spec)
         # not using the default shard_order
-        tensor_global_1._spec.shard_order = (
-            ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
-            ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
+        tensor_global_1._spec._maybe_update_placements_given_shard_order(
+            (
+                ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+                ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
+            )
         )
         # hash should be recomputed in DTensorSpec.__setattr__()
         self.assertNotEqual(hash(tensor_global_1._spec), hash(tensor_global_2._spec))
@@ -1265,13 +1297,16 @@ class TestDTensorSpec(DTensorTestBase):
         )
         self.assertEqual(tensor_global._spec.shard_order, ())
 
-        # shard_order doesn't work with _StridedShard
+        # shard_order work with _StridedShard
         tensor_global = DTensor.from_local(
             tensor_local,
             mesh,
             [Replicate(), _StridedShard(0, split_factor=2), Shard(0)],
         )
-        self.assertEqual(tensor_global._spec.shard_order, ())
+        self.assertEqual(
+            tensor_global._spec.shard_order,
+            (ShardOrderEntry(tensor_dim=0, mesh_dims=(2, 1)),),
+        )
 
     @with_comms
     def test_default_shard_order(self):
@@ -1294,9 +1329,11 @@ class TestDTensorSpec(DTensorTestBase):
             DTensorSpec.is_default_device_order(tensor_global._spec.shard_order)
         )
         # manually set the shard_order by exchange mesh dim 0 and 2
-        tensor_global._spec.shard_order = (
-            ShardOrderEntry(tensor_dim=1, mesh_dims=(2, 0)),
-            ShardOrderEntry(tensor_dim=2, mesh_dims=(1,)),
+        tensor_global._spec._maybe_update_placements_given_shard_order(
+            (
+                ShardOrderEntry(tensor_dim=1, mesh_dims=(2, 0)),
+                ShardOrderEntry(tensor_dim=2, mesh_dims=(1,)),
+            )
         )
         self.assertFalse(
             DTensorSpec.is_default_device_order(tensor_global._spec.shard_order)

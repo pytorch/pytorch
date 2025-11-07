@@ -92,21 +92,17 @@ class DTensorRedistributePlanner:
             default=None, init=False, repr=False, compare=False
         )
 
-        def __str__(self):
-            return DTensorSpec.format_shard_order_str(
-                self.placements,
-                self.tensor_dim_to_mesh_dim,
-            )
-
-        def __repr__(self):
-            return self.__str__()
-
         def __post_init__(self):
-            # precompute hash after all attributes are set
             object.__setattr__(
                 self,
                 "_hash",
                 self._compute_hash(),
+            )
+
+        def __repr__(self):
+            return DTensorSpec.format_shard_order_str(
+                self.placements,
+                self.tensor_dim_to_mesh_dim,
             )
 
         def __hash__(self) -> int:
@@ -160,8 +156,7 @@ class DTensorRedistributePlanner:
     def stringify_transform_infos(
         mesh: DeviceMesh,
         transform_infos: Sequence[_TransformInfo],
-        src_placement: tuple[Placement, ...],
-        src_shard_order: Optional[ShardOrder] = None,
+        src_placements: tuple[Placement, ...],
     ) -> str:
         """
         Generate a string representation of the sequence of state transitions
@@ -171,18 +166,21 @@ class DTensorRedistributePlanner:
             mesh: The DeviceMesh used for the redistribution.
             transform_infos: A sequence of _TransformInfo objects describing each
                 transformation step.
-            src_placement: The initial tuple of Placement objects.
-            src_shard_order: (Optional) The initial ShardOrder representing
-                the mapping of tensor dimensions to mesh dimensions. If None,
-                the default shard order is computed from src_placement and mesh.
+            src_placements: The initial tuple of Placement objects, may contain
+                _StridedShard with shard order information.
 
         Returns:
             A string showing the sequence of DistState transitions, separated by '->'.
         """
-        assert len(src_placement) == mesh.ndim
+        assert len(src_placements) == mesh.ndim
+        normalized_src_placements, src_shard_order = (
+            DTensorSpec.normalize_placements_into_shard_order(src_placements, mesh)
+        )
         if src_shard_order is None:
-            src_shard_order = DTensorSpec.compute_default_shard_order(src_placement)
-        cur_placement = list(src_placement)
+            src_shard_order = DTensorSpec.compute_default_shard_order(
+                normalized_src_placements
+            )
+        cur_placement = list(normalized_src_placements)
         shard_order_dict = DTensorRedistributePlanner._ShardOrder_to_dict(
             src_shard_order
         )
@@ -458,6 +456,7 @@ class DTensorRedistributePlanner:
                     new_path = path + [next_state]
                     counter += 1
                     heapq.heappush(pq, (new_cost, counter, next_state, new_path))
+        torch.distributed.breakpoint()
         raise AssertionError(
             f"No path found from src_state {src_state} to dst_state {dst_state}"
         )
@@ -491,9 +490,19 @@ class DTensorRedistributePlanner:
         dst_spec: DTensorSpec,
         full_tensor_shape: tuple[int, ...],
     ) -> list[_TransformInfo]:
-        assert src_spec.shard_order is not None and dst_spec.shard_order is not None
-        src_state = self.DistState(src_spec.placements, src_spec.shard_order)
-        dst_state = self.DistState(dst_spec.placements, dst_spec.shard_order)
+        src_placements, src_shard_order = (
+            DTensorSpec.normalize_placements_into_shard_order(
+                src_spec.placements, src_spec.mesh
+            )
+        )
+        dst_placements, dst_shard_order = (
+            DTensorSpec.normalize_placements_into_shard_order(
+                dst_spec.placements, dst_spec.mesh
+            )
+        )
+        assert src_shard_order is not None and dst_shard_order is not None
+        src_state = self.DistState(src_placements, src_shard_order)
+        dst_state = self.DistState(dst_placements, dst_shard_order)
         transform_infos: list[_TransformInfo] = []
         state_path = self.find_min_cost_path(src_state, dst_state)
         for cur_state, nxt_state in itertools.pairwise(state_path):
@@ -650,15 +659,23 @@ def _gen_transform_infos_non_cached(
 ) -> list[_TransformInfo]:
     transform_infos: list[_TransformInfo] = []
     device_mesh = src_spec.device_mesh
-    src_shard_order = src_spec.shard_order
-    dst_shard_order = dst_spec.shard_order
-    # DTensorSpec should automatically generate shard_order, and it can be () if
-    # no shard.
-    assert src_shard_order is not None and dst_shard_order is not None
+    src_shard_order = DTensorSpec._maybe_convert_StridedShard_to_shard_order(
+        src_spec.placements, device_mesh
+    )
+    dst_shard_order = DTensorSpec._maybe_convert_StridedShard_to_shard_order(
+        dst_spec.placements, device_mesh
+    )
+    # TODO(zpcore): consider special case (e.g., shard after view) where shard
+    # order is not convertible. In the worst case, we can create a fallback path
+    # to replicate on all devices.
     if use_graph_based_transform is None:
-        if all(
-            DTensorSpec.is_default_device_order(order)
-            for order in (src_shard_order, dst_shard_order)
+        if (
+            src_shard_order is None
+            or dst_shard_order is None
+            or all(
+                DTensorSpec.is_default_device_order(order)
+                for order in (src_shard_order, dst_shard_order)
+            )
         ):
             use_graph_based_transform = False
         else:
@@ -733,7 +750,6 @@ def redistribute_local_tensor(
                 device_mesh,
                 transform_infos,
                 current_spec.placements,
-                current_spec.shard_order,
             ),
         )
         if debug_mode is not None
