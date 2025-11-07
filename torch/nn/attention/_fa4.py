@@ -1,9 +1,11 @@
+"""UBER PROTOTYPE!!!"""
 # mypy: allow-untyped-defs
 
 from __future__ import annotations
 
 import importlib
 from dataclasses import dataclass
+from functools import cache
 from typing import Any, TYPE_CHECKING
 
 
@@ -25,40 +27,27 @@ class _FA4FlashAttentionState:
     module_path: str = "flash_attn.cute.interface"
     module: ModuleType | None = None
     registered: bool = False
-    last_error: str | None = None
 
 
 _FA4_STATE = _FA4FlashAttentionState()
 _FA4_LIBRARY: Library | None = None
 
 
-def _flash_attention_forward_fallback(*args, **kwargs):
-    return torch.ops.aten._flash_attention_forward.default(*args, **kwargs)
+@cache
+def _get_device_major(device: torch.device) -> int:
+    major, _ = torch.cuda.get_device_capability(device)
+    return major
 
 
-def _flash_attention_backward_fallback(*args, **kwargs):
-    return torch.ops.aten._flash_attention_backward.default(*args, **kwargs)
-
-
-def _sdpa_forward_fallback(*args, **kwargs):
-    return torch.ops.aten._scaled_dot_product_flash_attention.default(*args, **kwargs)
-
-
-def _sdpa_backward_fallback(*args, **kwargs):
-    return torch.ops.aten._scaled_dot_product_flash_attention_backward.default(
-        *args, **kwargs
-    )
-
-
+@cache
 def register_flash_attention_fa4(
     module_path: str = "flash_attn.cute.interface",
 ) -> None:
     module = _fa4_import_module(module_path)
     _FA4_STATE.module_path = module_path
     _FA4_STATE.module = module
-    _FA4_STATE.last_error = None
     if _FA4_STATE.registered:
-        return
+        return None
     _fa4_register_kernels()
     _FA4_STATE.registered = True
 
@@ -68,21 +57,14 @@ def flash_attention_fa4_status() -> dict[str, Any]:
         "registered": _FA4_STATE.registered,
         "module_loaded": _FA4_STATE.module is not None,
         "module_path": _FA4_STATE.module_path,
-        "last_error": _FA4_STATE.last_error,
     }
 
 
+@cache
 def _fa4_import_module(module_path: str) -> ModuleType:
-    spec = importlib.util.find_spec(module_path)
-    if spec is None:
-        message = f"Module '{module_path}' not found"
-        _FA4_STATE.last_error = message
-        raise ImportError(message)
     module = importlib.import_module(module_path)
     if not hasattr(module, "_flash_attn_fwd") or not hasattr(module, "_flash_attn_bwd"):
-        message = f"Module '{module_path}' does not expose FA4 kernels"
-        _FA4_STATE.last_error = message
-        raise RuntimeError(message)
+        raise RuntimeError(f"Module '{module_path}' does not expose FA4 kernels")
     return module
 
 
@@ -104,7 +86,7 @@ def _fa4_register_kernels() -> None:
     _FA4_LIBRARY = lib
 
 
-def _fa4_forward_supported(
+def _fa4_forward_support_error(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
@@ -113,35 +95,36 @@ def _fa4_forward_supported(
     alibi_slopes: torch.Tensor | None,
     seqused_k: torch.Tensor | None,
     cum_seq_q: torch.Tensor | None,
-) -> bool:
+) -> str | None:
     if dropout_p != 0.0:
-        return False
+        return "dropout_p must be 0"
     if return_debug_mask:
-        return False
+        return "return_debug_mask must be False"
     if alibi_slopes is not None:
-        return False
+        return "alibi_slopes not supported"
     if not (query.is_cuda and key.is_cuda and value.is_cuda):
-        return False
+        return "inputs must be CUDA tensors"
     if query.device != key.device or query.device != value.device:
-        return False
+        return "query, key, value must be on same device"
     if query.dtype not in (torch.float16, torch.bfloat16):
-        return False
+        return "query dtype must be float16 or bfloat16"
     if seqused_k is not None:
         if seqused_k.dtype != torch.int32:
-            return False
+            return "seqused_k must be int32"
         if not seqused_k.is_cuda:
-            return False
+            return "seqused_k must be CUDA"
     if cum_seq_q is None and query.dim() != 4:
-        return False
+        return "dense query must be 4D"
     if cum_seq_q is not None and query.dim() != 3:
-        return False
+        return "ragged query must be 3D"
     if not torch.cuda.is_available():
-        return False
-    major, _ = torch.cuda.get_device_capability(query.device)
-    return major in (9, 10)
+        return "CUDA not available"
+    if _get_device_major(query.device) not in (9, 10):
+        return "FA4 requires compute capability 9.0 or 10.0"
+    return None
 
 
-def _fa4_backward_supported(
+def _fa4_backward_support_error(
     grad_out: torch.Tensor,
     query: torch.Tensor,
     key: torch.Tensor,
@@ -152,36 +135,29 @@ def _fa4_backward_supported(
     cum_seq_q: torch.Tensor | None,
     window_size_left: int | None,
     window_size_right: int | None,
-) -> bool:
+) -> str | None:
     if dropout_p != 0.0:
-        return False
+        return "dropout_p must be 0"
     if window_size_left is not None or window_size_right is not None:
-        return False
+        return "windowed attention not supported"
     tensors = (grad_out, query, key, value, out, logsumexp)
     if not all(t.is_cuda for t in tensors):
-        return False
+        return "inputs must be CUDA tensors"
     if len({t.device for t in tensors}) != 1:
-        return False
+        return "inputs must share device"
     if query.dtype not in (torch.float16, torch.bfloat16):
-        return False
+        return "query dtype must be float16 or bfloat16"
     if logsumexp.dtype != torch.float32:
-        return False
+        return "logsumexp dtype must be float32"
     if cum_seq_q is None and query.dim() != 4:
-        return False
+        return "dense query must be 4D"
     if cum_seq_q is not None and query.dim() != 3:
-        return False
+        return "ragged query must be 3D"
     if not torch.cuda.is_available():
-        return False
-    major, _ = torch.cuda.get_device_capability(query.device)
-    return major in (9, 10)
-
-
-def _fa4_prepare_dense(tensor: torch.Tensor) -> torch.Tensor:
-    return tensor.transpose(1, 2).contiguous()
-
-
-def _fa4_restore_dense(tensor: torch.Tensor) -> torch.Tensor:
-    return tensor.transpose(1, 2).contiguous()
+        return "CUDA not available"
+    if _get_device_major(query.device) not in (9, 10):
+        return "FA4 requires compute capability 9.0 or 10.0"
+    return None
 
 
 def _fa4_as_int32(tensor: torch.Tensor | None) -> torch.Tensor | None:
@@ -192,22 +168,14 @@ def _fa4_as_int32(tensor: torch.Tensor | None) -> torch.Tensor | None:
     return tensor.to(dtype=torch.int32).contiguous()
 
 
-def _fa4_zero_seed(device: torch.device) -> torch.Tensor:
-    return torch.zeros((2,), dtype=torch.uint64, device=device)
-
-
-def _fa4_zero_offset(device: torch.device) -> torch.Tensor:
-    return torch.zeros((), dtype=torch.uint64, device=device)
-
-
-def _fa4_empty_debug_mask(query: torch.Tensor) -> torch.Tensor:
-    return torch.empty(0, dtype=query.dtype, device=query.device)
-
-
 def _fa4_to_optional_int(value: int | None) -> int | None:
     if value is None:
         return None
     return int(value)
+
+
+def _transpose_dense(*tensors: torch.Tensor) -> tuple[torch.Tensor, ...]:
+    return tuple(t.transpose(1, 2) for t in tensors)
 
 
 def _fa4_run_forward(
@@ -225,15 +193,6 @@ def _fa4_run_forward(
     module = _FA4_STATE.module
     if module is None:
         raise RuntimeError("FA4 module not loaded")
-    dense = cum_seq_q is None
-    if dense:
-        q = _fa4_prepare_dense(query)
-        k = _fa4_prepare_dense(key)
-        v = _fa4_prepare_dense(value)
-    else:
-        q = query.contiguous()
-        k = key.contiguous()
-        v = value.contiguous()
     kwargs: dict[str, Any] = {
         "softmax_scale": scale,
         "causal": is_causal,
@@ -242,11 +201,11 @@ def _fa4_run_forward(
         "return_lse": True,
         "cu_seqlens_q": _fa4_as_int32(cum_seq_q),
         "cu_seqlens_k": _fa4_as_int32(cum_seq_k),
-        "seqused_k": seqused_k.contiguous() if seqused_k is not None else None,
+        "seqused_k": seqused_k
+        if seqused_k is None or seqused_k.is_contiguous()
+        else seqused_k.contiguous(),
     }
-    out, lse = module._flash_attn_fwd(q, k, v, **kwargs)
-    if dense:
-        out = _fa4_restore_dense(out)
+    out, lse = module._flash_attn_fwd(query, key, value, **kwargs)
     return out, lse.contiguous()
 
 
@@ -265,35 +224,18 @@ def _fa4_run_backward(
     module = _FA4_STATE.module
     if module is None:
         raise RuntimeError("FA4 module not loaded")
-    dense = cum_seq_q is None
-    if dense:
-        q = _fa4_prepare_dense(query)
-        k = _fa4_prepare_dense(key)
-        v = _fa4_prepare_dense(value)
-        o = _fa4_prepare_dense(out)
-        do = _fa4_prepare_dense(grad_out)
-    else:
-        q = query.contiguous()
-        k = key.contiguous()
-        v = value.contiguous()
-        o = out.contiguous()
-        do = grad_out.contiguous()
     dq, dk, dv = module._flash_attn_bwd(
-        q,
-        k,
-        v,
-        o,
-        do,
+        query,
+        key,
+        value,
+        out,
+        grad_out,
         logsumexp.contiguous(),
         softmax_scale=scale,
         causal=is_causal,
         cu_seqlens_q=_fa4_as_int32(cum_seq_q),
         cu_seqlens_k=_fa4_as_int32(cum_seq_k),
     )
-    if dense:
-        dq = _fa4_restore_dense(dq)
-        dk = _fa4_restore_dense(dk)
-        dv = _fa4_restore_dense(dv)
     return dq, dk, dv
 
 
@@ -315,25 +257,7 @@ def _fa4_flash_attention_forward_impl(
     seqused_k: torch.Tensor | None = None,
     alibi_slopes: torch.Tensor | None = None,
 ):
-    if not _FA4_STATE.registered:
-        return _flash_attention_forward_fallback(
-            query,
-            key,
-            value,
-            cum_seq_q,
-            cum_seq_k,
-            max_q,
-            max_k,
-            dropout_p,
-            is_causal,
-            return_debug_mask,
-            scale=scale,
-            window_size_left=window_size_left,
-            window_size_right=window_size_right,
-            seqused_k=seqused_k,
-            alibi_slopes=alibi_slopes,
-        )
-    if not _fa4_forward_supported(
+    error = _fa4_forward_support_error(
         query,
         key,
         value,
@@ -342,28 +266,18 @@ def _fa4_flash_attention_forward_impl(
         alibi_slopes,
         seqused_k,
         cum_seq_q,
-    ):
-        return _flash_attention_forward_fallback(
-            query,
-            key,
-            value,
-            cum_seq_q,
-            cum_seq_k,
-            max_q,
-            max_k,
-            dropout_p,
-            is_causal,
-            return_debug_mask,
-            scale=scale,
-            window_size_left=window_size_left,
-            window_size_right=window_size_right,
-            seqused_k=seqused_k,
-            alibi_slopes=alibi_slopes,
-        )
+    )
+    if error is not None:
+        raise RuntimeError(f"FA4 flash_attention forward unsupported: {error}")
+    dense = cum_seq_q is None
+    if dense:
+        q, k, v = _transpose_dense(query, key, value)
+    else:
+        q, k, v = query, key, value
     out, lse = _fa4_run_forward(
-        query,
-        key,
-        value,
+        q,
+        k,
+        v,
         cum_seq_q,
         cum_seq_k,
         scale,
@@ -372,9 +286,11 @@ def _fa4_flash_attention_forward_impl(
         window_size_right,
         seqused_k,
     )
-    rng_state = _fa4_zero_seed(query.device)
-    philox_offset = _fa4_zero_offset(query.device)
-    debug_mask = _fa4_empty_debug_mask(query)
+    if dense:
+        (out,) = _transpose_dense(out)
+    rng_state = torch.zeros((2,), dtype=torch.uint64, device=query.device)
+    philox_offset = torch.zeros((), dtype=torch.uint64, device=query.device)
+    debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
     return out, lse, rng_state, philox_offset, debug_mask
 
 
@@ -398,27 +314,7 @@ def _fa4_flash_attention_backward_impl(
     window_size_left: int | None = None,
     window_size_right: int | None = None,
 ):
-    if not _FA4_STATE.registered:
-        return _flash_attention_backward_fallback(
-            grad_out,
-            query,
-            key,
-            value,
-            out,
-            logsumexp,
-            cum_seq_q,
-            cum_seq_k,
-            max_q,
-            max_k,
-            dropout_p,
-            is_causal,
-            rng_state,
-            unused,
-            scale=scale,
-            window_size_left=window_size_left,
-            window_size_right=window_size_right,
-        )
-    if not _fa4_backward_supported(
+    error = _fa4_backward_support_error(
         grad_out,
         query,
         key,
@@ -429,38 +325,31 @@ def _fa4_flash_attention_backward_impl(
         cum_seq_q,
         window_size_left,
         window_size_right,
-    ):
-        return _flash_attention_backward_fallback(
-            grad_out,
-            query,
-            key,
-            value,
-            out,
-            logsumexp,
-            cum_seq_q,
-            cum_seq_k,
-            max_q,
-            max_k,
-            dropout_p,
-            is_causal,
-            rng_state,
-            unused,
-            scale=scale,
-            window_size_left=window_size_left,
-            window_size_right=window_size_right,
-        )
-    return _fa4_run_backward(
-        grad_out,
-        query,
-        key,
-        value,
-        out,
+    )
+    if error is not None:
+        raise RuntimeError(f"FA4 flash_attention backward unsupported: {error}")
+    dense = cum_seq_q is None
+    if dense:
+        q, k, v, o, go = _transpose_dense(query, key, value, out, grad_out)
+    else:
+        q, k, v = query, key, value
+        o = out
+        go = grad_out
+    dq, dk, dv = _fa4_run_backward(
+        go,
+        q,
+        k,
+        v,
+        o,
         logsumexp,
         cum_seq_q,
         cum_seq_k,
         scale,
         is_causal,
     )
+    if dense:
+        dq, dk, dv = _transpose_dense(dq, dk, dv)
+    return dq, dk, dv
 
 
 def _fa4_scaled_dot_product_flash_attention_forward_impl(
@@ -473,11 +362,7 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
     *,
     scale: float | None = None,
 ):
-    if not _FA4_STATE.registered:
-        return _sdpa_forward_fallback(
-            query, key, value, dropout_p, is_causal, return_debug_mask, scale=scale
-        )
-    if not _fa4_forward_supported(
+    error = _fa4_forward_support_error(
         query,
         key,
         value,
@@ -486,14 +371,15 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
         None,
         None,
         None,
-    ):
-        return _sdpa_forward_fallback(
-            query, key, value, dropout_p, is_causal, return_debug_mask, scale=scale
-        )
+    )
+    if error is not None:
+        raise RuntimeError(f"FA4 SDPA forward unsupported: {error}")
+    dense = True
+    q, k, v = _transpose_dense(query, key, value)
     out, lse = _fa4_run_forward(
-        query,
-        key,
-        value,
+        q,
+        k,
+        v,
         None,
         None,
         scale,
@@ -502,9 +388,11 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
         None,
         None,
     )
-    rng_state = _fa4_zero_seed(query.device)
-    philox_offset = _fa4_zero_offset(query.device)
-    debug_mask = _fa4_empty_debug_mask(query)
+    if dense:
+        (out,) = _transpose_dense(out)
+    rng_state = torch.zeros((2,), dtype=torch.uint64, device=query.device)
+    philox_offset = torch.zeros((), dtype=torch.uint64, device=query.device)
+    debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
     max_q = query.size(2)
     max_k = key.size(2)
     return (
@@ -538,25 +426,7 @@ def _fa4_scaled_dot_product_flash_attention_backward_impl(
     *,
     scale: float | None = None,
 ):
-    if not _FA4_STATE.registered:
-        return _sdpa_backward_fallback(
-            grad_out,
-            query,
-            key,
-            value,
-            out,
-            logsumexp,
-            cum_seq_q,
-            cum_seq_k,
-            max_q,
-            max_k,
-            dropout_p,
-            is_causal,
-            philox_seed,
-            philox_offset,
-            scale=scale,
-        )
-    if not _fa4_backward_supported(
+    error = _fa4_backward_support_error(
         grad_out,
         query,
         key,
@@ -567,33 +437,21 @@ def _fa4_scaled_dot_product_flash_attention_backward_impl(
         None,
         None,
         None,
-    ):
-        return _sdpa_backward_fallback(
-            grad_out,
-            query,
-            key,
-            value,
-            out,
-            logsumexp,
-            cum_seq_q,
-            cum_seq_k,
-            max_q,
-            max_k,
-            dropout_p,
-            is_causal,
-            philox_seed,
-            philox_offset,
-            scale=scale,
-        )
-    return _fa4_run_backward(
-        grad_out,
-        query,
-        key,
-        value,
-        out,
+    )
+    if error is not None:
+        raise RuntimeError(f"FA4 SDPA backward unsupported: {error}")
+    q, k, v, o, go = _transpose_dense(query, key, value, out, grad_out)
+    dq, dk, dv = _fa4_run_backward(
+        go,
+        q,
+        k,
+        v,
+        o,
         logsumexp,
         None,
         None,
         scale,
         is_causal,
     )
+    dq, dk, dv = _transpose_dense(dq, dk, dv)
+    return dq, dk, dv
