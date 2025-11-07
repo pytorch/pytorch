@@ -164,7 +164,7 @@ _TORCH_DTYPE_TO_ABBREVIATION = {
 
 SYM_VALUE_TYPE = Union[torch.SymInt, torch.SymFloat, torch.SymBool]
 META_VALUE_TYPE = Union[fake_tensor.FakeTensor, SYM_VALUE_TYPE, int, float, bool]
-# NOTE: Belows are from torch/fx/node.py
+# NOTE: Below are from torch/fx/node.py
 BaseArgumentTypes = Union[
     str,
     int,

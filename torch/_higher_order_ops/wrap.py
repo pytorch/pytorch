@@ -228,10 +228,10 @@ class TagActivationCheckpoint(HigherOrderOperator):
         checkpoint_keys.add("preserve_rng_state")
 
         checkpoint_kwargs = {
-            name: kwargs[name] for name in kwargs.keys() if name in checkpoint_keys
+            name: kwargs[name] for name in kwargs if name in checkpoint_keys
         }
         gmod_kwargs = {
-            name: kwargs[name] for name in kwargs.keys() if name not in checkpoint_keys
+            name: kwargs[name] for name in kwargs if name not in checkpoint_keys
         }
         return checkpoint_kwargs, gmod_kwargs
 
@@ -325,7 +325,8 @@ def proxy_mode_key(
     qualname = proxy_mode.tracer.get_fresh_qualname("wrap_body")  # type: ignore[union-attr]
 
     # TODO (tmanlaibaatar) don't we need flat_apply here??
-    flat_args, _ = pytree.tree_flatten((args, kwargs))
+    # Dynamo already traced the gmod body without kwargs
+    flat_args, _ = pytree.tree_flatten(args)
     with fx_traceback.preserve_node_meta():
         gmod_aten = reenter_make_fx(Interpreter(gmod).run)(*flat_args)
         gmod_aten.meta["_checkpoint_context_fn"] = gmod.meta["_checkpoint_context_fn"]

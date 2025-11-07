@@ -42,7 +42,7 @@ class RAdam(Optimizer):  # noqa: D101
         maximize: bool = False,
         capturable: bool = False,
         differentiable: bool = False,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -270,7 +270,7 @@ def _single_tensor_radam(
     maximize: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
 
@@ -283,12 +283,13 @@ def _single_tensor_radam(
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch.compiler.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
-            assert (
+            if not (
                 param.device.type == step_t.device.type
                 and param.device.type in capturable_supported_devices
-            ), (
-                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-            )
+            ):
+                raise AssertionError(
+                    f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+                )
 
         if torch.is_complex(param):
             param = torch.view_as_real(param)
@@ -322,7 +323,7 @@ def _single_tensor_radam(
         rho_t = rho_inf - 2 * step * (beta2**step) / bias_correction2
 
         def _compute_rect():
-            # pyrefly: ignore  # unsupported-operation
+            # pyrefly: ignore [unsupported-operation]
             return (
                 (rho_t - 4)
                 * (rho_t - 2)
@@ -337,7 +338,7 @@ def _single_tensor_radam(
             else:
                 exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
 
-            # pyrefly: ignore  # unsupported-operation
+            # pyrefly: ignore [unsupported-operation]
             return (bias_correction2**0.5) / exp_avg_sq_sqrt
 
         # Compute the variance rectification term and update parameters accordingly
@@ -376,24 +377,26 @@ def _multi_tensor_radam(
     maximize: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if len(params) == 0:
         return
 
-    assert not differentiable, "_foreach ops don't support autograd"
+    if differentiable:
+        raise AssertionError("_foreach ops don't support autograd")
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
-        assert all(
+        if not all(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
-            for p, step in zip(params, state_steps)
-        ), (
-            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-        )
+            for p, step in zip(params, state_steps, strict=True)
+        ):
+            raise AssertionError(
+                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            )
 
     lr = _to_scalar(lr)
 
@@ -498,7 +501,8 @@ def _multi_tensor_radam(
 
             # TODO(mlazos): we should try and get a foreach_where op https://github.com/pytorch/pytorch/issues/117884
             rect = [
-                torch.where(rho_t > 5.0, n, 0.0) for n, rho_t in zip(num, rho_t_list)
+                torch.where(rho_t > 5.0, n, 0.0)
+                for n, rho_t in zip(num, rho_t_list, strict=True)
             ]
             del num
             del rho_t_list
@@ -541,11 +545,14 @@ def _multi_tensor_radam(
                 1 - beta1 ** _get_value(step) for step in grouped_state_steps
             ]
             unrect_step_size = [
-                (lr * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)
+                (lr * rect / bc) * -1
+                for rect, bc in zip(unrectified, bias_correction1, strict=True)
             ]
             bias_correction2 = [
                 ((1 - beta2 ** _get_value(step)) ** 0.5) * (lr * rect / bc) * -1
-                for step, rect, bc in zip(grouped_state_steps, rect, bias_correction1)
+                for step, rect, bc in zip(
+                    grouped_state_steps, rect, bias_correction1, strict=True
+                )
             ]
 
         buffer = torch._foreach_sqrt(grouped_exp_avg_sqs)
@@ -579,7 +586,7 @@ def radam(
     lr: float,
     weight_decay: float,
     eps: float,
-):
+) -> None:
     r"""Functional API that performs RAdam algorithm computation.
 
     See :class:`~torch.optim.RAdam` for details.

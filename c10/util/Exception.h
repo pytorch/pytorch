@@ -217,7 +217,7 @@ class C10_API WarningHandlerGuard {
 /// The TORCH_WARN_ONCE macro is difficult to test for. Use
 /// setWarnAlways(true) to turn it into TORCH_WARN, which can be
 /// tested for more easily.
-C10_API void set_warnAlways(bool) noexcept(true);
+C10_API void set_warnAlways(bool /*setting*/) noexcept(true);
 C10_API bool get_warnAlways() noexcept(true);
 
 // A RAII guard that sets warn_always (not thread-local) on
@@ -469,7 +469,7 @@ C10_API std::string GetExceptionString(const std::exception& e);
 
 namespace c10::detail {
 template <typename... Args>
-decltype(auto) torchCheckMsgImpl(const char* /*msg*/, const Args&... args) {
+auto torchCheckMsgImpl(const char* /*msg*/, const Args&... args) {
   return ::c10::str(args...);
 }
 inline C10_API const char* torchCheckMsgImpl(const char* msg) {

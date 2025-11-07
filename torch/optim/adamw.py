@@ -33,7 +33,7 @@ class AdamW(Adam):
         capturable: bool = False,
         differentiable: bool = False,
         fused: Optional[bool] = None,
-    ):
+    ) -> None:
         super().__init__(
             params,
             lr,
@@ -152,7 +152,7 @@ def adamw(
     weight_decay: float,
     eps: float,
     maximize: bool,
-):
+) -> None:
     r"""Functional API that performs AdamW algorithm computation.
 
     See :class:`~torch.optim.AdamW` for details.

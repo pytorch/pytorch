@@ -5,7 +5,6 @@ import dataclasses
 import io
 import logging
 import operator
-from collections import ChainMap
 from functools import reduce
 from typing import Any, cast, Optional, Union
 
@@ -137,12 +136,9 @@ class DefaultSavePlanner(SavePlanner):
         global_plan, metadata = create_default_global_save_plan(deduped_plans)
 
         if self.flatten_state_dict:
-            # | does not work for Python 3.8 or older version.
-            # merged_mappings = reduce(
-            #     lambda x, y: x | y, (p.planner_data for p in global_plan)
-            # )
-            planner_data_dict = [p.planner_data for p in global_plan]
-            merged_mappings = dict(ChainMap(*planner_data_dict))
+            merged_mappings = reduce(
+                lambda x, y: x | y, (p.planner_data for p in global_plan)
+            )
             metadata = dataclasses.replace(metadata, planner_data=merged_mappings)
 
         if not _validate_global_plan(global_plan, metadata):
@@ -313,7 +309,8 @@ class DefaultLoadPlanner(LoadPlanner):
         self.is_coordinator = is_coordinator
 
     def create_local_plan(self) -> LoadPlan:
-        assert self.metadata is not None
+        if self.metadata is None:
+            raise AssertionError("self.metadata is not None")
         if self.flatten_state_dict:
             # To support checkpoints that are saved before v2.4, we have to
             # differentiate if the missing keys are due to old checkpoints.
@@ -432,8 +429,10 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
         metadata: Optional[Metadata] = None,
         is_coordinator: bool = False,
     ) -> None:
-        assert not state_dict
-        assert metadata is not None
+        if state_dict:
+            raise AssertionError("not state_dict")
+        if metadata is None:
+            raise AssertionError("metadata is not None")
 
         # rebuild the state dict from the metadata
         for k, v in metadata.state_dict_metadata.items():
@@ -549,13 +548,15 @@ def create_default_global_save_plan(
         new_items = []
         for item in plan.items:
             if item.type != WriteItemType.SHARD:
-                assert item.index.fqn not in md
+                if item.index.fqn in md:
+                    raise AssertionError("item.index.fqn not in md")
 
             if item.type == WriteItemType.BYTE_IO:
                 md[item.index.fqn] = BytesStorageMetadata()
                 new_items.append(item)
             else:
-                assert item.tensor_data is not None
+                if item.tensor_data is None:
+                    raise AssertionError("item.tensor_data is not None")
                 tensor_md = cast(
                     TensorStorageMetadata,
                     md.setdefault(
@@ -575,10 +576,11 @@ def create_default_global_save_plan(
                     new_item = dataclasses.replace(item, index=new_index)
                 new_items.append(new_item)
 
-                assert item.tensor_data.chunk is not None, f"""
+                if item.tensor_data.chunk is None:
+                    raise AssertionError(f"""
                     Cannot create MD for tensor without bounds.
                     FQN: {item.index.fqn}
-                """
+                """)
                 tensor_md.chunks.append(item.tensor_data.chunk)
         new_plans.append(dataclasses.replace(plan, items=new_items))
     return (new_plans, Metadata(md))

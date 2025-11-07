@@ -396,7 +396,7 @@ def is_contiguous_for_memory_format(  # type: ignore[return]
     *,
     memory_format: torch.memory_format,
     false_if_dde=False,
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
 ) -> bool:
     validate_memory_format(memory_format)
 
@@ -728,7 +728,7 @@ def validate_dim_length(length: int):
     """
 
     if isinstance(length, (int, torch.SymInt)):
-        torch._check_is_size(length)
+        torch._check(length >= 0)
     else:
         # sometimes called with sympy expression by inductor
         assert length >= 0
@@ -820,13 +820,13 @@ def canonicalize_dims(
     rank: int,
     indices: Sequence[int],
     wrap_scalar: bool = True,
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
 ) -> tuple[int, ...]:
     pass
 
 
 @overload
-# pyrefly: ignore  # bad-return
+# pyrefly: ignore [bad-return]
 def canonicalize_dims(rank: int, indices: int, wrap_scalar: bool = True) -> int:
     pass
 
@@ -873,7 +873,7 @@ def check_same_device(*args, allow_cpu_scalar_tensors):
 
     # Note: cannot initialize device to the first arg's device (it may not have one)
     device = None
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     for arg in args:
         if isinstance(arg, Number):
             continue
@@ -921,7 +921,7 @@ def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
     """
     shape = None
 
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     for arg in args:
         if isinstance(arg, Number):
             continue
@@ -948,7 +948,7 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
     shape = None
     scalar_shape = None
 
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     for arg in args:
         if isinstance(arg, Number):
             continue
@@ -1005,7 +1005,7 @@ def extract_shape_from_varargs(
 
     # Handles tuple unwrapping
     if len(shape) == 1 and isinstance(shape[0], Sequence):
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         shape = shape[0]
 
     if validate:
@@ -1083,13 +1083,7 @@ def infer_size(shape: ShapeType, numel: int) -> tuple[int, ...]:
         # PyTorch, which prints sequences in square brackets.
         shape = list(shape)
         shape[dim] = numel // newsize
-        # NB: This is pretty important when you have unbacked SymInts.
-        # Suppose you have (i0, 12) resizing into (2, -1, 12).  The old
-        # range for i0 is typically [2, inf], which means if you divide
-        # by two the new range should be [1, inf].  But this is bad news
-        # if you have an unbacked SymInt: we need to reapply the unsound
-        # assumption that the size is >= 2.
-        torch._check_is_size(shape[dim])
+        torch._check(shape[dim] >= 0)
     return tuple(shape)
 
 
@@ -1307,7 +1301,7 @@ def get_higher_dtype(
 
         raise RuntimeError("Unexpected type given to _extract_dtype!")
 
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     a, b = _extract_dtype(a), _extract_dtype(b)
 
     if a is b:
@@ -1403,7 +1397,7 @@ def check_same_dtype(*args):
     full_dtype = None
     scalar_type = None
 
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     for arg in args:
         if isinstance(arg, Number):
             # Scalar type checking is disabled (and may be removed in the future)
@@ -1674,10 +1668,10 @@ def elementwise_dtypes(
 
         # Prefers dtype of tensors with one or more dimensions
         if one_plus_dim_tensor_dtype is not None:
-            # pyrefly: ignore  # bad-return
+            # pyrefly: ignore [bad-return]
             return one_plus_dim_tensor_dtype
 
-        # pyrefly: ignore  # bad-return
+        # pyrefly: ignore [bad-return]
         return zero_dim_tensor_dtype
 
     if highest_type is float:
@@ -2143,7 +2137,8 @@ def alert_not_deterministic(caller: str):
                 f"{caller} does not have a deterministic implementation, but you set "
                 f"'torch.use_deterministic_algorithms(True, warn_only=True)'. "
                 f"You can file an issue at https://github.com/pytorch/pytorch/issues "
-                f"to help us prioritize adding deterministic support for this operation."
+                f"to help us prioritize adding deterministic support for this operation.",
+                stacklevel=2,
             )
         else:
             torch._check(

@@ -49,7 +49,7 @@ if IS_WINDOWS:
 
             self.manager_dead = False
 
-        def is_alive(self):
+        def is_alive(self) -> bool:
             if not self.manager_dead:
                 # Value obtained from https://msdn.microsoft.com/en-us/library/windows/desktop/ms687032.aspx
                 self.manager_dead = (
@@ -64,7 +64,7 @@ else:
             self.manager_pid = os.getppid()
             self.manager_dead = False
 
-        def is_alive(self):
+        def is_alive(self) -> bool:
             if not self.manager_dead:
                 self.manager_dead = os.getppid() != self.manager_pid
             return not self.manager_dead
@@ -80,20 +80,20 @@ class WorkerInfo:
     dataset: "Dataset"
     __initialized = False
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         for k, v in kwargs.items():
             setattr(self, k, v)
         self.__keys = tuple(kwargs.keys())
         self.__initialized = True
 
-    def __setattr__(self, key, val):
+    def __setattr__(self, key, val) -> None:
         if self.__initialized:
             raise RuntimeError(
                 f"Cannot assign attributes to {self.__class__.__name__} objects"
             )
         return super().__setattr__(key, val)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         items = [f"{k}={getattr(self, k)}" for k in self.__keys]
         return f"{self.__class__.__name__}({', '.join(items)})"
 
@@ -240,7 +240,7 @@ def _worker_loop(
     num_workers,
     persistent_workers,
     shared_seed,
-):
+) -> None:
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
 
@@ -269,7 +269,10 @@ def _worker_loop(
 
         shared_rng = torch.Generator()
         if isinstance(dataset, IterDataPipe):
-            assert shared_seed is not None
+            if shared_seed is None:
+                raise AssertionError(
+                    "shared_seed must be provided for IterDataPipe workers"
+                )
             shared_rng.manual_seed(shared_seed)
             dataset = apply_random_seed(dataset, shared_rng)
 
@@ -321,7 +324,10 @@ def _worker_loop(
                 iteration_end = False
 
                 if isinstance(dataset, IterDataPipe):
-                    assert r.seed is not None
+                    if r.seed is None:
+                        raise AssertionError(
+                            "resume iteration seed is None for IterDataPipe"
+                        )
                     shared_rng.manual_seed(r.seed)
                     dataset = apply_random_seed(dataset, shared_rng)
 
@@ -332,7 +338,10 @@ def _worker_loop(
                 continue
             elif r is None:
                 # Received the final signal
-                assert done_event.is_set() or iteration_end
+                if not done_event.is_set() and not iteration_end:
+                    raise AssertionError(
+                        "Received final signal but neither done_event nor iteration_end is set"
+                    )
                 break
             elif done_event.is_set() or iteration_end:
                 # `done_event` is set. But I haven't received the final signal

@@ -850,7 +850,7 @@ $1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])""",
             lambda: A(torch.zeros(1)).detach(),
         )
 
-    def test_detach_appears_twice_when_called_once(self) -> None:
+    def test_detach_appears_once_when_called_once(self) -> None:
         with capture_logs() as logs:
             x = LoggingTensor(torch.tensor([3.0]), requires_grad=True)
             log_input("x", x)
@@ -863,8 +863,7 @@ $1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])""",
             "\n".join(logs),
             """\
 $0: f32[1] = input('x')
-$1: f32[1] = torch._ops.aten.detach.default($0)
-$2: f32[1] = torch._ops.aten.detach.default($1)""",
+$1: f32[1] = torch._ops.aten.detach.default($0)""",
         )
 
     def test_storage(self) -> None:
@@ -2521,7 +2520,7 @@ def forward(self, x_1):
                 self.last_args = args
                 return func(*args, **kwargs)
 
-        # Value that could not be intepreted as signed int64
+        # Value that could not be interpreted as signed int64
         uarg = 2**63 + 1
         with DummyMode() as m:
             a = torch.full((3, 3), uarg, dtype=torch.uint64)
