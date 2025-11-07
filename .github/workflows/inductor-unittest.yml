@@ -89,6 +89,7 @@ jobs:
       build-environment: linux-jammy-py3.12-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-py3.12-pallas
       cuda-arch-list: '8.9'
+      runner: linux.8xlarge.memory
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
