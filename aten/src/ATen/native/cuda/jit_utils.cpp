@@ -1532,7 +1532,7 @@ NvrtcFunction jit_pwise_function(
 
   std::string file_path;
   if (cache_dir.has_value()) {
-    // Attemps to read from the cache.
+    // Attempts to read from the cache.
     // Cubin name is <kernel name>_arch<major>.<minor>_nvrtc<major>.<minor>_<ptx or sass>_<program length>_<string hash>
     // Note that the SHA1 hash used in the file name is NOT the SHA1 hash of the file's contents,
     //   because we hash on the CUDA code, but we save the compiled ptx or sass

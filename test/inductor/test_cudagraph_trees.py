@@ -383,7 +383,7 @@ if HAS_CUDA_AND_TRITON:
             foo = get_compile_fn(backend)(foo)
 
             with capture_stderr() as captured_output:
-                for i in range(3):
+                for _ in range(3):
                     torch.compiler.cudagraph_mark_step_begin()
                     inp = torch.rand([4], device="cuda")
 
@@ -415,7 +415,7 @@ if HAS_CUDA_AND_TRITON:
             foo = get_compile_fn(backend)(foo)
 
             with capture_stderr() as captured_output:
-                for i in range(3):
+                for _ in range(3):
                     torch.compiler.cudagraph_mark_step_begin()
                     inp = torch.rand([4], device="cuda")
 
@@ -493,7 +493,7 @@ if HAS_CUDA_AND_TRITON:
                 # Should warn for current_node=None
                 mut(inp())
 
-                for i in range(3):
+                for _ in range(3):
                     torch.compiler.cudagraph_mark_step_begin()
                     tmp = foo(inp())
                     mut(tmp)  # should not warn
@@ -945,34 +945,45 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(num_partitions, 1)
 
             @torch.library.custom_op("mylib::baz", mutates_args=())
-            def baz(x: torch.Tensor, flag: int) -> torch.Tensor:
+            def baz(x: torch.Tensor) -> torch.Tensor:
                 return x.clone()
 
             @baz.register_fake
-            def _(x, flag):
+            def _(x):
                 return x.clone()
 
-            def should_partition(x, flag):
-                return flag
+            # custom_should_partition_ops takes effect which lead to 2 partitions
+            torch._inductor.config.custom_should_partition_ops = ["mylib::baz"]
 
-            torch._inductor.scheduler.register_should_partition_rule(
-                torch.ops.mylib.baz.default, should_partition
-            )
-
-            def f(x, flag):
+            def f(x):
                 x = x + 1
-                x = baz(x, flag)
+                x = baz(x)
                 x = x + 1
                 return x
 
             f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
-            _, code = run_and_get_code(f_compiled, x, True)
+            _, code = run_and_get_code(f_compiled, x)
             num_partitions = get_num_partitions(code)
             self.assertEqual(num_partitions, 2)
 
-            _, code = run_and_get_code(f_compiled, x, False)
+            # update the config should NOT force recompile
+            torch._inductor.config.custom_should_partition_ops = []
+            with torch.compiler.set_stance("fail_on_recompile"):
+                f_compiled(x)
+
+            # run_and_get_code forces recompile. Now we should cache miss, recompile, and
+            # only have 1 partition.
+            _, code = run_and_get_code(f_compiled, x)
             num_partitions = get_num_partitions(code)
             self.assertEqual(num_partitions, 1)
+
+            # test that op_overload name takes effect which lead to 2 partitions
+            torch._inductor.config.custom_should_partition_ops = ["mylib::baz.default"]
+
+            f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+            _, code = run_and_get_code(f_compiled, x)
+            num_partitions = get_num_partitions(code)
+            self.assertEqual(num_partitions, 2)
 
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("implicit_fallbacks", True)
@@ -2169,7 +2180,7 @@ if HAS_CUDA_AND_TRITON:
 
             model = torch.nn.Linear(10, 10, bias=False, device="cuda")
             x = torch.randn(10, 10, device="cuda")
-            for i in range(5):
+            for _ in range(5):
                 out = model(x)
                 bwd(out.sum())
                 model.weight.grad = None
@@ -4494,7 +4505,7 @@ if HAS_CUDA_AND_TRITON:
             ]
             for i, compile_fn in enumerate(compile_fns):
                 torch.manual_seed(0)
-                for index in range(3):
+                for _ in range(3):
                     x = torch.randn(4, 4, device=device, requires_grad=True)
                     y = torch.randn(4, 4, device=device, requires_grad=True)
 

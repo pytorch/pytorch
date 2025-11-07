@@ -65,6 +65,7 @@ from ..utils import (
     guard_if_dyn,
     has_torch_function,
     hashable,
+    is_wrapper_or_member_descriptor,
     product,
     proxy_args_kwargs,
     unwrap_if_wrapper,
@@ -77,7 +78,7 @@ from .ctx_manager import (
 )
 from .dicts import ConstDictVariable
 from .distributed import DistributedVariable, ProcessGroupVariable
-from .functions import bind_args_cached
+from .functions import bind_args_cached, NestedUserFunctionVariable
 from .lists import ListVariable, TupleVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -147,6 +148,7 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
 
 constant_fold_functions_need_guards = [
     torch.accelerator.current_device_index,
+    torch.accelerator.current_accelerator,
     torch.cuda.current_device,
     torch.cuda.is_initialized,
     torch.xpu.current_device,
@@ -248,6 +250,17 @@ class BaseTorchVariable(VariableTracker):
             install_guard(source.make_guard(GuardBuilder.CLASS_MATCH))
         elif inspect.ismodule(value):
             install_guard(source.make_guard(GuardBuilder.MODULE_MATCH))
+        elif inspect.isfunction(value):
+            install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
+        elif inspect.isbuiltin(value) or isinstance(
+            value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
+        ):
+            install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
+        elif is_wrapper_or_member_descriptor(value) or isinstance(
+            value, torch._dynamo.compiled_autograd.Op
+        ):
+            # Dont need to guard on wrappers
+            pass
         else:
             install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
         return cls(value, source=source)
@@ -395,6 +408,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.cuda.amp.autocast,
             torch.cpu.amp.autocast,
         ):
+            # pyrefly: ignore [bad-argument-type]
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
             # NOTE any class added here must align with the semantic
@@ -821,12 +835,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(torch.full)
         def handle_full(self, tx, size, fill_value, **kwargs):
             if isinstance(fill_value, TensorVariable):
-                result = TorchInGraphFunctionVariable(
-                    torch.ops.aten._local_scalar_dense
-                ).call_function(tx, [fill_value], {})
-                return TorchInGraphFunctionVariable(torch.full).call_function(
-                    tx, [size, result], kwargs
+                # Decompose: create empty tensor and fill it
+                # This avoids the scalar extraction at compile time
+                empty_result = TorchInGraphFunctionVariable(torch.empty).call_function(
+                    tx, [size], kwargs
                 )
+                # Call fill_ method on the empty tensor
+                return empty_result.call_method(tx, "fill_", [fill_value], {})
 
         @register(torch._foreach_lerp_)
         def handle_inplace_foreach_lerp_scalar(
@@ -1255,6 +1270,35 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # pyrefly: ignore [unbound-name]
             return VariableTracker.build(tx, module, new_source)
 
+        @register(torch.accelerator.current_stream, torch.cuda.current_stream)
+        def handle_current_stream(self, tx: "InstructionTranslator", *args, **kwargs):
+            if len(args) + len(kwargs) > 1 or (kwargs and "device" not in kwargs):
+                unimplemented_v2(
+                    gb_type="unsupported arguments to torch.accelerator.current_stream",
+                    context=f"args={args}, kwargs={kwargs}",
+                    explanation="torch.accelerator.current_stream accepts one optional argument `device`",
+                    hints=[
+                        *graph_break_hints.USER_ERROR,
+                    ],
+                )
+            try:
+                if kwargs:
+                    device = torch.device(kwargs["device"].as_python_constant())
+                elif args:
+                    device = torch.device(args[0].as_python_constant())
+                else:
+                    device = None
+
+                return tx.symbolic_stream_state.cur_stream(device)
+            except Exception as e:
+                unimplemented_v2(
+                    gb_type="bad device argument to torch.accelerator.current_stream",
+                    context=f"args={args}, kwargs={kwargs}",
+                    explanation="Expected valid string/torch.device argument ('cpu', 'cuda', etc.)",
+                    hints=[*graph_break_hints.USER_ERROR],
+                    from_exc=e,
+                )
+
         @register(torch.set_default_device)
         def handle_set_default_device(
             self, tx: "InstructionTranslator", *args, **kwargs
@@ -1273,6 +1317,86 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 TorchFunctionModeStackVariable.register_device_context_insertion(tx)
 
             return ConstantVariable.create(None)
+
+        @register(torch._check)
+        def handle_check(self, tx: "InstructionTranslator", *args, **kwargs):
+            predicate_vt = None
+            message_vt = None
+
+            if args:
+                predicate_vt = args[0]
+                rest_args = args[1:]
+            else:
+                rest_args = ()
+
+            if predicate_vt is None and "cond" in kwargs:
+                predicate_vt = kwargs.pop("cond")
+
+            if rest_args:
+                message_vt = rest_args[0]
+            elif "message" in kwargs:
+                message_vt = kwargs.pop("message")
+
+            if predicate_vt is None:
+                return wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        self.value,
+                        (),
+                        {},
+                    ),
+                )
+
+            message_eager = None
+            message_graph_proxy = None
+            if message_vt is not None:
+                if (
+                    not isinstance(message_vt, NestedUserFunctionVariable)
+                    or message_vt.has_closure()
+                ):
+                    unimplemented_v2(
+                        gb_type="Can't extract message from torch._check()",
+                        context=str(message_vt),
+                        explanation=(
+                            "The second argument of torch._check() must be a function"
+                            "defined within the torch.compile region"
+                            "that does not reference a non-local variable."
+                        ),
+                        hints=[
+                            "Make sure the message function is defined in the torch.compile region.",
+                            "Remove any closure variables, e.g. "
+                            "remove references to closure variable `x` in `lambda: f'{x} failed check'`",
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
+                    )
+                message_eager = message_vt.get_function()
+
+                message_graph_proxy = tx.output.register_static_attr_and_return_proxy(
+                    "_check_message", message_eager
+                )
+
+            if predicate_vt.is_python_constant():
+                self.value(predicate_vt.as_python_constant(), message_eager)
+                return ConstantVariable.create(None)
+
+            predicate_proxy = predicate_vt.as_proxy()
+
+            proxy_args: tuple[Any, ...]
+            if message_graph_proxy is None:
+                proxy_args = (predicate_proxy,)
+            else:
+                proxy_args = (predicate_proxy, message_graph_proxy)
+
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    self.value,
+                    proxy_args,
+                    {},
+                ),
+            )
 
         return handlers
 
@@ -1451,6 +1575,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ):
             # constant fold functions need to be guarded.
             if self.value in constant_fold_functions_need_guards:
+                assert self.source is not None
                 source = CallFunctionNoArgsSource(self.source)
                 install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
             # constant fold
@@ -1606,7 +1731,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # take the conservative approach to graph break on size changes, and
             # assume other cases can fall through soundly.
             #
-            # Note that although these tensor variablels would hold different
+            # Note that although these tensor variables would hold different
             # proxies, the in-place mutation semantics is preserved in the FX
             # graph, so we won't have correctness issues.
             if isinstance(saved_out_shapes, list):
