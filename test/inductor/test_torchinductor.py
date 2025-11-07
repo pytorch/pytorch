@@ -13563,6 +13563,44 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             size_assert_pattern = r"assert_size_stride.[a-z]+[0-9]+, .2, 3, 16, 32, 32., .49152, 16384, 1, 512, 16.."
         FileCheck().check_regex(size_assert_pattern).run(code)
 
+    def test_lite_mode_fallback(self):
+        def f(x, y):
+            z = x + y
+            return z - x
+
+        f = torch.compile(f, mode="lite")
+
+        x, y = [torch.randn(2, device=self.device)]*2
+
+        _, code = run_and_get_code(f, x, y)
+
+        # Checks that aten ops are kept and run
+        FileCheck().check("torch.ops.aten.add.Tensor(").check("torch.ops.aten.sub.Tensor(").run(code[0])
+
+        # Checks that no triton code run in the generated code
+        self.assertFalse(".run(" in code[0])
+
+    @torch._functorch.config.patch("selective_decompose", True)
+    # skip cpu test since rms norm is always decomposed on cpu
+    @skip_if_cpu
+    def test_lite_mode_not_decompose(self):
+        def f(x, shape):
+            y = x + 1
+            z = torch.ops.aten._fused_rms_norm(x, shape, None, None)
+            return z[0] + z[1]
+
+        f = torch.compile(f, mode="lite")
+
+        x = torch.randn(2,3, device=self.device)
+        _, code = run_and_get_code(f, x, [2,3])
+        breakpoint()
+        FileCheck().check("torch.ops.aten._fused_rms_norm.default(").run(code[0])
+
+        x = torch.randn(2,3, device=self.device,requires_grad=True)
+        _, codes = run_fw_bw_and_get_code(lambda: f(x, [2, 3]))
+        self.assertEqual(len(codes), 2)
+        FileCheck().check("torch.ops.aten._fused_rms_norm.default(").run(code[0])
+
     @skip_if_cpu
     @torch._functorch.config.patch("selective_decompose", True)
     def test_lite_inductor_regional_compile(self):

@@ -246,6 +246,7 @@ def aot_stage1_graph_capture(
             *updated_flat_args,
             decomposition=aot_config.decompositions,
             should_decompose=_needs_inductor_compile,
+            trace_joint_graph=aot_state.needs_autograd and not aot_config.pre_dispatch,
         )
 
     return AOTGraphCapture(
