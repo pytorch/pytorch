@@ -410,7 +410,8 @@ class DTensorAPITest(DTensorTestBase):
         self.assertTrue(any(isinstance(p, Partial) for p in dt_sum.placements))
 
         with self.assertRaisesRegex(
-            RuntimeError, "Cannot call .item\\(\\) on a DTensor with Partial placement"
+            RuntimeError,
+            r"Cannot call scalar extraction \(e\.g\., item, bool, int, float\) on DTensor with Partial placement",
         ):
             dt_sum.item()
 

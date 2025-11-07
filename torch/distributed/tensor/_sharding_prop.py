@@ -372,8 +372,10 @@ class ShardingPropagator:
             if isinstance(input_arg, DTensorSpec):
                 for placement in input_arg.placements:
                     if isinstance(placement, Partial):
-                        raise ValueError(
-                            "Cannot call .item() on a DTensor with Partial placement. "
+                        raise RuntimeError(
+                            "Cannot call scalar extraction (e.g., item, bool, int, float) on "
+                            "DTensor with Partial placement. "
+                            "Different ranks have different local values. "
                             "Call .redistribute(placements=[Replicate()]) first to reduce the tensor."
                         )
 
