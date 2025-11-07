@@ -205,7 +205,7 @@ class TensorDataset(Dataset[tuple[Tensor, ...]]):
     def __getitem__(self, index):
         return tuple(tensor[index] for tensor in self.tensors)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.tensors[0].size(0)
 
 
@@ -292,7 +292,7 @@ class StackDataset(Dataset[_T_stack]):
         tuple_batch: list[_T_tuple] = [tuple(sample) for sample in list_batch]
         return tuple_batch
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self._length
 
 
@@ -327,7 +327,7 @@ class ConcatDataset(Dataset[_T_co]):
                 raise AssertionError("ConcatDataset does not support IterableDataset")
         self.cumulative_sizes = self.cumsum(self.datasets)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.cumulative_sizes[-1]
 
     def __getitem__(self, idx):
@@ -374,7 +374,7 @@ class ChainDataset(IterableDataset):
                 raise AssertionError("ChainDataset only supports IterableDataset")
             yield from d
 
-    def __len__(self):
+    def __len__(self) -> int:
         total = 0
         for d in self.datasets:
             if not isinstance(d, IterableDataset):
@@ -412,7 +412,7 @@ class Subset(Dataset[_T_co]):
         else:
             return [self.dataset[self.indices[idx]] for idx in indices]
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.indices)
 
 
