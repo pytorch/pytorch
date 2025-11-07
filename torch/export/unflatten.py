@@ -1331,7 +1331,7 @@ class _ModuleFrame:
         else:
             graph_outputs = []
             # Iterate through nodes we have copied into self.graph.
-            for orig_node in self.node_map.keys():
+            for orig_node in self.node_map:
                 for user_node in orig_node.users:
                     if user_node.name not in self.seen_nodes:
                         # external user node, need to expose as an output
