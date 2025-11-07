@@ -15,7 +15,7 @@ if [ -z "${image}" ]; then
 fi
 
 function extract_version_from_image_name() {
-  eval export $2=$(echo "${image}" | perl -n -e"/$1(\d+(\.\d+)?(\.\d+)?)/ && print \$1")
+  eval export $2=$(echo "${image}" | perl -n -e"/$1(\d+(\.\d+)?(\.\d+)?t?)/ && print \$1")
   if [ "x${!2}" = x ]; then
     echo "variable '$2' not correctly parsed from image='$image'"
     exit 1
