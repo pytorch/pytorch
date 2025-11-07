@@ -624,7 +624,7 @@ class FxGraphCachePickler(pickle.Pickler):
         try:
             self.dump(obj)
             return self._stream.getvalue()
-        except (TypeError, AttributeError) as e:
+        except (TypeError, AttributeError, pickle.PicklingError) as e:
             # Some configs options may not pickle.
             log.warning("Failed to pickle cache key", exc_info=True)
             raise BypassFxGraphCache("Failed to pickle cache key") from e
