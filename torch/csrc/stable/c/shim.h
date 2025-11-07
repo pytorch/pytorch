@@ -37,6 +37,13 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_impl(
     void (*fn)(StableIValue*, uint64_t, uint64_t),
     uint64_t extension_build_version);
 
+// Helper function to parse device string using c10::Device
+// Returns device type and index via output parameters
+AOTI_TORCH_EXPORT AOTITorchError torch_parse_device_string(
+    const char* device_string,
+    uint32_t* out_device_type,
+    int32_t* out_device_index);
+
 // Parallel utility APIs for stable ABI
 // Function pointer type for parallel_for callback
 // The callback receives begin and end indices for a range to process
@@ -51,7 +58,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_parallel_for(
 
 // Get the current thread index in a parallel region
 // Returns 0 if not in a parallel region
-AOTI_TORCH_EXPORT int32_t torch_get_thread_idx();
+AOTI_TORCH_EXPORT uint32_t torch_get_thread_idx();
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
