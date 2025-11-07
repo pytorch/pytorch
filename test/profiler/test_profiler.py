@@ -916,8 +916,7 @@ class TestProfiler(TestCase):
                         )
             for key, count in expected_event_count.items():
                 self.assertTrue(
-                    (key in actual_event_count.keys())
-                    and (count == actual_event_count[key])
+                    (key in actual_event_count) and (count == actual_event_count[key])
                 )
 
         with _profile(use_kineto=kineto_available()) as prof:
@@ -1406,10 +1405,7 @@ class TestProfiler(TestCase):
                 s_ts_2 = flow_s_to_ts[2]
                 f_ts_2 = flow_f_to_ts[2]
                 self.assertTrue(
-                    all(
-                        ts in ts_to_name.keys()
-                        for ts in [s_ts_1, f_ts_1, s_ts_2, f_ts_2]
-                    )
+                    all(ts in ts_to_name for ts in [s_ts_1, f_ts_1, s_ts_2, f_ts_2])
                 )
                 self.assertTrue(
                     ts_to_name[s_ts_1] == "aten::binary_cross_entropy_with_logits"
