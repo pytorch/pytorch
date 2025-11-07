@@ -155,7 +155,11 @@ def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=F
     matching_data = {}
     if "*" in key:
         for op_key in op_data:
-            if [None for k1, k2 in zip(op_key, key) if k2 != "*" and k1 != k2]:
+            if [
+                None
+                for k1, k2 in zip(op_key, key, strict=True)
+                if k2 != "*" and k1 != k2
+            ]:
                 continue
             matching_data[op_key] = op_data[op_key]
     else:
@@ -173,10 +177,14 @@ def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=F
                 "num_stages",
                 "num_warps",
             )
-            meta = dict(zip(names, values))
+            meta = dict(zip(names, values, strict=True))
         elif op in {"bsr_dense_addmm", "_int_bsr_dense_addmm"}:
             meta = dict(
-                zip(("GROUP_SIZE_ROW", "SPLIT_N", "num_stages", "num_warps"), values)
+                zip(
+                    ("GROUP_SIZE_ROW", "SPLIT_N", "num_stages", "num_warps"),
+                    values,
+                    strict=True,
+                )
             )
         else:
             raise NotImplementedError(f"names for {op=}")
@@ -289,7 +297,7 @@ def minimize(
         return tuple(parameters[k] for k in sorted(parameters))
 
     def from_key(key, parameters):
-        return dict(zip(sorted(parameters), key))
+        return dict(zip(sorted(parameters), key, strict=True))
 
     if all_values is None:
         all_values = {}
@@ -347,7 +355,7 @@ def minimize(
         for i, (_, d_tuple) in enumerate(all_directions):
             pbar.update(1)
             next_parameters = parameters.copy()
-            for name, direction in zip(names, d_tuple):
+            for name, direction in zip(names, d_tuple, strict=True):
                 value = next_parameters[name]
                 if direction == 0:
                     continue

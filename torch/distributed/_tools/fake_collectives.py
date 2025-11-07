@@ -276,14 +276,14 @@ class CollectiveOp:
             return res.untyped_storage().nbytes()
         if func in CollectiveOp.COMM_TENSOR_SINGLE_UNTYPED_STORAGE:
             return args[0].untyped_storage().nbytes()
-        if func == c10d._reduce_scatter_base_.default:
+        if func is c10d._reduce_scatter_base_.default:
             return args[1].untyped_storage().nbytes()
-        if func == c10d.alltoall_.default:
+        if func is c10d.alltoall_.default:
             # TODO(@sanketpurandare) - Confirm size computation
             return max(
                 CollectiveOp.sum_tensors(args[0]), CollectiveOp.sum_tensors(args[1])
             )
-        if func == c10d.alltoall_base_.default:
+        if func is c10d.alltoall_base_.default:
             # TODO(@sanketpurandare) - Confirm size computation
             return max(
                 args[0].untyped_storage().nbytes(), args[1].untyped_storage().nbytes()

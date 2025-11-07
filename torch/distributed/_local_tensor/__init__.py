@@ -1,5 +1,7 @@
 from ast import Call
 
+from torch._ops import OpOverload
+
 
 """
 A LocalTensor is a tensor subclass which simulates a tensor that is
@@ -62,15 +64,18 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
 import torch
+import torch.distributed as dist
 from torch import Size, SymBool, SymInt, Tensor
 from torch._C import DispatchKey, DispatchKeySet, ScriptObject
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.distributed import DeviceMesh, ProcessGroup
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.fx.experimental._constant_symnode import ConstantIntNode
 from torch.nested._internal.nested_int import NestedIntNode
 from torch.utils import _pytree as pytree
+from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import return_and_correct_aliasing, TorchDispatchMode
 from torch.utils.checkpoint import get_device_states, set_device_states
 
@@ -79,6 +84,19 @@ not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemente
 
 
 from . import _c10d
+
+
+def _is_inplace_op(op: OpOverload | Callable[..., Any]) -> bool:
+    return (
+        isinstance(op, OpOverload)
+        # Not precise heuristic to detect inplace operation
+        and op._schema.name[-1] == "_"
+        # Strengthen the heuristic to check that the first argument and return value are a write
+        and len(op._schema.arguments) > 0
+        and op._schema.arguments[0].is_write
+        and len(op._schema.returns) > 0
+        and op._schema.returns[0].is_write
+    )
 
 
 def _int_on_rank(i: "int | LocalIntNode | ConstantIntNode", r: int) -> int:
@@ -100,7 +118,13 @@ def _check_for_subclass_arg(x: object) -> bool:
     return (
         not isinstance(x, LocalTensor)
         and isinstance(x, Tensor)
-        and type(x) not in (Tensor, torch.nn.Parameter, torch.nn.Buffer)
+        and type(x)
+        not in (
+            Tensor,
+            FakeTensor,
+            torch.nn.Parameter,
+            torch.nn.Buffer,
+        )
     )
 
 
@@ -220,7 +244,7 @@ def _zero_sized_like(tensor: torch.Tensor, dim: int) -> torch.Tensor:
 
 
 def _for_each_rank_run_func(
-    func: Callable[..., Any],
+    func: OpOverload | Callable[..., Any],
     ranks: frozenset[int],
     args: Sequence[Any],
     kwargs: dict[str, Any],
@@ -256,7 +280,15 @@ def _for_each_rank_run_func(
             split_dim = 0 if len(rank_flat_args) < 3 else rank_flat_args[2]
             default_value = _zero_sized_like(tensor, split_dim)
 
-    ret = _combine_rank_results(flat_rank_rets, default_value)
+    if _is_inplace_op(func):
+        alias = False
+        # For the in-place ops return self
+        ret = args[0]
+        if isinstance(func, OpOverload) and torch.Tag.inplace_view in func.tags:
+            # Ensure that wrapper tensor size is synchronized with its local tensors
+            ret._sync_meta()
+    else:
+        ret = _combine_rank_results(flat_rank_rets, default_value)
 
     if alias:
         return return_and_correct_aliasing(func, args, kwargs, ret)
@@ -386,6 +418,11 @@ class LocalIntNode:
         r = {self._local_ints[r] != _int_on_rank(other, r) for r in self._local_ints}
         return torch._C._get_constant_bool_symnode(len(r) > 1 or next(iter(r)))
 
+    def ge(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
+        r = {self._local_ints[r] >= _int_on_rank(other, r) for r in self._local_ints}
+        assert len(r) == 1, (self, other)
+        return torch._C._get_constant_bool_symnode(next(iter(r)))
+
     def gt(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
         r = {self._local_ints[r] > _int_on_rank(other, r) for r in self._local_ints}
         assert len(r) == 1, (self, other)
@@ -398,6 +435,93 @@ class LocalIntNode:
 
     def wrap_int(self, num: int) -> "LocalIntNode | ConstantIntNode":
         return ConstantIntNode(num)
+
+
+_LOCAL_TENSOR_ATTR_PREFIX = "_local_tensor_"
+
+
+def _is_local_tensor_attr(attr: str) -> bool:
+    return attr.startswith(_LOCAL_TENSOR_ATTR_PREFIX)
+
+
+def _to_local_tensor_attr(rank: int) -> str:
+    return f"{_LOCAL_TENSOR_ATTR_PREFIX}{rank}"
+
+
+def _from_local_tensor_attr(attr: str) -> int:
+    if not _is_local_tensor_attr(attr):
+        raise AssertionError(f"Invalid local tensor attr {attr}")
+    return int(attr[len(_LOCAL_TENSOR_ATTR_PREFIX) :])
+
+
+def _all_elements_same(values: list[Any]) -> bool:
+    if not values:
+        return True
+    first_value = values[0]
+    return all(value == first_value for value in values)
+
+
+def _compute_local_tensor_meta(
+    local_tensors: dict[int, torch.Tensor],
+) -> tuple[
+    list[torch.SymInt | int],
+    list[torch.SymInt | int],
+    torch.device,
+    torch.dtype,
+    torch.layout,
+    DispatchKeySet,
+]:
+    """
+    Computes the meta information for a LocalTensor from its local tensors.
+    """
+    it = iter(local_tensors.values())
+    first_local_tensor = next(it)
+
+    first_shape = first_local_tensor.shape
+    first_stride = first_local_tensor.stride()
+    dtype = first_local_tensor.dtype
+    device = first_local_tensor.device
+    layout = first_local_tensor.layout
+
+    extra_dispatch_keys = _get_extra_dispatch_keys(first_local_tensor)
+
+    # Assert that all tensors have the same dtype, layout and dispatch keys. Due
+    # to uneven sharding, it is possible that tensors will have different shapes.
+    for local_tensor in it:
+        assert dtype == local_tensor.dtype, (
+            "Tensors representing LocalTensor shards must have the same dtype"
+        )
+        assert layout == local_tensor.layout, (
+            "Tensors representing LocalTensor shards must have the same layout"
+        )
+        assert extra_dispatch_keys == _get_extra_dispatch_keys(local_tensor), (
+            "Tensors representing LocalTensor shards must have the same set of extra dispatch keys"
+        )
+
+    # Compute shape/stride.  We allow for non-SPMD'ness here
+    local_shapes: dict[int, dict[int, int]] = defaultdict(dict)  # dim => rank => size
+    local_strides: dict[int, dict[int, int]] = defaultdict(dict)  # dim => rank => size
+    for r, local_tensor in local_tensors.items():
+        for d, size in enumerate(local_tensor.shape):
+            local_shapes[d][r] = size
+            local_strides[d][r] = local_tensor.stride(d)
+    shape = [
+        (
+            first_shape[d]
+            if _all_elements_same(list(local_shapes[d].values()))
+            else torch.SymInt(LocalIntNode(local_shapes[d]))
+        )
+        for d in range(len(first_shape))
+    ]
+    strides = [
+        (
+            first_stride[d]
+            if _all_elements_same(list(local_strides[d].values()))
+            else torch.SymInt(LocalIntNode(local_strides[d]))
+        )
+        for d in range(len(first_shape))
+    ]
+    return shape, strides, device, dtype, layout, extra_dispatch_keys
 
 
 class LocalTensor(torch.Tensor):
@@ -418,13 +542,15 @@ class LocalTensor(torch.Tensor):
     _local_tensors: dict[int, torch.Tensor]
     # Precomputed for speed set of keys from the local tensor map.
     _ranks: frozenset[int]
-    __slots__ = ["_local_tensors", "_ranks"]
+    _size: list[torch.SymInt | int]
+    __slots__ = ["_local_tensors", "_ranks", "_size"]
 
     @staticmethod
     @torch._disable_dynamo
     def __new__(
         cls,
         local_tensors: dict[int, torch.Tensor],
+        requires_grad: bool = False,
     ) -> "LocalTensor":
         if any(t.requires_grad for t in local_tensors.values()):
             raise AssertionError(
@@ -432,57 +558,9 @@ class LocalTensor(torch.Tensor):
                 "Make a custom autograd function and make sure you detach the inner tensors."
             )
 
-        it = iter(local_tensors.values())
-        first_local_tensor = next(it)
-
-        first_shape = first_local_tensor.shape
-        first_stride = first_local_tensor.stride()
-        dtype = first_local_tensor.dtype
-        device = first_local_tensor.device
-        layout = first_local_tensor.layout
-
-        extra_dispatch_keys = _get_extra_dispatch_keys(first_local_tensor)
-
-        # Assert that all tensors have the same dtype, layout and dispatch keys. Due
-        # to uneven sharding, it is possible that tensors will have different shapes.
-        for local_tensor in it:
-            assert dtype == local_tensor.dtype, (
-                "Tensors representing LocalTensor shards must have the same dtype"
-            )
-            assert layout == local_tensor.layout, (
-                "Tensors representing LocalTensor shards must have the same layout"
-            )
-            assert extra_dispatch_keys == _get_extra_dispatch_keys(local_tensor), (
-                "Tensors representing LocalTensor shards must have the same set of extra dispatch keys"
-            )
-
-        # Compute shape/stride.  We allow for non-SPMD'ness here
-        local_shapes: dict[int, dict[int, int]] = defaultdict(
-            dict
-        )  # dim => rank => size
-        local_strides: dict[int, dict[int, int]] = defaultdict(
-            dict
-        )  # dim => rank => size
-        for r, local_tensor in local_tensors.items():
-            for d, size in enumerate(local_tensor.shape):
-                local_shapes[d][r] = size
-                local_strides[d][r] = local_tensor.stride(d)
-        shape = [
-            (
-                first_shape[d]
-                if len(set(local_shapes[d])) == 1
-                else torch.SymInt(LocalIntNode(local_shapes[d]))
-            )
-            for d in range(len(first_shape))
-        ]
-        strides = [
-            (
-                first_stride[d]
-                if len(set(local_strides[d])) == 1
-                else torch.SymInt(LocalIntNode(local_strides[d]))
-            )
-            for d in range(len(first_shape))
-        ]
+        (shape, strides, device, dtype, layout, extra_dispatch_keys) = (
+            _compute_local_tensor_meta(local_tensors)
+        )
 
         r = torch.Tensor._make_wrapper_subclass(
             cls,
@@ -491,7 +569,13 @@ class LocalTensor(torch.Tensor):
             dtype=dtype,
             device=device,
             layout=layout,
-            requires_grad=False,
+            # In place ops potentially change local tensor sizes (e.g. resize_). While
+            # executing an in-place op the return value must be the same as "self" input
+            # otherwise we can introduce errors due to tensor identity changes. Hence we
+            # need to be able to update wrapper subclass sizes after in-place ops. This
+            # dispatch policy allows us to do that.
+            dispatch_sizes_strides_policy="sizes",
+            requires_grad=requires_grad,
             _extra_dispatch_keys=extra_dispatch_keys,
         )
 
@@ -501,6 +585,7 @@ class LocalTensor(torch.Tensor):
         }
         r._local_tensors = local_tensors
         r._ranks = frozenset(local_tensors.keys())
+        r._size = shape
         return r
 
     @torch._disable_dynamo
@@ -512,9 +597,7 @@ class LocalTensor(torch.Tensor):
         local_tensors_copy = {
             r: copy.deepcopy(t, memo) for r, t in self._local_tensors.items()
         }
-        tensor_copy = LocalTensor(local_tensors_copy)
-        tensor_copy.requires_grad = self.requires_grad
-        return tensor_copy
+        return LocalTensor(local_tensors_copy, self.requires_grad)
 
     def __repr__(self) -> str:  # type: ignore[override]
         parts = []
@@ -524,12 +607,21 @@ class LocalTensor(torch.Tensor):
         tensors_str = ",\n".join(parts)
         return f"LocalTensor(\n{tensors_str}\n)"
 
+    def __getattr__(self, name: str) -> Any:
+        if _is_local_tensor_attr(name):
+            rank = _from_local_tensor_attr(name)
+            if rank not in self._ranks:
+                raise AttributeError(f"Local tensor has no knowledge of rank {rank}")
+            return self._local_tensors[rank]
+        return object.__getattribute__(self, name)
+
     def __tensor_flatten__(self) -> tuple[list[str], tuple[Any, ...]]:
         """
         protocol to inform how to flatten a DTensor to local tensor
         for PT2 tracing
         """
-        return ["_local_tensors"], ()
+        local_tensor_attrs = [_to_local_tensor_attr(r) for r in self._ranks]
+        return local_tensor_attrs, ()
 
     @staticmethod
     def __tensor_unflatten__(
@@ -541,8 +633,9 @@ class LocalTensor(torch.Tensor):
         assert flatten_spec is not None, (
             "Expecting spec to be not None from `__tensor_flatten__` return value!"
         )
-        local_tensors = inner_tensors["_local_tensors"]
-        # pyrefly: ignore [bad-argument-type, bad-argument-count]
+        local_tensors = {
+            _from_local_tensor_attr(a): t for a, t in inner_tensors.items()
+        }
         return LocalTensor(local_tensors)
 
     @classmethod
@@ -590,24 +683,6 @@ class LocalTensor(torch.Tensor):
             return self.reconcile().numpy(force=force)
         else:
             raise RuntimeError("Numpy is not available")
-
-    def __lt__(
-        self, other: torch.Tensor | bool | complex | float | int
-    ) -> torch.Tensor:
-        self_rec = self.reconcile()
-        other_rec = other
-        if isinstance(other, LocalTensor):
-            other_rec = other.reconcile()
-        return self_rec < other_rec
-
-    def __gt__(
-        self, other: torch.Tensor | bool | complex | float | int
-    ) -> torch.Tensor:
-        self_rec = self.reconcile()
-        other_rec = other
-        if isinstance(other, LocalTensor):
-            other_rec = other.reconcile()
-        return self_rec > other_rec
 
     def contiguous(
         self,
@@ -659,6 +734,13 @@ class LocalTensor(torch.Tensor):
         cl = t1.clone().detach()
         cl.requires_grad_(self.requires_grad)
         return cl
+
+    def _sync_meta(self) -> None:
+        with no_dispatch():
+            (shape, strides, device, dtype, layout, extra_dispatch_keys) = (
+                _compute_local_tensor_meta(self._local_tensors)
+            )
+            self._size = shape
 
 
 _LOCAL_TENSOR_MODE: list["LocalTensorMode"] = []
@@ -753,6 +835,11 @@ class LocalTensorMode(TorchDispatchMode):
                     f"Input LocalTensor {a} and LocalTensorMode must be configured for the same ranks"
                 )
 
+        if func.overloadpacket == torch.ops.aten.dim:
+            return len(args[0]._size)
+        if func.overloadpacket == torch.ops.aten.sym_size:
+            return tuple(args[0]._size)
+
         if func.namespace == "c10d":
             if func is torch.ops.c10d.allreduce_.default:
                 return _c10d._local_all_reduce_(*args, **kwargs)
@@ -834,6 +921,22 @@ class LocalTensorMode(TorchDispatchMode):
         with self.disable():
             # pyrefly: ignore [bad-argument-type, bad-argument-count]
             return LocalTensor({r: cb(r) for r in self.ranks})
+
+    def tensor_map(
+        self, tensor: LocalTensor, cb: Callable[[int, Tensor], Tensor | None]
+    ) -> LocalTensor:
+        """
+        Creates a LocalTensor instance by mapping rank id to ids local shard.
+        """
+
+        with self.disable():
+            results = {}
+            for r in self.ranks:
+                if r in tensor._local_tensors:
+                    m = cb(r, tensor._local_tensors[r])
+                    if m is not None:
+                        results[r] = m
+            return LocalTensor(results)
 
     def _patch_device_mesh(self) -> None:
         assert self._old_get_coordinate is None
@@ -963,3 +1066,120 @@ def maybe_disable_local_tensor_mode() -> contextlib.AbstractContextManager:
     """
     lm = local_tensor_mode()
     return lm.disable() if lm is not None else contextlib.nullcontext()
+
+
+import threading
+from queue import Queue
+
+
+_LOCAL_RUNNER_MODE: "LocalRunnerMode | None" = None
+
+
+class LocalRunnerMode:
+    """
+    A class for running multiple SPMD functions concurrently, however at any point
+    in time only one function can be running. The main use case for the local runner
+    mode is to enable SPMD functions to be able to use send and recv to communicate
+    with each other. Without local runner mode send and recv are not supported.
+    """
+
+    runner_context = threading.local()
+
+    def __init__(
+        self, ranks: frozenset[int] | int, concurrency: int, fn: Callable[[int], None]
+    ):
+        if isinstance(ranks, int):
+            ranks = frozenset(range(ranks))
+        self._ranks = ranks
+        self._fn = fn
+        self._run_lock = threading.Lock()
+        self._run_id = -1
+        self._run_cond = threading.Condition(self._run_lock)
+
+        self._recv_objects: dict[int, dict[int, Queue]] = {
+            dst: {src: Queue() for src in ranks} for dst in ranks
+        }
+        self._runners = [
+            threading.Thread(target=self._run, args=(i,), name="LocalRunnerMode")
+            for i in range(concurrency)
+        ]
+
+    def __enter__(self) -> "LocalRunnerMode":
+        global _LOCAL_RUNNER_MODE
+        assert _LOCAL_RUNNER_MODE is None, "LocalRunnerMode is already running"
+        _LOCAL_RUNNER_MODE = self
+
+        for r in self._runners:
+            r.start()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        for r in self._runners:
+            r.join()
+        global _LOCAL_RUNNER_MODE
+        _LOCAL_RUNNER_MODE = None
+
+    def _run(self, id: int) -> None:
+        LocalRunnerMode.runner_context.id = id
+        # Only one thread can run at a time, hence must acquire the lock
+        try:
+            self._acquire_run_lock()
+            self._fn(id)
+        finally:
+            self._release_run_lock()
+
+    def _acquire_run_lock(self) -> None:
+        self._run_lock.acquire()
+        self._run_id = LocalRunnerMode.runner_context.id
+
+    def _release_run_lock(self) -> None:
+        self._run_id = -1
+        self._run_lock.release()
+
+    def _assert_holds_run_lock(self) -> None:
+        assert self._run_id == LocalRunnerMode.runner_context.id, (
+            "Calling thread does not hold the run lock"
+        )
+
+    def _get_recv_object(self, src: int, dst: int) -> object | None:
+        peers = [src] if src != -1 else list(self._ranks)
+        recv_objects = self._recv_objects[dst]
+
+        for p in peers:
+            if not recv_objects[p].empty():
+                return recv_objects[p].get()
+
+        return None
+
+    def _signal_send(self, src: int, dst: int, obj: object) -> None:
+        assert obj is not None, "Cannot signal None"
+        self._assert_holds_run_lock()
+        # Only a single thread a time executes so it is safe to mutate
+        # read objects queue (executing thread is already holding the lock)
+        self._recv_objects[dst][src].put(obj)
+        # Signal directly condition variable since the calling thread is already
+        # holding the lock
+        self._run_cond.notify_all()
+
+    def _wait_recv(self, src: int, dst: int, post: Callable[[object], None]) -> None:
+        self._assert_holds_run_lock()
+        # Wait for the object to be available
+        while True:
+            obj = self._get_recv_object(src, dst)
+            if obj is not None:
+                post(obj)
+                # Note that we are not releasing the lock here, since the thread
+                # will continue to run and therefore must hold the lock
+                return
+            self._run_cond.wait()
+
+    @staticmethod
+    def current() -> "LocalRunnerMode":
+        global _LOCAL_RUNNER_MODE
+        assert _LOCAL_RUNNER_MODE is not None, "LocalRunnerMode is not enabled"
+        return _LOCAL_RUNNER_MODE
