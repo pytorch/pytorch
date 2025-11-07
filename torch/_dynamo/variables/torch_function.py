@@ -29,8 +29,9 @@ import contextlib
 import functools
 import inspect
 import operator
+from collections.abc import Generator, Iterable, Sequence
 from types import TracebackType
-from typing import Any, Generator, Iterable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch._C
 import torch.utils._pytree as pytree
@@ -163,7 +164,8 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         if value is not None:
             super().__init__(value, **kwargs)
         self.value = value
-        self.cm_obj = value  # needed for BC with calling enter from CM code
+        # needed for BC with calling enter from CM code
+        self.cm_obj = value  # type: ignore[assignment]
         self.source = source  # type: ignore[assignment]
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -722,12 +724,12 @@ class TensorWithTFOverrideVariable(TensorVariable):
         self,
         tx: "InstructionTranslator",
         name: str,
-        args: "list[VariableTracker]",
+        args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # This code block implements inlining the __torch_function__ override
         # of `call_method`.
-        tf_args = [self] + args
+        tf_args = [self] + list(args)
         if can_dispatch_torch_function(tx, tf_args, kwargs):
             import torch
 
