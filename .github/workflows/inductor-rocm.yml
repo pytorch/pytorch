@@ -2,7 +2,7 @@ name: inductor-rocm
 
 on:
   schedule:
-    - cron: 0 * * * *
+    - cron: 0 */3 * * *
   push:
     branches:
       - release/*
