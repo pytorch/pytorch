@@ -471,3 +471,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_parallel_for(
 AOTI_TORCH_EXPORT uint32_t torch_get_thread_idx() {
   return static_cast<uint32_t>(at::get_thread_num());
 }
+
+AOTI_TORCH_EXPORT uint32_t torch_get_num_threads() {
+  return static_cast<uint32_t>(at::get_num_threads());
+}
