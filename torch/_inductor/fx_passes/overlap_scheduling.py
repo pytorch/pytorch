@@ -6,7 +6,7 @@ import sys
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 import torch
 import torch.fx as fx
