@@ -1300,7 +1300,7 @@ class TestSerialization(TestCase, SerializationMixin):
             torch.save(c, f)
             f.seek(0)
             with self.assertRaisesRegex(pickle.UnpicklingError,
-                                        "GLOBAL __main__.ClassThatUsesBuildInstruction was not an allowed global by default"):
+                                        f"GLOBAL {__name__}.ClassThatUsesBuildInstruction was not an allowed global by default"):
                 torch.load(f, weights_only=True)
             try:
                 with torch.serialization.safe_globals([ClassThatUsesBuildInstruction]):
