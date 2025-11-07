@@ -95,7 +95,8 @@ class WeightNormSparsifier(BaseSparsifier):
     ):
         r"""Creates patches of size `block_shape` after scattering the indices."""
         if mask is None:
-            assert input_shape is not None
+            if input_shape is None:
+                raise AssertionError("input_shape must be provided when mask is None")
             mask = torch.ones(input_shape, device=device)
         mask.scatter_(dim=dim, index=indices, value=0)
         mask.data = F.fold(
@@ -235,7 +236,7 @@ class WeightNormSparsifier(BaseSparsifier):
             ww = self.norm_fn(getattr(module, tensor_name))
             tensor_mask = self._make_tensor_mask(
                 data=ww,
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 input_shape=ww.shape,
                 sparsity_level=sparsity_level,
                 sparse_block_shape=sparse_block_shape,

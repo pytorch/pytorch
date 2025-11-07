@@ -1,14 +1,17 @@
 import functools
 import math
 import operator
-from typing import Sequence
+from collections.abc import Callable, Sequence
+from datetime import timedelta
 
 import torch
 from torch._C import ScriptObject
-from torch._C._distributed_c10d import FakeWork
+from torch._C._distributed_c10d import FakeWork, PythonCallbackWork
 from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed.distributed_c10d import (
+    _check_op,
     _get_default_group,
+    _resolve_process_group,
     ProcessGroup,
     ReduceOp,
     Work,
@@ -71,9 +74,13 @@ def _indices_to_layout(indices: list[int]) -> tuple[tuple[int, ...], tuple[int, 
 
 
 def _prepare_collective_groups(
-    process_group_so: ScriptObject,
+    process_group_so: ScriptObject | ProcessGroup,
 ) -> tuple[list[int], list[int], int]:
-    process_group = ProcessGroup.unbox(process_group_so)
+    process_group = (
+        ProcessGroup.unbox(process_group_so)
+        if isinstance(process_group_so, ScriptObject)
+        else process_group_so
+    )
 
     ranks = torch.distributed.get_process_group_ranks(process_group)
     assert ranks
@@ -90,6 +97,123 @@ def _prepare_collective_groups(
     group_offsets = layout.complement(global_pg.size()).all_ranks_from_zero()
 
     return ranks, group_offsets, offset
+
+
+# NB: There are two flavors of the collectives: regular and functional. Regular collectives
+# allocate outputs to write the result to, accept process group and support async ops (return
+# work object). Functional collectives expect the implementation to allocate outputs, accept
+# process group name that must be resolved and do not support async ops (return output).
+def _local_functional_all_gather_into_tensor(
+    tensor: torch.Tensor, group_size: int, group_name: str
+) -> torch.Tensor:
+    # "all_gather_into_tensor(Tensor input, int group_size, str group_name) -> Tensor"
+    from . import LocalTensor
+
+    ranks, group_offsets, offset = _prepare_collective_groups(
+        _resolve_process_group(group_name)
+    )
+
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a LocalTensor"
+    output_local_tensors: dict[int, torch.Tensor] = {}
+
+    for group_offset in group_offsets:
+        group_ranks = [group_offset + r for r in ranks]
+
+        group_tensors = []
+        for rank in group_ranks:
+            group_tensors.append(tensor._local_tensors[rank])
+
+        gathered_tensor = torch.cat(group_tensors, dim=0)
+
+        for rank in group_ranks:
+            output_local_tensors[rank] = gathered_tensor.clone()
+
+    # pyrefly: ignore [bad-argument-type, bad-argument-count]
+    output = LocalTensor(output_local_tensors)
+
+    return output
+
+
+def _local_functional_reduce_scatter_tensor(
+    tensor: torch.Tensor, reduce_op: str, group_size: int, group_name: str
+) -> torch.Tensor:
+    #  "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, str group_name) -> Tensor"
+    from . import _zero_sized_like, LocalTensor
+
+    ranks, group_offsets, offset = _prepare_collective_groups(
+        _resolve_process_group(group_name)
+    )
+
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a LocalTensor"
+    output_local_tensors: dict[int, torch.Tensor] = {}
+
+    for group_offset in group_offsets:
+        group_ranks = [group_offset + r for r in ranks]
+
+        group_tensors = []
+        for rank in group_ranks:
+            group_tensors.append(tensor._local_tensors[rank])
+
+        reduced_tensor = _local_reduce(reduce_op, group_tensors)
+
+        scattered_tensor = torch.split(
+            reduced_tensor,
+            reduced_tensor.size(0) // len(group_ranks),
+            dim=0,
+        )
+
+        for i, rank in enumerate(group_ranks):
+            if i < len(scattered_tensor):
+                output_local_tensors[rank] = scattered_tensor[i].clone()
+            else:
+                output_local_tensors[rank] = _zero_sized_like(reduced_tensor, 0)
+
+    # pyrefly: ignore [bad-argument-type, bad-argument-count]
+    output = LocalTensor(output_local_tensors)
+
+    return output
+
+
+def _local_functional_shard_dim_alltoall(
+    tensor: torch.Tensor, gather_dim: int, shard_dim: int, group_name: str
+) -> torch.Tensor:
+    # "shard_dim_alltoall(Tensor input, int gather_dim, int shard_dim, str group_name) -> Tensor"
+    from . import _zero_sized_like, LocalTensor
+
+    ranks, group_offsets, offset = _prepare_collective_groups(
+        _resolve_process_group(group_name)
+    )
+
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a LocalTensor"
+    output_local_tensors: dict[int, torch.Tensor] = {}
+
+    for group_offset in group_offsets:
+        group_ranks = [group_offset + r for r in ranks]
+
+        group_tensors = []
+        for rank in group_ranks:
+            group_tensors.append(tensor._local_tensors[rank])
+
+        gathered_tensor = torch.cat(group_tensors, dim=gather_dim)
+
+        split_tensor = torch.split(
+            gathered_tensor,
+            gathered_tensor.size(shard_dim) // len(group_ranks),
+            dim=shard_dim,
+        )
+
+        for i, rank in enumerate(group_ranks):
+            if i < len(split_tensor):
+                output_local_tensors[rank] = split_tensor[i].clone()
+            else:
+                output_local_tensors[rank] = _zero_sized_like(
+                    gathered_tensor, shard_dim
+                )
+
+    # pyrefly: ignore [bad-argument-type, bad-argument-count]
+    output = LocalTensor(output_local_tensors)
+
+    return output
 
 
 def _local_broadcast_(
@@ -134,31 +258,31 @@ def _local_broadcast_(
 
 
 def _local_reduce(
-    reduce_op: ReduceOp,
+    reduce_op: ReduceOp | str,
     tensors: list[torch.Tensor],
 ) -> torch.Tensor:
-    if reduce_op == ReduceOp.SUM:
+    if reduce_op == ReduceOp.SUM or reduce_op == "sum":
         op = operator.add
-    elif reduce_op == ReduceOp.AVG:
+    elif reduce_op == ReduceOp.AVG or reduce_op == "avg":
         op = None
-    elif reduce_op == ReduceOp.PRODUCT:
+    elif reduce_op == ReduceOp.PRODUCT or reduce_op == "product":
         op = operator.mul
-    elif reduce_op == ReduceOp.MIN:
+    elif reduce_op == ReduceOp.MIN or reduce_op == "min":
         op = torch.minimum
-    elif reduce_op == ReduceOp.MAX:
+    elif reduce_op == ReduceOp.MAX or reduce_op == "max":
         op = torch.maximum
-    elif reduce_op == ReduceOp.BAND:
+    elif reduce_op == ReduceOp.BAND or reduce_op == "band":
         op = torch.bitwise_and
-    elif reduce_op == ReduceOp.BOR:
+    elif reduce_op == ReduceOp.BOR or reduce_op == "bor":
         op = torch.bitwise_or
-    elif reduce_op == ReduceOp.BXOR:
+    elif reduce_op == ReduceOp.BXOR or reduce_op == "bxor":
         op = torch.bitwise_xor
-    elif reduce_op == ReduceOp.PREMUL_SUM:
+    elif reduce_op == ReduceOp.PREMUL_SUM or reduce_op == "premul_sum":
         raise NotImplementedError("PREMUL_SUM: need to add binding for scaling factor")
     else:
         raise NotImplementedError(f"ReduceOp {reduce_op} not implemented")
 
-    if reduce_op == ReduceOp.AVG:
+    if reduce_op == ReduceOp.AVG or reduce_op == "avg":
         return functools.reduce(operator.add, tensors) / len(tensors)
     else:
         assert op is not None
@@ -286,13 +410,13 @@ def _local_reduce_scatter_tensor_coalesced_(
             # Perform the reduction operation
             reduced_input = _local_reduce(reduce_op, group_inputs)
 
-            reduced_inpit_splits = torch.split(
+            reduced_input_splits = torch.split(
                 reduced_input, reduced_input.size(0) // len(group_ranks), dim=0
             )
 
             # Update all tensors in the group with the reduced result
-            for rank in group_ranks:
-                output_tensor._local_tensors[rank].copy_(reduced_inpit_splits[rank])
+            for i, rank in enumerate(group_ranks):
+                output_tensor._local_tensors[rank].copy_(reduced_input_splits[i])
 
     work = FakeWork()
     work_so = Work.boxed(work)
@@ -316,7 +440,7 @@ def _local_all_gather_(
     assert len(input_tensors) == 1
 
     input_tensor = input_tensors[0]
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     output_tensors = output_tensors[0]
 
     ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
@@ -337,12 +461,12 @@ def _local_all_gather_(
             source_tensor = input_tensor
             if isinstance(input_tensor, LocalTensor):
                 source_tensor = input_tensor._local_tensors[rank_i]
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             output_tensors[i].copy_(source_tensor)
 
     work = FakeWork()
     work_so = Work.boxed(work)
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return ([output_tensors], work_so)
 
 
@@ -429,7 +553,7 @@ def _local_scatter_(
     assert len(output_tensors) == 1
     assert len(input_tensors) == 1
     output_tensor = output_tensors[0]
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     input_tensors = input_tensors[0]
 
     ranks, group_offsets, offset = _prepare_collective_groups(process_group_so)
@@ -643,10 +767,19 @@ def _local_send(
     # "send(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, "
     # "int dst, int tag) -> __torch__.torch.classes.c10d.Work";
 
-    raise NotImplementedError(
-        "LocalTensor does not support MPMD operations like send. "
-        "Use SPMD collective operations instead."
-    )
+    from . import LocalRunnerMode, LocalTensor
+
+    assert len(tensors) == 1
+    tensor = tensors[0]
+
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
+    src = int(tensor.__src_rank__)
+
+    LocalRunnerMode.current()._signal_send(src, dst, tensor._local_tensors[src])
+
+    work = FakeWork()
+    work_so = Work.boxed(work)
+    return work_so
 
 
 def _local_recv_(
@@ -657,11 +790,26 @@ def _local_recv_(
 ) -> ScriptObject:
     # "recv_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, "
     # "int src, int tag) -> __torch__.torch.classes.c10d.Work";
+    from . import LocalRunnerMode, LocalTensor
 
-    raise NotImplementedError(
-        "LocalTensor does not support MPMD operations like recv. "
-        "Use SPMD collective operations instead."
-    )
+    assert len(tensors) == 1
+    tensor = tensors[0]
+
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
+    dst = int(tensor.__src_rank__)
+
+    def _recv_and_store(timeout: timedelta) -> bool:
+        def _wait_and_store(obj: object) -> None:
+            assert isinstance(obj, torch.Tensor), "Expected to receive a Tensor"
+            assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
+            tensor._local_tensors[dst] = obj
+
+        LocalRunnerMode.current()._wait_recv(src, dst, _wait_and_store)
+        return True
+
+    work = PythonCallbackWork(_recv_and_store)
+    work_so = Work.boxed(work)
+    return work_so
 
 
 def _local_recv_any_source_(
@@ -670,7 +818,60 @@ def _local_recv_any_source_(
     # "recv_any_source_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, "
     # "int tag) -> __torch__.torch.classes.c10d.Work";
 
-    raise NotImplementedError(
-        "LocalTensor does not support MPMD operations like recv_any_source. "
-        "Use SPMD collective operations instead."
+    return _local_recv_(tensors, process_group_so, -1, tag)
+
+
+def _attach_rank(tensor: torch.Tensor, rank: int) -> torch.Tensor:
+    """
+    Attaches rank as an attribute to given tensor so that the send or recv implementation
+    knows which rank initiates the operation (note under local tensor mode ).
+    """
+    from torch.distributed.tensor import DTensor
+
+    if isinstance(tensor, DTensor):
+        tensor = tensor._local_tensor
+
+    tensor.__src_rank__ = rank  # type: ignore[attr-defined]
+    return tensor
+
+
+def local_p2p_op(
+    dst: torch.SymInt,
+    tensor: torch.Tensor,
+    op: Callable[[torch.Tensor, int], Work | None],
+) -> Work | None | list[Work | None]:
+    """
+    Runs a point-to-point (P2P) operation for all combinations of source and destination ranks.
+    """
+    _check_op(op)
+
+    from . import LocalIntNode
+
+    assert isinstance(dst.node, LocalIntNode), (
+        "Expected 'dst' to be a LocalIntNode where the value is the destination rank and key is the source rank"
     )
+
+    w = []
+    for s, d in dst.node._local_ints.items():
+        tensor = _attach_rank(tensor, s)
+        w.append(op(tensor, d))
+    return w
+
+
+def wait_all(work: Work | None | list[Work | None]) -> None:
+    """
+    Waits for all work objects in the input to complete.
+
+    A single Work object, None, or a list of Work objects (possibly containing None).
+    If None, does nothing. If a single Work, waits for it to complete. If a list, waits
+    for each non-None Work in the list to complete.
+    """
+
+    if work is None:
+        return
+    if isinstance(work, Work):
+        work = [work]
+    for w in work:
+        if w is None:
+            continue
+        w.wait()

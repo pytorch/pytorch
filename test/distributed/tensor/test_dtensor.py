@@ -1019,6 +1019,28 @@ class DTensorMeshTest(DTensorTestBase):
         except ValueError:
             self.fail("Unexpected ValueError raised with run_check=False")
 
+    @with_comms
+    def test_as_strided_identity(self):
+        # Test calling as_strided with the same size/stride/offset as input tensor
+        # This should be a no-op but currently fails
+        device_mesh = self.build_device_mesh()
+        placements = [Shard(0)]
+        local_tensor = torch.randn(3, 4, device=self.device_type)
+        dtensor = DTensor.from_local(local_tensor, device_mesh, placements)
+
+        # Get the current size, stride, and storage_offset
+        size = dtensor.size()
+        stride = dtensor.stride()
+        storage_offset = dtensor.storage_offset()
+
+        # Call as_strided with the exact same parameters
+        result = dtensor.as_strided(size, stride, storage_offset)
+
+        # The result should be identical to the input
+        self.assertEqual(result.size(), dtensor.size())
+        self.assertEqual(result.stride(), dtensor.stride())
+        self.assertEqual(result.to_local(), dtensor.to_local())
+
 
 DTensorMeshTestWithLocalTensor = create_local_tensor_test_class(
     DTensorMeshTest,

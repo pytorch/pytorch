@@ -94,10 +94,11 @@ class OutputProp:
                 )
 
             if isinstance(result, torch.Tensor):  # type: ignore[possibly-undefined]
-                # pyrefly: ignore  # unbound-name
+                # pyrefly: ignore [unbound-name]
                 node.traced_result = result
 
-            # pyrefly: ignore  # unsupported-operation
+            # pyrefly: ignore [unsupported-operation]
+            # pyrefly: ignore [unbound-name]
             env[node.name] = result
 
         return None
@@ -403,10 +404,10 @@ def create_submodule_from_subgraph(
                         cur_name_idx += 1
                         setattr(gm, mod_name, new_arg)
                         new_arg_placeholder = gm.placeholder(mod_name)  # type: ignore[operator]
-                        # pyrefly: ignore  # missing-attribute
+                        # pyrefly: ignore [missing-attribute]
                         cur_args_copy.append(new_arg_placeholder)
                     elif isinstance(arg, (float, int, torch.dtype)):
-                        # pyrefly: ignore  # missing-attribute
+                        # pyrefly: ignore [missing-attribute]
                         cur_args_copy.append(arg)
                     else:
                         raise AssertionError(f"arg of type {type(arg)} not handled yet")
@@ -818,7 +819,7 @@ def create_add_loggers_graph(
                 model,
                 cur_subgraph_idx,
                 match_name,
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 maybe_subgraph,
                 [qconfig_mapping],
                 [node_name_to_qconfig],
@@ -879,7 +880,7 @@ def create_add_loggers_graph(
             cur_node_orig = first_node
             cur_node_copy = None
             first_node_copy = None
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             while cur_node_orig in subgraph_to_use:
                 # TODO(future PR): make this support all possible args/kwargs
                 if cur_node_orig is first_node:
@@ -1049,7 +1050,7 @@ def _get_weight_info_from_shadow_wrapper(shadow_wrapper: torch.nn.Module):
             raise AssertionError(f"Expected exactly 1, got {len(shadow_n.users)}")
         quant_node = next(iter(shadow_n.users.keys()))
         new_args: Any = None
-        if quant_node.target == torch.quantize_per_channel:
+        if quant_node.target is torch.quantize_per_channel:
             _weight, scale_node, zp_node, axis, dtype = quant_node.args
             scale_val = getattr_from_fqn(shadow_wrapper, scale_node.target)
             zp_val = getattr_from_fqn(shadow_wrapper, zp_node.target)

@@ -101,14 +101,14 @@ class profile:
 
         records = _disable_profiler_legacy()
         parsed_results = _parse_legacy_records(records)
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         self.function_events = EventList(
             parsed_results,
             use_device="cuda" if self.use_cuda else None,
             profile_memory=self.profile_memory,
             with_flops=self.with_flops,
         )
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         self.function_events._build_tree()
         return False
 
@@ -296,9 +296,9 @@ def _parse_legacy_records(thread_records):
                         f"Expected CPU and CUDA memory allocation handles to match, "
                         f"but got {num_open_handles_cpu} CPU and {num_open_handles_cuda} CUDA"
                     )
-                for handle in cpu_memory_allocs.keys():
+                for handle in cpu_memory_allocs:
                     cpu_memory_allocs[handle] += record.cpu_memory_usage()
-                for handle in cuda_memory_allocs.keys():
+                for handle in cuda_memory_allocs:
                     cuda_memory_allocs[handle] += record.cuda_memory_usage()
                 if num_open_handles_cpu == 0:
                     # output event as a top-level memory event

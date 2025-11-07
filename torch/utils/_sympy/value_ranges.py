@@ -126,9 +126,9 @@ AllFn2 = Union[ExprFn2, BoolFn2]
 class ValueRanges(Generic[_T]):
     if TYPE_CHECKING:
         # ruff doesn't understand circular references but mypy does
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         ExprVR = ValueRanges[sympy.Expr]  # noqa: F821
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         BoolVR = ValueRanges[SympyBoolean]  # noqa: F821
         AllVR = Union[ExprVR, BoolVR]
 
@@ -484,7 +484,7 @@ class SymPyValueRangeAnalysis:
     @staticmethod
     def to_dtype(a, dtype, src_dtype=None):
         if dtype == torch.float64:
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             return ValueRanges.increasing_map(a, ToFloat)
         elif dtype == torch.bool:
             return ValueRanges.unknown_bool()
@@ -494,7 +494,7 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def trunc_to_int(a, dtype):
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         return ValueRanges.increasing_map(a, TruncToInt)
 
     @staticmethod
@@ -652,7 +652,7 @@ class SymPyValueRangeAnalysis:
             return ValueRanges.coordinatewise_monotone_map(
                 a,
                 b,
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 _keep_float(IntTrueDiv),
             )
 
@@ -668,7 +668,7 @@ class SymPyValueRangeAnalysis:
             return ValueRanges.coordinatewise_monotone_map(
                 a,
                 b,
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 _keep_float(FloatTrueDiv),
             )
 
@@ -748,7 +748,7 @@ class SymPyValueRangeAnalysis:
             # We should know that b >= 0 but we may have forgotten this fact due
             # to replacements, so don't assert it, but DO clamp it to prevent
             # degenerate problems
-            # pyrefly: ignore  # no-matching-overload
+            # pyrefly: ignore [no-matching-overload]
             return ValueRanges.coordinatewise_increasing_map(
                 a, b & ValueRanges(0, int_oo), PowByNatural
             )
@@ -915,7 +915,7 @@ class SymPyValueRangeAnalysis:
 
     @classmethod
     def round_to_int(cls, number, dtype):
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         return ValueRanges.increasing_map(number, RoundToInt)
 
     # It's used in some models on symints
@@ -1032,7 +1032,7 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def trunc(x):
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         return ValueRanges.increasing_map(x, TruncToFloat)
 
 

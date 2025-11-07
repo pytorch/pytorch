@@ -217,7 +217,7 @@ def _get_edge_or_node_to_group_id(
     # means the observer of key should be shared with observer with value, by default it will
     # be shared with itself
     shared_with_map: dict[EdgeOrNode, EdgeOrNode] = {
-        k: k for k in edge_or_node_to_qspec.keys()
+        k: k for k in edge_or_node_to_qspec
     }
     for edge_or_node, qspec in edge_or_node_to_qspec.items():
         if isinstance(edge_or_node, torch.fx.Node):
@@ -282,7 +282,7 @@ def _get_edge_or_node_to_group_id(
     # now that we get the sharing relations between all edges and nodes, we can assign group ids
     cur_group_id = 0
     edge_or_node_to_group_id: dict[EdgeOrNode, int] = {}
-    for edge_or_node in shared_with_map.keys():
+    for edge_or_node in shared_with_map:
         root = _find_root_edge_or_node(edge_or_node, shared_with_map)
         if root not in edge_or_node_to_group_id:
             edge_or_node_to_group_id[root] = cur_group_id
@@ -391,7 +391,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     # instead of inserting new observers we will have:
     # conv1 -> obs1 -> existing_obs -> conv2
     #                            \ -> conv3
-    for maybe_obs_node in arg.users.keys():
+    for maybe_obs_node in arg.users:
         if not _is_activation_post_process_node(maybe_obs_node, named_modules):
             continue
         maybe_obs_mod = named_modules[maybe_obs_node.target]  # type: ignore[index]
@@ -455,9 +455,9 @@ def _maybe_insert_input_observers_for_node(
     # gelu has a has an approximate kwarg that persist in exported graph.
     # This is just a work around for these.
     if not (
-        node.target == torch.ops.aten.clone.default
-        or node.target == torch.ops.aten.zeros_like.default
-        or node.target == torch.ops.aten.gelu.default
+        node.target is torch.ops.aten.clone.default
+        or node.target is torch.ops.aten.zeros_like.default
+        or node.target is torch.ops.aten.gelu.default
         or len(node.kwargs) == 0
     ):
         raise AssertionError(" expecting kwargs for aten op IR to be empty")

@@ -94,7 +94,7 @@ class ZStandard(StreamTransformExtension):
         return zstandard is not None or pyzstd is not None
 
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def from_descriptor(version: str) -> "ZStandard":
         if version.partition(".")[0] != "1":
             raise ValueError(f"Unknown extension {version=}")
@@ -217,7 +217,7 @@ class ExtensionRegistry:
             ext = self.extensions.get(name)
             if not ext:
                 raise ValueError(f"Unknown extension {name=}")
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             return ext.from_descriptor(version)
 
         return [from_descriptor(desc) for desc in descriptors]

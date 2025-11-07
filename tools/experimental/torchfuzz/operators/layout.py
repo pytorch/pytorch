@@ -400,3 +400,423 @@ class UnsqueezeOperator(LayoutOperatorBase):
             dim = len(output_spec.size) - 1
 
         return f"{output_name} = torch.unsqueeze({input_names[0]}, dim={dim})"
+
+
+class SplitOperator(LayoutOperatorBase):
+    """Operator for torch.split() operation."""
+
+    def __init__(self):
+        """Initialize SplitOperator."""
+        super().__init__("split")
+
+    @property
+    def torch_op_name(self) -> Optional[str]:
+        """Return the torch operation name."""
+        return "torch.split"
+
+    def can_produce(self, output_spec: Spec) -> bool:
+        """Split can produce any tensor output."""
+        if not isinstance(output_spec, TensorSpec):
+            return False
+        # Split can produce any tensor with at least one dimension
+        return len(output_spec.size) > 0
+
+    def _get_split_params(self, output_spec: TensorSpec) -> tuple[int, int]:
+        """Get consistent split parameters based on output spec.
+
+        This method uses the output_spec to deterministically choose split parameters,
+        ensuring that fuzz_inputs_specs and codegen make the same choices.
+        """
+        # Use output_spec properties to seed random choices
+        # This ensures both methods make the same choices
+        seed_value = hash((output_spec.size, output_spec.dtype))
+        rng = random.Random(seed_value)
+
+        split_dim = rng.randint(0, len(output_spec.size) - 1)
+        num_chunks = rng.randint(2, 4)
+
+        return split_dim, num_chunks
+
+    def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
+        """Generate input spec for split operation."""
+        if not isinstance(output_spec, TensorSpec):
+            raise ValueError("SplitOperator can only produce TensorSpec outputs")
+
+        # torch.split() splits a tensor along a dimension
+        # We'll use split_size_or_sections as an integer (split_size)
+        # The output will be one of the chunks from the split
+        if len(output_spec.size) == 0:
+            raise ValueError("Cannot split a scalar tensor")
+
+        split_dim, num_chunks = self._get_split_params(output_spec)
+
+        # Calculate input size: input will have split_dim with size = output_size * num_chunks
+        # (or slightly larger to account for uneven splits)
+        input_size = list(output_spec.size)
+        input_size[split_dim] = output_spec.size[split_dim] * num_chunks
+
+        # Create input tensor spec
+        from torchfuzz.tensor_fuzzer import fuzz_valid_stride
+
+        input_stride = fuzz_valid_stride(tuple(input_size))
+
+        return [
+            TensorSpec(
+                size=tuple(input_size), stride=input_stride, dtype=output_spec.dtype
+            )
+        ]
+
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
+        """Generate code for split operation."""
+        if not isinstance(output_spec, TensorSpec):
+            raise ValueError("SplitOperator can only produce TensorSpec outputs")
+
+        split_dim, _ = self._get_split_params(output_spec)
+
+        # Use output size along split_dim as the split_size
+        split_size = output_spec.size[split_dim]
+
+        # Generate the split and select the first chunk
+        return f"{output_name} = torch.split({input_names[0]}, {split_size}, dim={split_dim})[0]"
+
+
+class ExpandOperator(LayoutOperatorBase):
+    """Operator for torch.expand() operation."""
+
+    def __init__(self):
+        """Initialize ExpandOperator."""
+        super().__init__("expand")
+
+    @property
+    def torch_op_name(self) -> Optional[str]:
+        """Return the torch operation name."""
+        return "torch.expand"
+
+    def can_produce(self, output_spec: Spec) -> bool:
+        """Expand can produce any tensor output."""
+        if not isinstance(output_spec, TensorSpec):
+            return False
+        # Expand can produce any tensor with at least one dimension
+        return len(output_spec.size) > 0
+
+    def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
+        """Generate input spec for expand operation."""
+        if not isinstance(output_spec, TensorSpec):
+            raise ValueError("ExpandOperator can only produce TensorSpec outputs")
+
+        # torch.expand() broadcasts a tensor to a new shape
+        # For expand to work, each dimension of the input must either:
+        # 1. Match the corresponding output dimension
+        # 2. Be 1 (to be broadcasted)
+        # 3. Not exist (input can have fewer dimensions than output)
+
+        # Generate input size with same or fewer dimensions
+        output_size = output_spec.size
+        input_ndim = random.randint(1, len(output_size))
+
+        # Create input size by choosing dimensions to broadcast
+        input_size = []
+        for i in range(input_ndim):
+            output_dim_idx = len(output_size) - input_ndim + i
+            output_dim = output_size[output_dim_idx]
+
+            # Randomly choose to either match the output dimension or use 1 for broadcasting
+            # Use 1 with higher probability to test broadcasting behavior
+            if random.random() < 0.6 and output_dim > 1:
+                input_size.append(1)
+            else:
+                input_size.append(output_dim)
+
+        input_size = tuple(input_size)
+
+        # Create input tensor spec
+        from torchfuzz.tensor_fuzzer import fuzz_valid_stride
+
+        input_stride = fuzz_valid_stride(input_size)
+
+        return [
+            TensorSpec(size=input_size, stride=input_stride, dtype=output_spec.dtype)
+        ]
+
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
+        """Generate code for expand operation."""
+        if not isinstance(output_spec, TensorSpec):
+            raise ValueError("ExpandOperator can only produce TensorSpec outputs")
+
+        shape_str = str(list(output_spec.size))
+        return f"{output_name} = {input_names[0]}.expand({shape_str})"
+
+
+class CatOperator(LayoutOperatorBase):
+    """Operator for torch.cat() operation."""
+
+    def __init__(self):
+        """Initialize CatOperator."""
+        super().__init__("cat")
+
+    @property
+    def torch_op_name(self) -> Optional[str]:
+        """Return the torch operation name."""
+        return "torch.cat"
+
+    def can_produce(self, output_spec: Spec) -> bool:
+        """Cat can produce any tensor output."""
+        if not isinstance(output_spec, TensorSpec):
+            return False
+        # Cat can produce any tensor with at least one dimension
+        return len(output_spec.size) > 0
+
+    def _get_cat_params(self, output_spec: TensorSpec) -> tuple[int, int]:
+        """Get consistent cat parameters based on output spec.
+
+        This method uses the output_spec to deterministically choose cat parameters,
+        ensuring that fuzz_inputs_specs and codegen make the same choices.
+        """
+        # Use output_spec properties to seed random choices
+        # This ensures both methods make the same choices
+        seed_value = hash((output_spec.size, output_spec.dtype))
+        rng = random.Random(seed_value)
+
+        cat_dim = rng.randint(0, len(output_spec.size) - 1)
+        num_tensors = rng.randint(2, 4)
+
+        return cat_dim, num_tensors
+
+    def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
+        """Generate input specs for cat operation."""
+        if not isinstance(output_spec, TensorSpec):
+            raise ValueError("CatOperator can only produce TensorSpec outputs")
+
+        # torch.cat() concatenates tensors along a dimension
+        # Choose a random dimension to concatenate along
+        if len(output_spec.size) == 0:
+            raise ValueError("Cannot concatenate scalar tensors")
+
+        cat_dim, num_tensors = self._get_cat_params(output_spec)
+
+        # Distribute output size along cat_dim across input tensors
+        total_size = output_spec.size[cat_dim]
+
+        # Use deterministic RNG for splitting sizes
+        seed_value = hash((output_spec.size, output_spec.dtype))
+        rng = random.Random(seed_value + 1)  # +1 to differentiate from param selection
+
+        # Generate sizes for each input tensor along cat_dim
+        input_sizes_at_cat_dim = []
+        remaining_size = total_size
+
+        for i in range(num_tensors - 1):
+            if remaining_size > 0:
+                # Randomly split the remaining size
+                max_size = max(1, remaining_size - (num_tensors - i - 1))
+                size_for_this_tensor = rng.randint(1, max_size)
+                input_sizes_at_cat_dim.append(size_for_this_tensor)
+                remaining_size -= size_for_this_tensor
+            else:
+                input_sizes_at_cat_dim.append(0)
+
+        # Last tensor gets the remaining size
+        input_sizes_at_cat_dim.append(max(0, remaining_size))
+
+        # Create input tensor specs
+        from torchfuzz.tensor_fuzzer import fuzz_valid_stride
+
+        input_specs = []
+        for size_at_cat_dim in input_sizes_at_cat_dim:
+            input_size = list(output_spec.size)
+            input_size[cat_dim] = size_at_cat_dim
+            input_size = tuple(input_size)
+
+            input_stride = fuzz_valid_stride(input_size)
+
+            input_specs.append(
+                TensorSpec(
+                    size=input_size, stride=input_stride, dtype=output_spec.dtype
+                )
+            )
+
+        return input_specs
+
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
+        """Generate code for cat operation."""
+        if not isinstance(output_spec, TensorSpec):
+            raise ValueError("CatOperator can only produce TensorSpec outputs")
+
+        # Use the same cat_dim that was used in fuzz_inputs_specs
+        cat_dim, _ = self._get_cat_params(output_spec)
+
+        # Generate the cat operation
+        tensors_str = ", ".join(input_names)
+        return f"{output_name} = torch.cat([{tensors_str}], dim={cat_dim})"
+
+
+class StackOperator(LayoutOperatorBase):
+    """Operator for torch.stack() operation."""
+
+    def __init__(self):
+        """Initialize StackOperator."""
+        super().__init__("stack")
+
+    @property
+    def torch_op_name(self) -> Optional[str]:
+        """Return the torch operation name."""
+        return "torch.stack"
+
+    def can_produce(self, output_spec: Spec) -> bool:
+        """Stack can produce any tensor output with at least one dimension."""
+        if not isinstance(output_spec, TensorSpec):
+            return False
+        # Stack creates a new dimension, so output must have at least one dimension
+        # Also, no dimension can be 0 since that would require stacking 0 tensors
+        # Limit to outputs where all dimensions are <= 4 to avoid creating too large graphs
+        return (
+            len(output_spec.size) > 0
+            and 0 not in output_spec.size
+            and all(dim <= 4 for dim in output_spec.size)
+        )
+
+    def _get_stack_params(self, output_spec: TensorSpec) -> int:
+        """Get consistent stack dimension based on output spec.
+
+        This method uses the output_spec to deterministically choose stack parameters,
+        ensuring that fuzz_inputs_specs and codegen make the same choices.
+        """
+        # Use output_spec properties to seed random choices
+        # This ensures both methods make the same choices
+        seed_value = hash((output_spec.size, output_spec.dtype))
+        rng = random.Random(seed_value)
+
+        stack_dim = rng.randint(0, len(output_spec.size) - 1)
+
+        return stack_dim
+
+    def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
+        """Generate input specs for stack operation."""
+        if not isinstance(output_spec, TensorSpec):
+            raise ValueError("StackOperator can only produce TensorSpec outputs")
+
+        # torch.stack() stacks tensors along a new dimension
+        # Choose a random dimension to stack along (0 to len(output_spec.size))
+        if len(output_spec.size) == 0:
+            raise ValueError("Cannot stack into a scalar tensor")
+
+        stack_dim = self._get_stack_params(output_spec)
+
+        # Number of tensors to stack equals the size of the new dimension
+        # Limit to max 4 tensors to avoid creating too large graphs
+        num_tensors = min(output_spec.size[stack_dim], 4)
+
+        # Input tensors have the output shape with the stack_dim removed
+        input_size = list(output_spec.size)
+        input_size.pop(stack_dim)
+        input_size = tuple(input_size)
+
+        # Create input tensor specs (all inputs have the same shape)
+        from torchfuzz.tensor_fuzzer import fuzz_valid_stride
+
+        input_specs = []
+        for _ in range(num_tensors):
+            input_stride = fuzz_valid_stride(input_size)
+            input_specs.append(
+                TensorSpec(
+                    size=input_size, stride=input_stride, dtype=output_spec.dtype
+                )
+            )
+
+        return input_specs
+
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
+        """Generate code for stack operation."""
+        if not isinstance(output_spec, TensorSpec):
+            raise ValueError("StackOperator can only produce TensorSpec outputs")
+
+        # Use the same stack_dim that was used in fuzz_inputs_specs
+        stack_dim = self._get_stack_params(output_spec)
+
+        # Generate the stack operation
+        tensors_str = ", ".join(input_names)
+        return f"{output_name} = torch.stack([{tensors_str}], dim={stack_dim})"
+
+
+class ChunkOperator(LayoutOperatorBase):
+    """Operator for torch.chunk() operation."""
+
+    def __init__(self):
+        """Initialize ChunkOperator."""
+        super().__init__("chunk")
+
+    @property
+    def torch_op_name(self) -> Optional[str]:
+        """Return the torch operation name."""
+        return "torch.chunk"
+
+    def can_produce(self, output_spec: Spec) -> bool:
+        """Chunk can produce any tensor output."""
+        if not isinstance(output_spec, TensorSpec):
+            return False
+        # Chunk can produce any tensor with at least one dimension
+        return len(output_spec.size) > 0
+
+    def _get_chunk_params(self, output_spec: TensorSpec) -> tuple[int, int]:
+        """Get consistent chunk parameters based on output spec.
+
+        This method uses the output_spec to deterministically choose chunk parameters,
+        ensuring that fuzz_inputs_specs and codegen make the same choices.
+        """
+        # Use output_spec properties to seed random choices
+        # This ensures both methods make the same choices
+        seed_value = hash((output_spec.size, output_spec.dtype))
+        rng = random.Random(seed_value)
+
+        chunk_dim = rng.randint(0, len(output_spec.size) - 1)
+        num_chunks = rng.randint(2, 4)
+
+        return chunk_dim, num_chunks
+
+    def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
+        """Generate input spec for chunk operation."""
+        if not isinstance(output_spec, TensorSpec):
+            raise ValueError("ChunkOperator can only produce TensorSpec outputs")
+
+        # torch.chunk() splits a tensor into chunks along a dimension
+        # The output will be one of the chunks from the split
+        if len(output_spec.size) == 0:
+            raise ValueError("Cannot chunk a scalar tensor")
+
+        chunk_dim, num_chunks = self._get_chunk_params(output_spec)
+
+        # Calculate input size: input will have chunk_dim with size = output_size * num_chunks
+        # torch.chunk() tries to split evenly, but the last chunk may be smaller
+        input_size = list(output_spec.size)
+        input_size[chunk_dim] = output_spec.size[chunk_dim] * num_chunks
+
+        # Create input tensor spec
+        from torchfuzz.tensor_fuzzer import fuzz_valid_stride
+
+        input_stride = fuzz_valid_stride(tuple(input_size))
+
+        return [
+            TensorSpec(
+                size=tuple(input_size), stride=input_stride, dtype=output_spec.dtype
+            )
+        ]
+
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
+        """Generate code for chunk operation."""
+        if not isinstance(output_spec, TensorSpec):
+            raise ValueError("ChunkOperator can only produce TensorSpec outputs")
+
+        chunk_dim, num_chunks = self._get_chunk_params(output_spec)
+
+        # Generate the chunk operation and select the first chunk
+        return f"{output_name} = torch.chunk({input_names[0]}, {num_chunks}, dim={chunk_dim})[0]"

@@ -91,9 +91,10 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
             4. By default, the config of the replaced data is used as config for the replacing data, unless something
                is specified in the config dictionary.
         """
-        assert type(data) in SUPPORTED_TYPES, (
-            "specified data type not supported at the moment"
-        )
+        if type(data) not in SUPPORTED_TYPES:
+            raise AssertionError(
+                f"specified data type:{type(data)} not  supported at the moment"
+            )
         local_args = copy.deepcopy(self.defaults)
         local_args.update(config)
         weight = self._extract_weight(data)
@@ -105,7 +106,8 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
         if name in self.state:
             # If the named data already exists - replace
             warnings.warn(
-                "Replacing existing data of the same name. - Did you mean a different name?"
+                "Replacing existing data of the same name. - Did you mean a different name?",
+                stacklevel=2,
             )
 
             # reuse old config
@@ -115,9 +117,10 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
 
             if reuse_mask:
                 current_data = self.get_data(name=name)
-                assert weight.shape == current_data.shape, (
-                    "to retain the old mask, the shape of the new data must be the same as the previous one"
-                )
+                if weight.shape != current_data.shape:
+                    raise AssertionError(
+                        "to retain the old mask, the shape of the new data must be the same as the previous one"
+                    )
                 mask = self.get_mask(
                     name=name
                 )  # reuse mask instead of creating a new one

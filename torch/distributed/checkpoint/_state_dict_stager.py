@@ -23,10 +23,16 @@ class StateDictStager:
     Attributes:
         pin_memory (bool): Whether to pin CPU memory for faster CPU-GPU transfers
         share_memory (bool): Whether to share memory across processes
+        pin_memory_min_bytes (int): Minimum tensor size in bytes to pin memory (default: 5)
         _cached_storage_mapping (WeakIdKeyDictionary): Maps storage objects to optimized CPU storages using weak references
     """
 
-    def __init__(self, pin_memory: bool = False, share_memory: bool = False):
+    def __init__(
+        self,
+        pin_memory: bool = False,
+        share_memory: bool = False,
+        pin_memory_min_bytes: int = 5,
+    ):
         if pin_memory and not torch.cuda.is_available():
             warnings.warn(
                 "Ignoring pin_memory flag for checkpoint staging as pinning memory"
@@ -39,20 +45,28 @@ class StateDictStager:
         self.share_memory = share_memory
         # Mapping from original storage objects to CPU storages using weak references
         self._cached_storage_mapping = WeakIdKeyDictionary()
+        self.pin_memory_min_bytes = pin_memory_min_bytes
 
         def _deepcopy_atomic(x, _):
             return x
 
-        def _deepcopy_list(x, memo):
+        def _deepcopy_list(x, memo, non_blocking=False):
             y: list = []
             memo[id(x)] = y
             append = y.append
             for a in x:
-                append(self.deepcopy_with_tensor_offload(a, memo))
+                append(
+                    self.deepcopy_with_tensor_offload(
+                        a, memo, non_blocking=non_blocking
+                    )
+                )
             return y
 
-        def _deepcopy_tuple(x, memo):
-            y = [self.deepcopy_with_tensor_offload(a, memo) for a in x]
+        def _deepcopy_tuple(x, memo, non_blocking=False):
+            y = [
+                self.deepcopy_with_tensor_offload(a, memo, non_blocking=non_blocking)
+                for a in x
+            ]
             # We're not going to put the tuple in the memo, but it's still important we
             # check for it, in case the tuple contains recursive mutable structures.
             try:
@@ -69,18 +83,25 @@ class StateDictStager:
             # No elements changed, return original tuple
             return x
 
-        def _deepcopy_dict(x, memo):
+        def _deepcopy_dict(x, memo, non_blocking=False):
             y: dict = {}
             memo[id(x)] = y
             for key, value in x.items():
-                y[self.deepcopy_with_tensor_offload(key, memo)] = (
-                    self.deepcopy_with_tensor_offload(value, memo)
+                y[
+                    self.deepcopy_with_tensor_offload(
+                        key, memo, non_blocking=non_blocking
+                    )
+                ] = self.deepcopy_with_tensor_offload(
+                    value, memo, non_blocking=non_blocking
                 )
             return y
 
-        def _deepcopy_method(x, memo):  # Copy instance methods
+        def _deepcopy_method(x, memo, non_blocking=False):  # Copy instance methods
             return type(x)(
-                x.__func__, self.deepcopy_with_tensor_offload(x.__self__, memo)
+                x.__func__,
+                self.deepcopy_with_tensor_offload(
+                    x.__self__, memo, non_blocking=non_blocking
+                ),
             )
 
         d: dict[Any, Any] = {}
@@ -105,7 +126,9 @@ class StateDictStager:
         d[list] = _deepcopy_list
 
     def _stage_untyped_storage(
-        self, storage: UntypedStorage, non_blocking: bool = False
+        self,
+        storage: UntypedStorage,
+        non_blocking: bool = False,
     ):
         """
         Called from the hooked storage_deepcopy function in torch.Tensor.__deepcopy__.
@@ -123,13 +146,12 @@ class StateDictStager:
         # Check if we've already cached this storage
         if storage in self._cached_storage_mapping:
             cached_storage = self._cached_storage_mapping[storage]
-            if cached_storage.size() != storage.size():
-                raise AssertionError(
-                    "For async checkpointing,  We cache storages in DRAM and reuse them. "
-                    "Cached storage size does not match original storage size. "
-                    "This should never happen as we track the original storage weakref "
-                    "and clean up the cache storage. Please report this to PyTorch Distributed Checkpointing."
-                )
+            assert cached_storage.size() == storage.size(), (
+                "For async checkpointing,  We cache storages in DRAM and reuse them."
+                "Cached storage size does not match original storage size."
+                "This should never happen as we track the original storage weakref "
+                "and clean up the cache storage. Please report this to PyTorch Distributed Checkpointing."
+            )
             # Reuse cached storage but update with new data
             cached_storage.copy_(storage, non_blocking=non_blocking)
             return cached_storage
@@ -140,7 +162,10 @@ class StateDictStager:
         else:
             new_storage = type(storage)(storage.size(), device="cpu")
 
-        if self.pin_memory and new_storage.nbytes() > 0:
+        # Skip pinning for tensors below the minimum size threshold
+        # Small tensors (e.g., optimizer step counters, scalars) have negligible
+        # transfer time improvement from pinning, but pinning overhead is significant
+        if self.pin_memory and new_storage.nbytes() >= self.pin_memory_min_bytes:
             pin_memory_utils.pin_memory(new_storage.data_ptr(), new_storage.nbytes())
             # Set up a weak reference to unpin when cpu storage is garbage collected
             f = weakref.finalize(
@@ -159,10 +184,10 @@ class StateDictStager:
     @torch.no_grad()
     def stage(
         self,
-        state_dict: dict[str, Any],
+        state_dict: Any,
         non_blocking: bool = False,
-    ) -> dict[str, Any]:
-        return self.deepcopy_with_tensor_offload(state_dict, non_blocking=non_blocking)
+    ) -> Any:
+        return self.deepcopy_with_tensor_offload(state_dict, None, [], non_blocking)
 
     def _offload_tensor(self, x, memo, non_blocking=False):
         """
@@ -188,12 +213,25 @@ class StateDictStager:
         memo[d] = y
 
         if type(x) is torch.Tensor or x.data_ptr() != 0:
-            # Try to get the untyped storage and optimize it
+            # Get the untyped storage
             untyped_storage = x.untyped_storage()
-            copied_storage = self._stage_untyped_storage(
-                untyped_storage, non_blocking=non_blocking
-            )
-            # Set the tensor data using the optimized storage
+            storage_id = id(untyped_storage)
+
+            # Check if this storage has already been staged in this deepcopy operation
+            # This handles the case where different tensors share the same storage
+            # (e.g., FSDP state_dict where norm.weight and norm_weight reference same storage)
+            # PyTorch caches untyped_storage() calls, so same storage -> same id
+            if storage_id in memo:
+                copied_storage = memo[storage_id]
+            else:
+                # Storage not seen before in this operation, stage it
+                copied_storage = self._stage_untyped_storage(
+                    untyped_storage, non_blocking=non_blocking
+                )
+                # Add to memo to avoid re-staging if we see this storage again
+                memo[storage_id] = copied_storage
+
+            # Set the tensor data using the staged storage
             y.set_(copied_storage, x.storage_offset(), x.size(), x.stride())
 
         # Copy any attributes the tensor might have
@@ -261,38 +299,86 @@ class StateDictStager:
         # tensors and subclasses of tensors are handled separately
         if isinstance(x, torch.Tensor):
             y = self._offload_tensor(x, memo, non_blocking=non_blocking)
-
-        # Use the dispatch table for standard types
-        copier = self._deepcopy_dispatch.get(cls)
-        if copier is not None:
-            y = copier(x, memo)
         else:
-            if issubclass(cls, type):
-                y = self._deepcopy_dispatch[type](x, memo)
-            else:
-                copier = getattr(x, "__deepcopy__", None)
-                if copier is not None:
-                    y = copier(memo)
+            # Use the dispatch table for standard types
+            copier = self._deepcopy_dispatch.get(cls)
+            if copier is not None:
+                # Check if this is an atomic copier (only accepts x and memo)
+                if copier.__name__ == "_deepcopy_atomic":
+                    y = copier(x, memo)
                 else:
-                    reductor = dispatch_table.get(cls)
-                    if reductor:
-                        rv = reductor(x)
+                    y = copier(x, memo, non_blocking=non_blocking)
+            else:
+                if issubclass(cls, type):
+                    # type copier is also atomic
+                    y = self._deepcopy_dispatch[type](x, memo)
+                else:
+                    copier = getattr(x, "__deepcopy__", None)
+                    if copier is not None:
+                        y = copier(memo)
                     else:
-                        reductor = getattr(x, "__reduce_ex__", None)
-                        if reductor is not None:
-                            rv = reductor(4)
+                        reductor = dispatch_table.get(cls)
+                        if reductor:
+                            rv = reductor(x)
                         else:
-                            reductor = getattr(x, "__reduce__", None)
-                            if reductor:
-                                rv = reductor()
+                            reductor = getattr(x, "__reduce_ex__", None)
+                            if reductor is not None:
+                                rv = reductor(4)
+                            else:
+                                reductor = getattr(x, "__reduce__", None)
+                                if reductor:
+                                    rv = reductor()
+                                else:
+                                    raise RuntimeError(
+                                        f"un(deep)copyable object of type {cls}"
+                                    )
+                        if isinstance(rv, str):
+                            y = x
+                        else:
+                            # Unpack rv tuple elements (up to 5 from pickle protocol)
+                            # and explicitly pass non_blocking as keyword arg
+                            if len(rv) == 2:
+                                func, args = rv
+                                y = self._reconstruct(
+                                    x, memo, func, args, non_blocking=non_blocking
+                                )
+                            elif len(rv) == 3:
+                                func, args, state = rv
+                                y = self._reconstruct(
+                                    x,
+                                    memo,
+                                    func,
+                                    args,
+                                    state,
+                                    non_blocking=non_blocking,
+                                )
+                            elif len(rv) == 4:
+                                func, args, state, listiter = rv
+                                y = self._reconstruct(
+                                    x,
+                                    memo,
+                                    func,
+                                    args,
+                                    state,
+                                    listiter,
+                                    non_blocking=non_blocking,
+                                )
+                            elif len(rv) == 5:
+                                func, args, state, listiter, dictiter = rv
+                                y = self._reconstruct(
+                                    x,
+                                    memo,
+                                    func,
+                                    args,
+                                    state,
+                                    listiter,
+                                    dictiter,
+                                    non_blocking=non_blocking,
+                                )
                             else:
                                 raise RuntimeError(
-                                    f"un(deep)copyable object of type {cls}"
+                                    f"Unexpected pickle protocol return value length: {len(rv)}"
                                 )
-                    if isinstance(rv, str):
-                        y = x
-                    else:
-                        y = self._reconstruct(x, memo, *rv)
 
         # If is its own copy, don't memoize.
         if y is not x:
@@ -317,18 +403,31 @@ class StateDictStager:
             memo[id(memo)] = [x]
 
     def _reconstruct(
-        self, x, memo, func, args, state=None, listiter=None, dictiter=None
+        self,
+        x,
+        memo,
+        func,
+        args,
+        state=None,
+        listiter=None,
+        dictiter=None,
+        non_blocking=False,
     ):
         deep = memo is not None
         if deep and args:
-            args = (self.deepcopy_with_tensor_offload(arg, memo) for arg in args)
+            args = tuple(
+                self.deepcopy_with_tensor_offload(arg, memo, non_blocking=non_blocking)
+                for arg in args
+            )
         y = func(*args)
         if deep:
             memo[id(x)] = y
 
         if state is not None:
             if deep:
-                state = self.deepcopy_with_tensor_offload(state, memo)
+                state = self.deepcopy_with_tensor_offload(
+                    state, memo, non_blocking=non_blocking
+                )
             if hasattr(y, "__setstate__"):
                 y.__setstate__(state)
             else:
@@ -345,7 +444,9 @@ class StateDictStager:
         if listiter is not None:
             if deep:
                 for item in listiter:
-                    item = self.deepcopy_with_tensor_offload(item, memo)
+                    item = self.deepcopy_with_tensor_offload(
+                        item, memo, non_blocking=non_blocking
+                    )
                     y.append(item)
             else:
                 for item in listiter:
@@ -353,8 +454,12 @@ class StateDictStager:
         if dictiter is not None:
             if deep:
                 for key, value in dictiter:
-                    key = self.deepcopy_with_tensor_offload(key, memo)
-                    value = self.deepcopy_with_tensor_offload(value, memo)
+                    key = self.deepcopy_with_tensor_offload(
+                        key, memo, non_blocking=non_blocking
+                    )
+                    value = self.deepcopy_with_tensor_offload(
+                        value, memo, non_blocking=non_blocking
+                    )
                     y[key] = value
             else:
                 for key, value in dictiter:

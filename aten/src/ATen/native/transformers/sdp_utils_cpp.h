@@ -341,7 +341,7 @@ inline bool check_grouped_query_attention(sdp_params const& params, bool debug) 
   const auto v_num_heads = params.value.sym_size(-3);
   const bool same_kv_heads = k_num_heads == v_num_heads;
 
-  if (requires_same_num_heads && !(same_kv_heads)){
+  if (requires_same_num_heads && !same_kv_heads){
     if (debug) {
       TORCH_WARN(
           "Both fused kernels require key and value to have the same num_heads and batch_size but got: ",

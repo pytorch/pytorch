@@ -14,14 +14,11 @@ from torch.backends.cuda import (
     SDPAParams,
 )
 
-from .varlen import varlen_attn
-
 
 __all__: list[str] = [
     "SDPBackend",
     "sdpa_kernel",
     "WARN_FOR_UNFUSED_KERNELS",
-    "varlen_attn",
 ]
 
 # Note: [SDPA warnings]
@@ -60,10 +57,10 @@ def _raise_kernel_warnings(params: SDPAParams) -> None:
     """
     if WARN_FOR_UNFUSED_KERNELS:
         if not can_use_efficient_attention(params):
-            warn("Efficient attention can't be used because:")
+            warn("Efficient attention can't be used because:", stacklevel=2)
             can_use_efficient_attention(params, True)
         if not can_use_flash_attention(params):
-            warn("Flash attention can't be used because:")
+            warn("Flash attention can't be used because:", stacklevel=2)
             can_use_flash_attention(params, True)
 
 
@@ -93,7 +90,7 @@ def _cur_sdpa_kernel_backends(with_priority: bool = False):
     return backends
 
 
-def _sdpa_kernel(backends: Iterable, set_priority: bool = False):
+def _sdpa_kernel(backends: Iterable, set_priority: bool = False) -> None:
     for name, val in _backend_names.items():
         enabled = getattr(SDPBackend, val) in backends
         getattr(torch._C, f"_set_sdp_use_{name}")(enabled)

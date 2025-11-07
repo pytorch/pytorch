@@ -208,6 +208,7 @@ select = [
     "PLC1802", # len({expression}) used as condition without comparison
     "PLC0205", # string as __slots__
     "PLC3002", # unnecessary-direct-lambda-call
+    "PLC0414", # Import alias does not rename original package
     "PLE",
     "PLR0133", # constant comparison
     "PLR0206", # property with params

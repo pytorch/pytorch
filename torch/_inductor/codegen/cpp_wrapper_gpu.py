@@ -307,7 +307,7 @@ class DeferredTritonCallWrapper:
                             f"RAIIC10IValueHandle RAII_{arg_name}(tmp_{arg_name});",
                         ]
                     )
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     total_args.append(f"tmp_{arg_name}")
 
                 def process_args_for_input_shape(arg, arg_type, arg_signature=None):
@@ -332,12 +332,12 @@ class DeferredTritonCallWrapper:
                                 f"RAIIC10IValueHandle RAII_{arg_name}(tmp_{arg_name});",
                             ]
                         )
-                        # pyrefly: ignore  # bad-argument-type
+                        # pyrefly: ignore [bad-argument-type]
                         total_args.append(f"tmp_{arg_name}")
                     elif (
                         isinstance(arg_type, type(SymbolicCallArg))
                         and arg_signature is not None
-                        and arg_signature in signature2dtype.keys()
+                        and arg_signature in signature2dtype
                     ) or arg_type in (sympy.Integer, int, sympy.Float, float):
                         write_dummy_scalar_ivalue(arg_name)
                     elif arg_signature and arg_signature.startswith("tensordesc<"):
@@ -350,7 +350,7 @@ class DeferredTritonCallWrapper:
                 for arg, arg_type, arg_signature in zip_longest(
                     call_args, arg_types, arg_signatures
                 ):
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     ordered_argsname.append(f'"{arg}"')
                     process_args_for_input_shape(arg, arg_type, arg_signature)
 
@@ -719,7 +719,7 @@ class CppWrapperGpu(CppWrapperCpu):
             elif (
                 isinstance(arg_type, type(SymbolicCallArg))
                 and arg_signature is not None
-                and arg_signature in signature2dtype.keys()
+                and arg_signature in signature2dtype
             ):
                 code.writeline(
                     f"{signature2dtype[arg_signature]} {var_name} = {cexpr(arg)};"
@@ -822,9 +822,8 @@ class CppWrapperGpu(CppWrapperCpu):
 
         if triton:
             call_args, arg_types = self.prepare_triton_wrapper_args(
-                # pyrefly: ignore  # bad-argument-type
                 call_args,
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 arg_types,
             )
             wrapper_name = f"call_{kernel_name}"
@@ -849,12 +848,12 @@ class CppWrapperGpu(CppWrapperCpu):
                 self.writeline(f"{wrapper_name}({', '.join(call_args)});")
         else:
             casted = []
-            # pyrefly: ignore  # no-matching-overload
+            # pyrefly: ignore [no-matching-overload]
             for arg_type, arg in zip(arg_types, call_args):
                 new_arg = arg
                 if arg_type.endswith("*") and arg != "nullptr":
                     new_arg = f"{arg}.data_ptr()"
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 casted.append(f"({arg_type}){cexpr(new_arg)}")
             call_args_str = ", ".join(casted)
             self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")

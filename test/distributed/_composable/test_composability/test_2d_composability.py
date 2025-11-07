@@ -218,7 +218,7 @@ class TestFullyShard2DTraining(FSDPTest):
 
         torch.manual_seed(42 + global_mesh.get_local_rank("dp"))
         inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type)
-        for iter_idx in range(5):
+        for _ in range(5):
             ref_loss = ref_model(inp).sum()
             loss = model(inp).sum()
             self.assertEqual(ref_loss, loss)
@@ -238,9 +238,7 @@ class TestFullyShard2DTraining(FSDPTest):
             # runs its reduce-scatter
             self.assertIsInstance(model.pos_embeddings.weight.placements[1], Shard)
             self.assertIsInstance(model.pos_embeddings.weight.grad.placements[1], Shard)
-            for ref_param, (param_name, param) in zip(
-                ref_model.parameters(), model.named_parameters()
-            ):
+            for ref_param, param in zip(ref_model.parameters(), model.parameters()):
                 full_grad = param.grad.full_tensor()
                 self.assertEqual(ref_param.grad, full_grad)
 

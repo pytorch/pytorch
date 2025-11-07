@@ -261,7 +261,7 @@ static PyObject* THXPModule_resetAccumulatedMemoryStats(
 // XPU module initialization
 
 static void registerXpuDeviceProperties(PyObject* module) {
-  // Add _xpuDevicePropertires class to torch._C
+  // Add _xpuDeviceProperties class to torch._C
   using namespace c10::xpu;
   auto get_device_type = [](const DeviceProp& prop) {
     std::ostringstream stream;
@@ -420,6 +420,12 @@ static void initXpuMethodBindings(PyObject* module) {
       [](c10::DeviceIndex device, c10::DeviceIndex peer) {
         return at::xpu::canDeviceAccessPeer(device, peer);
       });
+  m.def("_xpu_getMemoryFraction", [](c10::DeviceIndex device) {
+    return c10::xpu::XPUCachingAllocator::getMemoryFraction(device);
+  });
+  m.def("_xpu_setMemoryFraction", [](double fraction, c10::DeviceIndex device) {
+    c10::xpu::XPUCachingAllocator::setMemoryFraction(fraction, device);
+  });
 }
 
 // Callback for python part. Used for additional initialization of python

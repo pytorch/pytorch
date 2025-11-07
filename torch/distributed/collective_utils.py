@@ -104,7 +104,10 @@ def broadcast(
     if pg is not None:
         broadcast_list = [sync_obj]
         dist.broadcast_object_list(broadcast_list, src=rank, group=pg)
-        assert len(broadcast_list) == 1
+        if len(broadcast_list) != 1:
+            raise AssertionError(
+                f"Expected broadcast_list to have exactly 1 element, got {len(broadcast_list)}"
+            )
         sync_obj = broadcast_list[0]
 
     # failure in any rank will trigger a throw in every rank.
@@ -114,7 +117,7 @@ def broadcast(
             error_msg += f": stage {sync_obj.stage_name}"
         if sync_obj.exception is not None:
             error_msg += f": exception {sync_obj.exception}"
-        # pyrefly: ignore  # invalid-inheritance
+        # pyrefly: ignore [invalid-inheritance]
         raise RuntimeError(error_msg) from sync_obj.exception
 
     return cast(T, sync_obj.payload)
@@ -186,14 +189,14 @@ def all_gather(
             raise RuntimeError(  # type: ignore[misc]
                 error_msg,
                 exception_list,
-                # pyrefly: ignore  # invalid-inheritance
+                # pyrefly: ignore [invalid-inheritance]
             ) from exception_list[0]
         return ret_list
     else:
         if not sync_obj.success:
             raise RuntimeError(
                 f"all_gather failed with exception {sync_obj.exception}",
-                # pyrefly: ignore  # invalid-inheritance
+                # pyrefly: ignore [invalid-inheritance]
             ) from sync_obj.exception
         return [sync_obj.payload]  # type: ignore[list-item]
 
@@ -240,8 +243,10 @@ def all_gather_object_enforce_type(
 
 def _summarize_ranks(ranks: Iterable[int]) -> str:
     ranks = sorted(ranks)
-    assert min(ranks) >= 0, "ranks should all be positive"
-    assert len(set(ranks)) == len(ranks), "ranks should not contain duplicates"
+    if min(ranks) < 0:
+        raise AssertionError("ranks should all be positive")
+    if len(set(ranks)) != len(ranks):
+        raise AssertionError("ranks should not contain duplicates")
     curr: Optional[Union[int, range]] = None
     ranges = []
     while ranks:
@@ -255,7 +260,8 @@ def _summarize_ranks(ranks: Iterable[int]) -> str:
                 step = x - curr
                 curr = range(curr, x + step, step)
         else:
-            assert isinstance(curr, range)
+            if not isinstance(curr, range):
+                raise AssertionError("curr must be an instance of range")
             if x == curr.stop:
                 curr = range(curr.start, curr.stop + curr.step, curr.step)
             else:
@@ -270,13 +276,13 @@ def _summarize_ranks(ranks: Iterable[int]) -> str:
     result = []
     for r in ranges:
         if len(r) == 1:
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             result.append(f"{r.start}")
         elif r.step == 1:
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             result.append(f"{r.start}:{r.stop}")
         else:
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             result.append(f"{r.start}:{r.stop}:{r.step}")
     return ",".join(result)
 

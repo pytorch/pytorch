@@ -147,7 +147,7 @@ def _qualified_name(obj, mangle_name=True) -> str:
 
     # If the module is actually a torchbind module, then we should short circuit
     if module_name == "torch._classes":
-        return obj.qualified_name  # pyrefly: ignore  # missing-attribute
+        return obj.qualified_name  # pyrefly: ignore [missing-attribute]
 
     # The Python docs are very clear that `__module__` can be None, but I can't
     # figure out when it actually would be.
@@ -759,7 +759,7 @@ def unused(fn: Callable[_P, _R]) -> Callable[_P, _R]:
                 prop.fset, "_torchscript_modifier", FunctionModifiers.UNUSED
             )
 
-        return prop  # pyrefly: ignore  # bad-return
+        return prop  # pyrefly: ignore [bad-return]
 
     fn._torchscript_modifier = FunctionModifiers.UNUSED  # type: ignore[attr-defined]
     return fn
@@ -844,7 +844,7 @@ def ignore(drop=False, **kwargs):
         #   @torch.jit.ignore
         #   def fn(...):
         fn = drop
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         fn._torchscript_modifier = FunctionModifiers.IGNORE
         return fn
 
@@ -859,6 +859,7 @@ def ignore(drop=False, **kwargs):
         warnings.warn(
             "ignore(drop_on_export=True) has been deprecated. TorchScript will now drop the function "
             "call on compilation. Use torch.jit.unused now. {}",
+            stacklevel=2,
             category=FutureWarning,
         )
 
@@ -867,6 +868,7 @@ def ignore(drop=False, **kwargs):
         warnings.warn(
             "ignore(True) has been deprecated. TorchScript will now drop the function "
             "call on compilation. Use torch.jit.unused now. {}",
+            stacklevel=2,
             category=FutureWarning,
         )
 
@@ -992,7 +994,8 @@ def _check_overload_body(func):
         # Parsing the function definition can raise an OSError if source is unavailable.
         # Since this is just an initial check, just raise a warning if this is the case.
         warnings.warn(
-            f"Unable to retrieve source for @torch.jit._overload function: {func}."
+            f"Unable to retrieve source for @torch.jit._overload function: {func}.",
+            stacklevel=2,
         )
         return
 
@@ -1252,7 +1255,7 @@ def _get_named_tuple_properties(
     obj_annotations = inspect.get_annotations(obj)
     if len(obj_annotations) == 0 and hasattr(obj, "__base__"):
         obj_annotations = inspect.get_annotations(
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             obj.__base__
         )
 
@@ -1385,7 +1388,8 @@ def check_empty_containers(obj) -> None:
             "calling torch.jit.isinstance in eager mode. For "
             "example, List[int] would become list and "
             "therefore falsely return True for List[float] or"
-            " List[str]."
+            " List[str].",
+            stacklevel=2,
         )
 
 
@@ -1443,7 +1447,7 @@ def container_checker(obj, target_type) -> bool:
                 return False
         return True
     elif origin_type is Union or issubclass(
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         origin_type,
         BuiltinUnionType,
     ):  # also handles Optional

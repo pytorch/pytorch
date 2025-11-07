@@ -326,7 +326,7 @@ def gaussian(
         requires_grad=requires_grad,
     )
 
-    return torch.exp(-(k**2))  # pyrefly: ignore  # unsupported-operation
+    return torch.exp(-(k**2))  # pyrefly: ignore [unsupported-operation]
 
 
 @_add_docstr(
@@ -397,15 +397,15 @@ def kaiser(
         )
 
     # Avoid NaNs by casting `beta` to the appropriate dtype.
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     beta = torch.tensor(beta, dtype=dtype, device=device)
 
     start = -beta
     constant = 2.0 * beta / (M if not sym else M - 1)
     end = torch.minimum(
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         beta,
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         start + (M - 1) * constant,
     )
 
@@ -420,7 +420,7 @@ def kaiser(
     )
 
     return torch.i0(torch.sqrt(beta * beta - torch.pow(k, 2))) / torch.i0(
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         beta
     )
 

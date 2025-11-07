@@ -39,7 +39,7 @@ class ASGD(Optimizer):
         maximize: bool = False,
         differentiable: bool = False,
         capturable: bool = False,
-    ):
+    ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -211,7 +211,7 @@ def _single_tensor_asgd(
     differentiable: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
 
@@ -226,16 +226,17 @@ def _single_tensor_asgd(
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch.compiler.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
-            assert (
+            if not (
                 param.device.type
                 == mu.device.type
                 == eta.device.type
                 == step_t.device.type
                 and param.device.type in capturable_supported_devices
-            ), (
-                f"If capturable=True, params, mus, etas, and state_steps must be "
-                f"on supported devices: {capturable_supported_devices}."
-            )
+            ):
+                raise AssertionError(
+                    f"If capturable=True, params, mus, etas, and state_steps must be "
+                    f"on supported devices: {capturable_supported_devices}."
+                )
 
         if torch.is_complex(param):
             grad = torch.view_as_real(grad)
@@ -263,7 +264,7 @@ def _single_tensor_asgd(
             ax.copy_(param)
 
         if capturable:
-            # pyrefly: ignore  # unsupported-operation
+            # pyrefly: ignore [unsupported-operation]
             eta.copy_(lr / ((1 + lambd * lr * step_t) ** alpha))
             mu.copy_(1 / torch.maximum(step_t - t0, torch.ones_like(step_t)))
         else:
@@ -291,24 +292,27 @@ def _multi_tensor_asgd(
     differentiable: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if len(params) == 0:
         return
 
-    assert not differentiable, "_foreach ops don't support autograd"
+    if differentiable:
+        raise AssertionError("_foreach ops don't support autograd")
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
-        assert all(
+        if not all(
             p.device.type == mu.device.type == eta.device.type == step.device.type
             and p.device.type in capturable_supported_devices
-            for p, mu, eta, step in zip(params, mus, etas, state_steps)
-        ), (
-            f"If capturable=True, params, mus, etas, and state_steps must be on supported devices: {capturable_supported_devices}."
-        )
+            for p, mu, eta, step in zip(params, mus, etas, state_steps, strict=True)
+        ):
+            raise AssertionError(
+                f"If capturable=True, params, mus, etas, and state_steps must be on "
+                f"supported devices: {capturable_supported_devices}."
+            )
 
     lr = _to_scalar(lr)
 
@@ -438,7 +442,7 @@ def asgd(
     t0: float,
     alpha: float,
     weight_decay: float,
-):
+) -> None:
     r"""Functional API that performs asgd algorithm computation.
 
     See :class:`~torch.optim.ASGD` for details.

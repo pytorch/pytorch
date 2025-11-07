@@ -262,7 +262,7 @@ class ConstLoop(torch.nn.Module):
         self.count = 3
 
     def forward(self, x):
-        for i in range(self.count):
+        for _ in range(self.count):
             x = torch.sigmoid(self.linear1(x))
         return x
 
@@ -509,7 +509,7 @@ class CfgModule(torch.nn.Module):
         self.layer = torch.nn.Linear(10, 10)
 
     def forward(self, x):
-        for i in range(self.cfg.count):
+        for _ in range(self.cfg.count):
             x = self.layer(x + self.cfg.val)
         return x
 
@@ -781,7 +781,7 @@ class ParametersModule5(torch.nn.Module):
 
     def forward(self, x):
         counter = 0
-        for param in self.parameters():
+        for _param in self.parameters():
             counter += 1
 
         return x * self.scale * counter
@@ -841,7 +841,7 @@ class EnumValues(torch.nn.ModuleDict):
 
     def forward(self, init_features):
         features = [init_features]
-        for idx, layer in enumerate(self.values()):
+        for layer in self.values():
             new_features = layer(features)
             features.append(new_features)
         return torch.cat(features, 1)
@@ -2161,7 +2161,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
         opt_mod = torch.compile(fn, backend=cnts)
-        for i in range(8):
+        for _ in range(8):
             mod = Mod()
             opt_mod(torch.randn(5, 5), mod)
 
@@ -2516,7 +2516,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         compiled_model = torch.compile(model, backend="aot_eager")
 
         activations = compiled_activations
-        for i in range(2):
+        for _ in range(2):
             # second iteration is key, hooks would have fired during aot trace
             # on first iter
             compiled_activations.clear()
@@ -2526,7 +2526,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             loss.backward()
 
         activations = eager_activations
-        for i in range(2):
+        for _ in range(2):
             # second iteration is key, hooks would have fired during aot trace
             # on first iter
             eager_activations.clear()
@@ -2575,12 +2575,12 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         def save_activations(mod, inp, out):
             activations.append(inp)
 
-        for name, module in model.named_modules():
+        for module in model.modules():
             module.register_forward_hook(save_activations)
 
         cnt = torch._dynamo.testing.CompileCounter()
         model = torch.compile(model, backend=cnt, fullgraph=True)
-        for i in range(2):
+        for _ in range(2):
             # second iteration is key, hooks would have fired during aot trace
             # on first iter
             activations.clear()
@@ -2703,7 +2703,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         model = torch.compile(model, backend="aot_eager")
 
-        for i in range(2):
+        for _ in range(2):
             # second iteration is key, hooks would have fired during aot trace
             # on first iter
             x = torch.randn((20, 10))
@@ -2762,6 +2762,22 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         optim_res = torch.compile(MyModule(), backend=cnt)(torch.ones(10, 10))
         self.assertEqual(eager_res, optim_res)
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_specialized_module___iter__(self):
+        ml = torch.nn.ModuleList(
+            [
+                torch.nn.Linear(10, 10),
+            ]
+        )
+        ml.torchdynamo_force_dynamic = False
+
+        def f(x):
+            it = ml.__iter__()
+            return next(it)(x)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.randn(10)
+        self.assertEqual(f(x), opt_f(x))
 
     def test_module_dict_iter_keys(self):
         class MyModule(torch.nn.Module):

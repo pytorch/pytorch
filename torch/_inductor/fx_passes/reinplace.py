@@ -3,10 +3,10 @@ import itertools
 import logging
 import operator
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 import torch
 import torch.fx.node
@@ -434,7 +434,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     for i, node in enumerate(reversed(graph.nodes)):
         node_order[node] = len(graph.nodes) - i - 1
         storage_to_nodes[get_node_storage(node)].append(node)
-        if node.target == aten.copy_.default and node.args[0].op in (
+        if node.target is aten.copy_.default and node.args[0].op in (
             "placeholder",
             "get_attr",
         ):
@@ -442,13 +442,13 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             src = node.args[1]
             # If the target is a getitem and it indexes a possible clone,
             # then skip over it
-            if src.target == operator.getitem and (
+            if src.target is operator.getitem and (
                 (
                     src.args[0].target == triton_kernel_wrapper_functional
                     and src.args[0].kwargs["kwargs"][src.args[1]] == node.args[0]
                 )
                 or (src.args[0].target in inplaceable_foreach_ops)
-                or (src.args[0].target == torch.ops.higher_order.auto_functionalized)
+                or (src.args[0].target is torch.ops.higher_order.auto_functionalized)
             ):
                 src = src.args[0]
 
@@ -643,7 +643,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                         # output atindex size(out)+i.
                         # This used to compare string with integers before for auto_functionalize_v2. Not sure
                         # if it was needed for inplaceable_triton_ops?
-                        if user.target == operator.getitem and user.args[1] == arg:
+                        if user.target is operator.getitem and user.args[1] == arg:
                             replace_dict[user] = mutated_arg
 
                 if isinstance(mutated_arg, (list, tuple)):
@@ -679,7 +679,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 if copy_node is not None:
                     replace_dict[copy_node] = copy_node.args[0]
                 node.target = inplaceable_op.inplace_op
-        elif node.target == torch.ops.higher_order.auto_functionalized_v2:
+        elif node.target is torch.ops.higher_order.auto_functionalized_v2:
             _mutable_op = node.args[0]
             kwargs = node.kwargs
 
@@ -696,7 +696,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # auto_functionalized into clones + a mutable op; this metadata
             # tells the decomp to only clone the following inputs
             node.meta["only_clone_these_tensors"] = new_bases_to_clone
-        elif node.target == torch.ops.higher_order.auto_functionalized:
+        elif node.target is torch.ops.higher_order.auto_functionalized:
             _mutable_op = node.args[0]
             from torch._higher_order_ops.auto_functionalize import get_mutable_args
 

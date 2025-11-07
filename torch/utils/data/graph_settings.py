@@ -58,7 +58,7 @@ def apply_sharding(
     """
     graph = traverse_dps(datapipe)
 
-    def _helper(graph, prev_applied=None):
+    def _helper(graph, prev_applied=None) -> None:
         for dp, sub_graph in graph.values():
             applied = None
             if _is_sharding_datapipe(dp):
@@ -116,7 +116,8 @@ def apply_shuffle_settings(
     if not shufflers and shuffle:
         warnings.warn(
             "`shuffle=True` was set, but the datapipe does not contain a `Shuffler`. Adding one at the end. "
-            "Be aware that the default buffer size might not be sufficient for your task."
+            "Be aware that the default buffer size might not be sufficient for your task.",
+            stacklevel=2,
         )
         datapipe = datapipe.shuffle()
         shufflers = [

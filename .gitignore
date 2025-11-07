@@ -127,6 +127,7 @@ torch/test/
 torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h
 torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h
 torch/version.py
+torch/_inductor/kernel/vendored_templates/*
 minifier_launcher.py
 aten/src/ATen/native/transformers/hip/flash_attn/ck/fmha_fwd_d*
 aten/src/ATen/native/transformers/hip/flash_attn/ck/fmha_bwd_d*
@@ -143,6 +144,7 @@ scripts/release_notes/*.json
 sccache-stats*.json
 lint.json
 merge_record.json
+.github/scripts/nightly_source_matrix.json
 
 # These files get copied over on invoking setup.py
 torchgen/packaged/*
@@ -397,3 +399,4 @@ CLAUDE.local.md
 /test_*.py
 /debug_*.py
 CLAUDE_CONTEXT/
+/.claude/settings.local.json

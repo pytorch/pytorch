@@ -1,7 +1,8 @@
 import collections
 import functools
 import inspect
-from typing import Any, Callable, final, Optional, Union
+from collections.abc import Callable
+from typing import Any, final, Optional, Union
 from typing_extensions import Self
 
 from ..utils import is_function_or_wrapper
@@ -33,6 +34,7 @@ class LazyCache:
             self.vt = builder.VariableBuilder(tx, self.source)(self.value)
 
         if self.name_hint is not None:
+            # pyrefly: ignore [missing-attribute]
             self.vt.set_name_hint(self.name_hint)
 
         del self.value

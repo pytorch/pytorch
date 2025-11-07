@@ -624,7 +624,8 @@ class DataLoader(Generic[_T_co]):
             warnings.warn(
                 _create_warning_msg(
                     max_num_worker_suggest, self.num_workers, cpuset_checked
-                )
+                ),
+                stacklevel=2,
             )
             return
 
@@ -632,7 +633,8 @@ class DataLoader(Generic[_T_co]):
             warnings.warn(
                 _create_warning_msg(
                     max_num_worker_suggest, self.num_workers, cpuset_checked
-                )
+                ),
+                stacklevel=2,
             )
 
 
@@ -663,14 +665,15 @@ class _BaseDataLoaderIter:
         if loader.pin_memory and loader.pin_memory_device:
             warnings.warn(
                 "pin_memory_device is deprecated, the current accelerator will be used as the device,"
-                f"ignore pin_memory_device='{loader.pin_memory_device}'."
+                f"ignore pin_memory_device='{loader.pin_memory_device}'.",
+                stacklevel=2,
             )
         if loader.pin_memory and not torch.accelerator.is_available():
             warn_msg = (
                 "'pin_memory' argument is set as true but no accelerator is found, "
                 "then device pinned memory won't be used."
             )
-            warnings.warn(warn_msg)
+            warnings.warn(warn_msg, stacklevel=2)
 
         # Enabling pin_memory in _BaseDataLoaderIter to support identical
         # behavior in forked implementations using _BaseDataLoaderIter.
@@ -678,7 +681,6 @@ class _BaseDataLoaderIter:
 
         # Set pin memory device based on the current accelerator.
         self._pin_memory_device = (
-            # pyrefly: ignore  # unbound-name
             acc.type
             if self._pin_memory
             and (acc := torch.accelerator.current_accelerator()) is not None
@@ -695,7 +697,7 @@ class _BaseDataLoaderIter:
                 "'pin_memory' argument is set as true but not supported on MPS now, "
                 "device pinned memory won't be used."
             )
-            warnings.warn(warn_msg)
+            warnings.warn(warn_msg, stacklevel=2)
 
         self._timeout = loader.timeout
         self._collate_fn = loader.collate_fn
@@ -752,7 +754,7 @@ class _BaseDataLoaderIter:
                         "IterableDataset replica at each worker. Please see "
                         "https://pytorch.org/docs/stable/data.html#torch.utils.data.IterableDataset for examples."
                     )
-                warnings.warn(warn_msg)
+                warnings.warn(warn_msg, stacklevel=2)
             return data
 
     def __len__(self) -> int:
