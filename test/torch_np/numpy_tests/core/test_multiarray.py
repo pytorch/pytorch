@@ -6131,7 +6131,7 @@ class TestArrayCreationCopyArgument(TestCase):
             assert res is not base_arr
 
         for copy in self.false_vals:
-            res = np.array(arr, copy=False)
+            res = np.array(arr, copy=copy)
             assert_array_equal(res, base_arr)
             assert res is base_arr  # numpy trusts the ArrayLike
 

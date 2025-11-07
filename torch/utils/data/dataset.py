@@ -205,7 +205,7 @@ class TensorDataset(Dataset[tuple[Tensor, ...]]):
     def __getitem__(self, index):
         return tuple(tensor[index] for tensor in self.tensors)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.tensors[0].size(0)
 
 
@@ -267,10 +267,10 @@ class StackDataset(Dataset[_T_stack]):
                             "Nested dataset's output size mismatch."
                             f" Expected {len(indices)}, got {len(items)}"
                         )
-                    for data, d_sample in zip(items, dict_batch):
+                    for data, d_sample in zip(items, dict_batch, strict=True):
                         d_sample[k] = data
                 else:
-                    for idx, d_sample in zip(indices, dict_batch):
+                    for idx, d_sample in zip(indices, dict_batch, strict=True):
                         d_sample[k] = dataset[idx]
             return dict_batch
 
@@ -284,15 +284,15 @@ class StackDataset(Dataset[_T_stack]):
                         "Nested dataset's output size mismatch."
                         f" Expected {len(indices)}, got {len(items)}"
                     )
-                for data, t_sample in zip(items, list_batch):
+                for data, t_sample in zip(items, list_batch, strict=True):
                     t_sample.append(data)
             else:
-                for idx, t_sample in zip(indices, list_batch):
+                for idx, t_sample in zip(indices, list_batch, strict=True):
                     t_sample.append(dataset[idx])
         tuple_batch: list[_T_tuple] = [tuple(sample) for sample in list_batch]
         return tuple_batch
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self._length
 
 
@@ -327,7 +327,7 @@ class ConcatDataset(Dataset[_T_co]):
                 raise AssertionError("ConcatDataset does not support IterableDataset")
         self.cumulative_sizes = self.cumsum(self.datasets)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.cumulative_sizes[-1]
 
     def __getitem__(self, idx):
@@ -374,7 +374,7 @@ class ChainDataset(IterableDataset):
                 raise AssertionError("ChainDataset only supports IterableDataset")
             yield from d
 
-    def __len__(self):
+    def __len__(self) -> int:
         total = 0
         for d in self.datasets:
             if not isinstance(d, IterableDataset):
@@ -412,7 +412,7 @@ class Subset(Dataset[_T_co]):
         else:
             return [self.dataset[self.indices[idx]] for idx in indices]
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.indices)
 
 
@@ -477,5 +477,5 @@ def random_split(
     lengths = cast(Sequence[int], lengths)
     return [
         Subset(dataset, indices[offset - length : offset])
-        for offset, length in zip(itertools.accumulate(lengths), lengths)
+        for offset, length in zip(itertools.accumulate(lengths), lengths, strict=True)
     ]
