@@ -54,6 +54,7 @@ __all__ = [
     "tree_leaves",
     "tree_flatten",
     "tree_flatten_with_path",
+    "tree_structure",
     "tree_unflatten",
 ]
 
@@ -106,7 +107,7 @@ def tree_is_leaf(
 ) -> bool:
     if (tree is None and none_is_leaf) or (is_leaf is not None and is_leaf(tree)):
         return True
-    if optree.register_pytree_node.get(type(tree), namespace=namespace) is None:  # type: ignore[attr-defined]
+    if optree.register_pytree_node.get(type(tree), namespace=namespace) is None:
         return True
     return False
 
@@ -269,6 +270,39 @@ class PyTreeSpec:
         paths: list[tuple[Any, ...]] = []
         helper(self, ())
         return paths
+
+    def accessors(self, /) -> list[optree.PyTreeAccessor]:
+        def helper(
+            treespec: Self,
+            entry_path_prefix: tuple[tuple[optree.PyTreeEntry], ...],
+        ) -> None:
+            if treespec.is_leaf():
+                entry_paths.append(entry_path_prefix)
+                return
+
+            handler = optree.register_pytree_node.get(
+                treespec.type, namespace=treespec.namespace
+            )
+            assert handler is not None
+            kind = handler.kind
+            path_entry_type = handler.path_entry_type
+
+            for entry, subspec in zip(
+                treespec._entries,
+                treespec._children,
+                strict=True,
+            ):
+                helper(
+                    subspec,
+                    (
+                        entry_path_prefix
+                        + (path_entry_type(entry, treespec.type, kind),)
+                    ),
+                )
+
+        entry_paths: list[tuple[optree.PyTreeEntry, ...]] = []
+        helper(self, ())
+        return [optree.PyTreeAccessor(path) for path in entry_paths]
 
     def children(self, /) -> list[Self]:
         return list(self._children)
@@ -447,7 +481,7 @@ def treespec_tuple(
             "All children PyTreeSpecs must have the same `namespace` value "
             f"as the parent; expected {namespace!r}, got: {children!r}.",
         )
-    handler = optree.register_pytree_node.get(tuple, namespace=namespace)  # type: ignore[attr-defined]
+    handler = optree.register_pytree_node.get(tuple, namespace=namespace)
     assert handler is not None
     return PyTreeSpec(
         tuple(children),
@@ -633,6 +667,28 @@ def _C_flatten_with_path(
         none_is_leaf=none_is_leaf,
         namespace=namespace,
     )
+
+
+@substitute_in_graph(  # type: ignore[arg-type]
+    optree.tree_structure,
+    # We need to disable constant folding here because we want the function to reference the
+    # PyTreeSpec class defined above, not the one in the C++ module.
+    can_constant_fold_through=False,
+)
+def tree_structure(
+    tree: PyTree,
+    /,
+    is_leaf: Callable[[PyTree], bool] | None = None,
+    *,
+    none_is_leaf: bool = False,
+    namespace: str = "",
+) -> PyTreeSpec:
+    return tree_flatten(  # type: ignore[return-value]
+        tree,
+        is_leaf=is_leaf,
+        none_is_leaf=none_is_leaf,
+        namespace=namespace,
+    )[1]
 
 
 @substitute_in_graph(  # type: ignore[arg-type]
