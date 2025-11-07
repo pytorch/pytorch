@@ -2713,7 +2713,10 @@ def _compile_fx_main(
 
             is_valid_aoti_model_name()
 
-            with functorch_config.patch(unlift_effect_tokens=True):
+            with functorch_config.patch(
+                unlift_effect_tokens=True,
+                selective_decompose=config.selective_decompose,
+            ):
                 gm, graph_signature = aot_export_module(
                     model_,
                     example_inputs_,
@@ -2773,7 +2776,10 @@ def _compile_fx_main(
             V.set_fake_mode(fake_mode),
             torch._guards.tracing(tracing_context),
             compiled_autograd._disable(),
-            functorch_config.patch(unlift_effect_tokens=True),
+            functorch_config.patch(
+                unlift_effect_tokens=True,
+                selective_decompose=config.selective_decompose,
+            ),
         ):
             try:
                 return aot_autograd(

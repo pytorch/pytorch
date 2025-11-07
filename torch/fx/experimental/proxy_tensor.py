@@ -1945,7 +1945,11 @@ class SelectiveDecomposeInterpreter(fx.Interpreter):
 
 
 def selective_decompose(
-    joint_gm: fx.GraphModule, *args, decomposition, should_decompose, trace_joint_graph: bool
+    joint_gm: fx.GraphModule,
+    *args,
+    decomposition,
+    should_decompose,
+    trace_joint_graph: bool,
 ) -> fx.GraphModule:
     """Retrace a joint graph module and selectively apply decomposition."""
 
@@ -1958,6 +1962,7 @@ def selective_decompose(
                 joint_gm, should_decompose, decomposition
             ).run(*args)
     else:
+
         def wrap_fn(*args):
             return SelectiveDecomposeInterpreter.recursive_wrap(
                 joint_gm, should_decompose, decomposition

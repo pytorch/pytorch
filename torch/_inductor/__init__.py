@@ -317,6 +317,7 @@ def aot_compile(
 
 lite_mode_options = {
     "fallback_by_default": True,
+    "selective_decompose": True,
     "use_dce": False,
     "allow_buffer_reuse": False,
     "reorder_for_peak_memory": False,

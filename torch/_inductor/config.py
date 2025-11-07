@@ -550,6 +550,12 @@ max_autotune_flex_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
 fallback_by_default: bool = False
 
 
+# This config allows for selective decomposition of certain operators in the graph.
+# Currently the only use case is to patch the same-name config in functorch.
+# See more details in [Note: Selective Decomposition]
+selective_decompose: bool = False
+
+
 # When False, skip decompositions unless for fx nodes with special annotations.
 use_decomposition: bool = True
 
