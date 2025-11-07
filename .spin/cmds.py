@@ -61,7 +61,7 @@ def _updated_hashes():
 @click.command()
 def setup_lint():
     """Set up lintrunner with current CI version."""
-    cmd = ["uvx", "lintrunner@0.12.7", "init"]
+    cmd = ["uvx", "--python", "3.10", "lintrunner@0.12.7", "init"]
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
