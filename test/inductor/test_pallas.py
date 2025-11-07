@@ -305,8 +305,8 @@ class PallasTests(TestCase):
         expected = contiguous_mul(x)
         self.assertEqual(result, expected)
 
-        # Test 3: Non-contiguous views will fail at runtime with JAX/Pallas
-        # This demonstrates that the Pallas backend requires contiguous memory layout
+        # Test 3: Non-contiguous views should work with the simplified dlpack approach
+        # The direct dlpack conversion handles non-contiguous tensors correctly
         def operate_on_tensor(x):
             return x.sin()
 
@@ -319,21 +319,12 @@ class PallasTests(TestCase):
         x_t = x.t()  # Non-contiguous view
         self.assertFalse(x_t.is_contiguous())
 
-        # This will fail because JAX/Pallas cannot handle non-contiguous layout via DLPack
-        # The error indicates that our contiguous-only approach is correct
-        with self.assertRaises((RuntimeError, Exception)) as cm:
-            result = compiled(x_t)
+        # With the simplified dlpack approach, non-contiguous tensors now work
+        result = compiled(x_t)
+        expected = operate_on_tensor(x_t)
+        self.assertEqual(result, expected)
 
-        # Verify the error is related to layout/contiguous issues
-        error_msg = str(cm.exception)
-        self.assertTrue(
-            "layout" in error_msg.lower()
-            or "contiguous" in error_msg.lower()
-            or "non-default" in error_msg.lower(),
-            f"Expected layout/contiguous error, got: {error_msg}",
-        )
-
-        # But if we make it contiguous first, it should work
+        # Contiguous tensors should also continue to work
         x_t_contiguous = x_t.contiguous()
         self.assertTrue(x_t_contiguous.is_contiguous())
         result = compiled(x_t_contiguous)

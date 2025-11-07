@@ -1026,7 +1026,6 @@ try:
 except ImportError:
     import torch._C as _C_for_compiled_check
 
-    # The __file__ check only works for Python 3.7 and above.
     if _C_for_compiled_check.__file__ is None:
         raise ImportError(
             textwrap.dedent(
