@@ -8,17 +8,10 @@ from ..utils import try_import_cutlass
 if try_import_cutlass():
     import enum
 
-    from cutlass_library.arch_constants import (  # noqa: F401, F403
-        INTEL_XE_ARCH_MAX,
-        INTEL_XE_ARCH_MIN,
-    )
     from cutlass_library.gemm_operation import *  # noqa: F401, F403
     from cutlass_library.library import *  # noqa: F401, F403
 
     _LOGGER = logging.getLogger(__name__)
-
-    def is_xpu_arch(arch: int) -> bool:
-        return INTEL_XE_ARCH_MIN <= arch and arch <= INTEL_XE_ARCH_MAX
 
     class EmitGemmUniversal3xInstanceWithEVT:
         """Responsible for emitting a CUTLASS 3.x template definition"""
@@ -40,6 +33,7 @@ if try_import_cutlass():
             ${element_epilogue}
             >"""
             self.evt_name = evt_name
+            self.device_type = device_type
             self.gemm_template = """
 using ${operation_name}_epilogue =
 typename cutlass::epilogue::collective::CollectiveBuilder<
@@ -181,7 +175,7 @@ ${compile_guard_end}
                     f"cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(\
 sizeof(typename {str(operation.procedural_name())}_epilogue::SharedStorage))>"
                 )
-            if is_xpu_arch(operation.arch):
+            if self.device_type == "xpu":
                 stage_count_string = "cutlass::gemm::collective::StageCountAuto"
 
             epi_tile_mn = "cutlass::epilogue::collective::EpilogueTileAuto"
@@ -358,11 +352,11 @@ cute::Layout<cute::Shape<int,int,int>, {operation_name_str}_StrideNarrow>{{}}));
             if self.evt_name:
                 epilogue_functor = self.evt_name
 
-            arch = (
-                "cutlass::arch::IntelXe"
-                if is_xpu_arch(operation.arch)
-                else f"cutlass::arch::Sm{operation.arch}"
-            )
+            if self.device_type == "xpu":
+                arch = f"cutlass::arch::Xe{operation.arch}"
+            else:
+                arch = f"cutlass::arch::Sm{operation.arch}"
+
             values = {
                 "operation_name": operation_name_str,
                 "operation_suffix": self.operation_suffix,
