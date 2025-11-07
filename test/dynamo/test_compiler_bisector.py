@@ -283,7 +283,7 @@ class TestCompilerBisector(TestCase):
     )
     def test_bisect_pre_grad_graph(self):
         def f(x):
-            for i in range(5):
+            for _ in range(5):
                 x = x + 1
             return x.relu()
 
