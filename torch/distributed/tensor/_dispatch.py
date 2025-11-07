@@ -9,6 +9,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
+from torch._library.utils import fill_defaults
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpInfo, OpSchema, OutputSpecType
@@ -19,7 +20,10 @@ from torch.distributed.tensor._tp_conv import (
     convolution_backward_handler,
     convolution_handler,
 )
-from torch.distributed.tensor._utils import try_find_mesh_from_args
+from torch.distributed.tensor._utils import (
+    ExplicitRedistributionContext,
+    try_find_mesh_from_args,
+)
 from torch.distributed.tensor.placement_types import Partial, Placement, Replicate
 from torch.utils._debug_mode import get_active_debug_mode
 from torch.utils._python_dispatch import return_and_correct_aliasing
@@ -32,6 +36,23 @@ except ImportError:
 
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
+
+
+def as_strided_handler(
+    op_call: torch._ops.OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+):
+    args, kwargs = fill_defaults(op_call._schema, args, kwargs)
+    assert not kwargs
+    tensor, size, stride, storage_offset = args
+    if (
+        tensor.size() == tuple(size)
+        and tensor.stride() == tuple(stride)
+        and (storage_offset is None or tensor.storage_offset() == storage_offset)
+    ):
+        return torch.ops.aten.alias.default(tensor)
+    raise RuntimeError("as_strided not supported with DTensor")
 
 
 def is_same_size_handler(
@@ -121,6 +142,7 @@ class OpDispatcher:
             aten.convolution.default: convolution_handler,
             aten.convolution_backward.default: convolution_backward_handler,
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
+            aten.as_strided.default: as_strided_handler,
         }
 
     # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
@@ -180,6 +202,10 @@ class OpDispatcher:
         if participating:
             # computation that happens in the current rank of the mesh, normal case
             if output_sharding.needs_redistribute:
+                if ExplicitRedistributionContext.is_active():
+                    raise RuntimeError(
+                        f"Implicit redistribution occurred while ExplicitRedistributionContext was active for {op_info.schema}"
+                    )
                 # If sharding propagation decision needs redistribute, perform redistribute
                 # on args first, which could potentially modify args (i.e. allgather certain arg)
                 assert output_sharding.redistribute_schema is not None

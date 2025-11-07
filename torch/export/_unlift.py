@@ -57,11 +57,11 @@ def eq_spec(self: pytree.TreeSpec, other: pytree.TreeSpec) -> bool:
                 return False
         elif a.context != b.context:
             return False
-        if len(a.children_specs) != len(b.children_specs):
+        if a.num_children != b.num_children:
             return False
         return all(
             _match_normalized_structure(a, b)
-            for a, b in zip(a.children_specs, b.children_specs)
+            for a, b in zip(a.children(), b.children())
         )
 
     return _match_normalized_structure(self, other)
@@ -357,13 +357,13 @@ def _get_codegen(
     elif (
         in_spec.type is tuple
         and in_spec.num_children == 2
-        and in_spec.children_specs[0].type is tuple
-        and in_spec.children_specs[1].type is dict
+        and in_spec.child(0).type is tuple
+        and in_spec.child(1).type is dict
     ):
         # if in_spec contains the args (tuple) and kwargs (dict)
-        names = [f"arg_{i}" for i in range(in_spec.children_specs[0].num_children)]
+        names = [f"arg_{i}" for i in range(in_spec.child(0).num_children)]
         # add kwarg names
-        names.extend(in_spec.children_specs[1].context)
+        names.extend(in_spec.child(1).context)
     else:
         names = [f"arg_{i}" for i in range(in_spec.num_children)]
 
