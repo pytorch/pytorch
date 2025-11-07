@@ -210,7 +210,7 @@ def parse_xml_and_upload_json() -> None:
         print(f"Failed to parse and upload json test reports: {e}")
 
 
-def upload_adhoc_failure_json(invoking_file: str) -> None:
+def upload_adhoc_failure_json(invoking_file: str, current_failure: str) -> None:
     """
     manually upload a json to s3 indicating that the entire test file failed
     since xml was probably not generated in this case
@@ -222,11 +222,20 @@ def upload_adhoc_failure_json(invoking_file: str) -> None:
         print(f"Failed to get job_id or workflow_id: {e}")
         return
 
+    split_failure = current_failure.split("::")
+    if len(split_failure) >= 2:
+        className = split_failure[-2]
+        testName = split_failure[-1]
+    else:
+        testName = current_failure
+        className = ""
+
     message = "The test file failed but we were not able to determine the exact unittest.  The most likely cause is a segfault"
     j = {
         "invoking_file": invoking_file,
         "file": f"{invoking_file}.py",
-        "name": "entire_test_suite_failure",
+        "name": testName,
+        "classname": className,
         "workflow_id": workflow_id,
         "workflow_run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
         "job_id": job_id,
