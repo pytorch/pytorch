@@ -160,20 +160,6 @@ def _fa4_backward_support_error(
     return None
 
 
-def _fa4_as_int32(tensor: torch.Tensor | None) -> torch.Tensor | None:
-    if tensor is None:
-        return None
-    if tensor.dtype == torch.int32 and tensor.is_contiguous():
-        return tensor
-    return tensor.to(dtype=torch.int32).contiguous()
-
-
-def _fa4_to_optional_int(value: int | None) -> int | None:
-    if value is None:
-        return None
-    return int(value)
-
-
 def _transpose_dense(*tensors: torch.Tensor) -> tuple[torch.Tensor, ...]:
     return tuple(t.transpose(1, 2) for t in tensors)
 
@@ -182,8 +168,8 @@ def _fa4_run_forward(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    cum_seq_q: torch.Tensor | None,
-    cum_seq_k: torch.Tensor | None,
+    cu_seq_q: torch.Tensor | None,
+    cu_seq_k: torch.Tensor | None,
     scale: float | None,
     is_causal: bool,
     window_size_left: int | None,
@@ -196,11 +182,11 @@ def _fa4_run_forward(
     kwargs: dict[str, Any] = {
         "softmax_scale": scale,
         "causal": is_causal,
-        "window_size_left": _fa4_to_optional_int(window_size_left),
-        "window_size_right": _fa4_to_optional_int(window_size_right),
+        "window_size_left": window_size_left,
+        "window_size_right": window_size_right,
         "return_lse": True,
-        "cu_seqlens_q": _fa4_as_int32(cum_seq_q),
-        "cu_seqlens_k": _fa4_as_int32(cum_seq_k),
+        "cu_seqlens_q": cu_seq_q,
+        "cu_seqlens_k": cu_seq_k,
         "seqused_k": seqused_k
         if seqused_k is None or seqused_k.is_contiguous()
         else seqused_k.contiguous(),
@@ -216,8 +202,8 @@ def _fa4_run_backward(
     value: torch.Tensor,
     out: torch.Tensor,
     logsumexp: torch.Tensor,
-    cum_seq_q: torch.Tensor | None,
-    cum_seq_k: torch.Tensor | None,
+    cu_seq_q: torch.Tensor | None,
+    cu_seq_k: torch.Tensor | None,
     scale: float | None,
     is_causal: bool,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -233,8 +219,8 @@ def _fa4_run_backward(
         logsumexp.contiguous(),
         softmax_scale=scale,
         causal=is_causal,
-        cu_seqlens_q=_fa4_as_int32(cum_seq_q),
-        cu_seqlens_k=_fa4_as_int32(cum_seq_k),
+        cu_seqlens_q=cu_seq_q,
+        cu_seqlens_k=cu_seq_k,
     )
     return dq, dk, dv
 
