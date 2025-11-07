@@ -42,6 +42,7 @@ from torch._guards import Source
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
+    format_frame_info,
     get_dynamo_observed_exception,
     handle_observed_exception,
     InfiniteGeneratorError,
@@ -1643,11 +1644,7 @@ class SkipFunctionVariable(VariableTracker):
             if skip_frame_msg:
                 skip_frame_msg = skip_frame_msg.as_python_constant()
                 f"Skip frame due to `torch._dynamo.skip_frame()`. Message: {skip_frame_msg}"
-            frame_info = (
-                f"{getattr(tx.f_code, 'co_name', '<unknown>')} "
-                f"({getattr(tx.f_code, 'co_filename', '<unknown>')} "
-                f"line {getattr(tx.f_code, 'co_firstlineno', 0)})"
-            )
+            frame_info = format_frame_info(tx.f_code)
             msg = (
                 f"torch.compile intentionally decided to skip the frame {frame_info} and fall back to eager.\n"
                 f"Reason: Skip frame due to `torch._dynamo.skip_frame()`. Message: {skip_frame_msg}"
