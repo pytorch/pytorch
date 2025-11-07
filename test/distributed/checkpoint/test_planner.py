@@ -216,7 +216,7 @@ class TestSavePlan(TestCase):
         # Number of plans should remain unchanged
         self.assertEqual(len(all_plans), len(deduped_plans))
 
-        # Numer of items in the deduped plans should be less than the original plans
+        # Number of items in the deduped plans should be less than the original plans
         for new_plan, old_plan in zip(deduped_plans, all_plans):
             self.assertFalse(_compare_save_plans(new_plan, old_plan))
             self.assertTrue(len(new_plan.items) < len(old_plan.items))

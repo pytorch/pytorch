@@ -1988,7 +1988,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         self.assertEqual(self.world_size - 1, len(known_context_ids))
 
         t1 = torch.rand((3, 3), requires_grad=True)
-        for i in range(100):
+        for _ in range(100):
             dst = self._next_rank()
             t1 = rpc.rpc_sync(worker_name(dst), torch.add, args=(t1, t1))
 

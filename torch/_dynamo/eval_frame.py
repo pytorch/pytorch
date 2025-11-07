@@ -39,6 +39,7 @@ import types
 import unittest
 import warnings
 import weakref
+from collections.abc import Sized
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
@@ -394,6 +395,13 @@ class OptimizedModule(torch.nn.Module):
         self.dynamo_ctx = dynamo_ctx
         self._initialize()
         self.training = self._orig_mod.training
+
+    def __len__(self) -> int:
+        # Proxy the len call to the original module
+        if isinstance(self._orig_mod, Sized):
+            return len(self._orig_mod)
+        # Mimic python's default behavior for objects without a length
+        raise TypeError(f"{type(self._orig_mod).__name__} does not support len()")
 
     def _initialize(self) -> None:
         # Do this stuff in constructor to lower overhead slightly
@@ -1211,7 +1219,9 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 
 # Make dynamo graph to have same input/output spec as user code
 def argument_names(
-    f_sig: inspect.Signature, args: list[Any], kwargs: dict[str, Any]
+    f_sig: inspect.Signature,
+    args: Union[list[Any], tuple[Any, ...]],
+    kwargs: dict[str, Any],
 ) -> list[str]:
     def signature_to_fullargspec(sig: inspect.Signature) -> inspect.FullArgSpec:
         # Get a list of Parameter objects from the Signature object
@@ -1782,7 +1792,7 @@ def rewrite_signature(
         for i, val in enumerate(sources):
             dict_of_source_vals[id(val)] = i
 
-        for i, val in enumerate(candidates):
+        for val in candidates:
             if isinstance(val, tuple(common_constant_types)):
                 matched_elements_positions.append(None)
             elif id(val) not in dict_of_source_vals:
@@ -2128,7 +2138,7 @@ def export(
 
             # Error if we have any constraints on static values
 
-            for k in shape_env.var_to_range.keys():
+            for k in shape_env.var_to_range:
                 if isinstance(k, sympy.Integer):
                     constraint_violation_error = ConstraintViolationError(
                         f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"

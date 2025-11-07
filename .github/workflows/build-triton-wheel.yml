@@ -55,7 +55,7 @@ jobs:
         docker-image: ["pytorch/manylinux2_28-builder:cpu"]
         include:
           - device: "rocm"
-            rocm_version: "7.0"
+            rocm_version: "7.1"
             runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
           - device: "cuda"
             rocm_version: ""
@@ -159,12 +159,7 @@ jobs:
             WITH_CLANG_LDD="--with-clang-ldd"
           fi
 
-          if [[ "${BUILD_DEVICE}" == xpu ]]; then
-            docker exec -t "${container_name}" bash -c "dnf install -y gcc-toolset-13-gcc-c++"
-            docker exec -t "${container_name}" bash -c "source /opt/rh/gcc-toolset-13/enable && ${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
-          else
-            docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
-          fi
+          docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
 
           if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "xpu") ]]; then
             docker exec -t "${container_name}"  bash -c "auditwheel repair --plat ${PLATFORM} //artifacts/*.whl"

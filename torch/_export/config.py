@@ -10,6 +10,7 @@ behavior, including:
 import sys
 from typing import Any, TYPE_CHECKING
 
+from torch._environment import is_fbcode
 from torch.utils._config_module import install_config_module
 
 
@@ -26,6 +27,11 @@ detect_non_strict_fake_tensor_leaks = False
 # this type of error usually happens when we encounter an op
 # that we don't know how to proxy, resulting in untracked fake tensors
 error_on_lifted_constant_tensors = True
+
+# enable auto_functionalized_v2 in export
+# We turn this off in fbcode due to downstream users not
+# being ready to handle auto_functionalized_v2.
+enable_auto_functionalized_v2_for_export = not is_fbcode()
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

@@ -298,5 +298,5 @@ def handle_effects(
     assert isinstance(wrapped_token, torch.Tensor)
     tokens[key] = wrapped_token
 
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     return ctx.wrap_tensors(unwrapped_outs)
