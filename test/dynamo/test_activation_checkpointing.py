@@ -1761,9 +1761,9 @@ class GraphModule(torch.nn.Module):
             out: "f32[4, 4]" = l_x_.sin()
 
             sin_1: "f32[4, 4]" = torch.sin(o)
-            child: "f32[4, 4]" = torch.cos(sin_1)
-            child_1: "f32[4, 4]" = torch.sin(l_x_);  l_x_ = None
-            return (child, child_1, matmul, o, out, sin_1)
+            cos: "f32[4, 4]" = torch.cos(sin_1)
+            sin_2: "f32[4, 4]" = torch.sin(l_x_);  l_x_ = None
+            return (cos, sin_2, matmul, o, out, sin_1)
 """,
         )
 
