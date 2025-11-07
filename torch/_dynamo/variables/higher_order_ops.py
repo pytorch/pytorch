@@ -1870,6 +1870,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         combine_freevars_proxy = list(combine_lifted_freevars.keys())
         combine_result_vars = combine_result.unpack_var_sequence(tx)
 
+        _combine_spec = None
         if combine_fn_is_normalized:
             carry_vars, out_vars = _extract_carry_and_out(
                 combine_result_vars, len(init_vars)
@@ -1888,6 +1889,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 out_vars
             ).unpack_var_sequence(tx)
 
+            _combine_spec = _make_inlined(tx, pytree.tree_structure)(combine_result)
             check_meta_consistency_vt(
                 init_vars,
                 carry_vars,
@@ -1926,15 +1928,28 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             additional_inputs_proxy,
         )
 
-        return _call_function_and_unflatten_output(
-            tx,
-            torch.ops.higher_order.scan,
-            p_args,
-            {},
-            None,
-            None,
-            combile_graph_output_vts,
+        from .builder import wrap_fx_proxy
+
+        flat_variable = wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                torch.ops.higher_order.scan,
+                args=p_args,
+                kwargs={},
+            ),
+            example_value=None,
         )
+
+        if _combine_spec:
+            flat_list_variable = BuiltinVariable(list).call_function(
+                tx, [flat_variable], {}
+            )
+            return _make_inlined(tx, pytree.tree_unflatten)(
+                flat_list_variable, _combine_spec
+            )
+        else:
+            return flat_variable
 
 
 def non_single_tensor_return_unsupported(api, ret):
@@ -2018,17 +2033,6 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             supports_input_mutation=self.supports_input_mutation,
             supports_aliasing=self.supports_aliasing,
         )
-
-        # # Check all outputs of map are tensors.
-        # # For map, outputting None is OK, thus ignore None values in the check
-        # body_r_vars = body_r.unpack_var_sequence(tx)
-        # none_mask = [
-        #     type(x.realize()) is ConstantVariable and x.as_python_constant() is None
-        #     for x in body_r_vars
-        # ]
-        # _check_all_tensorvariable(
-        #     [br for bm, br in zip(none_mask, body_r_vars) if not bm]
-        # )
 
         body_nn_modules = dict(tx.output.nn_modules)
 
@@ -3534,12 +3538,6 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         if len(p_kwargs) > 0:
             unimplemented("kwargs should have been flattened into lifted args")
-
-        # flat_example_value = pytree.tree_map_only(
-        #     torch.fx.Proxy,
-        #     lambda a: a.node.meta["example_value"],
-        #     body_r.as_proxy(),
-        # )
 
         p_args = (
             p_args[0],
