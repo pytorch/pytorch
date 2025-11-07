@@ -1089,7 +1089,7 @@ def extract_arguments(start, string):
     return arguments
 
 
-def str2bool(v) -> bool:
+def str2bool(v : str) -> bool:
     """ArgumentParser doesn't support type=bool. Thus, this helper method will convert
     from possible string types to True / False."""
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
