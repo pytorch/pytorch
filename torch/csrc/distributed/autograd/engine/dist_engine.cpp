@@ -98,7 +98,12 @@ void DistEngine::globalCpuThread(
                     InputBuffer::variables(std::move(task.inputs_))]() mutable {
       InputBuffer inputs(variables.size());
       for (const auto i : c10::irange(variables.size())) {
-        inputs.add(i, std::move(variables[i]), std::nullopt, std::nullopt);
+        inputs.add(
+            i,
+            std::move(variables[i]),
+            std::nullopt,
+            std::nullopt,
+            graphRoot.get());
       }
       execute_graph_task_until_ready_queue_empty(
           /*node_task*/ NodeTask(graphTask, graphRoot, std::move(inputs)),

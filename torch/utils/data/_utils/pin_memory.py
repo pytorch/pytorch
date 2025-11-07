@@ -23,7 +23,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
     torch.multiprocessing._set_thread_name("pt_data_pin")
     torch.accelerator.set_device_index(device_id)
 
-    def do_one_step():
+    def do_one_step() -> None:
         try:
             r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
         except queue.Empty:
