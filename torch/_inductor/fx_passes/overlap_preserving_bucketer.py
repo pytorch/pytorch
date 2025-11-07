@@ -176,6 +176,7 @@ class OverlapPreservingBucketer:
         head = None
         prev_event = None
         position = 0
+        hiding_nodes = OrderedSet()
 
         for node in self.scheduled:
             node_type = None
@@ -183,11 +184,13 @@ class OverlapPreservingBucketer:
             # Determine if this node is relevant for this PG
             if node in self.collective_info and get_group_name(node) == pg:
                 node_type = "starts"
+                if hn := self.collective_info[node].hiding_node:
+                    hiding_nodes.add(hn)
             elif is_wait_tensor(node):
                 wait_input = node.args[0]
                 if isinstance(wait_input, fx.Node) and get_group_name(wait_input) == pg:
                     node_type = "waits"
-            elif is_compute_node(node):
+            elif is_compute_node(node) or node in hiding_nodes:
                 node_type = "compute"
 
             if node_type is None:
@@ -205,7 +208,7 @@ class OverlapPreservingBucketer:
 
             prev_event = event
             position += 1
-
+        # from IPython import embed; embed(); exit()
         return head
 
     def _populate_node_to_event(self, pg: str) -> None:
