@@ -408,6 +408,79 @@ class TestOverlapPreservingBucketing(InductorTestCase):
                 "%all_gather_into_tensor_out", 1, exactly=False
             ).run(graph_str)
 
+    def test_can_bucket_all_reduce(self):
+        """
+        Test that all_reduce operations CAN bucket together.
+
+        Graph structure:
+        ar1_start -> ar2_start -> mm1 (hides ar1) -> mm2 (hides ar2) -> ar1_wait -> ar2_wait
+        """
+
+        def func(a, b):
+            group_name = "0"
+
+            # Start both all_reduce operations
+            ar1 = torch.ops._c10d_functional.all_reduce(a, "sum", group_name)
+            ar2 = torch.ops._c10d_functional.all_reduce(b, "sum", group_name)
+
+            # Independent compute that can hide both
+            mm1 = torch.mm(a, a)
+            mm2 = torch.mm(b, b)
+
+            # Wait for both
+            ar1_out = torch.ops._c10d_functional.wait_tensor(ar1)
+            ar2_out = torch.ops._c10d_functional.wait_tensor(ar2)
+
+            return ar1_out.sum() + ar2_out.sum() + mm1.sum() + mm2.sum()
+
+        # Use fake mode to trace without executing
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device) * 2
+
+            # Trace with make_fx
+            traced = make_fx(func)(a, b)
+
+        # Find nodes
+        ar1, ar2 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_reduce.default,
+        )
+        mm1, mm2 = traced.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.mm.default
+        )
+
+        # For all_reduce, start_node == wait_node (no separate wait)
+        hiding_annotations = {
+            ar1: mm1,
+            ar2: mm2,
+        }
+
+        # Build collective info
+        collective_info = build_collective_info(traced.graph, hiding_annotations)
+        node_ancestors = compute_ancestors(traced.graph)
+        scheduled = OrderedSet(traced.graph.nodes)
+
+        # Run bucketing
+        from torch._inductor.fx_passes.overlap_preserving_bucketer import (
+            OverlapPreservingBucketer,
+        )
+
+        bucketer = OverlapPreservingBucketer(
+            traced.graph,
+            collective_info,
+            node_ancestors,
+            scheduled,
+        )
+        bucketer.bucket_collectives()
+
+        # Verify: should have 1 bucketed all_reduce
+        # After bucketing, there should be only one all_reduce node (the bucketed one)
+        graph_str = str(traced.graph)
+        FileCheck().check_count("%all_reduce", 1, exactly=True).check_count(
+            "%mm", 2
+        ).run(graph_str)
+
     def test_can_bucket_multidtype_collectives(self):
         """
         Test that all_gathers with different dtypes CAN bucket together.

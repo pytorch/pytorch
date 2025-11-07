@@ -981,6 +981,41 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             correct = func(a, b, c, ranks=ranks)
             self.assertTrue(same(out, correct))
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(get_bucket_patches())
+    def test_basic_all_reduce_bucketing(self):
+        """Test that independent all_reduce operations get bucketed together."""
+
+        def func(a, b, c):
+            # Three independent all_reduces that should be bucketed
+            ar1 = _functional_collectives.all_reduce(a, "sum", "0")
+            ar2 = _functional_collectives.all_reduce(b, "sum", "0")
+            ar3 = _functional_collectives.all_reduce(c, "sum", "0")
+
+            return ar1.sum() + ar2.sum() + ar3.sum()
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            a = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
+            b = torch.ones(4, 4, dtype=torch.float, device=device_type) * 2
+            c = torch.ones(4, 4, dtype=torch.float, device=device_type) * 3
+
+            compiled = torch.compile(func)
+            out, aten_graph_str = run_and_get_aten_graph(compiled, a, b, c)
+
+            # Should see a single bucketed all_reduce
+            FileCheck().check_count(
+                "torch.ops._c10d_functional.wait_tensor.default", 1, exactly=True
+            ).run(aten_graph_str)
+
+            # Verify correctness
+            correct = func(a, b, c)
+            self.assertTrue(same(out, correct))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

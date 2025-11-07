@@ -746,7 +746,9 @@ class OverlapPreservingBucketer:
         """
 
         from torch._inductor.fx_passes.bucketing import (
+            is_all_reduce_tensor,
             merge_all_gather_bucket,
+            merge_all_reduce_bucket,
             merge_reduce_scatter_bucket,
         )
 
@@ -771,6 +773,13 @@ class OverlapPreservingBucketer:
                 bucket,
                 insert_before=next_node,
                 mode="custom_ops",
+            )
+        elif is_all_reduce_tensor(bucket[0]):
+            new_nodes, replacements = merge_all_reduce_bucket(
+                self.graph,
+                bucket,
+                mode="custom_ops",
+                insert_before=next_node,
             )
         else:
             assert is_reduce_scatter(bucket[0])
