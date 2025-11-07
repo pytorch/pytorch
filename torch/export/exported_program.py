@@ -817,7 +817,7 @@ def _common_getitem_elimination_pass(
             node_id: dict[torch.fx.Node, str] = {}
             getitems: dict[str, torch.fx.Node] = {}
             for node in list(module.graph.nodes):
-                if node.op == "call_function" and node.target == operator.getitem:
+                if node.op == "call_function" and node.target is operator.getitem:
                     source, idx = node.args
                     new_id = f"{node_id[source]}.{idx}"
                     if new_id in getitems:

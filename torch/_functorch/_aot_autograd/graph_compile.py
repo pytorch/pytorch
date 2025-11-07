@@ -25,6 +25,9 @@ from typing import Any, Optional, TYPE_CHECKING, Union
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+import threading
+from contextlib import contextmanager
+
 import torch
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
@@ -41,7 +44,7 @@ from torch._subclasses import FakeTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
-from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
+from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals, guard_or_true
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -88,7 +91,6 @@ from .schemas import (
 )
 from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
 from .utils import (
-    _get_symint_hints,
     contain_metadata_mutation_ops,
     get_cuda_generator_meta_val,
     make_boxed_func,
@@ -96,6 +98,43 @@ from .utils import (
     strict_zip,
     unlift_tokens,
 )
+
+
+_thread_local = threading.local()
+
+
+# Saved tensor hooks context
+# Compiled saved tensor hooks are convenient way to inline some logic in the graphs
+# for saved nodes from forward to backward. (E.g. activations quantization)
+# In base implementation user does not have any additional information about saved value
+# in the hook, except FakeTensor shape, dtype, device etc.
+# _get_saved_tensor_hook_context gives additional graph information about that saved value,
+# that can be used to make a decisions which pack/unpack to apply for particular saved value.
+# This allows user to reuse saved tensors hooks api to apply selective pack/unpack in
+# graph aware way.
+# Alternative to this will be making user to write a custom pass that mucks with forward outputs,
+# backward input metadata, which requires significantly more effort.
+#
+# As for now in context we expose forward graph, backward graph and current saved node,
+# which contains node.meta with additional information about that fx.Node.
+# Warning: This API may change without backward compatibility.
+@contextmanager
+def _saved_tensor_hook_context(state: dict[str, Any]):
+    previous_state = getattr(_thread_local, "state", None)
+    try:
+        _thread_local.state = state
+        yield
+    finally:
+        # Clean up: restore previous state or remove attribute
+        if previous_state is not None:
+            _thread_local.state = previous_state
+        else:
+            if hasattr(_thread_local, "state"):
+                delattr(_thread_local, "state")
+
+
+def _get_saved_tensor_hook_context() -> dict[str, Any] | None:
+    return getattr(_thread_local, "state", None)
 
 
 zip = strict_zip
@@ -1098,7 +1137,11 @@ def maybe_inline_graph_saved_tensors_hooks(
         if not isinstance(val, torch.Tensor):
             continue
 
-        pack_out_val = pack_hook_gm(val)
+        def _get_extra_info() -> dict[str, Any]:
+            return {"_fw_graph": fw_g, "_bw_graph": bw_g, "_node": saved}
+
+        with _saved_tensor_hook_context(_get_extra_info()):
+            pack_out_val = pack_hook_gm(val)
 
         requires_sc_handling = any(
             is_traceable_wrapper_subclass(x) for x in pytree.tree_leaves(pack_out_val)
@@ -1110,16 +1153,17 @@ def maybe_inline_graph_saved_tensors_hooks(
                 " in the pack hook, and reconstructing the subclass in the unpack hook"
             )
 
-        pack_gm = prepare_hook_gm(aot_config, pack_hook_gm, (val,))
-        pack_g = pack_gm.graph
-        maybe_log_graph(
-            pack_gm,
-            f"saved_tensors_pack_hook {saved.name}",
-            aot_config,
-            lambda: f"aot_saved_tensors_hooks_pack {saved.name}",
-            structured_logs,
-        )
-        pack_out_val = pack_gm(val)
+        with _saved_tensor_hook_context(_get_extra_info()):
+            pack_gm = prepare_hook_gm(aot_config, pack_hook_gm, (val,))
+            pack_g = pack_gm.graph
+            maybe_log_graph(
+                pack_gm,
+                f"saved_tensors_pack_hook {saved.name}",
+                aot_config,
+                lambda: f"aot_saved_tensors_hooks_pack {saved.name}",
+                structured_logs,
+            )
+            pack_out_val = pack_gm(val)
 
         # Install pack hook graph as eiplogue of fw_module.
         # Saved tensor output becomes input of pack hook graph.
@@ -1189,15 +1233,16 @@ def maybe_inline_graph_saved_tensors_hooks(
         # Install unpack hook graph as a prologue of backward graph
         # Saved tensors inputs are replaced with packed tensors and packed sym scalars.
         # The saved tensors inputs usages in the graph are replaced with unpack hook graph outputs.
-        unpack_gm = prepare_hook_gm(aot_config, unpack_hook_gm, (pack_out_val,))
-        unpack_g = unpack_gm.graph
-        maybe_log_graph(
-            unpack_gm,
-            f"saved_tensors_unpack_hook {saved.name}",
-            aot_config,
-            lambda: f"aot_saved_tensors_hooks_unpack {saved.name}",
-            structured_logs,
-        )
+        with _saved_tensor_hook_context(_get_extra_info()):
+            unpack_gm = prepare_hook_gm(aot_config, unpack_hook_gm, (pack_out_val,))
+            unpack_g = unpack_gm.graph
+            maybe_log_graph(
+                unpack_gm,
+                f"saved_tensors_unpack_hook {saved.name}",
+                aot_config,
+                lambda: f"aot_saved_tensors_hooks_unpack {saved.name}",
+                structured_logs,
+            )
 
         def find_saved_in_bw_inputs(bw_inputs):
             for n in bw_inputs:
@@ -1773,8 +1818,28 @@ def _aot_stage2b_bw_compile(
 
                 # Comparing ph_arg.stride() with real_stride directly may
                 # cause dynamic dimensions in ph_arg being specialized to static
-                # value. Using the hints to avoid that.
-                if _get_symint_hints(ph_arg.stride()) != real_stride:
+                # value. Using suppress_guards and guard_or_true to avoid that.
+
+                stride_different = False
+                fake_mode = detect_fake_mode()
+                suppress_ctx = (
+                    fake_mode.shape_env.suppress_guards()
+                    if fake_mode is not None and fake_mode.shape_env is not None
+                    else nullcontext()
+                )
+
+                # Inductor can choose different strides for activations than
+                # what backward graph has. if we can't statically tell that
+                # strides are the same, we assume they are not.
+                with suppress_ctx:
+                    for k in range(len(ph_arg.stride())):
+                        # real_stride can't be symbolic.
+                        # pyrefly: ignore [index-error]
+                        if guard_or_true(ph_arg.stride()[k] != int(real_stride[k])):
+                            stride_different = True
+                            break
+
+                if stride_different:
                     # Note that here we use the stride of the real tensor to
                     # restride a FakeTensor. This does not cause trouble
                     # for dynamic shape since this code path only get
@@ -2139,6 +2204,7 @@ def _aot_stage2b_compile_forward_or_inference(
     - FunctionalizedRngRuntimeWrapper
     - FakifiedOutWrapper
     """
+
     # Validation
     if not is_inference and num_fw_outs_saved_for_bw is None:
         raise ValueError(
