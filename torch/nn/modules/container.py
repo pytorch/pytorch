@@ -519,8 +519,7 @@ class ModuleDict(Module):
       :meth:`~torch.nn.ModuleDict.update`).
 
     Note that :meth:`~torch.nn.ModuleDict.update` with other unordered mapping
-    types (e.g., Python's plain ``dict`` before Python version 3.6) does not
-    preserve the order of the merged mapping.
+    types does not preserve the order of the merged mapping.
 
     Args:
         modules (iterable, optional): a mapping (dictionary) of (string: module)
