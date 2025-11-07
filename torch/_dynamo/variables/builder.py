@@ -591,7 +591,7 @@ class VariableBuilder:
         if not all_const:
             unimplemented_v2(
                 gb_type="non-const keys in mappingproxy",
-                context=f"non-const keys: {[k for k in value.keys() if not ConstantVariable.is_literal(k)]}",
+                context=f"non-const keys: {[k for k in value.keys() if not ConstantVariable.is_literal(k)]}",  # noqa: SIM118
                 explanation="Dynamo expects mappingproxy keys to be constants.",
                 hints=[
                     "Ensure your mappingproxy keys are constants (e.g. int, float, strings)",
