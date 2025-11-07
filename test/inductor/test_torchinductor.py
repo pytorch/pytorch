@@ -30,6 +30,7 @@ import numpy as np
 import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.aoti_eager
+import torch.fx.traceback as fx_traceback
 import torch.nn as nn
 from torch._C._dynamo.guards import assert_alignment, assert_size_stride
 from torch._dispatch.python import enable_python_dispatcher
@@ -13602,8 +13603,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         FileCheck().check("torch.ops.aten._fused_rms_norm.default(").run(code[0])
 
     @skip_if_cpu
-    def test_lite_inductor_regional_compile(self):
-        import torch.fx.traceback as fx_traceback
+    def test_lite_regional_compile_flex_attention(self):
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
         def _squared(score, b, h, m, n):
@@ -13642,6 +13642,78 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         # Check that inductor compilation is called twice
         _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
+        self.assertEqual(len(codes), 2)
+
+    def test_lite_regional_compile_invoke_subgraph_inner(self):
+        # Checks that the inductor regions are searched recursively.
+
+        @torch.compiler.nested_compile_region
+        def gn(x):
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                return torch.sin(x)
+
+        def fn(x):
+            x = x + 1
+            x = gn(x)
+            x = x + 1
+            x = gn(x)
+            return torch.sigmoid(x)
+
+        opt_fn = torch.compile(fn, mode="lite", fullgraph=True)
+        x = torch.randn(10, requires_grad=True)
+
+        _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
+        # the invoke_subgraph is called twice - but the inside code is compiled
+        # once - so in total 2 (1 fwd + 1 bwd)
+        self.assertEqual(len(codes), 2)
+
+    def test_lite_regional_compile_invoke_subgraph(self):
+        # Checks that get_attr nodes custom metadata is propagated
+        @torch.compiler.nested_compile_region
+        def gn(x):
+            return torch.sin(x)
+
+        def fn(x):
+            x = x + 1
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                z = gn(x)
+            return torch.sigmoid(z)
+
+        opt_fn = torch.compile(fn, mode="lite", fullgraph=True)
+        x = torch.randn(10, requires_grad=True)
+
+        _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
+        self.assertEqual(len(codes), 2)
+
+    def test_lite_regional_compile_repeated_blocks(self):
+        def fn(x, y):
+            sin = torch.sin(x)
+
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                mul = sin * y
+                add = mul + 1
+
+            return torch.sin(add)
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                a = fn(x, y)
+                return fn(a, y)
+
+        mod = Mod()
+
+        opt_mod = torch.compile(
+            mod,
+            mode="lite",
+            fullgraph=True,
+        )
+        x = torch.randn(10, requires_grad=True)
+        y = torch.randn(10, requires_grad=True)
+
+        _, codes = run_fw_bw_and_get_code(lambda: opt_mod(x, y))
         self.assertEqual(len(codes), 2)
 
     @lowering.force_fallback(aten.sort.default)
