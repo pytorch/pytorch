@@ -299,7 +299,7 @@ class _ConfigEntry:
     hide: bool = False
     alias: Optional[str] = None
 
-    def __init__(self, config: _Config):
+    def __init__(self, config: _Config) -> None:
         self.default = config.default
         self.value_type = (
             config.value_type if config.value_type is not None else type(self.default)
@@ -792,7 +792,7 @@ class SubConfigProxy:
     `config.triton.cudagraphs` maps to _config["triton.cudagraphs"]
     """
 
-    def __init__(self, config: object, prefix: str):
+    def __init__(self, config: object, prefix: str) -> None:
         # `super().__setattr__` to bypass custom `__setattr__`
         super().__setattr__("_config", config)
         super().__setattr__("_prefix", prefix)
