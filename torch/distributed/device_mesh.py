@@ -644,7 +644,7 @@ else:
 
             root_mesh = self._get_root_mesh()
             root_to_flatten_mapping = root_mesh._flatten_mapping
-            if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping.keys():
+            if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping:
                 dim_group_name = root_to_flatten_mapping[
                     mesh_dim  # type: ignore[index]
                 ]._dim_group_names[0]
