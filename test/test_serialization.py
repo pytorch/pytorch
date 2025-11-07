@@ -1281,7 +1281,7 @@ class TestSerialization(TestCase, SerializationMixin):
             torch.save(p, f)
             f.seek(0)
             with self.assertRaisesRegex(pickle.UnpicklingError,
-                                        "GLOBAL __main__.Point was not an allowed global by default"):
+                                        f"GLOBAL {__name__}.Point was not an allowed global by default"):
                 torch.load(f, weights_only=True)
             f.seek(0)
             with torch.serialization.safe_globals([Point]):
@@ -1300,7 +1300,7 @@ class TestSerialization(TestCase, SerializationMixin):
             torch.save(c, f)
             f.seek(0)
             with self.assertRaisesRegex(pickle.UnpicklingError,
-                                        "GLOBAL __main__.ClassThatUsesBuildInstruction was not an allowed global by default"):
+                                        f"GLOBAL {__name__}.ClassThatUsesBuildInstruction was not an allowed global by default"):
                 torch.load(f, weights_only=True)
             try:
                 with torch.serialization.safe_globals([ClassThatUsesBuildInstruction]):
@@ -1330,7 +1330,7 @@ class TestSerialization(TestCase, SerializationMixin):
             torch.save(obj, f)
             f.seek(0)
             with self.assertRaisesRegex(pickle.UnpicklingError,
-                                        f"GLOBAL __main__.{obj_cls.__name__} was not an allowed global by default"):
+                                        f"GLOBAL {__name__}.{obj_cls.__name__} was not an allowed global by default"):
                 torch.load(f, weights_only=True)
 
             f.seek(0)
