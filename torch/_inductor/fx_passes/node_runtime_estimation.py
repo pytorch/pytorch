@@ -124,7 +124,7 @@ def benchmark_collective_with_cuda_events_impl(
     success, args, kwargs = fx_utils.get_fake_args_kwargs(n)
 
     opt_args_kwargs = normalize_function(
-        n.target,
+        n.target,  # type: ignore[arg-type]
         args=n.args,
         kwargs=n.kwargs,
         normalize_to_only_use_kwargs=True,
@@ -148,6 +148,7 @@ def benchmark_collective_with_cuda_events_impl(
 
             total_elems = 1
             for dim in shape:
+                assert dim is not None
                 total_elems *= dim
 
             actual_bytes = total_elems * t.dtype.itemsize
