@@ -165,21 +165,6 @@ def get_tests(workflow_run_id: int, workflow_run_attempt: int) -> list[dict[str,
         return flattened
 
 
-def get_tests_for_circleci(
-    workflow_run_id: int, workflow_run_attempt: int
-) -> list[dict[str, Any]]:
-    # Parse the reports and transform them to JSON
-    test_cases = []
-    for xml_report in Path(".").glob("**/test/test-reports/**/*.xml"):
-        test_cases.extend(
-            parse_xml_report(
-                "testcase", xml_report, workflow_run_id, workflow_run_attempt
-            )
-        )
-
-    return test_cases
-
-
 def summarize_test_cases(test_cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Group test cases by classname, file, and job_id. We perform the aggregation
     manually instead of using the `test-suite` XML tag because xmlrunner does
@@ -258,21 +243,11 @@ if __name__ == "__main__":
         required=True,
         help="Head repository of the workflow",
     )
-    parser.add_argument(
-        "--circleci",
-        action="store_true",
-        help="If this is being run through circleci",
-    )
     args = parser.parse_args()
 
     print(f"Workflow id is: {args.workflow_run_id}")
 
-    if args.circleci:
-        test_cases = get_tests_for_circleci(
-            args.workflow_run_id, args.workflow_run_attempt
-        )
-    else:
-        test_cases = get_tests(args.workflow_run_id, args.workflow_run_attempt)
+    test_cases = get_tests(args.workflow_run_id, args.workflow_run_attempt)
 
     # Flush stdout so that any errors in the upload show up last in the logs.
     sys.stdout.flush()
