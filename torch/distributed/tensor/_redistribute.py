@@ -456,7 +456,6 @@ class DTensorRedistributePlanner:
                     new_path = path + [next_state]
                     counter += 1
                     heapq.heappush(pq, (new_cost, counter, next_state, new_path))
-        torch.distributed.breakpoint()
         raise AssertionError(
             f"No path found from src_state {src_state} to dst_state {dst_state}"
         )
@@ -500,7 +499,8 @@ class DTensorRedistributePlanner:
                 dst_spec.placements, dst_spec.mesh
             )
         )
-        assert src_shard_order is not None and dst_shard_order is not None
+        assert src_shard_order is not None
+        assert dst_shard_order is not None
         src_state = self.DistState(src_placements, src_shard_order)
         dst_state = self.DistState(dst_placements, dst_shard_order)
         transform_infos: list[_TransformInfo] = []

@@ -70,6 +70,8 @@ class StridedShard : public Shard {
       : Shard(dim), split_factor(split_factor_) {}
 
   // Override virtual equals to handle polymorphic comparison correctly
+  // TODO(zpcore): once _StridedShard is not a subclass of Shard, we can clean
+  // those up
   bool equals(const Shard& rhs) const override {
     // Only equal if rhs is also StridedShard with same dim and split_factor
     if (typeid(*this) != typeid(rhs)) {
