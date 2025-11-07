@@ -1871,7 +1871,7 @@ def _make_user_magic(method, user_type):
             setattrs(user_type, f"__r{method_name}__", rbinary_magic_impl)
 
 
-for method, func in magic_methods.items():  # type: ignore[assignment]
+for method in magic_methods:  # type: ignore[assignment]
     if method in only_bool_magic_methods:
         _make_user_magic(method, SymBool)
         continue

@@ -11,10 +11,11 @@ import sys
 import threading
 import traceback
 import typing
+from collections.abc import Callable
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from enum import Enum, IntEnum
-from typing import Any, Callable, IO, Optional, TypeVar
+from typing import Any, IO, Optional, TypeVar
 from typing_extensions import Never, ParamSpec
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read
@@ -23,6 +24,7 @@ from typing_extensions import Never, ParamSpec
 import torch._thread_safe_fork  # noqa: F401
 from torch._inductor import config
 from torch._inductor.codecache import torch_key
+from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.compile_worker.tracked_process_pool import (
     TrackedProcessPoolExecutor,
 )
@@ -131,6 +133,7 @@ class SubprocPool:
         nprocs: int,
         pickler: Optional[SubprocPickler] = None,
         kind: SubprocKind = SubprocKind.FORK,
+        quiesce: bool = False,
     ) -> None:
         entry = os.path.join(os.path.dirname(__file__), "__main__.py")
         self.pickler = pickler or SubprocPickler()
@@ -215,6 +218,13 @@ class SubprocPool:
             "pytorch.wait_counter.subproc_pool.first_job"
         ).guard()
 
+        if quiesce:
+            self.timer: Optional[Timer] = Timer(
+                config.quiesce_async_compile_time, self.quiesce
+            )
+        else:
+            self.timer = None
+
         # Start thread last to ensure all member variables are initialized
         # before any access.
         self.read_thread.start()
@@ -287,6 +297,8 @@ class SubprocPool:
             with self.futures_lock:
                 if not self.running:
                     return
+                if self.timer:
+                    self.timer.record_call()
                 if isinstance(result, _SubprocExceptionInfo):
                     # An exception occurred in the submitted job
                     self.pending_futures[job_id].set_exception(
@@ -321,6 +333,8 @@ class SubprocPool:
             with self.write_lock:
                 if not self.running:
                     return
+                if self.timer:
+                    self.timer.quit()
                 self.running = False
                 self.running_waitcounter.__exit__()
                 _send_msg(self.write_pipe, MsgHeader.SHUTDOWN)

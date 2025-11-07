@@ -35,6 +35,8 @@ from tempfile import TemporaryFile
 from typing import Any, IO, Optional, TYPE_CHECKING, Union
 from typing_extensions import Unpack
 
+import sympy
+
 
 try:
     from triton.runtime.autotuner import Autotuner, Heuristics
@@ -403,6 +405,7 @@ isolate_fails_code_str = None
                 # pyrefly: ignore [missing-attribute]
                 kernel._fn_name
                 if isinstance(kernel, JITFunction)
+                # pyrefly: ignore  # missing-attribute
                 else kernel.fn._fn_name
             )
             fn_name = fn_name.split(".")[-1]
@@ -441,22 +444,36 @@ isolate_fails_code_str = None
 
         # Extract symbolic variables from the same arguments
         # pyrefly: ignore [unbound-name]
-        if isinstance(arg, torch.SymInt):
-            sym_name = str(arg.node)
-            if arg.node.hint is not None:
-                used_syms[sym_name] = arg.node.hint
+        if (
+            # pyrefly: ignore [unbound-name]
+            isinstance(arg, torch.SymInt)
+            # By checking sympy.Symbol, we are excluding any symbolic expressions.
+            # TODO: we may need to solve expressions to extract symbol definitions.
+            and isinstance(arg.node.expr, sympy.Symbol)
+            and arg.node.hint is not None
+        ):
+            used_syms[str(arg.node)] = arg.node.hint
         # pyrefly: ignore [unbound-name]
         elif isinstance(arg, torch.Tensor):
             # Extract symbolic variables from tensor shapes and strides
             for dim in arg.shape:
                 # pyrefly: ignore [unbound-name]
-                if isinstance(dim, torch.SymInt) and dim.node.hint is not None:
+                if (
+                    # pyrefly: ignore [unbound-name]
+                    isinstance(dim, torch.SymInt)
+                    and isinstance(dim.node.expr, sympy.Symbol)
+                    and dim.node.hint is not None
+                ):
                     used_syms[str(dim.node)] = dim.node.hint
             for stride in arg.stride():
                 # pyrefly: ignore [unbound-name]
-                if isinstance(stride, torch.SymInt) and stride.node.hint is not None:
+                if (
+                    # pyrefly: ignore [unbound-name]
+                    isinstance(stride, torch.SymInt)
+                    and isinstance(stride.node.expr, sympy.Symbol)
+                    and stride.node.hint is not None
+                ):
                     used_syms[str(stride.node)] = stride.node.hint
-
     # Add symbolic variable definitions to the top of the generated code
     if used_syms:
         hint_lines = "\n".join(

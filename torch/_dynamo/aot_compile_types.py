@@ -48,7 +48,7 @@ class BundledAOTAutogradSerializableCallable(SerializableCallable):
 
     @classmethod
     def deserialize_compile_artifacts(cls, data: bytes) -> Any:
-        from torch._functorch._aot_autograd.autograd_cache import (
+        from torch._functorch._aot_autograd.aot_autograd_result import (
             deserialize_bundled_cache_entry,
         )
 

@@ -800,6 +800,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
                     stderr_redirects={0: stderr_redir},
                     ret_vals={0: queue},
                     queue_finished_reading_event=worker_finished_event_mock,
+                    numa_options=None,
                 )
                 self.assertEqual("hello_0", queue.get())
                 if stdout_redir:

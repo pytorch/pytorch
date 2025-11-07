@@ -469,7 +469,7 @@ def _flatten_optim_state_dict(
             for fqn in fqns:
                 if not unflat_osd_state[fqn]:
                     continue
-                for state_name in unflat_osd_state[fqn].keys():
+                for state_name in unflat_osd_state[fqn]:
                     unflat_osd_state[fqn][state_name] = _broadcast_state(
                         fsdp_state, unflat_osd_state[fqn][state_name], group=group
                     )
@@ -1377,9 +1377,7 @@ def _convert_all_state_info(
 
     for fqn, gathered_state in output_states.items():
         state_info = [s[fqn] for s in gathered_state_info]
-        all_tensor_states = sorted(
-            {n for state in state_info for n in state.tensors.keys()}
-        )
+        all_tensor_states = sorted({n for state in state_info for n in state.tensors})
         empty_ranks: set[int] = set()
         dtype: Optional[torch.dtype] = None
         # First check all the non-scalar states and get the information of
@@ -1549,7 +1547,7 @@ def _allgather_orig_param_states(
             fsdp_state._device_handle.memory_summary(),
         )
 
-    output_states: dict[str, dict[str, Any]] = {fqn: {} for fqn in input_states.keys()}
+    output_states: dict[str, dict[str, Any]] = {fqn: {} for fqn in input_states}
 
     dtype, state_buffers = _convert_all_state_info(
         fsdp_param_info, gathered_state_info, input_states, output_states

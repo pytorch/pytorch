@@ -574,7 +574,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     def init_fn(script_module):
         # Initialize the ScriptModule:
         # 1. Copy the attributes/parameters/buffers from the original `nn_module` to the new ScriptModule.
-        for name in concrete_type.get_attributes().keys():
+        for name in concrete_type.get_attributes():
             orig_value = getattr(nn_module, name)
             orig_value = (
                 orig_value.value

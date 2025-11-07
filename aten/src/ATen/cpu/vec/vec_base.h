@@ -672,7 +672,7 @@ struct Vectorized {
     return map(std::sqrt);
   }
   Vectorized<T> reciprocal() const {
-    return map([](T x) { return (T)(1) / x; });
+    return map([](T x) { return (T)1 / x; });
   }
   Vectorized<T> rsqrt() const {
     return map([](T x) { return (T)1 / std::sqrt(x); });

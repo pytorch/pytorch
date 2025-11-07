@@ -331,7 +331,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             def __init__(self, dim, num_blocks, enable_bias, enable_affine):
                 super().__init__()
                 layers = []
-                for i in range(num_blocks):
+                for _ in range(num_blocks):
                     layers.append(conv_module[dim](20, 20, 5, 1, bias=enable_bias))
                     bn_obj = bn_module[dim](num_features=20, affine=enable_affine)
                     if enable_affine:

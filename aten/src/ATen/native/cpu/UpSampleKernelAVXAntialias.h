@@ -342,7 +342,7 @@ void upsample_avx_bilinear_bicubic_uint8(
 
   if (need_horizontal) {
     int interp_dim = 3;
-    auto stride = (skip_unpacking) ? num_channels : 4;
+    auto stride = skip_unpacking ? num_channels : 4;
     std::tie(horiz_indices_weights, ksize_horiz, horiz_weights_precision) =
         F::compute_index_ranges_int16_weights(
             /*input_size=*/xin,
@@ -358,7 +358,7 @@ void upsample_avx_bilinear_bicubic_uint8(
 
   if (need_vertical) {
     int interp_dim = 2;
-    auto stride = (skip_unpacking) ? num_channels * xout : 4 * xout;
+    auto stride = skip_unpacking ? num_channels * xout : 4 * xout;
     std::tie(vert_indices_weights, ksize_vert, vert_weights_precision) =
         F::compute_index_ranges_int16_weights(
             /*input_size=*/yin,
@@ -377,17 +377,17 @@ void upsample_avx_bilinear_bicubic_uint8(
   // horizontal-only or vertical-only interpolation, and if the tensor doesn't
   // need repacking
   if (need_horizontal && (need_vertical || !skip_packing)) {
-    auto c = (skip_unpacking) ? num_channels : 4;
+    auto c = skip_unpacking ? num_channels : 4;
     buffer_horiz = at::empty({c, yin, xout}, input.options());
   }
   if (need_vertical && !skip_packing) {
-    auto c = (skip_unpacking) ? num_channels : 4;
+    auto c = skip_unpacking ? num_channels : 4;
     buffer_vert = at::empty({c, yout, xout}, input.options());
   }
 
   for (const auto i : c10::irange(batch_size)) {
 
-    at::Tensor unpacked_input = (skip_unpacking) ? input[i] : unpack_rgb(input[i]);
+    at::Tensor unpacked_input = skip_unpacking ? input[i] : unpack_rgb(input[i]);
     at::Tensor unpacked_output;
 
     if (need_horizontal) {
@@ -411,7 +411,7 @@ void upsample_avx_bilinear_bicubic_uint8(
       unpacked_output = unpacked_input = unpacked_output_temp;
     }
     if (need_vertical) {
-      unpacked_output = (skip_packing) ? output[i] : buffer_vert;
+      unpacked_output = skip_packing ? output[i] : buffer_vert;
 
       ImagingResampleVertical(
           unpacked_output,
@@ -502,7 +502,7 @@ void ImagingResampleHorizontalConvolution8u4x(
   // RGBA: b4_delta = b4_delta_soft = 3
   // RGB : b4_delta = 5
   // RGB : b4_delta_soft = 4
-  const auto b4_delta = (stride == 4) ? 3 : ((is_last_line) ? 5 : 4);
+  const auto b4_delta = (stride == 4) ? 3 : (is_last_line ? 5 : 4);
 
   // In block 2 (2 means we process 2 weights values together), we read input data
   // with _mm_loadl_epi64, i.e. 8 bytes, per one line:
@@ -515,7 +515,7 @@ void ImagingResampleHorizontalConvolution8u4x(
   // RGBA: b2_delta = b2_delta_soft = 1
   // RGB : b2_delta = 2
   // RGB : b2_delta_soft = 1
-  const auto b2_delta = (stride == 4) ? 1 : ((is_last_line) ? 2 : 1);
+  const auto b2_delta = (stride == 4) ? 1 : (is_last_line ? 2 : 1);
 
   const auto max_out_x_strided = out_xsize * stride;
   const auto max_in_x_strided = in_xsize * stride;
@@ -819,7 +819,7 @@ void ImagingResampleHorizontalConvolution8u(
   // RGBA: b8_delta = b8_delta_soft = 7
   // RGB : b8_delta = 10
   // RGB : b8_delta_soft = 9
-  const auto b8_delta = (stride == 4) ? 7 : ((is_last_line) ? 10 : 9);
+  const auto b8_delta = (stride == 4) ? 7 : (is_last_line ? 10 : 9);
 
   // In block 4 (4 means we process 4 weight values together), we read
   // 16 bytes of input data.
@@ -832,7 +832,7 @@ void ImagingResampleHorizontalConvolution8u(
   // RGBA: b4_delta = b4_delta_soft = 3
   // RGB : b4_delta = 5
   // RGB : b4_delta_soft = 4
-  const auto b4_delta = (stride == 4) ? 3 : ((is_last_line) ? 5 : 4);
+  const auto b4_delta = (stride == 4) ? 3 : (is_last_line ? 5 : 4);
 
   // In block 2 (2 means we process 2 weight values together), we read
   // 8 bytes of input data.
@@ -845,7 +845,7 @@ void ImagingResampleHorizontalConvolution8u(
   // RGBA: b2_delta = b2_delta_soft = 1
   // RGB : b2_delta = 2
   // RGB : b2_delta_soft = 1
-  const auto b2_delta = (stride == 4) ? 1 : ((is_last_line) ? 2 : 1);
+  const auto b2_delta = (stride == 4) ? 1 : (is_last_line ? 2 : 1);
 
   const auto max_out_x_strided = out_xsize * stride;
   const auto max_in_x_strided = in_xsize * stride;

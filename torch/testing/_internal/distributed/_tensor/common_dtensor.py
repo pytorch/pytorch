@@ -814,3 +814,7 @@ def map_local_tensor_for_rank(tensor, rank, func):
 @maybe_run_for_local_tensor
 def map_local_for_rank(rank, func):
     return func(rank)
+
+
+def reduce_local_int(val, func):
+    return func(val.node._local_ints)

@@ -2016,7 +2016,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         }
 
         with override_quantized_engine("x86"):
-            for unary_op in unary_map.keys():
+            for unary_op in unary_map:
                 m = TestHelperModules.Conv2dUnaryModule(
                     unary_map[unary_op][0], with_bn=True
                 )

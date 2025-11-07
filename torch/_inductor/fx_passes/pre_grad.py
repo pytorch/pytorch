@@ -737,7 +737,7 @@ def linear_permute_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
                 input_node = node.kwargs["input"]
             if (
                 input_node.op == "call_function"
-                and input_node.target == torch.nn.functional.linear
+                and input_node.target is torch.nn.functional.linear
             ):
                 normalized = NormalizedLinearNode(input_node)
                 input = normalized.get_input()

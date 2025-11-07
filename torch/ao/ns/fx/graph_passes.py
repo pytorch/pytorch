@@ -909,8 +909,7 @@ def create_a_shadows_b(
                         # is added
                         prev_node_c_list = [env_c[arg.name] for arg in prev_node_b]
 
-                        for arg_idx, arg in enumerate(prev_node_b):
-                            prev_node_c = prev_node_c_list[arg_idx]
+                        for arg_idx, prev_node_c in enumerate(prev_node_c_list):
                             env_c[prev_node_c.name] = _insert_logger_after_node(
                                 prev_node_c,
                                 gm_b,

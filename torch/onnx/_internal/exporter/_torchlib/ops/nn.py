@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, Sequence, TYPE_CHECKING
 
 from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
     opset20 as op20,
@@ -24,9 +24,6 @@ if TYPE_CHECKING:
     from onnxscript.values import Opset
 
 aten = torch.ops.aten
-
-_INT64_MAX = 9223372036854775807
-_INT64_MIN = -9223372036854775808
 
 
 @onnx_impl(aten.gelu.default, trace_only=True, opset_introduced=20)
@@ -51,9 +48,9 @@ def aten_group_norm(
 
     c = op21.Shape(input, start=1, end=2)
     if weight is None:
-        weight = op21.ConstantOfShape(c, value=ir.tensor(1.0, dtype=input.dtype))
+        weight = op21.ConstantOfShape(c, value=ir.tensor([1.0], dtype=input.dtype))
     if bias is None:
-        bias = op21.ConstantOfShape(c, value=ir.tensor(0.0, dtype=input.dtype))
+        bias = op21.ConstantOfShape(c, value=ir.tensor([0.0], dtype=input.dtype))
     return op21.GroupNormalization(
         input, weight, bias, epsilon=eps, num_groups=num_groups
     )
@@ -62,7 +59,7 @@ def aten_group_norm(
 @onnx_impl(aten.rms_norm.default, trace_only=True, opset_introduced=23)
 def aten_rms_norm(
     input: TFloat,
-    normalized_shape: list[int],
+    normalized_shape: Sequence[int],
     weight: Optional[TFloat] = None,
     eps: Optional[float] = None,
 ) -> TFloat:
@@ -81,7 +78,9 @@ def aten_rms_norm(
 
     # Create weight tensor if not provided
     if weight is None:
-        weight = op23.Constant(value=ir.tensor(1.0, dtype=input.dtype))
+        weight = op23.ConstantOfShape(
+            op23.Shape(input), value=ir.tensor([1], dtype=input.dtype)
+        )
 
     return op23.RMSNormalization(input, weight, axis=axis, epsilon=eps)
 

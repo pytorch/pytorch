@@ -42,6 +42,9 @@ fp16_ieee_to_fp32_value
 # fp32_from_bits called from fp16_ieee_to_fp32_value
 # fp32_to_bits called from fp16_ieee_from_fp32_value
 
+# torch/headeronly/util/HeaderOnlyArrayRef.h
+HeaderOnlyArrayRef
+
 # c10/util/complex.h, torch/headeronly/util/complex.h
 complex
 
@@ -136,3 +139,22 @@ AT_FORALL_COMPLEX_TYPES
 toString
 <<
 toUnderlying
+
+# torch/headeronly/core/Dispatch_v2.h
+THO_DISPATCH_V2_TMPL
+THO_PRIVATE_CASE_TYPE_USING_HINT_TMPL
+THO_DISPATCH_CASE_TMPL
+THO_DISPATCH_SWITCH_TMPL
+# AT_WRAP, THO_AP_VAR_TMPL, AT_CONCAT, AT_CONCAT_AUX, AT_EXPAND are tested through THO_DISPATCH_V2_TMPL
+# scalar_type is tested through THO_DISPATCH_SWITCH_TMPL
+AT_FLOAT8_TYPES
+AT_INTEGRAL_TYPES
+AT_FLOATING_TYPES
+AT_BAREBONES_UNSIGNED_TYPES
+AT_INTEGRAL_TYPES_V2
+AT_COMPLEX_TYPES
+AT_QINT_TYPES
+AT_ALL_TYPES
+AT_ALL_TYPES_AND_COMPLEX
+THO_DISPATCH_V2
+# THO_EMPTY, THO_DISPATCH_CASE, THO_DISPATCH_SWITCH, THO_PRIVATE_CASE_TYPE_USING_HINT are tested through THO_DISPATCH_V2

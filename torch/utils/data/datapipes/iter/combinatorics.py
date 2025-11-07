@@ -189,5 +189,5 @@ class ShufflerIterDataPipe(IterDataPipe[_T_co]):
         self._rng = random.Random()
         self._rng.setstate(rng_state)
 
-    def __del__(self):
+    def __del__(self) -> None:
         self._buffer.clear()

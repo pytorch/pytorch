@@ -28,8 +28,8 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
   PyCodeObject* co = F_CODE(frame);
   _framelocals.resize(co->co_nlocalsplus, nullptr);
 
-#if IS_PYTHON_3_15_PLUS || (IS_PYTHON_3_14_PLUS && defined(_WIN32))
-  TORCH_CHECK(false, "Python 3.15+ / 3.14 on Windows not supported");
+#if IS_PYTHON_3_15_PLUS
+  TORCH_CHECK(false, "Python 3.15+");
 #elif IS_PYTHON_3_14_PLUS
   if (!frame->stackpointer) {
     return;
@@ -63,11 +63,12 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
   };
 
   auto offset = co->co_nlocalsplus - co->co_nfreevars;
-#if IS_PYTHON_3_15_PLUS || (IS_PYTHON_3_14_PLUS && defined(_WIN32))
-  TORCH_CHECK(false, "Python 3.15+ / 3.14 on Windows not supported");
+#if IS_PYTHON_3_15_PLUS
+  TORCH_CHECK(false, "Python 3.15+");
 #elif IS_PYTHON_3_14_PLUS
   for (int i = 0; i < offset; i++) {
-    update_framelocals(i, PyStackRef_AsPyObjectBorrow(frame->localsplus[i]));
+    update_framelocals(
+        i, THP_PyStackRef_AsPyObjectBorrow(&frame->localsplus[i]));
   }
 #else
   for (int i = 0; i < offset; i++) {
@@ -76,9 +77,9 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
 #endif
 
   // Get references to closure variables
-#if IS_PYTHON_3_15_PLUS || (IS_PYTHON_3_14_PLUS && defined(_WIN32))
+#if IS_PYTHON_3_15_PLUS
   PyObject* closure;
-  TORCH_CHECK(false, "Python 3.15+ / 3.14 on Windows not supported");
+  TORCH_CHECK(false, "Python 3.15+");
 #else
   PyObject* closure = FUNC(frame)->func_closure;
 #endif

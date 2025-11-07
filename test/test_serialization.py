@@ -295,7 +295,7 @@ class SerializationMixin:
             5,
             6
         ]
-        for i in range(100):
+        for _ in range(100):
             data.append(0)
         t = torch.tensor(data, dtype=torch.uint8)
 

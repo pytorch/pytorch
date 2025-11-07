@@ -1413,10 +1413,14 @@ class MetaConverter(Generic[_TensorT]):
                     # TODO: Handle this better in Dynamo?
                     # There are checks there now, but this can still be triggered by a dense
                     # tensor graph input that is a view of a strided NT.
-                    from torch._dynamo.exc import unimplemented
+                    from torch._dynamo.exc import unimplemented_v2
 
-                    unimplemented(
-                        "strided nested tensors are not supported by meta conversion"
+                    # NOTE this graph break will NOT be present in Dynamo's graph break registry
+                    unimplemented_v2(
+                        gb_type="attempted to apply meta conversion to strided nested tensor",
+                        context=str(t),
+                        explanation="This is not supported.",
+                        hints=[],
                     )
                 elif t.is_mkldnn:
                     is_leaf = t.is_leaf
@@ -1450,10 +1454,13 @@ class MetaConverter(Generic[_TensorT]):
                         r = self._backward_error(r)
                 elif t.is_functorch_wrapped:
                     if t.is_view:
-                        from torch._dynamo.exc import unimplemented
+                        from torch._dynamo.exc import unimplemented_v2
 
-                        unimplemented(
-                            "view functorch tensors are not supported by meta conversion"
+                        unimplemented_v2(
+                            gb_type="attempted to apply meta conversion to view functorch tensor",
+                            context=str(t),
+                            explanation="This is not supported.",
+                            hints=[],
                         )
 
                     # Wraps a functorch tensor class (BatchedTensor, GradTrackingTensor)
@@ -1860,7 +1867,7 @@ class MetaConverter(Generic[_TensorT]):
                     nt_tensor_id=t.nested_int
                 )
 
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore [bad-argument-type, unbound-name]
             self.set_tensor_memo(t, r)
 
         return self._checked_get_tensor_memo(t)

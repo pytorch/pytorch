@@ -16,6 +16,7 @@ from torch._subclasses.meta_utils import is_sparse_any
 from torch.utils._python_dispatch import (
     _detect_infra_mode,
     _disable_infra_mode,
+    autograd_would_have_decomposed,
     return_and_correct_aliasing,
     TorchDispatchMode,
 )
@@ -376,7 +377,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         def _can_decompose(func):
             # See https://github.com/pytorch/pytorch/pull/115258#issuecomment-1900755832
             # Never decompose dropout in export
-            if self.export and func == torch.ops.aten.dropout.default:
+            if self.export and func is torch.ops.aten.dropout.default:
                 return False
 
             # We unconditionally decompose ops that are maybe aliasing or mutating ops
@@ -412,8 +413,13 @@ class FunctionalTensorMode(TorchDispatchMode):
                     return False
                 return True
 
-            # in normal torch.compile IR, we decompose functional composite ops
-            return True
+            # in normal torch.compile IR, we only decompose an op if autograd
+            # would have decomposed it (NB: autograd may have been skipped if
+            # we are in inference mode)
+            # TODO: the flatten here can potentially be deduped with the
+            # unwrapping pytree_map later
+            flat_args_kwargs, _ = pytree.tree_flatten((args, kwargs))
+            return autograd_would_have_decomposed(func, flat_args_kwargs)
 
         if (
             func not in FunctionalTensor.metadata_fns
@@ -549,7 +555,7 @@ class FunctionalTensorMode(TorchDispatchMode):
                     )
 
                     if self.export:
-                        if func == torch.ops.aten.dropout.default:
+                        if func is torch.ops.aten.dropout.default:
                             torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
                     outs_wrapped = pytree.tree_map_only(
                         torch.Tensor, wrap, outs_unwrapped
@@ -576,7 +582,7 @@ class FunctionalTensorMode(TorchDispatchMode):
             # aliasing correction step. Otherwise, we would be setting the storage of a
             # lifted tensor to that of an unlifted tensor.
             # Ref: https://github.com/pytorch/pytorch/issues/111506
-            or func == torch.ops.aten.lift_fresh.default
+            or func is torch.ops.aten.lift_fresh.default
         ):
             return outs_wrapped
         # for metadata mutations, need to manually mutate the metadata of the FunctionalTensor wrapper

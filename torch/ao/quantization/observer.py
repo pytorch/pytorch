@@ -250,17 +250,17 @@ class UniformQuantizationObserverBase(ObserverBase):
             )
         self.reduce_range = reduce_range
         self.register_buffer("eps", torch.tensor([eps], **factory_kwargs))
-        assert self.qscheme in (
+        if self.qscheme not in (
             torch.per_tensor_affine,
             torch.per_tensor_symmetric,
             torch.per_channel_affine,
             torch.per_channel_symmetric,
             torch.per_channel_affine_float_qparams,
-        ), (
-            "Default Observer only works for per_tensor_affine, \
-                per_tensor_symmetric, per_channel_affine, \
-                per_channel_symmetric and per_channel_float_qparams quantization scheme"
-        )
+        ):
+            raise AssertionError(
+                "Default Observer only works for per_tensor_affine, per_tensor_symmetric, "
+                "per_channel_affine, per_channel_symmetric and per_channel_float_qparams quantization scheme"
+            )
 
         _ALLOWED_DTYPES = (
             torch.qint8,
@@ -276,9 +276,10 @@ class UniformQuantizationObserverBase(ObserverBase):
             torch.uint16,
         )
 
-        assert self.dtype in _ALLOWED_DTYPES, (
-            f"Default Observer only works for {_ALLOWED_DTYPES} data type"
-        )
+        if self.dtype not in _ALLOWED_DTYPES:
+            raise AssertionError(
+                f"Default Observer only works for {_ALLOWED_DTYPES} data type"
+            )
         self.has_customized_qrange = (quant_min is not None) and (quant_max is not None)
         if self.has_customized_qrange:
             # pyrefly: ignore [bad-argument-type]
@@ -337,12 +338,12 @@ class UniformQuantizationObserverBase(ObserverBase):
         """
         # The variable names are prefixed with "initial" because their values (qmin and qmax) might be adjusted
         # based on whether quantization range is reduced and the datatype (signed/unsigned) used by the observer.
-        assert quant_min <= 0 <= quant_max, (
-            "Used-specified quantization range must include 0."
-        )
-        assert quant_min < quant_max, (
-            "qmin must be strictly less than qmax for user-specified quantization range."
-        )
+        if not quant_min <= 0 <= quant_max:
+            raise AssertionError("Used-specified quantization range must include 0.")
+        if quant_min >= quant_max:
+            raise AssertionError(
+                "qmin must be strictly less than qmax for user-specified quantization range."
+            )
 
     @torch.jit.export
     def _calculate_qparams(
@@ -1134,7 +1135,8 @@ class HistogramObserver(UniformQuantizationObserverBase):
         This follows the implementation of NormMinimization::NonlinearQuantizationParamsSearch in
         caffe2/quantization/server/norm_minimization.cc
         """
-        assert self.histogram.size()[0] == self.bins, "bins mismatch"
+        if self.histogram.size()[0] != self.bins:
+            raise AssertionError("bins mismatch")
         bin_width = (self.max_val - self.min_val) / self.bins
 
         # cumulative sum
@@ -1213,7 +1215,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         boundaries_new_histogram = torch.linspace(
             update_min, update_max, self.bins + 1, device=update_min.device
         ).to(histogram.device)
-        # this maps the mid-poits of the histogram to the new histogram's space
+        # this maps the mid-points of the histogram to the new histogram's space
         bucket_assignments = (
             torch.bucketize(mid_points_histogram, boundaries_new_histogram, right=True)
             - 1
@@ -1255,8 +1257,10 @@ class HistogramObserver(UniformQuantizationObserverBase):
             return transformed_orig_hist + update_hist
 
         # We assume the update_hist is already in the target range, we will map the orig_max to it
-        assert update_min <= orig_min
-        assert update_max >= orig_max
+        if update_min > orig_min:
+            raise AssertionError("update_min must be <= orig_min")
+        if update_max < orig_max:
+            raise AssertionError("update_max must be >= orig_max")
 
         # Now we need to turn the old_histogram, into the range of the new histogram
         transformed_orig_hist = self._upscale_histogram(
@@ -1276,9 +1280,8 @@ class HistogramObserver(UniformQuantizationObserverBase):
         self.min_val.copy_(min_val)
         self.max_val.resize_(max_val.shape)
         self.max_val.copy_(max_val)
-        assert min_val.numel() == 1 and max_val.numel() == 1, (
-            "histogram min/max values must be scalar."
-        )
+        if min_val.numel() != 1 or max_val.numel() != 1:
+            raise AssertionError("histogram min/max values must be scalar.")
         new_histogram = torch.histc(x, self.bins, min=min_val, max=max_val)  # type: ignore[arg-type]
         self.histogram.detach_().resize_(new_histogram.shape)
         self.histogram.copy_(new_histogram)
@@ -1356,10 +1359,11 @@ class HistogramObserver(UniformQuantizationObserverBase):
             return torch.tensor([1.0], device=self.min_val.device.type), torch.tensor(
                 [0], device=self.min_val.device.type
             )
-        assert self.bins == len(self.histogram), (
-            "The number of bins in histogram should be equal to the number of bins "
-            "supplied while making this observer"
-        )
+        if self.bins != len(self.histogram):
+            raise AssertionError(
+                "The number of bins in histogram should be equal to the number of bins "
+                "supplied while making this observer"
+            )
 
         new_min, new_max = self._non_linear_param_search()
 
@@ -1792,9 +1796,10 @@ def get_block_size(
         input_shape: The input tensor shape possibly more than 2 dimensions
         granularity: The granularity type of the quantization
     """
-    assert isinstance(granularity, Granularity), (
-        "Please provide an instance of Granularity, not subclass of it"
-    )
+    if not isinstance(granularity, Granularity):
+        raise AssertionError(
+            "Please provide an instance of Granularity, not subclass of it"
+        )
     if isinstance(granularity, PerTensor):
         return input_shape
     elif isinstance(granularity, PerAxis):
@@ -1804,9 +1809,10 @@ def get_block_size(
     elif isinstance(granularity, PerRow):
         return (1,) * (len(input_shape) - 1) + (input_shape[-1],)
     elif isinstance(granularity, PerGroup):
-        assert len(input_shape) == 2, (
-            f"Expecting input shape dim to be 2 for per group quantization, gotinput shape: {input_shape}"
-        )
+        if len(input_shape) != 2:
+            raise AssertionError(
+                f"Expecting input shape dim to be 2 for per group quantization, gotinput shape: {input_shape}"
+            )
         return (1, granularity.group_size)
     elif isinstance(granularity, PerToken):
         block_size = [1] * len(input_shape)
@@ -1843,8 +1849,8 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
         **kwargs,
     ):
         super().__init__()
-        assert granularity is not None, "granularity is None"
-
+        if granularity is None:
+            raise AssertionError("granularity is None")
         self.mapping_type = mapping_type
         self.target_dtype = target_dtype
         self.granularity = granularity
@@ -1882,10 +1888,10 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
         from torch.ao.quantization.fx.utils import create_getattr_from_value
 
         with model.graph.inserting_before(observer_node):
-            assert self.block_size is not None, "Expecting block_size to be populated"
-            assert self.original_dtype is not None, (
-                "Expecting original_dtype to be populated"
-            )
+            if self.block_size is None:
+                raise AssertionError("Expecting block_size to be populated")
+            if self.original_dtype is None:
+                raise AssertionError("Expecting original_dtype to be populated")
             if hasattr(self, "is_dynamic") and self.is_dynamic:
                 choose_qparams_affine = model.graph.call_function(
                     torch.ops.pt2e_quant.choose_qparams_affine,

@@ -26,6 +26,7 @@ from .decorators import (
     allow_in_graph,
     assume_constant_result,
     disable,
+    disable_nested_graph_breaks,
     disallow_in_graph,
     dont_skip_tracing,
     error_on_graph_break,
@@ -78,6 +79,7 @@ __all__ = [
     "assume_constant_result",
     "config",
     "disable",
+    "disable_nested_graph_breaks",
     "disallow_in_graph",
     "dont_skip_tracing",
     "export",
@@ -153,7 +155,6 @@ def reset() -> None:
         GenerationTracker.clear()
         TensorifyState.clear()
         torch._dynamo.utils.warn_once_cache.clear()
-        torch._dynamo.utils.user_obj_id_to_weakref.clear()
         torch._C._autograd._saved_tensors_hooks_set_tracing(False)
 
 

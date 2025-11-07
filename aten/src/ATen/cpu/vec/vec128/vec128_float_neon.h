@@ -309,7 +309,7 @@ class Vectorized<float> {
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(expm1)
   // Implementation copied from Arm Optimized Routine
   // https://github.com/ARM-software/optimized-routines/blob/master/math/aarch64/advsimd/expf.c
-  Vectorized<float> exp_u20() const {
+  inline Vectorized<float> vexpq_f32_u20() const {
     // bail out to sleef if it's a special case:
     // i.e. there's an input s.t. |input| > 87.3....
     const float32x4_t special_bound = vdupq_n_f32(0x1.5d5e2ap+6f);
@@ -347,6 +347,9 @@ class Vectorized<float> {
     float32x4_t poly = vfmaq_f32(p, q, r2);
 
     return vfmaq_f32(scale, poly, scale);
+  }
+  Vectorized<float> exp_u20() const {
+    return vexpq_f32_u20();
   }
   Vectorized<float> fexp_u20() const {
     return exp_u20();
@@ -634,7 +637,7 @@ inline Vectorized<float> Vectorized<float>::erf() const {
   // - exp(- x * x)
   auto pow_2 = (*this) * (*this);
   auto neg_pow_2 = pow_2 ^ neg_zero_vec;
-  auto tmp4 = neg_pow_2.exp();
+  auto tmp4 = neg_pow_2.vexpq_f32_u20();
   auto tmp5 = tmp4 ^ neg_zero_vec;
   // erf(x) = sign(x) * (1 - r * t * exp(- x * x))
   auto tmp6 = t * tmp5;

@@ -493,7 +493,7 @@ class _RemoteModule(nn.Module):
 
     def _check_attribute_picklability(self):
         """Check if all the attribute has explicitly defined whether to be pickled (i.e., picklability)."""
-        for k in self.__dict__.keys():
+        for k in self.__dict__:
             if (
                 k not in _REMOTE_MODULE_PICKLED_ATTRIBUTES
                 and k not in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING

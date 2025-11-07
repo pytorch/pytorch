@@ -19,7 +19,7 @@ class FuzzedSparseTensor(FuzzedTensor):
         coalesced: Optional[str] = None,
         dtype=torch.float32,
         cuda=False
-    ):
+    ) -> None:
         """
         Args:
             name:

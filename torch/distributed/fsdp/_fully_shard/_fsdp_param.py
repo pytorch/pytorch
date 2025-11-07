@@ -11,6 +11,7 @@ import torch.nn as nn
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.fsdp._fully_shard._fsdp_common import DDPMeshInfo
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
@@ -306,22 +307,29 @@ class FSDPParam:
                     f"or 4 (HSDP+EP+TP) but got {self._spmd_mesh.ndim}."
                 )
             self._spmd_placements: tuple[Placement, ...]
-            dp_shard_tp_placement = (
-                (
-                    _StridedShard(shard_dim, split_factor=split_factor)
-                    if split_factor > 1
-                    else fsdp_placement
-                ),
-                *self._tp_spec.placements,
-            )
-            if dp_mesh.ndim == 1:  # FSDP
-                self._spmd_placements = dp_shard_tp_placement
-            else:  # HSDP
+            if isinstance(self.mesh_info, FSDPMeshInfo):  # FSDP or HSDP
+                dp_shard_tp_placement = (
+                    (
+                        _StridedShard(shard_dim, split_factor=split_factor)
+                        if split_factor > 1
+                        else fsdp_placement
+                    ),
+                    *self._tp_spec.placements,
+                )
+            else:  # DDP
+                dp_shard_tp_placement = (
+                    (Replicate()),
+                    *self._tp_spec.placements,
+                )
+            if isinstance(self.mesh_info, HSDPMeshInfo):  # HSDP
                 if self.mesh_info.replicate_mesh_dim != 0:
                     raise AssertionError(
                         f"Expected replicate_mesh_dim to be 0, got {self.mesh_info.replicate_mesh_dim}"
                     )
                 self._spmd_placements = (Replicate(),) + dp_shard_tp_placement
+            else:  # FSDP or DDP
+                self._spmd_placements = dp_shard_tp_placement
+
             self._sharding_spec = DTensorSpec(
                 self._spmd_mesh,
                 self._spmd_placements,
@@ -330,10 +338,12 @@ class FSDPParam:
             param_data = cast(DTensor, param)._local_tensor
         else:
             self._spmd_mesh = self.mesh_info.mesh
-            if isinstance(self.mesh_info, HSDPMeshInfo):
+            if isinstance(self.mesh_info, HSDPMeshInfo):  # HSDP
                 self._spmd_placements = (Replicate(), fsdp_placement)
-            else:
+            elif isinstance(self.mesh_info, FSDPMeshInfo):  # FSDP
                 self._spmd_placements = (fsdp_placement,)
+            elif isinstance(self.mesh_info, DDPMeshInfo):  # DDP
+                self._spmd_placements = (Replicate(),)
             self._sharding_spec = DTensorSpec(
                 self._spmd_mesh,
                 self._spmd_placements,
@@ -351,8 +361,13 @@ class FSDPParam:
             )
         self._orig_size = param_data.size()
         self._contiguous_orig_stride = make_contiguous_strides_for(self._orig_size)
-        shard_rank = self.mesh_info.shard_mesh_rank
-        shard_world_size = self.mesh_info.shard_mesh_size
+        if isinstance(self.mesh_info, FSDPMeshInfo):  # FSDP or HSDP
+            shard_rank = self.mesh_info.shard_mesh_rank
+            shard_world_size = self.mesh_info.shard_mesh_size
+        else:  # DDP
+            shard_rank = 0
+            shard_world_size = 1
+
         if shard_dim > 0 and param_data.size(shard_dim) % shard_world_size != 0:
             # If sharding on nonzero dim, require even sharding for now because
             # the uneven sharding (1) requires extra copies before/after FSDP
@@ -401,12 +416,20 @@ class FSDPParam:
         if mesh_info is None:
             raise AssertionError("Expected post_forward_mesh_info to not be None")
         param_data = param._local_tensor if isinstance(param, DTensor) else param
-        chunks = _chunk_with_empty(param_data, mesh_info.shard_mesh_size, dim=0)
-        self.sharded_post_forward_size = _get_dim_chunked_size(
-            chunks[mesh_info.shard_mesh_rank],
-            param_data.size(),
-            dim=self.fsdp_placement.dim,
-        )
+        if isinstance(mesh_info, FSDPMeshInfo):
+            chunks = _chunk_with_empty(param_data, mesh_info.shard_mesh_size, dim=0)
+            self.sharded_post_forward_size = _get_dim_chunked_size(
+                chunks[mesh_info.shard_mesh_rank],
+                param_data.size(),
+                dim=self.fsdp_placement.dim,
+            )
+        else:  # DDP
+            chunks = _chunk_with_empty(param_data, 1, dim=0)
+            self.sharded_post_forward_size = _get_dim_chunked_size(
+                chunks[0],
+                param_data.size(),
+                dim=self.fsdp_placement.dim,
+            )
         self.contiguous_sharded_post_forward_stride = make_contiguous_strides_for(
             self.sharded_post_forward_size
         )

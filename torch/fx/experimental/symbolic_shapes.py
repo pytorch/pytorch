@@ -547,6 +547,7 @@ def rebind_unbacked(
         assert shape_env is not None
         for raw_u0, path in bindings.items():
             u1 = pytree.key_get(result, path)
+
             # Sometimes, things were previously unbacked bindings become constants.
             # There are two situations this can happen.
             #
@@ -602,7 +603,23 @@ def rebind_unbacked(
             if u1.node.hint is not None:
                 continue
 
-            raw_u1 = u1.node.expr
+            # unbacked symbols bindings might be replaced to other backed or
+            # unbacked replacements.
+            #
+            # Example:
+            #   u = x.item()
+            #   torch._check(u == 5)
+            #
+            # The safest approach is to retrieve raw_u1 from u1.node._expr
+            # and perform the rebinding on the original unbacked symbol,
+            # even if it’s no longer directly referenced.
+            #
+            # In other words, we should always rebind the original symbol
+            # before any replacements are applied.
+            #   u0 -> u0 == s1
+            raw_u1 = u1.node._expr
+
+            # TODO Do we still need this logic below?
             # Simplify SymBool binding
             if (
                 isinstance(raw_u1, sympy.Piecewise)
@@ -2658,7 +2675,9 @@ class _ShapeGuardPrinter(abc.ABC):
         Convert a sympy Symbol to its source representation.
 
         This method looks up the symbol in symbol_to_source mapping and returns
-        the string representation of its first source.
+        the string representation of its first source. If the symbol is not in
+        symbol_to_source (which can happen when symbols appear in guard expressions
+        through simplification or substitution), it falls back to var_to_sources.
 
         Args:
             expr: The sympy Symbol to convert
@@ -2667,24 +2686,30 @@ class _ShapeGuardPrinter(abc.ABC):
             String representation of the symbol's source
 
         Raises:
-            AssertionError: If the symbol is not found in symbol_to_source
+            AssertionError: If the symbol is not found in either mapping
         """
         assert isinstance(expr, sympy.Symbol), str(type(expr))
 
-        def repr_symbol_to_source() -> str:
-            return repr(
-                {
-                    symbol: [s.name() for s in sources]
-                    for symbol, sources in self.symbol_to_source.items()
-                }
-            )
+        # Try symbol_to_source first, fall back to var_to_sources if not found
+        if source := self.symbol_to_source.get(expr):
+            return self.print_source(source[0])
+        elif source := self.var_to_sources.get(expr):
+            return self.print_source(source[0])
+        else:
 
-        assert self.symbol_to_source.get(expr), (
-            f"{expr} (could be from {[s.name() for s in self.var_to_sources[expr]]}) "
-            f"not in {repr_symbol_to_source()}.  If this assert is failing, it could be "
-            "due to the issue described in https://github.com/pytorch/pytorch/pull/90665"
-        )
-        return self.print_source(self.symbol_to_source[expr][0])
+            def repr_sources(src: Mapping[sympy.Symbol, list[Source]]) -> str:
+                return repr(
+                    {
+                        symbol: [s.name() for s in sources]
+                        for symbol, sources in src.items()
+                    }
+                )
+
+            raise RuntimeError(
+                f"{expr} not in {repr_sources(self.symbol_to_source)} or "
+                f"{repr_sources(self.var_to_sources)}.  This could be due to "
+                "the issue described in https://github.com/pytorch/pytorch/pull/90665"
+            )
 
     @abc.abstractmethod
     def print_source(self, source: Source) -> str:
@@ -3342,7 +3367,7 @@ class DimConstraints:
         # alter derivations that depend on old root, to unify to new root
         # e.g. dx=3*_dx+1, dy=dx+1 -> dy=3*_dx+2
         for old_root in introduced_roots.values():
-            for k, c in list(results.items()):
+            for c in results.values():
                 if (
                     "eq" in c
                     and isinstance(c["eq"], sympy.Expr)
@@ -4522,7 +4547,7 @@ class ShapeEnv:
 
     # The order of checking the guards matters. In this specific example:
     # If True branch guard check precedes False branch and for True branch, y.size(0) check precedes x == True,
-    # we may have an unnecessary shape speciliazation for y.
+    # we may have an unnecessary shape specialization for y.
     def _maybe_specialize_sym_int_with_hint(
         self, maybe_sym: IntLikeType
     ) -> IntLikeType:
@@ -5830,7 +5855,7 @@ class ShapeEnv:
         def issue_guard(guard: ShapeGuard) -> None:
             expr = self.simplify(guard.expr)
 
-            # Avoid re-issueing the same guard.
+            # Avoid re-issuing the same guard.
             if expr in issued:
                 return
 

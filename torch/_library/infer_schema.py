@@ -142,7 +142,7 @@ def infer_schema(
                 list_type = tuple_to_list(annotation_type)
                 example_type_str = "\n\n"
                 # Only suggest the list type if this type is supported.
-                if list_type in SUPPORTED_PARAM_TYPES.keys():
+                if list_type in SUPPORTED_PARAM_TYPES:
                     example_type_str = f"For example, {list_type}.\n\n"
                 error_fn(
                     f"Parameter {name} has unsupported type {param.annotation}. "
@@ -291,7 +291,7 @@ def parse_return(annotation, error_fn):
 
     origin = typing.get_origin(annotation)
     if origin is not tuple:
-        if annotation not in SUPPORTED_RETURN_TYPES.keys():
+        if annotation not in SUPPORTED_RETURN_TYPES:
             error_fn(
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."

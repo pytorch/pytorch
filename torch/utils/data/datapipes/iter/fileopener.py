@@ -50,7 +50,7 @@ class FileOpenerIterDataPipe(IterDataPipe[tuple[str, IOBase]]):
         mode: str = "r",
         encoding: Optional[str] = None,
         length: int = -1,
-    ):
+    ) -> None:
         super().__init__()
         self.datapipe: Iterable[str] = datapipe
         self.mode: str = mode

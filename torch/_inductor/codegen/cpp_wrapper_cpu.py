@@ -8,7 +8,7 @@ import os
 import sys
 import textwrap
 from itertools import chain, count
-from typing import Any, Callable, Optional, Protocol, TYPE_CHECKING, Union
+from typing import Any, Optional, Protocol, TYPE_CHECKING, Union
 
 import sympy
 
@@ -37,7 +37,7 @@ from .wrapper import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from ..graph import GraphLowering
 
@@ -631,7 +631,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 debug_printer_manager.codegen_model_inputs_value_print(
                     input_args_to_print=[
                         input_key
-                        for input_key in V.graph.graph_inputs.keys()
+                        for input_key in V.graph.graph_inputs
                         if input_key.startswith("arg")
                     ]
                 )
@@ -811,7 +811,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
             all_cuda = all(
                 V.graph.get_original_value_of_constant(name).is_cuda
-                for name in V.graph.constants.keys()
+                for name in V.graph.constants
                 if name not in V.graph.folded_constants
             )
             for idx, name in enumerate(V.graph.constants.keys()):
@@ -2947,6 +2947,7 @@ if (!custom_op_wrapper) {
                 return functools.reduce(
                     lambda a, b: a | b,
                     [
+                        # pyrefly: ignore [missing-attribute]
                         node.node.get_stack_traces()
                         for node in node_schedule
                         if hasattr(node, "node") and node.node

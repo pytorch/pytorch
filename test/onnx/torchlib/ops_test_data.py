@@ -458,6 +458,18 @@ TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
     TorchLibOpInfo("add", core_ops.aten_add, tolerance={torch.float16: (1e-3, 1e-3)}),
     TorchLibOpInfo("add", core_ops.aten_add_complex, complex=True),
     TorchLibOpInfo("gelu_op20", nn_ops.aten_gelu_opset20, opset_introduced=20),
+    TorchLibOpInfo(
+        "nn.functional.group_norm", nn_ops.aten_group_norm, opset_introduced=21
+    ).skip(
+        reason="ONNX Runtime does not support zero sized inputs for GroupNorm",
+        matcher=lambda sample: sample.input.numel() == 0,
+    ),
+    TorchLibOpInfo(
+        "nn.functional.rms_norm", nn_ops.aten_rms_norm, opset_introduced=23
+    ).skip(
+        reason="ONNX Runtime does not support <1d inputs or zero sized inputs for RMSNorm",
+        matcher=lambda sample: len(sample.input.shape) < 2 or sample.input.numel() == 0,
+    ),
 )
 
 

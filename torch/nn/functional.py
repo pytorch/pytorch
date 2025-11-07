@@ -2229,7 +2229,7 @@ def gumbel_softmax(
         ).scatter_(dim, index, 1.0)
         ret = y_hard - y_soft.detach() + y_soft
     else:
-        # Reparametrization trick.
+        # Reparameterization trick.
         ret = y_soft
     return ret
 
@@ -2837,6 +2837,9 @@ def batch_norm(
     if training:
         # pyrefly: ignore [bad-argument-type]
         _verify_batch_size(input.size())
+
+    if eps <= 0.0:
+        raise ValueError(f"batch_norm eps must be positive, but got {eps}")
 
     return torch.batch_norm(
         input,

@@ -930,7 +930,7 @@ class MemTracker(TorchDispatchMode):
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):  # type: ignore[no-untyped-def]
         if (
-            func == torch.ops._c10d_functional.wait_tensor.default
+            func is torch.ops._c10d_functional.wait_tensor.default
             and active_fake_mode()
         ):
             # N.B: This is a hacky way to override the Meta IMPL of wait_tensor. The original impl returns

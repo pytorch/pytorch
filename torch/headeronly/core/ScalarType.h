@@ -19,6 +19,8 @@
 
 #include <cstdint>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
+
 namespace c10 {
 
 // dummy struct for uint1 to uint7, actual functionality
@@ -351,3 +353,5 @@ using c10::impl::ScalarTypeToCPPTypeT;
 } // namespace impl
 
 HIDDEN_NAMESPACE_END(torch, headeronly)
+
+C10_DIAGNOSTIC_POP()

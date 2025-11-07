@@ -2095,7 +2095,7 @@ class TestMaxAutotune(TestCase):
 
         # Test loop.
         def test_func2(x):
-            for i in range(10):
+            for _ in range(10):
                 x = torch.matmul(x, x)
             return x
 

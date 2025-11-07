@@ -750,7 +750,7 @@ class QuantizationTestCase(TestCase):
                     and not isinstance(module, torch.nn.Sequential)
                     and type(module) in propagate_qconfig_list
                 )
-                or type(module) in float_to_observed_module_class_mapping.keys()
+                or type(module) in float_to_observed_module_class_mapping
             )
             and not isinstance(module, torch.ao.quantization.DeQuantStub)
         ):
@@ -810,7 +810,7 @@ class QuantizationTestCase(TestCase):
         b = io.BytesIO()
         torch.save(model_dict, b)
         b.seek(0)
-        # weights_only=False as we sometimes get a ScriptObect here (weird)
+        # weights_only=False as we sometimes get a ScriptObject here (weird)
         loaded_dict = torch.load(b, weights_only=False)
         loaded_model.load_state_dict(loaded_dict)
         ref_out = ref_model(*x)

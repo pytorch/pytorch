@@ -15,7 +15,7 @@ DataPipe = Union[IterDataPipe, MapDataPipe]
 DataPipeGraph = dict[int, tuple[DataPipe, "DataPipeGraph"]]
 
 
-def _stub_unpickler():
+def _stub_unpickler() -> str:
     return "STUB"
 
 
