@@ -97,7 +97,7 @@ case ${image} in
     manylinux2_28-builder:xpu)
         TARGET=xpu_final
         GPU_IMAGE=amd64/almalinux:8
-        DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=11"
+        DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=13"
         MANY_LINUX_VERSION="2_28"
         ;;
     *)
