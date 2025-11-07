@@ -447,14 +447,6 @@ use_experimental_benchmarker: bool = Config(
     justknob="pytorch/inductor:use_experimental_benchmarker",
 )
 
-# Enable distributed autotuning. When this is enabled we will distribute the
-# autotuning across distributed ranks in the same program group - so instead of
-# each rank autotuning every kernel they only autotune 1/world size kernels and
-# then share the results.
-distributed_max_autotune_gemm = (
-    os.environ.get("TORCHINDUCTOR_DISTRIBUTED_MAX_AUTOTUNE_GEMM") == "1"
-)
-
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
@@ -524,7 +516,7 @@ multi_kernel_hints: list[int] = []
 # PALLAS: Pallas templates and kernels (TPU only).
 # CPP: CPP templates and kernels for CPU.
 max_autotune_gemm_backends = os.environ.get(
-    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP,PALLAS"
+    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
 
 
@@ -549,10 +541,6 @@ max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
 max_autotune_flex_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_FLEX_SEARCH_SPACE", "DEFAULT"
 ).upper()  # type: ignore[assignment]
-
-cutedsl_enable_autotuning: bool = (
-    os.environ.get("CUTEDSL_ENABLE_AUTOTUNING", "0") == "1"
-)
 
 # DEPRECATED. This setting is ignored.
 autotune_fallback_to_aten = False
