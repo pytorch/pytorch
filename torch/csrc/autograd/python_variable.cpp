@@ -1299,21 +1299,26 @@ void cleanup_thread_local_native_sharding_propagator_caches() {
 static void replace_dtensors_with_local_tensor(torch::jit::Stack& stack);
 
 static bool is_random_op(const c10::OperatorHandle& op) {
+  // NOTE: must stay in sync with _random_ops in
+  // torch/distributed/tensor/_dispatch.py
+  constexpr auto aten_namespace_prefix_len = 6;
   const auto& op_name = op.operator_name();
-  if (op_name.name.size() <= 6 ||
-      memcmp(op_name.name.data(), "aten::", 6) != 0) {
+  if (op_name.name.size() <= aten_namespace_prefix_len ||
+      memcmp(op_name.name.data(), "aten::", aten_namespace_prefix_len) != 0) {
     return false;
   }
-  static constexpr std::array<std::string_view, 6> random_names = {{
-      "native_dropout",
-      "normal_",
-      "rand_like",
-      "randn_like",
-      "uniform_",
-      "bernoulli",
-  }};
+  static constexpr std::array<std::string_view, aten_namespace_prefix_len>
+      random_names = {{
+          "native_dropout",
+          "normal_",
+          "rand_like",
+          "randn_like",
+          "uniform_",
+          "bernoulli",
+      }};
   std::string_view name_without_namespace(
-      op_name.name.c_str() + 6, op_name.name.size() - 6);
+      op_name.name.c_str() + aten_namespace_prefix_len,
+      op_name.name.size() - aten_namespace_prefix_len);
   if (name_without_namespace == "bernoulli_") {
     return op_name.overload_name == "float";
   }
@@ -1895,12 +1900,10 @@ enum class TensorFlavor {
 };
 
 static std::pair<TensorFlavor, py::object> check_for_dtensor_or_tensor(
-    const c10::IValue& iv) {
-  if (!iv.isTensor() || !iv.toTensor().defined()) {
+    const at::Tensor& tensor) {
+  if (!tensor.defined()) {
     return {TensorFlavor::NON_TENSOR, py::object()};
   }
-
-  const auto& tensor = iv.toTensor();
 
   // I don't think we need to check for wrapped_number() tensors here;
   // the try_replicate_spec_for_scalar_tensor stuff in our caller
@@ -1926,8 +1929,38 @@ static std::pair<TensorFlavor, py::object> check_for_dtensor_or_tensor(
   return {TensorFlavor::NON_DTENSOR_TENSOR_SUBCLASS, std::move(py_tensor)};
 }
 
+static std::pair<TensorFlavor, py::object> check_for_dtensor_or_tensor(
+    const c10::IValue& iv) {
+  if (!iv.isTensor()) {
+    return {TensorFlavor::NON_TENSOR, py::object()};
+  }
+
+  return check_for_dtensor_or_tensor(iv.toTensor());
+}
+
+static c10::List<at::Tensor> replace_dtensors_with_local_tensor(
+    const c10::List<at::Tensor>& tl) {
+  c10::List<at::Tensor> local_list;
+  local_list.reserve(tl.size());
+  for (const at::Tensor& elt : tl) {
+    const auto [tensor_flavor, py_tensor] = check_for_dtensor_or_tensor(elt);
+    if (tensor_flavor == TensorFlavor::EXACTLY_DTENSOR ||
+        tensor_flavor == TensorFlavor::DTENSOR_SUBCLASS) {
+      local_list.push_back(THPVariable_Unpack(
+          py_tensor.attr(dtensor_interned_strings._local_tensor).ptr()));
+    } else {
+      local_list.push_back(elt);
+    }
+  }
+  return local_list;
+}
+
 static void replace_dtensors_with_local_tensor(torch::jit::Stack& stack) {
   for (auto& arg : stack) {
+    if (arg.isTensorList()) {
+      arg = replace_dtensors_with_local_tensor(arg.toTensorList());
+      continue;
+    }
     const auto [tensor_flavor, py_tensor] = check_for_dtensor_or_tensor(arg);
     if (tensor_flavor == TensorFlavor::EXACTLY_DTENSOR ||
         tensor_flavor == TensorFlavor::DTENSOR_SUBCLASS) {
