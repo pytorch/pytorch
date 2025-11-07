@@ -1251,11 +1251,14 @@ if torch._C._has_mkldnn:
             and not torch._C.has_mkl
         ):
             return False
+        if not is_lp_weight and linear_node.target == aten.bmm.default:
+            return False
         for meta_value in [input_meta_value, weight_meta_value]:
             if (
                 meta_value is None
                 or meta_value.device.type != "cpu"
-                or meta_value.dim() != 2
+                or meta_value.dim()
+                != (3 if linear_node.target == aten.bmm.default else 2)
             ):
                 return False
         if weight_idx == 2:
@@ -1434,27 +1437,47 @@ if torch._C._has_mkldnn:
             extra_check=_is_packable_linear,
             pass_number=1,
         )
+        @register_freezing_graph_pattern(
+            CallFunction(aten.bmm.default, Arg(), Arg()),
+            extra_check=_is_packable_linear,
+            pass_number=1,
+        )
         def linear(match, *args, **kwargs):
             graph = match.graph
             linear_node = match.output_node()
-            input = args[0] if linear_node.target is aten.mm.default else args[1]
+            input = (
+                args[0]
+                if linear_node.target in [aten.mm.default, aten.bmm.default]
+                else args[1]
+            )
             bias = (
                 None
-                if linear_node.target is aten.mm.default
+                if linear_node.target in [aten.mm.default, aten.bmm.default]
                 or (
                     linear_node.target is aten.addmm.default
                     and linear_node.kwargs.get("beta", 1.0) == 0.0
                 )
                 else args[0]
             )
-            weight = args[1] if linear_node.target is aten.mm.default else args[2]
+            if linear_node.target is aten.mm.default:
+                weight = args[1]
+                weight_dtype = weight.meta.get("val").dtype
+            elif linear_node.target is aten.addmm.default:
+                weight = args[2]
+                weight_dtype = weight.meta.get("val").dtype
+            else:
+                assert linear_node.target is aten.bmm.default
+                wgt_expand_node = args[1]
+                weight = graph.create_node(
+                    "call_function", aten.select.int, (wgt_expand_node, 0, 0)
+                )
+                weight_dtype = wgt_expand_node.meta.get("val").dtype
             device_type = input.meta.get("val").device.type
             mkldnn_device_op = _get_mkldnn_device_op(device_type)
             with graph.inserting_before(linear_node):
                 transpose_weight_node = graph.create_node(
                     "call_function", aten.permute.default, (weight, (1, 0))
                 )
-                weight_dtype = weight.meta.get("val").dtype
                 is_lp_weight = weight_dtype in (
                     torch.bfloat16,
                     torch.float16,
