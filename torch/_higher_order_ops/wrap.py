@@ -228,10 +228,10 @@ class TagActivationCheckpoint(HigherOrderOperator):
         checkpoint_keys.add("preserve_rng_state")
 
         checkpoint_kwargs = {
-            name: kwargs[name] for name in kwargs.keys() if name in checkpoint_keys
+            name: kwargs[name] for name in kwargs if name in checkpoint_keys
         }
         gmod_kwargs = {
-            name: kwargs[name] for name in kwargs.keys() if name not in checkpoint_keys
+            name: kwargs[name] for name in kwargs if name not in checkpoint_keys
         }
         return checkpoint_kwargs, gmod_kwargs
 

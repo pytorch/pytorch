@@ -763,7 +763,7 @@ class NNModuleVariable(VariableTracker):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             result = []
-            for name in module.keys():
+            for name in module:
                 result.append(ConstantVariable.create(name))
             return ListIteratorVariable(result, mutation_type=ValueMutationNew())
         elif name == "values":

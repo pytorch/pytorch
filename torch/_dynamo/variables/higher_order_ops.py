@@ -2374,7 +2374,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # Since, we call `speculate_subgraph` with `set_subgraph_inputs="automatic`,
         # all the arguments are lifted.
-        lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
+        lifted_args = tuple(arg for arg in body_lifted_freevars)
 
         proxy_args = (body_node,) + lifted_args
         example_value = pytree.tree_map_only(
@@ -2660,7 +2660,7 @@ class HintsWrapperHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # Since, we call `speculate_subgraph` with `set_subgraph_inputs="automatic`,
         # all the arguments are lifted.
-        lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
+        lifted_args = tuple(body_lifted_freevars.keys())
         p_args = (body_node, lifted_args, {})
 
         p_kwargs = {}
@@ -2777,7 +2777,7 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         strict_mode_node = make_attr(tx, strict_mode_name)
         p_args = (
             strict_mode_node,
-            tuple(arg for arg in ret_lifted_freevars.keys()),
+            tuple(ret_lifted_freevars.keys()),
         )
 
         flat_example_value = pytree.tree_map_only(
@@ -3115,7 +3115,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # passed in as arguments. In this case, we need to lift them, which is handled by speculate_subgraph.
         # We then need to create proxies for this + the inputs.
 
-        lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
+        lifted_args = tuple(arg for arg in body_lifted_freevars)
 
         proxy_args = (body_node, lifted_args)
 
@@ -3443,7 +3443,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # However, the bwd_freevars got from speculate_subgraph use the Proxies in the bwd_graph,
         # we need to convert them to Proxies in the fwd_graph and then generate new fwd_graph output.
         fwd_proxy_of_bwd_freevars = []
-        for k in bwd_freevars.keys():
+        for k in bwd_freevars:
             if k in fwd_freevars:
                 fwd_proxy_of_bwd_freevars.append(fwd_freevars[k])
             else:
