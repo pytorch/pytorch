@@ -323,10 +323,8 @@ class PallasTestsCPU(PallasTestsMixin, TestCase):
 # Note: Only enable GPU tests since Pallas primarily targets GPU
 if hasattr(sys.modules.get(__name__), "test_torchinductor") and HAS_PALLAS:
     if getattr(test_torchinductor, "HAS_GPU", False):
-        # Uncomment these to run full test suite with Pallas backend
-        # make_pallas(test_torchinductor.SweepInputsGPUTest)
-        # make_pallas(test_torchinductor.GPUTests)
-        pass
+        make_pallas(test_torchinductor.SweepInputsGPUTest)
+        make_pallas(test_torchinductor.GPUTests)
 
 if __name__ == "__main__":
     if HAS_PALLAS:
