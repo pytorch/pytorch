@@ -171,6 +171,9 @@ class ShardingPropagator:
         # these operators to be inserted in the fx graph.
         from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
+        # DTensor.dispatch runs fake tensor prop twice, once here, and once for the actual
+        # local tensor result. The result here is never surfaced to tracing, and so if
+        # the op is data-dependent, can result in PendingUnbackedSymbolNotFound errors.
         fake_mode = detect_fake_mode() or FakeTensorMode()
         suppress_fresh_symbols_ctx = (
             fake_mode.shape_env.ignore_fresh_unbacked_symbols()
