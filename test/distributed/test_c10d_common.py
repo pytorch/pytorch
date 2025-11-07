@@ -55,7 +55,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 if platform == "darwin":
     LOOPBACK = "lo0"
@@ -2271,7 +2271,7 @@ class LocalRankTest(MultiProcessTestCase):
 if __name__ == "__main__":
     if device_type != "cpu":
         assert not torch.get_device_module()._initialized, (
-            "test_distributed must not have initialized {device_type} context on main process"
+            f"test_distributed must not have initialized {device_type} context on main process"
         )
 
     run_tests()

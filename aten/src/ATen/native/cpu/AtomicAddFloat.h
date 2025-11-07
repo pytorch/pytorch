@@ -22,7 +22,7 @@ static inline void cpu_atomic_add_float(float* dst, float fvalue)
   old_value.floatV = *dst;
   new_value.floatV = old_value.floatV + fvalue;
 
-  unsigned* old_intV = (unsigned*)(&old_value.intV);
+  unsigned* old_intV = &old_value.intV;
   while (!std::atomic_compare_exchange_strong(dst_intV, old_intV, new_value.intV)) {
 #ifdef __aarch64__
     __asm__ __volatile__("yield;" : : : "memory");

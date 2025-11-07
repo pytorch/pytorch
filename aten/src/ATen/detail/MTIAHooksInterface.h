@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/CachingDeviceAllocator.h>
 #include <c10/core/Device.h>
 #include <c10/util/Exception.h>
 
@@ -151,6 +152,36 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
   }
 
   virtual bool isAvailable() const override;
+
+  /* MTIAGraph related APIs */
+  virtual int64_t mtiagraphCreate(bool keep_graph = false) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return -1;
+  }
+
+  virtual void mtiagraphCaptureBegin(int64_t handle, MempoolId_t pool) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+  }
+
+  virtual void mtiagraphCaptureEnd(int64_t handle) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+  }
+
+  virtual void mtiagraphInstantiate(int64_t handle) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+  }
+
+  virtual void mtiagraphReplay(int64_t handle) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+  }
+
+  virtual void mtiagraphReset(int64_t handle) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+  }
+
+  virtual MempoolId_t mtiagraphPool(int64_t handle) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+  }
 };
 
 struct TORCH_API MTIAHooksArgs {};

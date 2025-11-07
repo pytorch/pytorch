@@ -248,6 +248,74 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
+  libtorch-cuda12_9-shared-with-deps-release-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu129
+      GPU_ARCH_VERSION: "12.9"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: libtorch-cxx11-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
+      LIBTORCH_CONFIG: release
+      LIBTORCH_VARIANT: shared-with-deps
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build_name: libtorch-cuda12_9-shared-with-deps-release
+      build_environment: linux-binary-libtorch
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  libtorch-cuda12_9-shared-with-deps-release-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - libtorch-cuda12_9-shared-with-deps-release-build
+      - get-label-type
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu129
+      GPU_ARCH_VERSION: "12.9"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: libtorch-cxx11-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
+      LIBTORCH_CONFIG: release
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-cuda12_9-shared-with-deps-release
+      build_environment: linux-binary-libtorch
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu # 12.8+ builds need sm_70+ runner
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  libtorch-cuda12_9-shared-with-deps-release-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cuda12_9-shared-with-deps-release-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu129
+      GPU_ARCH_VERSION: "12.9"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: libtorch-cxx11-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
+      LIBTORCH_CONFIG: release
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-cuda12_9-shared-with-deps-release
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+
   libtorch-cuda13_0-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
@@ -316,7 +384,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  libtorch-rocm6_3-shared-with-deps-release-build:
+  libtorch-rocm7_0-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
@@ -325,22 +393,23 @@ jobs:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: "6.3"
+      DESIRED_CUDA: rocm7.0
+      GPU_ARCH_VERSION: "7.0"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: libtorch-cxx11-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.3
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.0
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: libtorch-rocm6_3-shared-with-deps-release
+      timeout-minutes: 300
+      build_name: libtorch-rocm7_0-shared-with-deps-release
       build_environment: linux-binary-libtorch
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-rocm6_3-shared-with-deps-release-test:  # Testing
+  libtorch-rocm7_0-shared-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - libtorch-rocm6_3-shared-with-deps-release-build
+      - libtorch-rocm7_0-shared-with-deps-release-build
       - get-label-type
     runs-on: linux.rocm.gpu.mi250
     timeout-minutes: 240
@@ -349,21 +418,24 @@ jobs:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: "6.3"
+      DESIRED_CUDA: rocm7.0
+      GPU_ARCH_VERSION: "7.0"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: libtorch-cxx11-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.3
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.0
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: libtorch-rocm6_3-shared-with-deps-release
+          name: libtorch-rocm7_0-shared-with-deps-release
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
@@ -394,7 +466,7 @@ jobs:
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: libtorch-cxx11-builder
-          custom-tag-prefix: rocm6.3
+          custom-tag-prefix: rocm7.0
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
@@ -407,30 +479,30 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-  libtorch-rocm6_3-shared-with-deps-release-upload:  # Uploading
+  libtorch-rocm7_0-shared-with-deps-release-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: libtorch-rocm6_3-shared-with-deps-release-test
+    needs: libtorch-rocm7_0-shared-with-deps-release-test
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: "6.3"
+      DESIRED_CUDA: rocm7.0
+      GPU_ARCH_VERSION: "7.0"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: libtorch-cxx11-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.3
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.0
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      build_name: libtorch-rocm6_3-shared-with-deps-release
+      build_name: libtorch-rocm7_0-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  libtorch-rocm6_4-shared-with-deps-release-build:
+  libtorch-rocm7_1-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
@@ -439,22 +511,23 @@ jobs:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: "6.4"
+      DESIRED_CUDA: rocm7.1
+      GPU_ARCH_VERSION: "7.1"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: libtorch-cxx11-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.1
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: libtorch-rocm6_4-shared-with-deps-release
+      timeout-minutes: 300
+      build_name: libtorch-rocm7_1-shared-with-deps-release
       build_environment: linux-binary-libtorch
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-rocm6_4-shared-with-deps-release-test:  # Testing
+  libtorch-rocm7_1-shared-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - libtorch-rocm6_4-shared-with-deps-release-build
+      - libtorch-rocm7_1-shared-with-deps-release-build
       - get-label-type
     runs-on: linux.rocm.gpu.mi250
     timeout-minutes: 240
@@ -463,21 +536,24 @@ jobs:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: "6.4"
+      DESIRED_CUDA: rocm7.1
+      GPU_ARCH_VERSION: "7.1"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: libtorch-cxx11-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.1
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: libtorch-rocm6_4-shared-with-deps-release
+          name: libtorch-rocm7_1-shared-with-deps-release
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
@@ -508,7 +584,7 @@ jobs:
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: libtorch-cxx11-builder
-          custom-tag-prefix: rocm6.4
+          custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
@@ -521,25 +597,25 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-  libtorch-rocm6_4-shared-with-deps-release-upload:  # Uploading
+  libtorch-rocm7_1-shared-with-deps-release-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: libtorch-rocm6_4-shared-with-deps-release-test
+    needs: libtorch-rocm7_1-shared-with-deps-release-test
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: "6.4"
+      DESIRED_CUDA: rocm7.1
+      GPU_ARCH_VERSION: "7.1"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: libtorch-cxx11-builder
-      DOCKER_IMAGE_TAG_PREFIX: rocm6.4
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.1
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      build_name: libtorch-rocm6_4-shared-with-deps-release
+      build_name: libtorch-rocm7_1-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml

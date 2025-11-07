@@ -7,8 +7,9 @@ import functools
 import sys
 import warnings
 from collections import OrderedDict
+from collections.abc import Callable
 from inspect import getfullargspec, signature
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch.ao.quantization.quant_type import QuantType
@@ -426,7 +427,8 @@ def check_min_max_valid(min_val: torch.Tensor, max_val: torch.Tensor) -> bool:
     if min_val.numel() == 0 or max_val.numel() == 0:
         warnings.warn(
             "must run observer before calling calculate_qparams. "
-            + "Returning default values."
+            + "Returning default values.",
+            stacklevel=2,
         )
         return False
 
@@ -434,7 +436,8 @@ def check_min_max_valid(min_val: torch.Tensor, max_val: torch.Tensor) -> bool:
         if min_val == float("inf") and max_val == float("-inf"):
             warnings.warn(
                 "must run observer before calling calculate_qparams. "
-                + "Returning default values."
+                + "Returning default values.",
+                stacklevel=2,
             )
 
             return False
@@ -501,9 +504,9 @@ def calculate_qmin_qmax(
                 quant_min, quant_max = 0, 255
         elif dtype in [torch.qint32, torch.int32]:
             quant_min, quant_max = -1 * (2**31), (2**31) - 1
-        elif dtype in [torch.uint16]:
+        elif dtype == torch.uint16:
             quant_min, quant_max = 0, 2**16 - 1
-        elif dtype in [torch.int16]:
+        elif dtype == torch.int16:
             quant_min, quant_max = -(2**15), 2**15 - 1
         else:
             quant_min, quant_max = 0, 15
@@ -805,7 +808,8 @@ def _assert_and_get_unique_device(module: torch.nn.Module) -> Any:
     """
     if {torch.device("cpu"), torch.device("meta")} == devices:
         warnings.warn(
-            "Both 'meta' and 'cpu' are present in the list of devices. Module can have one device. We Select 'cpu'."
+            "Both 'meta' and 'cpu' are present in the list of devices. Module can have one device. We Select 'cpu'.",
+            stacklevel=2,
         )
         devices = {torch.device("cpu")}
     ""

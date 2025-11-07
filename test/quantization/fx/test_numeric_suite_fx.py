@@ -2252,7 +2252,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
             msp(*example_input)
 
         def _check_logger_count(model, exp_count_stats, exp_count_comparisons):
-            for name, mod in model.named_modules():
+            for mod in model.modules():
                 if isinstance(mod, OutputLogger):
                     self.assertTrue(
                         len(mod.stats) == exp_count_stats,

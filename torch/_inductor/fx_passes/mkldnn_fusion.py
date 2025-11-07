@@ -73,7 +73,7 @@ if torch._C._has_mkldnn:
             packed_weight_node = weight_node
             assert packed_weight_node.target == mkldnn._reorder_linear_weight
             transpose_weight_node = packed_weight_node.args[0]
-            assert transpose_weight_node.target == aten.permute.default
+            assert transpose_weight_node.target is aten.permute.default
             return transpose_weight_node
 
         def pack_conv_weight(
@@ -712,6 +712,7 @@ if torch._C._has_mkldnn:
             if any(_other_input_not_inplaceable(n, other_index) for n in binary_nodes):
                 return False
             if any(
+                # pyrefly: ignore [missing-attribute]
                 n.args[other_index].op in ["placeholder", "output"]
                 for n in binary_nodes
             ):
@@ -990,7 +991,7 @@ if torch._C._has_mkldnn:
 
     def _recover_linear():
         # convert reshape+linear+reshape to a single linear for applying fusion path.
-        # concat_linear (pass_number=0) -> mkldnn_linear_pack (pass_numer=1) -> _recover_linear(pass_number=2)
+        # concat_linear (pass_number=0) -> mkldnn_linear_pack (pass_number=1) -> _recover_linear(pass_number=2)
         @register_freezing_graph_pattern(
             CallFunction(
                 aten.reshape.default,
@@ -1212,13 +1213,13 @@ if torch._C._has_mkldnn:
 
         linear_node = match.output_node()
         # mkldnn linear only supports beta=1or0 and alpha=1
-        if linear_node.target == aten.addmm.default:
+        if linear_node.target is aten.addmm.default:
             alpha = linear_node.kwargs.get("alpha", 1.0)
             beta = linear_node.kwargs.get("beta", 1.0)
             if (beta != 0.0 and beta != 1.0) or alpha != 1.0:
                 return False
         # weight_idx is 1 for aten.mm and is 2 for aten.addmm
-        weight_idx = 2 if linear_node.target == aten.addmm.default else 1
+        weight_idx = 2 if linear_node.target is aten.addmm.default else 1
         if not is_const_or_cat_by_const(linear_node.args[weight_idx]):
             return False
         input_meta_value = linear_node.args[weight_idx - 1].meta.get("val")
@@ -1453,19 +1454,19 @@ if torch._C._has_mkldnn:
                 None
                 if linear_node.target in [aten.mm.default, aten.bmm.default]
                 or (
-                    linear_node.target == aten.addmm.default
+                    linear_node.target is aten.addmm.default
                     and linear_node.kwargs.get("beta", 1.0) == 0.0
                 )
                 else args[0]
             )
-            if linear_node.target == aten.mm.default:
+            if linear_node.target is aten.mm.default:
                 weight = args[1]
                 weight_dtype = weight.meta.get("val").dtype
-            elif linear_node.target == aten.addmm.default:
+            elif linear_node.target is aten.addmm.default:
                 weight = args[2]
                 weight_dtype = weight.meta.get("val").dtype
             else:
-                assert linear_node.target == aten.bmm.default
+                assert linear_node.target is aten.bmm.default
                 wgt_expand_node = args[1]
                 weight = graph.create_node(
                     "call_function", aten.select.int, (wgt_expand_node, 0, 0)

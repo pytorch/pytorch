@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Globals used internally by the ONNX exporter.
 
 Do not use this module outside of `torch.onnx` and its tests.
@@ -34,12 +33,12 @@ class _InternalGlobals:
         self._autograd_inlining: bool = True
 
     @property
-    def training_mode(self):
+    def training_mode(self) -> _C_onnx.TrainingMode:
         """The training mode for the exporter."""
         return self._training_mode
 
     @training_mode.setter
-    def training_mode(self, training_mode: _C_onnx.TrainingMode):
+    def training_mode(self, training_mode: _C_onnx.TrainingMode) -> None:
         if not isinstance(training_mode, _C_onnx.TrainingMode):
             raise TypeError(
                 "training_mode must be of type 'torch.onnx.TrainingMode'. This is "
@@ -53,7 +52,7 @@ class _InternalGlobals:
         return self._export_onnx_opset_version
 
     @export_onnx_opset_version.setter
-    def export_onnx_opset_version(self, value: int):
+    def export_onnx_opset_version(self, value: int) -> None:
         self._export_onnx_opset_version = value
 
     @property
@@ -62,7 +61,7 @@ class _InternalGlobals:
         return self._in_onnx_export
 
     @in_onnx_export.setter
-    def in_onnx_export(self, value: bool):
+    def in_onnx_export(self, value: bool) -> None:
         if type(value) is not bool:
             raise TypeError("in_onnx_export must be a boolean")
         self._in_onnx_export = value
@@ -73,7 +72,7 @@ class _InternalGlobals:
         return self._autograd_inlining
 
     @autograd_inlining.setter
-    def autograd_inlining(self, value: bool):
+    def autograd_inlining(self, value: bool) -> None:
         if type(value) is not bool:
             raise TypeError("autograd_inlining must be a boolean")
         self._autograd_inlining = value

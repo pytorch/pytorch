@@ -122,7 +122,7 @@ class ConstantFolder(torch.fx.Interpreter):
     def is_impure(self, node: torch.fx.node.Node) -> bool:
         def is_woq_int8_pattern(node: torch.fx.node.Node) -> bool:
             return (
-                node.target == torch.ops.prims.convert_element_type.default  # type: ignore[return-value]
+                node.target is torch.ops.prims.convert_element_type.default  # type: ignore[return-value]
                 and isinstance(node.args[0], torch.fx.Node)
                 and "val" in node.args[0].meta
                 and node.args[0].meta["val"].dtype == torch.int8  # type: ignore[union-attr]
@@ -132,7 +132,7 @@ class ConstantFolder(torch.fx.Interpreter):
         if (
             is_woq_int8_pattern(node)
             or (
-                node.target == torch.ops.aten.permute.default
+                node.target is torch.ops.aten.permute.default
                 and len(node.users) == 1
                 and is_woq_int8_pattern(next(iter(node.users)))
             )
@@ -206,7 +206,7 @@ class ConstantFolder(torch.fx.Interpreter):
         # contains a ScriptObject, equality checking results in a type error if
         # the types are different.
         if any(
-            type(self.unknown_value) == type(input_) and self.unknown_value == input_
+            type(self.unknown_value) is type(input_) and self.unknown_value == input_
             for input_ in flattened_inputs
         ):
             return self.unknown_value
@@ -214,7 +214,7 @@ class ConstantFolder(torch.fx.Interpreter):
         # TODO - fix errors with this
         if (
             node.op == "call_function"
-            and node.target == aten._efficientzerotensor.default
+            and node.target is aten._efficientzerotensor.default
         ):
             return self.unknown_value
 

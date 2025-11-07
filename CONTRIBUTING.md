@@ -11,7 +11,6 @@ aspects of contributing to PyTorch.
 <!-- toc -->
 
 - [Developing PyTorch](#developing-pytorch)
-  - [Setup the development environment](#setup-the-development-environment)
   - [Tips and Debugging](#tips-and-debugging)
 - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
@@ -66,23 +65,6 @@ aspects of contributing to PyTorch.
 ## Developing PyTorch
 
 Follow the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source). If you get stuck when developing PyTorch on your machine, check out the [tips and debugging](#tips-and-debugging) section below for common solutions.
-
-### Setup the development environment
-
-First, you need to [fork the PyTorch project on GitHub](https://github.com/pytorch/pytorch/fork) and follow the instructions at [Connecting to GitHub with SSH](https://docs.github.com/en/authentication/connecting-to-github-with-ssh) to setup your SSH authentication credentials.
-
-Then clone the PyTorch project and setup the development environment:
-
-```bash
-git clone git@github.com:<USERNAME>/pytorch.git
-cd pytorch
-git remote add upstream git@github.com:pytorch/pytorch.git
-
-make setup-env
-# Or run `make setup-env-cuda` for pre-built CUDA binaries
-# Or run `make setup-env-rocm` for pre-built ROCm binaries
-source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
-```
 
 ### Tips and Debugging
 
@@ -182,28 +164,36 @@ You can use this script to check out a new nightly branch with the following:
 
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch
-source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
 
 To install the nightly binaries built with CUDA, you can pass in the flag `--cuda`:
 
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch --cuda
-source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
 
 To install the nightly binaries built with ROCm, you can pass in the flag `--rocm`:
 
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch --rocm
-source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
 
 You can also use this tool to pull the nightly commits into the current branch:
 
 ```bash
-./tools/nightly.py pull -p my-env
-source my-env/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+./tools/nightly.py pull
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
+```
+
+To create the virtual environment with a specific Python interpreter, you can
+pass in the `--python` argument:
+
+```bash
+./tools/nightly.py --python /path/to/python3.12
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
 
 Pulling will recreate a fresh virtual environment and reinstall the development

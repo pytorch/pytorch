@@ -4,9 +4,9 @@ import functools
 import inspect
 import os
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from io import IOBase
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 from torch.utils._import_utils import dill_available
 
@@ -149,7 +149,8 @@ def _check_unpickable_fn(fn: Callable):
     if _is_local_fn(fn) and not dill_available():
         warnings.warn(
             "Local function is not supported by pickle, please use "
-            "regular python function or functools.partial instead."
+            "regular python function or functools.partial instead.",
+            stacklevel=2,
         )
         return
 
@@ -157,7 +158,8 @@ def _check_unpickable_fn(fn: Callable):
     if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not dill_available():
         warnings.warn(
             "Lambda function is not supported by pickle, please use "
-            "regular python function or functools.partial instead."
+            "regular python function or functools.partial instead.",
+            stacklevel=2,
         )
         return
 
@@ -185,7 +187,7 @@ def get_file_pathnames_from_root(
 ) -> Iterable[str]:
     # print out an error message and raise the error out
     def onerror(err: OSError):
-        warnings.warn(err.filename + " : " + err.strerror)
+        warnings.warn(err.filename + " : " + err.strerror, stacklevel=2)
         raise err
 
     if os.path.isfile(root):
@@ -196,6 +198,7 @@ def get_file_pathnames_from_root(
         if match_masks(fname, masks):
             yield path
     else:
+        # pyrefly: ignore [bad-assignment]
         for path, dirs, files in os.walk(root, onerror=onerror):
             if abspath:
                 path = os.path.abspath(path)
@@ -310,7 +313,7 @@ def _deprecation_warning(
     if new_argument_name:
         msg = f"{msg}\nPlease use `{old_class_name}({new_argument_name}=)` instead."
 
-    warnings.warn(msg, FutureWarning)
+    warnings.warn(msg, FutureWarning, stacklevel=2)
 
 
 class StreamWrapper:

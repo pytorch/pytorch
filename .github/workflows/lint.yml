@@ -12,6 +12,7 @@ on:
       - landchecks/*
     tags:
       - ciflow/pull/*
+      - ciflow/trunk/*
   workflow_dispatch:
 
 permissions: read-all
@@ -31,9 +32,13 @@ jobs:
     if: github.repository_owner == 'pytorch'
     name: Get changed files
     uses: ./.github/workflows/_get-changed-files.yml
+    with:
+      all_files: ${{ contains(github.event.pull_request.labels.*.name, 'lint-all-files') || contains(github.event.pull_request.labels.*.name, 'Reverted') || github.event_name == 'push' }}
 
   lintrunner-clang:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    # Needed to prevent deduping on HUD
+    name: lintrunner-clang-${{ needs.get-changed-files.outputs.changed-files == '*' && 'all' || 'partial' }}
     needs: [get-label-type, get-changed-files]
     # Only run if there are changed files relevant to clangtidy / clangformat
     if: |
@@ -53,7 +58,7 @@ jobs:
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.9-linter
+      docker-image: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-linter
       # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
       # to run git rev-parse HEAD~:.ci/docker when a new image is needed
       fetch-depth: 0
@@ -73,6 +78,7 @@ jobs:
   #       fails to find types when it should
   lintrunner-mypy:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    name: lintrunner-mypy-${{ needs.get-changed-files.outputs.changed-files == '*' && 'all' || 'partial' }}
     needs: [get-label-type, get-changed-files]
     # Only run if there are changed files relevant to mypy
     if: |
@@ -97,6 +103,7 @@ jobs:
 
   lintrunner-noclang:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    name: lintrunner-noclang-${{ needs.get-changed-files.outputs.changed-files == '*' && 'all' || 'partial' }}
     needs: [get-label-type, get-changed-files]
     with:
       timeout: 120
@@ -111,9 +118,9 @@ jobs:
         CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
         echo "Running all other linters"
         if [ "$CHANGED_FILES" = '*' ]; then
-          ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT,MYPY,MYPYSTRICT --all-files" .github/scripts/lintrunner.sh
+          ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT,MYPY,MYPYSTRICT,PYREFLY --all-files" .github/scripts/lintrunner.sh
         else
-          ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT,MYPY,MYPYSTRICT ${CHANGED_FILES}" .github/scripts/lintrunner.sh
+          ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT,MYPY,MYPYSTRICT,PYREFLY ${CHANGED_FILES}" .github/scripts/lintrunner.sh
         fi
 
   quick-checks:
@@ -264,10 +271,10 @@ jobs:
         with:
           submodules: false
           fetch-depth: 1
-      - name: Setup Python 3.9
+      - name: Setup Python 3.10
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: '3.9'
+          python-version: '3.10'
           architecture: x64
           cache: pip
       - name: Install dependencies

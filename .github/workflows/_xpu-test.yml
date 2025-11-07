@@ -38,6 +38,10 @@ on:
         default: ""
         description: |
           List of tests to include (empty string implies default list)
+      dashboard-tag:
+        required: false
+        type: string
+        default: ""
       disable-monitor:
         description: |
           [Experimental] Disable utilization monitoring for tests.
@@ -58,6 +62,11 @@ on:
         required: false
         type: number
         default: 1
+    secrets:
+      HUGGING_FACE_HUB_TOKEN:
+        required: false
+        description: |
+          HF Auth token to avoid rate limits when downloading models or datasets from hub
 permissions:
   id-token: write
   contents: read
@@ -196,6 +205,8 @@ jobs:
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
+          DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
+          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         run: |
           # Fetch aws credential from IMDs
@@ -246,6 +257,8 @@ jobs:
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
             -e TESTS_TO_INCLUDE \
             -e ZE_AFFINITY_MASK \
+            -e HUGGING_FACE_HUB_TOKEN \
+            -e DASHBOARD_TAG \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --ulimit core=0 \

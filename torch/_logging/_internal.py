@@ -15,8 +15,9 @@ import tempfile
 import time
 import warnings
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Generic, Optional, Union
+from typing import Any, Generic, Optional, Union
 from typing_extensions import ParamSpec
 from weakref import WeakSet
 
@@ -698,7 +699,7 @@ Examples:
 
   TORCH_LOGS_OUT=/tmp/output.txt will output the logs to /tmp/output.txt as
   well. This is useful when the output is long.
-"""  # flake8: noqa: B950
+"""
     msg = f"""
 TORCH_LOGS Info
 {examples}
@@ -1206,7 +1207,7 @@ def safe_grad_filter(message, category, filename, lineno, file=None, line=None) 
 def user_warning_filter(
     message, category, filename, lineno, file=None, line=None
 ) -> bool:
-    return not category == UserWarning
+    return category is not UserWarning
 
 
 @contextlib.contextmanager

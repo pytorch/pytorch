@@ -18,6 +18,7 @@ class GitHubComment:
     body_text: str
     created_at: str
     author_login: str
+    author_url: Optional[str]
     author_association: str
     editor_login: Optional[str]
     database_id: int

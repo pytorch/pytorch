@@ -200,7 +200,7 @@ class _TensorsAccessed:
         del self.accesses[data_ptr]
 
     def were_there_reads_since_last_write(self, data_ptr: DataPtr) -> bool:
-        return True if self.accesses[data_ptr].reads else False
+        return bool(self.accesses[data_ptr].reads)
 
     def get_allocation_stack_trace(
         self, data_ptr: DataPtr

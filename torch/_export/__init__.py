@@ -16,7 +16,8 @@ from collections import OrderedDict
 from contextlib import contextmanager
 from functools import lru_cache
 
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
 from unittest.mock import patch
 
 import torch
@@ -133,17 +134,18 @@ def aot_compile(
     else:
         # We want to export to Torch IR here to utilize the pre_grad passes in
         # inductor, which run on Torch IR.
-        gm = _export_to_torch_ir(
-            f,
-            args,
-            kwargs,
-            dynamic_shapes,
-            disable_constraint_solver=disable_constraint_solver,
-            same_signature=same_signature,
-            # Disabling this flag, because instead we can rely on the mapping
-            # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
-            restore_fqn=False,
-        )
+        with torch._export.config.patch(use_new_tracer_experimental=True):
+            gm = _export_to_torch_ir(
+                f,
+                args,
+                kwargs,
+                dynamic_shapes,
+                disable_constraint_solver=disable_constraint_solver,
+                same_signature=same_signature,
+                # Disabling this flag, because instead we can rely on the mapping
+                # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
+                restore_fqn=False,
+            )
 
     with torch.no_grad():
         so_path = torch._inductor.aot_compile(gm, args, kwargs, options=options)  # type: ignore[arg-type]

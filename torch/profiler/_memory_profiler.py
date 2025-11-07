@@ -5,8 +5,7 @@ import enum
 import itertools as it
 import logging
 from collections.abc import Iterator
-from typing import Any, cast, Optional, Union
-from typing_extensions import Literal
+from typing import Any, cast, Literal, Optional, Union
 
 import torch
 from torch._C import FunctionSchema
@@ -231,6 +230,7 @@ class SchemaMatcher:
         for schema in cls.match_schemas(t):
             mutable = mutable or [False for _ in schema.arguments]
             for i, arg in enumerate(schema.arguments):
+                # pyrefly: ignore [unsupported-operation]
                 mutable[i] |= getattr(arg.alias_info, "is_write", False)
 
         return tuple(mutable or (None for _ in t.inputs))
@@ -254,7 +254,9 @@ class SchemaMatcher:
         def matches(schema) -> bool:
             return len(schema.arguments) == len(signature) and all(
                 cls._types_match(observed, schema_arg.type)
-                for observed, schema_arg in zip(signature, schema.arguments)
+                for observed, schema_arg in zip(
+                    signature, schema.arguments, strict=True
+                )
             )
 
         return tuple(s for s in cls.lookup_schemas(t.name) or () if matches(s))
@@ -377,7 +379,9 @@ class SizeMap:
         key = TensorKey.from_tensor(t)
         if key is not None and t is not None and t.layout == torch.strided:
             # Scalars are represented as zero dim Tensors
-            n = max(i[0] * i[1] for i in zip(t.sizes or [1], t.strides or [1]))
+            n = max(
+                i[0] * i[1] for i in zip(t.sizes or [1], t.strides or [1], strict=True)
+            )
 
             num_bytes = n * _element_size(t.dtype)
             assert num_bytes >= 0, f"{num_bytes}"
@@ -430,7 +434,7 @@ class DataFlowNode:
         mutable_by_key: dict[Optional[TensorKey], set[Optional[bool]]] = {}
         for op in (i.typed[1] for i in subtree if i.typed[0] == _EventType.TorchOp):
             for op_input, mutable in zip(
-                op.inputs, SchemaMatcher.inputs_are_mutable(op)
+                op.inputs, SchemaMatcher.inputs_are_mutable(op), strict=True
             ):
                 # Tensor
                 if isinstance(op_input, _TensorMetadata):
@@ -672,6 +676,7 @@ class MemoryProfile:
         output: list[tuple[int, Action, KeyAndID, int]] = []
         allocation_times: dict[tuple[TensorKey, bool], int] = {}
         live_unknown: dict[tuple[int, torch.device], Literal[True]] = {}
+
         for event in self._op_tree.dfs():
             if event.typed[0] == _EventType.Allocation:
                 alloc_fields = event.typed[1]
@@ -778,6 +783,7 @@ class MemoryProfile:
 
                 if ids:
                     depends_on_gradient.update(ids)
+
                     depends_on_gradient.update(key.id for key in node.outputs)
 
             # We are guaranteed to exit because there is a finite set of
@@ -1082,6 +1088,7 @@ class MemoryProfileTimeline:
 
             if action in (Action.PREEXISTING, Action.CREATE):
                 raw_events.append(
+                    # pyrefly: ignore [bad-argument-type]
                     (
                         t,
                         _ACTION_TO_INDEX[action],
@@ -1092,6 +1099,7 @@ class MemoryProfileTimeline:
 
             elif action == Action.INCREMENT_VERSION:
                 raw_events.append(
+                    # pyrefly: ignore [bad-argument-type]
                     (
                         t,
                         _ACTION_TO_INDEX[action],
@@ -1100,6 +1108,7 @@ class MemoryProfileTimeline:
                     )
                 )
                 raw_events.append(
+                    # pyrefly: ignore [bad-argument-type]
                     (
                         t,
                         _ACTION_TO_INDEX[action],
@@ -1110,6 +1119,7 @@ class MemoryProfileTimeline:
 
             elif action == Action.DESTROY:
                 raw_events.append(
+                    # pyrefly: ignore [bad-argument-type]
                     (
                         t,
                         _ACTION_TO_INDEX[action],

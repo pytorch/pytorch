@@ -113,7 +113,7 @@ class TorchBenchmarkBase(torch.nn.Module):
             value = kargs[key]
             test_name_str.append(
                 ("" if key in skip_key_list else key)
-                + str(value if type(value) != bool else int(value))
+                + str(value if type(value) is not bool else int(value))
             )
         name = (self.module_name() + "_" + "_".join(test_name_str)).replace(" ", "")
         return name
@@ -161,6 +161,8 @@ class PyTorchOperatorTestCase:
         if self._compile_forward_graph is None:
             self._compile_forward_graph = self._generate_compile_forward_graph()
         self._compile_forward_graph(num_runs)
+        if cuda_sync:
+            torch.cuda.synchronize(torch.cuda.current_device())
 
     def _print_per_iter(self):
         # print last 50 values

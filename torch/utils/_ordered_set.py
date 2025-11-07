@@ -77,6 +77,7 @@ class OrderedSet(MutableSet[T], Reversible[T]):
     def pop(self) -> T:
         if not self:
             raise KeyError("pop from an empty set")
+        # pyrefly: ignore [bad-return]
         return self._dict.popitem()[0]
 
     def copy(self) -> OrderedSet[T]:
@@ -158,6 +159,7 @@ class OrderedSet(MutableSet[T], Reversible[T]):
     def __and__(self, other: AbstractSet[T_co]) -> OrderedSet[T]:
         # MutableSet impl will iterate over other, iter over smaller of two sets
         if isinstance(other, OrderedSet) and len(self) < len(other):
+            # pyrefly: ignore [unsupported-operation, bad-return]
             return other & self
         return cast(OrderedSet[T], super().__and__(other))
 

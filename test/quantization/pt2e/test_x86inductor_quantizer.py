@@ -332,7 +332,7 @@ class TestHelperModules:
         ) -> None:
             super().__init__()
             self.linear = nn.Linear(4, 4, bias=use_bias)
-            if postop == nn.GELU:
+            if postop is nn.GELU:
                 self.postop = postop(approximate=post_op_algo)
             else:
                 self.postop = postop(inplace=inplace_postop)
@@ -2464,11 +2464,11 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
         }
         node_list = [
-            # Q/DQ for first lienar
+            # Q/DQ for first linear
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.linear.default,
-            # Q/DQ for second lienar
+            # Q/DQ for second linear
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.linear.default,

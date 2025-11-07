@@ -2,6 +2,7 @@
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/headeronly/core/ScalarType.h>
+#include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/shim_utils.h>
 #include <climits>
@@ -9,7 +10,7 @@
 
 #include <torch/csrc/stable/accelerator.h>
 
-namespace torch::stable {
+HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
 using accelerator::DeviceIndex;
 using torch::headeronly::ScalarType;
@@ -168,4 +169,4 @@ class Tensor {
   // =============================================================================
 };
 
-} // namespace torch::stable
+HIDDEN_NAMESPACE_END(torch, stable)
