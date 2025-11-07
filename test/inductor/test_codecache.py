@@ -475,17 +475,14 @@ class TestFxGraphCache(TestCase):
 
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if (
-            device == "cuda"
-            and torch.version.hip is None
-            and dtype == torch.bfloat16
-            and not SM80OrLater
-        ):
+        if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
             raise unittest.SkipTest("requires SM80 or later")
         if use_static_cuda_launcher and not (device == "cuda" and bundle_triton):
             raise unittest.SkipTest(
                 "Static cuda launcher requires cuda and triton bundling"
             )
+        if use_static_cuda_launcher and TEST_WITH_ROCM:
+            raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
 
         def fn(x, y):
             return (x * 2, y @ y)
