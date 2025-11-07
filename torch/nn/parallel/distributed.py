@@ -336,6 +336,10 @@ class DistributedDataParallel(Module, Joinable):
     responsible for defining how to do so, for example through the use
     of a :class:`DistributedSampler`.
 
+    Functionality: enables multi-process, multi-GPU or multi-node training 
+    by replicating a model across multiple devices and synchronizing gradients
+    during the backward pass. 
+
     See also: :ref:`distributed-basics` and :ref:`cuda-nn-ddp-instead`.
     The same constraints on input as in :class:`torch.nn.DataParallel` apply.
 

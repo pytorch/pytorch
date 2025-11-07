@@ -6,6 +6,11 @@ from collections.abc import Generator
 import torch
 from torch._C import default_generator
 
+r"""
+Functionality: default_generator is the main random number generatir used by 
+default for all CPU random operations in the library. 
+"""
+
 
 def set_rng_state(new_state: torch.Tensor) -> None:
     r"""Sets the random number generator state.
