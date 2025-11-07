@@ -15940,7 +15940,7 @@ if RUN_GPU:
 
             result, code = run_and_get_code(torch.compile(fn), output, indices, values)
             self.assertTrue(
-                any("tl.atomic_add" in c for c in code),
+                "tl.atomic_add" in code[0],
                 "bf16 should generate tl.atomic_add",
             )
             torch.testing.assert_close(
