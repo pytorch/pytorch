@@ -736,7 +736,7 @@ class OverlapScheduler:
         if key is None:
             return False
 
-        for in_flight_coll in self.in_flight.keys():
+        for in_flight_coll in self.in_flight:
             if bucket_key(in_flight_coll, mode="custom_ops_multidtype") == key:
                 return True
 
