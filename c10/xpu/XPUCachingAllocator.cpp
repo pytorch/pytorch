@@ -120,6 +120,8 @@ struct AllocParams {
   StatTypes stat_types = {};
 };
 
+// Internal implementation that manages actual memory blocks.
+// high level MemPool interface wraps PrivatePool via MempoolId.
 struct PrivatePool {
   PrivatePool(MempoolId_t id, XPUAllocator* allocator = nullptr)
       : id(std::move(id)),
@@ -132,6 +134,7 @@ struct PrivatePool {
   PrivatePool& operator=(PrivatePool&&) = delete;
   ~PrivatePool() = default;
 
+  // default Mempool when no Mempool is specified
   MempoolId_t id{0, 0};
   // Number of live graphs using this pool
   int use_count{1};
@@ -374,8 +377,17 @@ class DeviceCachingAllocator {
      * We have to do a device-level synchronization before free these blocks to
      * guarantee that all kernels can access to the blocks have finished.
      */
-    sycl::free(block->ptr, xpu::get_device_context());
     auto* pool = block->pool;
+    if (pool->owner_PrivatePool && pool->owner_PrivatePool->allocator()) {
+      pool->owner_PrivatePool->allocator()->raw_delete(block->ptr);
+    } else {
+      sycl::free(block->ptr, xpu::get_device_context());
+    }
+
+    if (pool->owner_PrivatePool) {
+      TORCH_INTERNAL_ASSERT(pool->owner_PrivatePool->allocation_count > 0);
+      pool->owner_PrivatePool->allocation_count--;
+    }
     pool->blocks.erase(block);
 
     StatTypes stat_types = get_stat_types_for_pool(*pool);

@@ -29,6 +29,4 @@ C10_XPU_API double getMemoryFraction(DeviceIndex device);
 
 C10_XPU_API void setMemoryFraction(double fraction, DeviceIndex device);
 
-class XPUAllocator;
-
 } // namespace c10::xpu::XPUCachingAllocator
