@@ -5449,6 +5449,90 @@ def resize_as(self, other, memory_format=None):
     return aten.resize(self, other.shape, memory_format=memory_format)
 
 
+@register_decomposition(aten.max_pool2d_with_indices_backward)
+def max_pool2d_with_indices_backward(
+    grad_output: Tensor,
+    self: Tensor,
+    kernel_size,
+    stride,
+    padding,
+    dilation,
+    ceil_mode: bool,
+    indices: Tensor,
+):
+    """
+    Decomposition of max_pool2d_with_indices_backward using gather + reduction.
+
+    This uses high-level PyTorch operations (scatter_add) instead of low-level
+    IR primitives, providing:
+    - Deterministic results (well-defined reduction order via scatter_add)
+    - Generalizability (same pattern works for avg_pool)
+    - Maintainability (simple, clear code using standard PyTorch ops)
+    - Automatic optimization by Inductor
+
+    Algorithm:
+        For each input position, gather all gradient contributions from outputs
+        that selected it as the maximum, then sum them using scatter_add.
+
+    This is the "gather + reduction" approach suggested by @eellison in PR #166662.
+    """
+    # Get spatial dimensions
+    in_height = self.size(-2)
+    in_width = self.size(-1)
+    out_height = grad_output.size(-2)
+    out_width = grad_output.size(-1)
+
+    # Handle both 3D (C, H, W) and 4D (B, C, H, W) cases
+    is_batched = self.dim() == 4
+
+    if is_batched:
+        batch_size = self.size(0)
+        channels = self.size(1)
+
+        # Create grad_input in the flattened shape for efficient scatter_add
+        grad_input_flat = torch.zeros(
+            batch_size * channels,
+            in_height * in_width,
+            dtype=grad_output.dtype,
+            device=grad_output.device,
+        )
+
+        # Reshape grad_output and indices to (B*C, H_out*W_out)
+        grad_output_flat = grad_output.reshape(
+            batch_size * channels, out_height * out_width
+        )
+        indices_flat = indices.reshape(batch_size * channels, out_height * out_width)
+
+        # Use scatter_add to accumulate gradients (functional version for torch.compile)
+        grad_input_flat = grad_input_flat.scatter_add(1, indices_flat, grad_output_flat)
+
+        # Reshape back to original input shape
+        grad_input = grad_input_flat.reshape(batch_size, channels, in_height, in_width)
+    else:
+        # 3D case: (C, H, W)
+        channels = self.size(0)
+
+        # Create grad_input in the flattened shape for efficient scatter_add
+        grad_input_flat = torch.zeros(
+            channels,
+            in_height * in_width,
+            dtype=grad_output.dtype,
+            device=grad_output.device,
+        )
+
+        # Reshape grad_output and indices to (C, H_out*W_out)
+        grad_output_flat = grad_output.reshape(channels, out_height * out_width)
+        indices_flat = indices.reshape(channels, out_height * out_width)
+
+        # Use scatter_add to accumulate gradients (functional version for torch.compile)
+        grad_input_flat = grad_input_flat.scatter_add(1, indices_flat, grad_output_flat)
+
+        # Reshape back to original input shape
+        grad_input = grad_input_flat.reshape(channels, in_height, in_width)
+
+    return grad_input
+
+
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)
