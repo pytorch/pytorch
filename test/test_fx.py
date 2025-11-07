@@ -4746,7 +4746,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         check_symbols_have_bc_designation(torch.fx.passes, set())
 
         non_back_compat_strs = [
-            torch.typename(obj) for obj in non_back_compat_objects.keys()
+            torch.typename(obj) for obj in non_back_compat_objects
         ]
         # Only want objects in torch.fx
         non_back_compat_strs = [
