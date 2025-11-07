@@ -321,6 +321,43 @@ def autotune_custom_op(
         )
         input_gen_fns = _adapt_user_input_gen_fns(inputs, arg_names, user_input_gen_fns)
 
+    # Detect collective operations for specialized benchmarking
+    is_collective = False
+    process_group = None
+
+    if op_overload:
+        from torch._inductor.runtime.collective_benchmarking import is_collective_op
+
+        op_name = str(op_overload)
+        is_collective = is_collective_op(op_name)
+
+        if is_collective:
+            # Extract process_group from non_tensor_args
+            for kwargs_dict in non_tensor_args:
+                if "group" in kwargs_dict:
+                    process_group = kwargs_dict["group"]
+                    break
+                elif "process_group" in kwargs_dict:
+                    process_group = kwargs_dict["process_group"]
+                    break
+
+            # Log collective op detection for debugging
+            import torch.distributed as dist
+
+            if dist.is_initialized():
+                rank = dist.get_rank(process_group)
+                log.debug(
+                    "Detected collective op on rank %d: %s (process_group=%s)",
+                    rank,
+                    op_name,
+                    "default" if process_group is None else "custom",
+                )
+            else:
+                log.debug(
+                    "Detected collective op: %s (distributed not initialized)",
+                    op_name,
+                )
+
     # Run autotuning and get both result and winning choice
     selected_result, winning_choice = autotune_select_algorithm(
         name=name,
@@ -329,6 +366,8 @@ def autotune_custom_op(
         layout=choices[0].layout,
         input_gen_fns=input_gen_fns,
         return_choice=True,
+        is_collective=is_collective,
+        process_group=process_group,
     )
 
     # Apply inlining for fusion if winning_choice has graph; otherwise return result as-is(default fallback impl)
