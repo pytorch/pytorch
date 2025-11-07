@@ -14424,6 +14424,20 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn(6, 4, device=GPU_TYPE).t().contiguous().t(),))
 
+    @skip_if_halide
+    @requires_cuda_and_triton
+    def test_unbacked_float_item(self):
+        def fn(x, max_val):
+            return torch.clamp(x, 0, max_val.item())
+
+        self.common(
+            fn,
+            (
+                torch.randn(10, 20, 30, device=self.device),
+                torch.tensor(5.0, device=self.device),
+            ),
+        )
+
     # end of class CommonTemplate - add new tests here
 
 
