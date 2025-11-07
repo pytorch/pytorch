@@ -496,7 +496,7 @@ class Node(_NodeBase):
         _new_input_nodes: dict[Node, None] = {}
         _fx_map_arg(arg, _new_input_nodes.setdefault)
 
-        for new_use in _new_input_nodes.keys():
+        for new_use in _new_input_nodes:
             if new_use not in self._input_nodes:
                 self._input_nodes.setdefault(new_use)
                 new_use.users.setdefault(self)
@@ -754,6 +754,26 @@ class Node(_NodeBase):
 
             return self.target in _side_effectful_functions
 
+        def subgraph_has_impure_ops(module: torch.fx.GraphModule) -> bool:
+            """
+            Return True if a GraphModule type subgraph contains any impure op, else False.
+            """
+            assert isinstance(module, torch.fx.GraphModule), (
+                "caller should only pass GraphModule to subgraph_has_impure_ops check"
+            )
+            for node in module.graph.nodes:
+                if node.op == "call_function" and node.is_impure(impure_random):
+                    return True
+                if (
+                    # pyrefly: ignore [invalid-argument]
+                    node.op == "call_module"
+                    # pyrefly: ignore [not-callable]
+                    and (submodule := module.get_submodule(node.target))
+                    and isinstance(submodule, torch.fx.GraphModule)
+                ):
+                    return subgraph_has_impure_ops(submodule)
+            return False
+
         # Check if an impure module.
         if self.op == "call_module":
             assert self.graph.owning_module is not None, (
@@ -763,7 +783,10 @@ class Node(_NodeBase):
             assert target_mod is not None, (
                 f"Did not find expected submodule target {self.target}"
             )
-            return getattr(target_mod, "_is_impure", False)
+            if isinstance(target_mod, torch.fx.GraphModule):
+                return subgraph_has_impure_ops(target_mod)
+            else:
+                return getattr(target_mod, "_is_impure", False)
 
         return False
 
