@@ -111,6 +111,17 @@ echo "${TORCH_CUDA_ARCH_LIST}"
 if [[ "$ARCH" == "aarch64" ]]; then
     echo "Disabling MAGMA for aarch64 architecture"
     export USE_MAGMA=0
+
+    # Enable MKLDNN with ARM Compute Library for ARM builds
+    export USE_MKLDNN=1
+    # Only enable ACL if it's installed
+    if [[ -d "/acl" ]]; then
+        export USE_MKLDNN_ACL=1
+        export ACL_ROOT_DIR=/acl
+        echo "ARM Compute Library enabled for MKLDNN: ACL_ROOT_DIR=/acl"
+    else
+        echo "Warning: ARM Compute Library not found at /acl, building without ACL optimization"
+    fi
 fi
 
 # Package directories
