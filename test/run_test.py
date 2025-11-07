@@ -400,6 +400,7 @@ AOT_DISPATCH_TESTS = [
     test for test in TESTS if test.startswith("functorch/test_aotdispatch")
 ]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
+DYNAMO_CORE_TESTS = [test for test in TESTS if test.startswith("dynamo")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 QUANTIZATION_TESTS = [test for test in TESTS if test.startswith("test_quantization")]
 
@@ -1315,6 +1316,16 @@ def parse_args():
         help="Run all distributed tests",
     )
     parser.add_argument(
+        "--dynamo-core",
+        "--dynamo-core",
+        action="store_true",
+        help=(
+            "If this flag is present, we will only run dynamo tests. "
+            "If this flag is not present, we will run all tests "
+            "(including dynamo tests)."
+        ),
+    )
+    parser.add_argument(
         "--functorch",
         "--functorch",
         action="store_true",
@@ -1578,6 +1589,12 @@ def get_selected_tests(options) -> list[str]:
     if options.core:
         selected_tests = list(
             filter(lambda test_name: test_name in CORE_TEST_LIST, selected_tests)
+        )
+
+    # Filter to only run dynamo tests when --dynamo-core option is specified
+    if options.dynamo_core:
+        selected_tests = list(
+            filter(lambda test_name: test_name in DYNAMO_CORE_TESTS, selected_tests)
         )
 
     # Filter to only run functorch tests when --functorch option is specified
