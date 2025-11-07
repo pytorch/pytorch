@@ -1542,7 +1542,7 @@ class OutputGraph(OutputGraphCommon):
                 )
             )
             tmp_vars = []
-            for constructor in reversed(index_to_bytecode_constructor.values()):
+            for constructor in index_to_bytecode_constructor.values():
                 constructor(codegen)
                 var_name = (
                     self.new_var()
@@ -2587,7 +2587,7 @@ class OutputGraph(OutputGraphCommon):
                             real_script_obj
                         ):
                             flat_dict = dict(real_script_obj.__obj_flatten__())  # type: ignore[attr-defined]
-                            for attr in flat_dict.keys():
+                            for attr in flat_dict:
                                 fake_attr_val = getattr(
                                     fake_script_obj.wrapped_obj, attr
                                 )
@@ -3255,7 +3255,7 @@ class SubgraphTracer(fx.Tracer):
     def remove_node(self, node: fx.Node) -> None:
         if len(node.users) > 0:
             user_graph_nodes: list[torch.fx.Node] = []
-            for user in node.users.keys():
+            for user in node.users:
                 # For the case where user.graph == self.graph, that is a real bug and will raise
                 # properly.
                 if user.graph != self.graph:
