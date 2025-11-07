@@ -175,7 +175,13 @@ def install_config_module(module: ModuleType) -> None:
             if (
                 key.startswith("__")
                 or isinstance(value, (ModuleType, FunctionType))
-                or (hasattr(value, "__module__") and value.__module__ == "typing")
+                or (
+                    hasattr(value, "__module__")
+                    and (
+                        value.__module__ == "typing"
+                        or value.__module__.startswith("collections.abc")
+                    )
+                )
                 # Handle from torch.utils._config_module import Config
                 or (isinstance(value, type) and issubclass(value, _Config))
             ):
@@ -293,7 +299,7 @@ class _ConfigEntry:
     hide: bool = False
     alias: Optional[str] = None
 
-    def __init__(self, config: _Config):
+    def __init__(self, config: _Config) -> None:
         self.default = config.default
         self.value_type = (
             config.value_type if config.value_type is not None else type(self.default)
@@ -692,7 +698,7 @@ class ConfigModule(ModuleType):
                     raise AssertionError(
                         "prior should be empty when entering ConfigPatch"
                     )
-                for key in self.changes.keys():
+                for key in self.changes:
                     # KeyError on invalid entry
                     prior[key] = config.__getattr__(key)
                 for k, v in self.changes.items():
@@ -786,7 +792,7 @@ class SubConfigProxy:
     `config.triton.cudagraphs` maps to _config["triton.cudagraphs"]
     """
 
-    def __init__(self, config: object, prefix: str):
+    def __init__(self, config: object, prefix: str) -> None:
         # `super().__setattr__` to bypass custom `__setattr__`
         super().__setattr__("_config", config)
         super().__setattr__("_prefix", prefix)

@@ -2,6 +2,7 @@
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/stable/c/shim.h>
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
@@ -31,10 +32,8 @@ template <typename T>
 struct FromImpl {
   static StableIValue call(
       T val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     static_assert(
         sizeof(T) <= sizeof(StableIValue),
         "StableLibrary stack does not support parameter types larger than 64 bits.");
@@ -75,10 +74,8 @@ template <>
 struct FromImpl<ScalarType> {
   static StableIValue call(
       ScalarType val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     switch (val) {
       case ScalarType::Byte:
         return from(aoti_torch_dtype_uint8());
@@ -133,10 +130,8 @@ template <>
 struct FromImpl<std::nullopt_t> {
   static StableIValue call(
       std::nullopt_t val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     return from(nullptr);
   }
 };
@@ -190,13 +185,51 @@ template <>
 struct FromImpl<torch::stable::Tensor> {
   static StableIValue call(
       const torch::stable::Tensor& val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     AtenTensorHandle new_ath;
     TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle(val.get(), &new_ath));
     return from(new_ath);
+  }
+};
+
+// Specialization for torch::headeronly::HeaderOnlyArrayRef<T> => StableIValue
+// Returns a new owning reference of the underlying list.
+template <typename T>
+struct FromImpl<torch::headeronly::HeaderOnlyArrayRef<T>> {
+  static StableIValue call(
+      const torch::headeronly::HeaderOnlyArrayRef<T>& val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    StableListHandle new_list_handle;
+    try {
+      TORCH_ERROR_CODE_CHECK(
+          torch_new_list_reserve_size(val.size(), &new_list_handle));
+      for (const auto& elem : val) {
+        TORCH_ERROR_CODE_CHECK(
+            torch_list_push_back(new_list_handle, from(elem)));
+      }
+      return from(new_list_handle);
+    } catch (const std::runtime_error& e) {
+      if (new_list_handle != nullptr) {
+        // clean up memory if an error was thrown
+        TORCH_ERROR_CODE_CHECK(torch_delete_list(new_list_handle));
+      }
+      throw;
+    }
+  }
+};
+
+// Specialization for std::vector<T> => StableIValue, which is implemented the
+// same way as HeaderOnlyArrayRef<T> => StableIValue
+// Returns a new owning reference of the underlying list.
+template <typename T>
+struct FromImpl<std::vector<T>> {
+  static StableIValue call(
+      const std::vector<T>& val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    return from<torch::headeronly::HeaderOnlyArrayRef<T>>(val);
   }
 };
 
@@ -209,10 +242,8 @@ template <typename T>
 struct ToImpl {
   static T call(
       StableIValue val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     static_assert(std::is_trivially_copyable_v<T>);
     // T may not have a default constructor. (For example, it might be
     // c10::Device.) However, std::memcpy implicitly creates a T at the
@@ -249,10 +280,8 @@ template <>
 struct ToImpl<ScalarType> {
   static ScalarType call(
       StableIValue val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     int32_t shim_scalartype = to<int32_t>(val);
     if (shim_scalartype == aoti_torch_dtype_uint8()) {
       return ScalarType::Byte;
@@ -309,10 +338,8 @@ template <>
 struct ToImpl<std::nullopt_t> {
   static std::nullopt_t call(
       StableIValue val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     // val should be equivalent to from(nullptr)
     return std::nullopt;
   }
@@ -350,11 +377,41 @@ template <>
 struct ToImpl<torch::stable::Tensor> {
   static torch::stable::Tensor call(
       StableIValue val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     return torch::stable::Tensor(to<AtenTensorHandle>(val));
+  }
+};
+
+// Specialization for StableIValue => std::vector<T>
+// std::vector<T> should be represented as a StableListHandle
+// filled with StableIValues
+// The new std::vector steals ownership of the underlying elements
+// and we free the underlying list referred by the input StableListHandle.
+template <typename T>
+struct ToImpl<std::vector<T>> {
+  static std::vector<T> call(
+      StableIValue val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    auto list_handle = to<StableListHandle>(val);
+    size_t size;
+    try {
+      TORCH_ERROR_CODE_CHECK(torch_list_size(list_handle, &size));
+      std::vector<T> result;
+      result.reserve(size);
+      for (size_t i = 0; i < size; i++) {
+        StableIValue element;
+        TORCH_ERROR_CODE_CHECK(torch_list_get_item(list_handle, i, &element));
+        result.push_back(to<T>(element));
+      }
+      TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
+      return result;
+    } catch (const std::runtime_error& e) {
+      // clean up memory if an exception is thrown, and rethrow
+      TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
+      throw;
+    }
   }
 };
 
