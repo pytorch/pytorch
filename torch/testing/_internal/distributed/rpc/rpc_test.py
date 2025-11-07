@@ -3285,7 +3285,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         for key in expected:
             self.assertIn(key, info.keys())
 
-        for key in info.keys():
+        for key in info:
             self.assertIn(key, expected.keys())
 
     @dist_init(setup_rpc=False)
