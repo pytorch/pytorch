@@ -9,6 +9,8 @@ using Block = HostBlock<XPUStream>;
 
 struct XPUCachingHostAllocatorImpl
     : public CachingHostAllocatorImpl<XPUStream, XPUEvent> {
+  XPUCachingHostAllocatorImpl() : active_(false) {}
+
   /* These following functions are runtime-related. */
   void allocate_host_memory(size_t size, void** ptr) override {
     *ptr = sycl::aligned_alloc_host(
