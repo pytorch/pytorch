@@ -87,6 +87,11 @@ jobs:
     # Docker uploads fail from LF runners, see https://github.com/pytorch/pytorch/pull/137358
     # runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}"
     runs-on: "${{ matrix.runner }}"
+    outputs:
+      docker-pytorch-linux-jammy-rocm-n-py3: ${{ steps.generate_output.pytorch-linux-jammy-rocm-n-py3 }}
+      docker-pytorch-linux-noble-rocm-n-py3: ${{ steps.generate_output.pytorch-linux-noble-rocm-n-py3 }}
+      docker-pytorch-linux-jammy-rocm-n-py3-benchmarks: ${{ steps.generate_output.pytorch-linux-jammy-rocm-n-py3-benchmarks }}
+
     steps:
       - name: Clean workspace
         shell: bash
@@ -115,6 +120,13 @@ jobs:
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
+
+      - name: Generate output
+        id: generate_output
+        run: |
+          docker-image-name="${{ matrix.docker-image-name }}"
+          docker-image-tag="${{ steps.build-docker-image.outputs.docker-image }}"
+          echo "${docker_image_name}=${docker-image-tag}" >> "$GITHUB_OUTPUT"
 
       - uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
         name: Push to https://ghcr.io/
@@ -145,3 +157,45 @@ jobs:
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
+
+  rocm-docker-cache:
+    # TODO: Uncomment below
+    # needs: docker-build
+    # if: ${{ github.event_name == 'push' }}
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        #runner: [linux.rocm.gfx942.docker-cache]
+        runner: [linux.rocm.gfx942.1]
+        docker-image: [
+          docker-pytorch-linux-jammy-rocm-n-py3,
+          docker-pytorch-linux-noble-rocm-n-py3,
+          docker-pytorch-linux-jammy-rocm-n-py3-benchmarks
+        ]
+    runs-on: "${{ matrix.runner }}"
+    steps:
+      - name: configure aws credentials
+        id: aws_creds
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+          aws-region: us-east-1
+          role-duration-seconds: 18000
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        continue-on-error: false
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
+
+      - name: Pull docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ needs.docker-build.outputs.${{ matrix.docker-image }} }}
+
+            #- name: Save as tarball
+            #  run: |
+            #    docker-image-tag=
+            #    sudo docker save -o ~/docker-data/pytorch/pytorch_docker_image.tar ${{ steps.calculate-docker-image.outputs.docker-image }}
