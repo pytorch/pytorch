@@ -65,6 +65,8 @@ class Adam(Optimizer):
             raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
+        if not isinstance(betas, tuple) or not isinstance(betas, list):
+            raise TypeError("betas must be a tuple or list")
         if not (
             (isinstance(betas[0], float) and isinstance(betas[1], float))
             or (isinstance(betas[0], Tensor) and isinstance(betas[1], Tensor))
