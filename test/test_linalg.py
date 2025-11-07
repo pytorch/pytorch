@@ -10005,8 +10005,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         # due to large N ( 50_000 ), accumulation and assosiativity errors can occur
         # therefore we calculate appropriate rtol and atol based on N and machine epsilon.
-        
-        b_sum_f32 = B.float().sum() # compute sum, ensure f32 accumulation
+
+        b_sum_f32 = B.float().sum()  # compute sum, ensure f32 accumulation
         safety_factor = 3
         eps = torch.finfo(dtype).eps
         u = eps / 2.0         # unit roundoff for dtype
