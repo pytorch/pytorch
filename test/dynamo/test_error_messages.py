@@ -1080,51 +1080,42 @@ from user code:
 """,
         )
 
-    @make_logging_test(graph_breaks=True)
-    def test_skipped_frame_no_verbose_traceback(self, records):
-        def fn(x):
-            with GenericCtxMgr():
-                assert x is None
-
-        with self.assertRaises(AssertionError):
-            torch.compile(fn, backend="eager")(torch.randn(3))
-
-        self.assertEqual(len(records), 1)
-
-        message = records[0].getMessage()
-        files = [
-            "convert_frame.py",
-            "symbolic_convert.py",
-            "bytecode_transformation.py",
-        ]
-        for file in files:
-            self.assertNotIn(file, message)
-        expected_content = [
-            "assert x is None",
-            "torch.compile will skip tracing the frame",
-        ]
-        for content in expected_content:
-            self.assertIn(content, message)
-
     @torch._dynamo.config.patch(verbose=True)
     @make_logging_test(graph_breaks=True)
     def test_skipped_frame_with_verbose_traceback(self, records):
         def fn(x):
             with GenericCtxMgr():
-                assert x is None
+                torch._dynamo.graph_break()
+                return x + 1
 
-        with self.assertRaises(AssertionError):
-            torch.compile(fn, backend="eager")(torch.randn(3))
-
+        torch.compile(fn, backend="eager")(torch.randn(3))
         self.assertEqual(len(records), 1)
-        exc_text = "".join(traceback.format_exception(*records[0].exc_info))
-        has_internal_trace = (
-            "convert_frame.py" in exc_text
-            or "symbolic_convert.py" in exc_text
-            or "exc.py" in exc_text
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            """\
+Graph break: torch.compile cannot properly resume from this graph break, which results in a skip.
+torch.compile will skip tracing the frame fn (test_error_messages.py line N) and fall back to eager.
+The graph break occurred in the following user code:
+  File "test_error_messages.py", line N, in fn
+    torch._dynamo.graph_break()
+""",
         )
-        self.assertTrue(
-            has_internal_trace, "Expected internal stack trace with verbose=True"
+        self.assertExpectedInline(
+            munge_exc(records[0].exc_info[1], suppress_suffix=True, skip=0),
+            """\
+Graph break under GenericContextWrappingVariable
+  Explanation: Attempted to graph break in an active context manager(s) that doesn't support graph breaking.
+  Hint: Move the offending context manager(s) to outside the compiled region.
+  Hint: This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
+
+  Developer debug context: Active generic context managers: [GenericContextWrappingVariable(GenericCtxMgr)]
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0066.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    torch._dynamo.graph_break()
+""",
         )
 
     @make_logging_test(graph_breaks=True)
@@ -1136,16 +1127,17 @@ from user code:
                         x = x + 1
             return x
 
-        result = torch.compile(fn, backend="eager")(torch.randn(3))  # noqa: F841
-
-        skip_messages = [
-            r
-            for r in records
-            if "skip" in r.getMessage().lower()
-            or "fall back to eager" in r.getMessage().lower()
-        ]
-        self.assertGreater(
-            len(skip_messages), 0, "Expected at least one skip/fallback message"
+        torch.compile(fn, backend="eager")(torch.randn(3))
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            """\
+Graph break: torch.compile cannot properly resume from this graph break, which results in a skip.
+torch.compile will skip tracing the frame fn (test_error_messages.py line N) and fall back to eager.
+The graph break occurred in the following user code:
+  File "test_error_messages.py", line N, in fn
+    if x.sum() > 0:
+""",
         )
 
     @make_logging_test(graph_breaks=True)

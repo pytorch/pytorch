@@ -1885,11 +1885,7 @@ class ConvertFrame:
                         user_stack_formatted = "".join(
                             traceback.format_list(user_stack)
                         )
-                        frame_info = (
-                            f"{getattr(code, 'co_name', '<unknown>')} "
-                            f"({getattr(code, 'co_filename', '<unknown>')} "
-                            f"line {getattr(code, 'co_firstlineno', 0)})"
-                        )
+                        frame_info = exc.format_frame_info(code)
                         user_stack_trace = (
                             "Graph break: torch.compile cannot properly resume from this graph break, which results in a skip.\n"
                             f"torch.compile will skip tracing the frame {frame_info} and fall back to eager.\n"
@@ -1904,18 +1900,11 @@ class ConvertFrame:
                             },
                             payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc()}",
                         )
-                        if config.verbose:
-                            graph_break_log.debug(
-                                user_stack_trace,
-                                exc_info=True,
-                                stack_info=True,
-                            )
-                        else:
-                            graph_break_log.debug(
-                                user_stack_trace,
-                                exc_info=True,
-                                stack_info=False,
-                            )
+                        graph_break_log.debug(
+                            user_stack_trace,
+                            exc_info=True,
+                            stack_info=config.verbose,
+                        )
 
             if not config.suppress_errors and not soft_fail:
                 raise
