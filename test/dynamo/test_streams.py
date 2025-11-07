@@ -74,13 +74,13 @@ class TestStreams(torch._dynamo.test_case.TestCase):
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[2, 2]", arg1_1: "f32[2, 2]"):
-        # Annotation: {'stream': None}
+        # Annotation: {'stream': 0}
         add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
 
-        # Annotation: {'stream': None}
+        # Annotation: {'stream': 1}
         add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
 
-        # Annotation: {'stream': None}
+        # Annotation: {'stream': 1}
         add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, 2);  add_1 = None
         add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_2, add);  add_2 = add = None
         return (add_3,)
@@ -196,6 +196,7 @@ class <lambda>(torch.nn.Module):
         s_exp = fn(*inp)
         self.assertEqual(s_act, s_exp)
 
+    @requires_cuda
     def test_nested_stream_enter_exit(self):
         def fn(x, y, s0, s1, s2):
             with s1:
@@ -229,13 +230,13 @@ class <lambda>(torch.nn.Module):
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[2, 2]", arg1_1: "f32[2, 2]"):
-        # Annotation: {'stream': None}
+        # Annotation: {'stream': 1}
         add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
 
-        # Annotation: {'stream': None}
+        # Annotation: {'stream': 2}
         add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
 
-        # Annotation: {'stream': None}
+        # Annotation: {'stream': 1}
         add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add, 2);  add = None
         return (add_1, add_2)
 """,
@@ -249,6 +250,7 @@ class <lambda>(torch.nn.Module):
     def test_nested_stream_enter_exit_graph_break(self):
         pass
 
+    @requires_cuda
     def test_local_stream_enter_exit(self):
         def fn(x, y):
             s2 = torch.Stream()
@@ -289,6 +291,7 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
+    @requires_cuda
     def test_local_stream_nested_enter_exit(self):
         def fn(x, y):
             s2 = torch.Stream()
@@ -331,6 +334,7 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
+    @requires_cuda
     def test_stream_with_mutation(self):
         def fn(x, y):
             s2 = torch.Stream()
@@ -380,6 +384,7 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
+    @requires_cuda
     def test_stream_backward(self) -> None:
         def fn(x, y):
             s2 = torch.Stream()

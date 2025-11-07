@@ -82,7 +82,8 @@ class ItertoolsVariable(VariableTracker):
                 for item in itertools.product(*seqs, repeat=r)
             ]
             return variables.ListIteratorVariable(
-                items, mutation_type=ValueMutationNew()
+                items,  # type: ignore[arg-type]
+                mutation_type=ValueMutationNew(),
             )
         elif (
             self.value is itertools.combinations
@@ -98,7 +99,8 @@ class ItertoolsVariable(VariableTracker):
             for item in itertools.combinations(iterable, r):
                 items.append(variables.TupleVariable(list(item)))
             return variables.ListIteratorVariable(
-                items, mutation_type=ValueMutationNew()
+                items,  # type: ignore[arg-type]
+                mutation_type=ValueMutationNew(),
             )
         elif self.value is itertools.groupby:
             if any(kw != "key" for kw in kwargs.keys()):
@@ -181,7 +183,8 @@ class ItertoolsVariable(VariableTracker):
                     from_exc=e,
                 )
             return variables.ListIteratorVariable(
-                result, mutation_type=ValueMutationNew()
+                result,  # type: ignore[arg-type]
+                mutation_type=ValueMutationNew(),
             )
         elif self.value is itertools.repeat:
             if len(args) < 2:
@@ -212,7 +215,8 @@ class ItertoolsVariable(VariableTracker):
                 )
             ]
             return variables.ListIteratorVariable(
-                items, mutation_type=ValueMutationNew()
+                items,  # type: ignore[arg-type]
+                mutation_type=ValueMutationNew(),
             )
         else:
             return super().call_function(tx, args, kwargs)
