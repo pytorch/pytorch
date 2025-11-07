@@ -16,10 +16,11 @@ using torch::headeronly::DefaultPtrTraits;
 #if defined(__CUDACC__) || defined(__HIPCC__)
   using torch::headeronly::RestrictPtrTraits;
 #endif
-using torch::headeronly::detail::TensorAccessorDetail;
+using torch::headeronly::TensorAccessorDetail;
+using torch::headeronly::TensorAccessorBaseDetail;
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using TensorAccessorBase = torch::headeronly::detail::TensorAccessorBase<c10::IntArrayRef, T, N, PtrTraits, index_t>;
+using TensorAccessorBase = TensorAccessorBaseDetail<c10::IntArrayRef, T, N, PtrTraits, index_t>;
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
 using TensorAccessor = TensorAccessorDetail<c10::IntArrayRef, T, N, PtrTraits, index_t>;
