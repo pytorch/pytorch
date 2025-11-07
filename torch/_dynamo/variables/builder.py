@@ -1061,9 +1061,7 @@ class VariableBuilder:
             )
             set_example_value(stream_proxy.node, value)
             var = StreamVariable(
-                stream_proxy,
-                value,
-                source=self.source,
+                stream_proxy, value, source=self.source, user_object_index=index
             )
             return self.tx.output.side_effects.track_object_existing(value, var)
         elif isinstance(value, (torch._C._SDPAParams)):
@@ -3006,14 +3004,16 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         return SymNodeVariable(proxy, example_value, **options)
     elif (
         isinstance(example_value, torch.Stream)
-        and proxy.node.target
-        in (get_external_object_by_index, torch.accelerator.current_stream)
+        and proxy.node.target == get_external_object_by_index
     ) or proxy.node.target in [
         device_interface.current_stream
         for _, device_interface in get_registered_device_interfaces()
     ]:
         set_example_value(proxy.node, example_value)
-        return StreamVariable(proxy, example_value, **options)
+        index = None
+        if proxy.node.target == get_external_object_by_index:
+            index = proxy.node.args[0]
+        return StreamVariable(proxy, example_value, index, **options)
     elif (
         inspect.isclass(proxy.node.target)
         and issubclass(proxy.node.target, torch.Event)

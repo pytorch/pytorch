@@ -133,7 +133,7 @@ class elementwise_type_promotion_wrapper:
             type_promoting_args = tuple(
                 bound.arguments[x]
                 for x in self.type_promoting_arg_names  # type: ignore[union-attr]
-                if x in bound.arguments.keys()
+                if x in bound.arguments
             )
 
             flattened_type_promoting_args = pytree.arg_tree_leaves(*type_promoting_args)
@@ -145,7 +145,7 @@ class elementwise_type_promotion_wrapper:
             promoted_args = {
                 x: _maybe_convert_to_dtype(bound.arguments[x], compute_dtype)
                 for x in self.type_promoting_arg_names  # type: ignore[union-attr]
-                if x in bound.arguments.keys()
+                if x in bound.arguments
             }
             bound.arguments.update(promoted_args)
 

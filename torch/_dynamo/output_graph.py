@@ -1542,7 +1542,7 @@ class OutputGraph(OutputGraphCommon):
                 )
             )
             tmp_vars = []
-            for constructor in reversed(index_to_bytecode_constructor.values()):
+            for constructor in index_to_bytecode_constructor.values():
                 constructor(codegen)
                 var_name = (
                     self.new_var()

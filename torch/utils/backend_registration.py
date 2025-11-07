@@ -82,7 +82,7 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     _privateuse1_backend_name = backend_name
 
 
-def _check_register_once(module, attr):
+def _check_register_once(module, attr) -> None:
     if hasattr(module, attr):
         raise RuntimeError(
             f"The custom device module of {module} has already been registered with {attr}"
@@ -448,33 +448,33 @@ def _get_custom_mod_func(func_name: str):
 
 
 class _DummyBackendModule:
-    def is_initialized(self):
+    def is_initialized(self) -> bool:
         return True
 
-    def is_available(self):
+    def is_available(self) -> bool:
         return True
 
-    def current_device(self):
+    def current_device(self) -> int:
         return 0
 
-    def _is_in_bad_fork(self):
+    def _is_in_bad_fork(self) -> bool:
         return False
 
-    def manual_seed_all(self, seed: int):
+    def manual_seed_all(self, seed: int) -> None:
         pass
 
-    def device_count(self):
+    def device_count(self) -> int:
         return 1
 
 
 class _DummyPrivateUse1Hook(torch._C._acc.PrivateUse1Hooks):
-    def is_available(self):
+    def is_available(self) -> bool:
         return True
 
-    def has_primary_context(self, dev_id):
+    def has_primary_context(self, dev_id) -> bool:
         return True
 
-    def is_built(self):
+    def is_built(self) -> bool:
         return True
 
 
@@ -485,7 +485,7 @@ class _DummyDeviceGuard(torch._C._acc.DeviceGuard):
 
 def _setup_privateuseone_for_python_backend(
     rename=None, backend_module=None, hook=None, device_guard=None
-):
+) -> None:
     """This function will prepare the PrivateUse1 dispatch key to be used as a python backend.
 
     WARNING: this API is experimental and might change without notice.
