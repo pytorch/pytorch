@@ -115,6 +115,9 @@ class CoordescTuner:
         if self.is_native_matmul:
             out.append("num_stages")
             out.remove("ZBLOCK")  # ZBLOCK=1 always in native matmul
+        if 'r0_' in self.size_hints and self.size_hints['r0_'] >= 1024:
+            out.append("NUM_STAGES")
+
 
         return out
 
@@ -145,9 +148,14 @@ class CoordescTuner:
         returned as it's own neighbour.
         """
         assert radius >= 1
+        if name == "NUM_STAGES":
+            # we see cases that
+            # NUM_STAGES=1 is better than NUM_STAGES=2
+            # while NUM_STAGES=1 is worse than NUM_STAGES=3
+            radius = max(radius, 2)
 
         def update(cur_val, inc=True):
-            if name == "num_stages":
+            if name in ["num_stages", "NUM_STAGES"]:
                 if inc:
                     return cur_val + 1
                 else:
@@ -266,10 +274,9 @@ class CoordescTuner:
             baseline_timing = self.call_func(func, baseline_config)
 
         reduction_hint = self.inductor_meta.get("reduction_hint", None)
-        if reduction_hint != ReductionHint.OUTER:
+        if reduction_hint != ReductionHint.OUTER or len(baseline_config.kwargs) != 3:
             return baseline_config
-
-        log.error("= Do coordinate descent tuning for %s =", self.name)
+        log.debug("= Do coordinate descent tuning for %s =", self.name)
         log.debug(
             "%s: Baseline Config %s, baseline timing %f",
             self.name,

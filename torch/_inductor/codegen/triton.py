@@ -4515,12 +4515,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # Write the loop headers.
             for level, tree in enumerate(loop_trees):
                 with self.body.indent(offset=level):
+                    from torch._inductor.runtime.hints import ReductionHint
                     prefix = tree.prefix
                     loop_start = "rsplit_start" if self.cooperative_reduction else "0"
                     loop_end = (
                         "rsplit_end" if self.cooperative_reduction else f"{prefix}numel"
                     )
-                    num_stages = ", num_stages = 2" if torch.version.hip else ""
+                    num_stages_cuda = ", num_stages=NUM_STAGES" if self.features.get_reduction_hint() == ReductionHint.OUTER else ""
+                    num_stages = ", num_stages=2" if torch.version.hip else num_stages_cuda
                     self.body.writeline(
                         f"for {prefix}offset in tl.range({loop_start}, {loop_end}, {prefix.upper()}BLOCK{num_stages}):"
                     )
@@ -4930,6 +4932,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         if self.cooperative_reduction:
             add_constexpr_arg("RSPLIT")
+
+        if self.inside_reduction:
+            add_constexpr_arg("NUM_STAGES")
 
         triton_meta_signature = signature_to_meta(
             signature, size_dtype=self.index_dtype, argdefs=argdefs
