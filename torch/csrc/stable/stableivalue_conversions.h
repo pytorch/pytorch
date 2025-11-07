@@ -215,7 +215,7 @@ struct FromImpl<torch::headeronly::HeaderOnlyArrayRef<T>> {
         // clean up memory if an error was thrown
         TORCH_ERROR_CODE_CHECK(torch_delete_list(new_list_handle));
       }
-      throw e;
+      throw;
     }
   }
 };
@@ -410,7 +410,7 @@ struct ToImpl<std::vector<T>> {
     } catch (const std::runtime_error& e) {
       // clean up memory if an exception is thrown, and rethrow
       TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
-      throw e;
+      throw;
     }
   }
 };
