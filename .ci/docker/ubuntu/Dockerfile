@@ -66,10 +66,9 @@ ENV NCCL_LIB_DIR="/usr/local/cuda/lib64/"
 ARG CUDA_VERSION
 COPY ./common/install_jax.sh install_jax.sh
 COPY ./common/common_utils.sh common_utils.sh
-COPY ./ci_commit_pins/jax-cu12.txt /ci_commit_pins/jax-cu12.txt
-COPY ./ci_commit_pins/jax-cu13.txt /ci_commit_pins/jax-cu13.txt
+COPY ./ci_commit_pins/jax.txt /ci_commit_pins/jax.txt
 RUN bash ./install_jax.sh ${CUDA_VERSION}
-RUN rm -f install_jax.sh common_utils.sh /ci_commit_pins/jax-cu12.txt /ci_commit_pins/jax-cu13.txt
+RUN rm -f install_jax.sh common_utils.sh /ci_commit_pins/jax.txt
 
 
 # (optional) Install UCC
