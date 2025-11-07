@@ -58,6 +58,21 @@ def has_jax_cuda_backend() -> bool:
 
 
 @functools.cache
+def has_jax_tpu_backend() -> bool:
+    """Check if JAX has TPU backend support."""
+    if not has_jax_package():
+        return False
+    try:
+        import jax  # type: ignore[import-not-found]
+
+        # Check if TPU backend is available
+        devices = jax.devices("tpu")
+        return len(devices) > 0
+    except Exception:
+        return False
+
+
+@functools.cache
 def has_pallas() -> bool:
     """
     Check if Pallas backend is fully available for use.
@@ -65,18 +80,22 @@ def has_pallas() -> bool:
     Requirements:
     - JAX package installed
     - Pallas (jax.experimental.pallas) available
-    - CUDA backend available (for GPU support)
+    - A compatible backend (CUDA or TPU) is available in both PyTorch and JAX.
     """
     if not has_pallas_package():
         return False
 
-    # Only enable Pallas if CUDA is available
-    # (Pallas primarily targets GPU workloads)
-    if not torch.cuda.is_available():
-        return False
+    # Check for is CUDA is available or if JAX has GPU/CUDA backend
+    has_cuda = torch.cuda.is_available() and has_jax_cuda_backend()
 
-    # Check if JAX has GPU/CUDA backend
-    if not has_jax_cuda_backend():
-        return False
+    # Check for TPU backend
+    has_tpu_torch = False
+    try:
+        import torch_xla.core.xla_model as xm
 
-    return True
+        has_tpu_torch = xm.xla_device_count() > 0
+    except ImportError:
+        pass
+    has_tpu = has_tpu_torch and has_jax_tpu_backend()
+
+    return has_cuda or has_tpu

@@ -988,7 +988,7 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         self.generator_cls = generator_cls
 
     def __getattr__(self, name):
-        if name in self.__class__.__dict__.keys():
+        if name in self.__class__.__dict__:
             return getattr(self, name)
         return getattr(self.vt, name)
 

@@ -229,7 +229,7 @@ def assign_memory_planning_info_for_scheduler_buffers(
 
     # populate the MemoryPlanningInfoForBuffer attribute to each scheduler buffer
     # note: there are scheduler buffers not in dep_name_to_succ_nodes (e.g., graph outputs)
-    for buf_name in name_to_buf.keys():
+    for buf_name in name_to_buf:
         name_to_buf[buf_name].mpi_buffer = MemoryPlanningInfoForBuffer(
             size_alloc=sched_buf_to_size[buf_name][0],
             size_free=sched_buf_to_size[buf_name][1],

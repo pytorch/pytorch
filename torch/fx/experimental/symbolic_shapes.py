@@ -547,6 +547,7 @@ def rebind_unbacked(
         assert shape_env is not None
         for raw_u0, path in bindings.items():
             u1 = pytree.key_get(result, path)
+
             # Sometimes, things were previously unbacked bindings become constants.
             # There are two situations this can happen.
             #
@@ -602,7 +603,23 @@ def rebind_unbacked(
             if u1.node.hint is not None:
                 continue
 
-            raw_u1 = u1.node.expr
+            # unbacked symbols bindings might be replaced to other backed or
+            # unbacked replacements.
+            #
+            # Example:
+            #   u = x.item()
+            #   torch._check(u == 5)
+            #
+            # The safest approach is to retrieve raw_u1 from u1.node._expr
+            # and perform the rebinding on the original unbacked symbol,
+            # even if it’s no longer directly referenced.
+            #
+            # In other words, we should always rebind the original symbol
+            # before any replacements are applied.
+            #   u0 -> u0 == s1
+            raw_u1 = u1.node._expr
+
+            # TODO Do we still need this logic below?
             # Simplify SymBool binding
             if (
                 isinstance(raw_u1, sympy.Piecewise)

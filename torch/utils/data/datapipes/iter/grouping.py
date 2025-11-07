@@ -234,7 +234,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         biggest_key = None
         biggest_size = 0
         result_to_yield = None
-        for findkey in self.buffer_elements.keys():
+        for findkey in self.buffer_elements:
             if len(self.buffer_elements[findkey]) > biggest_size:
                 biggest_size = len(self.buffer_elements[findkey])
                 biggest_key = findkey

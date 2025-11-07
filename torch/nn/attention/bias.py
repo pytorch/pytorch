@@ -117,7 +117,7 @@ class CausalBias(torch.Tensor):
     .. warning:: This class is a prototype and subject to change.
     """
 
-    def __init__(self, variant: CausalVariant, seq_len_q: int, seq_len_kv: int):
+    def __init__(self, variant: CausalVariant, seq_len_q: int, seq_len_kv: int) -> None:
         """
         Initializes the CausalBias instance with a specified variant and sequence lengths.
 
@@ -296,7 +296,7 @@ class CausalBias(torch.Tensor):
             return cls._dispatch(*args, **kwargs)
         return super().__torch_function__(func, types, args, kwargs)
 
-    def __repr__(self):  # type:ignore[override]
+    def __repr__(self) -> str:  # type:ignore[override]
         return self._materialize().__repr__()
 
 

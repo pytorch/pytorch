@@ -73,7 +73,22 @@ from tools.testing.test_selections import (
     ShardedTest,
     THRESHOLD,
 )
-from tools.testing.upload_artifacts import zip_and_upload_artifacts
+
+
+try:
+    from tools.testing.upload_artifacts import (
+        parse_xml_and_upload_json,
+        zip_and_upload_artifacts,
+    )
+except ImportError:
+    # some imports in those files might fail, e.g., boto3 not installed. These
+    # functions are only needed under specific circumstances (CI) so we can
+    # define dummy functions here.
+    def parse_xml_and_upload_json():
+        pass
+
+    def zip_and_upload_artifacts(failed: bool):
+        pass
 
 
 # Make sure to remove REPO_ROOT after import is done
@@ -1672,7 +1687,7 @@ def get_selected_tests(options) -> list[str]:
             ]
         )
 
-    if sys.version_info[:2] < (3, 13):
+    if sys.version_info[:2] < (3, 13) or sys.version_info[:2] >= (3, 14):
         # Skip tests for older Python versions as they may use syntax or features
         # not supported in those versions
         options.exclude.extend(
@@ -1887,6 +1902,7 @@ def run_tests(
     def handle_complete(failure: Optional[TestFailure]):
         failed = failure is not None
         if IS_CI and options.upload_artifacts_while_running:
+            parse_xml_and_upload_json()
             zip_and_upload_artifacts(failed)
         if not failed:
             return False

@@ -435,7 +435,7 @@ def _suggest_or_raise_constraint_violation(
 
         # Error if we have any constraints on static values
 
-        for k in shape_env.var_to_range.keys():
+        for k in shape_env.var_to_range:
             if isinstance(k, sympy.Integer):
                 constraint_violation_error = ConstraintViolationError(
                     f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"

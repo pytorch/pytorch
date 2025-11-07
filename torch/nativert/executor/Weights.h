@@ -45,7 +45,11 @@ class Weights {
       const std::unordered_map<std::string, std::string>& constantPaths,
       std::string_view constantPathPrefix,
       std::function<bool(const std::string&)> skipSizeCheck = {},
-      std::function<bool(const std::string&)> skipDtypeCheck = {});
+      std::function<bool(const std::string&)> skipDtypeCheck = {},
+      std::shared_ptr<std::unordered_map<
+          std::string,
+          std::shared_ptr<torch::nativert::TensorMeta>>> maybeNewWeightsMeta =
+          nullptr);
 
   at::Tensor at(const std::string& name) const;
   at::Tensor& at(const std::string& name);

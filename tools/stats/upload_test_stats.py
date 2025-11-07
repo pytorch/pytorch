@@ -38,12 +38,14 @@ def parse_xml_report(
     report: Path,
     workflow_id: int,
     workflow_run_attempt: int,
+    job_id: int | None = None,
 ) -> list[dict[str, Any]]:
     """Convert a test report xml file into a JSON-serializable list of test cases."""
     print(f"Parsing {tag}s for test report: {report}")
 
-    job_id = get_job_id(report)
-    print(f"Found job id: {job_id}")
+    if job_id is None:
+        job_id = get_job_id(report)
+        print(f"Found job id: {job_id}")
 
     test_cases: list[dict[str, Any]] = []
 

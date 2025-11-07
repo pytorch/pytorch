@@ -2838,6 +2838,9 @@ def batch_norm(
         # pyrefly: ignore [bad-argument-type]
         _verify_batch_size(input.size())
 
+    if eps <= 0.0:
+        raise ValueError(f"batch_norm eps must be positive, but got {eps}")
+
     return torch.batch_norm(
         input,
         weight,

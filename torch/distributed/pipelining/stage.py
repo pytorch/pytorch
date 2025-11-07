@@ -978,7 +978,14 @@ class _PipelineStageBase(ABC):
 
         return ops
 
-    def _post_backward(self, grad_scale_factor: int):
+    def perform_reduce_grad(self, grad_scale_factor: int):
+        """
+        Called as a part of schedule IR.
+        REDUCE_GRAD action is scheduled after all microbatches W, B actions.
+
+        Currently contains "post_backward" functionality for FSDP.
+        We can try to extract post_backward in a separate IR action in future.
+        """
         # Manually call post backward for FSDP
         if isinstance(self.submod, FSDPModule):
             fsdp_module = self.submod
@@ -1001,7 +1008,8 @@ class _PipelineStageBase(ABC):
             distributed_state._root_post_backward_final_callback()
         # Call gradient scaling at the end of the backward pass
         # NOTE: this must happen after FSDP post_backward is FSDP is enabled
-        self.scale_grads(grad_scale_factor)
+        if grad_scale_factor != 1:
+            self.scale_grads(grad_scale_factor)
 
 
 class _PipelineStage(_PipelineStageBase):

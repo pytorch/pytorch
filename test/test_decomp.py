@@ -1338,7 +1338,7 @@ class HasDecompTest(TestCase):
         # operators, which never appear in AOTAutograd's graph so are never used.
         useful_decomps = {
             op
-            for op in decomposition_table.keys()
+            for op in decomposition_table
             if isinstance(op, torch._ops.OpOverload) and self._can_appear_in_trace(op)
         }
         core_decomps = torch._decomp.core_aten_decompositions().keys()

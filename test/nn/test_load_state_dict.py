@@ -62,6 +62,29 @@ class TestLoadStateDict(NNTestCase):
 
     @swap([True, False])
     @skipIfTorchDynamo("dynamo installs weakrefs on some params")
+    def test_scalar_param_1d_tensor_raises(self):
+        class SimpleModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.threshold = nn.Parameter(torch.tensor(0.0))
+
+            def forward(self, x):
+                return x
+
+        m = SimpleModule()
+
+        # Test that [3] -> scalar raises error
+        sd = {"threshold": torch.randn(3)}
+        with self.assertRaisesRegex(RuntimeError, "size mismatch for threshold"):
+            m.load_state_dict(sd)
+
+        # Test that [1] -> scalar is allowed (backward compatibility)
+        sd = {"threshold": torch.tensor([1.0])}
+        m.load_state_dict(sd)
+        self.assertEqual(m.threshold.item(), 1.0)
+
+    @swap([True, False])
+    @skipIfTorchDynamo("dynamo installs weakrefs on some params")
     def test_load_state_dict(self):
         l = nn.Linear(5, 5)
         block = nn.Module()

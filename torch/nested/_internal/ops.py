@@ -143,7 +143,7 @@ def check_schema(schema_str: str, func, *args, **kwargs) -> None:
         name, arg_type = named_arg_type.split(": ")
         is_optional = arg_type.endswith("?")
         normalized_arg_type = arg_type[:-1] if is_optional else arg_type
-        if normalized_arg_type not in arg_type_check_fns.keys():
+        if normalized_arg_type not in arg_type_check_fns:
             raise AssertionError(f"Unknown arg type: {normalized_arg_type}")
 
         if i >= len(args):

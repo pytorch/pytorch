@@ -115,7 +115,7 @@ _TENSOR_TYPE_MAP = {
 }
 
 
-def _calc_scale_factor(tensor):
+def _calc_scale_factor(tensor) -> int:
     converted = tensor.numpy() if not isinstance(tensor, np.ndarray) else tensor
     return 1 if converted.dtype == np.uint8 else 255
 
@@ -334,7 +334,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
     # pyrefly: ignore [missing-attribute]
     ssi = Summary(value=[Summary.Value(tag=SESSION_START_INFO_TAG, metadata=smd)])
 
-    mts = [MetricInfo(name=MetricName(tag=k)) for k in metric_dict.keys()]
+    mts = [MetricInfo(name=MetricName(tag=k)) for k in metric_dict]
 
     exp = Experiment(hparam_infos=hps, metric_infos=mts)
 
