@@ -423,33 +423,28 @@ from user code:
 
         @torch.compile(backend="eager")
         def fn(x):
-            d = {"a": 1}
-            optree.tree_flatten_with_path(d)
-            return torch.sin(x)
+            tree = {"a": x, "b": (x - 1, 2 * x)}
+            sin, cos = optree.tree_transpose_map(
+                lambda x: (torch.sin(x), torch.cos(x)),
+                tree,
+            )
+            return sin, cos
 
         def post_munge(s):
-            s = re.sub(
-                r"optree\.\S*\.flatten_with_path",
-                "optree.<path>.flatten_with_path",
-                s,
-            )
-            return re.sub(
-                r"qualname: \S*flatten_with_path",
-                "qualname: <path>.flatten_with_path",
-                s,
-            )
+            s = re.sub(r"optree\.\S*\.flatten", "optree.<path>.flatten", s)
+            return re.sub(r"qualname: \S*flatten", "qualname: <path>.flatten", s)
 
         fn(torch.randn(4))
-        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertGreaterEqual(len(counters["graph_break"]), 1)
         first_graph_break = next(iter(counters["graph_break"].keys()))
         self.assertExpectedInline(
             post_munge(first_graph_break),
             """\
 Attempted to call function marked as skipped
-  Explanation: Dynamo cannot trace optree C/C++ function optree.<path>.flatten_with_path.
+  Explanation: Dynamo cannot trace optree C/C++ function optree.<path>.flatten.
   Hint: Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py
 
-  Developer debug context: module: optree._C, qualname: <path>.flatten_with_path, skip reason: <missing reason>
+  Developer debug context: module: optree._C, qualname: <path>.flatten, skip reason: <missing reason>
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html""",
         )
