@@ -3710,15 +3710,6 @@ class DeviceCachingAllocator {
   }
 };
 
-static bool zeroAllocations() {
-  static auto has_cuda_env =
-      c10::utils::check_env("PYTORCH_CUDA_MEMORY_CACHING_MEMSET_ZEROS") == true;
-  static auto has_rocm_env =
-      c10::utils::check_env("PYTORCH_HIP_MEMORY_CACHING_MEMSET_ZEROS") == true;
-  static bool zeros = has_cuda_env || has_rocm_env;
-  return zeros;
-}
-
 // Returns whether to force all allocations to bypass the caching allocator and
 // go straight to cudaMalloc.  This setting is useful when debugging GPU memory
 // errors, since the caching allocator foils cuda-memcheck.
@@ -4148,8 +4139,9 @@ class NativeCachingAllocator : public CUDAAllocator {
       TORCH_SDT_WITH_SEMAPHORE(malloc, devPtr, device, size, stream.id());
     }
 
-    if (zeroAllocations()) {
-      C10_CUDA_CHECK(cudaMemsetAsync(devPtr, 0, size, stream));
+    if (CUDAAllocatorConfig::has_memset_value()) {
+      C10_CUDA_CHECK(cudaMemsetAsync(
+          devPtr, CUDAAllocatorConfig::memset_value(), size, stream));
     }
 
     return {devPtr, devPtr, deleteFunc, Device(DeviceType::CUDA, device)};
@@ -4241,11 +4233,14 @@ class NativeCachingAllocator : public CUDAAllocator {
       C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
       malloc(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
     }
-    if (zeroAllocations()) {
+    if (CUDAAllocatorConfig::has_memset_value()) {
       c10::DeviceIndex device = 0;
       C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-      C10_CUDA_CHECK(
-          cudaMemsetAsync(r, 0, nbytes, cuda::getCurrentCUDAStream(device)));
+      C10_CUDA_CHECK(cudaMemsetAsync(
+          r,
+          CUDAAllocatorConfig::memset_value(),
+          nbytes,
+          cuda::getCurrentCUDAStream(device)));
     }
     return r;
   }
@@ -4262,8 +4257,9 @@ class NativeCachingAllocator : public CUDAAllocator {
       C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
       malloc(&r, device, nbytes, stream);
     }
-    if (zeroAllocations()) {
-      C10_CUDA_CHECK(cudaMemsetAsync(r, 0, nbytes, stream));
+    if (CUDAAllocatorConfig::has_memset_value()) {
+      C10_CUDA_CHECK(cudaMemsetAsync(
+          r, CUDAAllocatorConfig::memset_value(), nbytes, stream));
     }
     return r;
   }

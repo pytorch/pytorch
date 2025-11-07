@@ -109,6 +109,8 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
     } else if (key == "per_process_memory_fraction") {
       i = parsePerProcessMemoryFraction(tokenizer, i);
       used_native_specific_option = true;
+    } else if (key == "memset_value") {
+      i = parseMemsetValue(tokenizer, i);
     } else {
       const auto& keys =
           c10::CachingAllocator::AcceleratorAllocatorConfig::getKeys();
@@ -158,6 +160,18 @@ double CUDAAllocatorConfig::parsePerProcessMemoryFraction(
       val_env >= 0.0 && val_env <= 1.0,
       "per_process_memory_fraction is invalid, set it in [0.0, 1.0]");
   m_per_process_memory_fraction = val_env;
+  return i;
+}
+
+int CUDAAllocatorConfig::parseMemsetValue(
+    const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+    size_t i) {
+  tokenizer.checkToken(++i, ":");
+  int val_env = tokenizer.toInt(++i);
+  TORCH_CHECK_VALUE(
+      val_env >= 0 && val_env <= 255,
+      "memset_value is invalid, set it in [0, 255]");
+  m_memset_value = val_env;
   return i;
 }
 

@@ -184,6 +184,18 @@ size_t AcceleratorAllocatorConfig::parseExpandableSegments(
   return i;
 }
 
+size_t AcceleratorAllocatorConfig::parseMemsetValue(
+    const ConfigTokenizer& tokenizer,
+    size_t i) {
+  tokenizer.checkToken(++i, ":");
+  memset_value_ = tokenizer.toInt(++i);
+  TORCH_CHECK_VALUE(
+      memset_value_ >= 0 && memset_value_ <= 255,
+      "CachingAllocator option memset_value invalid, set it in [0, 255]");
+
+  return i;
+}
+
 size_t AcceleratorAllocatorConfig::parsePinnedUseBackgroundThreads(
     const ConfigTokenizer& tokenizer,
     size_t i) {
@@ -218,6 +230,8 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
       i = parseRoundUpPower2Divisions(tokenizer, i);
     } else if (key == "expandable_segments") {
       i = parseExpandableSegments(tokenizer, i);
+    } else if (key == "memset_value") {
+      i = parseMemsetValue(tokenizer, i);
     } else if (key == "pinned_use_background_threads") {
       i = parsePinnedUseBackgroundThreads(tokenizer, i);
     } else {
