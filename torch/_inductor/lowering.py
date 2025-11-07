@@ -13,7 +13,16 @@ import textwrap
 import warnings
 from collections import defaultdict
 from collections.abc import Collection, Iterable, Sequence
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Optional,
+    TYPE_CHECKING,
+    TypeGuard,
+    TypeVar,
+    Union,
+)
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -284,7 +293,7 @@ def decode_dtype(dtype: Union[int, torch.dtype]) -> torch.dtype:
     return dtype
 
 
-def is_integer_type(x: Any) -> bool:
+def is_integer_type(x: Any) -> TypeGuard[Union[TensorBox, sympy.Expr, int]]:
     if isinstance(x, TensorBox):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     elif isinstance(x, sympy.Expr):
@@ -293,7 +302,7 @@ def is_integer_type(x: Any) -> bool:
         return isinstance(x, int)
 
 
-def is_boolean_type(x: Any) -> bool:
+def is_boolean_type(x: Any) -> TypeGuard[Union[TensorBox, bool]]:
     if isinstance(x, TensorBox):
         return is_boolean_dtype(x.get_dtype())
     else:
