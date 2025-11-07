@@ -1239,8 +1239,12 @@ constexpr size_t calculateSmallVectorDefaultInlinedElements() {
 
   // Discount the size of the header itself when calculating the maximum inline
   // bytes.
+  constexpr size_t BaseHeaderSize =
+      sizeof(SmallVectorBase<SmallVectorSizeType<T>>);
+  constexpr size_t HeaderBytesAligned =
+      ((BaseHeaderSize + alignof(T) - 1) / alignof(T)) * alignof(T);
   constexpr size_t PreferredInlineBytes =
-      kPreferredSmallVectorSizeof - sizeof(SmallVectorImpl<T>);
+      kPreferredSmallVectorSizeof - HeaderBytesAligned;
   constexpr size_t NumElementsThatFit = PreferredInlineBytes / sizeof(T);
   return NumElementsThatFit == 0 ? 1 : NumElementsThatFit;
 }
