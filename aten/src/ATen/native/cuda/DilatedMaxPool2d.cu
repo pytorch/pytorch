@@ -452,8 +452,11 @@ const Tensor& indices) {
   const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
 
-  const auto memory_format = input_.suggest_memory_format();
-
+  auto memory_format = input_.suggest_memory_format();              
+  if (memory_format == MemoryFormat::Contiguous && input_.numel() > static_cast<int64_t>(std::numeric_limits<int>::max())) {
+    memory_format = MemoryFormat::ChannelsLast;              
+  }
+  
   const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
   const int64_t nInputPlane = input_.size(-3);
   const int64_t inputHeight = input_.size(-2);
@@ -606,7 +609,10 @@ const Tensor& gradInput) {
   const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
 
-  const auto memory_format = input_.suggest_memory_format();
+  auto memory_format = input_.suggest_memory_format();              
+  if (memory_format == MemoryFormat::Contiguous && input_.numel() > static_cast<int64_t>(std::numeric_limits<int>::max())) {
+    memory_format = MemoryFormat::ChannelsLast;              
+  }
 
   const Tensor input = input_.contiguous(memory_format);
 
