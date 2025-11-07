@@ -2900,7 +2900,6 @@ def _reduction_configs(
     # for correctness
     if not torch.version.hip and not is_fbcode():
         outer_config = outer_config_opt()
-
     configs = []
 
     if inductor_meta.get("add_persistent_rblock") and loads_and_red <= 8:
@@ -2924,7 +2923,7 @@ def _reduction_configs(
         return configs + [contiguous_config]
     elif reduction_hint == ReductionHint.OUTER:
         return configs + [outer_config]
-    elif reduction_hint == ReductionHint.OUTER_TINY:
+    elif configs + [contiguous_config] == ReductionHint.OUTER_TINY:
         return configs + [tiny_config]
 
     # We continue here under the following conditions:
@@ -3164,6 +3163,8 @@ def reduction(
         num_dynamic=num_dynamic,
     )
 
+    for c in configs:
+        c.kwargs["NUM_STAGES"] = 1
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
 
@@ -3370,6 +3371,9 @@ def persistent_reduction(
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     inductor_meta.pop(persistent_reduction_key)
 
+    for c in configs:
+        c.kwargs["NUM_STAGES"] = 1
+
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
     return cached_autotune(
         size_hints,
@@ -3399,7 +3403,6 @@ def split_scan(
         raise NotImplementedError(f"size_hints: {size_hints}")
 
     configs = _reduction_configs(
-        size_hints=size_hints, inductor_meta=inductor_meta, triton_meta=triton_meta
     )
 
     # Fixup configs to enforce the minimum Rn_BLOCK size
