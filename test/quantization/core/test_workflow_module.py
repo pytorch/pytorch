@@ -650,7 +650,7 @@ class TestRecordHistogramObserver(QuantizationTestCase):
                 observer_dict = {}
                 _get_observer_dict(model, observer_dict)
 
-                self.assertTrue('fc1.module.activation_post_process' in observer_dict.keys(),
+                self.assertTrue('fc1.module.activation_post_process' in observer_dict,
                                 'observer is not recorded in the dict')
                 self.assertEqual(len(observer_dict['fc1.module.activation_post_process'].get_tensor_value()),
                                  2 * len(self.calib_data))

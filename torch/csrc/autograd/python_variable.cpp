@@ -51,6 +51,150 @@ using namespace at;
 using namespace torch;
 using namespace torch::autograd;
 
+namespace {
+class OperatorArgsKwargsView {
+ public:
+  OperatorArgsKwargsView(
+      const c10::OperatorHandle& op,
+      const std::vector<c10::IValue>& arguments);
+  using args_iterator = const c10::IValue*;
+
+  args_iterator args_begin() const {
+    return arguments_.data();
+  }
+
+  args_iterator args_end() const {
+    return arguments_.data() + positional_default_start_;
+  }
+
+  auto num_positional_args() const {
+    return positional_default_start_;
+  }
+
+  auto kwarg_start_index() const {
+    return first_non_default_kwarg_;
+  }
+
+  struct kwargs_iterator {
+    kwargs_iterator() = default;
+    kwargs_iterator(const OperatorArgsKwargsView* parent, size_t current)
+        : parent_(parent), current_(current) {}
+
+    kwargs_iterator(const kwargs_iterator&) = default;
+    kwargs_iterator& operator=(const kwargs_iterator&) = default;
+
+    kwargs_iterator& operator++() {
+      do {
+        current_++;
+      } while (current_ < parent_->arguments_.size() &&
+               parent_->is_default(current_));
+      return *this;
+    }
+
+    kwargs_iterator operator++(int) {
+      auto copy = *this;
+      ++(*this);
+      return copy;
+    }
+
+    const c10::IValue& operator*() const {
+      return parent_->arguments_[current_];
+    }
+
+    const c10::IValue* operator->() const {
+      return &operator*();
+    }
+
+    int64_t underlying_index() const {
+      return current_;
+    }
+
+    bool operator==(const kwargs_iterator& rhs) const {
+      return parent_ == rhs.parent_ && current_ == rhs.current_;
+    }
+
+    bool operator!=(const kwargs_iterator& rhs) {
+      return !(*this == rhs);
+    }
+
+   private:
+    const OperatorArgsKwargsView* parent_ = nullptr;
+    size_t current_ = 0;
+  };
+
+  kwargs_iterator kwargs_begin() const {
+    return kwargs_iterator(this, first_non_default_kwarg_);
+  }
+
+  kwargs_iterator kwargs_end() const {
+    return kwargs_iterator(this, arguments_.size());
+  }
+
+ private:
+  bool is_default(size_t idx) const {
+    const auto& arg = op_.schema().arguments()[idx];
+    if (!arg.default_value().has_value()) {
+      return false;
+    }
+    const auto& default_ivalue = *arg.default_value();
+    const auto& ivalue = arguments_[idx];
+    if (default_ivalue != ivalue) {
+      return false;
+    }
+    return true;
+  }
+
+  const c10::OperatorHandle& op_;
+  c10::ArrayRef<c10::IValue> arguments_;
+  // About all the pointers:
+  //
+  // f(int x, int y = 0, *, int z = 0)
+  //                                  ^- arguments.size()
+  //                        ^- kwarg_only_start
+  //          ^- positional_default_start
+  //   ^- 0
+  int64_t positional_default_start_;
+  int64_t first_non_default_kwarg_;
+};
+
+OperatorArgsKwargsView::OperatorArgsKwargsView(
+    const c10::OperatorHandle& op,
+    const std::vector<c10::IValue>& arguments)
+    : op_(op), arguments_(arguments) {
+  // Find the split point between kwarg-only and regular.  Since most functions
+  // don't have kwarg-only arguments, it is more efficient to scan from the
+  // right (but ideally, this would just be precomputed in FunctionSchema
+  // itself).  (NB: minus one in the loop is because we're testing if the
+  // *next* argument is kwarg-only before we advance the starting index)
+  const int64_t signed_arguments_size = static_cast<int64_t>(arguments.size());
+  int64_t kwarg_only_start = signed_arguments_size;
+  for (; kwarg_only_start > 0; kwarg_only_start--) {
+    const auto& arg = op.schema().arguments()[kwarg_only_start - 1];
+    if (!arg.kwarg_only()) {
+      break;
+    }
+  }
+
+  // Find the first positional argument that isn't defaulted
+  positional_default_start_ = kwarg_only_start;
+  for (; positional_default_start_ > 0; positional_default_start_--) {
+    if (!is_default(positional_default_start_ - 1)) {
+      break;
+    }
+  }
+
+  // kwargs_iterator will skip default kwargs when incremented, but we
+  // need to skip any initial run of default kwargs ourselves.
+  first_non_default_kwarg_ = kwarg_only_start;
+  for (; first_non_default_kwarg_ < signed_arguments_size;
+       ++first_non_default_kwarg_) {
+    if (!is_default(first_non_default_kwarg_)) {
+      break;
+    }
+  }
+}
+} // namespace
+
 std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
     const c10::OperatorHandle& op,
     const std::vector<c10::IValue>& arguments) {
@@ -59,52 +203,13 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
       "GIL must be held before you call parseIValuesToPyArgsKwargs");
   const auto& schema = op.schema();
   py::dict kwargs;
-  // About all the pointers:
-  //
-  // f(int x, int y = 0, *, int z = 0)
-  //                                  ^- arguments.size()
-  //                        ^- kwarg_only_start
-  //          ^- positional_default_start
-  //   ^- 0
 
-  // Find the split point between kwarg-only and regular.  Since most functions
-  // don't have kwarg-only arguments, it is more efficient to scan from the
-  // right (but ideally, this would just be precomputed in FunctionSchema
-  // itself).  (NB: minus one in the loop is because we're testing if the
-  // *next* argument is kwarg-only before we advance the starting index)
-  int64_t kwarg_only_start = static_cast<int64_t>(arguments.size());
-  for (; kwarg_only_start > 0; kwarg_only_start--) {
-    const auto& arg = schema.arguments()[kwarg_only_start - 1];
-    if (!arg.kwarg_only()) {
-      break;
-    }
-  }
+  OperatorArgsKwargsView args_kwargs(op, arguments);
+  auto args = py::reinterpret_steal<py::object>(
+      PyTuple_New(args_kwargs.num_positional_args()));
 
-  // Find the first positional argument that isn't defaulted
-  auto is_default = [&](size_t idx) -> bool {
-    const auto& arg = schema.arguments()[idx];
-    if (!arg.default_value().has_value()) {
-      return false;
-    }
-    const auto& default_ivalue = *arg.default_value();
-    const auto& ivalue = arguments[idx];
-    if (default_ivalue != ivalue) {
-      return false;
-    }
-    return true;
-  };
-
-  int64_t positional_default_start = kwarg_only_start;
-  for (; positional_default_start > 0; positional_default_start--) {
-    if (!is_default(positional_default_start - 1)) {
-      break;
-    }
-  }
-
-  auto args =
-      py::reinterpret_steal<py::object>(PyTuple_New(positional_default_start));
-
-  auto schemaAwareToPyObject = [&](size_t idx) -> py::object {
+  auto schemaAwareToPyObject =
+      [&schema](size_t idx, const c10::IValue& argument) -> py::object {
     const auto& arg = schema.arguments()[idx];
     auto match = [&](c10::TypeKind kind) {
       const auto& t = arg.real_type();
@@ -116,38 +221,42 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
       }
       return false;
     };
-    if (arguments[idx].isNone()) {
+    if (argument.isNone()) {
       return py::none();
     } else if (match(c10::ScalarTypeType::Kind)) {
-      auto* obj =
-          getTHPDtype(static_cast<c10::ScalarType>(arguments[idx].toInt()));
+      auto* obj = getTHPDtype(static_cast<c10::ScalarType>(argument.toInt()));
       return py::reinterpret_borrow<py::object>(
           reinterpret_cast<PyObject*>(obj));
     } else if (match(c10::LayoutType::Kind)) {
-      auto* obj =
-          getTHPLayout(static_cast<c10::Layout>(arguments[idx].toInt()));
+      auto* obj = getTHPLayout(static_cast<c10::Layout>(argument.toInt()));
       return py::reinterpret_borrow<py::object>(
           reinterpret_cast<PyObject*>(obj));
     } else if (match(c10::MemoryFormatType::Kind)) {
-      return py::cast(static_cast<c10::MemoryFormat>(arguments[idx].toInt()));
+      return py::cast(static_cast<c10::MemoryFormat>(argument.toInt()));
     } else {
-      return torch::jit::toPyObject(arguments[idx]);
+      return torch::jit::toPyObject(argument);
     }
   };
 
   // Populate positional arguments
-  for (const auto idx : c10::irange(positional_default_start)) {
+  size_t idx = 0;
+  for (auto argument_it = args_kwargs.args_begin();
+       argument_it != args_kwargs.args_end();
+       ++argument_it) {
     PyTuple_SET_ITEM(
-        args.ptr(), idx, schemaAwareToPyObject(idx).release().ptr());
+        args.ptr(),
+        idx,
+        schemaAwareToPyObject(idx, *argument_it).release().ptr());
+    idx++;
   }
 
   // Populate keyword arguments
-  for (const auto idx : c10::irange(kwarg_only_start, arguments.size())) {
-    // But don't populate default keyword arguments
-    if (is_default(idx))
-      continue;
-    const auto& arg = schema.arguments()[idx];
-    kwargs[py::cast(arg.name())] = schemaAwareToPyObject(idx);
+  for (auto argument_it = args_kwargs.kwargs_begin();
+       argument_it != args_kwargs.kwargs_end();
+       ++argument_it) {
+    const auto& arg = schema.arguments()[argument_it.underlying_index()];
+    kwargs[py::cast(arg.name())] =
+        schemaAwareToPyObject(argument_it.underlying_index(), *argument_it);
   }
   return std::make_pair(std::move(args), std::move(kwargs));
 }

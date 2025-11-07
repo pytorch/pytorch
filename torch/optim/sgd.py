@@ -39,7 +39,7 @@ class SGD(Optimizer):  # noqa: D101
         foreach: Optional[bool] = None,
         differentiable: bool = False,
         fused: Optional[bool] = None,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if lr < 0.0:
@@ -267,7 +267,7 @@ def sgd(
     dampening: float,
     nesterov: bool,
     maximize: bool,
-):
+) -> None:
     r"""Functional API that performs SGD algorithm computation.
 
     See :class:`~torch.optim.SGD` for details.
@@ -333,7 +333,7 @@ def _single_tensor_sgd(
     nesterov: bool,
     maximize: bool,
     has_sparse_grad: bool,
-):
+) -> None:
     if grad_scale is not None or found_inf is not None:
         raise AssertionError("Expected grad_scale and found_inf to be None")
 
@@ -394,7 +394,7 @@ def _multi_tensor_sgd(
     nesterov: bool,
     maximize: bool,
     has_sparse_grad: bool,
-):
+) -> None:
     if grad_scale is not None or found_inf is not None:
         raise AssertionError("Expected grad_scale and found_inf to be None")
 

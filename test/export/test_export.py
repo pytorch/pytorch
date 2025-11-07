@@ -721,6 +721,34 @@ class TestExport(TestCase):
                 )
                 self.assertEqual(node.meta["from_node"][-1].graph_id, graph_id)
 
+    def test_annotate_on_assert(self):
+        # nodes added in `apply_runtime_assertion_pass` will be annotated
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                with torch.fx.traceback.annotate({"moo": 0}):
+                    x = torch.cat([x, x])
+                    b = y.item()
+                    torch._check(b >= x.shape[0])
+                    return x * b
+
+        with torch.fx.traceback.preserve_node_meta():
+            ep = torch.export.export(
+                M(),
+                (torch.randn(3), torch.tensor(6)),
+                dynamic_shapes={"x": {0: Dim("b")}, "y": None},
+            )
+
+        custom_metadata = torch.fx.traceback._get_custom_metadata(ep.module())
+        self.assertExpectedInline(
+            str(custom_metadata),
+            """\
+('call_function', 'cat', {'moo': 0})
+('call_function', 'item', {'moo': 0})
+('call_function', 'ge_1', {'moo': 0})
+('call_function', '_assert_scalar_default', {'moo': 0})
+('call_function', 'mul', {'moo': 0})""",
+        )
+
     @requires_gpu
     def test_flex_attention_export(self):
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
@@ -6093,26 +6121,19 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         retry_export(
             cf_implicitsize(),
             (torch.tensor(2), torch.randn(10)),
-            fixes=[
-                # Could not guard on data-dependent expression u0 < 0
-                "torch._check(i >= 0)",
-            ],
+            fixes=[],
         )
 
         class cf_stacklist(torch.nn.Module):
             def forward(self, xs, y, fixes):
                 i = y.item()
                 eval(fixes)
-                # instead of xs[i]
                 return torch.stack(xs, 0).narrow(0, i, 1).squeeze()
 
         retry_export(
             cf_stacklist(),
             ([torch.ones(5) * i for i in range(10)], torch.tensor(2)),
-            fixes=[
-                # Could not guard on data-dependent expression u0 < 0
-                "torch._check(i >= 0)",
-            ],
+            fixes=[],
         )
 
         class cf_tensorsplit(torch.nn.Module):
@@ -6166,7 +6187,12 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         class cf_stacklist(torch.nn.Module):
             def forward(self, xs, y):
                 # y.item() is not a local, so we can't suggest a fix
-                return torch.stack(xs, 0).narrow(0, y.item(), 1).squeeze()
+                if y.item() < 0:
+                    return (
+                        torch.stack(xs, 0).narrow(0, y.item() + xs.size(), 1).squeeze()
+                    )
+                else:
+                    return torch.stack(xs, 0).narrow(0, y.item(), 1).squeeze()
 
         with self.assertRaisesRegex(
             error_type,
@@ -6196,7 +6222,18 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, xs, y):
                 box = Box(y.item())
                 # box.content is not a local, so we can't suggest a fix
-                return torch.stack(xs, 0).narrow(0, box.content, 1).squeeze()
+                if box.content < 0:
+                    return (
+                        torch.stack(xs, 0)
+                        .narrow(0, box.content + xs.size(), 1)
+                        .squeeze()
+                    )
+                else:
+                    return (
+                        torch.stack(xs, 0)
+                        .narrow(0, box.content + xs.size(), 1)
+                        .squeeze()
+                    )
 
         with self.assertRaisesRegex(
             error_type,

@@ -159,7 +159,7 @@ class TestInductorDynamic(TestCase):
         if not HAS_GPU:
             self.skipTest("Triton not available")
         torch._dynamo.reset()
-        TestCase.setUp(self)
+        super().setUp()
         # this should be in setUpClass, but device-generic tests
         # don't work with setUpClass well (non-deterministically the wrong setUpClass is resolved),
         # so put it in test setUp, it's cheap

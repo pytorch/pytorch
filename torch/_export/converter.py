@@ -443,7 +443,7 @@ class TS2FXGraphConverter:
         self.blocks_to_lifted_attrs = blocks_to_lifted_attrs
 
         # Populate methods for the standard operators.
-        for k in kind_to_standard_operators.keys():
+        for k in kind_to_standard_operators:
             handler_func_name = ir_name_to_func_name(k)
             # Create an indirect function call:
             # convert_<namespace>_<opname> --> lambda node: _convert_standard_operator(node)

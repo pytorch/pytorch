@@ -2150,7 +2150,7 @@ class BuiltinVariable(VariableTracker):
         )
 
         if isinstance(arg, dict):
-            arg_list = [ConstantVariable.create(k) for k in arg.keys()]
+            arg_list = [ConstantVariable.create(k) for k in arg]
             return DictVariableType(
                 # pyrefly: ignore [bad-argument-type]
                 dict.fromkeys(arg_list, value),

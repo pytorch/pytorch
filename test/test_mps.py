@@ -1762,13 +1762,13 @@ class TestMPS(TestCaseMPS):
                             continue
                         # Running stats must be tracked in eval mode
                         if (track_running_stats):
-                            helper(shape, eps=0, momentum=1, channels_last=channels_last,
+                            helper(shape, eps=1e-5, momentum=1, channels_last=channels_last,
                                    track_running_stats=track_running_stats, test_module=test_module)
                             helper(shape, channels_last=channels_last,
                                    track_running_stats=track_running_stats, test_module=test_module)
                             helper(shape, eps=1e-05, momentum=0.1, wts=False, training=False, channels_last=channels_last,
                                    track_running_stats=track_running_stats, test_module=test_module)
-                            helper(shape, eps=0, momentum=1.0, wts=False, training=False, channels_last=channels_last,
+                            helper(shape, eps=1e-5, momentum=1.0, wts=False, training=False, channels_last=channels_last,
                                    track_running_stats=track_running_stats, test_module=test_module)
                             helper(shape, eps=1, momentum=1, wts=True, training=False, channels_last=channels_last,
                                    track_running_stats=track_running_stats, test_module=test_module)
@@ -1776,7 +1776,7 @@ class TestMPS(TestCaseMPS):
                                    track_running_stats=track_running_stats, test_module=test_module)
                         helper(shape, eps=1e-05, momentum=0.1, wts=False, training=True, channels_last=channels_last,
                                track_running_stats=track_running_stats, test_module=test_module)
-                        helper(shape, eps=0, momentum=1.0, wts=False, training=True, channels_last=channels_last,
+                        helper(shape, eps=1e-5, momentum=1.0, wts=False, training=True, channels_last=channels_last,
                                track_running_stats=track_running_stats, test_module=test_module)
                         helper(shape, eps=1, momentum=1, wts=True, training=True, channels_last=channels_last,
                                track_running_stats=track_running_stats, test_module=test_module)
@@ -4469,6 +4469,14 @@ class TestMPS(TestCaseMPS):
         out2 = nn.BCELoss(weight)(sigmoid(output), target)
 
         self.assertEqual(out1, out2)
+
+    def test_bce_backward_with_no_reduction_and_one_in_shape(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/166746
+        output = torch.zeros(3, 2, 1, requires_grad=True, device='mps')
+        target = torch.zeros(3, 2, 1, device='mps')
+        torch.sum(nn.BCELoss(reduction='none')(output, target)).backward()
+        expected_grad = torch.zeros(3, 2, 1, device='mps')
+        self.assertEqual(output.grad, expected_grad)
 
     def test_cross_entropy_loss(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/116095

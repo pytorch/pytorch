@@ -30,7 +30,7 @@ def move_to_device_pass(
         location: Union[torch.device, str, dict[str, str]],
     ) -> str:
         if isinstance(location, dict):
-            if str(curr_device) in location.keys():
+            if str(curr_device) in location:
                 return location[str(curr_device)]
             else:
                 return str(curr_device)

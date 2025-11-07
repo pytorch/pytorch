@@ -49,6 +49,7 @@ class TestGlobalHelpers(common_utils.TestCase):
 
 class TestOverrideDict(common_utils.TestCase):
     def setUp(self):
+        super().setUp()
         self.override_dict: registration.OverrideDict[str, int] = (
             registration.OverrideDict()
         )

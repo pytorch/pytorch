@@ -63,7 +63,7 @@ docker build \
   --target final \
   --progress plain \
   --build-arg "BASE_TARGET=${BASE_TARGET}" \
-  --build-arg "DEVTOOLSET_VERSION=11" \
+  --build-arg "DEVTOOLSET_VERSION=13" \
   ${EXTRA_BUILD_ARGS} \
   -t ${tmp_tag} \
   $@ \

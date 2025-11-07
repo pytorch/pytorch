@@ -205,7 +205,7 @@ class TestBundledInputs(TestCase):
         self.assertEqual(all_info["foo"]["info"], info)
 
         # example of how to turn the 'get_inputs_function_name' into the actual list of bundled inputs
-        for func_name in all_info.keys():
+        for func_name in all_info:
             input_func_name = all_info[func_name]["get_inputs_function_name"][0]
             func_to_run = getattr(loaded, input_func_name)
             self.assertEqual(func_to_run(), samples)

@@ -108,7 +108,7 @@ def _find_loss_output(mod: torch.nn.Module, g: fx.Graph, output_loss_value_spec)
         generated_spec = TrivialLossWrapper.loss_spec
     elif output_loss_value_spec is None:
         # Use default spec, i.e. search for "loss" in output values
-        if isinstance(output_val, dict) and "loss" in output_val.keys():
+        if isinstance(output_val, dict) and "loss" in output_val:
             loss_node = output_val["loss"]
             generated_spec = {k: k == "loss" for k in output_val}
         else:

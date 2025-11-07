@@ -856,7 +856,7 @@ if _enabled:
                 self._c.setattr(attr, value)
             elif (
                 hasattr(self, "_concrete_type")
-                and attr in self._concrete_type.get_constants().keys()
+                and attr in self._concrete_type.get_constants()
             ):
                 # TODO: we don't have _concrete_type set after load(), and in general we lose constant information.
                 # We should encode constants as class type attributes (or something) so it persists across save/load.

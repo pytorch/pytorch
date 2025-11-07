@@ -594,6 +594,17 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 sizes[tree.tensor_dim] = f"{tree.prefix.upper()}BLOCK"
         return sizes
 
+    def create_constant_mask(self, entry) -> str:
+        x = entry.prefix
+        if entry.tensor_dim is None:
+            sizestr = self.dense_size_str()
+            return f"{x}mask = tl.full({sizestr}, True, tl.int1)"
+        sizes = ["None"] * self.triton_tensor_ndim()
+        sizes[entry.tensor_dim] = ":"
+        suffix = ", ".join(sizes)
+        out = f"{x}mask = tl.full([{x.upper()}BLOCK], True, tl.int1)[{suffix}]"
+        return out
+
     def dense_size_str(self) -> str:
         sizes = self.dense_size_list()
         return f"[{', '.join(sizes)}]"
@@ -1648,7 +1659,11 @@ class SIMDScheduling(BaseScheduling):
         if (
             not torch._inductor.config.deterministic
             and config.triton.mix_order_reduction_split_size is None
-            and config.triton.mix_order_reduction_autotune_split_size
+            and (
+                config.triton.mix_order_reduction_autotune_split_size
+                or config.max_autotune
+                or config.coordinate_descent_tuning
+            )
         ):
 
             def _bench(candidate_split_size):
@@ -2052,7 +2067,7 @@ class SIMDScheduling(BaseScheduling):
 
             # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
 
-            for input_name in kernel.named_input_nodes.keys():
+            for input_name in kernel.named_input_nodes:
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
                 # pyrefly: ignore [missing-attribute]
                 partial_code.finalize_hook(subgraph_name, strict=False)

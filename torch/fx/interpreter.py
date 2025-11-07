@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
 import inspect
+import logging
 from contextlib import contextmanager
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
-from torch._logging import trace_structured
+from torch._logging import LazyString, trace_structured
 from torch.hub import tqdm
 
 from . import config
@@ -21,8 +22,33 @@ from .proxy import Proxy
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+log = logging.getLogger(__name__)
 
 __all__ = ["Interpreter", "Transformer"]
+
+
+def _format_fx_node(n):
+    """
+    Format a torch.fx.Node into a human-readable string for debug logging.
+
+    Args:
+        n (torch.fx.Node): The FX node being executed.
+
+    Returns:
+        str: A formatted string describing the node operation, including its
+        name, target, positional arguments, and keyword arguments.
+    """
+    module_prefix = getattr(n.target, "__module__", "")
+    module_prefix = f"{module_prefix}." if module_prefix else ""
+
+    # Handle positional and keyword arguments
+    args = ", ".join(map(str, n.args))
+    kwargs = ", ".join(f"{k}={v}" for k, v in n.kwargs.items())
+    joined = ", ".join(filter(None, [args, kwargs]))
+
+    return (
+        f"{n.name} = {module_prefix}{getattr(n.target, '__name__', n.target)}({joined})"
+    )
 
 
 @compatibility(is_backward_compatible=True)
@@ -261,6 +287,7 @@ class Interpreter:
         Returns:
             Any: The result of executing ``n``
         """
+        log.debug("run_node %s", LazyString(lambda: _format_fx_node(n)))
         with self._set_current_node(n):
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             assert isinstance(args, tuple)

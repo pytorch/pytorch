@@ -311,7 +311,7 @@ class CopyIfCallgrind:
 
     See `GlobalsBridge` for why this matters.
     """
-    def __init__(self, value: Any, *, setup: Optional[str] = None):
+    def __init__(self, value: Any, *, setup: Optional[str] = None) -> None:
         for method, supported_types in _GLOBALS_ALLOWED_TYPES.items():
             if any(isinstance(value, t) for t in supported_types):
                 self._value: Any = value

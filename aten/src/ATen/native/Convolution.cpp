@@ -409,7 +409,7 @@ struct ConvParams {
     if (!detail::getCUDAHooks().compiledWithCuDNN() || !input.is_cuda() || !cudnn_enabled) {
       return false;
     }
-    static long cudnn_version = detail::getCUDAHooks().versionCuDNN();
+    static long cudnn_version = detail::getCUDAHooks().versionRuntimeCuDNN();
     // broken on cuDNN 9.8 - 9.14
     if (cudnn_version >= 90800 && cudnn_version < 91500) {
       if (cudnn_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous &&
@@ -453,7 +453,7 @@ struct ConvParams {
     }
     // native kernel doesn't support 64-bit non-splittable case
     if (!(canUse32BitIndexMath(input) && canUse32BitIndexMath(weight))) {
-      static long cudnn_version = detail::getCUDAHooks().compiledWithCuDNN() ? detail::getCUDAHooks().versionCuDNN() : -1;
+      static long cudnn_version = detail::getCUDAHooks().compiledWithCuDNN() ? detail::getCUDAHooks().versionRuntimeCuDNN() : -1;
       // TODO(eqy): remove this once cuDNN fixes 64-bit depthwise support, first broken in 9.11x
       if (cudnn_conv_suggest_memory_format(input, weight) != at::MemoryFormat::Contiguous) {
         if (cudnn_version < 0 || cudnn_version > 91000) {

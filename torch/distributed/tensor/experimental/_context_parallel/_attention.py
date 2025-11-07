@@ -1032,9 +1032,7 @@ def _disable_context_parallel_dispatcher_impl() -> None:
     _disable_cp_dtensor_dispatcher()
 
 
-_compiled_create_block_mask = torch.compile(
-    create_block_mask, dynamic=False, fullgraph=True
-)
+_compiled_create_block_mask = None
 
 
 def _context_parallel_buffers(
@@ -1187,9 +1185,12 @@ def _create_cp_block_mask(
             f"BLOCK_SIZE {_DEFAULT_SPARSE_BLOCK_SIZE}. This is not supported yet. "
         )
 
-    compiled_create_block_mask = torch.compile(
-        create_block_mask, dynamic=False, fullgraph=True
-    )
+    global _compiled_create_block_mask
+    if _compiled_create_block_mask is None:
+        _compiled_create_block_mask = torch.compile(
+            create_block_mask, dynamic=False, fullgraph=True
+        )
+    compiled_create_block_mask = _compiled_create_block_mask
 
     def _rewrite_mask_mod(
         mask_mod: _mask_mod_signature,

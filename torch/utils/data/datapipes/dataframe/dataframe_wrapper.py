@@ -83,7 +83,7 @@ def get_df_wrapper():
     return default_wrapper
 
 
-def set_df_wrapper(wrapper):
+def set_df_wrapper(wrapper) -> None:
     global default_wrapper
     default_wrapper = wrapper
 

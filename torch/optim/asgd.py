@@ -39,7 +39,7 @@ class ASGD(Optimizer):
         maximize: bool = False,
         differentiable: bool = False,
         capturable: bool = False,
-    ):
+    ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -211,7 +211,7 @@ def _single_tensor_asgd(
     differentiable: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
 
@@ -292,7 +292,7 @@ def _multi_tensor_asgd(
     differentiable: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if len(params) == 0:
         return
 
@@ -442,7 +442,7 @@ def asgd(
     t0: float,
     alpha: float,
     weight_decay: float,
-):
+) -> None:
     r"""Functional API that performs asgd algorithm computation.
 
     See :class:`~torch.optim.ASGD` for details.

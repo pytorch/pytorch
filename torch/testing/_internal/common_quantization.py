@@ -750,7 +750,7 @@ class QuantizationTestCase(TestCase):
                     and not isinstance(module, torch.nn.Sequential)
                     and type(module) in propagate_qconfig_list
                 )
-                or type(module) in float_to_observed_module_class_mapping.keys()
+                or type(module) in float_to_observed_module_class_mapping
             )
             and not isinstance(module, torch.ao.quantization.DeQuantStub)
         ):

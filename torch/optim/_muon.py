@@ -141,7 +141,7 @@ class Muon(Optimizer):
         params_with_grad: list[Tensor],
         grads: list[Tensor],
         muon_momentum_bufs: list[Tensor],
-    ):
+    ) -> bool:
         for p in group["params"]:
             if p.grad is None:
                 continue
@@ -337,7 +337,7 @@ def muon(
     eps: float,
     adjust_lr_fn: Optional[str],
     has_complex: bool,
-):
+) -> None:
     r"""Functional API that performs Muon algorithm computation.
 
     See :class:`~torch.optim.Muon` for details.

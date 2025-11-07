@@ -145,7 +145,7 @@ def _streaming_load(
         if pickle_module is None:
             pickle_module = pickle
 
-    if "encoding" not in pickle_load_args.keys():
+    if "encoding" not in pickle_load_args:
         pickle_load_args["encoding"] = "utf-8"
 
     zip_file = _PseudoZipFile()

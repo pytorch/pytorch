@@ -4,6 +4,7 @@
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/Exception.h>
+#include <torch/headeronly/util/HeaderOnlyArrayRef.h>
 #include <torch/headeronly/util/shim_utils.h>
 #include <climits>
 #include <memory>
@@ -13,6 +14,7 @@
 HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
 using accelerator::DeviceIndex;
+using torch::headeronly::IntHeaderOnlyArrayRef;
 using torch::headeronly::ScalarType;
 
 // The torch::stable::Tensor class is a highlevel C++ wrapper around
@@ -91,6 +93,32 @@ class Tensor {
     int64_t numel;
     TORCH_ERROR_CODE_CHECK(aoti_torch_get_numel(ath_.get(), &numel));
     return numel;
+  }
+
+  // note: this API is, for all intents and purposes, the same as the one in
+  // TensorBase.h: it returns a borrowed reference of the dimension sizes of
+  // a Tensor.
+  //
+  // The only difference is that it returns a header-only IntHeaderOnlyArrayRef,
+  // which has slightly less functionality than a regular IntArrayRef. See
+  // [HeaderOnlyArrayRef vs ArrayRef note] for more details.
+  IntHeaderOnlyArrayRef sizes() const {
+    int64_t* sizes;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(ath_.get(), &sizes));
+    return IntHeaderOnlyArrayRef(sizes, dim());
+  }
+
+  // note: this API is, for all intents and purposes, the same as the one in
+  // TensorBase.h: it returns a borrowed reference of the strides of a
+  // Tensor.
+  //
+  // The only difference is that it returns a header-only IntHeaderOnlyArrayRef,
+  // which has slightly less functionality than a regular IntArrayRef. See
+  // [HeaderOnlyArrayRef vs ArrayRef note] for more details.
+  IntHeaderOnlyArrayRef strides() const {
+    int64_t* strides;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(ath_.get(), &strides));
+    return IntHeaderOnlyArrayRef(strides, dim());
   }
 
   // note: this is a subset of the original TensorBase API. It takes no
