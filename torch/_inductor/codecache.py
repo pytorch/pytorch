@@ -2151,7 +2151,7 @@ end
             )
             all_cuda = all(
                 graph.get_original_value_of_constant(name).is_cuda
-                for name in graph.constants.keys()
+                for name in graph.constants
                 if name not in graph.folded_constants
             )
 
@@ -2192,7 +2192,7 @@ end
             ):
                 serialized_weights = b"".join(
                     _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
-                    for name in graph.constants.keys()
+                    for name in graph.constants
                     if name not in graph.folded_constants
                 )
             else:
@@ -2206,7 +2206,7 @@ end
                             graph.get_original_value_of_constant(name),
                             TensorProperties(graph.constants[name]),
                         )
-                        for name in graph.constants.keys()
+                        for name in graph.constants
                         if name not in graph.folded_constants
                     }
                 )
