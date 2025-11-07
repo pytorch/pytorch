@@ -13597,12 +13597,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         x = torch.randn(2, 3, device=self.device)
         _, code = run_and_get_code(f, x, [2, 3])
-        FileCheck().check("torch.ops.aten._fused_rms_norm.default(").run(code[0])
+        if config.cpp_wrapper:
+            FileCheck().check(
+                "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda__fused_rms_norm("
+            ).run(code[0])
+        else:
+            FileCheck().check("torch.ops.aten._fused_rms_norm.default(").run(code[0])
 
-        x = torch.randn(2, 3, device=self.device, requires_grad=True)
-        _, codes = run_fw_bw_and_get_code(lambda: f(x, [2, 3]))
-        self.assertEqual(len(codes), 2)
-        FileCheck().check("torch.ops.aten._fused_rms_norm.default(").run(code[0])
+        if config.cpp_wrapper:
+            # arg type List[int] is not yet supported by custom_op_wrapper
+            pass
+        else:
+            x = torch.randn(2, 3, device=self.device, requires_grad=True)
+            _, codes = run_fw_bw_and_get_code(lambda: f(x, [2, 3]))
+            self.assertEqual(len(codes), 2)
+            FileCheck().check("torch.ops.aten._fused_rms_norm.default(").run(code[0])
 
     @skip_if_cpu
     def test_lite_regional_compile_flex_attention(self):
@@ -13719,9 +13728,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         _, code = run_and_get_code(model, c)
         # Checks that unbacked symint assertions are kept
-        FileCheck().check_regex(r"if not \(u.* >= 0\):").check_regex(
-            r"raise RuntimeError\('u.* >= 0'\)"
-        ).run(code[0])
+        if config.cpp_wrapper:
+            FileCheck().check_regex(r"if \(!\(u.* >= 0L\)\)").check_regex(
+                "Expected u.* >= 0 but receive"
+            ).run(code[0])
+        else:
+            FileCheck().check_regex(r"if not \(u.* >= 0\):").check_regex(
+                r"raise RuntimeError\('u.* >= 0'\)"
+            ).run(code[0])
 
     @lowering.force_fallback(aten.sort.default)
     @unittest.skipIf(
