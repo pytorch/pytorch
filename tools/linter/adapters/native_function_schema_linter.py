@@ -398,7 +398,6 @@ def check_file(
                                 f"Structural schema change detected for '{op_name}' which is used in torch/csrc/stable/ops.h:\n\n"
                                 f"Old schema:\n  {old_schema}\n\n"
                                 f"New schema:\n  {new_schema}\n\n"
-                                f"This change requires a schema adapter because it's not just a default value change.\n"
                                 f"Please register a schema adapter in torch/csrc/shim_common.cpp\n"
                                 f"in the _register_adapters() function with {correct_version}.\n"
                                 f"See https://github.com/pytorch/pytorch/pull/165284/ for an example."
