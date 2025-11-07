@@ -196,7 +196,7 @@ class BaseSparsifier(abc.ABC):
 
             # check that whatever was put into local_args agrees with what was obtained
             # from tensor_fqn
-            for key in info_from_tensor_fqn.keys():
+            for key in info_from_tensor_fqn:
                 if key in local_args:
                     if not (
                         info_from_tensor_fqn[key] == local_args[key]

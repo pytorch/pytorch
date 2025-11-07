@@ -117,6 +117,74 @@ class MixOrderReductionTest(TestBase):
             metrics.codegen_mix_order_reduction,
         )
 
+    def test_xmask(self):
+        """
+        Make sure xmask is setup properly
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            return x.sum(dim=0), x.sum(dim=1)
+
+        M, N = 32768 + 1023, 768
+        EXTRA_ROW = 1
+        buf = torch.randn(M + EXTRA_ROW, N, device=GPU_TYPE)
+        x = buf[:M, :]
+        # make sure wrong xmask error loud if read excess elements
+        buf[M:, :] = 1000000
+
+        opt_f = torch.compile(
+            f,
+            options={
+                "triton.mix_order_reduction_initial_xblock": 2,
+            },
+        )
+
+        ref = f(x)
+        act = opt_f(x)
+
+        self.assertTrue(same(ref, act, tol=1e-3), f"ref:\n{ref}\nact:\n{act}")
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
+        )
+
+    def test_avoid_non_coalesced_access(self):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x, y):
+            return (x + y).sum(dim=-1), x.sum(dim=(0, 1))
+
+        x = torch.randn(128, 256, 768, device=GPU_TYPE)
+        y = torch.randn(128, 768, 256, device=GPU_TYPE).transpose(1, 2)
+        self.check_numeric(f, (x, y))
+
+        # we skip mix order reduction for such kernel since
+        # we force XBLOCK to be 1, the access to tensor y would be
+        # very inefficient.
+        # TODO: support XBLOCK larger than 1. But in that case, we
+        # would have bigger restriction on rnumel to avoid exploding
+        # shared memory.
+        self.assertEqual(metrics.codegen_mix_order_reduction, 0)
+
+    @inductor_config.patch(coordinate_descent_tuning=True)
+    def test_XBLOCK_coordest_tuning(self):
+        """
+        We should skip XBLOCK coordinate descent tuning for
+        mix order reduction.
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            return x.sum(dim=-1), x.sum(dim=0)
+
+        x = torch.randn(32768, 256, dtype=torch.float, device=GPU_TYPE)
+        self.check_numeric(f, (x,))
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+
     @inductor_config.patch(unroll_reductions_threshold=1)
     def test_3layer_split_reduction(self):
         """
@@ -183,8 +251,8 @@ class MixOrderReductionTest(TestBase):
         def f(x, y):
             return x.sum(dim=0), x.sum(dim=1), y.sum(dim=0), y.sum(dim=1)
 
-        x = torch.randn(4096, 32, device=GPU_TYPE)
-        y = torch.randn(4098, 34, device=GPU_TYPE)
+        x = torch.randn(4096 * 64, 32, device=GPU_TYPE)
+        y = torch.randn(4098 * 64, 34, device=GPU_TYPE)
 
         self.check_numeric(f, (x, y))
         expected_mix_order_reduction = (
@@ -202,8 +270,23 @@ class MixOrderReductionTest(TestBase):
         ],
     )
     @parametrize("split_reductions", (False, True))
-    @parametrize("shape", ((32768, 2048), (32768, 768), (32769, 768)))
-    def test_rms_norm_bwd(self, wdtype, split_reductions, shape):
+    @parametrize("shape", ((32768, 2048), (32768, 768), (32768 + 1023, 768)))
+    @parametrize("max_autotune", (False, True))
+    @parametrize("initial_xblock", (1, 2))
+    def test_rms_norm_bwd(
+        self, wdtype, split_reductions, shape, max_autotune, initial_xblock
+    ):
+        # max_autotune can be slow and cost resource, trim down the tests
+        # for max autotune
+        if max_autotune and not (
+            wdtype == torch.bfloat16
+            and not split_reductions
+            and shape in ((32768, 768), (32769, 768))
+            and initial_xblock == 1
+            and inductor_config.triton.mix_order_reduction
+        ):
+            self.skipTest("Skip non-critical tests to save resources.")
+
         def f(x, w, eps):
             orig_dtype = x.dtype
 
@@ -232,6 +315,15 @@ class MixOrderReductionTest(TestBase):
             f,
             options={
                 "split_reductions": split_reductions,
+                "triton.mix_order_reduction_initial_xblock": initial_xblock,
+                **(
+                    {
+                        "max_autotune": True,
+                        "coordinate_descent_tuning": True,
+                    }
+                    if max_autotune
+                    else {}
+                ),
             },
         )
 
