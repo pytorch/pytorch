@@ -425,13 +425,13 @@ from user code:
         def fn1(x):
             tree = {"a": x, "b": (x - 1, 2 * x)}
             sin, cos = optree.tree_transpose_map(
-                lambda x: (torch.sin(x), torch.cos(x)),
+                lambda t: (torch.sin(t), torch.cos(t)),
                 tree,
             )
             return sin, cos
 
         fn1(torch.randn(4))
-        self.assertGreaterEqual(len(counters["graph_break"]), 0)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
         @torch.compile(backend="eager")
         def fn2(x):
