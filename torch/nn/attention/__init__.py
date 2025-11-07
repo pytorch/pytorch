@@ -179,7 +179,7 @@ _FLASH_ATTENTION_ACTIVE: str | None = None
 
 
 def register_flash_attention_backend(
-    backend: str,
+    backend: str | _FlashAttentionBackend,
     *,
     register_fn: Callable[..., None],
 ) -> None:
@@ -194,7 +194,7 @@ def register_flash_attention_backend(
 
 
 def install_flash_attention_impl(
-    backend: str,
+    backend: str | _FlashAttentionBackend,
     *,
     module_path: str | None = None,
 ) -> None:
