@@ -291,7 +291,6 @@ class PallasKernel(SIMDKernel):
             import jax
             import jax.numpy as jnp
             from jax.experimental import pallas as pl
-            from torch.utils import dlpack as torch_dlpack
             """,
             strip=True,
         )
@@ -330,9 +329,7 @@ class PallasKernel(SIMDKernel):
             # Convert inputs to JAX arrays
             code.writeline("# Convert Torch -> JAX for inputs")
             for inp in input_params:
-                code.writeline(
-                    f"{inp}_jax = jax.dlpack.from_dlpack(torch_dlpack.to_dlpack({inp}))"
-                )
+                code.writeline(f"{inp}_jax = jax.dlpack.from_dlpack({inp})")
 
             # Get output spec from PyTorch tensor
             code.writeline("# Prepare output spec from PyTorch tensor")
@@ -362,9 +359,7 @@ class PallasKernel(SIMDKernel):
 
             # Copy result back
             code.writeline("# Copy result back into the provided torch output tensor")
-            code.writeline(
-                "res_t = torch_dlpack.from_dlpack(jax.dlpack.to_dlpack(res))"
-            )
+            code.writeline("res_t = torch.from_dlpack(res)")
             code.writeline(f"{output_param}.copy_(res_t)")
 
         return code.getvalue()
