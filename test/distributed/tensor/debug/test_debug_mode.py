@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
+import unittest
 
 import torch
 import torch.distributed as dist
@@ -15,8 +16,16 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.utils._debug_mode import _OpCall, _RedistributeCall, DebugMode
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.triton_utils import add_kernel_autotuned
+from torch.utils._debug_mode import (
+    _OpCall,
+    _RedistributeCall,
+    _TritonKernelCall,
+    DebugMode,
+)
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._triton import has_triton_package
 
 
 @requires_cuda
@@ -425,6 +434,108 @@ class TestDTensorDebugMode(TestCase):
             op for op in debug_mode.operators if str(op.op) == "aten.sum.dim_IntList"
         ][-1]
         self.assertTrue("self.l2(self.l1(x))" in sum_op.fwd_stack_trace)
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    @unittest.skipIf(not has_triton_package(), "requires triton")
+    def test_triton_kernel_logs(self):
+        import triton
+
+        def call_triton(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel_autotuned[grid](x, y, output, n_elements)
+            return output
+
+        x = torch.randn(128, device=GPU_TYPE)
+        y = torch.randn(128, device=GPU_TYPE)
+
+        with DebugMode() as debug_mode:
+            torch.compile(call_triton)(x, y)
+
+        triton_calls = [
+            op for op in debug_mode.operators if isinstance(op, _TritonKernelCall)
+        ]
+        self.assertGreater(len(triton_calls), 0)
+        self.assertIn("[triton]", triton_calls[0].render([]))
+
+    def test_check_hash_mismatches(self):
+        x = torch.randn(64, 64, device=GPU_TYPE)
+        x_different = torch.randn(64, 64, device=GPU_TYPE)
+
+        # Identical runs should have no mismatches
+        with DebugMode() as dm1, DebugMode.log_tensor_hashes():
+            x.sin().sum()
+        with DebugMode() as dm2, DebugMode.log_tensor_hashes():
+            x.sin().sum()
+        mismatches = DebugMode.check_hash_mismatches(dm1.logs, dm2.logs)
+        self.assertEqual(len(mismatches), 0)
+
+        # Different inputs should produce hash mismatches
+        with DebugMode() as dm3, DebugMode.log_tensor_hashes():
+            x_different.sin().sum()
+
+        # Check that mismatches are detected
+        mismatches = DebugMode.check_hash_mismatches(dm1.logs, dm3.logs)
+        self.assertEqual(len(mismatches), 2)
+        self.assertEqual(
+            [call["call"] for call in mismatches], ["aten::sin", "aten::sum"]
+        )
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    @unittest.skipIf(not has_triton_package(), "requires triton")
+    def test_check_triton_hash_mismatches(self):
+        import triton
+
+        def call_triton(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel_autotuned[grid](x, y, output, n_elements)
+            return output
+
+        a = torch.randn(128, device=GPU_TYPE)
+        b = torch.randn(128, device=GPU_TYPE)
+        c = torch.randn(128, device=GPU_TYPE)
+
+        # Run with hash logging to verify triton kernels can be hashed
+        with DebugMode() as dm_t1, DebugMode.log_tensor_hashes(hash_inputs=True):
+            torch.compile(call_triton)(a, b)
+
+        # Different inputs should have different hashes in triton kernels
+        with DebugMode() as dm_t2, DebugMode.log_tensor_hashes(hash_inputs=True):
+            torch.compile(call_triton)(a, c)
+
+        # Compare triton kernel hashes
+        triton_calls_1 = [op for op in dm_t1.logs if isinstance(op, _TritonKernelCall)]
+        triton_calls_2 = [op for op in dm_t2.logs if isinstance(op, _TritonKernelCall)]
+        mismatches = DebugMode.check_hash_mismatches(
+            dm_t1.logs, dm_t2.logs, compare_inputs=True
+        )
+        triton_mismatches = [m for m in mismatches if m["call_type"] == "triton kernel"]
+        self.assertGreater(len(triton_mismatches), 0)
+
+        # check both input & output hash mismatches are detected
+        self.assertGreater(len([m for m in triton_mismatches if m["is_input_hash"]]), 0)
+        self.assertGreater(
+            len([m for m in triton_mismatches if not m["is_input_hash"]]), 0
+        )
+
+    def test_check_structure_mismatches(self):
+        x = torch.randn(32, 32, device=self.device_type)
+
+        with DebugMode() as dm1, DebugMode.log_tensor_hashes():
+            x.sin()
+        with DebugMode() as dm2, DebugMode.log_tensor_hashes():
+            x.cos()
+        with DebugMode() as dm3, DebugMode.log_tensor_hashes():
+            x.sin().cos()
+
+        with self.assertRaisesRegex(ValueError, "Operators don't match"):
+            DebugMode.check_hash_mismatches(dm1.logs, dm2.logs)
+
+        with self.assertRaisesRegex(ValueError, "Log lengths don't match"):
+            DebugMode.check_hash_mismatches(dm1.logs, dm3.logs)
 
 
 instantiate_parametrized_tests(TestDTensorDebugMode)

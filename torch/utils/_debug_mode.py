@@ -1,4 +1,37 @@
 # mypy: allow-untyped-defs
+"""
+DebugMode is a debugging TorchDispatchMode that intercepts and logs runtime calls
+to a hierarchical string dump. It logs real tensor, DTensor, and optionally FakeTensor
+operations, with some additional handling for DTensor internals.
+
+An example dump from an eager mode DTensor matmul:
+
+    torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$6: f32[8, 32]| S(0)
+      aten::mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))
+        redistribute_input(1, S(0) -> R)
+          redistribute_input(t$2: f32[1, 32], trace: S(0)->R)
+            _c10d_functional::all_gather_into_tensor(t$2: f32[1, 32], 8, 0)  ->  t$3: f32[8, 32]
+            _c10d_functional::wait_tensor(t$3: f32[8, 32])  ->  t$3: f32[8, 32]
+        aten::mm(t$4: f32[1, 8], t$3: f32[8, 32])  ->  t$5: f32[1, 32]
+
+This mode runs "under" compile, which means it hides itself during compilation, and is re-enabled
+at runtime, and DebugMode-related operations won't show up in the compiled region.
+DebugMode also provides some visibility into non-torch-dispatch calls (e.g. DTensor redistribute calls,
+inductor-generated triton kernels), but requires special handling for these, since dispatch modes
+can't intercept them by default.
+
+The mode also provides some extensions for custom debugging (e.g. adding custom dispatch call hooks
+via dispatch_hooks), or numerics debugging (e.g. tensor hashing for bitwise equivalence/closeness,
+via log_tensor_hashes). These decorators allow annotating string dumps with additional per-call information,
+for any region of runtime code.
+
+Usage::
+
+    with DebugMode() as debug_mode:
+        result = some_pytorch_operation(tensor_input)
+    print(debug_mode.debug_string())
+"""
+
 import contextlib
 import functools
 import traceback
@@ -13,7 +46,7 @@ from torch.utils._python_dispatch import (
     _get_current_dispatch_mode_stack,
     TorchDispatchMode,
 )
-from torch.utils._pytree import keystr, tree_all, tree_map
+from torch.utils._pytree import keystr, tree_all, tree_map, tree_map_with_path
 from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakIdRef
 
@@ -27,11 +60,18 @@ __all__ = ["DebugMode", "get_active_debug_mode"]
 
 
 REDISTRIBUTE_FUNC = "redistribute_input"
+# registered dispatch call hooks
 _DISPATCH_RECORD_HOOKS: list[Callable] = []
 _DISPATCH_LOG_HOOKS: list[Callable] = []
+# Tracks if we're in inductor benchmarking, and temporarily disables logging
+# (for ignoring autotuning kernel launches which don't affect the user-facing result)
 _IN_INDUCTOR_BENCHMARK = False
+# For record_outputs, log_tensor_hashes hooks for triton kernels.
+# Stores kernel outputs in call.record["output"]
 _RECORD_TRITON_OUTPUTS = False
+# Annotates kernel output hashes, and stores them in call.post_hashes
 _TRITON_OUTPUT_HASH_FN = None
+# Annotates kernel input hashes, and stores them in call.pre_hashes
 _TRITON_INPUT_HASH_FN = None
 
 
@@ -440,7 +480,6 @@ class _TritonKernelCall(_DebugCall):
 
     def finalize(self, device_interface: "DeviceInterface"):
         # synchronize -> hash/store kernel results
-        # is this correct??
         global _RECORD_TRITON_OUTPUTS, _TRITON_OUTPUT_HASH_FN
         device_interface.synchronize(device_interface.current_device())
         if _RECORD_TRITON_OUTPUTS:
@@ -851,6 +890,10 @@ class DebugMode(TorchDispatchMode):
     @staticmethod
     @contextlib.contextmanager
     def _benchmarking_inductor():
+        """
+        Context manager for disabling logging during inductor benchmarking,
+        so logs don't contain all kernels launched from autotuning.
+        """
         global _IN_INDUCTOR_BENCHMARK
         try:
             _IN_INDUCTOR_BENCHMARK = True
@@ -866,6 +909,51 @@ class DebugMode(TorchDispatchMode):
     def check_hash_mismatches(
         logs1: list, logs2: list, compare_inputs: bool = False
     ) -> list[dict]:
+        """
+        Compares tensor hashes between two DebugMode runs, for checking run-to-run numerical divergence.
+
+        This first validates the two log sequences have identical structure (same operations, input shapes/dtypes, etc.),
+        then compares tensor hash values, and returns a list of call outputs where mismatches were found.
+        Expects input logs to have been run with log_tensor_hashes, and looks for hashes in .log["hash"] & .log["input_hash"]
+        (or .post_hashes & .pre_hashes for triton kernels).
+
+        note: skips checking log pairs where hashes aren't present, but will raise if present in one & not the other.
+
+        Args:
+            logs1: logs from the first DebugMode run (from debug_mode.logs)
+            logs2: logs from the second DebugMode run
+            compare_inputs: If True, also compare input tensor hashes (default: only output checking)
+
+        Returns:
+            List of dictionaries describing hash mismatches. Each dict contains:
+                - call_type: "torch op" or "triton kernel"
+                - call: Operator/kernel name
+                - arg_name: For triton kernels, the argument name; None for torch ops
+                - pytree_path: For torch ops, the pytree path to the differing tensor; None for kernels
+                - hash1: Hash value from the first run
+                - hash2: Hash value from the second run
+                - rel_diff: Relative difference between hash values
+                - is_input_hash: True if this is an input hash, False for output hash
+
+        Raises:
+            ValueError: If logs have different lengths, call types, operator names, or call depths
+
+        Usage::
+
+            # Run model first time
+            with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
+                model(x)
+                logs1 = debug_mode.logs
+
+            # Run again, in exactly the same way
+            with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
+                model(x)
+                logs2 = debug_mode.logs
+
+            mismatches = DebugMode.check_hash_mismatches(logs1, logs2)
+            for m in mismatches:
+                print(f"{m['call']}: hash diff {m['rel_diff']:.2e}")
+        """
         if len(logs1) != len(logs2):
             raise ValueError(f"Log lengths don't match: {len(logs1)} vs {len(logs2)}")
 
@@ -884,7 +972,7 @@ class DebugMode(TorchDispatchMode):
             op1_name, op2_name = _get_call_name(log1), _get_call_name(log2)
             if op1_name != op2_name:
                 raise ValueError(
-                    f"Operator don't match at index {i}: {call_type}[{op1_name}] vs {call_type}[{op2_name}]"
+                    f"Operators don't match at index {i}: {call_type}[{op1_name}] vs {call_type}[{op2_name}]"
                 )
             op_name = op1_name
 
@@ -893,8 +981,6 @@ class DebugMode(TorchDispatchMode):
                 raise ValueError(
                     f"Call depths for {call_type}[{op_name}] don't match at index {i}: {log1.call_depth} vs {log2.call_depth}"
                 )
-
-            # different checks for different call types
 
             # Redistribute: call args should be the same
             if isinstance(log1, _RedistributeCall):
@@ -981,6 +1067,8 @@ class DebugMode(TorchDispatchMode):
                                     "is_input_hash": is_input,
                                 }
                             )
+
+                    tree_map_with_path(_helper, hashes1, hashes2)
 
                 # check output hashes
                 has_hash1 = log1.log is not None and "hash" in log1.log
