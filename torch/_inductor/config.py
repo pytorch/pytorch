@@ -447,6 +447,14 @@ use_experimental_benchmarker: bool = Config(
     justknob="pytorch/inductor:use_experimental_benchmarker",
 )
 
+# Enable distributed autotuning. When this is enabled we will distribute the
+# autotuning across distributed ranks in the same program group - so instead of
+# each rank autotuning every kernel they only autotune 1/world size kernels and
+# then share the results.
+distributed_max_autotune_gemm = (
+    os.environ.get("TORCHINDUCTOR_DISTRIBUTED_MAX_AUTOTUNE_GEMM") == "1"
+)
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
@@ -1567,11 +1575,16 @@ class triton:
     enable_pdl = False
 
     mix_order_reduction = (
-        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0") == "1"
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0" if is_fbcode() else "1")
+        == "1"
     )
+    mix_order_reduction_initial_xblock = 1
 
     mix_order_reduction_split_size: Optional[int] = None
-    mix_order_reduction_autotune_split_size = True
+    mix_order_reduction_autotune_split_size = (
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_AUTOTUNE_SPLIT_SIZE", "0")
+        == "1"
+    )
 
 
 class aot_inductor:

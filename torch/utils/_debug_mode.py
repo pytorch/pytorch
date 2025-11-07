@@ -60,7 +60,7 @@ def _stringify_dtensor_spec(spec) -> str:
 
 
 class TensorIdTracker:
-    def __init__(self):
+    def __init__(self) -> None:
         self.tensor_memo: dict[WeakIdRef, int] = {}
         self.next_tensor_id = 0
 
@@ -68,7 +68,7 @@ class TensorIdTracker:
         with torch._C._DisablePythonDispatcher():
             o = WeakIdRef(tensor)
 
-            def del_memo():
+            def del_memo() -> None:
                 self.tensor_memo.pop(o, None)
 
             weakref.finalize(tensor, del_memo)
@@ -157,7 +157,7 @@ class _DebugCall:
         record: Optional[dict[str, Any]] = None,
         log: Optional[dict[str, Any]] = None,
         stack: bool = False,
-    ):
+    ) -> None:
         self.call_depth = call_depth
         if stack:
             self.stack_trace = _get_stack_trace()
@@ -207,7 +207,7 @@ class _OpCall(_DebugCall):
         kwargs: dict,
         call_depth: int,
         stack: bool = False,
-    ):
+    ) -> None:
         super().__init__(call_depth, stack=stack)
         self.op = op
         self.args = args
@@ -282,7 +282,7 @@ class _RedistributeCall(_DebugCall):
         transform_info_str,
         call_depth,
         stack=False,
-    ):
+    ) -> None:
         super().__init__(call_depth, stack=stack)
         self.arg = arg
         self.src_placement = src_placement
@@ -334,7 +334,7 @@ class _RedistributeCall(_DebugCall):
 class _NNModuleCall(_DebugCall):
     """Designates entering an nn.Module's forward method"""
 
-    def __init__(self, module_name: str, call_depth: int, stack: bool = False):
+    def __init__(self, module_name: str, call_depth: int, stack: bool = False) -> None:
         super().__init__(call_depth, stack=stack)
         self.module_name = module_name
 
@@ -395,7 +395,7 @@ class DebugMode(TorchDispatchMode):
         record_stack_trace=False,
         record_output=False,
         record_ids=False,
-    ):
+    ) -> None:
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
 
@@ -440,13 +440,13 @@ class DebugMode(TorchDispatchMode):
 
         self.reset()
 
-    def reset(self):
+    def reset(self) -> None:
         self.operators = []
         self.call_depth = 0
         self._tensor_memo = TensorIdTracker()
         self._output_info: dict[int, object] = {}
 
-    def _track_op_output(self, op_index, result):
+    def _track_op_output(self, op_index, result) -> None:
         """Assign IDs to output tensors and store in output_info"""
         # self._track_tensor_ids(result)
         self._output_info[op_index] = result
@@ -455,10 +455,10 @@ class DebugMode(TorchDispatchMode):
     # will force torch.compile to always use the “eager” backend
     # With this, DebugMode will not take effect on torch.compile
     @classmethod
-    def ignore_compile_internals(cls):
+    def ignore_compile_internals(cls) -> bool:
         return True
 
-    def _record_call(self, call):
+    def _record_call(self, call) -> None:
         if not self.store_original_args:
             call.stringify_args(
                 self.record_tensor_attributes,
@@ -466,7 +466,7 @@ class DebugMode(TorchDispatchMode):
             )
         self.operators.append(call)
 
-    def _record_call_output(self, call, output):
+    def _record_call_output(self, call, output) -> None:
         if not self.record_output:
             return
         call.stringify_output(
@@ -562,19 +562,19 @@ class DebugMode(TorchDispatchMode):
         if self.record_stack_trace:
             self.anomaly_for_traces.__exit__(*args)
 
-    def module_tracker_setup(self):
+    def module_tracker_setup(self) -> None:
         from torch.distributed._tools.mod_tracker import ModTracker
 
         self.module_tracker = ModTracker()
 
         # module pre-fw hook: record module call
-        def pre_fw_hook(module, input):
+        def pre_fw_hook(module, input) -> None:
             fqn = self.module_tracker._get_mod_name(module)  # type: ignore[attribute, union-attr]
             self.operators.append(_NNModuleCall(fqn, self.call_depth + 1))
             self.call_depth += 1
 
         # module post-fw hook: decrement call depth
-        def post_fw_hook(module, input, output):
+        def post_fw_hook(module, input, output) -> None:
             self.call_depth -= 1
 
         self.module_tracker.register_user_hooks(pre_fw_hook, post_fw_hook)
