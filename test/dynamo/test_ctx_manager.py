@@ -7,7 +7,7 @@ from contextlib import contextmanager
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.exc import InternalTorchDynamoError
+from torch._dynamo.exc import InternalTorchDynamoError, Unsupported
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
 from torch._dynamo.utils import counters
 from torch.nn import functional as F
@@ -2484,7 +2484,7 @@ class GraphModule(torch.nn.Module):
             return y
 
         x = torch.tensor([1.0])
-        with self.assertRaises(InternalTorchDynamoError):
+        with self.assertRaises(Unsupported):
             torch.compile(fn, backend="eager", fullgraph=False)(x)
 
     def test_disable___exit__(self):
@@ -2557,7 +2557,7 @@ class GraphModule(torch.nn.Module):
             return x + 1, ctx
 
         x = torch.tensor([1.0])
-        with self.assertRaises(InternalTorchDynamoError):
+        with self.assertRaises(Unsupported):
             torch.compile(fn, backend="eager", fullgraph=False)(x)
 
     def test_return_advanced_contextmanager(self):
@@ -2580,7 +2580,7 @@ class GraphModule(torch.nn.Module):
             return x + y, ctx
 
         x = torch.tensor([1.0])
-        with self.assertRaises(InternalTorchDynamoError):
+        with self.assertRaises(Unsupported):
             torch.compile(fn, backend="eager", fullgraph=False)(x)
 
     def test_contextmanager_as_argument_only___enter__(self):
