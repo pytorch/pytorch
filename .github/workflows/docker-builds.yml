@@ -171,7 +171,7 @@ jobs:
       fail-fast: false
       matrix:
         #runner: [linux.rocm.gfx942.docker-cache]
-        runner: [linux.rocm.gfx942.1]
+        runner: [linux.rocm.gpu.gfx942.1]
         docker-image: [
           docker-pytorch-linux-jammy-rocm-n-py3,
           docker-pytorch-linux-noble-rocm-n-py3,
