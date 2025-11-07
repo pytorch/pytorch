@@ -838,7 +838,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     proxy=tx.output.create_proxy(
                         "call_function", get_external_object_by_index, (ind,), {}
                     ),
-                    user_obj_index=ind,
                 )
             else:
                 tensor_variable = wrap_fx_proxy(
