@@ -7486,7 +7486,7 @@ class TestFXMemoryProfiler(TestCase):
         return fx_frames
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @torch._dynamo.config.patch("enrich_profiler_metadata", True)
+    @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_fx_memory_profiler_augmentation(self):
         """Test that memory snapshots are augmented with FX debug information."""
 

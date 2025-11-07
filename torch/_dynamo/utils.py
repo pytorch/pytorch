@@ -2843,7 +2843,7 @@ def key_is_id(
 
 
 def key_to_id(value: Any) -> list[Any]:
-    return [id(k) if key_is_id(k) else k for k in value.keys()]
+    return [id(k) if key_is_id(k) else k for k in value]
 
 
 def const_repr(x: Any, *, local: Any) -> str:
@@ -3263,7 +3263,7 @@ def same(
                 log_error=log_error,
                 use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
             )
-            for key in ref.__dict__.keys()
+            for key in ref.__dict__
         )
     else:
         raise RuntimeError(f"unsupported type: {type(ref).__name__}")
