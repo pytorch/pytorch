@@ -3228,7 +3228,7 @@ class InstructionTranslatorBase(
 
     def BUILD_SLICE(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
-        self.push(SliceVariable(items, tx=self))
+        self.push(SliceVariable(items, tx=self))  # type: ignore[arg-type]
 
     def BUILD_LIST(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
@@ -3607,7 +3607,7 @@ class InstructionTranslatorBase(
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ListVariable)
         assert obj.is_mutable()
-        obj.call_method(self, "extend", [v], {})
+        obj.call_method(self, "extend", [v], {})  # type: ignore[arg-type]
 
     def LIST_TO_TUPLE(self, inst: Instruction) -> None:
         self.push(BuiltinVariable(tuple).call_function(self, [self.pop()], {}))  # type: ignore[arg-type]
@@ -3673,7 +3673,7 @@ class InstructionTranslatorBase(
     def MATCH_KEYS(self, inst: Instruction) -> None:
         tos = self.stack[-1]
         assert isinstance(tos, TupleVariable)
-        keys = tos.unpack_var_sequence(self)
+        keys = tos.unpack_var_sequence(self)  # type: ignore[arg-type]
         tos1 = self.stack[-2]
         assert isinstance(tos1, ConstDictVariable)
 

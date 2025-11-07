@@ -252,6 +252,7 @@ class ProcessGroupNCCLNoGPUTest(TestCase):
     MAIN_PROCESS_RANK = 0
 
     def setUp(self):
+        super().setUp()
         self.rank = self.MAIN_PROCESS_RANK
         self.world_size = 1
         self.file = tempfile.NamedTemporaryFile(delete=False)
