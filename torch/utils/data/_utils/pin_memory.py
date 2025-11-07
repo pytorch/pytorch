@@ -69,7 +69,7 @@ def pin_memory(data):
             else:
                 return type(data)(
                     # pyrefly: ignore [bad-argument-count]
-                    {k: pin_memory(sample, device) for k, sample in data.items()}
+                    {k: pin_memory(sample) for k, sample in data.items()}
                 )  # type: ignore[call-arg]
         except TypeError:
             # The mapping type may not support `copy()` / `update(mapping)`
