@@ -11,6 +11,7 @@ on:
       - inductor
       - unstable
       - slow
+      - slow-rocm-mi200
       - unstable-periodic
       - inductor-periodic
       - rocm-mi200
