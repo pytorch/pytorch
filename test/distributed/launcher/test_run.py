@@ -677,6 +677,101 @@ class ElasticLaunchTest(TestCase):
         for i in range(nproc_per_node):
             self.assertTrue(f"[rank{i}]: creating " in captured_out.getvalue())
 
+    @skip_but_pass_in_sandcastle_if(
+        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
+    )
+    def test_virtual_local_rank(self):
+        """
+        Test that virtual-local-rank ensures consistent device IDs across ranks.
+        Without it, ranks may compile to different devices, leading to different code.
+        """
+        run_id = str(uuid.uuid4().int)
+        nnodes = 1
+        nproc_per_node = 2
+
+        # Helper function to run and capture output
+        def run_test(use_virtual_local_rank):
+            args = [
+                f"--nnodes={nnodes}",
+                f"--nproc-per-node={nproc_per_node}",
+                f"--rdzv-id={run_id}",
+                "--monitor-interval=1",
+                "--start-method=spawn",
+                "--redirect=3",
+                "--tee=3",
+            ]
+            if use_virtual_local_rank:
+                args.append("--virtual-local-rank")
+
+            args.append(path("bin/test_script_deviceid.py"))
+
+            captured_out = io.StringIO()
+            captured_err = io.StringIO()
+            with redirect_stdout(captured_out), redirect_stderr(captured_err):
+                launch.main(args)
+
+            return captured_out.getvalue()
+
+        def split_ranks(output):
+            default0 = []
+            default1 = []
+            for line in output.splitlines():
+                if "cuda:" not in line:
+                    continue
+                if line.startswith("[default0]:"):
+                    default0.append(line[11:])
+                elif line.startswith("[default1]:"):
+                    default1.append(line[11:])
+            return default0, default1
+
+        # First, run WITHOUT virtual-local-rank - outputs should differ
+        output = run_test(use_virtual_local_rank=False)
+        rank0, rank1 = split_ranks(output)
+
+        # Verify we actually captured compiled code from both ranks
+        self.assertGreater(
+            len(rank0),
+            0,
+            "Expected to capture compiled code from rank 0"
+        )
+        self.assertGreater(
+            len(rank1),
+            0,
+            "Expected to capture compiled code from rank 1"
+        )
+
+        # Without virtual-local-rank, the ranks should have DIFFERENT compiled code
+        # because they see different device IDs (cuda:0 vs cuda:1)
+        self.assertNotEqual(
+            rank0,
+            rank1,
+            "Expected different compiled code without --virtual-local-rank"
+        )
+
+        # Now run WITH virtual-local-rank - outputs should be identical
+        output = run_test(use_virtual_local_rank=True)
+        rank0, rank1 = split_ranks(output)
+
+        # Verify we actually captured compiled code from both ranks
+        self.assertGreater(
+            len(rank0),
+            0,
+            "Expected to capture compiled code from rank 0 with --virtual-local-rank"
+        )
+        self.assertGreater(
+            len(rank1),
+            0,
+            "Expected to capture compiled code from rank 1 with --virtual-local-rank"
+        )
+
+        # With virtual-local-rank, both ranks should have IDENTICAL compiled code
+        # because they both see cuda:0 during compilation
+        self.assertEqual(
+            rank0,
+            rank1,
+            "Expected identical compiled code with --virtual-local-rank"
+        )
+
 
 if __name__ == "__main__":
     run_tests()

@@ -77,7 +77,7 @@ class LaunchConfig:
                                 that match _any_ of the filter strings.
         virtual_local_rank: Enable virtual local rank mode for workers (defaults to False).
                            When enabled, LOCAL_RANK is set to 0 for all workers and
-                           ROCR/CUDA_VISIBLE_DEVICES is adjusted so each worker accesses its
+                           CUDA_VISIBLE_DEVICES is adjusted so each worker accesses its
                            assigned GPU at device index 0.
 
 

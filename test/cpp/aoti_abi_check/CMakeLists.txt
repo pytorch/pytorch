@@ -10,8 +10,11 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/main.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_cast.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_devicetype.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_dispatch.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_dispatch_v2.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_dtype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_exception.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_headeronlyarrayref.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_macros.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_math.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_rand.cpp
@@ -44,6 +47,10 @@ endif()
 # Disable unused-variable warnings for variables that are only used to test compilation
 target_compile_options_if_supported(test_aoti_abi_check -Wno-unused-variable)
 target_compile_options_if_supported(test_aoti_abi_check -Wno-unused-but-set-variable)
+# Add -Wno-dangling-pointer for GCC 13
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
+  target_compile_options_if_supported(test_aoti_abi_check -Wno-dangling-pointer)
+endif()
 
 foreach(test_src ${AOTI_ABI_CHECK_VEC_TEST_SRCS})
   foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})

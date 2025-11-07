@@ -204,7 +204,7 @@ class NodeEventTracker:
         Create dict dump on all events.
         """
         ret: dict[str, list[str]] = {}
-        for name in self.node_events.keys():
+        for name in self.node_events:
             ret[name] = []
             for idx in self.node_events.get(name, []):
                 event = self.events[idx]
@@ -218,7 +218,7 @@ class NodeEventTracker:
         """
         if not writer:
             writer = self.writer
-        for name in self.node_events.keys():
+        for name in self.node_events:
             writer(f"Node: {name}:")
             self.print_node(name, recursive=False, tab="  ", writer=writer)
 
