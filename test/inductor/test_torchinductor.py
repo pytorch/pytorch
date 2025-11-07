@@ -13588,7 +13588,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_lite_mode_not_decompose(self):
         def f(x, shape):
             y = x + 1
-            z = torch.ops.aten._fused_rms_norm(x, shape, None, None)
+            z = torch.ops.aten._fused_rms_norm(y, shape, None, None)
             return z[0] + z[1]
 
         f = torch.compile(f, mode="lite")
@@ -13731,7 +13731,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             fullgraph=True,
         )
 
-        c = torch.randn((64, 32), device="cuda")
+        c = torch.randn((64, 32), device=self.device)
         torch._dynamo.decorators.mark_unbacked(c, 0)
 
         _, code = run_and_get_code(model, c)
