@@ -195,7 +195,8 @@ jobs:
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: ${{ needs.docker-build.outputs.${{ matrix.docker-image }} }}
+          #docker-image: ${{ needs.docker-build.outputs.${{ matrix.docker-image }} }}
+          docker-image: ${{ needs.docker-build.outputs.docker-pytorch-linux-jammy-rocm-n-py3 }}
 
             #- name: Save as tarball
             #  run: |
