@@ -782,7 +782,7 @@ def run_test_retries(
 
         # Read what just failed/ran
         try:
-            current_failure = read_pytest_cache("current_failure")
+            current_failure = read_pytest_cache("lastrun")
             if current_failure is None:
                 raise FileNotFoundError
             if current_failure == "null":
