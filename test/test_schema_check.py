@@ -4,6 +4,7 @@
 import os
 import sys
 import torch
+
 from torch.utils._pytree import tree_map
 import unittest
 
@@ -18,6 +19,7 @@ from torch.testing._internal.common_utils import IS_WINDOWS, slowTestIf
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
+HAS_XPU = torch.xpu.is_available()
 
 
 def secretly_aliasing(x):
@@ -205,6 +207,7 @@ class TestSchemaCheck(JitTestCase):
         )
 
     # Tests that SchemaCheckMode records mutations and aliases with aliasing outputs
+    @unittest.skipIf(HAS_XPU, "Not supported on XPU yet")
     def test_schema_check_mode_mutated_aliasing_aliasing_outputs(self):
         x = torch.rand((3, 3))
         actual = torch.zeros(3)
@@ -303,6 +306,7 @@ class TestSchemaCheck(JitTestCase):
         self.assertEqual(e_expected, e_actual)
 
     # Tests that SchemaCheckMode wraps Torch.tensor with aliasing outputs due to aliasing inputs
+    @unittest.skipIf(HAS_XPU, "Not supported on XPU yet")
     def test_schema_check_mode_functionality_with_multiple_outputs_aliasing(self):
         x = torch.rand((3, 3))
         actual = torch.zeros(3)
@@ -318,6 +322,7 @@ class TestSchemaCheck(JitTestCase):
         self.assertEqual(x + x, y)
 
     # Tests that SchemaCheckMode wraps Torch.tensor in special training op edge case
+    @unittest.skipIf(HAS_XPU, "Not supported on XPU yet")
     def test_schema_check_mode_functionality_training_op(self):
         x = torch.rand((3, 3), requires_grad=True)
         batch = torch.nn.BatchNorm1d(3, track_running_stats=True)
@@ -327,6 +332,7 @@ class TestSchemaCheck(JitTestCase):
         self.assertEqual(expected, actual)
 
     # Tests that SchemaCheckMode wraps Torch.tensor with nested training op edge case
+    @unittest.skipIf(HAS_XPU, "Not supported on XPU yet")
     def test_schema_check_mode_functionality_nested_training_op(self):
         actual = torch.rand((3, 3))
         batch = torch.nn.BatchNorm1d(3, track_running_stats=True)
@@ -375,6 +381,7 @@ class TestSchemaCheck(JitTestCase):
                 IncorrectAliasTensor(x).add(IncorrectAliasTensor(y), alpha=2)
 
     # Tests that an exception is raised for a mismatching alias over multiple ops
+    @unittest.skipIf(HAS_XPU, "Not supported on XPU yet")
     def test_alias_check_fail_multiple_operators(self):
         with self.assertRaisesRegex(RuntimeError, "Argument input is not defined to alias output but was aliasing"):
             x = torch.rand((3, 3), requires_grad=True)
@@ -391,6 +398,7 @@ class TestSchemaCheck(JitTestCase):
                 IncorrectAliasTensor(x).sin().add(IncorrectAliasTensor(y), alpha=2).relu()
 
     # Tests that an exception is raised for a centered mismatching alias over multiple ops
+    @unittest.skipIf(HAS_XPU, "Not supported on XPU yet")
     def test_alias_check_fail_outputs_unexpectedly_aliasing(self):
         with self.assertRaisesRegex(RuntimeError, "Outputs 0 and 1 alias unexpectedly"):
             x = torch.rand((3, 3))
