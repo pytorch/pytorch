@@ -417,6 +417,7 @@ from user code:
     warnings.warn("test")""",
         )
 
+    @unittest.expectedFailure  # most optree functions are polyfilled
     @unittest.skipIf(not python_pytree._cxx_pytree_exists, "missing optree package")
     def test_optree_graph_break_message(self):
         import optree
