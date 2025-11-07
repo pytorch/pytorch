@@ -89,6 +89,8 @@ def lift_lowering_attrs_to_nodes(fx_module: GraphModule) -> None:
 
     for node in fx_module.graph.nodes:
         if node.op == "call_module":
+            # When op is "call_module", target is always a string (module name)
+            assert isinstance(node.target, str)
             if isinstance(submodules[node.target], GraphModule):
                 lift_lowering_attrs_to_nodes(submodules[node.target])
             else:
