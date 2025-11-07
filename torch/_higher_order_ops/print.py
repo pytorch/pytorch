@@ -41,10 +41,9 @@ def print_proxy_torch_dispatch_mode(
 @print.py_functionalize_impl
 # pyre-ignore
 def print_functionalize(ctx: Any, format_str: str, **kwargs: object) -> None:
-    ctx.functionalize(print)
-    #with ctx.redispatch_to_next():
-    #    res = print_impl(format_str, **kwargs)
-    #    return ctx.wrap_tensors(res)
+    with ctx.redispatch_to_next():
+        res = print_impl(format_str, **kwargs)
+        return ctx.wrap_tensors(res)
 
 @print.py_impl(FakeTensorMode)
 # pyre-ignore
