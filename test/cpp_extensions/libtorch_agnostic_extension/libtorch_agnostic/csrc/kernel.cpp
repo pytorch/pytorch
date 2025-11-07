@@ -478,6 +478,56 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("my_amax_vec", &boxed_my_amax_vec);
 }
 
+std::vector<Tensor> my__foreach_mul(torch::headeronly::HeaderOnlyArrayRef<Tensor> self, torch::headeronly::HeaderOnlyArrayRef<Tensor> other) {
+  std::array<StableIValue, 2> stack = {from(self), from(other)};
+  aoti_torch_call_dispatcher("aten::_foreach_mul", "List", stack.data());
+  return to<std::vector<Tensor>>(stack[0]);
+}
+
+void boxed_my__foreach_mul(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  // Why is the following NOT to<HeaderOnlyArrayRef<Tensor>>(stack[0])? Because calling `to`
+  // on a StableIValue means that the result is owning its underlying data now! HeaderOnlyArrayRef
+  // is not owning, so it cannot safely steward the result of the to<>.
+  auto res = my__foreach_mul(to<std::vector<Tensor>>(stack[0]), to<std::vector<Tensor>>(stack[1]));
+  stack[0] = from(res);
+}
+
+void my__foreach_mul_(torch::headeronly::HeaderOnlyArrayRef<Tensor> self, torch::headeronly::HeaderOnlyArrayRef<Tensor> other) {
+  std::array<StableIValue, 2> stack = {from(self), from(other)};
+  aoti_torch_call_dispatcher("aten::_foreach_mul_", "List", stack.data());
+}
+
+void boxed_my__foreach_mul_(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  my__foreach_mul_(to<std::vector<Tensor>>(stack[0]), to<std::vector<Tensor>>(stack[1]));
+}
+
+std::vector<Tensor> make_tensor_clones_and_call_foreach(Tensor t1, Tensor t2) {
+  // This function tests that my__foreach_mul can take in std::initializer_lists
+  // in addition to std::vectors.
+  Tensor t1_1 = my_clone(t1);
+  Tensor t1_2 = my_clone(t1);
+  Tensor t2_1 = my_clone(t2);
+  Tensor t2_2 = my_clone(t2);
+  return my__foreach_mul({t1_1, t2_1}, {t1_2, t2_2});
+}
+
+void boxed_make_tensor_clones_and_call_foreach(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  auto res = make_tensor_clones_and_call_foreach(to<Tensor>(stack[0]), to<Tensor>(stack[1]));
+  stack[0] = from(res);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("my__foreach_mul(Tensor[] self, Tensor[] other) -> Tensor[]");
+  m.def("my__foreach_mul_(Tensor(a!)[] self, Tensor[] other) -> ()");
+  m.def("make_tensor_clones_and_call_foreach(Tensor t1, Tensor t2) -> Tensor[]");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("my__foreach_mul", &boxed_my__foreach_mul);
+  m.impl("my__foreach_mul_", &boxed_my__foreach_mul_);
+  m.impl("make_tensor_clones_and_call_foreach", &boxed_make_tensor_clones_and_call_foreach);
+}
+
 // Test functions for torch::stable::accelerator APIs
 
 #ifdef LAE_USE_CUDA
@@ -565,4 +615,5 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("test_stream", &boxed_test_stream);
   m.impl("test_get_current_device_index", &boxed_test_get_current_device_index);
 }
+
 #endif // LAE_USE_CUDA
