@@ -802,7 +802,7 @@ class ConstDictVariable(VariableTracker):
 
     def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
         self.install_dict_keys_match_guard()
-        return [x.vt for x in self.items.keys()]
+        return [x.vt for x in self.items]
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -1027,7 +1027,7 @@ class SetVariable(ConstDictVariable):
         if not self.items:
             return "set()"
         else:
-            return "{" + ",".join(k.vt.debug_repr() for k in self.items.keys()) + "}"
+            return "{" + ",".join(k.vt.debug_repr() for k in self.items) + "}"
 
     @property
     def set_items(self) -> set["ConstDictVariable._HashableTracker"]:
@@ -1307,7 +1307,7 @@ class FrozensetVariable(SetVariable):
         if not self.items:
             return "frozenset()"
         else:
-            return "{" + ",".join(k.vt.debug_repr() for k in self.items.keys()) + "}"
+            return "{" + ",".join(k.vt.debug_repr() for k in self.items) + "}"
 
     @property
     def set_items(self) -> set["ConstDictVariable._HashableTracker"]:
@@ -1372,9 +1372,7 @@ class DictKeySetVariable(SetVariable):
             return "dict_keys([])"
         else:
             return (
-                "dict_keys(["
-                + ",".join(k.vt.debug_repr() for k in self.items.keys())
-                + "])"
+                "dict_keys([" + ",".join(k.vt.debug_repr() for k in self.items) + "])"
             )
 
     def install_dict_keys_match_guard(self) -> None:

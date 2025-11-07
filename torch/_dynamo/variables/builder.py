@@ -586,7 +586,7 @@ class VariableBuilder:
         # This might be suboptimal compared to dict guards. But mappingproxy is
         # not very common, so its ok to guard on all keys.
         self.install_guards(GuardBuilder.MAPPING_KEYS_CHECK)
-        all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
+        all_const = all(ConstantVariable.is_literal(k) for k in value)
 
         if not all_const:
             unimplemented_v2(
@@ -732,7 +732,7 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
+            all_const = all(ConstantVariable.is_literal(k) for k in value)
 
             # For all_const, we don't have to guard on anything yet. We guard on
             # keys lazily by adding a dict_getitem entry for each accessed key.
