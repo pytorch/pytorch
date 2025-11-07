@@ -1608,6 +1608,20 @@ class BuiltinVariable(VariableTracker):
         # TODO handle more cases and merge this with this with `generic_jump`.
         return None
 
+    def call_repr(self, tx: "InstructionTranslator", arg):
+        """Handle repr() on user defined objects."""
+        if isinstance(arg, variables.UserDefinedObjectVariable):
+            repr_method = arg.value.__repr__
+
+            if type(arg.value).__repr__ is object.__repr__:
+                # Default repr - just call it
+                return variables.ConstantVariable.create(value=repr_method())
+            else:
+                # Custom repr - inline the method for tracing
+                bound_method = repr_method.__func__
+                user_func_variable = variables.UserFunctionVariable(bound_method)
+                return tx.inline_user_function_return(user_func_variable, [arg], {})
+
     def call_str(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
