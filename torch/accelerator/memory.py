@@ -88,6 +88,9 @@ def memory_stats(device_index: _device_t = None, /) -> OrderedDict[str, Any]:
             If not given, use :func:`torch.accelerator.current_device_index` by default.
             If a :class:`torch.device` or str is provided, its type must match the current
             :ref:`accelerator<accelerators>` device type.
+
+    Returns:
+        OrderedDict[str, Any]: an ordered dictionary mapping statistic names to their values.
     """
     if not torch._C._accelerator_isAllocatorInitialized():
         return OrderedDict()
@@ -118,6 +121,9 @@ def memory_allocated(device_index: _device_t = None, /) -> int:
             If not given, use :func:`torch.accelerator.current_device_index` by default.
             If a :class:`torch.device` or str is provided, its type must match the current
             :ref:`accelerator<accelerators>` device type.
+
+    Returns:
+        int: the current memory occupied by live tensors (in bytes) within the current process.
     """
     return memory_stats(device_index).get("allocated_bytes.all.current", 0)
 
@@ -135,6 +141,9 @@ def max_memory_allocated(device_index: _device_t = None, /) -> int:
             If not given, use :func:`torch.accelerator.current_device_index` by default.
             If a :class:`torch.device` or str is provided, its type must match the current
             :ref:`accelerator<accelerators>` device type.
+
+    Returns:
+        int: the peak memory occupied by live tensors (in bytes) within the current process.
     """
     return memory_stats(device_index).get("allocated_bytes.all.peak", 0)
 
@@ -148,6 +157,9 @@ def memory_reserved(device_index: _device_t = None, /) -> int:
             If not given, use :func:`torch.accelerator.current_device_index` by default.
             If a :class:`torch.device` or str is provided, its type must match the current
             :ref:`accelerator<accelerators>` device type.
+
+    Returns:
+        int: the current memory reserved by PyTorch (in bytes) within the current process.
     """
     return memory_stats(device_index).get("reserved_bytes.all.current", 0)
 
@@ -165,6 +177,9 @@ def max_memory_reserved(device_index: _device_t = None, /) -> int:
             If not given, use :func:`torch.accelerator.current_device_index` by default.
             If a :class:`torch.device` or str is provided, its type must match the current
             :ref:`accelerator<accelerators>` device type.
+
+    Returns:
+        int: the peak memory reserved by PyTorch (in bytes) within the current process.
     """
     return memory_stats(device_index).get("reserved_bytes.all.peak", 0)
 
@@ -206,14 +221,16 @@ def reset_peak_memory_stats(device_index: _device_t = None, /) -> None:
 def get_memory_info(device_index: _device_t = None, /) -> tuple[int, int]:
     r"""Return the current device memory information for a given device index.
 
-    This function returns a tuple of two integers: the first is the amount of
-    free memory in bytes, and the second is the total memory in bytes.
-
     Args:
         device_index (:class:`torch.device`, str, int, optional): the index of the device to target.
             If not given, use :func:`torch.accelerator.current_device_index` by default.
             If a :class:`torch.device` or str is provided, its type must match the current
             :ref:`accelerator<accelerators>` device type.
+
+    Returns:
+        tuple[int, int]: a tuple of two integers (free_memory, total_memory) in bytes.
+            The first value is the free memory on the device (available across all processes and applications),
+            The second value is the device's total hardware memory capacity.
     """
     device_index = _get_device_index(device_index, optional=True)
     return torch._C._accelerator_getMemoryInfo(device_index)
