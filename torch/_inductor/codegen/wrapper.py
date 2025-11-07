@@ -971,6 +971,7 @@ class ScatterFallbackLine(WrapperLine):
         else:
             (x, index) = (t.codegen_reference() for t in node.inputs)
             src = node.constant_args[1]
+        device = d.type if (d := node.get_device()) else V.graph.device_type
         self.wrapper._generate_scatter_fallback(
             x,
             [x, node.constant_args[0], index, src],
@@ -979,6 +980,7 @@ class ScatterFallbackLine(WrapperLine):
             node.src_is_tensor,
             node.kwargs["reduce"],
             node.codegen_kwargs(),
+            device,
         )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -1632,6 +1634,7 @@ class PythonWrapperCodegen(CodeGen):
         src_is_tensor,
         reduce,
         kwargs,
+        device,
     ):
         line = f"{python_kernel_name}({','.join(map(str, inputs))}"
         if python_kernel_name.startswith("aten.scatter_reduce"):
