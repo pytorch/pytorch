@@ -4,10 +4,8 @@ set -ex
 
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
-# Get the pinned JAX version
-JAX_VERSION=$(get_pinned_commit /ci_commit_pins/jax)
-
 function install_jax_12() {
+  JAX_VERSION=$(get_pinned_commit /ci_commit_pins/jax-cu12)
   echo "Installing JAX ${JAX_VERSION} with CUDA 12 support"
   pip_install "jax[cuda12]==${JAX_VERSION}" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
@@ -17,6 +15,7 @@ function install_jax_12() {
 }
 
 function install_jax_13() {
+  JAX_VERSION=$(get_pinned_commit /ci_commit_pins/jax-cu13)
   echo "Installing JAX ${JAX_VERSION} with CUDA 13 support"
   pip_install "jax[cuda13]==${JAX_VERSION}" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
