@@ -27,7 +27,10 @@ env:
   ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine
   AWS_DEFAULT_REGION: us-east-1
 
-permissions: read-all
+#permissions: read-all
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   get-label-type:
