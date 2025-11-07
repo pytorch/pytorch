@@ -879,9 +879,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             mod = M(bias).eval()
             v = torch.randn(2, 4, 3, 4)
             torch._dynamo.reset()
-            autocast_enabled = (
-                True if dtype in [torch.bfloat16, torch.float16] else False
-            )
+            autocast_enabled = dtype in [torch.bfloat16, torch.float16]
             with (
                 torch.no_grad(),
                 torch.autocast(
