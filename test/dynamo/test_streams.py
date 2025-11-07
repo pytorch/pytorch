@@ -3,10 +3,15 @@ import functools
 import re
 import unittest
 import weakref
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.graph_bytecode_inputs import (
+    reset_user_object_tracking,
+    store_user_object_weakrefs,
+)
 from torch._dynamo.testing import extract_graph, remove_trailing_space
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import requires_cuda
@@ -70,13 +75,13 @@ class TestStreams(torch._dynamo.test_case.TestCase):
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[2, 2]", arg1_1: "f32[2, 2]"):
-        # Annotation: {'stream': None}
+        # Annotation: {'stream': 0}
         add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
 
-        # Annotation: {'stream': None}
+        # Annotation: {'stream': 1}
         add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
 
-        # Annotation: {'stream': None}
+        # Annotation: {'stream': 1}
         add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, 2);  add_1 = None
         add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_2, add);  add_2 = add = None
         return (add_3,)
@@ -192,6 +197,7 @@ class <lambda>(torch.nn.Module):
         s_exp = fn(*inp)
         self.assertEqual(s_act, s_exp)
 
+    @requires_cuda
     def test_nested_stream_enter_exit(self):
         def fn(x, y, s0, s1, s2):
             with s1:
@@ -225,13 +231,13 @@ class <lambda>(torch.nn.Module):
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[2, 2]", arg1_1: "f32[2, 2]"):
-        # Annotation: {'stream': None}
+        # Annotation: {'stream': 1}
         add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
 
-        # Annotation: {'stream': None}
+        # Annotation: {'stream': 2}
         add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
 
-        # Annotation: {'stream': None}
+        # Annotation: {'stream': 1}
         add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add, 2);  add = None
         return (add_1, add_2)
 """,
@@ -245,6 +251,7 @@ class <lambda>(torch.nn.Module):
     def test_nested_stream_enter_exit_graph_break(self):
         pass
 
+    @requires_cuda
     def test_local_stream_enter_exit(self):
         def fn(x, y):
             s2 = torch.Stream()
@@ -285,6 +292,7 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
+    @requires_cuda
     def test_local_stream_nested_enter_exit(self):
         def fn(x, y):
             s2 = torch.Stream()
@@ -327,6 +335,7 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
+    @requires_cuda
     def test_stream_with_mutation(self):
         def fn(x, y):
             s2 = torch.Stream()
@@ -376,6 +385,7 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
+    @requires_cuda
     def test_stream_backward(self) -> None:
         def fn(x, y):
             s2 = torch.Stream()
@@ -437,17 +447,111 @@ class GraphModule(torch.nn.Module):
         )
 
     @requires_cuda
-    def test_run_opcheck(self):
+    def test_event_tracing(self):
+        def fn(x) -> None:
+            e = torch.Event()
+            e.record()
+            x.add_(1)
+            return x
+
+        inp = (torch.ones(2, 2, device="cuda"),)
+        (
+            _,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+
+        self.assertExpectedInline(
+            print_graph(fw_graphs[0]),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]"):
+        #
+        record_event = torch.ops.streams.record_event.default(0, 1);  record_event = None
+
+        #
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+        copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = None
+        return (copy_,)
+""",
+        )
+
+    @requires_cuda
+    def test_run_opcheck_fork_join(self):
         from torch._dynamo.variables.streams import fork_stream, join_stream
         from torch.library import opcheck
 
-        sample_inputs = [
-            (0, torch.device("cuda:0"), 1, torch.device("cuda:1")),
-            (2, torch.device("cuda:2"), 3, torch.device("cuda:1")),
-        ]
-        for args in sample_inputs:
-            opcheck(fork_stream, args)
-            opcheck(join_stream, args)
+        original_stream = torch.accelerator.current_stream()
+        try:
+            s0 = torch.Stream()
+            s1 = torch.Stream()
+            store_user_object_weakrefs(s0, s1)
+
+            sample_inputs = [
+                (0, 1),
+                (1, 0),
+            ]
+            for args in sample_inputs:
+                opcheck(fork_stream, args)
+                opcheck(join_stream, args)
+        finally:
+            torch.accelerator.set_stream(original_stream)
+            reset_user_object_tracking()
+
+    @requires_cuda
+    def test_run_opcheck_wait_record(self):
+        from torch._dynamo.variables.streams import record_event, wait_event
+        from torch.library import opcheck
+
+        original_stream = torch.accelerator.current_stream()
+        try:
+            s0 = torch.Stream()
+            s1 = torch.Stream()
+            e0 = torch.Event()
+            e1 = torch.Event()
+            store_user_object_weakrefs(s0, s1, e0, e1)
+
+            sample_inputs = [
+                (2, 0),
+                (3, 1),
+            ]
+            for args in sample_inputs:
+                opcheck(wait_event, args)
+                opcheck(record_event, args)
+        finally:
+            torch.accelerator.set_stream(original_stream)
+            reset_user_object_tracking()
+
+    @requires_cuda
+    def test_inductor_lowering(self):
+        with patch("torch._inductor.config.implicit_fallbacks", False):
+
+            @torch.compile()
+            def fn(x):
+                e = torch.Event()
+                x += x + 1
+                e.record()
+                return x
+
+            inp = (torch.ones(2, 2, device="cuda"),)
+            fn(*inp)
+
+    def test_is_marked_side_effectful(self):
+        self.assertIn(
+            torch.ops.streams.fork.default, torch.fx.node._side_effectful_functions
+        )
+        self.assertIn(
+            torch.ops.streams.join.default, torch.fx.node._side_effectful_functions
+        )
+        self.assertIn(
+            torch.ops.streams.wait_event.default,
+            torch.fx.node._side_effectful_functions,
+        )
+        self.assertIn(
+            torch.ops.streams.record_event.default,
+            torch.fx.node._side_effectful_functions,
+        )
 
 
 if __name__ == "__main__":
