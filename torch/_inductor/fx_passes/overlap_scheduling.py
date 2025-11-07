@@ -4,9 +4,9 @@ import itertools
 import logging
 import sys
 from collections import Counter, defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 import torch
 import torch.fx as fx
@@ -736,7 +736,7 @@ class OverlapScheduler:
         if key is None:
             return False
 
-        for in_flight_coll in self.in_flight.keys():
+        for in_flight_coll in self.in_flight:
             if bucket_key(in_flight_coll, mode="custom_ops_multidtype") == key:
                 return True
 

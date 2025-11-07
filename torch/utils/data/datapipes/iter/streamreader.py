@@ -32,7 +32,7 @@ class StreamReaderIterDataPipe(IterDataPipe[tuple[str, bytes]]):
 
     def __init__(
         self, datapipe: IterDataPipe[tuple[str, IOBase]], chunk: Optional[int] = None
-    ):
+    ) -> None:
         self.datapipe = datapipe
         self.chunk = chunk
 

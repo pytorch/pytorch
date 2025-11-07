@@ -2707,6 +2707,7 @@ def to_subclass(t: Any, cls: type) -> Any:
 dict_getitem = dict.__getitem__
 
 
+@torch.fx.wrap
 def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
     # Call dict(d) to prevent calling overridden __iter__/keys
     dict_class = dict
@@ -2842,7 +2843,7 @@ def key_is_id(
 
 
 def key_to_id(value: Any) -> list[Any]:
-    return [id(k) if key_is_id(k) else k for k in value.keys()]
+    return [id(k) if key_is_id(k) else k for k in value]
 
 
 def const_repr(x: Any, *, local: Any) -> str:
@@ -3262,7 +3263,7 @@ def same(
                 log_error=log_error,
                 use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
             )
-            for key in ref.__dict__.keys()
+            for key in ref.__dict__
         )
     else:
         raise RuntimeError(f"unsupported type: {type(ref).__name__}")
@@ -4765,6 +4766,10 @@ def _extract_tensor_dict(t: torch.Tensor) -> dict[str, Any]:
 
 def build_stream(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Stream:
     return torch._C.Stream(*args, **kwargs)
+
+
+def build_event(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Event:
+    return torch._C.Event(*args, **kwargs)
 
 
 class CompileTimeInstructionCounter:

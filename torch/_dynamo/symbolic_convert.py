@@ -434,12 +434,15 @@ class BlockStackEntry:
         else:
             return ReenterWith(self.stack_index - 1)
 
-    def exit(self, tx: InstructionTranslatorBase, is_graph_break: bool) -> None:
+    def exit(
+        self, tx: InstructionTranslatorBase, is_graph_break: bool
+    ) -> VariableTracker | None:
         assert self.with_context is not None
         if (
             is_graph_break and self.with_context.exit_on_graph_break()
         ) or not is_graph_break:
             return self.with_context.exit(tx)  # type: ignore[arg-type]
+        return None
 
 
 class SpeculationLogDivergence(AssertionError):
@@ -2806,7 +2809,7 @@ class InstructionTranslatorBase(
             reads = livevars_analysis(self.instructions, resume_inst)
             all_argnames = tuple(
                 k
-                for k in self.symbolic_locals.keys()
+                for k in self.symbolic_locals
                 if k in reads and k not in self.cell_and_freevars()
             )
             argnames_null_set = set(meta.locals_null_keys)
@@ -3225,7 +3228,7 @@ class InstructionTranslatorBase(
 
     def BUILD_SLICE(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
-        self.push(SliceVariable(items, tx=self))
+        self.push(SliceVariable(items, tx=self))  # type: ignore[arg-type]
 
     def BUILD_LIST(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
@@ -3317,7 +3320,7 @@ class InstructionTranslatorBase(
         obj = self.stack[-inst.arg]
         assert isinstance(obj, SetVariable)
         assert obj.is_mutable()
-        obj.call_method(self, "add", [v], {})
+        obj.call_method(self, "add", [v], {})  # type: ignore[arg-type]
 
     def SET_UPDATE(self, inst: Instruction) -> None:
         v = self.pop()
@@ -3326,7 +3329,7 @@ class InstructionTranslatorBase(
         obj = self.stack[-inst.arg]
         assert isinstance(obj, SetVariable)
         assert obj.is_mutable()
-        obj.call_method(self, "update", [v], {})
+        obj.call_method(self, "update", [v], {})  # type: ignore[arg-type]
 
     def LIST_APPEND(self, inst: Instruction) -> None:
         v = self.pop()
@@ -3604,7 +3607,7 @@ class InstructionTranslatorBase(
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ListVariable)
         assert obj.is_mutable()
-        obj.call_method(self, "extend", [v], {})
+        obj.call_method(self, "extend", [v], {})  # type: ignore[arg-type]
 
     def LIST_TO_TUPLE(self, inst: Instruction) -> None:
         self.push(BuiltinVariable(tuple).call_function(self, [self.pop()], {}))  # type: ignore[arg-type]
@@ -3634,7 +3637,7 @@ class InstructionTranslatorBase(
         obj = self.stack[-inst.arg].realize()
         assert isinstance(obj, ConstDictVariable)
         assert obj.is_mutable()
-        obj.call_method(self, "update", [v], {})
+        obj.call_method(self, "update", [v], {})  # type: ignore[arg-type]
 
     DICT_UPDATE = DICT_MERGE
 
@@ -3670,7 +3673,7 @@ class InstructionTranslatorBase(
     def MATCH_KEYS(self, inst: Instruction) -> None:
         tos = self.stack[-1]
         assert isinstance(tos, TupleVariable)
-        keys = tos.unpack_var_sequence(self)
+        keys = tos.unpack_var_sequence(self)  # type: ignore[arg-type]
         tos1 = self.stack[-2]
         assert isinstance(tos1, ConstDictVariable)
 
@@ -3860,7 +3863,7 @@ class InstructionTranslatorBase(
             else:
                 self.block_stack.append(BlockStackEntry(inst, target, len(self.stack)))
 
-        return ctx.enter(self)
+        return ctx.enter(self)  # type: ignore[arg-type]
 
     @staticmethod
     def unsupported_ctx_graph_break(ctx: VariableTracker) -> NoReturn:
