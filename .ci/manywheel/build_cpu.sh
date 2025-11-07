@@ -71,7 +71,7 @@ DEPS_SONAME=(
 # Add ARM-specific library dependencies for CPU builds
 if [[ "$ARCH" == "aarch64" ]]; then
     echo "Adding ARM-specific CPU library dependencies"
-    
+
     # ARM Compute Library (if available)
     if [[ -d "/acl/build" ]]; then
         echo "Adding ARM Compute Library for CPU"
@@ -84,7 +84,7 @@ if [[ "$ARCH" == "aarch64" ]]; then
             "libarm_compute_graph.so"
         )
     fi
-    
+
     # ARM system libraries
     DEPS_LIST+=(
         "/usr/lib64/libgfortran.so.5"
