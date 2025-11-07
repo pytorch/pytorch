@@ -819,7 +819,7 @@ class TestSharding(DTensorTestBase):
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
         "Does not support flash nor efficient attention",
     )
-    def test_attention_shard_without_CP(self) -> None:
+    def test_attention_shard_without_cp(self) -> None:
         """Test that sharding on sequence dimension without CP enabled is not supported."""
         from torch.distributed.tensor import distribute_tensor, Replicate, Shard
 

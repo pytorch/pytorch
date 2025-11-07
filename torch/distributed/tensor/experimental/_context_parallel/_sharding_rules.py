@@ -380,7 +380,7 @@ def unregister_cp_sharding_rules():
     global _cp_strategy_contexts, _original_strategies
 
     # Exit all context managers
-    for op_overload, ctx in _cp_strategy_contexts.items():
+    for ctx in _cp_strategy_contexts.values():
         ctx.__exit__(None, None, None)
 
     _cp_strategy_contexts = {}
