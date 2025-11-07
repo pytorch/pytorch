@@ -52,6 +52,7 @@ __all__ = [
     "tree_iter",
     "tree_leaves",
     "tree_flatten",
+    "tree_flatten_with_path",
     "tree_structure",
     "tree_unflatten",
     "tree_map",
