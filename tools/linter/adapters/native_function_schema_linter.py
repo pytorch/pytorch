@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-STABLE_NATIVE_FUNCTION_SCHEMA: Ensures that when a native function schema is changed
-in native_functions.yaml for an op that is used in torch/csrc/stable/ops.h,
-a schema adapter is registered in torch/csrc/shim_common.cpp.
+STABLE_NATIVE_FUNCTION_SCHEMA: Ensures that:
+1. Auto-generates native_ops.txt from ops.h (like shim_function_versions.txt)
+2. When a native function schema is changed in native_functions.yaml for an op
+   that is used in torch/csrc/stable/ops.h, a schema adapter is registered in
+   torch/csrc/shim_common.cpp.
 """
 
 from __future__ import annotations
@@ -16,6 +18,8 @@ import sys
 from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
+
+from torchgen.model import FunctionSchema
 
 
 LINTER_CODE = "STABLE_NATIVE_FUNCTION_SCHEMA"
@@ -40,12 +44,60 @@ class LintMessage(NamedTuple):
     description: str | None
 
 
+def extract_native_ops_from_ops_h(ops_h_path: Path) -> set[str]:
+    """
+    Extract all ATen op names called via torch_call_dispatcher in ops.h.
+    Returns a set of op names like "aten::empty_like", "aten::transpose.int", etc.
+    """
+    ops = set()
+
+    with open(ops_h_path) as f:
+        content = f.read()
+
+    pattern = re.compile(
+        r'torch_call_dispatcher\s*\(\s*"(aten::[^"]+)"\s*,\s*"([^"]*)"\s*,'
+    )
+
+    for match in pattern.finditer(content):
+        op_name = match.group(1)
+        overload = match.group(2)
+
+        if overload:
+            full_op_name = f"{op_name}.{overload}"
+        else:
+            full_op_name = op_name
+
+        ops.add(full_op_name)
+
+    return ops
+
+
+def write_native_ops_txt(ops: set[str], output_file: Path) -> None:
+    """
+    Write the native ops list to a text file.
+    """
+    sorted_ops = sorted(ops)
+
+    with open(output_file, "w") as f:
+        f.write(
+            "# Auto-generated file listing ATen native ops used in torch/csrc/stable/ops.h\n"
+        )
+        f.write(
+            "# Each line contains one op name in format: aten::op_name or aten::op_name.overload\n"
+        )
+        f.write("#\n")
+        f.write(
+            "# This file is automatically updated by the stable_native_function_schema_linter.\n"
+        )
+        f.write("# DO NOT EDIT MANUALLY.\n\n")
+
+        for op in sorted_ops:
+            f.write(f"{op}\n")
+
+
 def read_native_ops_txt(native_ops_txt_path: Path) -> set[str]:
     """
-    Read the list of ops from native_ops.txt that we care about.
-
-    Each line should contain one op name.
-    Empty lines and lines starting with # are ignored.
+    Read the list of ops from native_ops.txt.
     """
     ops = set()
 
@@ -55,7 +107,6 @@ def read_native_ops_txt(native_ops_txt_path: Path) -> set[str]:
     with open(native_ops_txt_path) as f:
         for line in f:
             line = line.strip()
-            # Skip empty lines and comments
             if not line or line.startswith("#"):
                 continue
             ops.add(line)
@@ -136,44 +187,137 @@ def get_changed_function_schemas(
     return changed_schemas
 
 
-def get_registered_adapters(shim_common_path: Path) -> set[str]:
+def get_registered_adapters(shim_common_path: Path) -> dict[str, tuple[int, int]]:
     """
     Get the list of ops that have schema adapters registered in shim_common.cpp.
 
-    Looks for calls to register_schema_adapter("aten::op_name", ...).
+    Looks for calls to register_schema_adapter("aten::op_name", TORCH_VERSION_X_Y_Z, ...).
+    Returns a dict mapping op name to (major, minor) version tuple.
     """
-    adapters = set()
+    adapters = {}
 
     with open(shim_common_path) as f:
         content = f.read()
 
-    # Pattern to match register_schema_adapter("aten::...", ...)
-    pattern = re.compile(r'register_schema_adapter\s*\(\s*"(aten::[^"]+)"')
+    # Pattern to match register_schema_adapter("aten::...", TORCH_VERSION_X_Y_Z, ...)
+    pattern = re.compile(
+        r'register_schema_adapter\s*\(\s*"(aten::[^"]+)"\s*,\s*TORCH_VERSION_(\d+)_(\d+)_\d+'
+    )
 
     for match in pattern.finditer(content):
         op_name = match.group(1)
-        adapters.add(op_name)
+        major = int(match.group(2))
+        minor = int(match.group(3))
+        adapters[op_name] = (major, minor)
 
     return adapters
 
 
-def check_file(filename: str) -> list[LintMessage]:
+def get_current_torch_version() -> tuple[int, int]:
+    """
+    Get the current PyTorch major and minor version from version.txt.
+    Returns (major, minor) tuple.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    version_file = repo_root / "version.txt"
+
+    with open(version_file) as f:
+        version_str = f.read().strip()
+
+    # Parse version like "2.10.0a0" -> (2, 10)
+    match = re.match(r"(\d+)\.(\d+)\.", version_str)
+    if not match:
+        raise RuntimeError(f"Could not parse version from {version_str}")
+
+    return (int(match.group(1)), int(match.group(2)))
+
+
+def check_return_types_match(
+    old_func: FunctionSchema, new_func: FunctionSchema
+) -> None:
+    """
+    Check if return types match between two function schemas.
+
+    Raises RuntimeError if they don't match, as this indicates an unusual case
+    that should be reported to the PyTorch team.
+    """
+    if len(old_func.returns) != len(new_func.returns):
+        raise RuntimeError(
+            f"Return type mismatch for '{old_func.name}': number of returns changed "
+            f"from {len(old_func.returns)} to {len(new_func.returns)}. "
+            f"This is unexpected. Please file an issue at "
+            f"https://github.com/pytorch/pytorch/issues"
+        )
+
+    for old_ret, new_ret in zip(old_func.returns, new_func.returns):
+        if old_ret.type != new_ret.type:
+            raise RuntimeError(
+                f"Return type mismatch for '{old_func.name}': type changed "
+                f"from {old_ret.type} to {new_ret.type}. "
+                f"This is unexpected. Please file an issue at "
+                f"https://github.com/pytorch/pytorch/issues"
+            )
+        if old_ret.annotation != new_ret.annotation:
+            raise RuntimeError(
+                f"Return type annotation mismatch for '{old_func.name}': "
+                f"annotation changed from {old_ret.annotation} to {new_ret.annotation}. "
+                f"This is unexpected. Please file an issue at "
+                f"https://github.com/pytorch/pytorch/issues"
+            )
+
+
+def is_only_default_arg_value_change(
+    old_schema: str, new_schema: str
+) -> tuple[bool, list[str]]:
+    """
+    Determine if the schema change is ONLY a default argument value change.
+    Parameter name changes are also allowed (they don't affect ABI).
+
+    Returns (is_default_only, changed_args) where:
+    - is_default_only: True if only default values changed (or param names)
+    - changed_args: list of argument positions whose defaults changed
+    """
+    old_func = FunctionSchema.parse(old_schema)
+    new_func = FunctionSchema.parse(new_schema)
+
+    if old_func.name != new_func.name:
+        return (False, [])
+
+    # Check return types - raises RuntimeError if they don't match
+    check_return_types_match(old_func, new_func)
+
+    old_args = list(old_func.schema_order_arguments())
+    new_args = list(new_func.schema_order_arguments())
+
+    if len(old_args) != len(new_args):
+        return (False, [])
+
+    changed_args = []
+
+    for i, (old_arg, new_arg) in enumerate(zip(old_args, new_args)):
+        if old_arg.type != new_arg.type:
+            return (False, [])
+
+        if old_arg.default != new_arg.default:
+            changed_args.append(new_arg.name)
+
+    return (True, changed_args)
+
+
+def check_file(
+    filename: str,
+    native_functions_yaml_path: Path,
+    shim_common_path: Path,
+) -> list[LintMessage]:
     """
     Check if native_functions.yaml has schema changes for ops in native_ops.txt
     that don't have adapters registered in shim_common.cpp.
     """
     lint_messages: list[LintMessage] = []
 
-    # Only lint aten/src/ATen/native/native_functions.yaml
-    if not filename.endswith("native/native_functions.yaml"):
-        return []
-
     repo_root = Path(__file__).resolve().parents[3]
     native_ops_txt_path = repo_root / "torch/csrc/stable/native_ops.txt"
-    shim_common_path = repo_root / "torch/csrc/shim_common.cpp"
-    native_functions_yaml_path = Path(filename)
 
-    # Get the list of ops we care about
     tracked_ops = read_native_ops_txt(native_ops_txt_path)
 
     changed_schemas = get_changed_function_schemas(native_functions_yaml_path)
@@ -184,6 +328,9 @@ def check_file(filename: str) -> list[LintMessage]:
 
     # Get registered adapters
     registered_adapters = get_registered_adapters(shim_common_path)
+
+    # Get current PyTorch version
+    current_version = get_current_torch_version()
 
     # Check if any tracked ops have schema changes without adapters
     for op_name, (old_schema, new_schema) in changed_schemas.items():
@@ -199,31 +346,91 @@ def check_file(filename: str) -> list[LintMessage]:
 
         if is_tracked:
             # Check if an adapter is registered
-            has_adapter = (
-                full_op in registered_adapters or base_op in registered_adapters
-            )
+            adapter_key = None
+            if full_op in registered_adapters:
+                adapter_key = full_op
+            elif base_op in registered_adapters:
+                adapter_key = base_op
 
-            if not has_adapter:
-                lint_messages.append(
-                    LintMessage(
-                        path=filename,
-                        line=None,
-                        char=None,
-                        code=LINTER_CODE,
-                        severity=LintSeverity.ERROR,
-                        name="missing-schema-adapter",
-                        original=None,
-                        replacement=None,
-                        description=(
-                            f"Schema change detected for '{op_name}' which is used in torch/csrc/stable/ops.h:\n\n"
-                            f"Old schema:\n  {old_schema}\n\n"
-                            f"New schema:\n  {new_schema}\n\n"
-                            f"Please register a schema adapter in torch/csrc/shim_common.cpp\n"
-                            f"in the _register_adapters() function to handle this schema change.\n"
-                            f"See https://github.com/pytorch/pytorch/pull/165284/ for an example."
-                        ),
-                    )
+            if not adapter_key:
+                correct_version = (
+                    f"TORCH_VERSION_{current_version[0]}_{current_version[1]}_0"
                 )
+
+                # Determine if this is only a default value change
+                only_default_change, changed_args = is_only_default_arg_value_change(
+                    old_schema, new_schema
+                )
+
+                if only_default_change:
+                    # WARNING: Can use version guards in ops.h
+                    args_str = ", ".join(changed_args) if changed_args else "argument"
+                    lint_messages.append(
+                        LintMessage(
+                            path=filename,
+                            line=None,
+                            char=None,
+                            code=LINTER_CODE,
+                            severity=LintSeverity.WARNING,
+                            name="default-value-change",
+                            original=None,
+                            replacement=None,
+                            description=(
+                                f"Default value changed for {args_str} in '{op_name}': "
+                                f"update the default value in torch/csrc/stable/ops.h with version guards "
+                                f"(#if TORCH_FEATURE_VERSION >= {correct_version})."
+                            ),
+                        )
+                    )
+                else:
+                    # ERROR: Structural change requires adapter
+                    lint_messages.append(
+                        LintMessage(
+                            path=filename,
+                            line=None,
+                            char=None,
+                            code=LINTER_CODE,
+                            severity=LintSeverity.ERROR,
+                            name="missing-schema-adapter",
+                            original=None,
+                            replacement=None,
+                            description=(
+                                f"Structural schema change detected for '{op_name}' which is used in torch/csrc/stable/ops.h:\n\n"
+                                f"Old schema:\n  {old_schema}\n\n"
+                                f"New schema:\n  {new_schema}\n\n"
+                                f"This change requires a schema adapter because it's not just a default value change.\n"
+                                f"Please register a schema adapter in torch/csrc/shim_common.cpp\n"
+                                f"in the _register_adapters() function with {correct_version}.\n"
+                                f"See https://github.com/pytorch/pytorch/pull/165284/ for an example."
+                            ),
+                        )
+                    )
+            else:
+                # Adapter exists, check if version is correct
+                adapter_version = registered_adapters[adapter_key]
+                if adapter_version != current_version:
+                    lint_messages.append(
+                        LintMessage(
+                            path=filename,
+                            line=None,
+                            char=None,
+                            code=LINTER_CODE,
+                            severity=LintSeverity.ERROR,
+                            name="incorrect-adapter-version",
+                            original=None,
+                            replacement=None,
+                            description=(
+                                f"Schema adapter for '{op_name}' is registered with incorrect version.\n\n"
+                                f"Adapter registered with: TORCH_VERSION_{adapter_version[0]}_{adapter_version[1]}_0\n"
+                                f"Current version: TORCH_VERSION_{current_version[0]}_{current_version[1]}_0\n\n"
+                                f"Schema change:\n"
+                                f"Old schema:\n  {old_schema}\n\n"
+                                f"New schema:\n  {new_schema}\n\n"
+                                f"Please update the adapter registration in torch/csrc/shim_common.cpp\n"
+                                f"to use TORCH_VERSION_{current_version[0]}_{current_version[1]}_0."
+                            ),
+                        )
+                    )
 
     return lint_messages
 
@@ -255,9 +462,23 @@ if __name__ == "__main__":
         stream=sys.stderr,
     )
 
+    repo_root = Path(__file__).resolve().parents[3]
+    ops_h_path = repo_root / "torch/csrc/stable/ops.h"
+    native_ops_txt_path = repo_root / "torch/csrc/stable/native_ops.txt"
+    native_functions_yaml_path = (
+        repo_root / "aten/src/ATen/native/native_functions.yaml"
+    )
+    shim_common_path = repo_root / "torch/csrc/shim_common.cpp"
+
+    ops = extract_native_ops_from_ops_h(ops_h_path)
+    write_native_ops_txt(ops, native_ops_txt_path)
+
     lint_messages = []
     for filename in args.filenames:
-        lint_messages.extend(check_file(filename))
+        if filename.endswith("native/native_functions.yaml"):
+            lint_messages.extend(
+                check_file(filename, native_functions_yaml_path, shim_common_path)
+            )
 
     for lint_message in lint_messages:
         print(json.dumps(lint_message._asdict()), flush=True)
