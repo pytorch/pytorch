@@ -948,7 +948,7 @@ class SerializationMixin:
             with safe_globals([TwoTensor]), skip_data():
                 sd_loaded = torch.load(f)
             self.assertNotEqual(sd_loaded, sd)
-            for k in sd_loaded.keys():
+            for k in sd_loaded:
                 sd_loaded[k] = sd_loaded[k].zero_()
             self.assertEqual(sd_loaded, sd_zeroed)
 

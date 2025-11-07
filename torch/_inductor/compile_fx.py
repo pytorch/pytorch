@@ -214,7 +214,7 @@ def _fx_compile_mode_default() -> FxCompileConfig:
             "Invalid value of %s for %s. Expected one of %s. Using default.",
             value,
             name,
-            ", ".join(sorted(repr(x) for x in FxCompileMode.__members__.keys())),
+            ", ".join(sorted(repr(x) for x in FxCompileMode.__members__)),
         )
         # Remove from the environment so subprocesses don't ALSO complain.
         os.environ.pop(name)
