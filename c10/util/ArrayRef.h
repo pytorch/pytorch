@@ -50,13 +50,7 @@ namespace c10 {
 /// However, you should prefer to use ArrayRef when possible, because its use
 /// of TORCH_CHECK will lead to better user-facing error messages.
 template <typename T>
-class ArrayRef
-#if !(defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER))
-    // workaround a ICX bug: ICX does not recognize c10::ArrayRef as a
-    // template when ArrayRef is specified as `final`:
-    final
-#endif
-    : public HeaderOnlyArrayRef<T> {
+class ArrayRef /*final*/ : public HeaderOnlyArrayRef<T> {
  public:
   /// @name Constructors, all inherited from HeaderOnlyArrayRef except for
   /// SmallVector. As inherited constructors won't work with class template
