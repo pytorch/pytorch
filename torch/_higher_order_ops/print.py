@@ -41,19 +41,20 @@ def print_proxy_torch_dispatch_mode(
 @print.py_functionalize_impl
 # pyre-ignore
 def print_functionalize(ctx: Any, format_str: str, **kwargs: object) -> None:
-    with ctx.redispatch_to_next():
-        res = print_cpu(format_str, **kwargs)
-        return ctx.wrap_tensors(res)
+    ctx.functionalize(print)
+    #with ctx.redispatch_to_next():
+    #    res = print_impl(format_str, **kwargs)
+    #    return ctx.wrap_tensors(res)
 
 @print.py_impl(FakeTensorMode)
 # pyre-ignore
 def call_delegate_fake_tensor_mode(mode, format_str: str, **kwargs: object):
     with mode:
-        return print_cpu(format_str, *kwargs)
+        return None
 
 @print.py_impl(torch._C.DispatchKey.CompositeExplicitAutograd)
 # pyre-ignore
-def print_cpu(format_str: str, **kwargs: object) -> None:
+def print_impl(format_str: str, **kwargs: object) -> None:
     # Ensure all immutable_dict/list in kwargs are converted to regular dict/list
     map_types: dict[type, type] = {
         torch.fx.immutable_collections.immutable_dict: dict,

@@ -7,6 +7,7 @@ from torch._dynamo.utils import counters
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing import FileCheck
+from torch._higher_order_ops.effects import with_effects
 
 from torch._functorch.aot_autograd import aot_export_module
 
@@ -84,7 +85,7 @@ def forward(self, arg0_1):
     return (add,)""",
         )
 
-    def test_print_with_functionalization(self):
+    def test_print_with_side_effect(self):
         class M(torch.nn.Module):
             def forward(self, x):
                 torch._higher_order_ops.print("moo {x} {y}", x=1, y=2)
@@ -94,21 +95,15 @@ def forward(self, arg0_1):
 
         inputs = (torch.randn(3),)
 
-        # Without functionalization, print should just appear in the graph directly
-        gm = make_fx(M())(*inputs)
-        # FileCheck().check_count("torch.ops.aten._print.default", 2, exactly=True).run(
-        #     gm.code
-        # )
-
         # With functionalization, it should appear wrapped with with_effects()
         gm, gs = aot_export_module(M(), inputs, trace_joint=False)
         self.assertExpectedInline(
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1):
-    print_1 = torch.ops.higher_order.print('moo {x} {y}', {'x': 1, 'y': 2});  print_1 = None
+    with_effects = torch._higher_order_ops.effects.with_effects(torch.ops.higher_order.print('moo {x} {y}', {'x': 1, 'y': 2});  print_1 = None)
     add = torch.ops.aten.add.Tensor(arg0_1, arg0_1);  arg0_1 = None
-    print_2 = torch.ops.higher_order.print('moo {x} {y}', {'x': 1, 'y': 2});  print_2 = None
+    with_effects = torch._higher_order_ops.effects.with_effects(torch.ops.higher_order.print('moo {x} {y}', {'x': 1, 'y': 2});  print_2 = None)
     return (add,)""",
         )
         self.assertEqual(len(gs.input_tokens), 1)
