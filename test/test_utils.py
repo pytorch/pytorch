@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
+    HAS_GPU
 )
 from torch.utils._device import set_device
 from torch.utils._pytree import tree_all_only, tree_any
@@ -52,10 +53,6 @@ from torch.utils.data import DataLoader
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests  # noqa: PLW0127
-
-HAS_CUDA = torch.cuda.is_available()
-HAS_XPU = torch.xpu.is_available()
-HAS_GPU = HAS_CUDA or HAS_XPU
 
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"

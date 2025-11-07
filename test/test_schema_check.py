@@ -8,7 +8,7 @@ import torch
 from torch.utils._pytree import tree_map
 import unittest
 
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO, HAS_XPU
 from torch.fx.operator_schemas import normalize_function
 from torch._subclasses.schema_check_mode import SchemaCheckMode
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -18,8 +18,6 @@ from torch.testing._internal.common_device_type import ops, OpDTypes, instantiat
 from torch.testing._internal.common_utils import IS_WINDOWS, slowTestIf
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-
-HAS_XPU = torch.xpu.is_available()
 
 
 def secretly_aliasing(x):
