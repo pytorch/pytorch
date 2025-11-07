@@ -98,8 +98,8 @@ from .exc import (
     BackendCompilerFailed,
     exceptions_allowed_to_be_fallback,
     SkipFrame,
-    unimplemented_v2,
-    unimplemented_v2_with_warning,
+    unimplemented,
+    unimplemented_with_warning,
 )
 from .graph_bytecode_inputs import has_user_objects, index_to_bytecode_constructor
 from .graph_deduplication import apply_graph_deduplication
@@ -762,7 +762,7 @@ class OutputGraph(OutputGraphCommon):
     def get_backward_state_proxy(self) -> torch.fx.Proxy:
         if self.backward_state_proxy is None:
             if self.export:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="backward_state does not support export",
                     context="",
                     explanation="Compiled autograd doesn't work with `torch.export`.",
@@ -2403,7 +2403,7 @@ class OutputGraph(OutputGraphCommon):
                 raise BackendCompilerFailed(
                     self.compiler_fn, e, inspect.currentframe()
                 ).with_traceback(e.__traceback__) from None
-            unimplemented_v2_with_warning(
+            unimplemented_with_warning(
                 e,
                 self.root_tx.f_code,
                 gb_type="Backend compiler exception",
@@ -2806,7 +2806,7 @@ def check_pt2_compliant_op(
     def encountered_non_compliant_op(target: torch._ops.OpOverload, msg: str) -> None:
         output_graph.non_compliant_ops.add(target)
         if config.only_allow_pt2_compliant_ops:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Encountered non-PT2-compliant op",
                 context="",
                 explanation=msg + " " + err_epilogue,
@@ -2848,7 +2848,7 @@ def check_pt2_compliant_op(
                 target._qualified_op_name, *args, **kwargs
             )
         except RuntimeError as e:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Error when attempting to resolve op packet",
                 context="",
                 explanation=str(e),
@@ -3147,7 +3147,7 @@ class SubgraphTracer(fx.Tracer):
         elif kind == "call_module":
             if self.parent is not None:
                 # TODO can remove once inline_inbuilt_nn_modules is always True
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Invoking an nn.Module inside a higher order operator",
                     context=f"Higher order op name: {self.source_target}",
                     explanation="This is not supported.",
@@ -3181,7 +3181,7 @@ class SubgraphTracer(fx.Tracer):
                 elif kind == "call_module":
                     if self.parent is not None:
                         # TODO can remove once inline_inbuilt_nn_modules is always True
-                        unimplemented_v2(
+                        unimplemented(
                             gb_type="Invoking an nn.Module inside a HigherOrderOperator",
                             context="",
                             explanation="This is not supported.",
