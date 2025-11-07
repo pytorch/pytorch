@@ -2809,7 +2809,7 @@ class InstructionTranslatorBase(
             reads = livevars_analysis(self.instructions, resume_inst)
             all_argnames = tuple(
                 k
-                for k in self.symbolic_locals.keys()
+                for k in self.symbolic_locals
                 if k in reads and k not in self.cell_and_freevars()
             )
             argnames_null_set = set(meta.locals_null_keys)

@@ -1,6 +1,7 @@
 import os
 import sys
-from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
+from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.custom_graph_pass
@@ -577,9 +578,6 @@ use_pre_grad_passes: bool = True
 use_joint_graph_passes: bool = True
 use_post_grad_passes: bool = True
 
-cutedsl_enable_autotuning: bool = (
-    os.environ.get("CUTEDSL_ENABLE_AUTOTUNING", "0") == "1"
-)
 
 # DEPRECATED. This setting is ignored.
 autotune_fallback_to_aten = False
@@ -1607,11 +1605,16 @@ class triton:
     enable_pdl = False
 
     mix_order_reduction = (
-        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0") == "1"
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0" if is_fbcode() else "1")
+        == "1"
     )
+    mix_order_reduction_initial_xblock = 1
 
     mix_order_reduction_split_size: Optional[int] = None
-    mix_order_reduction_autotune_split_size = True
+    mix_order_reduction_autotune_split_size = (
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_AUTOTUNE_SPLIT_SIZE", "0")
+        == "1"
+    )
 
 
 class aot_inductor:
