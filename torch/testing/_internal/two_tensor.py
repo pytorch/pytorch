@@ -47,7 +47,9 @@ class TwoTensor(torch.Tensor):
             )
         if a.storage_offset() != b.storage_offset():
             raise AssertionError(
-                f"Tensors a and b must have the same storage_offset. Got a.storage_offset()={a.storage_offset()}, b.storage_offset()={b.storage_offset()}"
+                "Tensors a and b must have the same storage_offset. "
+                f"Got a.storage_offset()={a.storage_offset()}, "
+                f"b.storage_offset()={b.storage_offset()}"
             )
         return out
 
