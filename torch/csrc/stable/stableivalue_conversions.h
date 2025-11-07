@@ -134,10 +134,8 @@ template <>
 struct FromImpl<DeviceType> {
   static StableIValue call(
       DeviceType val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     switch (val) {
       case DeviceType::CPU:
         return from(aoti_torch_device_type_cpu());
@@ -236,10 +234,8 @@ template <>
 struct FromImpl<torch::stable::Device> {
   static StableIValue call(
       const torch::stable::Device& val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     // Convert DeviceType to shim representation (int32_t)
     StableIValue device_type_shim = from(val.type());
     // Pack: lower 32 bits = device index, upper 32 bits = device type (shim)
@@ -356,10 +352,8 @@ template <>
 struct ToImpl<DeviceType> {
   static DeviceType call(
       StableIValue val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     int32_t shim_devicetype = to<int32_t>(val);
     if (shim_devicetype == aoti_torch_device_type_cpu()) {
       return DeviceType::CPU;
@@ -441,10 +435,8 @@ template <>
 struct ToImpl<torch::stable::Device> {
   static torch::stable::Device call(
       StableIValue val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // Unused parameter
-    (void)is_internal; // Unused parameter
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
     // Unpack: lower 32 bits = device index, upper 32 bits = device type (shim)
     int32_t device_index = static_cast<int32_t>(val & 0xFFFFFFFF);
     StableIValue device_type_shim = (val >> 32) & 0xFFFFFFFF;
