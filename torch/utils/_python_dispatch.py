@@ -115,11 +115,18 @@ class TorchDispatchMode:
         self.old_without_ignore_compile_internals_dispatch_mode_flags: deque[bool] = (
             deque()
         )
-        # Wrap the unbound method from the class, then bind it to self
-        wrapped = torch._disable_dynamo(
+        # Store the wrapped function (not a bound method) to avoid circular reference
+        self.__dict__["_wrapped_torch_dispatch"] = torch._disable_dynamo(
             self.__class__.__torch_dispatch__, recursive=True
         )
-        self.__torch_dispatch__ = types.MethodType(wrapped, self)
+
+    def __getattribute__(self, name):
+        # Create bound method on demand to avoid circular reference
+        # reference: test/test_fake_tensor.py: test_no_ref_cycle
+        if name == "__torch_dispatch__":
+            wrapped = object.__getattribute__(self, "_wrapped_torch_dispatch")
+            return types.MethodType(wrapped, self)
+        return object.__getattribute__(self, name)
 
     def _lazy_init_old_dispatch_mode_flags(self):
         if not hasattr(self, "old_dispatch_mode_flags"):
