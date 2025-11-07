@@ -1971,7 +1971,14 @@ class InstructionTranslatorBase(
     @cache_method
     def load_builtin_from_argval(self, argval: Any) -> VariableTracker:
         if argval not in self.f_builtins:
-            raise Unsupported(f"name '{argval}' is not defined")
+            unimplemented(
+                gb_type="failed to find name in frame builtins",
+                context="",
+                explanation=f"Failed to find name `{argval}` in frame's builtins.",
+                hints=[
+                    *graph_break_hints.DYNAMO_BUG,
+                ],
+            )
         val = self.f_builtins[argval]
 
         if callable(val):

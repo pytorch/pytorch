@@ -34,12 +34,7 @@ from typing import TYPE_CHECKING
 import torch.nn
 
 from .. import graph_break_hints, trace_rules, variables
-from ..exc import (
-    raise_observed_exception,
-    unimplemented,
-    UnspecializeRestartAnalysis,
-    Unsupported,
-)
+from ..exc import raise_observed_exception, unimplemented, UnspecializeRestartAnalysis
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import GenerationTracker
 from ..source import (
@@ -960,9 +955,14 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
     def __init__(self, value, **kwargs) -> None:
         if type(value) is torch.jit._script.RecursiveScriptModule:
-            raise Unsupported(
-                "ScriptModules aren't supported in UnspecializedNNModuleVariable"
-                " because their .forward function isn't a static member of their type"
+            unimplemented(
+                gb_type="UnspecializedNNModuleVariable wrapped around ScriptModules unsupported",
+                context=str(value),
+                explanation="ScriptModules aren't supported in UnspecializedNNModuleVariable"
+                " because their .forward function isn't a static member of their type.",
+                hints=[
+                    *graph_break_hints.DIFFICULT,
+                ],
             )
         if "value_type" in kwargs:
             lazy_value_to_become = getattr(kwargs["value_type"], "cls_to_become", None)

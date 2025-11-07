@@ -2122,8 +2122,11 @@ def non_single_tensor_return_unsupported(api, ret):
     from . import TensorVariable
 
     if not isinstance(ret, TensorVariable):
-        raise Unsupported(
-            f"{api} over function that returns something other than one Tensor"
+        unimplemented(
+            gb_type="non-single Tensor return unsupported",
+            context=f"api: {api}, ret: {ret}",
+            explanation=f"{api} over function that returns something other than one Tensor.",
+            hints=[],
         )
 
 
@@ -3042,9 +3045,15 @@ class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
             p_args = tuple(self.to_proxy(tx, arg) for arg in args)
             p_kwargs = {key: self.to_proxy(tx, arg) for key, arg in kwargs.items()}
         except (NotImplementedError, Unsupported) as err:
-            raise Unsupported(
-                "Missing Dynamo support for FlexAttentionBackward HOP argument. Please file an issue."
-            ) from err
+            unimplemented(
+                gb_type="failed to handle argument for FlexAttentionBackward HOP",
+                context=f"args: {args}, kwargs: {kwargs}",
+                explanation="Missing Dynamo support for FlexAttentionBackward HOP argument.",
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+                from_exc=err,
+            )
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(

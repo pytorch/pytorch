@@ -2322,7 +2322,12 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 
 class DynamoTritonHOPifier(TritonHOPifier):
     def raise_unsupported(self, msg: str) -> Never:
-        raise Unsupported(msg)
+        unimplemented(
+            gb_type="triton kernel unsupported feature",
+            context="",
+            explanation=f"Encountered triton kernel unsupported feature: {msg}",
+            hints=[],
+        )
 
     def is_callable(self, maybe_callable: VariableTracker) -> bool:
         return isinstance(
