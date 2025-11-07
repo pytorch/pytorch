@@ -1991,7 +1991,7 @@ class BuiltinVariable(VariableTracker):
             # If the object implements a __getitem__ method, iter(...) will call obj.__getitem__()
             # with an integer argument starting at 0, until __getitem__ raises IndexError
             ret = variables.UserFunctionVariable(
-                polyfills.builtins.iter_
+                polyfills.builtins.iter_  # type: ignore[arg-type]
             ).call_function(tx, [obj, *args], {})
 
             if args:
@@ -2061,7 +2061,11 @@ class BuiltinVariable(VariableTracker):
         return None
 
     def call_dict(
-        self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
+        self,
+        tx: "InstructionTranslator",
+        /,
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
     ) -> VariableTracker:
         return BuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
 
@@ -2069,6 +2073,7 @@ class BuiltinVariable(VariableTracker):
     def call_custom_dict(
         tx: "InstructionTranslator",
         user_cls: type,
+        /,
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
@@ -2093,6 +2098,7 @@ class BuiltinVariable(VariableTracker):
     def call_custom_dict_fromkeys(
         tx: "InstructionTranslator",
         user_cls: type,
+        /,
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
@@ -2144,7 +2150,7 @@ class BuiltinVariable(VariableTracker):
         )
 
         if isinstance(arg, dict):
-            arg_list = [ConstantVariable.create(k) for k in arg.keys()]
+            arg_list = [ConstantVariable.create(k) for k in arg]
             return DictVariableType(
                 # pyrefly: ignore [bad-argument-type]
                 dict.fromkeys(arg_list, value),
