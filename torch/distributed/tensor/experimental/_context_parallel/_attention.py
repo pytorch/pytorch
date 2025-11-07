@@ -29,7 +29,19 @@ from ._cp_custom_ops import flex_cp_allgather
 from ._load_balancer import _create_default_load_balancer, _LoadBalancer
 
 
-__all__ = ["context_parallel", "set_rotate_method"]
+__all__ = [
+    "_CausalBehavior",
+    "_context_parallel_shard",
+    "_ContextParallel",
+    "_cp_options",
+    "_disable_context_parallel_dispatcher",
+    "_enable_context_parallel_dispatcher",
+    "_is_causal_behavior",
+    "_RotateMethod",
+    "context_parallel",
+    "context_parallel_unshard",
+    "set_rotate_method",
+]
 
 
 class _CausalBehavior(Enum):

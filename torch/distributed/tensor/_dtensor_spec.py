@@ -185,12 +185,12 @@ class DTensorSpec:
                 # TODO(zpcore): split_factor from `view` and `shard order`
                 # should be able to be multiplied into one. Need to loosen the
                 # condition here.
-                if type(placements[idx]) is not Shard:
+                mesh_dim = mesh_dims[idx]
+                if type(placements[mesh_dim]) is not Shard:
                     raise ValueError(
                         f"Only Shard placement can be converted to _StridedShard, "
-                        f"found {placements[idx]} in {placements=}."
+                        f"found {placements[mesh_dim]} in {placements=}."
                     )
-                mesh_dim = mesh_dims[idx]
                 split_factor = math.prod(
                     mesh.size(i) for i in mesh_dims[:idx] if i > mesh_dim
                 )

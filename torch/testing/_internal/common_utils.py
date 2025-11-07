@@ -333,7 +333,7 @@ if os.getenv("SLOW_TESTS_FILE", ""):
 if os.getenv("DISABLED_TESTS_FILE", ""):
     disabled_tests_dict = maybe_load_json(os.getenv("DISABLED_TESTS_FILE", ""))
 
-NATIVE_DEVICES = ('cpu', 'cuda', 'xpu', 'meta', 'mps', torch._C._get_privateuse1_backend_name())
+NATIVE_DEVICES = ('cpu', 'cuda', 'xpu', 'meta', 'mps', 'mtia', torch._C._get_privateuse1_backend_name())
 
 # used for managing devices testing for torch profiler UTs
 # for now cpu, cuda and xpu are added for testing torch profiler UTs
@@ -1468,6 +1468,44 @@ def is_privateuse1_backend_available():
     return (is_available := getattr(privateuse1_backend_module, "is_available", None)) and is_available()
 
 
+def make_lazy_class(cls):
+
+    def lazy_init(self, cb):
+        self._cb = cb
+        self._value = None
+
+    cls.__init__ = lazy_init
+
+    for basename in [
+        "add", "sub", "mul", "truediv", "floordiv", "mod", "divmod", "pow",
+        "lshift", "rshift", "and", "or", "xor", "neg", "pos", "abs", "invert",
+        "eq", "ne", "lt", "le", "gt", "ge", "bool", "int", "index",
+    ]:
+        name = f"__{basename}__"
+
+        def inner_wrapper(name):
+            use_operator = basename not in ("bool", "int")
+
+            def wrapped(self, *args, **kwargs):
+                if self._cb is not None:
+                    self._value = self._cb()
+                    self._cb = None
+                if not use_operator:
+                    return getattr(self._value, name)(*args, **kwargs)
+                else:
+                    return getattr(operator, name)(self._value, *args, **kwargs)
+            return wrapped
+
+        setattr(cls, name, inner_wrapper(name))
+
+    return cls
+
+
+@make_lazy_class
+class LazyVal:
+    pass
+
+
 IS_FILESYSTEM_UTF8_ENCODING = sys.getfilesystemencoding() == 'utf-8'
 
 TEST_NUMPY = _check_module_exists('numpy')
@@ -1480,6 +1518,8 @@ MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
 TEST_XPU = torch.xpu.is_available()
 TEST_HPU = bool(hasattr(torch, "hpu") and torch.hpu.is_available())
 TEST_CUDA = torch.cuda.is_available()
+TEST_ACCELERATOR = LazyVal(lambda: torch.accelerator.is_available())  # type: ignore[call-arg]
+TEST_MULTIACCELERATOR = LazyVal(lambda: torch.accelerator.device_count() > 1)  # type: ignore[call-arg]
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
 TEST_PRIVATEUSE1 = is_privateuse1_backend_available()
 TEST_PRIVATEUSE1_DEVICE_TYPE = torch._C._get_privateuse1_backend_name()
@@ -2793,7 +2833,7 @@ def check_if_enable(test: unittest.TestCase):
         # parametrized ones (TestSuite disables TestSuiteCPU)
         return classname.startswith(target_classname) and (target_testname in (test._testMethodName, sanitized_testname))
 
-    if any(matches_test(x) for x in slow_tests_dict.keys()):
+    if any(matches_test(x) for x in slow_tests_dict):
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
@@ -2960,7 +3000,7 @@ class RelaxedNumberPair(NumberPair):
             return int(number_like)  # type: ignore[call-overload]
         else:
             number = super()._to_number(number_like, id=id)
-            if type(number) not in self._TYPE_TO_DTYPE.keys():
+            if type(number) not in self._TYPE_TO_DTYPE:
                 self._inputs_not_supported()
             return number
 
@@ -5601,37 +5641,7 @@ class TestGradients(TestCase):
         if not op.supports_autograd and not op.supports_forward_ad:
             self.skipTest("Skipped! autograd not supported.")
 
-def make_lazy_class(cls):
 
-    def lazy_init(self, cb):
-        self._cb = cb
-        self._value = None
-
-    cls.__init__ = lazy_init
-
-    for basename in [
-        "add", "sub", "mul", "truediv", "floordiv", "mod", "divmod", "pow",
-        "lshift", "rshift", "and", "or", "xor", "neg", "pos", "abs", "invert",
-        "eq", "ne", "lt", "le", "gt", "ge", "bool", "int", "index",
-    ]:
-        name = f"__{basename}__"
-
-        def inner_wrapper(name):
-            use_operator = basename not in ("bool", "int")
-
-            def wrapped(self, *args, **kwargs):
-                if self._cb is not None:
-                    self._value = self._cb()
-                    self._cb = None
-                if not use_operator:
-                    return getattr(self._value, name)(*args, **kwargs)
-                else:
-                    return getattr(operator, name)(self._value, *args, **kwargs)
-            return wrapped
-
-        setattr(cls, name, inner_wrapper(name))
-
-    return cls
 
 
 # Base TestCase for NT tests; used to define common helpers, etc.
@@ -5674,11 +5684,6 @@ class NestedTensorTestCase(TestCase):
         finally:
             nested_tensor_module._tensor_id_counter = original_tensor_id_counter
             nested_tensor_module._tensor_symint_registry = original_tensor_symint_registry
-
-
-@make_lazy_class
-class LazyVal:
-    pass
 
 
 def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=0):
