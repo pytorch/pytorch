@@ -34,8 +34,6 @@ struct BlockPool {
   const bool is_small;
   PrivatePool* owner_PrivatePool;
 
-  // TODO:insert_into_blocks()
-
   MempoolId_t owner_MempoolId() const;
 };
 
