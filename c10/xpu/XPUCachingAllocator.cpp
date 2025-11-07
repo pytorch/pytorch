@@ -595,12 +595,12 @@ class DeviceCachingAllocator {
       std::function<bool(sycl::queue*)> filter) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     create_or_incref_pool(mempool_id);
-    for (auto it2 = captures_underway.begin(); it2 != captures_underway.end();
-         ++it2) {
-      TORCH_CHECK(
-          it2->first != mempool_id,
-          "beginAllocateToPool: already recording to mempool_id");
-    }
+    auto not_found = std::all_of(
+        captures_underway.begin(),
+        captures_underway.end(),
+        [&](const auto& entry) { return entry.first != mempool_id; });
+    TORCH_CHECK(
+        not_found, "beginAllocateToPool: already recording to mempool_id");
     captures_underway.emplace_back(mempool_id, std::move(filter));
   }
 
@@ -608,15 +608,14 @@ class DeviceCachingAllocator {
   void endAllocateToPool(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
-    for (auto it = captures_underway.begin(); it != captures_underway.end();
-         ++it) {
-      if (it->first == mempool_id) {
-        captures_underway.erase(it);
-        return;
-      }
-    }
-    TORCH_CHECK(
-        false, "endAllocatePool: not currently recording to mempool_id");
+    auto it = std::find_if(
+        captures_underway.begin(),
+        captures_underway.end(),
+        [&](const auto& entry) { return entry.first == mempool_id; });
+    TORCH_INTERNAL_ASSERT(
+        it != captures_underway.end(),
+        "endAllocatePool: not currently recording to mempool_id");
+    captures_underway.erase(it);
   }
 
   // Called by XPUGraph::reset and MemPool::~MemPool()
@@ -945,8 +944,9 @@ MemPool::MemPool(
   device_ = c10::xpu::current_device();
   XPUCachingAllocator::createOrIncrefPool(device_, id_, allocator);
   if (use_on_oom) {
-    // XPU doesn't support use_on_oom yet, but we keep the interface
-    TORCH_WARM("XPUCachingAllocator::MemPool: use_on_oom is not supported on XPU");
+    // XPU doesn't support use_on_oom yet
+    TORCH_WARM(
+        "XPUCachingAllocator::MemPool: use_on_oom is not supported on XPU");
   }
 }
 
