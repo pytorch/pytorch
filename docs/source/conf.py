@@ -494,6 +494,7 @@ coverage_ignore_functions = [
     "reset_peak_memory_stats",
     # torch.compiler
     "load_cache_artifacts",
+    "load_compiled_function",
     "save_cache_artifacts",
     # torch.cuda.nccl
     "all_gather",
