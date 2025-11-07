@@ -37,6 +37,7 @@ TORCH_PYTHON_API extern PyObject* THPVariableClass;
 TORCH_PYTHON_API extern PyObject* ParameterClass;
 
 bool THPVariable_initModule(PyObject* module);
+TORCH_PYTHON_API PyObject* THPVariable_Wrap(at::TensorBase&& var);
 TORCH_PYTHON_API PyObject* THPVariable_Wrap(const at::TensorBase& var);
 
 inline bool THPVariable_CheckTypeExact(PyTypeObject* tp) {

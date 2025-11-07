@@ -388,8 +388,7 @@ class intrusive_ptr final {
 
   void reset_() noexcept {
     if (target_ != NullType::singleton()) {
-      if (target_->combined_refcount_.load(std::memory_order_acquire) ==
-          detail::kUniqueRef) {
+      if (is_uniquely_owned()) {
         // Both counts are 1, so there are no weak references and
         // we are releasing the last strong reference. No other
         // threads can observe the effects of this target_ deletion
@@ -597,6 +596,16 @@ class intrusive_ptr final {
 
   bool unique() const noexcept {
     return use_count() == 1;
+  }
+
+  /**
+   * Stronger than unique() in that it must not have any weakrefs as well.
+   */
+  bool is_uniquely_owned() const noexcept {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(target_ != NullType::singleton());
+    uint64_t combined =
+        target_->combined_refcount_.load(std::memory_order_acquire);
+    return (combined & ~detail::kHasPyObject) == detail::kUniqueRef;
   }
 
   /**

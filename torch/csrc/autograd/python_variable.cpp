@@ -318,10 +318,6 @@ PyObject* THPVariableClass = nullptr;
 
 PyObject* ParameterClass = nullptr;
 
-// Creates a new torch.Tensor object (or subclass) that wraps the c10::Tensor.
-// Does *not* set the PyObject slot on the TensorImpl.
-static PyObject* THPVariable_New(PyTypeObject* type, at::TensorBase&& _var);
-
 // clang-tidy gets confused by static const
 static constexpr const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
@@ -377,8 +373,10 @@ static void check_tensor_subclass(PyObject* obj, PyTypeObject* type) {
       " which is not a subclass of the requested type");
 }
 
+// Generic for const Tensor& or Tensor&&
+template <typename T>
 static PyObject* THPVariable_WrapWithType(
-    const at::TensorBase& var,
+    T&& var,
     std::optional<PyTypeObject*> desired_type) {
   if (!var.defined()) {
     Py_RETURN_NONE;
@@ -404,7 +402,16 @@ static PyObject* THPVariable_WrapWithType(
     }
   }
 
-  obj = THPVariable_New(type, Tensor(var));
+  obj = type->tp_alloc(type, 0);
+  TORCH_CHECK(obj, "Failed to allocate a ", type->tp_name, " object");
+  auto v = reinterpret_cast<THPVariable*>(obj);
+  new (&v->cdata) Tensor(std::forward<T>(var));
+
+  if (THPVariable_Unpack(obj).is_uniquely_owned()) {
+    PyObjectPreservation::init_fresh_nonatomic(tensor_impl, pyobj_slot, obj);
+    return obj;
+  }
+
   PyObject* wrapper =
       PyObjectPreservation::init_once(tensor_impl, pyobj_slot, obj);
   if (wrapper != obj) {
@@ -415,12 +422,11 @@ static PyObject* THPVariable_WrapWithType(
     }
     return Py_NewRef(wrapper);
   }
-
-  if (check_has_torch_dispatch(obj)) { // Boo!
-    tensor_impl->set_python_dispatch(true);
-  }
-
   return obj;
+}
+
+PyObject* THPVariable_Wrap(at::TensorBase&& var) {
+  return THPVariable_WrapWithType(std::move(var), std::nullopt);
 }
 
 PyObject* THPVariable_Wrap(const at::TensorBase& var) {
@@ -591,7 +597,11 @@ static PyObject* THPVariable_as_subclass(
   // stack
   torch_dispatch_mode::StashTorchDispatchStackGuard td_g;
   c10::impl::DisablePythonDispatcher dpd_g;
-  return THPVariable_WrapWithType(self.alias(), (PyTypeObject*)cls);
+  PyObject* obj = THPVariable_WrapWithType(self.alias(), (PyTypeObject*)cls);
+  if (check_has_torch_dispatch(obj)) {
+    THPVariable_Unpack(obj).unsafeGetTensorImpl()->set_python_dispatch(true);
+  }
+  return obj;
   END_HANDLE_TH_ERRORS
 }
 
@@ -639,7 +649,11 @@ static PyObject* THPVariable_make_subclass(
     data.unsafeGetTensorImpl()->_change_backend_component_keys(r.device(6));
   }
 
-  return THPVariable_WrapWithType(data, (PyTypeObject*)cls);
+  PyObject* obj = THPVariable_WrapWithType(data, (PyTypeObject*)cls);
+  if (check_has_torch_dispatch(obj)) {
+    THPVariable_Unpack(obj).unsafeGetTensorImpl()->set_python_dispatch(true);
+  }
+  return obj;
   END_HANDLE_TH_ERRORS
 }
 
@@ -2332,8 +2346,12 @@ PyObject* THPVariable_pynew(
   // NB: base_tensor_ctor can call into dispatched ATen functions (e.g.,
   // alias(), lift_fresh()) which can return Tensor subclasses.  We allow
   // these to be passed on directly.
-  return THPVariable_WrapWithType(
+  PyObject* obj = THPVariable_WrapWithType(
       torch::utils::base_tensor_ctor(args, kwargs), type);
+  if (check_has_torch_dispatch(obj)) {
+    THPVariable_Unpack(obj).unsafeGetTensorImpl()->set_python_dispatch(true);
+  }
+  return obj;
   END_HANDLE_TH_ERRORS
 }
 
@@ -2372,14 +2390,6 @@ static void TORCH_CHECK_TENSOR_SUBTYPE(PyObject* cls) {
           PyType_IsSubtype(type, &THPVariableType),
       "Creating a Tensor subclass from a class that does not inherit from "
       "Tensor is not possible. Make sure your class inherits from Tensor.");
-}
-
-static PyObject* THPVariable_New(PyTypeObject* type, at::TensorBase&& tensor) {
-  PyObject* obj = type->tp_alloc(type, 0);
-  TORCH_CHECK(obj, "Failed to allocate a ", type->tp_name, " object");
-  auto v = reinterpret_cast<THPVariable*>(obj);
-  new (&v->cdata) Tensor(std::move(tensor));
-  return obj;
 }
 
 /// NOTE [ PyObject Traversal ]
