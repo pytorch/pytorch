@@ -110,7 +110,7 @@ def tree_is_leaf(
 ) -> bool:
     if (tree is None and none_is_leaf) or (is_leaf is not None and is_leaf(tree)):
         return True
-    if optree.register_pytree_node.get(type(tree), namespace=namespace) is None:  # type: ignore[attr-defined]
+    if optree.register_pytree_node.get(type(tree), namespace=namespace) is None:
         return True
     return False
 
@@ -258,7 +258,7 @@ class PyTreeSpec:
         return self.num_nodes == 1 and self.num_leaves == 1
 
     def paths(self, /) -> list[tuple[Any, ...]]:
-        def helper(treespec: Self, path_prefix: tuple[Any, ...]) -> None:
+        def helper(treespec: Self, path_prefix: list[Any]) -> None:
             if treespec.is_leaf():
                 paths.append(path_prefix)
                 return
@@ -268,11 +268,43 @@ class PyTreeSpec:
                 treespec._children,
                 strict=True,
             ):
-                helper(subspec, path_prefix + (entry,))
+                helper(subspec, path_prefix + [entry])
 
-        paths: list[tuple[Any, ...]] = []
-        helper(self, ())
-        return paths
+        paths: list[list[Any]] = []
+        helper(self, [])
+        return [tuple(path) for path in paths]
+
+    def accessors(self, /) -> list[optree.PyTreeAccessor]:
+        def helper(
+            treespec: Self,
+            entry_path_prefix: list[optree.PyTreeEntry],
+        ) -> None:
+            if treespec.is_leaf():
+                entry_paths.append(entry_path_prefix)
+                return
+
+            node_type = treespec.type
+            assert node_type is not None
+            handler = optree.register_pytree_node.get(
+                node_type, namespace=treespec.namespace
+            )
+            assert handler is not None
+            kind: optree.PyTreeKind = handler.kind
+            path_entry_type: type[optree.PyTreeEntry] = handler.path_entry_type
+
+            for entry, subspec in zip(
+                treespec._entries,
+                treespec._children,
+                strict=True,
+            ):
+                helper(
+                    subspec,
+                    entry_path_prefix + [path_entry_type(entry, node_type, kind)],
+                )
+
+        entry_paths: list[list[optree.PyTreeEntry]] = []
+        helper(self, [])
+        return [optree.PyTreeAccessor(path) for path in entry_paths]
 
     def children(self, /) -> list[Self]:
         return list(self._children)
@@ -451,7 +483,7 @@ def treespec_tuple(
             "All children PyTreeSpecs must have the same `namespace` value "
             f"as the parent; expected {namespace!r}, got: {children!r}.",
         )
-    handler = optree.register_pytree_node.get(tuple, namespace=namespace)  # type: ignore[attr-defined]
+    handler = optree.register_pytree_node.get(tuple, namespace=namespace)
     assert handler is not None
     return PyTreeSpec(
         tuple(children),
