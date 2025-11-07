@@ -13565,23 +13565,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         FileCheck().check_regex(size_assert_pattern).run(code)
 
     def test_lite_mode_fallback(self):
-        def f(x, y):
-            z = x + y
-            return z - x
+        def f(x):
+            z = x.sin()
+            return z.cos()
 
         f = torch.compile(f, mode="lite")
 
-        x, y = [torch.randn(2, device=self.device)] * 2
-
-        _, code = run_and_get_code(f, x, y)
+        _, code = run_and_get_code(f, torch.randn(2, device=self.device))
 
         # Checks that aten ops are kept and run
-        FileCheck().check("torch.ops.aten.add.Tensor(").check(
-            "torch.ops.aten.sub.Tensor("
-        ).run(code[0])
-
-        # Checks that no triton code run in the generated code
-        self.assertFalse(".run(" in code[0])
+        if config.cpp_wrapper:
+            FileCheck().check("aoti_torch_call_dispatcher(").check("aten::sin").check(
+                "aoti_torch_call_dispatcher("
+            ).check("aten::cos").run(code[0])
+        else:
+            FileCheck().check("torch.ops.aten.sin.default(").check(
+                "torch.ops.aten.cos.default("
+            ).run(code[0])
+            # Checks that no triton code run in the generated code
+            self.assertFalse(".run(" in code[0])
 
     # skip cpu test since rms norm is always decomposed on cpu
     @skip_if_cpu
@@ -13644,6 +13646,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
         self.assertEqual(len(codes), 2)
 
+    @unittest.skipIf(
+        config.cpp_wrapper,
+        "codegen invoke_subgraph is not implemented for cpp wrapper",
+    )
     def test_lite_regional_compile_invoke_subgraph(self):
         # Checks that get_attr nodes custom metadata is propagated
         @torch.compiler.nested_compile_region
