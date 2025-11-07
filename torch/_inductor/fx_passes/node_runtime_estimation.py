@@ -10,7 +10,6 @@ from typing import Any, Optional
 import torch
 from torch._inductor.utils import clear_on_fresh_cache
 from torch._logging import getArtifactLogger
-from torch.distributed.distributed_c10d import _get_group_size_by_name
 from torch.fx.operator_schemas import normalize_function
 
 
@@ -116,6 +115,8 @@ def benchmark_collective_with_cuda_events_impl(
     Benchmark collective with CUDA events. Returns (runtime_ms, cache_key) or (None, "") on failure.
     """
     from torch._inductor import fx_utils
+    from torch.distributed.distributed_c10d import _get_group_size_by_name
+
 
     # Early check: can we actually run collectives?
     if not can_benchmark_collective():
