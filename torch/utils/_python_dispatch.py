@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import types
 import warnings
 from collections import deque
 from dataclasses import dataclass
@@ -49,6 +50,23 @@ def is_in_any_mode_without_ignore_compile_internals() -> bool:
     return _is_in_any_mode_without_ignore_compile_internals
 
 
+def any_torch_dispatch_mode_on_stack() -> bool:
+    stack_len = torch._C._len_torch_dispatch_stack()
+
+    for idx in range(stack_len):
+        mode = _get_dispatch_stack_at(idx)
+
+        # Apply filters first
+        if mode.is_infra_mode():
+            continue
+
+        if mode.ignore_compile_internals():
+            continue
+
+        return True
+    return False
+
+
 class TorchDispatchMode:
     """
     A ``TorchDispatchMode`` allows you to override the meaning of all
@@ -86,7 +104,24 @@ class TorchDispatchMode:
     # Mode authors can implement how the mode interacts with higher order operators.
     supports_higher_order_operators = False
 
-    def __init__(self, _dispatch_key=None) -> None:
+    def __new__(cls, *args, **kwargs):
+        instance = super().__new__(cls)
+        # Store the wrapped function (not a bound method) to avoid circular reference
+        # This is done in __new__ instead of __init__ to ensure it's always set,
+        # even if subclasses don't call super().__init__()
+
+        # Check if __torch_dispatch__ is a classmethod by inspecting the class dict
+        # If it is, skip wrapping and let C++ validation handle the error
+        torch_dispatch = cls.__dict__.get("__torch_dispatch__")
+        if isinstance(torch_dispatch, classmethod):
+            instance.__dict__["_wrapped_torch_dispatch"] = None
+        else:
+            instance.__dict__["_wrapped_torch_dispatch"] = torch._disable_dynamo(
+                cls.__torch_dispatch__, recursive=True
+            )
+        return instance
+
+    def __init__(self, _dispatch_key=None):
         if _dispatch_key is not None:
             if not isinstance(_dispatch_key, torch._C.DispatchKey):
                 raise AssertionError("_dispatch_key must be a torch._C.DispatchKey")
@@ -98,7 +133,18 @@ class TorchDispatchMode:
             deque()
         )
 
-    def _lazy_init_old_dispatch_mode_flags(self) -> None:
+    def __getattribute__(self, name):
+        # Create bound method on demand to avoid circular reference
+        # reference: test/test_fake_tensor.py: test_no_ref_cycle
+        if name == "__torch_dispatch__":
+            wrapped = object.__getattribute__(self, "_wrapped_torch_dispatch")
+            if wrapped is None:
+                # classmethod case - get it from the class to let C++ validation handle it
+                return self.__class__.__torch_dispatch__
+            return types.MethodType(wrapped, self)
+        return object.__getattribute__(self, name)
+
+    def _lazy_init_old_dispatch_mode_flags(self):
         if not hasattr(self, "old_dispatch_mode_flags"):
             self.old_dispatch_mode_flags: deque[bool] = deque()  # type: ignore[no-redef]
 
