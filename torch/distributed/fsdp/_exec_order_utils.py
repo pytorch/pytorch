@@ -352,7 +352,7 @@ class _ExecOrderData:
                 fqns.append(self.param_to_fqn[flat_param])
         return fqns
 
-    def next_iter(self):
+    def next_iter(self) -> None:
         """
         Advances the internal data structures per iteration. This should be
         called in the post-backward callback since that marks the true end of

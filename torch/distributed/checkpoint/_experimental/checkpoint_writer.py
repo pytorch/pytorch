@@ -74,7 +74,7 @@ class CheckpointWriter:
         rank_info: RankInfo,
         barrier: Optional[Barrier] = None,
         commit_hook: Optional[WriterHook] = None,
-    ):
+    ) -> None:
         """
         Initialize a CheckpointWriter.
 

@@ -42,13 +42,13 @@ class _ScriptLocalOptimizer(nn.Module):
     # serialize the compiling with a lock
     compile_lock = Lock()
 
-    def __init__(self, optim_cls, local_params_rref, *args, **kwargs):
+    def __init__(self, optim_cls, local_params_rref, *args, **kwargs) -> None:
         super().__init__()
         self._local_params = [rref.local_value() for rref in local_params_rref]
         self.optim = optim_cls(self._local_params, *args, **kwargs)
 
     @jit.export
-    def step(self, autograd_ctx_id: int):
+    def step(self, autograd_ctx_id: int) -> None:
         all_local_grads = dist_autograd.get_gradients(autograd_ctx_id)
         # apply functional optimizer step with a list of gradients
         grads: list[Optional[Tensor]] = [
@@ -71,11 +71,11 @@ class _LocalOptimizer:
     # they will all optimize the same parameters on each worker)
     global_lock = Lock()
 
-    def __init__(self, optim_cls, local_params_rref, *args, **kwargs):
+    def __init__(self, optim_cls, local_params_rref, *args, **kwargs) -> None:
         self._local_params = [rref.local_value() for rref in local_params_rref]
         self.optim = optim_cls(self._local_params, *args, **kwargs)
 
-    def step(self, autograd_ctx_id):
+    def step(self, autograd_ctx_id) -> None:
         all_local_grads = dist_autograd.get_gradients(autograd_ctx_id)
 
         with _LocalOptimizer.global_lock:
@@ -88,7 +88,7 @@ def _new_local_optimizer(optim_cls, local_params_rref, *args, **kwargs):
     return rpc.RRef(_LocalOptimizer(optim_cls, local_params_rref, *args, **kwargs))
 
 
-def _local_optimizer_step(local_optim_rref, autograd_ctx_id):
+def _local_optimizer_step(local_optim_rref, autograd_ctx_id) -> None:
     local_optim = local_optim_rref.local_value()
     local_optim.step(autograd_ctx_id)
 
@@ -185,7 +185,7 @@ class DistributedOptimizer:
     __ https://github.com/pytorch/tutorials/pull/1465
     """
 
-    def __init__(self, optimizer_class, params_rref, *args, **kwargs):
+    def __init__(self, optimizer_class, params_rref, *args, **kwargs) -> None:
         torch._C._log_api_usage_once("torch.distributed.optim.DistributedOptimizer")
         per_worker_params_rref = defaultdict(list)
         for param in params_rref:
@@ -222,7 +222,7 @@ class DistributedOptimizer:
 
         self.remote_optimizers = _wait_for_all(remote_optim_futs)
 
-    def step(self, context_id):
+    def step(self, context_id) -> None:
         """
         Performs a single optimization step.
 

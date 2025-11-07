@@ -75,7 +75,9 @@ _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING = (
 
 
 # RPC handler.
-def _instantiate_template(module_interface_cls, enable_moving_cpu_tensors_to_cuda):
+def _instantiate_template(
+    module_interface_cls, enable_moving_cpu_tensors_to_cuda
+) -> None:
     instantiator.instantiate_scriptable_remote_module_template(
         module_interface_cls, enable_moving_cpu_tensors_to_cuda
     )
@@ -125,7 +127,7 @@ class _RemoteModule(nn.Module):
         args: Optional[tuple] = None,
         kwargs: Optional[dict[str, Any]] = None,
         _module_interface_cls: Any = None,
-    ):
+    ) -> None:
         """
         RemoteModule instance can only be created after RPC initialization.
 
@@ -387,7 +389,7 @@ class _RemoteModule(nn.Module):
     ) -> RemovableHandle:
         _raise_not_supported(self.register_forward_hook.__name__)
 
-    def state_dict(self, *args, **kwargs):
+    def state_dict(self, *args, **kwargs) -> None:
         _raise_not_supported(self.state_dict.__name__)
 
     def load_state_dict(
@@ -395,7 +397,7 @@ class _RemoteModule(nn.Module):
         state_dict: Mapping[str, Any],
         strict: bool = True,
         assign: bool = False,
-    ):
+    ) -> None:
         _raise_not_supported(self.load_state_dict.__name__)
 
     def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
@@ -438,7 +440,7 @@ class _RemoteModule(nn.Module):
         memo: Optional[set[Module]] = None,
         prefix: str = "",
         remove_duplicate: bool = True,
-    ):
+    ) -> None:
         _raise_not_supported(self.named_modules.__name__)
 
     def train(self, mode: bool = True) -> Self:
@@ -484,14 +486,16 @@ class _RemoteModule(nn.Module):
         enable_moving_cpu_tensors_to_cuda = torch.device(self.device).type == "cuda"
         return enable_moving_cpu_tensors_to_cuda
 
-    def _init_template(self, module_interface_cls, enable_moving_cpu_tensors_to_cuda):
+    def _init_template(
+        self, module_interface_cls, enable_moving_cpu_tensors_to_cuda
+    ) -> None:
         """Instantiate template on local side."""
         generated_module = instantiator.instantiate_scriptable_remote_module_template(
             module_interface_cls, enable_moving_cpu_tensors_to_cuda
         )
         self.generated_methods = generated_module._generated_methods
 
-    def _check_attribute_picklability(self):
+    def _check_attribute_picklability(self) -> None:
         """Check if all the attribute has explicitly defined whether to be pickled (i.e., picklability)."""
         for k in self.__dict__:
             if (
@@ -503,7 +507,7 @@ class _RemoteModule(nn.Module):
                     "``_REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING``."
                 )
 
-    def _install_generated_methods(self):
+    def _install_generated_methods(self) -> None:
         for method in self.generated_methods:
             method_name = method.__name__
             method = torch.jit.export(method)
@@ -696,7 +700,7 @@ class RemoteModule(_RemoteModule):
         module_cls: type[nn.Module],
         args: Optional[tuple] = None,
         kwargs: Optional[dict[str, Any]] = None,
-    ):
+    ) -> None:
         super().__init__(remote_device, module_cls, args, kwargs)
 
 

@@ -82,7 +82,7 @@ class ConstraintRegistry:
     Registry to link constraints to transforms.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._registry = {}
         super().__init__()
 

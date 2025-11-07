@@ -415,7 +415,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
         ] = None,
         device_mesh: Optional[DeviceMesh] = None,
-    ):
+    ) -> None:
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
         if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
@@ -1220,7 +1220,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         return total_norm.to(total_norm_dtype)
 
     @staticmethod
-    def _warn_optim_input(optim_input, *, stacklevel: int = 1):
+    def _warn_optim_input(optim_input, *, stacklevel: int = 1) -> None:
         if optim_input is not None:
             warnings.warn(
                 "The `optim_input` argument is deprecated and will be removed after PyTorch 1.13. "
@@ -1241,7 +1241,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         return False
 
     @staticmethod
-    def _warn_legacy_optim_state_dict(curr: str, new: str, *, stacklevel: int = 1):
+    def _warn_legacy_optim_state_dict(
+        curr: str, new: str, *, stacklevel: int = 1
+    ) -> None:
         warnings.warn(
             f"``FullyShardedDataParallel.{curr}``is being deprecated and is "
             f"replaced by ``FullyShardedDataParallel.{new}``. "
@@ -2007,7 +2009,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             optim.load_state_dict(result)
         return result
 
-    def register_comm_hook(self, state: object, hook: callable):
+    def register_comm_hook(self, state: object, hook: callable) -> None:
         """Register a communication hook.
 
         This is an enhancement that provides a flexible hook to users where they can specify how FSDP aggregates
@@ -2070,11 +2072,11 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 self,
                 flat_param_handle: Optional[FlatParamHandle],
                 unshard_event: torch.Event,
-            ):
+            ) -> None:
                 self._flat_param_handle = flat_param_handle
                 self._unshard_event = unshard_event
 
-            def wait(self):
+            def wait(self) -> None:
                 if self._flat_param_handle is not None:
                     current_stream = (
                         self._flat_param_handle._device_handle.current_stream()
@@ -2097,7 +2099,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         unshard_handle.wait()
         return None
 
-    def _wait_unshard_streams_on_current_stream(self):
+    def _wait_unshard_streams_on_current_stream(self) -> None:
         _wait_for_computation_stream(
             self._device_handle.current_stream(),
             self._unshard_stream,

@@ -113,7 +113,7 @@ class _ModMemStats:
          values as the memory consumed in bytes.
     """
 
-    def __init__(self, mod_fqn: str):
+    def __init__(self, mod_fqn: str) -> None:
         self.mod_fqn = mod_fqn
         self.parameter_mem: int
         self.buffer_mem: int

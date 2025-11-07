@@ -44,7 +44,7 @@ class StaticTCPRendezvous(RendezvousHandler):
         world_size: int,
         run_id: str,
         timeout: int,
-    ):
+    ) -> None:
         self.master_addr = master_addr
         self.master_port = master_port
         self.rank = rank
@@ -82,13 +82,13 @@ class StaticTCPRendezvous(RendezvousHandler):
             bootstrap_store_info,
         )
 
-    def is_closed(self):
+    def is_closed(self) -> bool:
         return False
 
-    def set_closed(self):
+    def set_closed(self) -> None:
         pass
 
-    def num_nodes_waiting(self):
+    def num_nodes_waiting(self) -> int:
         return 0
 
     def get_run_id(self) -> str:

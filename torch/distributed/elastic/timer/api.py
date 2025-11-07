@@ -39,7 +39,7 @@ class TimerRequest:
 
     __slots__ = ["worker_id", "scope_id", "expiration_time"]
 
-    def __init__(self, worker_id: Any, scope_id: str, expiration_time: float):
+    def __init__(self, worker_id: Any, scope_id: str, expiration_time: float) -> None:
         self.worker_id = worker_id
         self.scope_id = scope_id
         self.expiration_time = expiration_time
@@ -119,7 +119,7 @@ class TimerServer(abc.ABC):
 
     def __init__(
         self, request_queue: RequestQueue, max_interval: float, daemon: bool = True
-    ):
+    ) -> None:
         """
         :param request_queue: Consumer ``RequestQueue``
         :param max_interval: max time (in seconds) to wait
@@ -179,14 +179,14 @@ class TimerServer(abc.ABC):
             )
             return True
 
-    def _watchdog_loop(self):
+    def _watchdog_loop(self) -> None:
         while not self._stop_signaled:
             try:
                 self._run_watchdog()
             except Exception:
                 logger.exception("Error running watchdog")
 
-    def _run_watchdog(self):
+    def _run_watchdog(self) -> None:
         batch_size = max(1, self._request_queue.size())
         timer_requests = self._request_queue.get(batch_size, self._max_interval)
         self.register_timers(timer_requests)
@@ -237,7 +237,7 @@ class TimerServer(abc.ABC):
 _timer_client: Optional[TimerClient] = None
 
 
-def configure(timer_client: TimerClient):
+def configure(timer_client: TimerClient) -> None:
     """
     Configures a timer client. Must be called before using ``expires``.
     """

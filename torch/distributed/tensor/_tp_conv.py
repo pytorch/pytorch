@@ -16,7 +16,7 @@ def _requires_data_exchange(padding):
     return padding[-1] != 0
 
 
-def _is_supported(input_size, kernel_size, stride, padding, dilation):
+def _is_supported(input_size, kernel_size, stride, padding, dilation) -> bool:
     if dilation[-1] != 1:
         raise RuntimeError("Dilation must be 1 for tensor parallel convolution.")
     if padding[-1] != 0:
@@ -65,7 +65,7 @@ def _ring_send_recv_construct(in_tensor, d1, d2, left, right, rank, size):
     return in_tensor
 
 
-def _ring_send_recv_aggregate(grad_in_tensor, d1, d2, left, right, rank, size):
+def _ring_send_recv_aggregate(grad_in_tensor, d1, d2, left, right, rank, size) -> None:
     # dist comms and aggregate gradients for edge pixels
     send_to_right = grad_in_tensor[:, :, :, -d2:].contiguous()
     send_to_left = grad_in_tensor[:, :, :, :d1].contiguous()

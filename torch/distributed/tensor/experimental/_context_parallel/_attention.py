@@ -138,7 +138,7 @@ def _partial_update(
 class _SDPAMerger:
     """A class to help merge the local SDPA result."""
 
-    def __init__(self, convert_to_f32: bool, seq_dim: int):
+    def __init__(self, convert_to_f32: bool, seq_dim: int) -> None:
         self._seq_dim = seq_dim
         self._out: Optional[torch.Tensor] = None
         self._lse: Optional[torch.Tensor] = None

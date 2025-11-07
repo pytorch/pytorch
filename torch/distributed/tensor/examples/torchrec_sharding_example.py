@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from torch.distributed.tensor.placement_types import Placement
 
 
-def get_device_type():
+def get_device_type() -> str:
     return (
         "cuda"
         if torch.cuda.is_available() and torch.cuda.device_count() >= 4
@@ -106,7 +106,7 @@ class LocalShardsWrapper(torch.Tensor):
         return self.local_shards
 
     @shards.setter
-    def shards(self, local_shards: list[torch.Tensor]):
+    def shards(self, local_shards: list[torch.Tensor]) -> None:
         self.local_shards = local_shards
 
     @cached_property
@@ -118,7 +118,7 @@ class LocalShardsWrapper(torch.Tensor):
         return [chunk.offsets for chunk in self.storage_meta.chunks]
 
 
-def run_torchrec_row_wise_even_sharding_example(rank, world_size):
+def run_torchrec_row_wise_even_sharding_example(rank, world_size) -> None:
     # row-wise even sharding example:
     #   One table is evenly sharded by rows within the global ProcessGroup.
     #   In our example, the table's num_embedding is 8, and the embedding dim is 16
@@ -189,7 +189,7 @@ def run_torchrec_row_wise_even_sharding_example(rank, world_size):
     assert dtensor_local_shards.shard_offsets[0] == local_shard_offset  # unwrap offset
 
 
-def run_torchrec_row_wise_uneven_sharding_example(rank, world_size):
+def run_torchrec_row_wise_uneven_sharding_example(rank, world_size) -> None:
     # row-wise uneven sharding example:
     #   One table is unevenly sharded by rows within the global ProcessGroup.
     #   In our example, the table's num_embedding is 8, and the embedding dim is 16
@@ -264,7 +264,7 @@ def run_torchrec_row_wise_uneven_sharding_example(rank, world_size):
     assert dtensor_local_shards.shard_offsets[0] == local_shard_offset  # unwrap offset
 
 
-def run_torchrec_table_wise_sharding_example(rank, world_size):
+def run_torchrec_table_wise_sharding_example(rank, world_size) -> None:
     # table-wise example:
     #   each rank in the global ProcessGroup holds one different table.
     #   In our example, the table's num_embedding is 8, and the embedding dim is 16
@@ -371,7 +371,7 @@ def run_torchrec_table_wise_sharding_example(rank, world_size):
             assert dtensor_local_shards.numel() == 0
 
 
-def run_example(rank, world_size, example_name):
+def run_example(rank, world_size, example_name) -> None:
     # the dict that stores example code
     name_to_example_code = {
         "row-wise-even": run_torchrec_row_wise_even_sharding_example,

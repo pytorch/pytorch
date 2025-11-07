@@ -372,7 +372,7 @@ class Backend(str):  # noqa: SLOT000
 class BackendConfig:
     """Backend configuration class."""
 
-    def __init__(self, backend: Backend):
+    def __init__(self, backend: Backend) -> None:
         """Init."""
         self.device_backend_map: dict[str, Backend] = {}
         # pyrefly: ignore [bad-assignment]
@@ -442,7 +442,7 @@ class BackendConfig:
 
         logger.info("Using backend config: %s", self.device_backend_map)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Return all the device:backend pairs separated by commas."""
         return ",".join(
             f"{device}:{backend}" for device, backend in self.device_backend_map.items()
@@ -508,7 +508,7 @@ class P2POp:
         group: Optional[ProcessGroup] = None,
         tag: int = 0,
         group_peer: Optional[int] = None,
-    ):
+    ) -> None:
         """Init."""
         self.op = op
         self.tensor = tensor
@@ -534,7 +534,7 @@ class P2POp:
 
         return object.__new__(cls)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         my_group_rank = get_rank(self.group)
         op_name = self.op.__name__
         group_name = self.group.group_name if self.group else "default_pg"
@@ -569,7 +569,7 @@ class _CollOp:
         dst_tensor: Optional[torch.Tensor] = None,
         redop: Optional[ReduceOp] = None,
         root: Optional[int] = None,
-    ):
+    ) -> None:
         self.op = op
         self.tensor = tensor
         self.dst_tensor = dst_tensor
@@ -734,7 +734,7 @@ class _WorldMeta(type):
         return _world.default_pg
 
     @WORLD.setter
-    def WORLD(cls, pg: Optional[ProcessGroup]):
+    def WORLD(cls, pg: Optional[ProcessGroup]) -> None:
         _world.default_pg = pg
 
 
@@ -1180,7 +1180,7 @@ def _canonicalize_group_rank(
     return group_rank
 
 
-def _check_not_self_rank(group: ProcessGroup, rank: int, rank_type: str):
+def _check_not_self_rank(group: ProcessGroup, rank: int, rank_type: str) -> None:
     if group.rank() == rank:
         raise ValueError(
             f"Invalid {rank_type} rank: {rank_type} rank should not be the same as "
@@ -1832,7 +1832,7 @@ def init_process_group(
     old_hook = sys.excepthook
     excepthook_prefix = f"[rank{get_rank()}]"
 
-    def _distributed_excepthook(*args):
+    def _distributed_excepthook(*args) -> None:
         old_stderr = sys.stderr
         sys.stderr = buf = io.StringIO()
         try:
@@ -2216,7 +2216,7 @@ def _new_process_group_helper(
     return pg, prefix_store
 
 
-def destroy_process_group(group: Optional[ProcessGroup] = None):
+def destroy_process_group(group: Optional[ProcessGroup] = None) -> None:
     """
     Destroy a given process group, and deinitialize the distributed package.
 
@@ -2305,7 +2305,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         _unregister_process_group(pg.group_name)
 
 
-def _abort_process_group(group: Optional[ProcessGroup] = None):
+def _abort_process_group(group: Optional[ProcessGroup] = None) -> None:
     """
     Abort a given process group. If group.WORLD (i.e. `None`) is given, all
     process groups including the default one will be aborted.
@@ -2623,11 +2623,11 @@ class _CoalescingManager:
     def __init__(self) -> None:
         self.works: list[Work] = []
 
-    def append(self, work: Optional[Work] = None):
+    def append(self, work: Optional[Work] = None) -> None:
         if work:
             self.works.append(work)
 
-    def wait(self):
+    def wait(self) -> None:
         for work in self.works:
             work.wait()
 
@@ -3171,7 +3171,7 @@ def _tensor_to_object(tensor, tensor_size, group):
 
 
 @_exception_logger
-def all_gather_object(object_list, obj, group=None):
+def all_gather_object(object_list, obj, group=None) -> None:
     """
     Gathers picklable objects from the whole group into a list.
 
@@ -3272,7 +3272,7 @@ def gather_object(
     dst: Optional[int] = None,
     group: Optional[ProcessGroup] = None,
     group_dst: Optional[int] = None,
-):
+) -> None:
     """
     Gathers picklable objects from the whole group in a single process.
 
@@ -3404,7 +3404,7 @@ def send_object_list(
     device: Optional[torch.device] = None,
     group_dst: Optional[int] = None,
     use_batch: bool = False,
-):
+) -> None:
     """
     Sends picklable objects in ``object_list`` synchronously.
 
@@ -3663,7 +3663,7 @@ def broadcast_object_list(
     group: Optional[ProcessGroup] = None,
     device: Optional[torch.device] = None,
     group_src: Optional[int] = None,
-):
+) -> None:
     """
     Broadcasts picklable objects in ``object_list`` to the whole group.
 
@@ -3795,7 +3795,7 @@ def scatter_object_list(
     src: Optional[int] = None,
     group: Optional[ProcessGroup] = None,
     group_src: Optional[int] = None,
-):
+) -> None:
     """
     Scatters picklable objects in ``scatter_object_input_list`` to the whole group.
 
@@ -4250,7 +4250,7 @@ def all_gather_coalesced(
     # Otherwise, the backend has sync'ed at CPP level
 
 
-def _validate_output_list_for_rank(my_rank, dst, gather_list):
+def _validate_output_list_for_rank(my_rank, dst, gather_list) -> None:
     if dst == my_rank:
         if not gather_list:
             raise ValueError(

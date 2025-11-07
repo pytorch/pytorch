@@ -30,7 +30,7 @@ def _auto_wrap(
     ignored_params: set[nn.Parameter],
     root_kwargs: dict[str, Any],
     fsdp_fn: Callable,  # e.g. `FullyShardedDataParallel` or `fully_shard`
-):
+) -> None:
     """
     Auto wraps modules in ``root_module`` 's tree according to ``policy``
     following a post-order traversal.
@@ -102,7 +102,7 @@ def _auto_wrap(
     _recursive_wrap(**recursive_wrap_kwargs, **root_kwargs)  # type: ignore[arg-type]
 
 
-def _check_nested_wrapping(root_module: nn.Module):
+def _check_nested_wrapping(root_module: nn.Module) -> None:
     for module_name, module in root_module.named_modules():
         if _get_module_fsdp_state(module) is not None:
             raise ValueError(
@@ -113,7 +113,7 @@ def _check_nested_wrapping(root_module: nn.Module):
 
 def _warn_on_overridden_mixed_precision(
     overridden_module_classes: set[type[nn.Module]],
-):
+) -> None:
     if len(overridden_module_classes) == 0:
         return
     warnings.warn(
@@ -130,7 +130,7 @@ def _validate_frozen_params(
     modules_to_wrap: set[nn.Module],
     ignored_params: set[nn.Parameter],
     use_orig_params: bool,
-):
+) -> None:
     """
     This checks that, given ``modules_to_wrap``, each module would manage
     parameters that are uniformly frozen or non-frozen. This uniformity

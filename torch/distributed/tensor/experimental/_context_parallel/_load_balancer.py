@@ -77,7 +77,9 @@ class _LoadBalancer(ABC):
 
 
 class _HeadTailLoadBalancer(_LoadBalancer):
-    def __init__(self, seq_length: int, world_size: int, device: str | torch.device):
+    def __init__(
+        self, seq_length: int, world_size: int, device: str | torch.device
+    ) -> None:
         self.seq_length = seq_length
         self.world_size = world_size
         self.device = device
@@ -181,7 +183,7 @@ class _PerDocumentHeadTailLoadBalancer(_LoadBalancer):
         seq_length_per_doc: list[list[int]],
         world_size: int,
         device: str | torch.device,
-    ):
+    ) -> None:
         """
         `seq_length_per_doc` has size (B, seq_len) if the load-balancing should vary
         within the batch. Otherwise `seq_length_per_doc` should have size (1, seq_len).
@@ -312,7 +314,7 @@ class _PTRRLoadBalancer(_LoadBalancer):
         self,
         block_mask: BlockMask,
         world_size: int,
-    ):
+    ) -> None:
         """
         `block_mask` must have shape (B, 1, seq_len, seq_len) or (1, 1, seq_len, seq_len).
         """

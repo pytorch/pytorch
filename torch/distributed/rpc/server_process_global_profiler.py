@@ -103,7 +103,7 @@ class _server_process_global_profile(profile):
         >>> rpc.shutdown()
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
     def __enter__(self):

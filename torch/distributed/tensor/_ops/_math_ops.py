@@ -73,7 +73,7 @@ class _NormPartial(Partial):
 
     norm_type: Union[int, float, str] = 2
 
-    def __init__(self, norm_type: Union[int, float, str] = 2):
+    def __init__(self, norm_type: Union[int, float, str] = 2) -> None:
         reduce_op = None
         if norm_type in (float("inf"), "inf"):
             reduce_op = "max"

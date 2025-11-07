@@ -62,7 +62,7 @@ class ChunkShardingSpec(ShardingSpec):
                 self.placements[i] = torch.distributed._remote_device(remote_device)
 
     @staticmethod
-    def _verify_dim(dim):
+    def _verify_dim(dim) -> None:
         # Validate the sharding spec.
         # TODO: support named dimension
         if isinstance(dim, str):

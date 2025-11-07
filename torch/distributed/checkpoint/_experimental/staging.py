@@ -138,7 +138,7 @@ class DefaultStager(CheckpointStager):
     def __init__(
         self,
         config: CheckpointStagerConfig = CheckpointStagerConfig(),
-    ):
+    ) -> None:
         self._config = config
         self._state_dict_stager = StateDictStager(
             pin_memory=config.use_pinned_memory, share_memory=config.use_shared_memory

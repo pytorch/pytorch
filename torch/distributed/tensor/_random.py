@@ -112,7 +112,7 @@ class _PhiloxState:
     The state is always moved to .cpu since it is necessary for it to be on CPU before applying it back to a generator.
     """
 
-    def __init__(self, state: torch.Tensor):
+    def __init__(self, state: torch.Tensor) -> None:
         self._state = state.to("cpu")
 
     @property
@@ -151,7 +151,7 @@ class _RNGStateTracker:
     a random op (an operator that calls RNG).
     """
 
-    def __init__(self, device: torch.device):
+    def __init__(self, device: torch.device) -> None:
         # pyrefly: ignore [read-only]
         self._device = device
         self._device_handle = _get_device_handle(self._device.type)
@@ -172,7 +172,7 @@ class _RNGStateTracker:
 
     def _distribute_region(
         self, spec: DTensorSpec, generator: Optional[torch.Generator] = None
-    ):
+    ) -> None:
         pass
 
     def _manual_seed(self, parallel_seed: int) -> None:
@@ -192,7 +192,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         self,
         device_mesh: DeviceMesh,
         run_state_sync: bool = True,
-    ):
+    ) -> None:
         super().__init__(_resolve_device(device_mesh=device_mesh))
         assert self._device_handle is not None
         # DTensor RNG tracker so far only supports CUDA/CUDA-like devices
@@ -225,7 +225,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             self._device_handle.unset_rng_ctx("philox")
         return rng_state
 
-    def _set_device_state(self, state: torch.Tensor):
+    def _set_device_state(self, state: torch.Tensor) -> None:
         # It seems that the underlying generator wants a cpu tensor but the dtensor code expects `_get_device_state`
         # to convert to a 'device' tensor, probably because we may use it with our backend comms for sync/debug
         # for now, we just convert back to cpu here to make sure it always works.

@@ -85,7 +85,7 @@ class ColwiseParallel(ParallelStyle):
         input_layouts: Optional[Placement] = None,
         output_layouts: Optional[Placement] = None,
         use_local_output: bool = True,
-    ):
+    ) -> None:
         super().__init__()
         self.input_layouts = (input_layouts or Replicate(),)
         self.output_layouts = (output_layouts or Shard(-1),)
@@ -115,7 +115,7 @@ class ColwiseParallel(ParallelStyle):
             )
         return input_tensor
 
-    def _partition_linear_fn(self, name, module, device_mesh):
+    def _partition_linear_fn(self, name, module, device_mesh) -> None:
         # colwise shard weight/bias to Shard(0), weight be Shard(0)
         # means Colwise as Linear is input * weight^T + bias, where
         # weight would become Shard(1)
@@ -127,7 +127,7 @@ class ColwiseParallel(ParallelStyle):
             )
             module.register_parameter(name, dist_param)
 
-    def _partition_embedding_fn(self, name, module, device_mesh):
+    def _partition_embedding_fn(self, name, module, device_mesh) -> None:
         # colwise shard embedding.weight is straight forward as Shard(1)
         for name, param in module.named_parameters():
             dist_param = nn.Parameter(
@@ -215,7 +215,7 @@ class RowwiseParallel(ParallelStyle):
         input_layouts: Optional[Placement] = None,
         output_layouts: Optional[Placement] = None,
         use_local_output: bool = True,
-    ):
+    ) -> None:
         super().__init__()
         self.input_layouts = (input_layouts or Shard(-1),)
         self.output_layouts = (output_layouts or Replicate(),)
@@ -237,7 +237,7 @@ class RowwiseParallel(ParallelStyle):
             )
         return input_tensor
 
-    def _partition_linear_fn(self, name, module, device_mesh):
+    def _partition_linear_fn(self, name, module, device_mesh) -> None:
         # Rowwise shard weight to Shard(1), bias to Replicate(), weight be Shard(1)
         # means Rowwise as nn.Linear is input * weight^T + bias, where
         # weight would become Shard(0)
@@ -266,7 +266,7 @@ class RowwiseParallel(ParallelStyle):
                 ),
             )
 
-    def _partition_embedding_fn(self, name, module, device_mesh):
+    def _partition_embedding_fn(self, name, module, device_mesh) -> None:
         # rowwise shard embedding.weight is Shard(0)
         for name, param in module.named_parameters():
             dist_param = nn.Parameter(
@@ -366,14 +366,16 @@ class SequenceParallel(ParallelStyle):
         to ensure that they are replicated.
     """
 
-    def __init__(self, *, sequence_dim: int = 1, use_local_output: bool = False):
+    def __init__(
+        self, *, sequence_dim: int = 1, use_local_output: bool = False
+    ) -> None:
         super().__init__()
         self.sequence_sharding = (Shard(sequence_dim),)
         self.use_local_output = use_local_output
 
     def _replicate_module_fn(
         self, name: str, module: nn.Module, device_mesh: DeviceMesh
-    ):
+    ) -> None:
         for p_name, param in module.named_parameters():
             # simple replication with fixed ones_ init from LayerNorm/RMSNorm, which allow
             # us to simply just use from_local
@@ -482,7 +484,7 @@ class PrepareModuleInput(ParallelStyle):
         input_kwarg_layouts: Optional[dict[str, Placement]] = None,
         desired_input_kwarg_layouts: Optional[dict[str, Placement]] = None,
         use_local_output: bool = False,
-    ):
+    ) -> None:
         self.input_layouts = (
             (input_layouts,) if isinstance(input_layouts, Placement) else input_layouts
         )
@@ -640,7 +642,7 @@ class PrepareModuleOutput(ParallelStyle):
         output_layouts: Union[Placement, tuple[Optional[Placement], ...]],
         desired_output_layouts: Union[Placement, tuple[Placement, ...]],
         use_local_output: bool = True,
-    ):
+    ) -> None:
         self.output_layouts = (
             (output_layouts,)
             if isinstance(output_layouts, Placement)
@@ -780,7 +782,7 @@ class PrepareModuleInputOutput(ParallelStyle):
         output_layouts: Union[Placement, tuple[Optional[Placement], ...]],
         desired_output_layouts: Union[Placement, tuple[Placement, ...]],
         use_local_output: bool = True,
-    ):
+    ) -> None:
         self.prepare_module_input = PrepareModuleInput(
             input_layouts=input_layouts,
             desired_input_layouts=desired_input_layouts,

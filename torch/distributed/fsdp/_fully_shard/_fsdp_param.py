@@ -77,7 +77,7 @@ lib.define("copy_(Tensor(a!) tensor, Tensor data) -> ()")
 @torch.library.impl(lib, "copy_", "HPU")
 @torch.library.impl(lib, "copy_", "CPU")
 @torch.library.impl(lib, "copy_", "MTIA")
-def copy_(tensor, data):
+def copy_(tensor, data) -> None:
     tensor.copy_(data)
 
 
@@ -130,7 +130,7 @@ But maybe there are few enough mutations induced by FSDP for this to matter.
 
 
 @torch.library.impl(lib, "copy_", "Functionalize")
-def copy__functionalize(tensor, data):
+def copy__functionalize(tensor, data) -> None:
     torch._sync(tensor)
     torch._sync(data)
     tensor_inner = torch._from_functional_tensor(tensor)
@@ -185,7 +185,7 @@ class ExtensionsData:
     # Save the all-gather input sizes to unflatten the all-gather outputs to ND
     all_gather_input_sizes: Sequence[torch.Size] = ()  # ND
 
-    def clear(self):
+    def clear(self) -> None:
         self.all_gather_metadata = None
         self.all_gather_input_sizes = ()
 
@@ -229,7 +229,7 @@ class FSDPParam:
         shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]],
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
-    ):
+    ) -> None:
         self._module_info: ParamModuleInfo = module_info
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
@@ -262,7 +262,7 @@ class FSDPParam:
         param: nn.Parameter,
         device: torch.device,
         shard_placement_fn: Optional[Callable],
-    ):
+    ) -> None:
         if param.device != device and param.device.type != "meta":
             raise AssertionError(
                 f"Expects the parameter to already be moved to device {device} but got {param.device}"
@@ -434,7 +434,7 @@ class FSDPParam:
             self.sharded_post_forward_size
         )
 
-    def init_dtype_attrs(self, mp_policy: MixedPrecisionPolicy):
+    def init_dtype_attrs(self, mp_policy: MixedPrecisionPolicy) -> None:
         param_dtype, reduce_dtype = (mp_policy.param_dtype, mp_policy.reduce_dtype)
         self.orig_dtype = self.sharded_param.dtype
         # Clamp `reduce_dtype` to `None` if no casting is required: since
@@ -469,7 +469,7 @@ class FSDPParam:
         world_size: int,
         device: torch.device,
         force_recreate: bool = False,
-    ):
+    ) -> None:
         if not force_recreate and len(self.all_gather_outputs) > 0:
             return  # already initialized
         self.all_gather_outputs = [
@@ -477,7 +477,7 @@ class FSDPParam:
             for numel, dtype in zip(all_gather_input_numels, all_gather_input_dtypes)
         ]
 
-    def init_unsharded_param(self):
+    def init_unsharded_param(self) -> None:
         """
         [Note: Invariants for torch.compile Traceable FSDP2]
         1. Under compile, we always re-populate the content of `self._unsharded_param`
@@ -863,7 +863,7 @@ class FSDPParam:
                 f"Expects to be in one of {states}, not {self.sharded_state}"
             )
 
-    def reset_sharded_param(self):
+    def reset_sharded_param(self) -> None:
         # For ops like `nn.Module._apply` or `load_state_dict(assign=True)`
         # that change the sharded parameter tensor, we may need to re-pad the
         # sharded local tensor and re-save the reference.
@@ -930,7 +930,7 @@ class FSDPParam:
                 )
         self._sharding_spec = self.sharded_param._spec
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"
 
 

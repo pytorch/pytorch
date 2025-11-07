@@ -105,7 +105,7 @@ class Barrier(abc.ABC):
     """
 
     @abc.abstractmethod
-    def __init__(self, **kwargs: dict[str, Any]):
+    def __init__(self, **kwargs: dict[str, Any]) -> None:
         """
         Initialize a barrier.
 
@@ -185,7 +185,7 @@ class TCPStoreBarrier(Barrier):
         tcpstore_port: int,
         master_address: str,
         timeout_secs: int,
-    ):
+    ) -> None:
         """
         Initialize a TCPStoreBarrier.
 

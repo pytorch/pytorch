@@ -214,7 +214,7 @@ class MixtureSameFamily(Distribution):
         )
         return x
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         args_string = (
             f"\n  {self.mixture_distribution},\n  {self.component_distribution}"
         )

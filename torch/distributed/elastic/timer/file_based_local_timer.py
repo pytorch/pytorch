@@ -263,7 +263,7 @@ class FileTimerServer:
             os.remove(self._file_path)
 
     @staticmethod
-    def is_process_running(pid: int):
+    def is_process_running(pid: int) -> bool | None:
         """
         function to check process is running or not
         """

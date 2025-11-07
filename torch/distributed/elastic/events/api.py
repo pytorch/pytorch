@@ -44,7 +44,7 @@ class Event:
     timestamp: int = 0
     metadata: dict[str, EventMetadataValue] = field(default_factory=dict)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.serialize()
 
     @staticmethod
@@ -99,7 +99,7 @@ class RdzvEvent:
     local_id: Optional[int] = None
     error_trace: str = ""
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.serialize()
 
     @staticmethod

@@ -174,7 +174,7 @@ class DefaultStager(AsyncStager):
     def __init__(
         self,
         config: StagingOptions = StagingOptions(),
-    ):
+    ) -> None:
         self._config = config
         self._state_dict_stager = StateDictStager(
             pin_memory=config.use_pinned_memory, share_memory=config.use_shared_memory
@@ -292,7 +292,7 @@ class BlockingAsyncStager(AsyncStager):
         self,
         cache_staged_state_dict: bool = False,
         type_check: bool = False,
-    ):
+    ) -> None:
         """
         Initializes the BlockingAsyncStager.
 
@@ -352,7 +352,7 @@ class _ReplicationStager(AsyncStager):
         timeout: timedelta = timedelta(minutes=30),
         device: torch.device = torch.device("cpu"),
         storage_dir: Optional[str] = None,
-    ):
+    ) -> None:
         self._pg = pg
         self._timeout = timeout
         # pyrefly: ignore [read-only]

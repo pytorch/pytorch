@@ -258,7 +258,7 @@ class _StorageWriterTransforms:
         # are appended.
 
         class NoCloseWriter(io.IOBase):
-            def __init__(self, raw: io.IOBase):
+            def __init__(self, raw: io.IOBase) -> None:
                 self.raw = raw
 
             def writeable(self) -> bool:
@@ -267,7 +267,7 @@ class _StorageWriterTransforms:
             def write(self, b: Buffer) -> int:
                 return self.raw.write(b)
 
-            def close(self):
+            def close(self) -> None:
                 self.flush()
                 self.raw.flush()
                 # but not close.

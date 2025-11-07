@@ -937,7 +937,7 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
     return config, cmd, cmd_args
 
 
-def run_script_path(training_script: str, *training_script_args: str):
+def run_script_path(training_script: str, *training_script_args: str) -> None:
     """
     Run the provided `training_script` from within this interpreter.
 
@@ -950,7 +950,7 @@ def run_script_path(training_script: str, *training_script_args: str):
     runpy.run_path(sys.argv[0], run_name="__main__")
 
 
-def run(args):
+def run(args) -> None:
     torch.multiprocessing._set_thread_name("pt_elastic")
 
     if args.standalone:
@@ -977,7 +977,7 @@ def run(args):
 
 
 @record
-def main(args=None):
+def main(args=None) -> None:
     args = parse_args(args)
     run(args)
 

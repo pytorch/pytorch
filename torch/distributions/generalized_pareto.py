@@ -43,7 +43,7 @@ class GeneralizedPareto(Distribution):
     }
     has_rsample = True
 
-    def __init__(self, loc, scale, concentration, validate_args=None):
+    def __init__(self, loc, scale, concentration, validate_args=None) -> None:
         self.loc, self.scale, self.concentration = broadcast_all(
             loc, scale, concentration
         )

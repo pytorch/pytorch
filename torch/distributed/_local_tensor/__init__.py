@@ -316,7 +316,7 @@ class LocalIntNode:
             return ConstantIntNode(next(iter(local_ints.values())))
         return super().__new__(cls)
 
-    def __init__(self, local_ints: dict[int, int]):
+    def __init__(self, local_ints: dict[int, int]) -> None:
         self._local_ints = local_ints
 
     def maybe_as_int(self) -> Optional[int]:
@@ -590,7 +590,7 @@ class LocalTensor(torch.Tensor):
 
     @torch._disable_dynamo
     @mark_subclass_constructor_exportable_experimental  # type: ignore[misc]
-    def __init__(self, *args: Any, **kwargs: Any):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__()
 
     def __deepcopy__(self, memo: dict[Any, Any] | None) -> "LocalTensor":
@@ -765,7 +765,7 @@ class LocalTensorMode(TorchDispatchMode):
     """
 
     # What ranks this local tensor mode is operating over
-    def __init__(self, ranks: Union[int, frozenset[int]]):
+    def __init__(self, ranks: Union[int, frozenset[int]]) -> None:
         if isinstance(ranks, int):
             # assume is world size
             self.ranks = frozenset(range(ranks))
@@ -1087,7 +1087,7 @@ class LocalRunnerMode:
 
     def __init__(
         self, ranks: frozenset[int] | int, concurrency: int, fn: Callable[[int], None]
-    ):
+    ) -> None:
         if isinstance(ranks, int):
             ranks = frozenset(range(ranks))
         self._ranks = ranks

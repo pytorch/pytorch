@@ -162,7 +162,7 @@ class Worker:
         role_rank: int = -1,
         world_size: int = -1,
         role_world_size: int = -1,
-    ):
+    ) -> None:
         # unique identifier for this worker
         self.id: Any = None
 
@@ -188,14 +188,14 @@ class Worker:
         # the role world size may change between re-rendezvous.
         self.role_world_size: int = role_world_size
 
-    def __str__(self):
+    def __str__(self) -> str:
         return (
             f"local_rank={self.local_rank},global_rank={self.global_rank}"
             f",role_rank={self.role_rank},world_size={self.world_size}"
             f",role_world_size={self.role_world_size}"
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return str(self)
 
 
@@ -271,7 +271,7 @@ class WorkerGroup:
         "master_port",
     ]
 
-    def __init__(self, spec: WorkerSpec):
+    def __init__(self, spec: WorkerSpec) -> None:
         self.spec = spec
         self.workers = [Worker(local_rank=i) for i in range(self.spec.local_world_size)]
 
@@ -295,7 +295,7 @@ class _RoleInstanceInfo:
 
     __slots__ = ["role", "rank", "local_world_size"]
 
-    def __init__(self, role: str, rank: int, local_world_size: int):
+    def __init__(self, role: str, rank: int, local_world_size: int) -> None:
         r"""Initialize the agent class instance.
 
         Args:
@@ -449,7 +449,7 @@ class SimpleElasticAgent(ElasticAgent):
     such as one particular type of worker role.
     """
 
-    def __init__(self, spec: WorkerSpec, exit_barrier_timeout: float = 300):
+    def __init__(self, spec: WorkerSpec, exit_barrier_timeout: float = 300) -> None:
         self._worker_group = WorkerGroup(spec)
         self._remaining_restarts = self._worker_group.spec.max_restarts
         self._store = None
@@ -845,7 +845,7 @@ class SimpleElasticAgent(ElasticAgent):
             f"torchelastic.worker.status.{state}", source=source, metadata=metadata
         )
 
-    def _record_metrics(self, group_results: RunResult):
+    def _record_metrics(self, group_results: RunResult) -> None:
         is_failed = group_results.is_failed()
         self._record_flakiness_metric(is_failed)
         spec = self._worker_group.spec
@@ -864,14 +864,14 @@ class SimpleElasticAgent(ElasticAgent):
             "run_failed_no_retries", is_failed and not restarts_happened
         )
 
-    def _record_metric_with_condition(self, metric_name, condition):
+    def _record_metric_with_condition(self, metric_name, condition) -> None:
         spec = self._worker_group.spec
         if condition:
             put_metric(f"workers.{spec.role}.{metric_name}", 1)
         else:
             put_metric(f"workers.{spec.role}.{metric_name}", 0)
 
-    def _record_flakiness_metric(self, is_failed: bool = False):
+    def _record_flakiness_metric(self, is_failed: bool = False) -> None:
         if is_failed:
             flakiness = 100.0
         else:
@@ -952,7 +952,7 @@ class SimpleElasticAgent(ElasticAgent):
                     f"[{role}] Worker group in {state.name} state"
                 )
 
-    def _exit_barrier(self):
+    def _exit_barrier(self) -> None:
         """
         Define a barrier that keeps the agent process alive until all workers finish.
 

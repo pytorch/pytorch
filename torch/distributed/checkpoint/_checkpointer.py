@@ -39,7 +39,7 @@ class _Checkpointer:
         no_dist: bool = False,
         load_planner: Optional[LoadPlanner] = None,
         save_planner: Optional[SavePlanner] = None,
-    ):
+    ) -> None:
         """Initializes the Checkpointer instance.
 
         Args:

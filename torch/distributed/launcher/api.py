@@ -157,7 +157,7 @@ class elastic_launch:
         self,
         config: LaunchConfig,
         entrypoint: Union[Callable, str, None],
-    ):
+    ) -> None:
         self._config = config
         self._entrypoint = entrypoint
 

@@ -39,7 +39,7 @@ class Model(torch.nn.Module):
         return torch.rand(8, 8, device="cuda")
 
 
-def _make_stateful(model, optim):
+def _make_stateful(model, optim) -> None:
     _patch_model_state_dict(model)
     _patch_optimizer_state_dict(model, optimizers=optim)
 
@@ -70,7 +70,7 @@ def _init_model(device, world_size):
     return model, optim
 
 
-def run(rank, world_size, device="cuda"):
+def run(rank, world_size, device="cuda") -> None:
     # Set up world pg
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12355"

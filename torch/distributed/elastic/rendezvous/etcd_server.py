@@ -64,7 +64,7 @@ def find_free_port():
     raise RuntimeError("Failed to create a socket")
 
 
-def stop_etcd(subprocess, data_dir: Optional[str] = None):
+def stop_etcd(subprocess, data_dir: Optional[str] = None) -> None:
     if subprocess and subprocess.poll() is None:
         logger.info("stopping etcd server")
         subprocess.terminate()
@@ -107,7 +107,7 @@ class EtcdServer:
         etcd_binary_path: path of etcd server binary (see above for fallback path)
     """
 
-    def __init__(self, data_dir: Optional[str] = None):
+    def __init__(self, data_dir: Optional[str] = None) -> None:
         self._port = -1
         self._host = "localhost"
 

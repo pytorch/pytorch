@@ -32,7 +32,7 @@ def tail_logfile(
     finished: Event,
     interval_sec: float,
     log_line_filter: Optional[Callable[[str], bool]] = None,
-):
+) -> None:
     while not os.path.exists(file):
         if finished.is_set():
             return
@@ -102,7 +102,7 @@ class TailLog:
         log_line_prefixes: Optional[dict[int, str]] = None,
         interval_sec: float = 0.1,
         log_line_filter: Callable[[str], bool] = (lambda _: True),
-    ):
+    ) -> None:
         n = len(log_files)
         self._threadpool = None
         if n > 0:

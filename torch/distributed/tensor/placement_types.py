@@ -870,7 +870,7 @@ class MaskPartial(Partial):
         offset_dim=0,
         *args,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(reduce_op)
         if mask_buffer is None:
             mask_buffer = MaskBuffer()

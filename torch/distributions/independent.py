@@ -131,7 +131,7 @@ class Independent(Distribution, Generic[D]):
             )
         return self.base_dist.enumerate_support(expand=expand)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             self.__class__.__name__
             + f"({self.base_dist}, {self.reinterpreted_batch_ndims})"
