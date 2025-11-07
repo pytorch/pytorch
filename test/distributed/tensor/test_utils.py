@@ -1,11 +1,18 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
+from contextlib import nullcontext
 from typing import Any
 
 import torch
+import torch.distributed as dist
+from torch.distributed._local_tensor import (
+    local_tensor_mode,
+    LocalTensor,
+    LocalTensorMode,
+)
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import distribute_tensor, DTensor
+from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._utils import (
     _compute_local_shape_and_global_offset,
@@ -14,6 +21,7 @@ from torch.distributed.tensor._utils import (
     compute_global_tensor_shape,
     compute_local_shape_and_global_offset,
     compute_local_tensor_info,
+    ExplicitRedistributionContext,
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import (
@@ -849,6 +857,94 @@ class Test2DStridedLocalShard(DTensorTestBase):
         )
 
         self.assertEqual(global_tensor, dtensor_2d.full_tensor())
+
+
+class LocalTensorTestBase(TestCase):
+    def assertEqual(self, lhs, rhs, **kwargs):
+        mode = local_tensor_mode()
+        with nullcontext() if mode is None else mode.disable():
+            if isinstance(lhs, LocalTensor) and isinstance(rhs, LocalTensor):
+                assert isinstance(lhs, LocalTensor) and isinstance(rhs, LocalTensor)
+                super().assertEqual(lhs._ranks, rhs._ranks)
+                for r in lhs._ranks:
+                    super().assertEqual(
+                        lhs._local_tensors[r],
+                        rhs._local_tensors[r],
+                        lambda m: f"rank {r}: {m}",
+                    )
+            elif isinstance(lhs, LocalTensor) or isinstance(rhs, LocalTensor):
+                lhs, rhs = (lhs, rhs) if isinstance(lhs, LocalTensor) else (rhs, lhs)
+                for r in lhs._ranks:
+                    super().assertEqual(
+                        lhs._local_tensors[r], rhs, lambda m: f"rank {r}: {m}"
+                    )
+            else:
+                return super().assertEqual(lhs, rhs, **kwargs)
+
+    @property
+    def world_size(self):
+        raise NotImplementedError("override world-size in your subclass")
+
+    def build_device_mesh(self) -> DeviceMesh:
+        return init_device_mesh("cpu", (self.world_size,))
+
+    def setUp(self):
+        super().setUp()
+        torch.distributed.init_process_group(
+            # TODO: test other ranks too
+            "fake",
+            rank=0,
+            world_size=self.world_size,
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            dist.destroy_process_group()
+        except AssertionError:
+            pass
+
+
+class TestExplicitRedistribute(LocalTensorTestBase):
+    @property
+    def world_size(self):
+        return 4
+
+    def test_explicit_matmul(self):
+        with LocalTensorMode(self.world_size):
+            device_mesh = self.build_device_mesh()
+            dim = 128
+            x = torch.randn(8, dim, requires_grad=True)
+            A = torch.randn(dim, dim, requires_grad=True)
+
+            # Prepare DTensors
+            dx = distribute_tensor(x, device_mesh, [Shard(0)])
+            dA = distribute_tensor(A, device_mesh, [Shard(0)])
+
+            # implicit redistribute works as usual by default
+            with CommDebugMode() as comm_mode:
+                torch.matmul(dx, dA)
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+
+            # explicit redistribute works too
+            with ExplicitRedistributionContext():
+                with self.assertRaisesRegex(RuntimeError, "Implicit redistribution"):
+                    torch.matmul(dx, dA)
+
+            # explicit redistribute allows manual redistribute
+            with ExplicitRedistributionContext():
+                dA_repl = dA.redistribute(device_mesh, [Replicate()])
+                torch.matmul(dx, dA_repl)
+
+            dx = distribute_tensor(x, device_mesh, [Shard(0)])
+            dA = distribute_tensor(A, device_mesh, [Replicate()])
+            with ExplicitRedistributionContext():
+                dY = torch.matmul(dx, dA_repl)
+                loss = dY.sum()
+
+                # we now see the error during backwards
+                with self.assertRaisesRegex(RuntimeError, "Implicit redistribution"):
+                    loss.backward()
 
 
 if __name__ == "__main__":

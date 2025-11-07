@@ -18,6 +18,33 @@ from torch.distributed.tensor.placement_types import (
 from torch.utils._typing_utils import not_none
 
 
+class ExplicitRedistributionContext:
+    """
+    Within this context manager, DTensor will refuse to perform implicit redistribution,
+    instead raising an error.  Manual calls to ``redistribute()`` are required wherever a redistribution
+    must occur to avoid erroring.  This can be used to ensure that the user is aware of all redistribution.
+
+    Note: it is easier to use this mode on just the forward pass of a typical DTensor program, as the backwards pass
+    may contain implicit redistribution calls that are not visible to the user and difficult to replace with manual
+    calls.  Redistribution during backward can be made explicit by writing `autograd.Function`s that are no-op
+    during forward and perform a manual redistribution during backwards.
+    """
+
+    _explicit_redistribute_mode = False
+
+    @classmethod
+    def is_active(cls) -> bool:
+        return cls._explicit_redistribute_mode
+
+    def __enter__(self):
+        self.prev = ExplicitRedistributionContext._explicit_redistribute_mode
+        ExplicitRedistributionContext._explicit_redistribute_mode = True
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        ExplicitRedistributionContext._explicit_redistribute_mode = self.prev
+
+
 def _explicit_order_placements(
     mesh_shape: ShapeType, placements: Sequence[Placement]
 ) -> Sequence[tuple[int, Placement]]:
