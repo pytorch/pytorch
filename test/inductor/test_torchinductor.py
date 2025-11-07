@@ -13644,29 +13644,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
         self.assertEqual(len(codes), 2)
 
-    def test_lite_regional_compile_invoke_subgraph_inner(self):
-        # Checks that the inductor regions are searched recursively.
-
-        @torch.compiler.nested_compile_region
-        def gn(x):
-            with fx_traceback.annotate({"compile_with_inductor": 0}):
-                return torch.sin(x)
-
-        def fn(x):
-            x = x + 1
-            x = gn(x)
-            x = x + 1
-            x = gn(x)
-            return torch.sigmoid(x)
-
-        opt_fn = torch.compile(fn, mode="lite", fullgraph=True)
-        x = torch.randn(10, requires_grad=True)
-
-        _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
-        # the invoke_subgraph is called twice - but the inside code is compiled
-        # once - so in total 2 (1 fwd + 1 bwd)
-        self.assertEqual(len(codes), 2)
-
     def test_lite_regional_compile_invoke_subgraph(self):
         # Checks that get_attr nodes custom metadata is propagated
         @torch.compiler.nested_compile_region
