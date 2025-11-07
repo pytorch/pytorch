@@ -810,7 +810,7 @@ def run_test_retries(
             # failing tests instead of reruns. [1:-1] to remove quotes
             print_to_file(f"FAILED CONSISTENTLY: {current_failure[1:-1]}")
             if (
-                read_pytest_cache("made_failing_xml") == "False"
+                read_pytest_cache("made_failing_xml") == "false"
                 and IS_CI
                 and options.upload_artifacts_while_running
             ):
