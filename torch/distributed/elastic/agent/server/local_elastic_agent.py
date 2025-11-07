@@ -36,6 +36,7 @@ from torch.distributed.elastic.multiprocessing import (
     PContext,
     start_processes,
 )
+from torch.distributed.elastic.rendezvous.api import RendezvousStoreInfo
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
 
@@ -371,6 +372,8 @@ class LocalElasticAgent(SimpleElasticAgent):
             self._health_check_server = None
         if self._pcontext:
             self._pcontext.close(death_sig)
+        if self._rdzv_handler and self._rdzv_handler.use_agent_store:
+            RendezvousStoreInfo.clean_up(self._store)
 
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
     #  `torch.distributed.elastic.metrics.prof`.
