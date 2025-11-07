@@ -11,7 +11,7 @@ import sys
 import time
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
+from typing import Any, NoReturn, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -117,7 +117,7 @@ from .virtualized import NullHandler, V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
     from types import ModuleType
 
     from torch._higher_order_ops.effects import _EffectType
@@ -1590,7 +1590,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         schema_kwargs = {arg.name: arg for arg in schema.arguments}
 
-        for key in old_kwargs.keys():
+        for key in old_kwargs:
             old_arg = old_kwargs[key]
             new_arg = new_kwargs[key]
             schema_arg = schema_kwargs[key]
@@ -1936,7 +1936,7 @@ class GraphLowering(torch.fx.Interpreter):
         # we already know facts for.
         renamed_unbacked_bindings = OrderedSet(
             V.fake_mode.shape_env.unbacked_renamings.get(s, s)
-            for s in unbacked_bindings.keys()
+            for s in unbacked_bindings
         )
 
         assert new_unbacked_defs >= renamed_unbacked_bindings, (
@@ -2481,7 +2481,7 @@ class GraphLowering(torch.fx.Interpreter):
         # dynamo wraps unspec variable as 0d CPU tensor,
         # need to convert to scalar during codegen (triton only)
         return (
-            name in self.graph_inputs.keys()
+            name in self.graph_inputs
             and self.graph_inputs[name].get_numel() == 1
             and len(self.graph_inputs[name].get_size()) == 0
             and get_device_type(self.graph_inputs[name]) == "cpu"
