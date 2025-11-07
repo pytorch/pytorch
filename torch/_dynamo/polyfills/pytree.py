@@ -582,7 +582,7 @@ def _C_flatten(
     none_is_leaf: bool = False,
     namespace: str = "",
 ) -> tuple[list[Any], PyTreeSpec]:
-    return tree_flatten(
+    return tree_flatten(  # type: ignore[return-value]
         tree,
         is_leaf=leaf_predicate,
         none_is_leaf=none_is_leaf,
@@ -626,7 +626,7 @@ def _C_flatten_with_path(
     none_is_leaf: bool = False,
     namespace: str = "",
 ) -> tuple[list[tuple[Any, ...]], list[Any], PyTreeSpec]:
-    return tree_flatten_with_path(
+    return tree_flatten_with_path(  # type: ignore[return-value]
         tree,
         is_leaf=leaf_predicate,
         none_is_leaf=none_is_leaf,
