@@ -19,6 +19,7 @@ from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
 
+
 # Add the repo root to sys.path so torchgen can be imported
 repo_root = Path(__file__).resolve().parents[3]
 if str(repo_root) not in sys.path:
