@@ -4044,4 +4044,15 @@ def should_fallback_by_default(node: torch.fx.Node) -> bool:
     if not config.fallback_by_default:
         return False
 
+    # some ops need special handle due to dynamic shapes. we can avoid
+    # fallback if they do not impact numerics.
+    skip_fallback_due_to_dynamic_shape = OrderedSet(
+        [
+            torch.ops.aten._assert_scalar.default,
+        ]
+    )
+
+    if node.target in skip_fallback_due_to_dynamic_shape:
+        return False
+
     return not _needs_inductor_compile(node)
