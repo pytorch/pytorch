@@ -112,16 +112,17 @@ jobs:
 
       - name: Build docker image
         id: build-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        #uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: jithunnair-amd/test-infra/.github/actions/calculate-docker-image@disable_image_build
         with:
           docker-image-name: ci-image:${{ matrix.docker-image-name }}
           always-rebuild: true
           push: true
 
-      - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        with:
-          docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
+      #- name: Pull docker image
+      #  uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+      #  with:
+      #    docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
 
       - name: Generate output
         id: generate_output
