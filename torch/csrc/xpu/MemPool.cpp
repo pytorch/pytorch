@@ -11,7 +11,9 @@ using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 void THXPMemPool_init(PyObject* module) {
   auto torch_C_m = py::handle(module).cast<py::module>();
-  shared_ptr_class_<::c10::xpu::MemPool>(torch_C_m, "_MemPool")
+  // Use _XPUMemPool instead of _MemPool to avoid naming conflict with CUDA backend.
+  // Python user API remains torch.xpu.MemPool unchanged.
+  shared_ptr_class_<::c10::xpu::MemPool>(torch_C_m, "_XPUMemPool")
       .def(
           py::init([](c10::xpu::XPUCachingAllocator::XPUAllocator* allocator,
                       bool is_user_created,

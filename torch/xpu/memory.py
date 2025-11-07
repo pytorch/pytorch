@@ -570,16 +570,16 @@ if not hasattr(torch._C, "_xpu_XPUAllocator"):
     torch._C.__dict__["_xpu_XPUAllocator"] = _dummy_type("_xpu_XPUAllocator")
 
 
-if not hasattr(torch._C, "_MemPool"):
+if not hasattr(torch._C, "_XPUMemPool"):
     # Define dummy base classes
-    torch._C.__dict__["_MemPool"] = _dummy_type("_MemPool")
+    torch._C.__dict__["_XPUMemPool"] = _dummy_type("_XPUMemPool")
 
 from torch._C import (  # noqa: F401
     _xpu_XPUAllocator,
-    _MemPool,
+    _XPUMemPool,
 )
 
-class MemPool(_MemPool):
+class MemPool(_XPUMemPool):
     r"""MemPool represents a pool of memory in a caching allocator. Currently,
     it's just the ID of the pool object maintained in the XPUCachingAllocator.
 
