@@ -15,6 +15,7 @@
 #endif
 #include <c10/core/SymNodeImpl.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/frontend/schema_type_parser.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -78,6 +79,7 @@
 #include <torch/csrc/jit/passes/vulkan_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 #include <torch/csrc/jit/python/init.h>
+#include <torch/csrc/jit/python/opaque_obj.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
 #include <torch/csrc/jit/python/python_custom_class.h>
@@ -1254,11 +1256,6 @@ void initJITBindings(PyObject* module) {
             return a->expect_true(file, line);
           })
       .def(
-          "expect_size",
-          [](const c10::SymNode& a, const char* file, int64_t line) {
-            return a->expect_size(file, line);
-          })
-      .def(
           "guard_size_oblivious",
           [](const c10::SymNode& a, const char* file, int64_t line) {
             return a->guard_size_oblivious(file, line);
@@ -1865,6 +1862,47 @@ void initJITBindings(PyObject* module) {
       &parseSchema,
       py::arg("schema"),
       py::arg("allow_typevars") = true);
+  m.def(
+      "_make_opaque_object",
+      [](py::object payload) {
+        auto obj = c10::make_intrusive<OpaqueObject>(payload);
+        auto typePtr =
+            torch::getCustomClass("__torch__.torch.classes.aten.OpaqueObject");
+        return torch::jit::toPyObject(c10::IValue(std::move(obj)));
+      },
+      R"doc(Creates an opaque object which stores the given Python object.)doc");
+  m.def(
+      "_get_opaque_object_payload",
+      [](py::object obj) {
+        auto typePtr =
+            torch::getCustomClass("__torch__.torch.classes.aten.OpaqueObject");
+        auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+        auto customObj = ivalue.toCustomClass<OpaqueObject>();
+        return customObj->getPayload();
+      },
+      R"doc(Returns the Python object stored on the given opaque object.)doc");
+  m.def(
+      "_set_opaque_object_payload",
+      [](py::object obj, py::object payload) {
+        auto typePtr =
+            torch::getCustomClass("__torch__.torch.classes.aten.OpaqueObject");
+        auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+        auto customObj = ivalue.toCustomClass<OpaqueObject>();
+        customObj->setPayload(std::move(payload));
+      },
+      R"doc(Sets the payload of the given opaque object with the given Python object.)doc");
+  m.def(
+      "_register_opaque_type",
+      [](const std::string& type_name) {
+        torch::jit::registerOpaqueType(type_name);
+      },
+      R"doc(Registers a type name to be treated as an opaque type (PyObject) in schema parsing.)doc");
+  m.def(
+      "_is_opaque_type_registered",
+      [](const std::string& type_name) -> bool {
+        return torch::jit::isRegisteredOpaqueType(type_name);
+      },
+      R"doc(Checks if a type name is registered as an opaque type.)doc");
   m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);

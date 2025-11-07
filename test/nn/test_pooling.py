@@ -857,6 +857,20 @@ torch.cuda.synchronize()
             else:
                 unpool(output, indices)
 
+    # https://github.com/pytorch/pytorch/issues/163409
+    @onlyNativeDeviceTypes
+    def test_MaxUnpool_invalid_output_size(self, device):
+        input2d = torch.randn(1, 1, 1)
+        input3d = torch.randn(1, 1, 1, 1, 1)
+        unpool2d = torch.nn.MaxUnpool2d(())
+        unpool3d = torch.nn.MaxUnpool3d(())
+
+        with self.assertRaisesRegex(RuntimeError, "There should be exactly"):
+            unpool2d(input2d, torch.zeros_like(input2d, dtype=torch.int64))
+
+        with self.assertRaisesRegex(RuntimeError, "There should be exactly"):
+            unpool3d(input3d, torch.zeros_like(input3d, dtype=torch.int64))
+
     @expectedFailureMPS
     @onlyNativeDeviceTypes
     def test_AdaptiveMaxPool_zero_batch_dim(self, device):
@@ -883,6 +897,16 @@ torch.cuda.synchronize()
         with self.assertRaisesRegex(RuntimeError, "Expected"):
             inp = torch.ones(1, 0, 50, 44, 31, device=device)
             mod(inp)
+
+    @onlyCPU
+    def test_LPPool1d_kernel_size_overflow_large(self, device):
+        avgpool = torch.nn.LPPool1d(
+            -1.38119e150, 7879455037536781369, ceil_mode=True
+        ).to(device)
+        inp = torch.randn(3, 15, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "integer out of range"):
+            avgpool(inp)
 
     @onlyNativeDeviceTypes
     def test_AvgPool2d_empty(self, device):
@@ -1121,7 +1145,7 @@ torch.cuda.synchronize()
         for size, kernel_size, stride, dilation, ceil_mode in itertools.product(
             sizes, kernel_sizes, strides, dilations, ceil_modes
         ):
-            padding = random.sample(range(0, math.floor(kernel_size / 2) + 1), 1)
+            padding = random.sample(range(math.floor(kernel_size / 2) + 1), 1)
             check(
                 torch.randn(size, device=device, dtype=dtype),
                 kernel_size,

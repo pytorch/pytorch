@@ -62,7 +62,7 @@ constexpr const char* unknown_eventname = "eventname not specified";
 #endif
 }  // namespace (anonymous)
 
-MapAllocator::MapAllocator(WithFd, std::string_view filename, int fd, int flags, size_t size)
+MapAllocator::MapAllocator(WithFd /*unused*/, std::string_view filename, int fd, int flags, size_t size)
   : filename_(filename.empty() ? unknown_filename : filename)
   , size_(0) // to be filled later
 #ifdef _WIN32
@@ -292,6 +292,28 @@ MapAllocator::MapAllocator(WithFd, std::string_view filename, int fd, int flags,
           if (ftruncate(fd, static_cast<off_t>(size)) == -1) {
             TORCH_CHECK(false, "unable to resize file <", filename_, "> to the right size: ", c10::utils::str_error(errno), " (", errno, ")");
           }
+
+#ifdef HAVE_POSIX_FALLOCATE
+          if (flags_ & ALLOCATOR_MAPPED_SHAREDMEM) {
+            for (;;) {
+              if (posix_fallocate(fd, 0, static_cast<off_t>(size)) == 0) {
+                break;
+              }
+
+              if (errno == EINTR) {
+                continue;
+              }
+
+              if (errno == EINVAL || errno == EOPNOTSUPP) {
+                // the underlying filesystem does not support the operation
+                break;
+              }
+
+              TORCH_CHECK(false, "unable to allocate shared memory(shm) for file <", filename_, ">: ", c10::utils::str_error(errno), " (", errno, ")");
+            }
+          }
+#endif
+
           if (fstat(fd, &file_stat) == -1 || file_stat.st_size < static_cast<int64_t>(size)) {
 #ifndef STRIP_ERROR_MESSAGES
             int last_err = errno;
@@ -472,7 +494,7 @@ RefcountedMapAllocator::RefcountedMapAllocator(const char *filename, int flags, 
 
     initializeAlloc();
 }
-RefcountedMapAllocator::RefcountedMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size)
+RefcountedMapAllocator::RefcountedMapAllocator(WithFd /*unused*/, const char *filename, int fd, int flags, size_t size)
   : RefcountedMapAllocatorArgCheck(flags)
   , MapAllocator(WITH_FD, filename, flags, fd, size + map_alloc_alignment) {
 
@@ -592,7 +614,7 @@ at::DataPtr MapAllocator::makeDataPtr(std::string_view filename, int flags, size
   return {context->data(), context, &deleteMapAllocator, at::DeviceType::CPU};
 }
 
-at::DataPtr MapAllocator::makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
+at::DataPtr MapAllocator::makeDataPtr(WithFd /*unused*/, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
   auto* context = new MapAllocator(WITH_FD, filename, fd, flags, size);
   if (actual_size_out) *actual_size_out = context->size();
   return {context->data(), context, &deleteMapAllocator, at::DeviceType::CPU};
@@ -604,7 +626,7 @@ at::DataPtr RefcountedMapAllocator::makeDataPtr(const char *filename, int flags,
   return {context->data(), context, &deleteRefcountedMapAllocator, at::DeviceType::CPU};
 }
 
-at::DataPtr RefcountedMapAllocator::makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
+at::DataPtr RefcountedMapAllocator::makeDataPtr(WithFd /*unused*/, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
   auto* context = new RefcountedMapAllocator(WITH_FD, filename, fd, flags, size);
   if (actual_size_out) *actual_size_out = context->size() - map_alloc_alignment;
   return {context->data(), context, &deleteRefcountedMapAllocator, at::DeviceType::CPU};

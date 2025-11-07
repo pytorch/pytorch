@@ -196,7 +196,7 @@ std::shared_ptr<::gloo::transport::Device> makeGlooDevice(
   static auto transportName = c10::utils::get_env("GLOO_DEVICE_TRANSPORT");
   if (transportName.has_value()) {
     return GlooDeviceRegistry()->Create(
-        transportName.value().c_str(), interfaceName, hostName, lazyInit);
+        transportName.value(), interfaceName, hostName, lazyInit);
   }
 
 #ifdef __linux__

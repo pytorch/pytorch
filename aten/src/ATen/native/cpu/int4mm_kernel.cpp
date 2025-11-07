@@ -838,7 +838,7 @@ void dyn_quant_pack_4bit_weight_kernel(
   }
 }
 
-static void ref_dyn_quant_matmul_4bit_channelwise_kernel(
+void ref_dyn_quant_matmul_4bit_channelwise_kernel(
     size_t m,
     size_t n,
     size_t k,
@@ -906,7 +906,7 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel(
           // Round to nearest integer
           const int32_t nudged_zero_point0 = lrintf(zero_point0);
 
-          int8_t* dst_ptr = (int8_t*)lhs_qa8dx + m_idx * dst_stride;
+          int8_t* dst_ptr = lhs_qa8dx + m_idx * dst_stride;
 
           // LHS offset at the beginning of the row
           *((float*)(dst_ptr)) = recip_scale0;
@@ -930,7 +930,7 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel(
         }
       };
 
-  // Dynamically Quantize the float32 input to 8 bit assymetric
+  // Dynamically Quantize the float32 input to 8 bit asymmetric
   input_quant_pack_8bit_channelwise(m, k, lhs_f32, (int8_t*)lhs_qa8dx);
 
   const size_t lhs_stride =
@@ -997,7 +997,7 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel(
   }
 }
 
-static void ref_dyn_quant_matmul_4bit_groupwise_kernel(
+void ref_dyn_quant_matmul_4bit_groupwise_kernel(
     size_t m,
     size_t n,
     size_t k,
@@ -1048,7 +1048,7 @@ static void ref_dyn_quant_matmul_4bit_groupwise_kernel(
       zero_point0 = (std::min)(zero_point0, qmax);
       const int32_t nudged_zero_point0 = lrintf(zero_point0);
 
-      int8_t* dst_ptr = (int8_t*)lhs_qa8dx + row_idx * dst_stride;
+      int8_t* dst_ptr = lhs_qa8dx + row_idx * dst_stride;
 
       *((float*)(dst_ptr)) = recip_scale0;
       dst_ptr += sizeof(float);
@@ -1163,7 +1163,7 @@ void dyn_quant_matmul_4bit_kernel(
   const int64_t weight_packed_size =
       kleidiai::kai_pack_rhs_int4_size(N, K, block_size);
   if (weight_packed_size == packed_weights.numel()) {
-    // KleidiAI interface intenally handles the Channelwise and groupwise
+    // KleidiAI interface internally handles the Channelwise and groupwise
     // distinction
     kleidiai::kai_quant_pack_lhs_int4_mm(
         output, inp, packed_weights, M, N, K, block_size);

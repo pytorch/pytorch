@@ -120,7 +120,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
   // buffer (in bytes)
   size_t orig_m = sparse_input.size(0);
   size_t div = orig_m * sparse_input.itemsize();
-  size_t new_n = (compressed_size + div - 1) / div; // floor
+  size_t new_n = (compressed_size + div - 1) / div; // ceil(s,d) = (s+d-1)/d
   auto compressed_tensor = sparse_input.new_empty({(int64_t)orig_m, (int64_t)new_n});
 
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
@@ -155,7 +155,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
     TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
     handle_initialized = true;
   }
-  // cupsarselt constructs
+  // cuSPARSELt constructs
   cusparseLtMatmulDescriptor_t matmul;
   cusparseLtMatmulPlan_t plan;
   cusparseLtMatmulAlgSelection_t alg_sel;

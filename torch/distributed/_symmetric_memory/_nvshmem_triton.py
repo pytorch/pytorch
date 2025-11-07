@@ -11,108 +11,236 @@ from torch.utils._triton import has_triton
 logger = logging.getLogger(__name__)
 
 
-def _find_nvshmem_device_library() -> str:
-    paths = [os.path.join(sysconfig.get_path("purelib"), "nvidia", "nvshmem", "lib")]
+class NvshmemLibFinder:
+    """
+    A class to find path to the NVSHMEM device library.
 
-    # Add common system installation paths
-    common_paths = [
-        "/usr/local/lib",
-        "/usr/lib",
-        "/opt/nvidia/nvshmem/lib",
-    ]
-    paths.extend(common_paths)
+    Environment variable:
 
-    try:
-        import torch
+    `NVSHMEM_LIB_DIR` (Optional[str]): The directory where the NVSHMEM device
+    library is located. If not provided, it will use the default path where
+    NVSHMEM wheel is installed, or search for the library in common system
+    paths.
+    """
 
-        torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
-        so_path = os.path.join(torch_lib, "libtorch_nvshmem.so")
+    # Class variable to store the found library path for reuse
+    found_device_lib_path: Optional[str] = None
 
-        if os.path.exists(so_path):
-            try:
-                result = subprocess.run(
-                    ["readelf", "-d", so_path],
-                    capture_output=True,
-                    text=True,
-                    check=True,
+    @classmethod
+    def find_device_library(cls) -> str:
+        """
+        Find the path to the NVSHMEM device library.
+
+        Returns:
+            str: The path to libnvshmem_device.bc (included).
+        """
+        if cls.found_device_lib_path is not None:
+            # Return the cached path if it exists
+            return cls.found_device_lib_path
+
+        # First, check if the user has specified a custom library path
+        user_lib_dir = os.environ.get("NVSHMEM_LIB_DIR", None)
+        if user_lib_dir is not None:
+            lib_path = os.path.join(user_lib_dir, "libnvshmem_device.bc")
+            if not os.path.exists(lib_path):
+                raise RuntimeError(
+                    f"NVSHMEM device library not found at specified path: {user_lib_dir}"
                 )
+            cls.found_device_lib_path = lib_path
+            return lib_path
 
-                for line in result.stdout.splitlines():
-                    if ("RPATH" in line or "RUNPATH" in line) and "[" in line:
-                        rpath = line.split("[", 1)[1].split("]", 1)[0]
-                        for p in rpath.split(":"):
-                            p = p.strip().replace("$ORIGIN", torch_lib)
-                            if p and p not in paths:
-                                paths.append(p)
-            except subprocess.CalledProcessError:
-                pass
+        # Otherwise, search for the library in the default installation paths
+        paths = [
+            os.path.join(sysconfig.get_path("purelib"), "nvidia", "nvshmem", "lib")
+        ]
 
-    except ImportError:
-        pass
+        # Add common system installation paths
+        common_paths = [
+            "/usr/local/lib",
+            "/usr/lib",
+            "/opt/nvidia/nvshmem/lib",
+        ]
+        paths.extend(common_paths)
 
-    for path in paths:
-        device_lib = os.path.join(path, "libnvshmem_device.bc")
-        if os.path.exists(device_lib):
-            return device_lib
+        try:
+            import torch
 
-    raise RuntimeError(f"NVSHMEM device library not found. Searched: {paths}")
+            torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
+            so_path = os.path.join(torch_lib, "libtorch_nvshmem.so")
+
+            if os.path.exists(so_path):
+                try:
+                    result = subprocess.run(
+                        ["readelf", "-d", so_path],
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+
+                    for line in result.stdout.splitlines():
+                        if ("RPATH" in line or "RUNPATH" in line) and "[" in line:
+                            rpath = line.split("[", 1)[1].split("]", 1)[0]
+                            for p in rpath.split(":"):
+                                p = p.strip().replace("$ORIGIN", torch_lib)
+                                if p and p not in paths:
+                                    paths.append(p)
+                except subprocess.CalledProcessError:
+                    pass
+
+        except ImportError:
+            pass
+
+        for path in paths:
+            device_lib = os.path.join(path, "libnvshmem_device.bc")
+            if os.path.exists(device_lib):
+                cls.found_device_lib_path = device_lib
+                return device_lib
+
+        raise RuntimeError(f"NVSHMEM device library not found. Searched: {paths}")
 
 
 def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
+    raise NotImplementedError(
+        "`enable_triton` is deprecated. "
+        "If you need NVSHMEM device function support for Triton, "
+        "please use `@requires_nvshmem` to decorate your Triton kernel. ",
+    )
+
+
+class NvshmemKernelRegistry:
     """
-    Enable NVSHMEM device functions for Triton. It performs a NVSHMEM
-    device-side initialization on the kernel module created by Triton.
-
-    This function sets a global hook that initializes NVSHMEM for Triton
-    kernels. To avoid unnecessary initializations, the hook only acts on
-    kernels that have "nvshmem" in their function name. Therefore, it is
-    required that all Triton kernels using NVSHMEM primitives follow this
-    naming convention.
-
-    Args:
-        lib_dir (Optional[str]): The directory where the NVSHMEM device library
-        is located. If not provided, it will use the default path where NVSHMEM
-        wheel is installed.
-
-    Returns:
-        dict[str, str]: A dictionary containing the NVSHMEM device library name
-        and path.
+    A class to register kernel functions that ** require NVSHMEM initialization **
     """
-    import triton
 
+    # Class variable to store the functions to be initialized
+    _to_init: dict[str, Any] = {}
+
+    @classmethod
+    def register(cls, name: str) -> None:
+        """
+        Register a kernel function with the given name.
+
+        Args:
+            name (str): The name of the kernel function.
+        """
+        cls._to_init.setdefault(name)
+
+    @classmethod
+    def deregister(cls, name: str) -> None:
+        """
+        Deregister a kernel function with the given name.
+
+        Args:
+            name (str): The name of the kernel function.
+        """
+        cls._to_init.pop(name, None)
+
+    @classmethod
+    def has(cls, name: str) -> bool:
+        """
+        Check if a kernel function with the given name is registered.
+
+        Args:
+            name (str): The name of the kernel function.
+
+        Returns:
+            bool: True if the kernel function is registered, False otherwise.
+        """
+        return name in cls._to_init
+
+
+def _nvshmem_init_hook(*args, **kwargs) -> None:  # type: ignore[no-untyped-def]
+    """
+    A hook function to initialize the CUModule created by `triton.jit` with
+    NVSHMEM device context
+    """
     from torch._C._distributed_c10d import _nvshmemx_cumodule_init
 
-    if lib_dir is not None:
-        lib_path = os.path.join(lib_dir, "libnvshmem_device.bc")
-        if not os.path.exists(lib_path):
-            raise RuntimeError(
-                f"NVSHMEM device library not found at specified path: {lib_path}"
-            )
-    else:
-        # Otherwise, search for the library automatically.
-        lib_path = _find_nvshmem_device_library()
+    jit_function = kwargs["fn"].jit_function
+    fn_name = jit_function.fn.__name__
 
+    # Only initialize NVSHMEM module for kernels registered via @requires_nvshmem
+    if NvshmemKernelRegistry.has(fn_name):
+        key = kwargs["key"]
+        device = kwargs["compile"]["device"]
+        jit_function = kwargs["fn"].jit_function
+        kernel_cache = jit_function.device_caches[device][0]
+        kernel = kernel_cache.get(key, None)
+        if kernel is not None:
+            kernel.run
+            # Initialize NVSHMEM for the CU module
+            _nvshmemx_cumodule_init(kernel.module)
+        else:
+            logger.warning(
+                f"It seems Triton hasn't created a kernel for function {fn_name}. "  # noqa: G004
+                "Please report this issue to Triton."
+            )
+
+
+if has_triton():
+    from triton.runtime.jit import JITFunction, KernelInterface
+
+    # Create a new Callable class that follows the KernelInterface protocol so
+    # that the Callable works with the subscript operator, e.g. `foo[(1, 1)]`
+    class GridCallableWithExtern(KernelInterface):
+        """
+        `KernelInterface` invokes `self.run` in `__getitem__`, i.e. [].  We
+        implement a `run` method by directing the call to `JITFunction.run`,
+        with added extern_libs kwarg, so that users don't have to pass it
+        """
+
+        def __init__(self, jit_func: JITFunction, extern_libs: dict[str, str]) -> None:
+            self.jit_func = jit_func
+            self.extern_libs = extern_libs
+
+        def run(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            # Call the JITFunction.run with added extern_libs kwarg
+            return self.jit_func.run(*args, **kwargs, extern_libs=self.extern_libs)
+
+
+def requires_nvshmem(  # type: ignore[no-untyped-def]
+    jit_func,  # JITFunction created by triton.jit
+):
+    """
+    A decorator to register a Triton kernel function that requires NVSHMEM initialization.
+
+    Example usage:
+    ```
+        @requires_nvshmem
+        @triton.jit
+        def foo(...):
+            ...
+    ```
+
+    If you would like to specify a path to the NVSHMEM device library other
+    than standard search locations, you can use the following environment
+    variable:
+    ```
+        export NVSHMEM_LIB_DIR=/path/to/nvshmem/lib
+    ```
+    """
+
+    import triton
+    from triton.runtime.jit import JITFunction
+
+    if not isinstance(jit_func, JITFunction):
+        raise TypeError(f"Expected a JITFunction, but got {type(jit_func)}")
+
+    # Find the NVSHMEM device library
+    lib_path = NvshmemLibFinder.find_device_library()
     extern_libs = {"libnvshmem_device": lib_path}
 
-    # A hook function to initialize NVSHMEM in Triton
-    def nvshmem_init_hook(*args, **kwargs) -> None:  # type: ignore[no-untyped-def]
-        jit_function = kwargs["fn"].jit_function
-        # Only initialize NVSHMEM module for kernels containing "nvshmem" in their name
-        if "nvshmem" in jit_function.fn.__name__:
-            key = kwargs["key"]
-            device = kwargs["compile"]["device"]
-            jit_function = kwargs["fn"].jit_function
-            kernel_cache = jit_function.device_caches[device][0]
-            kernel = kernel_cache.get(key, None)
-            if kernel is not None:
-                kernel.run
-                _nvshmemx_cumodule_init(kernel.module)
+    # Register the JITFunction with the kernel registry as "to be initialized"
+    NvshmemKernelRegistry.register(jit_func.fn.__name__)
 
-    # Register the function as a post-compile hook
-    triton.knobs.runtime.jit_post_compile_hook = nvshmem_init_hook
+    # Register the NVSHMEM init function as a post-compile hook.
+    # [Note] This is a global setting (due to lack of Triton API exposure). To
+    # avoid initializing Triton kernels that do not require NVSHMEM, filtering
+    # is performed in the hook function itself by checking against
+    # NvshmemKernelRegistry.
+    triton.knobs.runtime.jit_post_compile_hook = _nvshmem_init_hook
 
-    # Return to user so that they can use it in Triton kernel invocation
-    return extern_libs
+    return GridCallableWithExtern(jit_func, extern_libs)
 
 
 if has_triton():
@@ -222,6 +350,60 @@ if has_triton():
                     core.dtype("int64"),  # size in bytes
                     core.dtype("int32"),  # pe number
                 ): ("nvshmemx_getmem_block", core.dtype("int32"))
+            },
+            is_pure=False,
+            _semantic=_semantic,
+        )
+
+    @triton.jit  # type: ignore[misc]
+    def get_nbi(dest, source, nelems, pe):  # type: ignore[no-untyped-def]
+        """
+        Get tensor data from a remote PE to local PE, non-blocking.
+
+        Different from the `get` function, this function returns after
+        initiating the operation. The operation is considered complete after a
+        subsequent call to `quiet`.
+
+        Args:
+            dest: Destination tensor on the local PE. Type must match source.
+            source: Source tensor on the remote PE containing data to be copied.
+            nelems: Number of elements to transfer.
+            pe: PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
+
+        Notes:
+            - Performs compile-time type checking between dest and source tensors.
+            - Automatically calculates byte size from tensor type and element count.
+
+        Example:
+            ```
+            # Get 100 elements from PE 0
+            nvshmem.get_nbi(dest, src, 100, 0)
+            # Some independent computation which overlaps with the get operation
+            ...
+            # Wait for completion of the get operation
+            nvshmem.quiet()
+            ```
+        """
+        tl.static_assert(dest.type == source.type)
+        nbytes = nelems * dest.type.element_ty.itemsize
+        return getmem_block_extern_wrapper(
+            dest.to(tl.int64), source.to(tl.int64), nbytes.to(tl.int64), pe
+        )
+
+    @core.extern
+    def getmem_nbi_block_extern_wrapper(dest, source, size_bytes, pe, _semantic=None):  # type: ignore[no-untyped-def]
+        """Low-level extern wrapper for NVSHMEM get"""
+        return core.extern_elementwise(
+            "",
+            "",
+            [dest, source, size_bytes, pe],
+            {
+                (
+                    core.dtype("int64"),  # dest ptr
+                    core.dtype("int64"),  # source ptr
+                    core.dtype("int64"),  # size in bytes
+                    core.dtype("int32"),  # pe number
+                ): ("nvshmemx_getmem_nbi_block", core.dtype("int32"))
             },
             is_pure=False,
             _semantic=_semantic,

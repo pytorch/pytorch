@@ -14,20 +14,11 @@ from abc import abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Generic,
-    NamedTuple,
-    Optional,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Generic, NamedTuple, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch
 from torch.utils import _pytree as pytree
-from torch.utils._backport_slots import dataclass_slots
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._traceback import CapturedTraceback, format_frame
 from torch.utils.weak import WeakTensorKeyDictionary
 
@@ -36,7 +27,7 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterator
+    from collections.abc import Callable, Generator, Iterator
     from types import CodeType
 
     import sympy
@@ -72,18 +63,17 @@ CA_COMPILE_ID_PATTERN = re.compile(
 # 3. Compact: The string form is directly displayed by some tools. Special symbols are okay.
 
 
-# TODO: mark as kw_only=True once we drop support for <Python 3.10
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True, slots=True)
 class CompileId:
-    frame_id: Optional[int]
+    frame_id: int | None
     # This id is per-frame, and counts how many times we've compiled this
     # frame.  This could have been a global id but having this be per-frame
     # gives you a better intuitive sense for how many recompiles have occurred
     # so far.
-    frame_compile_id: Optional[int]
+    frame_compile_id: int | None
 
     # torch.compiling a compiled autograd graph
-    compiled_autograd_id: Optional[int] = None
+    compiled_autograd_id: int | None = None
 
     # TODO: consider also tracking the recompilation count
     # See Note: Updating CompileId
@@ -220,8 +210,8 @@ class GuardBuilderBase:
 
 @dataclasses.dataclass(frozen=True)
 class SLoc:
-    framework_loc: Optional[Union[traceback.FrameSummary, str]]
-    maybe_user_loc: Optional[str]
+    framework_loc: traceback.FrameSummary | str | None
+    maybe_user_loc: str | None
 
     def __str__(self) -> str:
         floc = (
@@ -241,8 +231,7 @@ class ShapeGuard(NamedTuple):
     size_oblivious: bool
 
 
-@dataclass_slots
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class Guard:
     # originating_source is the source that called the make_guard method to
     # construct this guard object. The property name specifies what exactly it
@@ -769,9 +758,7 @@ class HopDispatchSetCache:
 
         self.hop_cache_map = {invoke_subgraph: InvokeSubgraphCache()}
 
-    def get_cache(
-        self, op: torch._ops.HigherOrderOperator
-    ) -> Optional[HopSubgraphCache]:
+    def get_cache(self, op: torch._ops.HigherOrderOperator) -> HopSubgraphCache | None:
         if op not in self.hop_cache_map:
             return None
         return self.hop_cache_map[op]  # type: ignore[index]
@@ -805,12 +792,12 @@ class CompileContext:
         return _TLS.compile_context
 
     @staticmethod
-    def try_get() -> Optional[CompileContext]:
+    def try_get() -> CompileContext | None:
         return getattr(_TLS, "compile_context", None)
 
     def __init__(self, compile_id: Optional[CompileId]) -> None:
         assert compile_id is None or isinstance(compile_id, CompileId)
-        self.compile_id: Optional[CompileId] = compile_id
+        self.compile_id: CompileId | None = compile_id
         self.attempt = 0
         # Verbose ShapeEnv guards produced.
         self.shape_env_guards: list[str] = []
@@ -841,7 +828,7 @@ class TracingContext:
     """
 
     @staticmethod
-    def try_get() -> Optional[TracingContext]:
+    def try_get() -> TracingContext | None:
         return getattr(_TLS, "tracing_context", None)
 
     @staticmethod
@@ -885,7 +872,7 @@ class TracingContext:
         # careful not to accidentally induce guards on the SymInt if
         # you ever do change this in aot_autograd.py; you should check
         # on permutations preferentially.)
-        self.output_strides: Optional[list[Optional[tuple[int, ...]]]] = None
+        self.output_strides: list[tuple[int, ...] | None] | None = None
         # When this is True, whenever we encounter an int in Dynamo tracing,
         # we will (1) force unspec it and (2) force it as a size-like unbacked
         # integer.  This is currently used when processing certain lists of
@@ -1132,7 +1119,11 @@ def detect_fake_mode(inputs: Any = None) -> Optional[FakeTensorMode]:
         - Fake mode associated with passed in tensors (inputs does not
           have to be flattened)
     """
-    from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+    from torch._subclasses.fake_tensor import (
+        FakeTensor,
+        FakeTensorMode,
+        get_plain_tensors,
+    )
 
     fake_modes = []
 
@@ -1145,21 +1136,39 @@ def detect_fake_mode(inputs: Any = None) -> Optional[FakeTensorMode]:
 
     for i, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
         if isinstance(m, FakeTensorMode):
+            # pyrefly: ignore [bad-argument-type]
             fake_modes.append((m, "active fake mode", i))
 
     flat_inputs = pytree.tree_leaves(inputs)
     for i, flat_input in enumerate(flat_inputs):
         if isinstance(flat_input, FakeTensor):
+            # pyrefly: ignore [bad-argument-type]
             fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
+        if is_traceable_wrapper_subclass(flat_input):
+            out: list[Union[torch.Tensor, int, torch.SymInt]] = []
+            get_plain_tensors(flat_input, out=out)  # type: ignore[arg-type]
+            fake_tensors: list[FakeTensor] = [
+                x for x in out if isinstance(x, FakeTensor)
+            ]
+            fake_modes.extend(
+                # pyrefly: ignore [bad-argument-type]
+                [
+                    (tensor.fake_mode, f"subclass input {i}", ix)
+                    for ix, tensor in enumerate(fake_tensors)
+                ]
+            )
 
     if fake_modes:
         fake_mode, desc1, i1 = fake_modes[0]
         for m, desc2, i2 in fake_modes[1:]:
             assert fake_mode is m, (
                 f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}\n\n"
+                # pyrefly: ignore [missing-attribute]
                 f"fake mode from {desc1} {i1} allocated at:\n{fake_mode.stack}\n"
+                # pyrefly: ignore [missing-attribute]
                 f"fake mode from {desc2} {i2} allocated at:\n{m.stack}"
             )
+        # pyrefly: ignore [bad-return]
         return fake_mode
     else:
         return None

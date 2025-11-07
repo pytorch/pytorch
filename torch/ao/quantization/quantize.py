@@ -237,7 +237,7 @@ def _add_observer_(
 
     for name, child in module.named_children():
         # TODO remove Dropout special after codebase stable
-        if type_before_parametrizations(child) in [nn.Dropout]:
+        if type_before_parametrizations(child) is nn.Dropout:
             continue
         elif issubclass(
             type_before_parametrizations(child), (nnq.FloatFunctional, nnq.QFunctional)
@@ -392,7 +392,8 @@ def prepare(
         warnings.warn(
             "None of the submodule got qconfig applied. Make sure you "
             "passed correct configuration through `qconfig_dict` or "
-            "by assigning the `.qconfig` attribute directly on submodules"
+            "by assigning the `.qconfig` attribute directly on submodules",
+            stacklevel=2,
         )
 
     _add_observer_(

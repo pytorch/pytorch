@@ -76,7 +76,6 @@ test_failures = {
     "test_reduction3_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction5_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_dynamic_shapes": TestFailure(("mps",)),
-    "test_require_stride_expanded_dynamic_shapes": TestFailure(("mps",)),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
     "test_std_dynamic_shapes": TestFailure(("mps",)),
     "test_var_correction_dynamic_shapes": TestFailure(("mps",)),
@@ -286,7 +285,6 @@ class TestInductorDynamic(TestCase):
         def f():
             full = torch.full((), 11)
             i0 = full.item()
-            torch._check_is_size(i0)
             return torch.full((i0,), 0)
 
         opt_f = torch.compile(f, fullgraph=True)
@@ -451,8 +449,6 @@ class TestInductorDynamic(TestCase):
     def test_return_unbacked_view_split(self, device):
         def f(values, length_per_key):
             u0, u1 = length_per_key.tolist()
-            torch._check_is_size(u0)
-            torch._check_is_size(u1)
             v1, v2 = torch.functional.split(values, [u0, u1])
             return v1, v2
 
@@ -484,7 +480,6 @@ class TestInductorDynamic(TestCase):
 
         @torch.library.register_fake("_test::_cat")
         def _cat_fake(t: torch.Tensor, ds: list[int]) -> torch.Tensor:
-            [torch._check_is_size(d) for d in ds]
             return t.new_empty([sum(ds)])
 
         def _cat_setup_context(ctx, inputs, output):
@@ -984,7 +979,6 @@ class TestInductorDynamic(TestCase):
         @torch.compile(fullgraph=True, dynamic=True)
         def f(x):
             a = x.item()
-            torch._check_is_size(a)
             torch._check(a >= 1)
             torch._check(a <= 10)
             return torch.ones(a, a)
@@ -996,8 +990,6 @@ class TestInductorDynamic(TestCase):
         @torch.compile()
         def f(xt):
             xs = xt.tolist()
-            for x in xs:
-                torch._check_is_size(x)
             y = sum(xs)
             return torch.zeros(y, device=device)
 
@@ -1115,6 +1107,40 @@ class TestInductorDynamic(TestCase):
             actual, source_codes = run_and_get_code(fn_c, x)
             self.assertEqual(fn(x), actual)
             FileCheck().check("R0_BLOCK: tl.constexpr = 64").run(source_codes[0])
+
+    def test_non_persistent_dynamic_rblock(self):
+        def reduce_bounded(x, y):
+            """Reduce over a dimension with bounded size."""
+            # x shape: [batch, features, reduction_dim]
+            # reduction_dim is dynamic but bounded to max 128
+            assert x.shape[2] <= 64, f"Reduction dim {x.shape[2]} exceeds max 128"
+
+            # Perform reduction (sum) over the last dimension
+            result = torch.sum(x * y, dim=2)
+            return result
+
+        # Create tensors where reduction dimension is 6 (but could be up to 128)
+        batch = 256
+        features = 5536
+        reduction_dim = 6  # Actual size is small
+
+        x = torch.randn(reduction_dim, batch, features, device=GPU_TYPE).permute(
+            1, 2, 0
+        )
+        y = torch.randn(reduction_dim, batch, features, device=GPU_TYPE).permute(
+            1, 2, 0
+        )
+
+        torch._dynamo.mark_dynamic(x, 2, min=6, max=64)
+        torch._dynamo.mark_dynamic(y, 2, min=6, max=64)
+
+        compiled_fn = torch.compile(reduce_bounded)
+        result, source_codes = run_and_get_code(compiled_fn, x, y)
+
+        FileCheck().check_not("@triton_heuristics.persistent").run(source_codes[0])
+        expected = reduce_bounded(x, y)
+
+        assert torch.allclose(result, expected, atol=1e-3, rtol=1e-3)
 
     def test_unspecialized_float_dynamic(self):
         def fn(x, y):

@@ -300,8 +300,6 @@ void nonzero_static_cuda_out_impl(
     int64_t size,
     int64_t fill_value,
     Tensor& out) {
-#if defined(CUDA_VERSION) || defined(USE_ROCM)
-
   Tensor self_contiguous_ = self.contiguous();
   // see comment in nonzero_cuda_out_impl on reqs for out
   bool out_correct_size =
@@ -377,9 +375,6 @@ void nonzero_static_cuda_out_impl(
   if (need_to_copy) {
     out.copy_(out_temp);
   }
-#else
-  TORCH_CHECK(false, "Nonzero_static is not supported for cuda <= 11.4");
-#endif
 }
 
 Tensor& nonzero_out_cuda(const Tensor& self, Tensor& out) {

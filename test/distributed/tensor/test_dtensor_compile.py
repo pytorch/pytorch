@@ -266,6 +266,41 @@ def forward(self, b_parametrizations_buffer_original0, x):
         compiled_out = compiled_fn(mesh)
         self.assertEqual(opt_fn, compiled_out)
 
+    def test_get_local_rank_compile(self):
+        mesh = init_device_mesh(
+            self.device_type, (self.world_size,), mesh_dim_names=("dp",)
+        )
+
+        def fn_with_str_arg(x):
+            local_rank = x.device_mesh.get_local_rank("dp")
+            return x * local_rank
+
+        x = DTensor.from_local(torch.rand(4, 4), mesh, [Shard(0)], run_check=False)
+        ref = fn_with_str_arg(x)
+
+        opt_fn = torch.compile(fn_with_str_arg, backend="aot_eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
+        def fn_with_int_arg(x):
+            local_rank = x.device_mesh.get_local_rank(0)
+            return x * local_rank
+
+        ref2 = fn_with_int_arg(x)
+        opt_fn2 = torch.compile(fn_with_int_arg, backend="aot_eager", fullgraph=True)
+        res2 = opt_fn2(x)
+        self.assertEqual(res2, ref2)
+
+        def fn_without_arg(x):
+            # will fail if device_mesh.ndim > 1
+            local_rank = x.device_mesh.get_local_rank()
+            return x + local_rank
+
+        ref3 = fn_without_arg(x)
+        opt_fn3 = torch.compile(fn_without_arg, backend="aot_eager", fullgraph=True)
+        res3 = opt_fn3(x)
+        self.assertEqual(res3, ref3)
+
     def test_fakify_dtensor(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -387,6 +422,47 @@ def forward(self, b_parametrizations_buffer_original0, x):
         opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         res = opt_fn(x, y)
         self.assertEqual(res, ref)
+
+    def test_dtensor_dynamic_recompiles(self):
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def inp(*shape):
+            param = torch.randn(*shape, requires_grad=True)
+            x = DTensor.from_local(param, mesh, [Shard(0)], run_check=False)
+            torch._dynamo.mark_dynamic(x, 0)
+            torch._dynamo.mark_dynamic(x, 1)
+            return x
+
+        def run(func, *shape):
+            res = func(inp(*shape))
+            res.sum().backward()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def f(x):
+            y = x * x
+            return y.to_local()
+
+        run(f, 4, 4)
+        run(f, 6, 8)
+        run(f, 10, 10)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # sanity check that shape guard recompiles are still handled
+        @torch.compile(backend=cnt, fullgraph=True)
+        def g(x):
+            if x.size(0) <= 16:
+                y = x * x
+            else:
+                y = x + x
+            return y.to_local()
+
+        cnt.clear()
+        run(g, 4, 4)
+        run(g, 8, 8)
+        self.assertEqual(cnt.frame_count, 1)
+        run(g, 64, 8)
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_dtensor_attribute_access_on_intermediate(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -918,6 +994,9 @@ def forward(self, primals_1):
         out_dt = torch.matmul(tmp_dt, y_dt)
         out_dt.sum().backward()
 
+    @unittest.skipIf(
+        torch._inductor.config.triton.native_matmul, "Matmul is now generated"
+    )
     def _test_tp_compile_comm_reordering(self):
         class FakeAttention(nn.Module):
             def __init__(self) -> None:

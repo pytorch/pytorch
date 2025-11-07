@@ -4,56 +4,67 @@
 
 import copy
 import itertools
-import numpy as np
 import operator
 import random
 import unittest
-from packaging.version import Version
-from typing import NamedTuple
+from typing import NamedTuple, TYPE_CHECKING
+
+import numpy as np
 
 import torch
-from torch import _VF
 import torch.jit
 import torch.nn.functional as F
-from torch.nn.modules.utils import _single, _pair
-
-from hypothesis import settings, HealthCheck
-from hypothesis import assume, given, note
-from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
+
+from hypothesis import assume, given, HealthCheck, note, settings, strategies as st
+from packaging.version import Version
+from torch import _VF
+if TYPE_CHECKING:
+    from torch._ops import OpOverloadPacket
+from torch.nn.modules.utils import _pair, _single
+
 hu.assert_deadline_disabled()
-
-from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import (
-    raise_on_run_directly,
-    TestCase,
-    IS_PPC,
-    IS_MACOS,
-    IS_SANDCASTLE,
-    IS_FBCODE,
-    IS_ARM64
-)
-from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK, skipIfNoONEDNN
-from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
-    override_quantized_engine, supported_qengines, override_qengines, _snr
-from torch.testing._internal.common_quantized import (
-    qengine_is_qnnpack,
-    qengine_is_onednn,
-)
-from torch.ao.quantization import PerChannelMinMaxObserver
-from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_CUDNN_VERSION, TEST_CUDA
-from torch.testing._internal.optests import opcheck
-import torch.backends.xnnpack
-
-from torch.utils.cpp_extension import ROCM_HOME
 
 from typing import Optional
 
-np_dtype = {
-    torch.quint8 : np.uint8,
-    torch.qint8 : np.int8,
-    torch.qint32 : np.int32
-}
+import torch.backends.xnnpack
+from torch.ao.quantization import PerChannelMinMaxObserver
+from torch.testing._internal.common_cuda import (
+    SM80OrLater,
+    TEST_CUDA,
+    TEST_CUDNN,
+    TEST_CUDNN_VERSION,
+)
+from torch.testing._internal.common_quantization import (
+    skipIfNoFBGEMM,
+    skipIfNoONEDNN,
+    skipIfNoQNNPACK,
+)
+from torch.testing._internal.common_quantized import (
+    _calculate_dynamic_qparams,
+    _dequantize,
+    _quantize,
+    _snr,
+    override_qengines,
+    override_quantized_engine,
+    qengine_is_onednn,
+    qengine_is_qnnpack,
+    supported_qengines,
+)
+from torch.testing._internal.common_utils import (
+    IS_ARM64,
+    IS_FBCODE,
+    IS_MACOS,
+    IS_PPC,
+    IS_SANDCASTLE,
+    raise_on_run_directly,
+    TestCase,
+)
+from torch.testing._internal.optests import opcheck
+
+from torch.utils.cpp_extension import ROCM_HOME
+
+np_dtype = {torch.quint8: np.uint8, torch.qint8: np.int8, torch.qint32: np.int32}
 
 TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
 
@@ -214,7 +225,7 @@ class TestQuantizedOps(TestCase):
             `output_is_observed`: if specified and is True, we'll append extra
              output_scale/output_zero_point keyword argument when calling quantized op
         """
-        # Retrives the default parameters from X.
+        # Retrieves the default parameters from X.
         X, (scale, zero_point, torch_type) = X
         if not isinstance(X, torch.Tensor):
             X = torch.from_numpy(X)
@@ -2191,7 +2202,7 @@ class TestQuantizedOps(TestCase):
         X = torch.from_numpy(X)
         new_shape = np.array(X.shape)
         new_shape[dim] = 0
-        for idx in range(num):
+        for _ in range(num):
             tensors_q.append(torch.quantize_per_tensor(X, scale, zero_point,
                                                        torch_type))
             tensors_ref.append(X)
@@ -3042,7 +3053,7 @@ class TestQuantizedOps(TestCase):
                 lstm_quantized = torch.ao.quantization.convert(
                     lstm_prepared, convert_custom_config_dict=custom_config_dict
                 )
-                assert type(lstm_quantized[0]) == torch.ao.nn.quantized.LSTM
+                assert type(lstm_quantized[0]) is torch.ao.nn.quantized.LSTM
                 qy = lstm_quantized(qx)
 
                 snr = _snr(y, qy)
@@ -3151,7 +3162,7 @@ class TestQuantizedOps(TestCase):
                     # Quantize
                     mha_quantized = torch.ao.quantization.convert(mha_prepared)
 
-                    for name, param in mha_quantized.named_parameters():
+                    for name, _param in mha_quantized.named_parameters():
                         self.assertTrue("in_proj_weight" not in name)
 
                     qy = mha_quantized(*q_data)
@@ -3573,7 +3584,7 @@ class TestDynamicQuantizedOps(TestCase):
     def test_wrapped_fbgemm_pack_gemm_matrix_fp16_pt2_compliant(self):
         # We are not using opcheck over here because the output for the op we're testing
         # (_quantized.wrapped_fbgemm_pack_gemm_matrix_fp16) is not deterministic
-        # due to the C-struct it's procuding. This would fail the check when we're trying
+        # due to the C-struct it's producing. This would fail the check when we're trying
         # to match the result between compiled and eager version.
         #
         # This is only a temporary solution, long term, we should be able to support PT2
@@ -5561,7 +5572,7 @@ class TestQuantizedConv(TestCase):
         )
 
         act_qdtypes = [torch.quint8]
-        # Only qnnpack qengine supportes qint8
+        # Only qnnpack qengine supports qint8
         if qengine_is_qnnpack() and torch.backends.xnnpack.enabled:
             act_qdtypes.append(torch.qint8)
 
@@ -5642,7 +5653,7 @@ class TestQuantizedConv(TestCase):
         )
 
         act_qdtypes = [torch.quint8]
-        # Only qnnpack qengine supportes qint8
+        # Only qnnpack qengine supports qint8
         if qengine_is_qnnpack() and torch.backends.xnnpack.enabled:
             act_qdtypes.append(torch.qint8)
 
@@ -5980,7 +5991,7 @@ class TestQuantizedConv(TestCase):
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 schedule=my_schedule,
                 on_trace_ready=trace_handler) as prof:
-            for i in range(30):
+            for _ in range(30):
                 conv_op(input, weight, None, stride, padding, dilation, groups)
                 prof.step()
 
@@ -5995,7 +6006,7 @@ class TestQuantizedConv(TestCase):
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 schedule=my_schedule,
                 on_trace_ready=trace_handler) as prof:
-            for i in range(30):
+            for _ in range(30):
                 conv_op(input_fp16, weight_fp16, None, stride, padding, dilation, groups)
                 prof.step()
 
@@ -6012,7 +6023,7 @@ class TestQuantizedConv(TestCase):
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 schedule=my_schedule,
                 on_trace_ready=trace_handler) as prof:
-            for i in range(30):
+            for _ in range(30):
                 conv_op(input_int8, weight_prepacked, scale, zero_point)
                 prof.step()
 
@@ -6073,7 +6084,7 @@ class TestQuantizedConv(TestCase):
             )
 
             act_qdtypes = [torch.quint8]
-            # Only qnnpack qengine supportes qint8
+            # Only qnnpack qengine supports qint8
             if qengine_is_qnnpack() and torch.backends.xnnpack.enabled:
                 act_qdtypes.append(torch.qint8)
 
@@ -6199,7 +6210,7 @@ class TestQuantizedConv(TestCase):
             bias=use_bias
         )
         act_qdtypes = [torch.quint8]
-        # Only qnnpack qengine supportes qint8
+        # Only qnnpack qengine supports qint8
         if qengine_is_qnnpack() and torch.backends.xnnpack.enabled:
             act_qdtypes.append(torch.qint8)
 
@@ -6504,7 +6515,7 @@ class TestQuantizedConv(TestCase):
         qconv = torch.ops.quantized.conv1d
 
         act_qdtypes = [torch.quint8]
-        # Only qnnpack qengine supportes qint8
+        # Only qnnpack qengine supports qint8
         if qengine_is_qnnpack() and torch.backends.xnnpack.enabled:
             act_qdtypes.append(torch.qint8)
 
@@ -6575,7 +6586,7 @@ class TestQuantizedConv(TestCase):
         qconv = torch.ops.quantized.conv1d_relu
 
         act_qdtypes = [torch.quint8]
-        # Only qnnpack qengine supportes qint8
+        # Only qnnpack qengine supports qint8
         if qengine_is_qnnpack() and torch.backends.xnnpack.enabled:
             act_qdtypes.append(torch.qint8)
 
@@ -7034,8 +7045,8 @@ class TestQuantizedConv(TestCase):
         # ONEDNN only supports symmetric quantization of weight
         if W_zero_point is not None:
             W_zero_point = len(W_zero_point) * [0]
-        fp32_output = True if qconv_output_dtype is torch.float32 else False
-        bfloat16_output = True if qconv_output_dtype is torch.bfloat16 else False
+        fp32_output = qconv_output_dtype is torch.float32
+        bfloat16_output = qconv_output_dtype is torch.bfloat16
         if fp32_output or bfloat16_output:
             Y_scale = 1.0
             Y_zero_point = 0
@@ -7894,8 +7905,8 @@ class TestQuantizedConv(TestCase):
         weight_in_channel_last_format=False,
     ):
         # We assume FP8 quantization is always symmetric
-        fp32_output = True if qconv_output_dtype is torch.float32 else False
-        bfloat16_output = True if qconv_output_dtype is torch.bfloat16 else False
+        fp32_output = qconv_output_dtype is torch.float32
+        bfloat16_output = qconv_output_dtype is torch.bfloat16
         if fp32_output or bfloat16_output:
             Y_scale = 1.0
             X2_scale = 1.0
@@ -8794,6 +8805,67 @@ class TestComparatorOps(TestCase):
             note(f"result 3: {result}")
             self.assertEqual(result_ref, result,
                              msg=f"'tensor.{op}(scalar)'' failed")
+
+"""Tests the correctness of the quantized::embedding_bag_(byte|4bit|2bit)_prepack_with_rowwise_min_max ops."""
+class TestQuantizedWithMinMax(TestCase):
+    """Validates that the *rowwsie_min_max* quantization functions are equivalent to the ones without it."""
+    def test_quantize_tensor_with_min_max(self):
+        num_rows_list = [1, 2, 10, 100]
+        num_cols_list = [4, 8, 16, 32, 64, 128]
+        # Map of quantization bit rate to tuple of quantize function (with rowwise_min_max) and
+        # quantize function (without rowwise_min_max)
+        bit_rate_to_quant_fn: dict[
+            int,
+            tuple[
+                OpOverloadPacket,
+                OpOverloadPacket,
+            ],
+        ] = {
+            8: (
+                torch.ops.quantized.embedding_bag_byte_prepack_with_rowwise_min_max,
+                torch.ops.quantized.embedding_bag_byte_prepack,
+            ),
+            4: (
+                torch.ops.quantized.embedding_bag_4bit_prepack_with_rowwise_min_max,
+                torch.ops.quantized.embedding_bag_4bit_prepack,
+            ),
+            2: (
+                torch.ops.quantized.embedding_bag_2bit_prepack_with_rowwise_min_max,
+                torch.ops.quantized.embedding_bag_2bit_prepack,
+            ),
+        }
+
+        for quant_fn_with_rowwise_min_max, quant_fn in bit_rate_to_quant_fn.values():
+            for torch_dtype in [torch.float16, torch.float32]:
+                for num_rows, num_cols in itertools.product(num_rows_list, num_cols_list):
+                    weight = torch.rand(num_rows, num_cols, dtype=torch_dtype)
+                    rowwise_min_max = torch.stack(
+                        [weight.min(dim=1).values, weight.max(dim=1).values], dim=1
+                    )
+
+                    # Perform the quantization with rowwise_min_max
+                    weight_quantized = quant_fn_with_rowwise_min_max(
+                        weight, rowwise_min_max
+                    )
+                    assert weight_quantized.dtype == torch.uint8
+
+                    # Confirm that the quantization is matching the one without rowwise_min_max
+                    weight_quantized_no_rowwise_min_max = quant_fn(weight)
+                    assert torch.equal(
+                        weight_quantized, weight_quantized_no_rowwise_min_max
+                    )
+
+                    # Confirtm that incorrect rowwise_min_max will result in different quantization output
+                    incorrect_rowwise_min_max = torch.stack(
+                        [weight.max(dim=1).values, weight.max(dim=1).values], dim=1
+                    )
+                    weight_incorrectly_quantized = quant_fn_with_rowwise_min_max(
+                        weight, incorrect_rowwise_min_max
+                    )
+                    assert weight_incorrectly_quantized.dtype == torch.uint8
+                    assert not torch.equal(
+                        weight_incorrectly_quantized, weight_quantized_no_rowwise_min_max
+                    )
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_quantization.py")

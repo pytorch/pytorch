@@ -13,22 +13,21 @@ collection support for PyTorch APIs.
 """
 
 import functools
-import sys
 import types
-from collections.abc import Iterable
-from typing import Any, Callable, Optional, overload, TypeVar, Union
-from typing_extensions import deprecated, TypeIs
+from collections.abc import Callable, Iterable, Mapping
+from typing import Any, Optional, overload, TypeVar, Union
+from typing_extensions import deprecated, Self, TypeAlias, TypeIs
 
 import torch.utils._pytree as python_pytree
 from torch.torch_version import TorchVersion as _TorchVersion
 from torch.utils._pytree import (
-    is_namedtuple as is_namedtuple,
-    is_namedtuple_class as is_namedtuple_class,
-    is_namedtuple_instance as is_namedtuple_instance,
-    is_structseq as is_structseq,
-    is_structseq_class as is_structseq_class,
-    is_structseq_instance as is_structseq_instance,
-    KeyEntry as KeyEntry,
+    is_namedtuple,
+    is_namedtuple_class,
+    is_namedtuple_instance,
+    is_structseq,
+    is_structseq_class,
+    is_structseq_instance,
+    KeyEntry,
 )
 
 
@@ -43,7 +42,7 @@ if not python_pytree._cxx_pytree_dynamo_traceable:
 
 
 import optree
-from optree import PyTreeSpec as TreeSpec  # direct import for type annotations
+from optree import PyTreeSpec  # direct import for type annotations
 
 
 __all__ = [
@@ -54,6 +53,7 @@ __all__ = [
     "DumpableContext",
     "ToDumpableContextFn",
     "FromDumpableContextFn",
+    "PyTreeSpec",
     "TreeSpec",
     "LeafSpec",
     "keystr",
@@ -100,6 +100,8 @@ S = TypeVar("S")
 U = TypeVar("U")
 R = TypeVar("R")
 
+
+TreeSpec: TypeAlias = PyTreeSpec
 
 Context = Any
 PyTree = Any
@@ -268,6 +270,30 @@ def _is_pytreespec_instance(obj: Any, /) -> TypeIs[TreeSpec]:
     return isinstance(obj, TreeSpec)
 
 
+def treespec_leaf() -> TreeSpec:
+    """Make a treespec representing a leaf node."""
+    return optree.treespec_leaf(none_is_leaf=True, namespace="torch")
+
+
+def treespec_tuple(iterable: Iterable[TreeSpec] = (), /) -> TreeSpec:
+    """Make a tuple treespec from an iterable of child treespecs."""
+    return optree.treespec_tuple(iterable, none_is_leaf=True, namespace="torch")
+
+
+def treespec_dict(
+    mapping: Union[Mapping[Any, TreeSpec], Iterable[tuple[Any, TreeSpec]]] = (),
+    /,
+    **kwargs: TreeSpec,
+) -> TreeSpec:
+    """Make a dict treespec from a dict of child treespecs."""
+    return optree.treespec_dict(
+        mapping,
+        **kwargs,
+        none_is_leaf=True,
+        namespace="torch",
+    )
+
+
 def tree_is_leaf(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -368,11 +394,6 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
         The reconstructed pytree, containing the ``leaves`` placed in the structure described by
         ``treespec``.
     """
-    if not _is_pytreespec_instance(treespec):
-        raise TypeError(
-            f"tree_unflatten(leaves, treespec): Expected `treespec` to be instance of "
-            f"PyTreeSpec but got item of type {type(treespec)}."
-        )
     return optree.tree_unflatten(treespec, leaves)  # type: ignore[arg-type]
 
 
@@ -570,10 +591,7 @@ def tree_map_(
 
 Type2 = tuple[type[T], type[S]]
 Type3 = tuple[type[T], type[S], type[U]]
-if sys.version_info >= (3, 10):
-    TypeAny = Union[type[Any], tuple[type[Any], ...], types.UnionType]
-else:
-    TypeAny = Union[type[Any], tuple[type[Any], ...]]
+TypeAny = Union[type[Any], tuple[type[Any], ...], types.UnionType]
 
 Fn2 = Callable[[Union[T, S]], R]
 Fn3 = Callable[[Union[T, S, U]], R]
@@ -631,10 +649,7 @@ def map_only(
 
     You can also directly use 'tree_map_only'
     """
-    if isinstance(type_or_types_or_pred, (type, tuple)) or (
-        sys.version_info >= (3, 10)
-        and isinstance(type_or_types_or_pred, types.UnionType)
-    ):
+    if isinstance(type_or_types_or_pred, (type, tuple, types.UnionType)):
 
         def pred(x: Any) -> bool:
             return isinstance(x, type_or_types_or_pred)  # type: ignore[arg-type]
@@ -943,7 +958,10 @@ def _broadcast_to_and_flatten(
     treespec: TreeSpec,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> Optional[list[Any]]:
-    assert _is_pytreespec_instance(treespec)
+    if not _is_pytreespec_instance(treespec):
+        raise AssertionError(
+            f"_broadcast_to_and_flatten: Expected `treespec` to be instance of PyTreeSpec but got {type(treespec)}"
+        )
     full_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
     try:
         return broadcast_prefix(tree, full_tree, is_leaf=is_leaf)
@@ -994,9 +1012,14 @@ class LeafSpecMeta(type(TreeSpec)):  # type: ignore[misc]
         return _is_pytreespec_instance(instance) and instance.is_leaf()
 
 
+@deprecated(
+    "`isinstance(treespec, LeafSpec)` is deprecated, "
+    "use `isinstance(treespec, TreeSpec)` and `treespec.is_leaf()` instead.",
+    category=FutureWarning,
+)
 class LeafSpec(TreeSpec, metaclass=LeafSpecMeta):  # type: ignore[misc,final]
-    def __new__(cls) -> "LeafSpec":
-        return optree.treespec_leaf(none_is_leaf=True)  # type: ignore[return-value]
+    def __new__(cls) -> Self:
+        return treespec_leaf()  # type: ignore[return-value]
 
 
 def tree_flatten_with_path(
@@ -1086,6 +1109,7 @@ def key_get(obj: Any, kp: KeyPath) -> Any:
 
 
 with python_pytree._NODE_REGISTRY_LOCK:
+    # pyrefly: ignore [bad-assignment]
     python_pytree._cxx_pytree_imported = True
     args, kwargs = (), {}  # type: ignore[var-annotated]
     for args, kwargs in python_pytree._cxx_pytree_pending_imports:

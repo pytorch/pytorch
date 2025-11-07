@@ -22,7 +22,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, cpp_builder, ir
-from ..debug import set_kernel_post_grad_provenance_tracing
+from ..ir import ExternKernel
 from ..utils import _align, DeferredLineBase, LineContext, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
@@ -44,6 +44,8 @@ if TYPE_CHECKING:
     # At most, the list nesting can go one layer deep.
     _OUTPUT_ARGS_TYPE = list[Union[Optional[str], list[Optional[str]]]]
 
+    from ..scheduler import BaseSchedulerNode
+
 
 class HasWriteLine(Protocol):
     def writeline(self, line: Union[LineContext, DeferredLineBase, str]) -> None: ...
@@ -60,9 +62,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # must be initialized prior to calling super().__init__()
         self.included_devices: OrderedSet[str] = OrderedSet()
         self.model_class_name_suffix = (
-            config.aot_inductor.model_name_for_generated_files
-            if config.aot_inductor.compile_standalone
-            else ""
+            ""
+            if config.aot_inductor.dynamic_linkage
+            else config.aot_inductor.model_name_for_generated_files
         )
         self.aoti_model_class_name = f"AOTInductorModel{self.model_class_name_suffix}"
 
@@ -222,7 +224,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.add_device_include(self.device)
 
         if V.graph.aot_mode:
-            if not config.aot_inductor.compile_standalone:
+            if config.aot_inductor.dynamic_linkage:
                 with open(
                     os.path.join(
                         os.path.dirname(__file__), "aoti_runtime", "interface.cpp"
@@ -233,6 +235,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 # we produce a separate model header for each model in static linkage
                 self.header.splice(f"""#include \"{self.model_class_name_suffix}.h\"""")
             self.header.splice("\n")
+
+        if config.cpp.enable_kernel_profile:
+            self.header.splice(
+                "#include <torch/csrc/inductor/aoti_runtime/kernel_context_tls.h>"
+            )
+            self.header.splice(
+                """
+                namespace torch::aot_inductor {
+                thread_local KernelContext* tls_kernel_context = nullptr;
+                }
+                """
+            )
 
     def _include_extra_header(self, header: str):
         # This is needed for cpp to python dtype conversion
@@ -768,7 +782,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         num_outputs = len(V.graph.graph_outputs)
         num_constants = len(V.graph.constants)
         include_weights = (
-            "true" if config.aot_inductor.package_constants_in_so else "false"
+            "true"
+            if config.aot_inductor.package_constants_in_so
+            and config.aot_inductor.package_constants_on_disk_format != "binary_blob"
+            else "false"
         )
         self.prefix.splice(
             f"""
@@ -1169,7 +1186,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             """
         )
 
-        wrapper_body = "input_tensors = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args]"
+        wrapper_body = "input_tensors = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg, device='cpu') for arg in args]"
         if V.graph.constants:
             # Append constants to the input args for cpp wrapper.
             # Python wrapper directly gets the value inside the wrapper call
@@ -1247,7 +1264,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         device: str,
         *,
         debug_args: Optional[list[str]] = None,
-        debug_handle: Optional[int] = None,
+        stack_traces: Optional[OrderedSet[str]] = None,
     ) -> None:
         """debug_args kwarg allows CppWrapperCpuArrayRef to pass in wrapped arguments in
         place of args while preserving debug printer output."""
@@ -1264,21 +1281,26 @@ class CppWrapperCpu(PythonWrapperCodegen):
         ]
         with debug_printer_manager:
             shim_fn = self.get_c_shim_func_name(kernel, device)
-            self.write_provenance_debug_handle(shim_fn, debug_handle)
-            shim_fn_codes = (
+            shim_fn_codes = [
                 f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));"
-            )
+            ]
             if enable_kernel_profile:
-                debug_handle_str = "" if debug_handle is None else f":{debug_handle}"
-                shim_fn_codes = textwrap.dedent(
-                    f"""
-                    {{
-                      RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}{debug_handle_str}", nullptr);
-                      {shim_fn_codes}
-                    }}
-                    """
-                )
-            self.writeline(shim_fn_codes)
+                stack_trace_str = 'R"('
+                if stack_traces:
+                    for stack_trace in stack_traces:
+                        for line in stack_trace.split("\n"):
+                            stack_trace_str += f"\n{line}"
+                        stack_trace_str += "\n"
+                stack_trace_str += ')"'
+
+                shim_fn_codes = [
+                    "{",
+                    f"""KernelContextGuard _ctx("{shim_fn}", {stack_trace_str});""",
+                    f"""RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr);""",
+                    shim_fn_codes[0],
+                    "}",
+                ]
+            self.writelines(shim_fn_codes)
 
     def generate_c_shim_extern_kernel_alloc(
         self, extern_kernel: ir.ExternKernelAlloc, args: list[str]
@@ -1297,14 +1319,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         device = d.type if (d := extern_kernel.get_device()) else self.device
 
-        debug_handle = None
-        if config.trace.provenance_tracking_level != 0:
-            debug_handle = set_kernel_post_grad_provenance_tracing(
-                extern_kernel, extern_kernel.get_kernel_name(), is_extern=True
-            )
-
         self.generate_c_shim_extern_kernel_call(
-            extern_kernel.get_kernel_name(), args, device, debug_handle=debug_handle
+            extern_kernel.get_kernel_name(), args, device
         )
 
         if extern_kernel.python_kernel_name in (
@@ -1362,19 +1378,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         args = args + output_args
         device = d.type if (d := fallback_kernel.get_device()) else self.device
 
-        debug_handle = None
-        if config.trace.provenance_tracking_level != 0:
-            shim_fn = self.get_c_shim_func_name(fallback_kernel.cpp_kernel_name, device)  # type: ignore[arg-type]
-            debug_handle = set_kernel_post_grad_provenance_tracing(
-                fallback_kernel,
-                shim_fn,
-                is_extern=True,
-            )
         self.generate_c_shim_extern_kernel_call(
             fallback_kernel.cpp_kernel_name,  # type: ignore[arg-type]
             args,
             device,
-            debug_handle=debug_handle,
         )
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
@@ -1386,7 +1393,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         out_view: Optional[str],
         args: list[str],
         device: str,
-        debug_handle: Optional[int] = None,
+        stack_traces: Optional[OrderedSet[str]] = None,
     ) -> None:
         if out_view:
             out_name = f"{out}_as_strided"
@@ -1396,7 +1403,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             args.insert(0, out)
 
         self.generate_c_shim_extern_kernel_call(
-            kernel, args, device, debug_handle=debug_handle
+            kernel, args, device, stack_traces=stack_traces
         )
 
     def _get_scatter_reduce_enum(self, reduce):
@@ -1498,7 +1505,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             self.writeline(f"{arg.inner} = {cexpr(arg.inner_expr)};")
 
-    def codegen_dynamic_scalar(self, node):
+    def _codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
         self.codegen_tensor_item(node.inputs[0].get_dtype(), data, f"{node.sym}_raw")
 
@@ -1517,19 +1524,58 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
         self.unbacked_symbol_decls.add(str(node.sym))
 
-    def codegen_dynamic_select_index(self, node):
+    def codegen_dynamic_select_index(self, node, clamp):
         index_cpp_str = self.val_to_arg_str_for_prim_type(node.index, int)
+        size_cpp_str = self.val_to_arg_str_for_prim_type(node.size, int)
 
-        index_compute_str = (
+        # codegen index
+        sym = node.unbacked_offset_symbol
+        index_str = (
             f"{index_cpp_str} < 0 ? {index_cpp_str} + "
-            f"{self.val_to_arg_str_for_prim_type(node.size, int)}:  {index_cpp_str}"
+            f"{self.val_to_arg_str_for_prim_type(node.size, int)}: {index_cpp_str}"
         )
+        self.writeline(f"auto {sym}_index = {index_str};")
+        index_str_clamped = (
+            f"{sym}_index < 0 ? 0 : ({sym}_index > {size_cpp_str} ? {size_cpp_str} : {sym}_index)"
+            if clamp
+            else f"{sym}_index"
+        )
+        self.writeline(f"auto {sym}_index_clamped = {index_str_clamped};")
         self.writeline(
-            f"auto {node.unbacked_offset_symbol} = {self.val_to_arg_str_for_prim_type(node.base_offset, int)} + "
-            f"{self.val_to_arg_str_for_prim_type(node.base_dim_stride, int)} * ({index_compute_str});"
+            f"auto {sym} = {self.val_to_arg_str_for_prim_type(node.base_offset, int)} + "
+            f"{self.val_to_arg_str_for_prim_type(node.base_dim_stride, int)} * {sym}_index_clamped;"
         )
         # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
-        self.unbacked_symbol_decls.add(str(node.unbacked_offset_symbol))
+        self.unbacked_symbol_decls.add(str(sym))
+
+    def codegen_dynamic_slice_size(self, node):
+        start_cpp_str = self.val_to_arg_str_for_prim_type(node.start, int)
+        end_cpp_str = self.val_to_arg_str_for_prim_type(node.end, int)
+        size_cpp_str = self.val_to_arg_str_for_prim_type(node.size, int)
+        step_cpp_str = self.val_to_arg_str_for_prim_type(node.step, int)
+        sym = node.unbacked_size_symbol
+
+        def codegen_clamp(index_str, start=True):
+            suf = "st" if start else "en"
+            index_ = f"{sym}_{suf}_index"
+            self.writeline(
+                f"int64_t {index_} = {index_str} < 0 ? {index_str} + {size_cpp_str} : {index_str};"
+            )
+            self.writeline(
+                f"int64_t {sym}_{suf}_cl = {index_} < 0 ? 0 : ({index_} > {size_cpp_str} ? {size_cpp_str} : {index_});"
+            )
+
+        codegen_clamp(start_cpp_str, start=True)
+        codegen_clamp(end_cpp_str, start=False)
+        if node.step == 1:
+            step_str = f"{sym}_en_cl - {sym}_st_cl"
+        else:
+            step_str = (
+                f"({sym}_en_cl - {sym}_st_cl + {step_cpp_str} - 1) / {step_cpp_str}"
+            )
+        self.writeline(f"int64_t {sym}_with_step = {step_str};")
+        self.writeline(f"int64_t {sym} = {sym}_with_step < 0 ? 0 : {sym}_with_step;")
+        self.unbacked_symbol_decls.add(str(sym))
 
     def make_buffer_free(self, buffer):
         return (
@@ -2871,3 +2917,53 @@ if (!custom_op_wrapper) {
             writer.writeline(call_str)
 
         return tmp_var_name
+
+    def write_kernel_context_guard_begin(
+        self,
+    ):
+        # Beginning of a kernel context guarded block.
+        # The block looks like this:
+        # {
+        # KernelContextGuard _ctx("{kernel_name}", {stack_trace_str});
+        # ... operations...
+        # }
+        self.writeline("{")
+
+    def write_kernel_context_guard_end(
+        self,
+    ):
+        # End of a kernel context guarded block.
+        self.writeline("}")
+
+    def write_kernel_context_guard(
+        self,
+        kernel_name: str,
+        node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
+    ):
+        def aggregate_stack_traces(
+            node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
+        ) -> OrderedSet[str]:
+            if isinstance(node_schedule, list):
+                return functools.reduce(
+                    lambda a, b: a | b,
+                    [
+                        node.node.get_stack_traces()
+                        for node in node_schedule
+                        if hasattr(node, "node") and node.node
+                    ],
+                    OrderedSet(),
+                )
+            elif isinstance(node_schedule, ExternKernel):
+                return node_schedule.get_stack_traces()
+            else:
+                return OrderedSet()
+
+        stack_trace_str = 'R"('
+        stack_traces = aggregate_stack_traces(node_schedule)
+
+        for stack_trace in stack_traces:
+            for line in stack_trace.split("\n"):
+                stack_trace_str += f"\n{line}"
+            stack_trace_str += "\n"
+        stack_trace_str += ')"'
+        self.writeline(f'KernelContextGuard _ctx("{kernel_name}", {stack_trace_str});')

@@ -1,6 +1,6 @@
 import enum
-from typing import Any, Callable, Optional
-from typing_extensions import TypeAlias
+from collections.abc import Callable
+from typing import Any, Optional, TypeAlias
 
 import torch
 
@@ -222,12 +222,6 @@ class GuardManager:
     ) -> GuardManager: ...
     # Leaf guards
     def add_lambda_guard(
-        self, user_lambda: Callable[..., Any], verbose_code_parts: list[str]
-    ) -> None: ...
-    def add_lambda_guard_no_args(
-        self, user_lambda: Callable[..., Any], verbose_code_parts: list[str]
-    ) -> None: ...
-    def add_lambda_guard_no_framelocals(
         self, user_lambda: Callable[..., Any], verbose_code_parts: list[str]
     ) -> None: ...
     def add_id_match_guard(
