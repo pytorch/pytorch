@@ -14,11 +14,16 @@ from torch.backends.cuda import (
     SDPAParams,
 )
 
+from ._fa4 import flash_attention_fa4_status, register_flash_attention_fa4
+
 
 __all__: list[str] = [
     "SDPBackend",
     "sdpa_kernel",
     "WARN_FOR_UNFUSED_KERNELS",
+    "register_flash_attention_fa4",
+    "flash_attention_fa4_status",
+    "register_fa4",
 ]
 
 # Note: [SDPA warnings]
@@ -162,3 +167,7 @@ def _sdpa_kernel_variadic(*backends: SDPBackend):
 def _get_flash_version() -> str:
     """This returns the closest matching tag for the flash attention backend"""
     return "2.5.7"
+
+
+def register_fa4(module_path: str = "flash_attn.cute.interface") -> None:
+    register_flash_attention_fa4(module_path)
