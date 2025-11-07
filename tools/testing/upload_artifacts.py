@@ -230,7 +230,7 @@ def upload_adhoc_failure_json(invoking_file: str, current_failure: str) -> None:
         testName = current_failure
         className = ""
 
-    message = "The test file failed but we were not able to determine the exact unittest.  The most likely cause is a segfault"
+    message = "The test file failed but pytest did not generate xml.  The most likely cause is a segfault"
     j = {
         "invoking_file": invoking_file,
         "file": f"{invoking_file}.py",
