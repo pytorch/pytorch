@@ -316,7 +316,7 @@ class StepcurrentPlugin:
         self.run_single: bool = config.getoption("run_single")
 
         self.made_failing_xml_location = f"{directory}/made_failing_xml"
-        self.cache.set(self.made_failing_xml_location, "False")
+        self.cache.set(self.made_failing_xml_location, False)
 
     def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
         if not self.lastrun:
@@ -359,4 +359,4 @@ class StepcurrentPlugin:
         if exitstatus == 0:
             self.cache.set(self.lastrun_location, self.initial_val)
         if exitstatus != 0:
-            self.cache.set(self.made_failing_xml_location, "True")
+            self.cache.set(self.made_failing_xml_location, True)
