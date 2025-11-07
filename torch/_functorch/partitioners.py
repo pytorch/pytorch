@@ -1026,9 +1026,6 @@ def default_partition(
     Returns:
         Returns the generated forward and backward Fx graph modules.
     """
-    fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs = (
-        _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
-    )
     # Respect the original placement of ops rather than rely on dataflow.
     forward_nodes = []
     last_node = None
@@ -1044,14 +1041,25 @@ def default_partition(
     forward_node_names = OrderedSet(
         node.name for node in forward_nodes if node.op != "output"
     )
-    saved_values = []
-    saved_sym_nodes = []
-
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
     if graph_has_recomputable_ops:
         assert_functional_graph(joint_module.graph)
         joint_module = cleanup_recompute_tags(joint_module, is_default_partition=True)
+
+    if not config.unsafe_allow_optimization_of_collectives:
+        force_save_collectives(joint_module)
+
+    force_save_bw_mutation_src(joint_module)
+
+    if static_lifetime_input_indices is None:
+        static_lifetime_input_indices = []
+    node_info = classify_nodes(
+        joint_module, static_lifetime_input_indices, num_fwd_outputs
+    )
+
+    saved_values = []
+    saved_sym_nodes = []
 
     for node in joint_module.graph.nodes:
         if node.name not in forward_node_names:
@@ -1101,6 +1109,11 @@ def default_partition(
     saved_values = list(dict.fromkeys(saved_values).keys())
     saved_sym_nodes = list(dict.fromkeys(saved_sym_nodes).keys())
 
+    if config._sync_decision_cross_ranks:
+        saved_values = _sync_decision_cross_ranks(joint_module.graph, saved_values)
+
+    if static_lifetime_input_nodes is None:
+        static_lifetime_input_nodes = node_info.static_lifetime_input_nodes
     fw_module, bw_module = _extract_fwd_bwd_modules(
         joint_module,
         saved_values,
@@ -1121,10 +1134,9 @@ def default_partition(
     fw_module = raise_getitems(fw_module)
     bw_module = raise_getitems(bw_module)
 
-    # Failing for  python test/functorch/test_aotdispatch.py -k test_some_output_requires_grad_input_doesnt
-    # last_input = next(reversed(module.graph.find_nodes(op="placeholder"))  # StopIteration
-    # fw_module = thread_graphsafe_rng_from_hops(fw_module, is_backward=False)
-    # bw_module = thread_graphsafe_rng_from_hops(bw_module, is_backward=True)
+    fw_module = thread_graphsafe_rng_from_hops(fw_module, is_backward=False)
+    if len(node_info.required_bw_nodes) > 0:
+        bw_module = thread_graphsafe_rng_from_hops(bw_module, is_backward=True)
 
     return fw_module, bw_module
 
@@ -2778,6 +2790,59 @@ def thread_graphsafe_rng_from_hops(module, is_backward):
     return module
 
 
+def classify_nodes(joint_module, static_lifetime_input_indices, num_fwd_outputs):
+    name_to_node = get_name_to_node(joint_module.graph)
+    required_bw_nodes: OrderedSet[fx.Node] = OrderedSet()
+    for node in joint_module.graph.nodes:
+        if node.op == "placeholder" and "tangents" in node.target:
+            required_bw_nodes.add(node)
+        elif _must_be_in_backward(node):
+            required_bw_nodes.add(node)
+
+        if node in required_bw_nodes:
+            required_bw_nodes.update(node.users)
+
+    primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
+    fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
+    inputs = primal_inputs + fwd_seed_offset_inputs
+    fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs = (
+        _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
+    )
+    required_bw_nodes.update(
+        o for o in bwd_outputs if o is not None and o.op != "output"
+    )
+    forward_only_graph = _extract_graph_with_inputs_outputs(
+        joint_module.graph, inputs, fwd_outputs, fwd_outputs_descs, "forward"
+    )
+    required_fw_nodes: OrderedSet[fx.Node] = OrderedSet(
+        name_to_node[node.name]
+        for node in forward_only_graph.nodes
+        if node.op != "output"
+    )
+    unclaimed_nodes: OrderedSet[fx.Node] = OrderedSet(
+        node
+        for node in joint_module.graph.nodes
+        if node not in required_fw_nodes and node not in required_bw_nodes
+    )
+    static_lifetime_input_nodes = OrderedSet(
+        p for i, p in enumerate(primal_inputs) if i in static_lifetime_input_indices
+    )
+    fw_cnt = 0
+    fw_order = {}
+    for node in joint_module.graph.nodes:
+        if node in required_fw_nodes:
+            fw_order[node] = fw_cnt
+            fw_cnt += 1
+    return NodeInfo(
+        inputs,
+        required_fw_nodes,
+        required_bw_nodes,
+        unclaimed_nodes,
+        fw_order,
+        static_lifetime_input_nodes,
+    )
+
+
 def min_cut_rematerialization_partition(
     joint_module: fx.GraphModule,
     _joint_inputs,
@@ -2831,63 +2896,11 @@ def min_cut_rematerialization_partition(
         force_save_collectives(joint_module)
     force_save_bw_mutation_src(joint_module)
 
-    def classify_nodes(joint_module, static_lifetime_input_indices):
-        name_to_node = get_name_to_node(joint_module.graph)
-        required_bw_nodes: OrderedSet[fx.Node] = OrderedSet()
-        for node in joint_module.graph.nodes:
-            if node.op == "placeholder" and "tangents" in node.target:
-                required_bw_nodes.add(node)
-            elif _must_be_in_backward(node):
-                required_bw_nodes.add(node)
-
-            if node in required_bw_nodes:
-                required_bw_nodes.update(node.users)
-
-        primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
-        fwd_seed_offset_inputs = list(
-            filter(_is_fwd_seed_offset, joint_module.graph.nodes)
-        )
-        inputs = primal_inputs + fwd_seed_offset_inputs
-        fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs = (
-            _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
-        )
-        required_bw_nodes.update(
-            o for o in bwd_outputs if o is not None and o.op != "output"
-        )
-        forward_only_graph = _extract_graph_with_inputs_outputs(
-            joint_module.graph, inputs, fwd_outputs, fwd_outputs_descs, "forward"
-        )
-        required_fw_nodes: OrderedSet[fx.Node] = OrderedSet(
-            name_to_node[node.name]
-            for node in forward_only_graph.nodes
-            if node.op != "output"
-        )
-        unclaimed_nodes: OrderedSet[fx.Node] = OrderedSet(
-            node
-            for node in joint_module.graph.nodes
-            if node not in required_fw_nodes and node not in required_bw_nodes
-        )
-        static_lifetime_input_nodes = OrderedSet(
-            p for i, p in enumerate(primal_inputs) if i in static_lifetime_input_indices
-        )
-        fw_cnt = 0
-        fw_order = {}
-        for node in joint_module.graph.nodes:
-            if node in required_fw_nodes:
-                fw_order[node] = fw_cnt
-                fw_cnt += 1
-        return NodeInfo(
-            inputs,
-            required_fw_nodes,
-            required_bw_nodes,
-            unclaimed_nodes,
-            fw_order,
-            static_lifetime_input_nodes,
-        )
-
     if static_lifetime_input_indices is None:
         static_lifetime_input_indices = []
-    node_info = classify_nodes(joint_module, static_lifetime_input_indices)
+    node_info = classify_nodes(
+        joint_module, static_lifetime_input_indices, num_fwd_outputs
+    )
 
     # networkx blows up on graphs with no required backward nodes
     # Since there's nothing to partition anyway, and the default partitioner can "handle"
