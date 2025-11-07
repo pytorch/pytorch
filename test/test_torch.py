@@ -10412,7 +10412,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # Concurrent calls to tensor.untyped_storage()
         def access_untyped_storage(tensor, barrier):
             barrier.wait()
-            return id(tensor.untyped_storage())
+            return weakref.ref(tensor.untyped_storage())
 
         for i in range(NUM_ITERS):
             tensor = torch.tensor([1.0, 2.0, 3.0])
@@ -10425,7 +10425,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
                 # Check that all the storages returned were the same
                 for future in futures:
-                    self.assertEqual(future.result(), id(tensor.untyped_storage()))
+                    self.assertEqual(future.result()(), tensor.untyped_storage())
 
     # FIXME: move to test_linalg
     @torch.inference_mode()
