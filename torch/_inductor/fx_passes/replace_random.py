@@ -26,6 +26,14 @@ def _shape_to_offset(size, device: torch.device) -> int:
     nelem = 1
     for s in size:
         nelem *= int(s)
+    # Normalize device
+    if device is None:
+        device = torch.device("cpu")
+    elif not isinstance(device, torch.device):
+        device = torch.device(device)
+    # CPU or non-CUDA builds: skip alignment, no CUDA queries
+    if device.type != "cuda":
+        return 0
 
     UNROLL = 4
     prop = torch.cuda.get_device_properties(device)
@@ -230,7 +238,7 @@ def replace_random(
     ]  # type: ignore[union-attr]
     device = get_device(device)
 
-    if mode == "rand" and config.align_random_eager:
+    if mode == "rand" and config.align_random_eager and device.type == "cuda":
 
         def replacement(size):
             offset = _shape_to_offset(size, device)
