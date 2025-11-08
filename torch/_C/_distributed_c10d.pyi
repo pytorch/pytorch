@@ -1,9 +1,8 @@
 # mypy: allow-untyped-defs
 # mypy: disable-error-code="type-arg"
-from collections.abc import Callable
 from datetime import timedelta
 from enum import Enum
-from typing import Any, Optional, overload, Union
+from typing import Any, Callable, Optional, overload, Union
 
 import torch
 from torch import Tensor

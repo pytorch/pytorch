@@ -1,14 +1,10 @@
 # Owner(s): ["module: dynamo"]
-from typing import NamedTuple, Optional, TYPE_CHECKING
+from typing import Callable, NamedTuple, Optional
 
 import torch
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter, same
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 
 """

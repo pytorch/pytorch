@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 import threading
 from collections.abc import Callable, Sequence
 from functools import lru_cache
@@ -6,6 +7,7 @@ from itertools import chain
 from typing import cast, Optional, Union
 
 import torch
+from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
@@ -169,7 +171,16 @@ class ShardingPropagator:
         # these operators to be inserted in the fx graph.
         from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
-        with FakeTensorMode(), disable_proxy_modes_tracing():
+        # DTensor.dispatch runs fake tensor prop twice, once here, and once for the actual
+        # local tensor result. The result here is never surfaced to tracing, and so if
+        # the op is data-dependent, can result in PendingUnbackedSymbolNotFound errors.
+        fake_mode = detect_fake_mode() or FakeTensorMode()
+        suppress_fresh_symbols_ctx = (
+            fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+            if fake_mode.shape_env
+            else contextlib.nullcontext()
+        )
+        with fake_mode, disable_proxy_modes_tracing(), suppress_fresh_symbols_ctx:
             fake_args = op_schema.gen_fake_args()
             fake_kwargs = op_schema.gen_fake_kwargs()
             fake_out = op_schema.op(*fake_args, **fake_kwargs)
