@@ -1681,14 +1681,13 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         tag_activation_checkpoint = torch.ops.higher_order.tag_activation_checkpoint(wrap_body_0, l_x_, use_reentrant = True);  wrap_body_0 = l_x_ = None
-        getitem: "f32[4, 4]" = tag_activation_checkpoint[0]
-        getitem_1: "f32[4, 4]" = tag_activation_checkpoint[1];  tag_activation_checkpoint = None
-        return (getitem, getitem_1)
+        getitem: "f32[4, 4]" = tag_activation_checkpoint[0];  tag_activation_checkpoint = None
+        return (getitem,)
 
     class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[4, 4]"):
             y: "f32[4, 4]" = torch.sin(l_x_);  l_x_ = None
-            return (y, y)
+            return (y,)
 """,
         )
 
