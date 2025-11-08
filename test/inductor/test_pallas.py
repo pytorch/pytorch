@@ -41,6 +41,7 @@ def make_pallas(cls):
         cls,
         cls_prefix,
         suffix,
+        (config, "cpu_backend", "pallas"),
         (config, "cuda_backend", "pallas"),
         xfail_prop="_expected_failure_pallas",
     )
@@ -319,14 +320,15 @@ class PallasTestsCPU(PallasTestsMixin, TestCase):
     DEVICE = "cpu"
 
 
-# Create test variants using the main test suite
-# Note: Only enable GPU tests since Pallas primarily targets GPU
-if hasattr(sys.modules.get(__name__), "test_torchinductor") and HAS_PALLAS:
-    if getattr(test_torchinductor, "HAS_GPU", False):
-        # Uncomment these to run full test suite with Pallas backend
-        # make_pallas(test_torchinductor.SweepInputsGPUTest)
-        # make_pallas(test_torchinductor.GPUTests)
-        pass
+if test_torchinductor.HAS_CPU and HAS_PALLAS:
+    make_pallas(test_torchinductor.SweepInputsCpuTest)
+    make_pallas(test_torchinductor.CpuTests)
+
+
+if test_torchinductor.HAS_GPU and HAS_PALLAS:
+    make_pallas(test_torchinductor.SweepInputsGPUTest)
+    make_pallas(test_torchinductor.GPUTests)
+
 
 if __name__ == "__main__":
     if HAS_PALLAS:
