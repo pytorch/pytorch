@@ -90,9 +90,9 @@ jobs:
     # runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}"
     runs-on: "${{ matrix.runner }}"
     outputs:
-      docker-pytorch-linux-jammy-rocm-n-py3: ${{ steps.generate_output.pytorch-linux-jammy-rocm-n-py3 }}
-      docker-pytorch-linux-noble-rocm-n-py3: ${{ steps.generate_output.pytorch-linux-noble-rocm-n-py3 }}
-      docker-pytorch-linux-jammy-rocm-n-py3-benchmarks: ${{ steps.generate_output.pytorch-linux-jammy-rocm-n-py3-benchmarks }}
+      docker-pytorch-linux-jammy-rocm-n-py3: ${{ steps.generate_output.outputs.pytorch-linux-jammy-rocm-n-py3 }}
+      docker-pytorch-linux-noble-rocm-n-py3: ${{ steps.generate_output.outputs.pytorch-linux-noble-rocm-n-py3 }}
+      docker-pytorch-linux-jammy-rocm-n-py3-benchmarks: ${{ steps.generate_output.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}
 
     steps:
       - name: Clean workspace
