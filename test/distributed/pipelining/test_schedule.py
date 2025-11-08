@@ -21,6 +21,7 @@ from torch.distributed.pipelining import (
 from torch.distributed.pipelining._utils import generate_stage_to_rank_mapping
 from torch.distributed.pipelining.schedules import (
     _Action,
+    _add_reduce_grad,
     _add_send_recv,
     _add_unshard_reshard,
     _format_pipeline_order,
@@ -565,6 +566,45 @@ class TestScheduleLowering(TestCase):
 
         comms_sch = _add_unshard_reshard(compute_sch)
         for expected, actual in zip(expected_comms_sch, comms_sch):
+            self.assertEqual(
+                expected,
+                actual,
+                (
+                    f"Mismatch: expected action {expected} but found {actual}."
+                    f"\nWhole Schedule: {comms_sch}"
+                ),
+            )
+
+    @parametrize(
+        "test_info",
+        [
+            {
+                "compute": ["0F0", "0F1", "   ", "0B0", "0B1"],
+                "comms": ["0F0", "0F1", "0B0", "0B1", "0REDUCE_GRAD"],
+            },
+            {
+                "compute": ["0F0", "0F1", "1F0", "1F1", "1B0", "1B1", "0B0", "0B1"],
+                "comms": [
+                    "0F0",
+                    "0F1",
+                    "1F0",
+                    "1F1",
+                    "1B0",
+                    "1B1",
+                    "1REDUCE_GRAD",
+                    "0B0",
+                    "0B1",
+                    "0REDUCE_GRAD",
+                ],
+            },
+        ],
+    )
+    def test_reduce_grad(self, test_info):
+        compute_sch = self._parse_actions(test_info["compute"])
+        expected_comms_sch = self._parse_actions(test_info["comms"])
+
+        comms_sch = _add_reduce_grad(compute_sch, 2)
+        for expected, actual in zip(expected_comms_sch, comms_sch, strict=True):
             self.assertEqual(
                 expected,
                 actual,
