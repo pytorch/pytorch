@@ -910,7 +910,7 @@ class TestProfiler(TestCase):
             for e in prof.function_events:
                 if "#" in e.name:
                     key = e.name
-                    if key in expected_event_count.keys():
+                    if key in expected_event_count:
                         actual_event_count[key] = (
                             actual_event_count.setdefault(key, 0) + 1
                         )
@@ -3094,7 +3094,7 @@ aten::mm""",
                 report = json.load(f)
 
             # It is platform dependent whether the path will include "profiler/"
-            keys = [k for k in report.keys() if k.endswith("test_profiler.py")]
+            keys = [k for k in report if k.endswith("test_profiler.py")]
             self.assertEqual(len(keys), 1, f"{keys}")
             entry = report[keys[0]]
 
