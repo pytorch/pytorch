@@ -84,6 +84,11 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
     steps:
+      - name: Debug git config
+        shell: bash
+        run: |
+          git --no-pager config --global --get-regexp '^url'
+
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
