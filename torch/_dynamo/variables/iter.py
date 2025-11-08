@@ -63,7 +63,7 @@ class ItertoolsVariable(VariableTracker):
         # See also: module `torch._dynamo.polyfills.itertools`
 
         if self.value is itertools.product:
-            if any(kw != "repeat" for kw in kwargs.keys()):
+            if any(kw != "repeat" for kw in kwargs):
                 unimplemented_v2(
                     gb_type="Unsupported kwargs for itertools.product",
                     context=f"call_function {self} {args} {kwargs}",
@@ -72,7 +72,7 @@ class ItertoolsVariable(VariableTracker):
                     hints=[*graph_break_hints.USER_ERROR],
                 )
 
-            if "repeat" in kwargs.keys():
+            if "repeat" in kwargs:
                 r = kwargs["repeat"].as_python_constant()
             else:
                 r = 1
@@ -82,7 +82,8 @@ class ItertoolsVariable(VariableTracker):
                 for item in itertools.product(*seqs, repeat=r)
             ]
             return variables.ListIteratorVariable(
-                items, mutation_type=ValueMutationNew()
+                items,  # type: ignore[arg-type]
+                mutation_type=ValueMutationNew(),
             )
         elif (
             self.value is itertools.combinations
@@ -98,10 +99,11 @@ class ItertoolsVariable(VariableTracker):
             for item in itertools.combinations(iterable, r):
                 items.append(variables.TupleVariable(list(item)))
             return variables.ListIteratorVariable(
-                items, mutation_type=ValueMutationNew()
+                items,  # type: ignore[arg-type]
+                mutation_type=ValueMutationNew(),
             )
         elif self.value is itertools.groupby:
-            if any(kw != "key" for kw in kwargs.keys()):
+            if any(kw != "key" for kw in kwargs):
                 unimplemented_v2(
                     gb_type="Unsupported kwargs for itertools.groupby",
                     context=f"call_function {self} {args} {kwargs}",
@@ -181,7 +183,8 @@ class ItertoolsVariable(VariableTracker):
                     from_exc=e,
                 )
             return variables.ListIteratorVariable(
-                result, mutation_type=ValueMutationNew()
+                result,  # type: ignore[arg-type]
+                mutation_type=ValueMutationNew(),
             )
         elif self.value is itertools.repeat:
             if len(args) < 2:
@@ -212,7 +215,8 @@ class ItertoolsVariable(VariableTracker):
                 )
             ]
             return variables.ListIteratorVariable(
-                items, mutation_type=ValueMutationNew()
+                items,  # type: ignore[arg-type]
+                mutation_type=ValueMutationNew(),
             )
         else:
             return super().call_function(tx, args, kwargs)
@@ -586,7 +590,7 @@ class FilterVariable(IteratorVariable):
             else:
                 res = self.fn.call_function(tx, [item], {})
             pred_res = variables.UserFunctionVariable(
-                polyfills.predicate
+                polyfills.predicate  # type: ignore[arg-type]
             ).call_function(tx, [res], {})
             if pred_res.as_python_constant():
                 return item

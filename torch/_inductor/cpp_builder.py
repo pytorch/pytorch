@@ -913,6 +913,10 @@ def _get_optimization_cflags(
             if not config.is_fbcode():
                 if platform.machine() == "ppc64le":
                     cflags.append("mcpu=native")
+                elif platform.machine() == "riscv64":
+                    cflags.append("march=rv64gc")
+                elif platform.machine() == "riscv32":
+                    cflags.append("march=rv32gc")
                 else:
                     cflags.append("march=native")
 
