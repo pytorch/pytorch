@@ -133,7 +133,7 @@ def is_trivial_mask_graph(graph_module: GraphModule) -> bool:
 @functools.lru_cache(maxsize=1)
 def _supports_nontrivial_mask_graphs() -> bool:
     """Currently only supported on Hopper (SM90) GPUs."""
-    return torch.cuda.get_device_capability()[0] == 9
+    return torch.cuda.get_device_capability()[0] in [9, 10]
 
 
 def _can_use_flex_flash_attention(
