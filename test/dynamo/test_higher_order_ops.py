@@ -1834,9 +1834,9 @@ def forward(self, L_x_ : torch.Tensor):
                 body_graph,
                 """\
 def forward(self, child : torch.Tensor):
-    sin = child.sin()
-    sin_1 = child.sin();  child = None
-    return (sin, sin_1)""",
+    child_1 = child.sin()
+    child_2 = child.sin();  child = None
+    return (child_1, child_2)""",
             )
 
     def test_map_pytree_return(self):
@@ -1879,14 +1879,14 @@ def forward(self, L_x_ : torch.Tensor):
                 body_graph,
                 """\
 def forward(self, child : torch.Tensor):
-    clone = child.clone()
-    clone_1 = child.clone()
-    clone_2 = child.clone()
-    clone_3 = child.clone()
-    clone_4 = child.clone()
-    clone_5 = child.clone()
-    clone_6 = child.clone();  child = None
-    return (clone, clone_1, clone_2, clone_3, clone_4, clone_5, clone_6)""",
+    child_1 = child.clone()
+    child_2 = child.clone()
+    child_3 = child.clone()
+    child_4 = child.clone()
+    child_5 = child.clone()
+    child_6 = child.clone()
+    child_7 = child.clone();  child = None
+    return (child_1, child_2, child_3, child_4, child_5, child_6, child_7)""",
             )
 
     def test_map_kwargs(self):

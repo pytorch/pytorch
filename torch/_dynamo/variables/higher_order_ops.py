@@ -27,7 +27,7 @@ import logging
 import types
 import warnings
 from collections.abc import Sequence
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Literal, Optional, TYPE_CHECKING
 
 import torch._C
 import torch.fx
@@ -63,6 +63,7 @@ from .lists import ListVariable, TupleVariable
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.output_graph import SubgraphTracer
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
@@ -219,8 +220,14 @@ def _make_inlined(tx: "InstructionTranslator", f):
 
 
 def _call_function_and_unflatten_output(
-    tx, fn, args, kwargs, flat_example_value, body_r, graph_output_vts
-):
+    tx: "InstructionTranslator",
+    fn: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    flat_example_value: Any,
+    body_r: Optional[VariableTracker],
+    graph_output_vts: VariableTracker | tuple[VariableTracker, ...],
+) -> Optional[VariableTracker]:
     from .builder import wrap_fx_proxy
 
     # Store the invocation as a call
@@ -240,6 +247,16 @@ def _call_function_and_unflatten_output(
     # are still pointing to the nodes present in the subgraph. So, we reproxify
     # the original tensor vts with the subgraph outputs. This way, whenever the
     # outer graph uses an original vt, it uses the subgraph output.
+    #
+    # This is critical for maintaining the separation between:
+    # - `body_r`: The output VT structure that Dynamo continues tracing (may
+    #   contain non-proxyable objects, nested structures, etc.)
+    # - `graph_output_vts`: Only the tensor/symint VTs that were actual graph
+    #   outputs from speculate_subgraph
+    #
+    # By overwriting the proxies of VTs in `body_r` with the proxies from the
+    # HOP call, we ensure the outer graph correctly references the HOP outputs
+    # while still allowing `body_r` to contain arbitrary Python objects.
     if body_r is not None:
         for orig_vt, subgraph_vt in zip(graph_output_vts, flat_variable.items):
             if isinstance(
@@ -858,17 +875,17 @@ def _merge_graph_inputs(
 
 # See NOTE [HigherOrderOperator tracing design] for details of the design
 def speculate_subgraph(
-    tx,
-    f,
-    sub_args,
-    sub_kwargs,
-    description,
+    tx: "InstructionTranslator",
+    f: VariableTracker,
+    sub_args: Sequence[VariableTracker],
+    sub_kwargs: Optional[dict[str, Any]],
+    description: str,
     *,
     # source_target is the .value of HigherOrderOpVariable and is the
     # target of the proxy that we created for the higherOrderOperator.
-    source_target=None,
-    always_restore=False,
-    enable_grad=None,
+    source_target: Optional[Any] = None,
+    always_restore: bool = False,
+    enable_grad: Optional[bool] = None,
     # NOTE [argument `set_subgraph_inputs`]
     # set_subgraph_inputs controls what how to construct subgraphs' placeholders from sub_args.
     # 1. if your HOP supports arbitrary inputs, use set_subgraph_inputs="automatic" (most recommended).
@@ -878,20 +895,25 @@ def speculate_subgraph(
     # 3. if your HOP must preserve inputs that are not tensor or symnode as placeholders e.g. AutogradFunctionContextVariable
     # use set_subgraph_inputs="manual" (not recommended). We do not recommend it in general because it has the
     # restriction that user need to manually control how to create placeholders and VariableTrackers for the args.
-    set_subgraph_inputs="automatic",
-    restore_side_effects=True,
-    should_flatten_outputs=False,
+    set_subgraph_inputs: Literal["automatic", "flatten_manual", "manual"] = "automatic",
+    restore_side_effects: bool = True,
+    should_flatten_outputs: bool = False,
     # if should_flatten_outputs is True, `remove_consts_from_outputs` remove the
     # const outputs from the subgraph output.
-    remove_consts_from_outputs=True,
-    under_activation_checkpoint=False,
+    remove_consts_from_outputs: bool = True,
+    under_activation_checkpoint: bool = False,
     # TODO - supports input_mutation and aliasing should be False by default for strictness
-    supports_input_mutation=True,
-    supports_aliasing=True,
+    supports_input_mutation: bool = True,
+    supports_aliasing: bool = True,
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
-    tracer=None,
-):
+    tracer: Optional["SubgraphTracer"] = None,
+) -> tuple[
+    VariableTracker,
+    torch.fx.Graph,
+    dict[torch.fx.Proxy, torch.fx.Proxy],
+    VariableTracker | tuple[VariableTracker, ...],
+]:
     if sub_kwargs is None:
         sub_kwargs = {}
 
@@ -973,7 +995,32 @@ def speculate_subgraph(
                 )
                 tx.output.side_effects = prev_side_effects
 
+            # NOTE: [Separation of graph outputs and output VTs]
+            # In Dynamo (outside of speculate_subgraph), VTs and the graph are
+            # separate concepts:
+            # - VTs (VariableTrackers) can "run ahead" and continue Dynamo tracing
+            # - The graph is just a side data structure tracking computation seen so far
+            #
+            # This separation is crucial for HOPs with non-proxyable outputs (e.g.,
+            # custom user-defined objects containing tensors). The function may return
+            # complex Python objects for Dynamo to continue tracing, but only the
+            # tensor/symint VTs need to be registered as actual graph outputs.
+            #
+            # Example:
+            #   class Foo:
+            #       def __init__(self, a, b):
+            #           self.a = a  # tensor
+            #           self.b = b  # tensor
+            #
+            #   def gn(x):
+            #       return Foo(torch.sin(x), torch.cos(x))
+            #
+            # Here, `output` VT is a UserDefinedObjectVariable wrapping Foo, but
+            # `graph_output_vts` contains only the tensor VTs (a and b) that should
+            # be actual FX graph outputs.
             if should_flatten_outputs:
+                # Collect only tensor and symint VTs that should be graph outputs.
+                # We walk the output structure and extract proxyable VTs.
                 graph_output_vts = []
 
                 def visit(vt):
@@ -1165,6 +1212,13 @@ def speculate_subgraph(
                             ],
                         )
 
+                # Return both the output VT and the graph output VTs separately:
+                # - `output`: The VT that Dynamo continues tracing with (may be
+                #   complex Python objects, tuples, dicts, etc.)
+                # - `graph`: The FX graph representing the subgraph computation
+                # - `lifted_freevars`: Free variables lifted as inputs to the subgraph
+                # - `graph_output_vts`: Only the tensor/symint VTs that are actual
+                #   FX graph outputs (basically the vts associated with graph outputs)
                 return (
                     output,
                     graph,
@@ -1377,8 +1431,20 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # generation.
             tx.fake_mode.epoch += 1
 
-            if not ret_graph_output_vts:
-                unimplemented("Expected at least one tensor output in cond branches")
+            flattened_ret_val = _make_inlined(tx, pytree.tree_flatten)(ret_val).items[0]
+            if not only_consist_of(
+                flattened_ret_val, (TensorVariable, ConstantVariable)
+            ):
+                unimplemented(
+                    "Expected branches to return a possibly nested pytree of tensors "
+                    "or constant ints but it consists of others.",
+                )
+            for ret in flattened_ret_val.unpack_var_sequence(tx):
+                if isinstance(ret, ConstantVariable) and ret.python_type() is not int:
+                    unimplemented(
+                        "Expected branches to return a possibly nested pytree of tensors "
+                        f"or constant ints but it consists of others {ret.python_type()}.",
+                    )
             return ret_val, ret_graph, ret_lifted_freevars, ret_graph_output_vts
 
         (true_r, true_graph, true_lifted_freevars, true_graph_output_vts) = (
@@ -1723,15 +1789,28 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             additional_inputs_proxy,
         )
 
-        return _call_function_and_unflatten_output(
-            tx,
-            torch.ops.higher_order.associative_scan,
-            p_args,
-            {},
-            None,
-            None,
-            combine_graph_output_vts,
+        from .builder import wrap_fx_proxy
+
+        flat_variable = wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                torch.ops.higher_order.associative_scan,
+                args=p_args,
+                kwargs={},
+            ),
+            example_value=None,
         )
+
+        if xs_treespec:
+            flat_list_variable = BuiltinVariable(list).call_function(
+                tx, [flat_variable], {}
+            )
+            return _make_inlined(tx, pytree.tree_unflatten)(
+                flat_list_variable, xs_treespec
+            )
+        else:
+            return flat_variable
 
 
 class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
@@ -2032,6 +2111,20 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             remove_consts_from_outputs=False,
             supports_input_mutation=self.supports_input_mutation,
             supports_aliasing=self.supports_aliasing,
+        )
+        # Check all outputs of map are tensors.
+        # For map, outputting None is OK, thus ignore None values in the check
+        body_r_vars = (
+            _make_inlined(tx, pytree.tree_flatten)(body_r)
+            .items[0]
+            .unpack_var_sequence(tx)
+        )
+        none_mask = [
+            type(x.realize()) is ConstantVariable and x.as_python_constant() is None
+            for x in body_r_vars
+        ]
+        _check_all_tensorvariable(
+            [br for bm, br in zip(none_mask, body_r_vars) if not bm]
         )
 
         body_nn_modules = dict(tx.output.nn_modules)
