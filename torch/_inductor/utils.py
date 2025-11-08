@@ -24,6 +24,7 @@ import textwrap
 import time
 import unittest
 from collections.abc import (
+    Callable,
     Collection,
     Generator,
     Iterator,
@@ -35,25 +36,20 @@ from datetime import datetime
 from io import StringIO
 from typing import (
     Any,
-    Callable,
     cast,
+    Concatenate,
     Generic,
     Literal,
     NamedTuple,
     Optional,
     Protocol,
     TYPE_CHECKING,
+    TypeAlias,
+    TypeGuard,
     TypeVar,
     Union,
 )
-from typing_extensions import (
-    Concatenate,
-    dataclass_transform,
-    ParamSpec,
-    Self,
-    TypeAlias,
-    TypeGuard,
-)
+from typing_extensions import dataclass_transform, ParamSpec, Self
 from unittest import mock
 
 import sympy
@@ -1230,7 +1226,7 @@ def unload_xpu_triton_pyds() -> None:
         if not module_name.startswith("torch._inductor.runtime.compile_tasks."):
             continue
         m = sys.modules[module_name]
-        for attr_name in m.__dict__.keys():
+        for attr_name in m.__dict__:
             if attr_name.startswith("triton_"):
                 kernel = getattr(m, attr_name)
                 if isinstance(
@@ -2171,9 +2167,21 @@ def use_cpp_bmm_template(
 
     assert isinstance(mat1.layout, Layout)
 
-    return (
-        use_cpp_gemm_template(layout, mat1, mat2, require_constant_mat2=False)
-        and mat1.layout.is_contiguous()
+    # In certain scenarios, such as when the first stride is 0, the entire tensor may not be contiguous.
+    # But the 2D matrix within each batch can still be contiguous, allowing us to apply max autotune.
+    # So here we specifically check for contiguity within the 2D matrix of each batch.
+    mat1_size = mat1.layout.size
+    mat1_stride = mat1.layout.stride
+    mat1_each_batch_is_contiguous = (
+        _use_template_for_cpu(layout)
+        and mat1.get_dtype() == torch.float32
+        and (len(mat1_size) == 3)
+        and (len(mat1_stride) == 3)
+        and (mat1_stride[1] == mat1_size[2])
+        and (mat1_stride[2] == 1)
+    )
+    return use_cpp_gemm_template(layout, mat1, mat2, require_constant_mat2=False) and (
+        mat1.layout.is_contiguous() or mat1_each_batch_is_contiguous
     )
 
 
@@ -2555,11 +2563,14 @@ def get_device_tflops(dtype: torch.dtype) -> float:
             return get_max_simd_tflops(torch.float32, sm_clock)
     else:
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
+            # pyrefly: ignore  # missing-argument
             return get_max_tensorcore_tflops(dtype)
 
         if torch.backends.cuda.matmul.allow_tf32:
+            # pyrefly: ignore  # missing-argument
             return get_max_tensorcore_tflops(torch.float32)
         else:
+            # pyrefly: ignore  # missing-argument
             return get_max_simd_tflops(torch.float32)
 
 
@@ -2573,6 +2584,7 @@ def get_gpu_dram_gbps() -> int:
 def get_gpu_shared_memory() -> int:
     from triton.runtime import driver
 
+    # pyrefly: ignore  # missing-attribute
     return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
 
 
@@ -2737,13 +2749,16 @@ def is_wait(node: Optional[Union[IRNode, Operation]]) -> bool:
     return type(node) is ir._WaitKernel
 
 
-def contains_collective(snode: BaseSchedulerNode) -> bool:
+def contains_collective(
+    snode: BaseSchedulerNode,
+    filter_fn: Optional[Callable[[BaseSchedulerNode], bool]] = None,
+) -> bool:
     from torch._inductor.scheduler import GroupedSchedulerNode
 
     if isinstance(snode, GroupedSchedulerNode):
         return any(contains_collective(x) for x in snode.snodes)
 
-    return is_collective(snode.node)
+    return is_collective(snode.node) and (filter_fn is None or filter_fn(snode))
 
 
 def contains_wait(snode: BaseSchedulerNode) -> bool:

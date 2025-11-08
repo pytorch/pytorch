@@ -34,7 +34,7 @@ class _Column:
         time_unit: str,
         trim_significant_figures: bool,
         highlight_warnings: bool,
-    ):
+    ) -> None:
         self._grouped_results = grouped_results
         self._flat_results = [*it.chain.from_iterable(grouped_results)]
         self._time_scale = time_scale
@@ -79,7 +79,7 @@ def optional_min(seq):
 
 class _Row:
     def __init__(self, results, row_group, render_env, env_str_len,
-                 row_name_str_len, time_scale, colorize, num_threads=None):
+                 row_name_str_len, time_scale, colorize, num_threads=None) -> None:
         super().__init__()
         self._results = results
         self._row_group = row_group
@@ -91,7 +91,7 @@ class _Row:
         self._columns: tuple[_Column, ...] = ()
         self._num_threads = num_threads
 
-    def register_columns(self, columns: tuple[_Column, ...]):
+    def register_columns(self, columns: tuple[_Column, ...]) -> None:
         self._columns = columns
 
     def as_column_strings(self):
@@ -156,7 +156,7 @@ class Table:
             colorize: Colorize,
             trim_significant_figures: bool,
             highlight_warnings: bool
-    ):
+    ) -> None:
         if len({r.label for r in results}) != 1:
             raise AssertionError("All results must share the same label")
 
@@ -283,17 +283,17 @@ class Compare:
     Args:
         results: List of Measurement to display.
     """
-    def __init__(self, results: list[common.Measurement]):
+    def __init__(self, results: list[common.Measurement]) -> None:
         self._results: list[common.Measurement] = []
         self.extend_results(results)
         self._trim_significant_figures = False
         self._colorize = Colorize.NONE
         self._highlight_warnings = False
 
-    def __str__(self):
+    def __str__(self) -> str:
         return "\n".join(self._render())
 
-    def extend_results(self, results):
+    def extend_results(self, results) -> None:
         """Append results to already stored ones.
 
         All added results must be instances of ``Measurement``.
@@ -305,22 +305,22 @@ class Compare:
                 )
         self._results.extend(results)
 
-    def trim_significant_figures(self):
+    def trim_significant_figures(self) -> None:
         """Enables trimming of significant figures when building the formatted table."""
         self._trim_significant_figures = True
 
-    def colorize(self, rowwise=False):
+    def colorize(self, rowwise=False) -> None:
         """Colorize formatted table.
 
         Colorize columnwise by default.
         """
         self._colorize = Colorize.ROWWISE if rowwise else Colorize.COLUMNWISE
 
-    def highlight_warnings(self):
+    def highlight_warnings(self) -> None:
         """Enables warning highlighting when building formatted table."""
         self._highlight_warnings = True
 
-    def print(self):
+    def print(self) -> None:
         """Print formatted table"""
         print(str(self))
 

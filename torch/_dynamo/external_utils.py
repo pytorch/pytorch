@@ -196,6 +196,10 @@ def get_nonrecursive_disable_wrapper(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     # this function is in external_utils so that convert_frame doesn't skip it.
     @functools.wraps(fn)
     def nonrecursive_disable_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        if torch.compiler.is_exporting():
+            raise RuntimeError(
+                "Non-recursive torch.compiler.disable is not supported with torch.export."
+            )
         return fn(*args, **kwargs)
 
     return nonrecursive_disable_wrapper
@@ -251,33 +255,3 @@ def wrap_inline_with_error_on_graph_break(
                 return fn(*args, **kwargs)
 
     return wrapper
-
-
-def filter_out_const_values(tup: tuple[Any, ...], masks: list[bool]) -> tuple[Any, ...]:
-    """
-    masks is a list of bools, where True means the corresponding element in tup
-    is a const value. Filter out the const values.
-    """
-    out = []
-    for mask_idx, mask in enumerate(masks):
-        if not mask:
-            out.append(tup[mask_idx])
-    return tuple(out)
-
-
-def insert_const_values_with_mask(
-    tup: tuple[Any, ...], masks: list[bool], values: tuple[Any, ...]
-) -> tuple[Any, ...]:
-    """
-    masks and values are of same length. For indices where the mask is True, use
-    the const_values to fill in.
-    """
-    out = []
-    idx = 0
-    for mask_idx, mask in enumerate(masks):
-        if mask:
-            out.append(values[mask_idx])
-        else:
-            out.append(tup[idx])
-            idx += 1
-    return tuple(out)
