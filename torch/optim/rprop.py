@@ -39,7 +39,7 @@ class Rprop(Optimizer):  # noqa: D101
         foreach: Optional[bool] = None,
         maximize: bool = False,
         differentiable: bool = False,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -235,7 +235,7 @@ def _single_tensor_rprop(
     capturable: bool,
     differentiable: bool,
     has_complex: bool,
-):
+) -> None:
     for i, param in enumerate(params):
         grad = grads[i]
         grad = grad if not maximize else -grad
@@ -306,7 +306,7 @@ def _multi_tensor_rprop(
     capturable: bool,
     differentiable: bool,
     has_complex: bool,
-):
+) -> None:
     if len(params) == 0:
         return
 
@@ -428,7 +428,7 @@ def rprop(
     step_size_max: float,
     etaminus: float,
     etaplus: float,
-):
+) -> None:
     r"""Functional API that performs rprop algorithm computation.
 
     See :class:`~torch.optim.Rprop` for details.
