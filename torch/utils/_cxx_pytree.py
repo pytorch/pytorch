@@ -980,8 +980,9 @@ def _broadcast_to_and_flatten(
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> Optional[list[Any]]:
     if not _is_pytreespec_instance(treespec):
-        raise AssertionError(
-            f"_broadcast_to_and_flatten: Expected `treespec` to be instance of PyTreeSpec but got {type(treespec)}"
+        raise TypeError(
+            f"Expected `treespec` to be an instance of "
+            f"PyTreeSpec but got item of type {type(treespec)}."
         )
     full_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
     try:
@@ -994,7 +995,7 @@ def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
     """Serialize a treespec to a JSON string."""
     if not _is_pytreespec_instance(treespec):
         raise TypeError(
-            f"Expected `treespec` to be instance of "
+            f"Expected `treespec` to be an instance of "
             f"PyTreeSpec but got item of type {type(treespec)}."
         )
 

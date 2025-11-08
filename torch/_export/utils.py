@@ -1097,9 +1097,19 @@ def placeholder_naming_pass(
             node.name = node.target = name_map[node.name]
             if node.name in custom_meta:
                 if node.meta.get("custom") is None:
-                    node.meta["custom"] = custom_meta[node.name]
+                    node.meta["custom"] = {}
                 else:
-                    assert node.meta["custom"] == custom_meta[node.name]
+                    # Assert if any existing key has different value
+                    for k, v in node.meta["custom"].items():
+                        if (
+                            k in custom_meta[node.name]
+                            and v != custom_meta[node.name][k]
+                        ):
+                            raise AssertionError(
+                                f"Mismatch in custom metadata for key {k}. Value in "
+                                f"node.meta is {v} and value in custom_meta is {custom_meta[node.name][k]}."
+                            )
+                node.meta["custom"].update(custom_meta[node.name])
             # if the constant obj is an input, we also need to update meta["val"]
             # because this is created before the placeholder naming pass
             if isinstance(node.meta["val"], CustomObjArgument):
