@@ -2926,7 +2926,6 @@
   ],
   "GB0287": [
     {
-<<<<<<< HEAD
       "Gb_type": "unsupported type.__dict__['__annotations__'].__get__ call",
       "Context": "call_function {self}, args: {args}, kwargs: {kwargs}",
       "Explanation": "`torch.compile` only supports calling type.__dict__['__annotations__'].__get__ on a single constant argument (i.e. a type).",
@@ -2988,16 +2987,10 @@
       "Gb_type": "constant-like method call with unsupported return type",
       "Context": "{self._error_prefix}.{name}(*{args}, **{kwargs}) returned {result}",
       "Explanation": "Attempted to call {self._error_prefix}.{name}, got unsupported return value {result}.",
-=======
-      "Gb_type": "Unsupported input type in backward graph of autograd.Function",
-      "Context": "Unsupported node type {type(example_value)}",
-      "Explanation": "Node {node} has example_value {example_value} which is not a Tensor/Symint/None",
->>>>>>> 280f8aa5897 ([dynamo] Rehaul the autograd.Function support)
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
-<<<<<<< HEAD
   ],
   "GB0293": [
     {
@@ -3664,7 +3657,15 @@
       "Explanation": "Encountered triton kernel unsupported feature: {msg}",
       "Hints": []
     }
-=======
->>>>>>> 280f8aa5897 ([dynamo] Rehaul the autograd.Function support)
+  ],
+  "GB0362": [
+    {
+      "Gb_type": "Unsupported input type in backward graph of autograd.Function",
+      "Context": "Unsupported node type {type(example_value)}",
+      "Explanation": "Node {node} has example_value {example_value} which is not a Tensor/Symint/None",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }

@@ -3630,7 +3630,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             )
 
         # Speculate subgraph on the fwd
-        fwd_out, fwd_spec, fwd_graph, fwd_graph_output_vts = speculate_subgraph(
+        fwd_out, fwd_graph, fwd_freevars, fwd_graph_output_vts = speculate_subgraph(
             tx,
             fwd_fn,
             fwd_args,
@@ -3806,7 +3806,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                     type(None),
                 ),
             ):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Unsupported input type in backward graph of autograd.Function",
                     context=f"Unsupported node type {type(example_value)}",
                     explanation=f"Node {node} has example_value {example_value} which is not a Tensor/Symint/None",
