@@ -2701,6 +2701,32 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("bs", (5,))
+    @parametrize("Mdim", (16,))
+    @parametrize("Kdim", (32,))
+    @parametrize("Ndim", (64,))
+    @dtypes(torch.float)
+    def test_bmm_with_broadcasted_mat1(self, bs, Mdim, Kdim, Ndim, dtype):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, w):
+                assert x.dim() == 2, f"Expected x to be 2D, got {x.dim()}D"
+                x_expanded = x.unsqueeze(0).expand(bs, -1, -1)
+                return x_expanded @ w
+
+        counters.clear()
+        u = torch.randn(Mdim, Kdim).to(dtype=dtype)
+        v = torch.randn(bs, Kdim, Ndim).to(dtype=dtype)
+        mod = M().to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (u, v), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("bs", (5,))
     @parametrize("Mdim", (384,))
     @parametrize("Kdim", (96,))
     @parametrize("Ndim", (64, 65))

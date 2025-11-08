@@ -2141,9 +2141,10 @@ class GuardBuilder(GuardBuilderBase):
         original_metadata = deepcopy(self.get(guard.name).__tensor_flatten__()[1])
         if hasattr(value, "__metadata_guard__"):
             verify_guard_fn_signature(value)
+            cls = type(value)
 
             def metadata_checker(x: Any) -> bool:
-                return value.__metadata_guard__(
+                return cls.__metadata_guard__(
                     original_metadata, x.__tensor_flatten__()[1]
                 )
 
@@ -2283,7 +2284,7 @@ class GuardBuilder(GuardBuilderBase):
                 # If guard_nn_modules is true, we will guard on the right set of guards
                 self._guard_on_attribute(guard, "training", GuardBuilder.CONSTANT_MATCH)  # type: ignore[arg-type]
         else:
-            exc.unimplemented_v2(
+            exc.unimplemented(
                 gb_type="Attempted to guard on uninitialized nn.Module",
                 context="",
                 explanation="Attempted to setup an NN_MODULE guard on uninitialized "
