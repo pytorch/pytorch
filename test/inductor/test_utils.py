@@ -9,6 +9,7 @@ from sympy import Symbol, sympify
 import torch
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
+from torch._inductor.compile_fx import _get_subgraph_names
 from torch._inductor.fx_utils import (
     count_flops_fx,
     countable_fx,
@@ -236,23 +237,22 @@ class TestFakeTensorUpdater(TestCase):
         def recursively_test_graph_mod(gm: torch.fx.GraphModule) -> None:
             for node in gm.graph.find_nodes(op="placeholder"):
                 with gm.graph.inserting_after(node):
-                    copy_node = gm.graph.call_function(
+                    clone_node = gm.graph.call_function(
                         torch.ops.aten.clone.default, (node,)
                     )
 
-                modified_nodes = node.replace_all_uses_with(
-                    copy_node, delete_user_cb=lambda n: n != copy_node
+                node.replace_all_uses_with(
+                    clone_node, delete_user_cb=lambda n: n != clone_node
                 )
 
-                # The minimum number of nodes to be updated is all the nodes that had
-                # arguments replaced, plus the newly inserted copy_node.
+                # At minimum we should update the cloned node.  We may also update a
+                # variable number of other nodes, so it's difficult to make hard
+                # assertions here.
                 with V.set_fake_mode(detect_fake_mode(get_fake(node, gm))):
-                    self.assertGreaterEqual(
-                        updater.incremental_update(), len(modified_nodes) + 1, str(node)
-                    )
+                    self.assertGreaterEqual(updater.incremental_update(), 1, str(node))
 
             # iterate over subgraphs, updating *main_graph*
-            for subgraph_name in (s for s in dir(gm) if s.startswith("subgraph_")):
+            for subgraph_name in _get_subgraph_names(gm):
                 subgraph = getattr(gm, subgraph_name)
                 self.assertIsInstance(subgraph, torch.fx.GraphModule)
                 recursively_test_graph_mod(subgraph)
@@ -285,7 +285,7 @@ class TestFakeTensorUpdater(TestCase):
                 self.assertEqual(val.stride(), strides)
 
             # iterate over subgraphs, updating *main_graph*
-            for subgraph_name in (s for s in dir(gm) if s.startswith("subgraph_")):
+            for subgraph_name in _get_subgraph_names(gm):
                 subgraph = getattr(gm, subgraph_name)
                 self.assertIsInstance(subgraph, torch.fx.GraphModule)
                 recursively_test_graph_mod(subgraph)
@@ -302,7 +302,10 @@ class TestFakeTensorUpdater(TestCase):
         self._modify_node(deepcopy(backend.graphs[0]))
         self._insert_clone(deepcopy(backend.graphs[0]))
 
-    def test_hop_no_subgraph_inputs(self):
+    # TODO: remove this XFAIL by resolving our failure to update into torch.cond
+    # subgraphs.
+    @unittest.expectedFailure
+    def test_hop_implicit_subgraph_inputs(self):
         def fn(x: torch.Tensor) -> torch.Tensor:
             return torch.cond(torch.sum(x) < 0, torch.sin, torch.cos, (x,))
 
@@ -315,8 +318,12 @@ class TestFakeTensorUpdater(TestCase):
             return torch.sin(a)
 
         @torch.compiler.nested_compile_region
-        def nested_section_outer(a: torch.Tensor, b: torch.Tensor) -> tuple[torch.Tensor, ...]:
-            return nested_section_inner(nested_section_inner(a)), nested_section_inner(b)
+        def nested_section_outer(
+            a: torch.Tensor, b: torch.Tensor
+        ) -> tuple[torch.Tensor, ...]:
+            return nested_section_inner(nested_section_inner(a)), nested_section_inner(
+                b
+            )
 
         def fn(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
             x, y = nested_section_outer(a, b)

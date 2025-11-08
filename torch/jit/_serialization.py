@@ -18,7 +18,7 @@ from torch.jit._recursive import wrap_cpp_module
 from torch.serialization import validate_cuda_device
 
 
-def save(m, f, _extra_files=None):
+def save(m, f, _extra_files=None) -> None:
     r"""
     Save an offline version of this module for use in a separate process.
 
@@ -213,7 +213,7 @@ def jit_module_from_flatbuffer(f):
         return wrap_cpp_module(torch._C._load_jit_module_from_bytes(f.read()))
 
 
-def save_jit_module_to_flatbuffer(m, f, _extra_files=None):
+def save_jit_module_to_flatbuffer(m, f, _extra_files=None) -> None:
     r"""
     Save an offline version of this module for use in a separate process.
 

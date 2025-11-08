@@ -96,7 +96,7 @@ class Stream(torch._C._XpuStreamBase):
     def __hash__(self):
         return hash((self.sycl_queue, self.device))
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"torch.xpu.Stream(device={self.device} sycl_queue={self.sycl_queue:#x})"
 
 
@@ -166,7 +166,7 @@ class Event(torch._C._XpuEventBase):
     def _as_parameter_(self):
         return ctypes.c_void_p(self.sycl_event)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         if self.sycl_event:
             return f"torch.xpu.Event(sycl_event={self.sycl_event:#x})"
         else:

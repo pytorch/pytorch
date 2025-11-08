@@ -303,7 +303,7 @@ class CheckpointWrapperTest(TestCase):
                     )
 
                 inp = torch.randn(4, 10, requires_grad=True)
-                for i in range(6):
+                for _ in range(6):
                     # Kwarg input
                     loss = model(x=inp).sum()
                     self.assertTrue(loss.requires_grad)
