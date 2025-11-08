@@ -1987,6 +1987,9 @@ cuda_backend: Literal["triton", "halide", "pallas"] = "triton"
 # Backend to use for XPU codegen either "triton"
 xpu_backend: Literal["triton"] = "triton"
 
+# Backend to use for Pallas codegen either "pallas" (experimental)
+pallas_backend: Literal["pallas"] = "pallas"
+
 
 class halide:
     # Base halide target to use for CPU devices

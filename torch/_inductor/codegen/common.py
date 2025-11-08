@@ -575,6 +575,16 @@ def init_backend_registration() -> None:
             WrapperFxCodegen,
         )
 
+    if get_scheduling_for_device("xla") is None:
+        from .xla.pallas_scheduling import PallasScheduling
+        from .xla.pallas_wrapper import PallasWrapperCodegen
+        from .xla.pallas_device_op_overrides import PallasDeviceOpOverrides
+        register_backend_for_device(
+            "xla",
+            PallasScheduling,
+            PallasWrapperCodegen,
+        )
+
     private_backend = torch._C._get_privateuse1_backend_name()
     if (
         private_backend != "privateuseone"
@@ -624,6 +634,7 @@ def get_device_op_overrides(device: str) -> DeviceOpOverrides:
         from .cuda import device_op_overrides  # noqa: F401
         from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
+        from .xla import device_op_overrides as xla_op_overrides # noqa: F401
 
     return device_op_overrides_dict[device]
 
