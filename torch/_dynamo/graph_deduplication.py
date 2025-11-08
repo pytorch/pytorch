@@ -529,7 +529,7 @@ def _is_tuple_node(node: Node) -> bool:
 
 def _get_children_getitems(node: Node) -> Generator[Node, None, None]:
     for user in node.users:
-        if user.target == operator.getitem and isinstance(user.args[1], int):
+        if user.target is operator.getitem and isinstance(user.args[1], int):
             yield user
 
 

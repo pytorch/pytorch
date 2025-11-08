@@ -7,6 +7,10 @@ import itertools
 import unittest
 
 import torch
+from torch.distributed._local_tensor import (
+    maybe_disable_local_tensor_mode,
+    maybe_run_for_local_tensor,
+)
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -29,7 +33,9 @@ from torch.testing._internal.common_utils import (
     TEST_HPU,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
+    map_local_tensor_for_rank,
     with_comms,
 )
 from torch.utils._debug_mode import DebugMode
@@ -163,7 +169,9 @@ class RedistributeTest(DTensorTestBase):
             )
 
             # make local tensor as the element of the corresponding chunked list
-            local_tensor = splitted_list[self.rank]
+            local_tensor = map_local_tensor_for_rank(
+                splitted_list, self.rank, lambda tl, r: tl[r]
+            )
             replica_tensor = distribute_tensor(local_replica, device_mesh, replica_spec)
             with comm_mode:
                 reshard_tensor = replica_tensor.redistribute(device_mesh, shard_spec)
@@ -407,7 +415,7 @@ class RedistributeTest(DTensorTestBase):
     def test_partial_to_shard(self, dtype):
         device_mesh = self.build_device_mesh()
         partial_spec = [Partial()]
-        my_rank = device_mesh.get_rank()
+        my_rank = self.rank
 
         input_sizes_and_shard_dim = [
             ((self.world_size * 3, 3), 0),
@@ -440,8 +448,13 @@ class RedistributeTest(DTensorTestBase):
                 for idx in range(self.world_size)
             ]
 
-            local_shape = list(input_size)
-            local_shape[shard_dim] = chunk_sizes[my_rank]
+            @maybe_run_for_local_tensor
+            def _compute_local_shape(rank) -> list[int]:
+                local_shape = list(input_size)
+                local_shape[shard_dim] = chunk_sizes[rank]
+                return local_shape
+
+            local_shape = _compute_local_shape(my_rank)
 
             # test partial to shard, trigger reduce_scatter
             with comm_mode:
@@ -534,10 +547,12 @@ class RedistributeTest(DTensorTestBase):
                         1,
                     )
                 else:
-                    self.assertEqual(
-                        comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
-                        1,
-                    )
+                    # TODO: Integrate local tensor with CommDebugMode
+                    if not self.is_local_tensor_enabled:
+                        self.assertEqual(
+                            comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
+                            1,
+                        )
 
         # test 2d device mesh
         mesh_2d = DeviceMesh(
@@ -586,7 +601,8 @@ class RedistributeTest(DTensorTestBase):
                     out_dt = sharded_dt.redistribute(mesh_2d, dst)
 
                 self.assertEqual(out_dt.placements, expected_dt.placements)
-                self.assertEqual(comm_mode.get_total_counts(), comm_counts_2d[idx])
+                if not self.is_local_tensor_enabled:
+                    self.assertEqual(comm_mode.get_total_counts(), comm_counts_2d[idx])
 
                 local_out_dt = out_dt.to_local()
                 local_expected_dt = expected_dt.to_local()
@@ -1027,23 +1043,27 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
     def test_ordered_distribute_all_combination(self):
         """Exhaustively test all possible sharding combinations and verify correctness"""
         torch.manual_seed(21)
-        mesh = init_device_mesh(self.device_type, (2, 2, 2))
-        input_tensor_shape = [
-            # even sharding
-            (16, 8),
-            (8, 16, 32),
-            (8, 32, 16, 16),
-            # uneven sharding with padding
-            (17, 5),
-            (13, 2, 13),
-            (33, 16, 8, 1),
-        ]
+
+        with maybe_disable_local_tensor_mode():
+            mesh = init_device_mesh(self.device_type, (2, 2, 2))
+            input_tensor_shape = [
+                # even sharding
+                (16, 8),
+                (8, 16, 32),
+                (8, 32, 16, 16),
+                # uneven sharding with padding
+                (17, 5),
+                (13, 2, 13),
+                (33, 16, 8, 1),
+            ]
 
         # 1. Verify correctness of distribute_tensor from Tensor to DTensor.
         for tensor_shape in input_tensor_shape:
             input_data = torch.randn(tensor_shape, device=self.device_type)
             tensor_rank = input_data.ndim
-            for shard_order in self.generate_shard_orders(mesh, tensor_rank):
+            with maybe_disable_local_tensor_mode():
+                shard_orders = self.generate_shard_orders(mesh, tensor_rank)
+            for shard_order in shard_orders:
                 sharded_dt = self.distribute_tensor(
                     input_data.clone(), mesh, placements=None, shard_order=shard_order
                 )
@@ -1057,7 +1077,9 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             input_data = torch.randn(tensor_shape, device=self.device_type)
             tensor_rank = input_data.ndim
             prev_sharded_dt = None
-            for shard_order in self.generate_shard_orders(mesh, tensor_rank):
+            with maybe_disable_local_tensor_mode():
+                shard_orders = self.generate_shard_orders(mesh, tensor_rank)
+            for shard_order in shard_orders:
                 if prev_sharded_dt is None:
                     prev_sharded_dt = self.distribute_tensor(
                         input_data.clone(),
@@ -1077,26 +1099,27 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
         """Test mixing Partial in the original placements and do redistribute."""
         # This test takes 226s to complete on 8XA100...
         torch.manual_seed(21)
-        mesh = init_device_mesh(self.device_type, (2, 2, 2))
-        input_tensor_shape = [
-            # even sharding
-            (16, 8),
-            (8, 16, 32),
-            # uneven sharding with padding
-            (17, 5),
-            (13, 2, 13),
-            (33, 16, 8, 1),
-        ]
-        placement_choice = [
-            Shard(0),
-            Shard(1),
-            Shard(2),
-            Partial("sum"),
-            Partial("min"),
-            Replicate(),
-        ]
-        # pick 3 for the 3D mesh
-        partial_placement_comb = list(itertools.combinations(placement_choice, 3))
+        with maybe_disable_local_tensor_mode():
+            mesh = init_device_mesh(self.device_type, (2, 2, 2))
+            input_tensor_shape = [
+                # even sharding
+                (16, 8),
+                (8, 16, 32),
+                # uneven sharding with padding
+                (17, 5),
+                (13, 2, 13),
+                (33, 16, 8, 1),
+            ]
+            placement_choice = [
+                Shard(0),
+                Shard(1),
+                Shard(2),
+                Partial("sum"),
+                Partial("min"),
+                Replicate(),
+            ]
+            # pick 3 for the 3D mesh
+            partial_placement_comb = list(itertools.combinations(placement_choice, 3))
 
         def _is_valid_placement(placements, tensor_rank):
             # Check if placements is valid for tensor with rank `tensor_rank`
@@ -1112,7 +1135,9 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                     continue
                 local_tensor = torch.randn(shape, device=self.device_type)
                 full_tensor = DTensor.from_local(local_tensor, mesh, placements)
-                for shard_order in self.generate_shard_orders(mesh, len(shape)):
+                with maybe_disable_local_tensor_mode():
+                    shard_orders = self.generate_shard_orders(mesh, len(shape))
+                for shard_order in shard_orders:
                     sharded_dt = self.redistribute(
                         full_tensor, mesh, placements=None, shard_order=shard_order
                     )
@@ -1162,6 +1187,19 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
         )
         self.assertEqual(x_ordered_dt.to_local(), x_strided_dt.to_local())
 
+
+RedistributeTestWithLocalTensor = create_local_tensor_test_class(
+    RedistributeTest,
+)
+
+MultiDimRedistributeTestWithLocalTensor = create_local_tensor_test_class(
+    MultiDimRedistributeTest,
+    skipped_tests=["test_multi_dim_mesh"],
+)
+
+DistributeWithDeviceOrderTestWithLocalTensor = create_local_tensor_test_class(
+    DistributeWithDeviceOrderTest,
+)
 
 if __name__ == "__main__":
     run_tests()

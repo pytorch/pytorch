@@ -81,7 +81,7 @@ class StrobelightCLIFunctionProfiler:
         sample_tags: Optional[list[str]] = None,
         stack_max_len: int = 127,
         async_stack_max_len: int = 127,
-    ):
+    ) -> None:
         self.stop_at_error = stop_at_error
         self.max_profile_duration_sec = max_profile_duration_sec
         self.sample_each = sample_each
@@ -305,7 +305,7 @@ def strobelight(
     ) -> Callable[_P, Optional[_R]]:
         @functools.wraps(work_function)
         def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> Optional[_R]:
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             return profiler.profile(work_function, *args, **kwargs)
 
         return wrapper_function
