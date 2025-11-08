@@ -1,6 +1,7 @@
 import os
 import sys
-from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
+from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.custom_graph_pass
@@ -445,6 +446,14 @@ use_experimental_benchmarker: bool = Config(
     default=True,
     env_name_force="TORCHINDUCTOR_USE_EXPERIMENTAL_BENCHMARKER",
     justknob="pytorch/inductor:use_experimental_benchmarker",
+)
+
+# Enable distributed autotuning. When this is enabled we will distribute the
+# autotuning across distributed ranks in the same program group - so instead of
+# each rank autotuning every kernel they only autotune 1/world size kernels and
+# then share the results.
+distributed_max_autotune_gemm = (
+    os.environ.get("TORCHINDUCTOR_DISTRIBUTED_MAX_AUTOTUNE_GEMM") == "1"
 )
 
 # enable slow autotuning passes to select algorithms
@@ -904,6 +913,11 @@ class aten_distributed_optimizations:
     custom_runtime_estimation: Optional[Callable[[torch.fx.Node], Optional[float]]] = (
         None
     )
+
+    # Method for estimating collective runtime
+    # "analytical": Use bandwidth formulas (default)
+    # "benchmark": Use CUDA events with power-of-2 rounding and interpolation
+    collective_estimator: Literal["analytical", "benchmark"] = "analytical"
 
 
 def parallel_compile_enabled_internally() -> bool:
@@ -1563,11 +1577,16 @@ class triton:
     enable_pdl = False
 
     mix_order_reduction = (
-        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0") == "1"
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0" if is_fbcode() else "1")
+        == "1"
     )
+    mix_order_reduction_initial_xblock = 1
 
     mix_order_reduction_split_size: Optional[int] = None
-    mix_order_reduction_autotune_split_size = True
+    mix_order_reduction_autotune_split_size = (
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_AUTOTUNE_SPLIT_SIZE", "0")
+        == "1"
+    )
 
 
 class aot_inductor:

@@ -319,11 +319,11 @@ class SubprocPool:
 
     def quiesce(self) -> None:
         self._send(MsgHeader.QUIESCE)
-        assert self.quiesce_waitcounter is None
-        self.quiesce_waitcounter = _WaitCounter(
-            "pytorch.wait_counter.subproc_pool.running"
-        ).guard()
-        self.quiesce_waitcounter.__enter__()
+        if self.quiesce_waitcounter is None:
+            self.quiesce_waitcounter = _WaitCounter(
+                "pytorch.wait_counter.subproc_pool.running"
+            ).guard()
+            self.quiesce_waitcounter.__enter__()
 
     def wakeup(self) -> None:
         self._send(MsgHeader.WAKEUP)

@@ -78,7 +78,7 @@ from .ctx_manager import (
 )
 from .dicts import ConstDictVariable
 from .distributed import DistributedVariable, ProcessGroupVariable
-from .functions import bind_args_cached
+from .functions import bind_args_cached, NestedUserFunctionVariable
 from .lists import ListVariable, TupleVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -472,7 +472,12 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             )
         elif self.value is torch.nn.attention.sdpa_kernel.__wrapped__:  # type: ignore[attr-defined]
             name_to_arg_map = bind_args_cached(
-                self.value, tx, self.source, args, kwargs
+                # pyrefly: ignore[bad-argument-type]
+                self.value,
+                tx,
+                self.source,
+                args,
+                kwargs,
             )
             backends = name_to_arg_map["backends"].as_python_constant()
             set_priority = name_to_arg_map["set_priority"].as_python_constant()
@@ -1270,7 +1275,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # pyrefly: ignore [unbound-name]
             return VariableTracker.build(tx, module, new_source)
 
-        @register(torch.accelerator.current_stream)
+        @register(torch.accelerator.current_stream, torch.cuda.current_stream)
         def handle_current_stream(self, tx: "InstructionTranslator", *args, **kwargs):
             if len(args) + len(kwargs) > 1 or (kwargs and "device" not in kwargs):
                 unimplemented_v2(
@@ -1318,6 +1323,86 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             return ConstantVariable.create(None)
 
+        @register(torch._check)
+        def handle_check(self, tx: "InstructionTranslator", *args, **kwargs):
+            predicate_vt = None
+            message_vt = None
+
+            if args:
+                predicate_vt = args[0]
+                rest_args = args[1:]
+            else:
+                rest_args = ()
+
+            if predicate_vt is None and "cond" in kwargs:
+                predicate_vt = kwargs.pop("cond")
+
+            if rest_args:
+                message_vt = rest_args[0]
+            elif "message" in kwargs:
+                message_vt = kwargs.pop("message")
+
+            if predicate_vt is None:
+                return wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        self.value,
+                        (),
+                        {},
+                    ),
+                )
+
+            message_eager = None
+            message_graph_proxy = None
+            if message_vt is not None:
+                if (
+                    not isinstance(message_vt, NestedUserFunctionVariable)
+                    or message_vt.has_closure()
+                ):
+                    unimplemented_v2(
+                        gb_type="Can't extract message from torch._check()",
+                        context=str(message_vt),
+                        explanation=(
+                            "The second argument of torch._check() must be a function"
+                            "defined within the torch.compile region"
+                            "that does not reference a non-local variable."
+                        ),
+                        hints=[
+                            "Make sure the message function is defined in the torch.compile region.",
+                            "Remove any closure variables, e.g. "
+                            "remove references to closure variable `x` in `lambda: f'{x} failed check'`",
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
+                    )
+                message_eager = message_vt.get_function()
+
+                message_graph_proxy = tx.output.register_static_attr_and_return_proxy(
+                    "_check_message", message_eager
+                )
+
+            if predicate_vt.is_python_constant():
+                self.value(predicate_vt.as_python_constant(), message_eager)
+                return ConstantVariable.create(None)
+
+            predicate_proxy = predicate_vt.as_proxy()
+
+            proxy_args: tuple[Any, ...]
+            if message_graph_proxy is None:
+                proxy_args = (predicate_proxy,)
+            else:
+                proxy_args = (predicate_proxy, message_graph_proxy)
+
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    self.value,
+                    proxy_args,
+                    {},
+                ),
+            )
+
         return handlers
 
     def call_function(
@@ -1349,7 +1434,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             packed_input_vt = TupleVariable.build(
                 tx, (TupleVariable.build(tx, args), ConstDictVariable.build(tx, kwargs))
             )
-            out_vt = variables.UserFunctionVariable(tree_flatten).call_function(
+            out_vt = variables.UserFunctionVariable(tree_flatten).call_function(  # type: ignore[arg-type]
                 tx, [packed_input_vt], {}
             )
             assert isinstance(out_vt, TupleVariable) and len(out_vt.items) == 2
