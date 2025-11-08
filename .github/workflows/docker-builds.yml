@@ -164,7 +164,7 @@ jobs:
   rocm-docker-cache:
     # TODO: Uncomment below
     needs: docker-build
-    # if: ${{ github.event_name == 'push' }}
+    # if: ${{ github.event_name == 'push' && ( github.ref_name == 'main' || startsWith(github.ref_name, 'release/' ) ) }} 
     if: github.repository_owner == 'pytorch'
     permissions:
       id-token: write
@@ -209,8 +209,16 @@ jobs:
 
       - name: Save as tarball
         run: |
-          docker_image_tag=${{ steps.calculate-docker-image.outputs.docker-image }}
+          docker_image_tag=${{ matrix.docker-image }}
           docker_image_tag="${docker_image_tag:#*:} # Remove everything before and including first ":"
           docker_image_tag="${docker_image_tag:%-*} # Remove everything after and including last "-"
-          docker save -o ~/pytorch-data/docker/${docker_image_tag}.tar.tmp ${{ steps.calculate-docker-image.outputs.docker-image }}
-          mv ~/pytorch-data/docker/${docker_image_tag}.tar.tmp ~/pytorch-data/docker/${docker_image_tag}.tar # mv is atomic operation
+          docker save -o ~/pytorch-data/docker/${docker_image_tag}.tar.tmp ${{ matrix.docker-image }}
+          ref_name=${{ github.ref_name }}
+          if [[ $ref_name =~ "release/" ]]; then
+            ref_suffix = "release"
+          elif [[ $ref_name == "main" ]]; then
+            ref_suffix = "main"
+          else
+            echo "Unexpected branch in ref_name: ${ref_name}" && exit 1
+          fi
+          mv ~/pytorch-data/docker/${docker_image_tag}.tar.tmp ~/pytorch-data/docker/${docker_image_tag}_${ref_suffix}.tar # mv is atomic operation
