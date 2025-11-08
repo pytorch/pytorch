@@ -1681,7 +1681,7 @@ class CudaKernelParamCache:
 
         if config.aot_inductor.emit_multi_arch_kernel:
             bin_type_to_ext = {"cubin": ".fatbin", "spv": ".spv", "hsaco": ".hsaco"}
-            assert bin_type in bin_type_to_ext.keys(), (
+            assert bin_type in bin_type_to_ext, (
                 "multi_arch_kernel_binary only supported in CUDA/XPU/ROCm"
             )
             base_path, _ = os.path.splitext(bin_path)
