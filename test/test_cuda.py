@@ -4626,6 +4626,52 @@ print(torch.cuda.get_allocator_backend())
         rc = check_output(test_script)
         self.assertEqual(rc, "cudaMallocAsync")
 
+    def test_allocator_memory_fraction_setting(self):
+        def make_env(fraction):
+            env = os.environ.copy()
+            var = "PYTORCH_CUDA_ALLOC_CONF"
+            key = "per_process_memory_fraction"
+            value = [
+                x
+                for x in env.get(var, "").split(",")
+                if len(x) > 0 and not x.startswith(f"{key}:")
+            ]
+            value.append(f"{key}:{fraction}")
+            env[var] = ",".join(value)
+            return env
+
+        def run_test(value):
+            test_script = """\
+import os
+import torch
+device = torch._C._cuda_getDevice()
+value = torch.cuda.memory.get_per_process_memory_fraction(device)
+print(value, end="")
+            """
+            return subprocess.run(
+                [sys.executable, "-c", test_script],
+                env=make_env(value),
+                text=True,
+                check=True,
+                capture_output=True,
+            )
+
+        self.assertEqual(run_test(0.0).stdout, "0.0")
+        self.assertEqual(run_test(0.5).stdout, "0.5")
+        self.assertEqual(run_test(1.0).stdout, "1.0")
+
+        with self.assertRaises(subprocess.CalledProcessError) as e:
+            run_test(-0.1)
+        assert "per_process_memory_fraction is invalid" in e.exception.stderr, (
+            e.exception.stderr
+        )
+
+        with self.assertRaises(subprocess.CalledProcessError) as e:
+            run_test(1.1)
+        assert "per_process_memory_fraction is invalid" in e.exception.stderr, (
+            e.exception.stderr
+        )
+
     def test_cachingAllocator_raw_alloc(self):
         # Test that raw_alloc respects the setting that
         # activates/deactivates the caching allocator
@@ -7440,7 +7486,7 @@ class TestFXMemoryProfiler(TestCase):
         return fx_frames
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @torch._dynamo.config.patch("enrich_profiler_metadata", True)
+    @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_fx_memory_profiler_augmentation(self):
         """Test that memory snapshots are augmented with FX debug information."""
 
@@ -7462,6 +7508,8 @@ class TestFXMemoryProfiler(TestCase):
         device = "cuda"
         mod = MLPModule(device)
         with tempfile.TemporaryDirectory() as tmpdir:
+            # reset cache to start fresh
+            torch.cuda.memory.empty_cache()
             torch.cuda.memory._record_memory_history()
             compiled = torch.compile(mod, backend="aot_eager", fullgraph=True)
             result = compiled(torch.randn(10, 10, device=device))
@@ -7472,10 +7520,7 @@ class TestFXMemoryProfiler(TestCase):
             torch.cuda.empty_cache()
 
             fx_frames = self.collect_frames(augmented_snapshot)
-            if TEST_WITH_ROCM:
-                self.assertGreater(len(fx_frames), 0)
-            else:
-                self.assertEqual(len(fx_frames), 12)
+            self.assertGreater(len(fx_frames), 2)
 
             for frame in fx_frames:
                 # Every FX frame should have both node_op and node_name

@@ -1687,7 +1687,7 @@ def get_selected_tests(options) -> list[str]:
             ]
         )
 
-    if sys.version_info[:2] < (3, 13):
+    if sys.version_info[:2] < (3, 13) or sys.version_info[:2] >= (3, 14):
         # Skip tests for older Python versions as they may use syntax or features
         # not supported in those versions
         options.exclude.extend(

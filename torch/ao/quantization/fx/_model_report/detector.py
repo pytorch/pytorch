@@ -743,7 +743,7 @@ class DynamicStaticDetector(DetectorBase):
         #   Populates the string based report with the information from module_dynamic_static_info
         #   Compiles the complete report by appending relevant formatted strings
 
-        for module_fqn in module_dynamic_static_info.keys():
+        for module_fqn in module_dynamic_static_info:
             # there is at least 1 module for suggestion
             modules_added = True
             module_info = module_dynamic_static_info[module_fqn]
