@@ -3667,5 +3667,15 @@
         "Use custom operators instead of direct attribute/method access."
       ]
     }
+  ],
+  "GB0363": [
+    {
+      "Gb_type": "returning_contextmanager_from_compile",
+      "Context": "Attempting to return a @contextmanager object from a torch.compile function",
+      "Explanation": "Returning a @contextmanager object from a torch.compile function is not yet implemented",
+      "Hints": [
+        "Consider refactoring to avoid returning context managers from compiled functions"
+      ]
+    }
   ]
 }
