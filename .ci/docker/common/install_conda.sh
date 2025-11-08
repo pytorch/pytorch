@@ -61,7 +61,9 @@ else
   # Also ensure sysroot is using a modern GLIBC to match system compilers
   if [[ "$ANACONDA_PYTHON_VERSION" == *t ]]
   then
-      PYTHON_DEP="python-freethreading=${ANACONDA_PYTHON_VERSION%?}"
+      export ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION%?}
+      PYTHON_DEP="python-freethreading=${ANACONDA_PYTHON_VERSION}"
+
   else
       PYTHON_DEP="python=${ANACONDA_PYTHON_VERSION}"
   fi
