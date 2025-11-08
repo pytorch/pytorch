@@ -279,7 +279,7 @@ def convolution_backward_handler(
     output_sharding = op_info.output_sharding
     assert output_sharding is not None, "output sharding should not be None"
     output_spec = output_sharding.output_spec
-    assert isinstance(output_spec, list)
+    assert isinstance(output_spec, tuple)
 
     # local propagation
     local_results = tp_convolution_backward(
