@@ -197,10 +197,15 @@ jobs:
         continue-on-error: false
         uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
 
+          #- name: Pull docker image
+          #  uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+          #  with:
+          #    docker-image: ${{ matrix.docker-image }}
+
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        with:
-          docker-image: ${{ matrix.docker-image }}
+        run: |
+          docker pull ubuntu:22.04
+          docker tag ubuntu:22.04 ${{ matrix.docker-image }}
 
       - name: Save as tarball
         run: |
