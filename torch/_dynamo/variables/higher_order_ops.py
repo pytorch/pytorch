@@ -3769,19 +3769,13 @@ class BaseHOPVariable(WrapHigherOrderVariable):
         )
         assert len(p_kwargs) == 0
 
-        flat_example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            body_r.as_proxy(),
-        )
-
         p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
         return _call_function_and_unflatten_output(
             tx,
             self.value,
             p_args,
             p_kwargs,
-            flat_example_value,
+            example_value,
             body_r,
             body_graph_output_vts,
         )
