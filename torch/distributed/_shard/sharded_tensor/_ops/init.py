@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Any, Never, overload
+from typing import Any, overload
+from typing_extensions import Never
 
 import torch
 import torch.distributed._shard.sharded_tensor as sharded_tensor
