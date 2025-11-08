@@ -15,10 +15,6 @@ from torch.testing._internal.common_utils import parametrize, run_tests, TestCas
 SdpaShape = namedtuple("Sdpa_Shape", ["batch", "num_heads", "seq_len", "head_dim"])
 
 
-def _shape_to_fa(shape: SdpaShape) -> tuple[int, int, int, int]:
-    return shape.batch, shape.seq_len, shape.num_heads, shape.head_dim
-
-
 def _fa4_dependencies_available() -> bool:
     if not torch.cuda.is_available():
         return False
@@ -115,16 +111,9 @@ class TestFlashAttentionFA4(TestCase):
         is_causal: bool,
         rtol: int = 2,
     ) -> None:
-        fa_shape = _shape_to_fa(shape)
-        q = torch.randn(
-            fa_shape, dtype=dtype, device=device, requires_grad=True
-        ).transpose(1, 2)
-        k = torch.randn(
-            fa_shape, dtype=dtype, device=device, requires_grad=True
-        ).transpose(1, 2)
-        v = torch.randn(
-            fa_shape, dtype=dtype, device=device, requires_grad=True
-        ).transpose(1, 2)
+        q = torch.randn(shape, dtype=dtype, device=device).requires_grad_(True)
+        k = torch.randn(shape, dtype=dtype, device=device).requires_grad_(True)
+        v = torch.randn(shape, dtype=dtype, device=device).requires_grad_(True)
 
         # Forward pass comparison
         out_flash, out_math_low, out_math_fp32 = flash_vs_math(
