@@ -52,13 +52,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 # Install correct Python version
 # Also ensure sysroot is using a modern GLIBC to match system compilers
 if [ "$ANACONDA_PYTHON_VERSION" = "3.14" ]; then
-  as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
-             python="3.14.0" \
-             ${SYSROOT_DEP} \
-             -c conda-forge
-else
-  # Install correct Python version
-  # Also ensure sysroot is using a modern GLIBC to match system compilers
   if [[ $PYTHON_FREETHREADED == "1" ]]
   then
     PYTHON_DEP="python-freethreading=${ANACONDA_PYTHON_VERSION}"
@@ -67,7 +60,14 @@ else
   fi
 
   as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
-             ${PYTHON_DEP}\
+             ${PYTHON_DEP} \
+             ${SYSROOT_DEP} \
+             -c conda-forge
+else
+  # Install correct Python version
+  # Also ensure sysroot is using a modern GLIBC to match system compilers
+  as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
+             python="$ANACONDA_PYTHON_VERSION" \
              ${SYSROOT_DEP}
 fi
   # libstdcxx from conda default channels are too old, we need GLIBCXX_3.4.30
