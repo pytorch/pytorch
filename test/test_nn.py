@@ -1038,13 +1038,13 @@ class TestNN(NNTestCase):
                 self.assertIs(modules[k1], module_dict[k2])
             for k in module_dict:
                 self.assertIs(module_dict[k], modules[k])
-            for k in module_dict.keys():
+            for k in module_dict:
                 self.assertIs(module_dict[k], modules[k])
             for k, v in module_dict.items():
                 self.assertIs(modules[k], v)
             for k1, m2 in zip(modules, module_dict.values()):
                 self.assertIs(modules[k1], m2)
-            for k in modules.keys():
+            for k in modules:
                 self.assertTrue(k in module_dict)
         check()
 
@@ -1245,13 +1245,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 self.assertIs(parameters[k1], parameter_dict[k2])
             for k in parameter_dict:
                 self.assertIs(parameter_dict[k], parameters[k])
-            for k in parameter_dict.keys():
+            for k in parameter_dict:
                 self.assertIs(parameter_dict[k], parameters[k])
             for k, v in parameter_dict.items():
                 self.assertIs(v, parameters[k])
             for k1, m2 in zip(parameters, parameter_dict.values()):
                 self.assertIs(parameters[k1], m2)
-            for k in parameters.keys():
+            for k in parameters:
                 self.assertTrue(k in parameter_dict)
 
         check()
@@ -2356,7 +2356,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertIn('bn.running_var', state_dict)
         self.assertIn('bn.running_mean', state_dict)
         self.assertIn('bn.num_batches_tracked', state_dict)
-        self.assertFalse(any(k.startswith('empty') for k in state_dict.keys()))
+        self.assertFalse(any(k.startswith('empty') for k in state_dict))
         for k, v in state_dict.items():
             param = net
             for component in k.split('.'):
@@ -4123,7 +4123,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         def compare_cpu_gpu(outputs_cpu, outputs_gpu):
             self.assertEqual(list(outputs_cpu.keys()), list(outputs_gpu.keys()))
-            for key in outputs_cpu.keys():
+            for key in outputs_cpu:
                 if key != 'weights':
                     self.assertEqual(outputs_cpu[key], outputs_gpu[key], atol=5e-5, rtol=0, msg=key)
 
@@ -7281,7 +7281,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(children[1].__class__, torch.nn.InstanceNorm1d)
 
         for layer, converted_layer in zip(comp_module.children(), sync_bn_module.children()):
-            for key in layer.state_dict().keys():
+            for key in layer.state_dict():
                 self.assertEqual(layer.state_dict()[key].device, converted_layer.state_dict()[key].device)
                 self.assertEqual(layer.state_dict()[key], converted_layer.state_dict()[key])
 

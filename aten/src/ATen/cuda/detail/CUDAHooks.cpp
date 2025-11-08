@@ -21,6 +21,7 @@
 
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
+#include <cudnn_frontend.h>
 #endif
 
 #if AT_MAGMA_ENABLED()
@@ -348,6 +349,26 @@ long CUDAHooks::versionCuDNN() const {
   return CUDNN_VERSION;
 #else
   TORCH_CHECK(false, "Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
+#endif
+}
+
+long CUDAHooks::versionRuntimeCuDNN() const {
+#if AT_CUDNN_ENABLED()
+#ifndef USE_STATIC_CUDNN
+  return cudnnGetVersion();
+#else
+  return CUDNN_VERSION;
+#endif
+#else
+  TORCH_CHECK(false, "Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
+#endif
+}
+
+long CUDAHooks::versionCuDNNFrontend() const {
+#if AT_CUDNN_ENABLED()
+  return CUDNN_FRONTEND_VERSION;
+#else
+  TORCH_CHECK(false, "Cannot query CuDNN Frontend version if ATen_cuda is not built with CuDNN");
 #endif
 }
 

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, Sequence, TYPE_CHECKING
 
 import sympy  # noqa: TC002
 
@@ -17,8 +17,6 @@ from .simd import SIMDKernel, SIMDScheduling
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
-
     from ..ir import IRNode
     from ..scheduler import BaseSchedulerNode
 
@@ -314,7 +312,11 @@ class PallasKernel(SIMDKernel):
         code.writeline(f"def {main_name}({', '.join(kernel_params)}, stream=None):")
         with code.indent():
             # Determine interpret statically based on codegen device
-            interpret_literal = "True" if V.graph.get_current_device_or_throw().type == "cpu" else "False"
+            interpret_literal = (
+                "True"
+                if V.graph.get_current_device_or_throw().type == "cpu"
+                else "False"
+            )
             # Identify inputs (in_ptr*) and output (out_ptr*)
             input_params = [
                 p for p in kernel_params if p.startswith(("in_ptr", "in_out_ptr"))
