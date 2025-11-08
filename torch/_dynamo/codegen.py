@@ -15,7 +15,7 @@ import dataclasses
 import re
 import sys
 import types
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Callable, Iterable
 from typing import Any, Optional, TYPE_CHECKING, Union
 
@@ -597,32 +597,35 @@ class PyCodegen:
 
         graphargs = self.tx.output.graphargs
 
-        seen_sources: OrderedSet[Source] = OrderedSet()
-
-        def collect_temp_source(source: Source) -> None:
-            if source in seen_sources:
-                # This source is used at least twice, so it can be reused
-                self.mark_source_temp(source)
-                # Dont trace source further. This prevents us from marking too
-                # many nodes as temp sources.
-                return
-
-            seen_sources.add(source)
-
+        def extract_nested_sources(source: Source) -> list[Source]:
+            nested_sources: list[Source] = []
             if isinstance(source, ChainedSource):
-                collect_temp_source(source.base)
-
+                nested_sources.append(source.base)
             if isinstance(source, DictGetItemSource) and isinstance(
                 source.index, Source
             ):
-                collect_temp_source(source.index)
+                nested_sources.append(source.index)
+            return nested_sources
+
+        def collect_temp_sources(sources: deque[Source], codegen: PyCodegen) -> None:
+            seen_sources: OrderedSet[Source] = OrderedSet()
+            while sources:
+                current_source = sources.popleft()
+                if current_source in seen_sources:
+                    # This source is used at least twice, so it can be reused
+                    codegen.mark_source_temp(current_source)
+                    # Dont trace source further. This prevents us from marking too
+                    # many nodes as temp sources.
+                    continue
+                seen_sources.add(current_source)
+                sources.extend(extract_nested_sources(current_source))
 
         # Collect all the sources that are used more than once, so that we can
         # generate tmp variables in the generated pre-graph bytecode. This
         # essentially implements CSE.
-        for arg in graphargs:
-            if arg.source is not None:
-                collect_temp_source(arg.source)
+        collect_temp_sources(
+            deque([arg.source for arg in graphargs if arg.source is not None]), self
+        )
 
         cm_var = None
         if config.record_runtime_overhead:

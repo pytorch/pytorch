@@ -21,9 +21,9 @@ restoring state changes.
 import inspect
 import sys
 import warnings
-from collections.abc import Callable, Sequence, Sized
+from collections.abc import Callable, Sequence
 from contextlib import ExitStack
-from typing import Any, ContextManager, Optional, TYPE_CHECKING, Union
+from typing import Any, ContextManager, Optional, Sized, TYPE_CHECKING, Union
 
 import torch._C
 from torch._guards import Guard
