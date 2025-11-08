@@ -52,8 +52,15 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 # Install correct Python version
 # Also ensure sysroot is using a modern GLIBC to match system compilers
 if [ "$ANACONDA_PYTHON_VERSION" = "3.14" ]; then
+  if [[ $PYTHON_FREETHREADED == "1" ]]
+  then
+    PYTHON_DEP="python-freethreading=${ANACONDA_PYTHON_VERSION}"
+  else
+    PYTHON_DEP="python=${ANACONDA_PYTHON_VERSION}"
+  fi
+
   as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
-             python="3.14.0" \
+             ${PYTHON_DEP} \
              ${SYSROOT_DEP} \
              -c conda-forge
 else
