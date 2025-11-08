@@ -192,7 +192,7 @@ def check_multiple_devices_or_any_cpu_nodes(
     ):
         return None
 
-    keys_repr = (repr(key) for key in device_node_mapping.keys())
+    keys_repr = (repr(key) for key in device_node_mapping)
     return format_default_skip_message(f"multiple devices: {', '.join(keys_repr)}")
 
 

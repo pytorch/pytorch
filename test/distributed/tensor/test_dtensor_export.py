@@ -557,7 +557,6 @@ class DTensorExportTest(TestCase):
         x = torch.randint(1000, (4, 64, 16))
         x_dt = distribute_tensor(x, device_mesh, placements=[Replicate()])
         gm = _dynamo_graph_capture_for_export(Bar())(x_dt)
-        print(gm.graph)
         self.assertExpectedInline(
             """\
 graph():
@@ -574,7 +573,7 @@ graph():
     %_assert_scalar_default_1 : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge_2, Runtime assertion failed for expression u2 >= 0 on node 'ge_2'), kwargs = {})
     %le : [num_users=1] = call_function[target=operator.le](args = (%sym_size_int, 4), kwargs = {})
     %_assert_scalar_default_2 : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%le, Runtime assertion failed for expression u2 <= 4 on node 'le'), kwargs = {})
-    return (res,)""",
+    return (res,)""",  # noqa: B950
             str(gm.graph).strip(),
         )
 

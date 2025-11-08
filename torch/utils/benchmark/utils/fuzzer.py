@@ -29,7 +29,7 @@ class FuzzedParameter:
         maxval: Optional[Union[int, float]] = None,
         distribution: Optional[Union[str, dict[Any, float]]] = None,
         strict: bool = False,
-    ):
+    ) -> None:
         """
         Args:
             name:
@@ -159,10 +159,10 @@ class ParameterAlias:
 
     Chains of alias' are allowed, but may not contain cycles.
     """
-    def __init__(self, alias_to):
+    def __init__(self, alias_to) -> None:
         self.alias_to = alias_to
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"ParameterAlias[alias_to: {self.alias_to}]"
 
 
@@ -199,7 +199,7 @@ class FuzzedTensor:
         dtype=torch.float32,
         cuda=False,
         tensor_constructor: Optional[Callable] = None
-    ):
+    ) -> None:
         """
         Args:
             name:
@@ -329,7 +329,7 @@ class FuzzedTensor:
         allocation_size = tuple(size_i * step_i for size_i, step_i in zip(size, steps, strict=True))
         return size, steps, allocation_size
 
-    def satisfies_constraints(self, params):
+    def satisfies_constraints(self, params) -> bool:
         size, _, allocation_size = self._get_size_and_steps(params)
         # Product is computed in Python to avoid integer overflow.
         num_elements = prod(size)
@@ -357,7 +357,7 @@ class Fuzzer:
         tensors: list[Union[FuzzedTensor, list[FuzzedTensor]]],
         constraints: Optional[list[Callable]] = None,
         seed: Optional[int] = None
-    ):
+    ) -> None:
         """
         Args:
             parameters:
