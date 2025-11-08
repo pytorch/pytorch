@@ -18,7 +18,6 @@ from torch.library import Library
 
 __all__ = [
     "register_flash_attention_fa4",
-    "flash_attention_fa4_status",
 ]
 
 
@@ -50,14 +49,6 @@ def register_flash_attention_fa4(
         return None
     _fa4_register_kernels()
     _FA4_STATE.registered = True
-
-
-def flash_attention_fa4_status() -> dict[str, Any]:
-    return {
-        "registered": _FA4_STATE.registered,
-        "module_loaded": _FA4_STATE.module is not None,
-        "module_path": _FA4_STATE.module_path,
-    }
 
 
 @cache
