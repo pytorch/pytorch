@@ -182,9 +182,9 @@ its type to `common_constant_types`.
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
-            return variables.SymNodeVariable(self.as_proxy(), self.value).call_method(
-                tx, name, args, kwargs
-            )
+            return variables.SymNodeVariable.create(
+                tx, self.as_proxy(), self.value
+            ).call_method(tx, name, args, kwargs)
 
         try:
             const_args = [a.as_python_constant() for a in args]
@@ -192,7 +192,7 @@ its type to `common_constant_types`.
         except NotImplementedError:
             return super().call_method(tx, name, args, kwargs)
 
-        if isinstance(self.value, str) and name in str.__dict__.keys():
+        if isinstance(self.value, str) and name in str.__dict__:
             method = getattr(self.value, name)
             try:
                 return ConstantVariable.create(method(*const_args, **const_kwargs))
@@ -233,7 +233,7 @@ its type to `common_constant_types`.
         elif isinstance(self.value, bytes) and name == "decode":
             method = getattr(self.value, name)
             return ConstantVariable.create(method(*const_args, **const_kwargs))
-        elif type(self.value) is complex and name in complex.__dict__.keys():
+        elif type(self.value) is complex and name in complex.__dict__:
             method = getattr(self.value, name)
             try:
                 return ConstantVariable.create(method(*const_args, **const_kwargs))

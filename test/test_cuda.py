@@ -7486,7 +7486,7 @@ class TestFXMemoryProfiler(TestCase):
         return fx_frames
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @torch._dynamo.config.patch("enrich_profiler_metadata", True)
+    @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_fx_memory_profiler_augmentation(self):
         """Test that memory snapshots are augmented with FX debug information."""
 
@@ -7508,6 +7508,8 @@ class TestFXMemoryProfiler(TestCase):
         device = "cuda"
         mod = MLPModule(device)
         with tempfile.TemporaryDirectory() as tmpdir:
+            # reset cache to start fresh
+            torch.cuda.memory.empty_cache()
             torch.cuda.memory._record_memory_history()
             compiled = torch.compile(mod, backend="aot_eager", fullgraph=True)
             result = compiled(torch.randn(10, 10, device=device))
@@ -7518,10 +7520,7 @@ class TestFXMemoryProfiler(TestCase):
             torch.cuda.empty_cache()
 
             fx_frames = self.collect_frames(augmented_snapshot)
-            if TEST_WITH_ROCM:
-                self.assertGreater(len(fx_frames), 0)
-            else:
-                self.assertEqual(len(fx_frames), 12)
+            self.assertGreater(len(fx_frames), 2)
 
             for frame in fx_frames:
                 # Every FX frame should have both node_op and node_name

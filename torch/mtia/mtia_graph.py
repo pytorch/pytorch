@@ -9,7 +9,7 @@ import torch
 _POOL_HANDLE = tuple[int, int]
 
 
-class _MTIAGraph(torch._C._MTIAGraph):
+class MTIAGraph(torch._C._MTIAGraph):
     def __new__(cls, keep_graph: bool = False) -> Self:
         return super().__new__(cls, keep_graph)
 
@@ -32,12 +32,12 @@ class _MTIAGraph(torch._C._MTIAGraph):
         return super().pool()
 
 
-class _graph:
+class graph:
     default_capture_stream: Optional[torch.mtia.Stream] = None
 
     def __init__(
         self,
-        mtia_graph: _MTIAGraph,
+        mtia_graph: MTIAGraph,
         pool: Optional[_POOL_HANDLE] = None,
         stream: Optional[torch.mtia.Stream] = None,
     ):
@@ -66,3 +66,9 @@ class _graph:
     def __exit__(self, *args: object) -> None:
         self.mtia_graph.capture_end()
         self.stream_ctx.__exit__(*args)
+
+
+__all__ = [
+    "MTIAGraph",
+    "graph",
+]
