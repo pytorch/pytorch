@@ -471,7 +471,7 @@ class PythonMod(sympy.Function):
     def _eval_is_nonpositive(self) -> Optional[bool]:
         return True if self.args[1].is_negative else None  # type: ignore[attr-defined]
 
-    def _ccode(self, printer):
+    def _ccode(self, printer) -> str:
         # pyrefly: ignore [missing-attribute]
         p = printer.parenthesize(self.args[0], PRECEDENCE["Atom"] - 0.5)
         # pyrefly: ignore [missing-attribute]
@@ -558,7 +558,7 @@ class CeilToInt(sympy.Function):
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.ceil(float(number)))
 
-    def _ccode(self, printer):
+    def _ccode(self, printer) -> str:
         # pyrefly: ignore [missing-attribute]
         number = printer.parenthesize(self.args[0], self.args[0].precedence - 0.5)
         return f"ceil({number})"
@@ -1164,7 +1164,7 @@ class IntTrueDiv(sympy.Function):
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return sympy.Float(int(base) / int(divisor))
 
-    def _ccode(self, printer):
+    def _ccode(self, printer) -> str:
         # pyrefly: ignore [missing-attribute]
         base = printer.parenthesize(self.args[0], PRECEDENCE["Atom"] - 0.5)
         # pyrefly: ignore [missing-attribute]
@@ -1331,11 +1331,11 @@ class Identity(sympy.Function):
 
     precedence = 10
 
-    def __repr__(self):  # type: ignore[override]
+    def __repr__(self) -> str:  # type: ignore[override]
         # pyrefly: ignore [missing-attribute]
         return f"Identity({self.args[0]})"
 
-    def _sympystr(self, printer):
+    def _sympystr(self, printer) -> str:
         """Controls how sympy's StrPrinter prints this"""
         # pyrefly: ignore [missing-attribute]
         return f"({printer.doprint(self.args[0])})"

@@ -391,7 +391,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     # instead of inserting new observers we will have:
     # conv1 -> obs1 -> existing_obs -> conv2
     #                            \ -> conv3
-    for maybe_obs_node in arg.users.keys():
+    for maybe_obs_node in arg.users:
         if not _is_activation_post_process_node(maybe_obs_node, named_modules):
             continue
         maybe_obs_mod = named_modules[maybe_obs_node.target]  # type: ignore[index]
