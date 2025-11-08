@@ -1169,7 +1169,7 @@ class VariableBuilder:
                 f"{sym_expr} is not a basic Symbol."
             )
             self.tx.output.tracked_fakes.append(TrackedFake(node, source, None))
-            return SymNodeVariable(sym_node_proxy, node)
+            return SymNodeVariable.create(self.tx, sym_node_proxy, node)
         elif is_torch_sym(value):
             # Note: this doesn't handle nested symints.
             # For SymBool input, we reuse the infra for SymInt by simulating SymBool with a SymInt in dynamo.
@@ -2454,7 +2454,7 @@ class VariableBuilder:
         sym_expr = wrapped_value.node.expr
         assert isinstance(sym_expr, sympy.Symbol), f"{sym_expr} is not a basic Symbol."
         self.tx.output.root_tracer.bound_symbols[sym_expr] = proxy
-        unspec_var = SymNodeVariable(proxy, wrapped_value, **options)
+        unspec_var = SymNodeVariable.create(self.tx, proxy, wrapped_value, **options)
         self.tx.output.unspec_variable_map[self.name] = unspec_var
 
         if not is_constant_source(self.get_source()):
@@ -3002,7 +3002,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         tx.output.current_tracer.track_produced_symints(example_value, proxy)
         set_example_value(proxy.node, example_value)
-        return SymNodeVariable(proxy, example_value, **options)
+        return SymNodeVariable.create(tx, proxy, example_value, **options)
     elif (
         isinstance(example_value, torch.Stream)
         and proxy.node.target is get_external_object_by_index

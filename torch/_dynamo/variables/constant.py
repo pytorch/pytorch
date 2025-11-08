@@ -182,9 +182,9 @@ its type to `common_constant_types`.
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
-            return variables.SymNodeVariable(self.as_proxy(), self.value).call_method(
-                tx, name, args, kwargs
-            )
+            return variables.SymNodeVariable.create(
+                tx, self.as_proxy(), self.value
+            ).call_method(tx, name, args, kwargs)
 
         try:
             const_args = [a.as_python_constant() for a in args]

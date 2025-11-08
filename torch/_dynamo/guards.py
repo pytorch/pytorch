@@ -2141,9 +2141,10 @@ class GuardBuilder(GuardBuilderBase):
         original_metadata = deepcopy(self.get(guard.name).__tensor_flatten__()[1])
         if hasattr(value, "__metadata_guard__"):
             verify_guard_fn_signature(value)
+            cls = type(value)
 
             def metadata_checker(x: Any) -> bool:
-                return value.__metadata_guard__(
+                return cls.__metadata_guard__(
                     original_metadata, x.__tensor_flatten__()[1]
                 )
 
