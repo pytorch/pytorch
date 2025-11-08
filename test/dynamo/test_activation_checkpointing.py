@@ -1672,6 +1672,61 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         # The mutation is not reapplied in the backward because the flag was on.
         self.assertEqual(counter, 1)
 
+    @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=True)
+    def test_nonlocal_list_mutation(self):
+        def gn(x, z):
+            out = x.sin()
+            z.append(out)
+            return torch.cos(torch.sin(torch.matmul(x, x) @ x)), out
+
+        def fn(x):
+            z = []
+
+            out1, out2 = torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                z,
+                use_reentrant=False,
+            )
+
+            return out1, z[0]
+
+        x = torch.randn(4, 4, requires_grad=True)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1], res[1])
+
+    @unittest.expectedFailure
+    @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=True)
+    def test_nonlocal_list_mutation_hidden(self):
+        def gn(x, z):
+            out = x.sin()
+            z.append(out)
+            return torch.cos(torch.sin(torch.matmul(x, x) @ x))
+
+        def fn(x):
+            z = []
+
+            out1 = torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                z,
+                use_reentrant=False,
+            )
+
+            return out1, z[0]
+
+        x = torch.randn(4, 4, requires_grad=True)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1], res[1])
+
 
 devices = ["cuda", "hpu"]
 instantiate_device_type_tests(
