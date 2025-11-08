@@ -8807,7 +8807,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         # check it works in None and static qconfig
         for qconfig in [None, default_qconfig]:
-            qconfig_dict = {"": default_qconfig}
+            qconfig_dict = {"": qconfig}
             m = M().eval()
             m = prepare_fx(model, qconfig_dict, example_inputs=example_inputs)
             self.checkGraphModuleNodes(m, expected_node_occurrence={
