@@ -188,7 +188,7 @@ class Timer:
         env: Optional[str] = None,
         num_threads: int = 1,
         language: Union[Language, str] = Language.PYTHON,
-    ):
+    ) -> None:
         if not isinstance(stmt, str):
             raise ValueError("Currently only a `str` stmt is supported.")
 

@@ -141,7 +141,7 @@ class InstanceNorm1d(_InstanceNorm):
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size `C` (where `C` is the number of features or channels of the input) if :attr:`affine` is ``True``.
     The variance is calculated via the biased estimator, equivalent to
-    `torch.var(input, unbiased=False)`.
+    `torch.var(input, correction=0)`.
 
     By default, this layer uses instance statistics computed from input data in
     both training and evaluation modes.
@@ -256,7 +256,7 @@ class InstanceNorm2d(_InstanceNorm):
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size `C` (where `C` is the input size) if :attr:`affine` is ``True``.
     The standard-deviation is calculated via the biased estimator, equivalent to
-    `torch.var(input, unbiased=False)`.
+    `torch.var(input, correction=0)`.
 
     By default, this layer uses instance statistics computed from input data in
     both training and evaluation modes.
@@ -372,7 +372,7 @@ class InstanceNorm3d(_InstanceNorm):
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size C (where C is the input size) if :attr:`affine` is ``True``.
     The standard-deviation is calculated via the biased estimator, equivalent to
-    `torch.var(input, unbiased=False)`.
+    `torch.var(input, correction=0)`.
 
     By default, this layer uses instance statistics computed from input data in
     both training and evaluation modes.
