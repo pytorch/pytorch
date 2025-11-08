@@ -1655,6 +1655,43 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
         self.assertEqual(opt_fn(x), fn(x))
 
+    def test_return_same_element_twice(self):
+        def gn(x):
+            y = torch.sin(x)
+            return y, y
+
+        def fn(x):
+            return torch.utils.checkpoint.checkpoint(gn, x, use_reentrant=True)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        ref = fn(x)
+
+        backend = AotEagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1], res[1])
+
+        self.assertExpectedInline(
+            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[4, 4]"):
+        l_x_ = L_x_
+
+        wrap_body_0 = self.wrap_body_0
+        tag_activation_checkpoint = torch.ops.higher_order.tag_activation_checkpoint(wrap_body_0, l_x_, use_reentrant = True);  wrap_body_0 = l_x_ = None
+        getitem: "f32[4, 4]" = tag_activation_checkpoint[0]
+        getitem_1: "f32[4, 4]" = tag_activation_checkpoint[1];  tag_activation_checkpoint = None
+        return (getitem, getitem_1)
+
+    class wrap_body_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[4, 4]"):
+            y: "f32[4, 4]" = torch.sin(l_x_);  l_x_ = None
+            return (y, y)
+""",
+        )
+
     @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=True)
     def test_nonlocal_mutation(self):
         counter = 0
