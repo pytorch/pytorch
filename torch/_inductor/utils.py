@@ -549,70 +549,6 @@ def is_pointwise_use(
     return torch.Tag.pointwise in target.tags or is_pointwise_fn(target)
 
 
-class LogicalConnective(enum.Enum):
-    OR = enum.auto()
-    AND = enum.auto()
-
-
-def has_uses(
-    target: Node,
-    use_selector_fn: Callable[[torch._ops.OpOverload], bool] = lambda _: False,
-    use_aggregate_type: LogicalConnective = LogicalConnective.OR,
-) -> bool:
-    """
-    Given a target, explore the uses of `target` by applying `use_selector_fn`
-    on them, and then aggregate these booleans with the `use_aggregate_type`
-    logical connective.
-
-    Uses in view ops will follow the views uses.
-    """
-
-    def get_use_aggregate_fn(
-        use_aggregate_type: LogicalConnective,
-    ) -> Callable[[Iterator[Any]], bool]:
-        match use_aggregate_type:
-            case LogicalConnective.AND:
-                return all
-            case LogicalConnective.OR:
-                return any
-            case _:
-                return any
-
-    use_aggregate_fn = get_use_aggregate_fn(use_aggregate_type)
-
-    def has_uses_impl(use: Node) -> bool:
-        if use.op != "call_function":
-            return False
-        if not (
-            isinstance(use.target, torch._ops.OpOverload)
-            or use.target is operator.getitem
-        ):
-            return False
-
-        target = cast(torch._ops.OpOverload, use.target)
-        # Process getitem and view
-        if target is operator.getitem or is_view(target):
-            return use_aggregate_fn(has_uses_impl(user) for user in use.users)
-
-        return use_selector_fn(target)
-
-    return use_aggregate_fn(has_uses_impl(user) for user in target.users)
-
-
-def has_uses_tagged_as(
-    target: Node,
-    use_tags: Collection[torch.Tag],
-    use_aggregate_type: LogicalConnective = LogicalConnective.OR,
-) -> bool:
-    """
-    Is there a use with given tags?
-    """
-
-    return has_uses(
-        target, lambda use: any(tag in use_tags for tag in use.tags), use_aggregate_type
-    )
-
-
 def gen_gm_and_inputs(
     target: Any, args: list[Any], kwargs: dict[str, Any]
 ) -> tuple[GraphModule, list[torch.Tensor]]:
@@ -1290,7 +1226,7 @@ def unload_xpu_triton_pyds() -> None:
         if not module_name.startswith("torch._inductor.runtime.compile_tasks."):
             continue
         m = sys.modules[module_name]
-        for attr_name in m.__dict__.keys():
+        for attr_name in m.__dict__:
             if attr_name.startswith("triton_"):
                 kernel = getattr(m, attr_name)
                 if isinstance(
@@ -2813,13 +2749,16 @@ def is_wait(node: Optional[Union[IRNode, Operation]]) -> bool:
     return type(node) is ir._WaitKernel
 
 
-def contains_collective(snode: BaseSchedulerNode) -> bool:
+def contains_collective(
+    snode: BaseSchedulerNode,
+    filter_fn: Optional[Callable[[BaseSchedulerNode], bool]] = None,
+) -> bool:
     from torch._inductor.scheduler import GroupedSchedulerNode
 
     if isinstance(snode, GroupedSchedulerNode):
         return any(contains_collective(x) for x in snode.snodes)
 
-    return is_collective(snode.node)
+    return is_collective(snode.node) and (filter_fn is None or filter_fn(snode))
 
 
 def contains_wait(snode: BaseSchedulerNode) -> bool:
