@@ -217,10 +217,10 @@ jobs:
           elif [[ $ref_name == "main" ]]; then
             ref_suffix="main"
           else
-            echo "Unexpected branch in ref_name: ${ref_name}" && exit 1
+            # TODO: Remove below
+            ref_suffix="main"
+            # echo "Unexpected branch in ref_name: ${ref_name}" && exit 1
           fi
-          # TODO: Remove below
-          ref_suffix="main"
           # mv is atomic operation, so we use intermediate tar.tmp file to prevent read-write contention
           docker save -o ~/pytorch-data/docker/${docker_image_tag}.tar.tmp ${{ matrix.docker-image }}
           mv ~/pytorch-data/docker/${docker_image_tag}.tar.tmp ~/pytorch-data/docker/${docker_image_tag}_${ref_suffix}.tar
