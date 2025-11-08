@@ -7,7 +7,7 @@ from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
-from torch.fx.passes.tools_common import legalize_graph, NodeList, NodeSet
+from torch.fx.passes.tools_common import NodeList, NodeSet
 from torch.fx.passes.utils import lift_subgraph_as_module  # type: ignore[attr-defined]
 
 
@@ -220,22 +220,34 @@ def insert_subgm(
     submodule_name = sub_gm.__class__.__name__
     gm.add_submodule(submodule_name, sub_gm)
 
+    def last_node(target_nodes: tuple[Node, ...]) -> Node:
+        for node in reversed(gm.graph.nodes):
+            if node in target_nodes:
+                return node
+
+    last_input_node: Node = last_node(orig_inputs)
+
     # Create a call_module node in main graph.
-    module_node = gm.graph.call_module(submodule_name, args=orig_inputs, kwargs=None)
-
-    output_node = sub_gm.graph.output_node()
-    if len(orig_outputs) == 1 and not isinstance(output_node.args[0], tuple):
-        # main_remapping[comp.orig_outputs[0]] = module_node
-        orig_outputs[0].replace_all_uses_with(module_node, propagate_meta=True)
-    else:
-        for i, orig_output in enumerate(orig_outputs):
-            # Use Proxy to record getitem access.
-            proxy_out = torch.fx.Proxy(module_node)[i].node  # type: ignore[index]
-            orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
-
-        module_node.meta["val"] = tuple(
-            orig_output.meta.get("val", None) for orig_output in orig_outputs
+    with gm.graph.inserting_after(last_input_node):
+        module_node = gm.graph.call_module(
+            submodule_name, args=orig_inputs, kwargs=None
         )
+        output_node = sub_gm.graph.output_node()
+
+    next_node = module_node.next
+    with gm.graph.inserting_before(next_node):
+        if len(orig_outputs) == 1 and not isinstance(output_node.args[0], tuple):
+            # main_remapping[comp.orig_outputs[0]] = module_node
+            orig_outputs[0].replace_all_uses_with(module_node, propagate_meta=True)
+        else:
+            for i, orig_output in enumerate(orig_outputs):
+                # Use Proxy to record getitem access.
+                proxy_out = torch.fx.Proxy(module_node)[i].node  # type: ignore[index]
+                orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
+
+            module_node.meta["val"] = tuple(
+                orig_output.meta.get("val", None) for orig_output in orig_outputs
+            )
     return gm
 
 
@@ -269,7 +281,6 @@ def fuse_by_partitions(
 
         erase_nodes(gm, sorted_nodes)
 
-    # topological sort original gm with newly created sub_gm
-    legalize_graph(gm)
+    gm.graph.lint()
 
     return gm
