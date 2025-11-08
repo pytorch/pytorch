@@ -6,7 +6,7 @@ import math
 import os
 from functools import partial
 from threading import Lock
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -19,9 +19,12 @@ from .. import config, config as inductor_config
 from ..kernel.bmm import bmm_template
 from ..kernel.mm import (
     blackwell_ws_persistent_device_tma_mm_template,
+    get_scaling_options,
+    get_tile_size,
     mm_template,
     persistent_tma_mm_template,
     scaled_mm_device_tma_epilogue_scaling_template,
+    scaled_mm_device_tma_main_loop_scaling_template,
 )
 from ..kernel.mm_plus_mm import mm_plus_mm_template
 from ..kernel_inputs import KernelInputs, MMKernelInputs
@@ -38,7 +41,7 @@ from .registry import register_template_heuristic
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
 
     from triton import Config as TritonConfig
 
@@ -419,8 +422,12 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(32, 256, 64, 6, 4),
             GemmConfig(64, 16, 256, 5, 4),
             GemmConfig(64, 32, 256, 5, 4),
+            GemmConfig(64, 128, 128, 2, 4),
             GemmConfig(64, 128, 128, 3, 4),
+            GemmConfig(128, 128, 128, 2, 4),
             GemmConfig(128, 256, 128, 4, 8),
+            GemmConfig(256, 128, 128, 2, 4),
+            GemmConfig(256, 128, 128, 2, 8),
         ]
 
         self.scaled_persistent_mm_configs: list[BaseConfig] = [
@@ -1735,7 +1742,7 @@ class TMAWorkspaceMixin(MMTemplateConfigMixin):
         )
         return kwargs
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         TMA specific filtering, as num_warps=2 not safe for TMA
@@ -1886,11 +1893,6 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
 
             return False
 
-        def is_scalar_like(sz: Any) -> bool:
-            return (len(sz) == 0) or all(
-                V.graph.sizevars.statically_known_equals(d, 1) for d in sz
-            )
-
         size_a, size_b = scale_a.get_size(), scale_b.get_size()
         assert are_compatible_scales(size_a, size_b), (
             "Expect scale_a and scale_b to be either both scalars (including single-element tensors) "
@@ -1948,6 +1950,29 @@ class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
             return False
         return True
 
+    # pyrefly: ignore [bad-override]
+    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
+        """
+        Filter out bad configs for specific hardware.
+        On AMD MI350X (GFX 9.5+), skip configs with BLOCK_K<=64 due to lack of corresponding MFMA instructions.
+        """
+
+        def should_skip_mi350x_config(config: BaseConfig) -> bool:
+            """Skip config if BLOCK_K<=64 on MI350X (GFX 9.5+)"""
+            try:
+                return (
+                    config.block_k <= 64
+                    and torch.version.hip is not None
+                    and torch.cuda.get_device_capability() >= (9, 5)
+                )
+            except RuntimeError:
+                # If no HIP GPUs are available, we can't check device capability
+                # so we don't skip any configs
+                return False
+
+        filtered_configs = [c for c in configs if not should_skip_mi350x_config(c)]
+        return super()._filter_configs(filtered_configs)
+
 
 # Scaled TMA-specific mixin for scaled MM templates with TMA
 class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
@@ -1957,7 +1982,7 @@ class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
     This inherits from BaseScaledMMConfigMixin and adds TMA-specific options.
     """
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         TMA specific filtering:
@@ -1998,7 +2023,7 @@ class ScaledBlackwellTMAConfigMixin(
     This inherits from ScaledMMConfigMixin, which inherits the scale_mm_epilogue, and adds TMA-specific options.
     """
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         Warp specialization-specific filtering (BlackwellTMATemplateConfigMixin)
@@ -2131,7 +2156,7 @@ class CUDAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CUDAConfigHeurist
         # Override mm_configs to use scaled_mm_configs
         self.mm_configs = self.scaled_mm_configs
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         configs = [c for c in configs if c.block_k >= 32]
         return super()._filter_configs(configs)
@@ -2152,6 +2177,72 @@ class CUDAScaledTMAEpilogueScalingTemplateConfigHeuristic(
         super().__init__()
         # Override mm_configs to use scaled_persistent_mm_configs for TMA
         self.mm_configs = self.scaled_persistent_mm_configs
+
+
+@register_template_heuristic(
+    scaled_mm_device_tma_main_loop_scaling_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+    op_name="scaled_mm",
+)
+class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
+    ScaledTMAConfigMixin, CUDAConfigHeuristic
+):
+    """
+    Scaled TMA template heuristic for CUDA:
+        main loop scaling variants (BlockWise1x128, BlockWise1x32, BlockWise1x16, BlockWise128x128)
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use scaled_persistent_mm_configs for TMA
+        self.mm_configs = self.scaled_persistent_mm_configs
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        """
+        Generate main loop scaling kernel inputs.
+        """
+        mat_a, mat_b, scale_a, scale_b = kernel_inputs._input_nodes
+        scale_a_size, scale_b_size = scale_a.get_size(), scale_b.get_size()
+
+        scale_option_a, scale_option_b = get_scaling_options(
+            mat_a, mat_b, scale_a_size, scale_b_size
+        )
+        tile_size_a = get_tile_size(scale_option_a)
+        tile_size_b = get_tile_size(scale_option_b)
+
+        # Get base scaled MM template configs from superclass
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs,
+            op_name,
+        ):
+            # Add scaling-specific options for main loop scaling variants
+
+            # Inductor templates require compile-time constants passed in as tl.constexpr values.
+            # In cases in which the block size (BLOCK_*) is smaller than the tile size (128, 32, 16),
+            # scales must be broadcasted to BLOCK_* (rather than to a tile_sizextile_size chunk).
+
+            template_kwargs["TILE_SIZE_A"] = tile_size_a
+            template_kwargs["TILE_SIZE_B"] = tile_size_b
+
+            template_kwargs["MIN_BLOCK_TILE_AM"] = min(
+                template_kwargs["BLOCK_M"], tile_size_a
+            )
+            template_kwargs["MIN_BLOCK_TILE_AK"] = min(
+                template_kwargs["BLOCK_K"], tile_size_a
+            )
+            template_kwargs["MIN_BLOCK_TILE_BK"] = min(
+                template_kwargs["BLOCK_K"], tile_size_b
+            )
+            template_kwargs["MIN_BLOCK_TILE_BN"] = min(
+                template_kwargs["BLOCK_N"], tile_size_b
+            )
+
+            yield template_kwargs
 
 
 @register_template_heuristic(

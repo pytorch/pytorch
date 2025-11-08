@@ -34,7 +34,7 @@ from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
 )
 from torch.nn.attention._utils import _validate_sdpa_input
-from torch.utils._pytree import tree_map_only
+from torch.utils._pytree import GetAttrKey, tree_map_only
 
 
 # Private debug flag to disable internal compilation wrapping for debugging purposes.
@@ -84,7 +84,7 @@ _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
 
 
-# pyrefly: ignore  # invalid-inheritance
+# pyrefly: ignore [invalid-inheritance]
 class FlexKernelOptions(TypedDict, total=False):
     """Options for controlling the behavior of FlexAttention kernels.
 
@@ -128,97 +128,97 @@ class FlexKernelOptions(TypedDict, total=False):
     """
 
     # Performance tuning options
-    # pyrefly: ignore  # invalid-annotation
+    # pyrefly: ignore [invalid-annotation]
     num_warps: NotRequired[int]
     """Number of warps to use in the CUDA kernel. Higher values may improve performance
     but increase register pressure. Default is determined by autotuning."""
 
-    # pyrefly: ignore  # invalid-annotation
+    # pyrefly: ignore [invalid-annotation]
     num_stages: NotRequired[int]
     """Number of pipeline stages in the CUDA kernel. Higher values may improve performance
     but increase shared memory usage. Default is determined by autotuning."""
 
-    # pyrefly: ignore  # invalid-annotation
+    # pyrefly: ignore [invalid-annotation]
     BLOCK_M: NotRequired[int]
     """Thread block size for the sequence length dimension of Q in forward pass.
     Must be a power of 2. Common values: 16, 32, 64, 128. Default is determined by autotuning."""
 
-    # pyrefly: ignore  # invalid-annotation
+    # pyrefly: ignore [invalid-annotation]
     BLOCK_N: NotRequired[int]
     """Thread block size for the sequence length dimension of K/V in forward pass.
     Must be a power of 2. Common values: 16, 32, 64, 128. Default is determined by autotuning."""
 
     # Backward-specific block sizes (when prefixed with 'bwd_')
-    # pyrefly: ignore  # invalid-annotation
+    # pyrefly: ignore [invalid-annotation]
     BLOCK_M1: NotRequired[int]
     """Thread block size for Q dimension in backward pass. Use as 'bwd_BLOCK_M1'.
     Default is determined by autotuning."""
 
-    # pyrefly: ignore  # invalid-annotation
+    # pyrefly: ignore [invalid-annotation]
     BLOCK_N1: NotRequired[int]
     """Thread block size for K/V dimension in backward pass. Use as 'bwd_BLOCK_N1'.
     Default is determined by autotuning."""
 
-    # pyrefly: ignore  # invalid-annotation
+    # pyrefly: ignore [invalid-annotation]
     BLOCK_M2: NotRequired[int]
     """Thread block size for second Q dimension in backward pass. Use as 'bwd_BLOCK_M2'.
     Default is determined by autotuning."""
 
-    # pyrefly: ignore  # invalid-annotation
+    # pyrefly: ignore [invalid-annotation]
     BLOCK_N2: NotRequired[int]
     """Thread block size for second K/V dimension in backward pass. Use as 'bwd_BLOCK_N2'.
     Default is determined by autotuning."""
 
-    # pyrefly: ignore  # invalid-annotation
+    # pyrefly: ignore [invalid-annotation]
     PRESCALE_QK: NotRequired[bool]
     """Whether to pre-scale QK by 1/sqrt(d) and change of base. This is slightly faster but
     may have more numerical error. Default: False."""
 
-    # pyrefly: ignore  # invalid-annotation
+    # pyrefly: ignore [invalid-annotation]
     ROWS_GUARANTEED_SAFE: NotRequired[bool]
     """If True, guarantees that at least one value in each row is not masked out.
     Allows skipping safety checks for better performance. Only set this if you are certain
     your mask guarantees this property. For example, causal attention is guaranteed safe
     because each query has at least 1 key-value to attend to. Default: False."""
 
-    # pyrefly: ignore  # invalid-annotation
+    # pyrefly: ignore [invalid-annotation]
     BLOCKS_ARE_CONTIGUOUS: NotRequired[bool]
     """If True, guarantees that all blocks in the mask are contiguous.
     Allows optimizing block traversal. For example, causal masks would satisfy this,
     but prefix_lm + sliding window would not. Default: False."""
 
-    # pyrefly: ignore  # invalid-annotation
+    # pyrefly: ignore [invalid-annotation]
     WRITE_DQ: NotRequired[bool]
     """Controls whether gradient scatters are done in the DQ iteration loop of the backward pass.
     Setting this to False will force this to happen in the DK loop which depending on your
     specific score_mod and mask_mod might be faster. Default: True."""
 
-    # pyrefly: ignore  # invalid-annotation
+    # pyrefly: ignore [invalid-annotation]
     FORCE_USE_FLEX_ATTENTION: NotRequired[bool]
     """If True, forces the use of the flex attention kernel instead of potentially using
     the more optimized flex-decoding kernel for short sequences. This can be a helpful
     option for debugging. Default: False."""
 
-    # pyrefly: ignore  # invalid-annotation
+    # pyrefly: ignore [invalid-annotation]
     USE_TMA: NotRequired[bool]
     """Whether to use Tensor Memory Accelerator (TMA) on supported hardware.
     This is experimental and may not work on all hardware, currently specific
     to NVIDIA GPUs Hopper+. Default: False."""
 
     # ROCm-specific options
-    # pyrefly: ignore  # invalid-annotation
+    # pyrefly: ignore [invalid-annotation]
     kpack: NotRequired[int]
     """ROCm-specific kernel packing parameter."""
 
-    # pyrefly: ignore  # invalid-annotation
+    # pyrefly: ignore [invalid-annotation]
     matrix_instr_nonkdim: NotRequired[int]
     """ROCm-specific matrix instruction non-K dimension."""
 
-    # pyrefly: ignore  # invalid-annotation
+    # pyrefly: ignore [invalid-annotation]
     waves_per_eu: NotRequired[int]
     """ROCm-specific waves per execution unit."""
 
-    # pyrefly: ignore  # invalid-annotation
+    # pyrefly: ignore [invalid-annotation]
     force_flash: NotRequired[bool]
     """ If True, forces use of the cute-dsl flash attention kernel.
 
@@ -519,6 +519,24 @@ class BlockMask:
     BLOCK_SIZE: tuple[int, int]
     mask_mod: _mask_mod_signature
 
+    # Attribute lists for pytree flatten/unflatten
+    _TENSOR_ATTRS = [
+        "kv_num_blocks",
+        "kv_indices",
+        "full_kv_num_blocks",
+        "full_kv_indices",
+        "q_num_blocks",
+        "q_indices",
+        "full_q_num_blocks",
+        "full_q_indices",
+    ]
+
+    _CONTEXT_ATTRS = [
+        "seq_lengths",
+        "BLOCK_SIZE",
+        "mask_mod",
+    ]
+
     def __init__(
         self,
         seq_lengths: tuple[int, int],
@@ -532,7 +550,7 @@ class BlockMask:
         full_q_indices: Optional[Tensor],
         BLOCK_SIZE: tuple[int, int],
         mask_mod: _mask_mod_signature,
-    ):
+    ) -> None:
         if kv_indices.dim() < 2:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
         assert kv_num_blocks is not None, "kv_num_blocks must be provided"
@@ -644,7 +662,7 @@ class BlockMask:
             block_size = (self.BLOCK_SIZE,)  # type: ignore[assignment]
             seq_lengths = (self.seq_lengths,)  # type: ignore[assignment]
 
-        # pyrefly: ignore  # not-iterable
+        # pyrefly: ignore [not-iterable]
         return (
             *seq_lengths,
             self.kv_num_blocks,
@@ -664,7 +682,7 @@ class BlockMask:
         *batch_dims, _, _ = self.kv_indices.shape
         return tuple(batch_dims) + self.seq_lengths
 
-    def __str__(self):
+    def __str__(self) -> str:
         s = f"BlockMask(shape={self.shape}, sparsity={self.sparsity():.2f}%, \n"
         mask_str = self.to_string().strip()
         s += mask_str
@@ -720,7 +738,7 @@ class BlockMask:
             (slice(i + n, i + n + 1) if -n <= i < 0 else slice(i, i + 1))
             if isinstance(i, int)
             else i
-            for i, n in zip(padded, sizes)
+            for i, n in zip(padded, sizes, strict=True)
         )
         new_kv_num_blocks = self.kv_num_blocks[index]
         new_kv_indices = self.kv_indices[index]
@@ -742,7 +760,7 @@ class BlockMask:
             compute_q_blocks=self.q_indices is not None,
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         def shape_or_none(x: Optional[torch.Tensor]):
             return x.shape if x is not None else None
 
@@ -817,7 +835,7 @@ class BlockMask:
         partial_dense = _ordered_to_dense(self.kv_num_blocks, self.kv_indices)
         if self.full_kv_num_blocks is not None:
             assert self.full_kv_indices is not None
-            # pyrefly: ignore  # bad-return
+            # pyrefly: ignore [bad-return]
             return partial_dense | _ordered_to_dense(
                 self.full_kv_num_blocks, self.full_kv_indices
             )
@@ -846,7 +864,7 @@ class BlockMask:
 
             vis = ", ".join(reversed(descriptors)) + "\n"
 
-            def summarize_section(section):
+            def summarize_section(section) -> str:
                 percentage = section.float().mean().item()
                 if percentage == 1:
                     return "█"
@@ -912,6 +930,32 @@ class BlockMask:
             self.as_tuple(flatten=False),
         )
         return BlockMask(*mapped_attributes)
+
+    def _flatten(self):
+        """Flatten BlockMask into a list of tensors and context."""
+        tensors = tuple(getattr(self, attr) for attr in self._TENSOR_ATTRS)
+        context = tuple(getattr(self, attr) for attr in self._CONTEXT_ATTRS)
+        return tensors, context
+
+    @classmethod
+    def _unflatten(cls, tensors, context):
+        """Unflatten tensors and context back into a BlockMask."""
+        kwargs = {
+            **dict(zip(cls._CONTEXT_ATTRS, context)),
+            **dict(zip(cls._TENSOR_ATTRS, tensors)),
+        }
+        # pyrefly: ignore [bad-argument-type]
+        return cls(**kwargs)
+
+    def _flatten_with_keys(self):
+        """Flatten BlockMask with keys for better tracing."""
+        tensors = tuple(
+            (GetAttrKey(attr), getattr(self, attr)) for attr in self._TENSOR_ATTRS
+        )
+        context = tuple(
+            (GetAttrKey(attr), getattr(self, attr)) for attr in self._CONTEXT_ATTRS
+        )
+        return tensors, context
 
 
 def _broadcast_to_dim(x, dim):
@@ -1152,6 +1196,7 @@ def create_block_mask(
         warnings.warn(
             "_compile flag on create_block_mask was originally added to work around a torch.compile limitation. That limitation has since been addressed. So, to compile create_block_mask, we suggest doing torch.compile(create_block_mask). This still works for now, but will be removed in the future.",
             DeprecationWarning,
+            stacklevel=2,
         )
         return torch.compile(create_block_mask)(
             mask_mod, B, H, Q_LEN, KV_LEN, device, BLOCK_SIZE
@@ -1244,7 +1289,7 @@ def _apply_kernel_options(
     return kernel_options
 
 
-def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
+def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor) -> None:
     if query.size(-1) != key.size(-1):
         raise ValueError(
             f"Expect query and key/value to have the same embedding dimension "
@@ -1252,7 +1297,7 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
         )
 
 
-def _validate_device(query: Tensor, key: Tensor, value: Tensor):
+def _validate_device(query: Tensor, key: Tensor, value: Tensor) -> None:
     """TODO: Remove once non cuda/cpu devices support is added
     We only need to check query since we have already that q,k,v are on the same device
     """

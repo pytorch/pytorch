@@ -12,14 +12,15 @@ log = logging.getLogger(__name__)
 
 
 class FakeScriptObject:
-    def __init__(self, wrapped_obj: Any, script_class_name: str, x: torch.ScriptObject):
-        self.wrapped_obj = wrapped_obj
-
-        # The fully qualified name of the class of original script object
-        self.script_class_name = script_class_name
+    def __init__(
+        self, wrapped_obj: Any, script_class_name: str, x: Optional[torch.ScriptObject]
+    ):
+        # Use object.__setattr__ to bypass our custom __setattr__ during initialization
+        object.__setattr__(self, "wrapped_obj", wrapped_obj)
+        object.__setattr__(self, "script_class_name", script_class_name)
         try:
             with _disable_current_modes():
-                self.real_obj = copy.deepcopy(x)
+                real_obj = copy.deepcopy(x)
         except RuntimeError as e:
             log.warning(  # noqa: G200
                 "Unable to deepcopy the custom object %s due to %s. "
@@ -29,7 +30,31 @@ class FakeScriptObject:
                 script_class_name,
                 str(e),
             )
-            self.real_obj = x
+            real_obj = x
+        object.__setattr__(self, "real_obj", real_obj)
+
+    def __getattribute__(self, name):
+        try:
+            return super().__getattribute__(name)
+        except AttributeError as e:
+            raise AttributeError(
+                f"Tried to call __getattr__ with attr '{name}' on a FakeScriptObject, "
+                "implying that you are calling this inside of a fake kernel. "
+                "The fake kernel should not depend on the contents of the "
+                "OpaqueObject at all, so we're erroring out. If you need this"
+                "functionality, consider creating a custom TorchBind Object instead"
+                "(but note that this is more difficult)."
+            ) from e
+
+    def __setattr__(self, name, value):
+        raise AttributeError(
+            f"Tried to call __setattr__ with attr '{name}' on a FakeScriptObject, "
+            "implying that you are calling this inside of a fake kernel. "
+            "The fake kernel should not depend on the contents of the "
+            "OpaqueObject at all, so we're erroring out. If you need this"
+            "functionality, consider creating a custom TorchBind Object instead"
+            "(but note that this is more difficult)."
+        )
 
 
 class FakeScriptMethod:
@@ -125,7 +150,8 @@ def tracing_with_real(x: torch.ScriptObject) -> bool:
 
 
 def maybe_to_fake_obj(
-    fake_mode, x: torch.ScriptObject
+    fake_mode,
+    x: Any,
 ) -> Union[FakeScriptObject, torch.ScriptObject]:
     import torch.utils._pytree as pytree
     from torch.utils._python_dispatch import _disable_current_modes
@@ -135,13 +161,17 @@ def maybe_to_fake_obj(
     if tracing_with_real(x):
         return x
 
-    from torch._library.opaque_object import FakeOpaqueObject, OpaqueTypeStr
+    from torch._library.opaque_object import (
+        FakeOpaqueObject,
+        is_opaque_type,
+        OpaqueTypeStr,
+    )
 
-    if str(x._type()) == OpaqueTypeStr:
+    if x is None or is_opaque_type(type(x)) or str(x._type()) == OpaqueTypeStr:
         # In order to make OpaqueObjects truly opaque, the fake kernel should
         # not depend on the contents of the OpaqueObject at all.
-        fake_x = FakeOpaqueObject()
-
+        fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), OpaqueTypeStr, None)
+        return fake_x_wrapped
     else:
         # x.__obj_flatten__() could be calling some tensor operations inside but we don't
         # want to call these ops in surrounding dispatch modes when executing it.
@@ -209,7 +239,8 @@ def maybe_to_fake_obj(
             if isinstance(real_attr, torch.ScriptMethod):
                 method_schema = real_attr.schema  # type: ignore[attr-defined]
 
-            setattr(
+            # Bypasses our custom setattr function
+            object.__setattr__(
                 fake_x_wrapped,
                 name,
                 FakeScriptMethod(fake_x_wrapped, name, method_schema),

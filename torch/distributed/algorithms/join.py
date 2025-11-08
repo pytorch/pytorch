@@ -210,7 +210,7 @@ class Join:
         """
         process_group = None
         device = None
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         for joinable in self._joinables:
             if process_group is None:
                 process_group = joinable.join_process_group
@@ -257,7 +257,8 @@ class Join:
                     f"{self._rank} has at least {WARN_THRESHOLD} "
                     f"fewer inputs than other currently-active ranks. "
                     "This level of skew could lead to performance "
-                    "degradation during training."
+                    "degradation during training.",
+                    stacklevel=2,
                 )
             # Shadow the all-reduce in non-joined processes
             num_nonjoined_procs = self._get_num_nonjoined_procs()

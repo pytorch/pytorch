@@ -31,7 +31,7 @@ def _validate_sdpa_input(
     dropout_p=0.0,
     is_causal=False,
     scale=None,
-):
+) -> None:
     if (
         not isinstance(query, NestedTensor)
         or not isinstance(key, NestedTensor)
@@ -364,7 +364,7 @@ def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> tuple[torch.Tensor, in
     return cumulative_seqlen, max_seqlen, n_elem
 
 
-def _is_safe_to_get_storage_as_tensor(tensor: torch.Tensor):
+def _is_safe_to_get_storage_as_tensor(tensor: torch.Tensor) -> bool:
     # This function checks if a nested tensor is valid for
     # use with the flash-attention and efficient_attention kernels without
     # needing to call contiguous on the nested tensor input.
@@ -438,7 +438,7 @@ def _view_as_dense(
 #     #     this is because needs_broadcast indicates that the batch_size is 1
 #     #     and hence there is only 1 value for seq_len
 #     # (2) The cum_seq_lens are given by [0, {*}_t.size(1), 2 * {*}_t.size(1),
-#     # ..., outut_batch_size * {*}_t.size(1)]
+#     # ..., output_batch_size * {*}_t.size(1)]
 #     # (3) Nnz_{*} is given by output_batch_size * {*}_t.size(1)
 
 #     if q_batch_size_needs_broadcast or not q_t.is_nested:

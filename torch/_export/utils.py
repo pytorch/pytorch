@@ -681,7 +681,7 @@ def _insert_aten_to_metadata_assert_pass(gm: torch.fx.GraphModule) -> None:
     for node in gm.graph.nodes:
         if node.target in aten_to_variants:
             if (
-                node.prev.target == torch.ops.aten._assert_tensor_metadata.default
+                node.prev.target is torch.ops.aten._assert_tensor_metadata.default
                 and node.args[0] == node.prev.args[0]
             ):
                 # skip if already guarded
@@ -850,7 +850,7 @@ def node_inline_(call_mod_node: torch.fx.Node) -> Optional[torch.fx.GraphModule]
                 get_item_users = nodes_filter(
                     list(call_mod_node.users.keys()),
                     lambda node: node.op == "call_function"
-                    and node.target == operator.getitem,
+                    and node.target is operator.getitem,
                 )
                 # get_item_node.args[1] is the idx referring to new_output[idx]
                 nodes_map(
@@ -1097,9 +1097,19 @@ def placeholder_naming_pass(
             node.name = node.target = name_map[node.name]
             if node.name in custom_meta:
                 if node.meta.get("custom") is None:
-                    node.meta["custom"] = custom_meta[node.name]
+                    node.meta["custom"] = {}
                 else:
-                    assert node.meta["custom"] == custom_meta[node.name]
+                    # Assert if any existing key has different value
+                    for k, v in node.meta["custom"].items():
+                        if (
+                            k in custom_meta[node.name]
+                            and v != custom_meta[node.name][k]
+                        ):
+                            raise AssertionError(
+                                f"Mismatch in custom metadata for key {k}. Value in "
+                                f"node.meta is {v} and value in custom_meta is {custom_meta[node.name][k]}."
+                            )
+                node.meta["custom"].update(custom_meta[node.name])
             # if the constant obj is an input, we also need to update meta["val"]
             # because this is created before the placeholder naming pass
             if isinstance(node.meta["val"], CustomObjArgument):
@@ -1120,14 +1130,14 @@ def placeholder_naming_pass(
         if (  # handle targets for custom objects
             spec.kind == InputKind.CUSTOM_OBJ and spec.target in name_map
         ):
-            # pyrefly: ignore  # index-error
+            # pyrefly: ignore [index-error]
             spec.target = name_map[spec.target][4:]  # strip obj_ prefix
 
     for spec in export_graph_signature.output_specs:
         if spec.arg.name in name_map:
             spec.arg.name = name_map[spec.arg.name]
         if spec.kind == OutputKind.USER_INPUT_MUTATION and spec.target in name_map:
-            # pyrefly: ignore  # index-error
+            # pyrefly: ignore [index-error]
             spec.target = name_map[spec.target]
 
     # rename keys in constants dict for custom objects
@@ -1477,7 +1487,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
         flattened, _ = flatten_fn(obj)
 
         # NOTE: This helper function will replicate an nn.Module in the exactly same
-        #       structure to be used together with _reparametrize_module. This will
+        #       structure to be used together with _reparameterize_module. This will
         #       create a clone of the module with the new parameters and buffers without
         #       affecting the original module.
         def copy_module(mod: torch.nn.Module):

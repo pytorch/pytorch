@@ -16,7 +16,7 @@ logger = logging.getLogger()
 
 __all__: list[str] = []
 
-# pyrefly: ignore  # unknown-name
+# pyrefly: ignore [unknown-name]
 global _dcp_logger
 _dcp_logger = c10d_logger._get_or_create_logger(DCP_LOGGER_NAME)
 
@@ -40,7 +40,7 @@ def _msg_dict_from_dcp_method_args(*args, **kwargs) -> dict[str, Any]:
         checkpoint_id = getattr(serializer, "checkpoint_id", None)
 
     msg_dict["checkpoint_id"] = (
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         str(checkpoint_id) if checkpoint_id is not None else checkpoint_id
     )
 

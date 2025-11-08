@@ -141,7 +141,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
             dilation,
             groups,
             bias,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             padding_mode,
             device,
             dtype,
@@ -206,7 +206,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
             dilation,
             groups,
             bias,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             padding_mode,
             device,
             dtype,
@@ -383,7 +383,7 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
             groups,
             bias,
             dilation,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             padding_mode,
             device,
             dtype,
@@ -465,7 +465,7 @@ class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
             groups,
             bias,
             dilation,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             padding_mode,
             device,
             dtype,

@@ -946,10 +946,10 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
     }
   };
   // avoid overflow
-  float matrix_rank = float(std::min(m, n));
+  auto matrix_rank = std::min(m, n);
   // A heuristic tested on a 32 core/socket ICX system
   // https://github.com/pytorch/pytorch/pull/93037#discussion_r1090112948
-  int64_t chunk_size_per_thread = int64_t(
+  int64_t chunk_size_per_thread = static_cast<int64_t>(
       std::min(1.0, 3200.0 / (matrix_rank * matrix_rank * matrix_rank)));
   int64_t grain_size = chunk_size_per_thread * at::get_num_threads();
   at::parallel_for(0, batch_size, grain_size, loop);

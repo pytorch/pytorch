@@ -139,7 +139,7 @@ def fork_wait_graph_exception(input1, input2):
 
 def loop_graph(a, b, iters: int):
     c = a + b * 2
-    for i in range(iters):
+    for _ in range(iters):
         c = c + b
         c *= 2
         c -= a
@@ -556,7 +556,7 @@ class TestStaticModule(TestCase):
         torch._C._fuse_to_static_module(og.graph)
         assert "StaticSubgraph" in str(og.graph)
         o_test = og(a, b, b, c)
-        for i in o_ref.keys():
+        for i in o_ref:
             torch.testing.assert_close(o_ref[i], o_test[i])
 
     def test_create_object(self):

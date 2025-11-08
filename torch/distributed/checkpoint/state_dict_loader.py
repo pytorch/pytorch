@@ -158,7 +158,8 @@ def load(
     no_dist = no_dist or (not dist.is_available()) or (not dist.is_initialized())
     if no_dist:
         warnings.warn(
-            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to load in a single process."
+            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to load in a single process.",
+            stacklevel=2,
         )
 
     with _profile():
@@ -365,7 +366,8 @@ def _load_state_dict_from_keys(
     no_dist = not (dist.is_available() and dist.is_initialized())
     if no_dist:
         warnings.warn(
-            "torch.distributed is unavailable or uninitialized, assuming the intent is to load in a single process."
+            "torch.distributed is unavailable or uninitialized, assuming the intent is to load in a single process.",
+            stacklevel=2,
         )
 
     storage_reader = cast(

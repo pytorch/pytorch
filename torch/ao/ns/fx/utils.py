@@ -204,7 +204,7 @@ def get_node_input_qparams(
 
     if prev_node.op == "call_function":
         # quantize - read the args directly
-        if prev_node.target == torch.quantize_per_tensor:
+        if prev_node.target is torch.quantize_per_tensor:
             return _get_scale_zp_from_function_args(prev_node, gm, 1, 2)
         elif prev_node.target in (toq.add, toq.add_relu, toq.mul, toq.mul_relu):
             return _get_scale_zp_from_function_args(prev_node, gm, 2, 3)
@@ -496,7 +496,7 @@ def compute_normalized_l2_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tenso
     Return:
         float or tuple of floats
     """
-    # pyrefly: ignore  # unsupported-operation
+    # pyrefly: ignore [unsupported-operation]
     return torch.sqrt(((x - y) ** 2).sum() / (x**2).sum())
 
 

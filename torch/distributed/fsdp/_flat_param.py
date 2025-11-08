@@ -1585,7 +1585,8 @@ class FlatParamHandle:
                 warnings.warn(
                     f"[Rank {self.rank}] Only some but not all ranks have a "
                     "`None` `FlatParameter` gradient, so FSDP is using zeros to "
-                    "approximate those ranks' sharded gradients being `None`"
+                    "approximate those ranks' sharded gradients being `None`",
+                    stacklevel=2,
                 )
             flat_param._saved_grad_shard = None  # type: ignore[assignment]
             sharded_grad = torch.zeros(flat_param._sharded_size, device=self.device)  # type: ignore[attr-defined]
@@ -2086,14 +2087,14 @@ class FlatParamHandle:
                 param.grad.data = view
             else:
                 param.grad = view
-        for i, (
+        for (
             param_name,
             module,
             module_name,
             prim_param_name,
             prim_module,
             _,
-        ) in enumerate(self.flat_param._shared_param_infos):
+        ) in self.flat_param._shared_param_infos:
             _p_assert(
                 hasattr(module, param_name),
                 f"{module_name + '.' + param_name if module_name else param_name} is missing",
@@ -2170,11 +2171,8 @@ class FlatParamHandle:
                 param.data = flat_param[offset : offset + numel_in_shard]
         if self.flat_param._shared_params is None:
             raise AssertionError("Expected _shared_params to be not None")
-        for i, (
-            param,
-            (param_name, module, _, prim_param_name, prim_module, _),
-        ) in enumerate(
-            zip(self.flat_param._shared_params, self.flat_param._shared_param_infos)
+        for param, (param_name, module, _, prim_param_name, prim_module, _) in zip(
+            self.flat_param._shared_params, self.flat_param._shared_param_infos
         ):
             self._setattr_param(module, param_name, param)
             prim_param = getattr(prim_module, prim_param_name)
@@ -2387,14 +2385,14 @@ class FlatParamHandle:
 
         # TODO: If we want to handle shared parameters, we need to re-generate
         # the shared parameter data structures in case sharedness changed.
-        for i, (
+        for (
             param_name,
             module,
             _,
             prim_param_name,
             prim_module,
             _,
-        ) in enumerate(flat_param._shared_param_infos):
+        ) in flat_param._shared_param_infos:
             if getattr(module, param_name) is not getattr(prim_module, prim_param_name):
                 raise NotImplementedError(
                     "Changing shared parameters is not supported yet"
@@ -2434,7 +2432,8 @@ class FlatParamHandle:
                 f"[Rank {rank}] {'Parameter' if is_param else 'Gradient'} needs "
                 f"writeback in {self._training_state}\n"
                 f"expected shape={expected_shape} shape={src_shape} "
-                f"expected device={dst_tensor.device} device={src_device}"
+                f"expected device={dst_tensor.device} device={src_device}",
+                stacklevel=2,
             )
         if src_tensor is not None and src_tensor.shape != expected_shape:
             # NOTE: Gradient shape mismatch is not possible in practice since
