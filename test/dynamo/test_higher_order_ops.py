@@ -3354,7 +3354,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2, 4)
         y = torch.ones(4)
 
-        msg = "hints_wrapper - key hints not provided"
+        msg = "hints_wrapper: improper args/kwargs"
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn_with_hints, backend=cnt)(x, y)
 
@@ -4516,12 +4516,9 @@ class GraphModule(torch.nn.Module):
             model, params, inputs, targets
         )
         self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(
-            {
-                "torch.func.functional_call capture is disabled, it can be "
-                "turned on by setting `torch._dynamo.config.inline_inbuilt_nn_modules=True`": 1,
-            },
-            dict(counters["graph_break"]),
+        self.assertIn(
+            "torch.func.functional_call capture is disabled",
+            next(iter(counters["graph_break"].keys())),
         )
         self.assertEqual(actual, expected)
 

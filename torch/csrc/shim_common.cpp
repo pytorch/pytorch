@@ -4,11 +4,64 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
-#include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/stable/library.h>
 #include <torch/library.h>
 
+#include <torch/csrc/shim_conversion_utils.h>
 #include <torch/csrc/stable/c/shim.h>
+
+AOTITorchError torch_new_list_reserve_size(size_t size, StableListHandle* ret) {
+  auto list_ptr = std::make_unique<std::vector<StableIValue>>();
+  list_ptr->reserve(size);
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret = list_pointer_to_list_handle(list_ptr.release()); });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_list_size(StableListHandle list_handle, size_t* size) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::vector<StableIValue>* list = list_handle_to_list_pointer(list_handle);
+    *size = list->size();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_list_get_item(
+    StableListHandle list_handle,
+    size_t index,
+    StableIValue* element) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::vector<StableIValue>* list = list_handle_to_list_pointer(list_handle);
+    *element = list->at(index);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_list_set_item(
+    StableListHandle list_handle,
+    size_t index,
+    StableIValue element) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::vector<StableIValue>* list = list_handle_to_list_pointer(list_handle);
+    list->at(index) = element;
+  });
+}
+
+AOTITorchError torch_list_push_back(
+    StableListHandle list_handle,
+    StableIValue element) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::vector<StableIValue>* list = list_handle_to_list_pointer(list_handle);
+    list->push_back(element);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_delete_list(StableListHandle list_handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::vector<StableIValue>* list_ptr =
+        list_handle_to_list_pointer(list_handle);
+    delete list_ptr;
+  });
+}
 
 static StableIValue from_ivalue(
     const c10::TypePtr& type,
@@ -70,6 +123,19 @@ static StableIValue from_ivalue(
       StableIValue* sivp = new StableIValue(
           from_ivalue(inner_type, ivalue, extension_build_version));
       return torch::stable::detail::_from(sivp, extension_build_version);
+    }
+    case c10::TypeKind::ListType: {
+      auto inner_type = type->castRaw<c10::ListType>()->getElementType();
+      auto ivalue_list = ivalue.toList();
+      auto stableivalue_list = std::make_unique<std::vector<StableIValue>>();
+      stableivalue_list->reserve(ivalue_list.size());
+      for (const auto& elem : ivalue_list) {
+        stableivalue_list->emplace_back(
+            from_ivalue(inner_type, elem, extension_build_version));
+      }
+      return torch::stable::detail::_from(
+          list_pointer_to_list_handle(stableivalue_list.release()),
+          extension_build_version);
     }
     default: {
       TORCH_CHECK(
@@ -144,6 +210,21 @@ static c10::IValue to_ivalue(
       auto ival = to_ivalue(inner_type, *sivp, extension_build_version);
       delete sivp;
       return ival;
+    }
+    case c10::TypeKind::ListType: {
+      auto inner_type = type->castRaw<c10::ListType>()->getElementType();
+      auto list_handle = torch::stable::detail::_to<StableListHandle>(
+          stable_ivalue, extension_build_version);
+      std::vector<StableIValue>* stableivalue_list =
+          list_handle_to_list_pointer(list_handle);
+      auto ivalue_list = c10::impl::GenericList(inner_type);
+      ivalue_list.reserve(stableivalue_list->size());
+      for (const auto& elem : *stableivalue_list) {
+        ivalue_list.emplace_back(
+            to_ivalue(inner_type, elem, extension_build_version));
+      }
+      TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
+      return ivalue_list;
     }
     default: {
       TORCH_CHECK(

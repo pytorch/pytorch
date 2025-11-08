@@ -627,7 +627,7 @@ class ComboKernel(Kernel):
         if heuristics == "foreach":
             heuristics_line = f"""
                 @triton_heuristics.foreach(
-                    num_warps={self.num_warps},
+                    filename=__file__,
                     triton_meta={triton_meta!r},
                     inductor_meta={inductor_meta!r},
                 )
@@ -699,7 +699,7 @@ class ComboKernel(Kernel):
                 block_names[f"{tree.prefix.upper()}BLOCK"] = tree.prefix
         self.block_args = list(block_names.keys())
 
-        return [ConstexprArg(x) for x in block_names.keys()]
+        return [ConstexprArg(x) for x in block_names]
 
     def add_numel_to_args(
         self, argdefs: list[ArgName], signature: list[Any]
