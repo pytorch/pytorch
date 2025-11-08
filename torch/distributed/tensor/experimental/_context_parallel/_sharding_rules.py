@@ -84,7 +84,7 @@ def scaled_dot_product_flash_attention_cp_strategy(op_schema: OpSchema) -> OpStr
     return_debug_mask = len(op_schema.args_schema) >= 6 and op_schema.args_schema[5]
     debug_attn_mask_sharding = Shard(2) if return_debug_mask else Replicate()
 
-    cp_strategy_placements = [
+    cp_strategy_placements: PlacementList = [
         Shard(2),  # output
         Shard(2),  # logsumexp
         None,  # cum_seq_q
@@ -169,7 +169,7 @@ def scaled_dot_product_efficient_attention_cp_strategy(
     mesh = op_schema.get_mesh_from_args()
     has_attn_bias = op_schema.args_schema[3] is not None
 
-    cp_strategy_placements = [
+    cp_strategy_placements: PlacementList = [
         Shard(2),  # output
         Shard(2),  # logsumexp
         None,  # philox_seed
@@ -256,7 +256,7 @@ def scaled_dot_product_cudnn_attention_cp_strategy(op_schema: OpSchema) -> OpStr
     logsumexp_sharding = cp_sharding if compute_log_sumexp else Replicate()
     debug_attn_mask_sharding = cp_sharding if return_debug_mask else None
 
-    cp_strategy_placements = [
+    cp_strategy_placements: PlacementList = [
         cp_sharding,  # output
         logsumexp_sharding,  # logsumexp
         None,  # cum_seq_q
