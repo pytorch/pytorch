@@ -3971,6 +3971,7 @@ def should_fallback_by_default(node: torch.fx.Node) -> bool:
     skip_fallback_due_to_dynamic_shape = OrderedSet(
         [
             torch.ops.aten._assert_scalar.default,
+            torch.ops.aten.lift_fresh_copy.default,
         ]
     )
 
