@@ -16,7 +16,7 @@ jobs:
       - name: Debug git config
         shell: bash
         run: |
-          git --no-pager config --global --get-regexp '^url'
+          sudo git config --system --get core.alternateObjectDirectories | tr ':' '\n' | nl
 
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
