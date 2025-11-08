@@ -3719,7 +3719,7 @@ class TestPinMemory(TestCase):
         dl = DataLoader(ds, batch_size=2, pin_memory=False, num_workers=0)
 
         for (batch,) in dl:
-            self.assertTrue(batch.is_pinned())
+            self.assertFalse(batch.is_pinned())
 
     def test_pin_memory_does_not_accept_device_arg(self):
         # The deprecated device arg should now raise
