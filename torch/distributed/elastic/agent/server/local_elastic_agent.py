@@ -368,7 +368,6 @@ class LocalElasticAgent(SimpleElasticAgent):
         # Set CUDA_VISIBLE_DEVICES and LOCAL_RANK based on virtual_local_rank mode.
         # Virtual mode: Each worker sees only its assigned GPU as device 0, LOCAL_RANK=0
         # Traditional mode: Workers see all GPUs, LOCAL_RANK matches actual local rank
-        import torch
 
         if spec.virtual_local_rank:
             # Set LOCAL_RANK=0 and use CUDA_VISIBLE_DEVICES to control the actual GPU access.

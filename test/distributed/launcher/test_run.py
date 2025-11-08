@@ -16,7 +16,7 @@ import sys
 import tempfile
 import uuid
 from contextlib import closing, redirect_stderr, redirect_stdout
-from unittest import mock
+from unittest import mock, skipIf
 from unittest.mock import MagicMock, Mock, patch
 
 import torch.distributed.run as launch
@@ -28,6 +28,7 @@ from torch.distributed.elastic.utils.distributed import get_free_port
 from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_CUDA,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
@@ -680,6 +681,7 @@ class ElasticLaunchTest(TestCase):
     @skip_but_pass_in_sandcastle_if(
         TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
     )
+    @skipIf(not TEST_CUDA, "requires CUDA")
     def test_virtual_local_rank(self):
         """
         Test that virtual-local-rank ensures consistent device IDs across ranks.
@@ -730,14 +732,10 @@ class ElasticLaunchTest(TestCase):
 
         # Verify we actually captured compiled code from both ranks
         self.assertGreater(
-            len(rank0),
-            0,
-            "Expected to capture compiled code from rank 0"
+            len(rank0), 0, "Expected to capture compiled code from rank 0"
         )
         self.assertGreater(
-            len(rank1),
-            0,
-            "Expected to capture compiled code from rank 1"
+            len(rank1), 0, "Expected to capture compiled code from rank 1"
         )
 
         # Without virtual-local-rank, the ranks should have DIFFERENT compiled code
@@ -745,7 +743,7 @@ class ElasticLaunchTest(TestCase):
         self.assertNotEqual(
             rank0,
             rank1,
-            "Expected different compiled code without --virtual-local-rank"
+            "Expected different compiled code without --virtual-local-rank",
         )
 
         # Now run WITH virtual-local-rank - outputs should be identical
@@ -756,20 +754,18 @@ class ElasticLaunchTest(TestCase):
         self.assertGreater(
             len(rank0),
             0,
-            "Expected to capture compiled code from rank 0 with --virtual-local-rank"
+            "Expected to capture compiled code from rank 0 with --virtual-local-rank",
         )
         self.assertGreater(
             len(rank1),
             0,
-            "Expected to capture compiled code from rank 1 with --virtual-local-rank"
+            "Expected to capture compiled code from rank 1 with --virtual-local-rank",
         )
 
         # With virtual-local-rank, both ranks should have IDENTICAL compiled code
         # because they both see cuda:0 during compilation
         self.assertEqual(
-            rank0,
-            rank1,
-            "Expected identical compiled code with --virtual-local-rank"
+            rank0, rank1, "Expected identical compiled code with --virtual-local-rank"
         )
 
 
