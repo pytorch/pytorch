@@ -1062,10 +1062,16 @@ def speculate_subgraph(
                 # We walk the output structure and extract proxyable VTs.
                 graph_output_vts = []
 
+                output_types = (variables.TensorVariable, variables.SymNodeVariable)
+
+                if not remove_consts_from_outputs:
+                    # TODO - For cond, we need to return constant variables.
+                    # Investigate why. There are some tests that fail if we dont
+                    # do that.
+                    output_types += (variables.ConstantVariable,)
+
                 def visit(vt):
-                    if isinstance(
-                        vt, (variables.TensorVariable, variables.SymNodeVariable)
-                    ):
+                    if isinstance(vt, output_types):
                         graph_output_vts.append(vt)
 
                 VariableTracker.visit(visit, output)
