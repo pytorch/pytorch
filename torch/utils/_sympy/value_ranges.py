@@ -18,6 +18,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import TypeIs
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
@@ -111,7 +112,7 @@ def vr_is_expr(vr: ValueRanges[_T]) -> TypeGuard[ValueRanges[sympy.Expr]]:
     return not vr.is_bool
 
 
-def is_sympy_integer(value) -> TypeGuard[sympy.Integer]:
+def is_sympy_integer(value) -> TypeIs[sympy.Integer]:
     return isinstance(value, sympy.Integer)
 
 
