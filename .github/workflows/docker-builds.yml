@@ -175,9 +175,9 @@ jobs:
         #runner: [linux.rocm.gfx942.docker-cache]
         runner: [linux.rocm.gpu.gfx942.1]
         docker-image: [
-          docker-pytorch-linux-jammy-rocm-n-py3,
-          docker-pytorch-linux-noble-rocm-n-py3,
-          docker-pytorch-linux-jammy-rocm-n-py3-benchmarks
+          ${{ needs.docker-build.outputs.docker-pytorch-linux-jammy-rocm-n-py3 }},
+          ${{ needs.docker-build.outputs.docker-pytorch-linux-noble-rocm-n-py3 }},
+          ${{ needs.docker-build.outputs.docker-pytorch-linux-jammy-rocm-n-py3-benchmarks }}
         ]
     runs-on: "${{ matrix.runner }}"
     steps:
@@ -201,7 +201,7 @@ jobs:
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: ${{ needs.docker-build.outputs.${{ matrix.docker-image }} }}
+          docker-image: ${{ matrix.docker-image }}
 
             #- name: Save as tarball
             #  run: |
