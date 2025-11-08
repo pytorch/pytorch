@@ -37,6 +37,34 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_impl(
     void (*fn)(StableIValue*, uint64_t, uint64_t),
     uint64_t extension_build_version);
 
+struct StableListOpaque;
+using StableListHandle = StableListOpaque*;
+
+// returns an owning reference of a StableList. callee is responsible for
+// freeing memory.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_new_list_reserve_size(size_t size, StableListHandle* ret);
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_list_size(StableListHandle list_handle, size_t* size);
+
+AOTI_TORCH_EXPORT AOTITorchError torch_list_get_item(
+    StableListHandle list_handle,
+    size_t index,
+    StableIValue* element);
+
+AOTI_TORCH_EXPORT AOTITorchError torch_list_set_item(
+    StableListHandle list_handle,
+    size_t index,
+    StableIValue element);
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_list_push_back(StableListHandle list_handle, StableIValue element);
+
+// deletes the underlying list referenced by list_handle
+AOTI_TORCH_EXPORT AOTITorchError
+torch_delete_list(StableListHandle list_handle);
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 #ifdef __cplusplus

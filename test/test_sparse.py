@@ -178,7 +178,7 @@ class TestSparseBase(TestCase):
 class TestSparse(TestSparseBase):
 
     def setUp(self):
-        TestCase.setUp(self)
+        super().setUp()
 
         self.index_tensor = lambda *args, **kwargs: torch.tensor(*args, **kwargs, dtype=torch.int64)
 
@@ -216,6 +216,12 @@ class TestSparse(TestSparseBase):
                 return True
             else:
                 existing_indices.add(index)
+
+    def test_negative_indices(self):
+        indices = torch.tensor([[0, 1, -1], [2, 0, 1]])
+        values = torch.tensor([1, 2, 3])
+        shape = torch.Size([3, 3])
+        self.assertRaisesRegex(RuntimeError, "found negative index", lambda: torch.sparse_coo_tensor(indices, values, shape))
 
     def randn(self, *args, **kwargs):
         """
@@ -1427,7 +1433,7 @@ class TestSparse(TestSparseBase):
         def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
             a_list = []
             b_list = []
-            for mat_idx in range(num_mats):
+            for _ in range(num_mats):
                 a_mat = self._gen_sparse(2, nnz, [dim_i, dim_j], dtype, device, coalesced)[0]
                 b_mat = torch.randn([dim_j, dim_k], dtype=dtype, device=device)
                 a_list.append(a_mat)
@@ -3552,7 +3558,7 @@ class TestSparse(TestSparseBase):
                         values = torch.ones((indices.shape[1],) + shape[sparse_dim:], dtype=dtype, device=device)
                     else:
                         ranges = []
-                        for j, sz in enumerate(shape[:sparse_dim]):
+                        for sz in shape[:sparse_dim]:
                             ranges.append(list(range(sz)))
                         indices = torch.tensor(list(itertools.product(*ranges)), dtype=torch.long, device=device).t()
                         values = torch.zeros((indices.shape[1],) + shape[sparse_dim:], dtype=dtype, device=device)

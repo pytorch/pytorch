@@ -572,6 +572,8 @@ fi
 
 if [[ "${TEST_CONFIG}" == *cpu* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--device cpu)
+elif [[ "${TEST_CONFIG}" == *xpu* ]]; then
+  DYNAMO_BENCHMARK_FLAGS+=(--device xpu)
 else
   DYNAMO_BENCHMARK_FLAGS+=(--device cuda)
 fi
@@ -665,6 +667,8 @@ test_perf_for_dashboard() {
     device=cuda_b200
   elif [[ "${TEST_CONFIG}" == *rocm* ]]; then
     device=rocm
+  elif [[ "${TEST_CONFIG}" == *xpu* ]]; then
+    device=xpu
   fi
 
   for mode in "${modes[@]}"; do
@@ -817,6 +821,11 @@ test_inductor_micro_benchmark() {
 
 test_inductor_halide() {
   python test/run_test.py --include inductor/test_halide.py --verbose
+  assert_git_not_dirty
+}
+
+test_inductor_pallas() {
+  python test/run_test.py --include inductor/test_pallas.py --verbose
   assert_git_not_dirty
 }
 
@@ -1649,7 +1658,7 @@ test_operator_microbenchmark() {
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
 
-  for OP_BENCHMARK_TESTS in matmul mm addmm bmm; do
+  for OP_BENCHMARK_TESTS in matmul mm addmm bmm conv; do
     $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}_compile.json" \
       --benchmark-name "PyTorch operator microbenchmark" --use-compile
@@ -1720,6 +1729,8 @@ elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
   test_inductor_halide
+elif [[ "${TEST_CONFIG}" == *inductor-pallas* ]]; then
+  test_inductor_pallas
 elif [[ "${TEST_CONFIG}" == *inductor-triton-cpu* ]]; then
   test_inductor_triton_cpu
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
@@ -1757,7 +1768,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   else
     # Do this after checkout_install_torchbench to ensure we clobber any
     # nightlies that torchbench may pull in
-    if [[ "${TEST_CONFIG}" != *cpu* ]]; then
+    if [[ "${TEST_CONFIG}" != *cpu* && "${TEST_CONFIG}" != *xpu* ]]; then
       install_torchrec_and_fbgemm
     fi
     PYTHONPATH=/torchbench test_dynamo_benchmark torchbench "$id"

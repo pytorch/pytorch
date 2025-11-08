@@ -84,7 +84,7 @@ class DefaultFuseHandler(FuseHandler):
                 n = pattern
                 if n.op == "call_module":
                     return named_modules[n.target]
-                elif n.op == "call_function" and n.target == torch.nn.functional.relu:
+                elif n.op == "call_function" and n.target is torch.nn.functional.relu:
                     relu = torch.nn.ReLU()
                     relu.training = root_module.training
                     return relu

@@ -224,7 +224,7 @@ def _get_existing_inline_assertions(
             lhs = maybe_get_symint(lhs)
             rhs = maybe_get_symint(rhs)
 
-            if compare_op == operator.ge:
+            if compare_op is operator.ge:
                 lhs, rhs = rhs, lhs
 
             if isinstance(lhs, sympy.Symbol) and isinstance(rhs, int):
