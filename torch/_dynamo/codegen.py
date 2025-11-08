@@ -246,10 +246,13 @@ class PyCodegen:
             value, ContextlibContextManagerLocalGeneratorObjectVariable
         ):
             unimplemented(
-                gb_type="returning_contextmanager_from_compile",
-                context="Attempting to return a @contextmanager object from a torch.compile function",
+                gb_type="returning @contextmanager object from compile",
+                context=str(value),
                 explanation="Returning a @contextmanager object from a torch.compile function is not yet implemented",
-                hints=["Consider refactoring to avoid returning context managers from compiled functions"],
+                hints=[
+                    "Consider refactoring to avoid returning @contextmanager objects from compiled functions.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
 
         # Dynamo normally prefers codegen from source to account for aliasing.
