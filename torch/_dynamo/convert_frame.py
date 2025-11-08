@@ -114,7 +114,7 @@ from .exc import (
     SkipCodeRecursiveException,
     TorchRuntimeError,
     UncapturedHigherOrderOpError,
-    unimplemented_v2,
+    unimplemented,
     Unsupported,
 )
 from .graph_bytecode_inputs import reset_user_object_tracking
@@ -646,7 +646,7 @@ class ConvertFrameAssert:
             return ConvertFrameReturn()
 
         if is_generator(code):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Attempt to trace generator",
                 context="",
                 explanation="Generators cannot be compiled directly with `torch.compile`.",
@@ -1241,7 +1241,7 @@ def compile_frame(  # type: ignore[return]
             # We now have a new "last attempt", reset the clock
             last_attempt_start_time = time.time()
             if attempt > 100:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Excessive RestartAnalysis() calls",
                     context="",
                     explanation="Dynamo attempted to trace the same frame 100+ times. "
@@ -1576,7 +1576,7 @@ def _compile(
                 raise RecompileLimitExceeded(f"{limit_type} reached")
             else:
                 # do not recursively skip frames
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Dynamo cache limit exceeded",
                     context=f"Limit type: {limit_type}",
                     explanation="Dynamo attempted to recompile the code object too many times, "

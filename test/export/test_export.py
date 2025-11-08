@@ -742,11 +742,14 @@ class TestExport(TestCase):
         self.assertExpectedInline(
             str(custom_metadata),
             """\
-('call_function', 'cat', {'moo': 0})
-('call_function', 'item', {'moo': 0})
-('call_function', 'ge_1', {'moo': 0})
-('call_function', '_assert_scalar_default', {'moo': 0})
-('call_function', 'mul', {'moo': 0})""",
+('placeholder', 'x', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace'})
+('placeholder', 'y', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace'})
+('call_function', 'cat', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
+('call_function', 'item', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
+('call_function', 'ge_1', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
+('call_function', '_assert_scalar_default', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
+('call_function', 'mul', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
+('output', 'output', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace'})""",
         )
 
     @requires_gpu
@@ -1221,8 +1224,14 @@ graph():
     %p_block_linear2_bias : [num_users=1] = placeholder[target=p_block_linear2_bias]
     %x : [num_users=1] = placeholder[target=x]
     %wrap_body0 : [num_users=1] = get_attr[target=wrap_body0]
-    %tag_activation_checkpoint : [num_users=1] = call_function[target=torch.ops.higher_order.tag_activation_checkpoint](args = (%wrap_body0, %x, %p_block_linear1_weight, %p_block_linear1_bias, %p_block_linear2_weight, %p_block_linear2_bias), kwargs = {})
+    %tag_activation_checkpoint : [num_users=7] = call_function[target=torch.ops.higher_order.tag_activation_checkpoint](args = (%wrap_body0, %x, %p_block_linear1_weight, %p_block_linear1_bias, %p_block_linear2_weight, %p_block_linear2_bias), kwargs = {})
     %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 0), kwargs = {})
+    %getitem_1 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 1), kwargs = {})
+    %getitem_2 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 2), kwargs = {})
+    %getitem_3 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 3), kwargs = {})
+    %getitem_4 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 4), kwargs = {})
+    %getitem_5 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 5), kwargs = {})
+    %getitem_6 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 6), kwargs = {})
     return (getitem,)""",
         )
 
@@ -1231,14 +1240,14 @@ graph():
             """\
 graph():
     %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
-    %arg1_1 : [num_users=1] = placeholder[target=arg1_1]
-    %arg2_1 : [num_users=1] = placeholder[target=arg2_1]
-    %arg3_1 : [num_users=1] = placeholder[target=arg3_1]
-    %arg4_1 : [num_users=1] = placeholder[target=arg4_1]
-    %linear : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%arg0_1, %arg1_1, %arg2_1), kwargs = {})
-    %relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default](args = (%linear,), kwargs = {})
+    %arg1_1 : [num_users=2] = placeholder[target=arg1_1]
+    %arg2_1 : [num_users=2] = placeholder[target=arg2_1]
+    %arg3_1 : [num_users=2] = placeholder[target=arg3_1]
+    %arg4_1 : [num_users=2] = placeholder[target=arg4_1]
+    %linear : [num_users=2] = call_function[target=torch.ops.aten.linear.default](args = (%arg0_1, %arg1_1, %arg2_1), kwargs = {})
+    %relu : [num_users=2] = call_function[target=torch.ops.aten.relu.default](args = (%linear,), kwargs = {})
     %linear_1 : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%relu, %arg3_1, %arg4_1), kwargs = {})
-    return (linear_1,)""",
+    return (linear_1, arg1_1, arg2_1, linear, relu, arg3_1, arg4_1)""",
         )
 
         stack = contextlib.ExitStack()
