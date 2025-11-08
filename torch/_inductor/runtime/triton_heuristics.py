@@ -330,13 +330,14 @@ class CachingAutotuner(KernelInterface):
         log.debug("Triton cache dir: %s", os.environ["TRITON_CACHE_DIR"])
 
         self.size_hints = size_hints
+        self.is_mix_order_reduction = self.inductor_meta.get("RSPLIT_SIZE") is not None
         self.coordesc_tuner = CoordescTuner(
             is_mm=False,
             is_native_matmul=triton_meta.get("native_matmul", False),
+            is_mix_order_reduction=self.is_mix_order_reduction,
             name=self.fn.__name__,
             size_hints=size_hints,
             inductor_meta=self.inductor_meta,
-            frozen_fields=self.get_coordesc_frozen_fields(),
         )
         self.filename = filename
 
@@ -365,13 +366,6 @@ class CachingAutotuner(KernelInterface):
 
         # Mode for launch grid calculation
         self.grid_mode: Literal["python", "cpp"] = "python"
-
-    def get_coordesc_frozen_fields(self) -> OrderedSet[str]:
-        out: OrderedSet[str] = OrderedSet()
-        if self.inductor_meta.get("RSPLIT_SIZE"):
-            # We fix XBLOCK for mix order reduction
-            out.add("XBLOCK")
-        return out
 
     def is_statically_launchable(self):
         """
@@ -838,7 +832,7 @@ class CachingAutotuner(KernelInterface):
                 # only add inductor_args if the hook takes it
                 sig = inspect.signature(hook)
                 params = sig.parameters
-                if "inductor_args" in params:
+                if "inductor_args" in params and "config_args" in self.inductor_meta:
                     call_kwargs["inductor_args"] = self.inductor_meta["config_args"]
 
                 hook(**call_kwargs)
@@ -1425,7 +1419,7 @@ class CachingAutotuner(KernelInterface):
                         # These are torch compiled triton kernels that definitely
                         # have block size configs. Dynamo does not currently
                         # trace user defined triton kernels when TRITON_INTERPRET=1
-                        if x not in cfg.kwargs.keys():
+                        if x not in cfg.kwargs:
                             new_signature.append(x)
                     elif i not in get_constexprs(self.fn):
                         # use constexprs rather than just configs since user
@@ -2562,7 +2556,7 @@ def _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs: list[Conf
             }
 
         assert all(
-            block_type in configs[0].kwargs for block_type in tma_min_block_sizes.keys()
+            block_type in configs[0].kwargs for block_type in tma_min_block_sizes
         )
 
         # Add a config that is guaranteed to compile
@@ -3199,7 +3193,7 @@ def reduction(
     assert triton_meta is not None
 
     num_dynamic = 0
-    for k in triton_meta["signature"].keys():
+    for k in triton_meta["signature"]:
         if "ks" in k:
             num_dynamic += 1
 
@@ -3421,8 +3415,12 @@ def persistent_reduction(
         for c in configs:
             c.kwargs["RSPLIT_SIZE"] = inductor_meta.get("RSPLIT_SIZE")
 
+            c.kwargs["NUM_STAGES"] = 1
+
             # small XBLOCK to use less registers/smem
-            c.kwargs["XBLOCK"] = 1
+            c.kwargs["XBLOCK"] = (
+                torch._inductor.config.triton.mix_order_reduction_initial_xblock
+            )
 
             rnumel_hint = size_hints["r0_"]
 
@@ -3760,8 +3758,9 @@ class MixOrderReductionGrid(GridExpr):
     def generate(self, meta: dict[str, int]) -> None:
         split_size = meta.get("RSPLIT_SIZE")
         xblock = meta.get("XBLOCK")
-        assert split_size
-        assert xblock == 1, "Mix order reduction force XBLOCK=1 right now"
+        assert split_size, "Missing RSPLIT_SIZE"
+        assert xblock, "Missing XBLOCK"
+        assert split_size % xblock == 0, f"{split_size=}, {xblock=}"
         self.x_grid = self.ceildiv("xnumel", split_size)
 
 

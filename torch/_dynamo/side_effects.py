@@ -41,7 +41,7 @@ from .bytecode_transformation import (
     create_instruction,
 )
 from .codegen import PyCodegen
-from .exc import SideEffectsError, unimplemented_v2
+from .exc import SideEffectsError, unimplemented
 from .source import GlobalSource, LocalCellSource, Source, TempLocalSource
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
@@ -261,7 +261,7 @@ class SideEffects:
         assert item.mutation_type is not None
         if not is_side_effect_safe(item.mutation_type):
             # TODO plumb HOP information here
-            unimplemented_v2(
+            unimplemented(
                 gb_type="HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)",
                 context="",
                 explanation="This is not supported.",
@@ -289,7 +289,7 @@ class SideEffects:
             assert self.is_attribute_mutation(item)
         result = self.store_attr_mutations[item][name]
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Attempted to read a deleted variable",
                 context=f"item: {item}, name: {name}",
                 explanation="",
@@ -299,7 +299,7 @@ class SideEffects:
 
     def store_cell(self, cellvar: VariableTracker, value: VariableTracker) -> None:
         if cellvar.is_immutable():
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Write to immutable cell",
                 context=f"cellvar: {cellvar}, value: {value}",
                 explanation="Dynamo doesn't support writing to immutable/sourceless cell variables.",
@@ -315,7 +315,7 @@ class SideEffects:
             return self.load_attr(cellvar, "cell_contents", check=False)
         if cellvar.pre_existing_contents:
             return cellvar.pre_existing_contents
-        unimplemented_v2(
+        unimplemented(
             gb_type="Read uninitialized cell",
             context=str(cellvar),
             explanation="Attempted to read a cell variable that has not been populated yet.",
@@ -731,7 +731,7 @@ class SideEffects:
                     cg.clear_tos()
                     var.source = TempLocalSource(cg.tempvars[var])
             elif isinstance(var, variables.AutogradFunctionContextVariable):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="AutogradFunctionContextVariable escaped Dynamo-traced region",
                     context="",
                     explanation="We cannot reconstruct a torch.autograd.Function's context object.",
@@ -889,7 +889,7 @@ class SideEffects:
                     isinstance(var.maxlen, variables.ConstantVariable)
                     and var.maxlen.value is None
                 ):
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Side effect on existing deque with limited maxlen",
                         context="",
                         explanation="This is not supported.",
