@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, Sequence, TYPE_CHECKING
 
 import sympy  # noqa: TC002
 
@@ -17,8 +17,6 @@ from .simd import SIMDKernel, SIMDScheduling
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
-
     from ..ir import IRNode
     from ..scheduler import BaseSchedulerNode
 

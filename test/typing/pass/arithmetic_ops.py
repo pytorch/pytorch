@@ -1,5 +1,5 @@
-from typing import TypeAlias, Union
-from typing_extensions import assert_type
+from typing import Union
+from typing_extensions import assert_type, TypeAlias
 
 from torch import randn, Tensor
 
