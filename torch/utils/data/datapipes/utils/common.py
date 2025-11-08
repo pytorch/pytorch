@@ -6,7 +6,7 @@ import os
 import warnings
 from collections.abc import Callable, Iterable
 from io import IOBase
-from typing import Any, NoReturn, Optional, Union
+from typing import Any, NoReturn
 
 from torch.utils._import_utils import dill_available
 
@@ -25,9 +25,7 @@ __all__ = [
 DILL_AVAILABLE = dill_available()
 
 
-def validate_input_col(
-    fn: Callable, input_col: Optional[Union[int, tuple, list]]
-) -> None:
+def validate_input_col(fn: Callable, input_col: int | tuple | list | None) -> None:
     """
     Check that function used in a callable datapipe works with the input column.
 
@@ -166,7 +164,7 @@ def _check_unpickable_fn(fn: Callable) -> None:
         return
 
 
-def match_masks(name: str, masks: Union[str, list[str]]) -> bool:
+def match_masks(name: str, masks: str | list[str]) -> bool:
     # empty mask matches any input name
     if not masks:
         return True
@@ -182,7 +180,7 @@ def match_masks(name: str, masks: Union[str, list[str]]) -> bool:
 
 def get_file_pathnames_from_root(
     root: str,
-    masks: Union[str, list[str]],
+    masks: str | list[str],
     recursive: bool = False,
     abspath: bool = False,
     non_deterministic: bool = False,
@@ -219,7 +217,7 @@ def get_file_pathnames_from_root(
 
 
 def get_file_binaries_from_pathnames(
-    pathnames: Iterable, mode: str, encoding: Optional[str] = None
+    pathnames: Iterable, mode: str, encoding: str | None = None
 ):
     if not isinstance(pathnames, Iterable):
         pathnames = [

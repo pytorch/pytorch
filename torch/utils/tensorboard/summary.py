@@ -4,7 +4,7 @@ import logging
 import os
 import struct
 
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import numpy as np
@@ -249,7 +249,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
             ssi.hparams[k].number_value = v
 
             if k in hparam_domain_discrete:
-                domain_discrete: Optional[struct_pb2.ListValue] = struct_pb2.ListValue(
+                domain_discrete: struct_pb2.ListValue | None = struct_pb2.ListValue(
                     values=[
                         struct_pb2.Value(number_value=d)
                         for d in hparam_domain_discrete[k]
