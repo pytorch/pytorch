@@ -38,7 +38,6 @@ def _get_device_major(device: torch.device) -> int:
     return major
 
 
-@cache
 def register_flash_attention_fa4(
     module_path: str = "flash_attn.cute.interface",
 ) -> None:
@@ -74,7 +73,34 @@ def _fa4_register_kernels() -> None:
         _fa4_scaled_dot_product_flash_attention_backward_impl,
         "CUDA",
     )
+    # If we dont store the library, it will be garbage collected and the kernels will be unregistered
     _FA4_LIBRARY = lib
+
+
+def _fa4_common_support_error(
+    query: torch.Tensor,
+    tensors: tuple[torch.Tensor, ...],
+    cum_seq_q: torch.Tensor | None,
+    require_fp32: tuple[tuple[str, torch.Tensor], ...] = (),
+) -> str | None:
+    if not all(t.is_cuda for t in tensors):
+        return "inputs must be CUDA tensors"
+    if len({t.device for t in tensors}) != 1:
+        return "inputs must share device"
+    if query.dtype not in (torch.float16, torch.bfloat16):
+        return "query dtype must be float16 or bfloat16"
+    for name, tensor in require_fp32:
+        if tensor.dtype != torch.float32:
+            return f"{name} dtype must be float32"
+    if cum_seq_q is None and query.dim() != 4:
+        return "dense query must be 4D"
+    if cum_seq_q is not None and query.dim() != 3:
+        return "ragged query must be 3D"
+    if not torch.cuda.is_available():
+        return "CUDA not available"
+    if _get_device_major(query.device) not in (9, 10):
+        return "FA4 requires compute capability 9.0 or 10.0"
+    return None
 
 
 def _fa4_forward_support_error(
@@ -93,25 +119,20 @@ def _fa4_forward_support_error(
         return "return_debug_mask must be False"
     if alibi_slopes is not None:
         return "alibi_slopes not supported"
-    if not (query.is_cuda and key.is_cuda and value.is_cuda):
-        return "inputs must be CUDA tensors"
-    if query.device != key.device or query.device != value.device:
-        return "query, key, value must be on same device"
-    if query.dtype not in (torch.float16, torch.bfloat16):
-        return "query dtype must be float16 or bfloat16"
     if seqused_k is not None:
         if seqused_k.dtype != torch.int32:
             return "seqused_k must be int32"
         if not seqused_k.is_cuda:
             return "seqused_k must be CUDA"
-    if cum_seq_q is None and query.dim() != 4:
-        return "dense query must be 4D"
-    if cum_seq_q is not None and query.dim() != 3:
-        return "ragged query must be 3D"
-    if not torch.cuda.is_available():
-        return "CUDA not available"
-    if _get_device_major(query.device) not in (9, 10):
-        return "FA4 requires compute capability 9.0 or 10.0"
+    error = _fa4_common_support_error(
+        query,
+        (query, key, value),
+        cum_seq_q,
+    )
+    if error is not None:
+        if error == "inputs must share device":
+            return "query, key, value must be on same device"
+        return error
     return None
 
 
@@ -131,23 +152,14 @@ def _fa4_backward_support_error(
         return "dropout_p must be 0"
     if window_size_left is not None or window_size_right is not None:
         return "windowed attention not supported"
-    tensors = (grad_out, query, key, value, out, logsumexp)
-    if not all(t.is_cuda for t in tensors):
-        return "inputs must be CUDA tensors"
-    if len({t.device for t in tensors}) != 1:
-        return "inputs must share device"
-    if query.dtype not in (torch.float16, torch.bfloat16):
-        return "query dtype must be float16 or bfloat16"
-    if logsumexp.dtype != torch.float32:
-        return "logsumexp dtype must be float32"
-    if cum_seq_q is None and query.dim() != 4:
-        return "dense query must be 4D"
-    if cum_seq_q is not None and query.dim() != 3:
-        return "ragged query must be 3D"
-    if not torch.cuda.is_available():
-        return "CUDA not available"
-    if _get_device_major(query.device) not in (9, 10):
-        return "FA4 requires compute capability 9.0 or 10.0"
+    error = _fa4_common_support_error(
+        query,
+        (grad_out, query, key, value, out, logsumexp),
+        cum_seq_q,
+        require_fp32=(("logsumexp", logsumexp),),
+    )
+    if error is not None:
+        return error
     return None
 
 
@@ -178,9 +190,7 @@ def _fa4_run_forward(
         "return_lse": True,
         "cu_seqlens_q": cu_seq_q,
         "cu_seqlens_k": cu_seq_k,
-        "seqused_k": seqused_k
-        if seqused_k is None or seqused_k.is_contiguous()
-        else seqused_k.contiguous(),
+        "seqused_k": seqused_k.contiguous() if seqused_k is not None else None,
     }
     out, lse = module._flash_attn_fwd(query, key, value, **kwargs)
     return out, lse.contiguous()
