@@ -510,7 +510,7 @@ def _call_while_loop(
     # torch.contiguous_format is not yet implemented". This is okay because stride
     # is still checked.
     check_meta_consistency_vt(
-        body_r.unpack_var_sequence(tx),
+        body_graph_output_vts,
         operands_seq,
         "body_fn_output",
         "carried_inputs",
@@ -4109,12 +4109,6 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             )
         assert len(p_kwargs) == 0
 
-        flat_example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            body_r.as_proxy(),
-        )
-
         # Step 5: Install local_map subgraph
         p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
         out = _call_function_and_unflatten_output(
@@ -4122,7 +4116,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             self.value,
             p_args,
             p_kwargs,
-            flat_example_value,
+            example_value,
             body_r,
             body_graph_output_vts,
         )
