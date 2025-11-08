@@ -34,7 +34,7 @@ class _Column:
         time_unit: str,
         trim_significant_figures: bool,
         highlight_warnings: bool,
-    ):
+    ) -> None:
         self._grouped_results = grouped_results
         self._flat_results = [*it.chain.from_iterable(grouped_results)]
         self._time_scale = time_scale
@@ -51,7 +51,7 @@ class _Column:
         unit_digits = max(d for d in leading_digits if d is not None)
         decimal_digits = min(
             max(m.significant_figures - digits, 0)
-            for digits, m in zip(leading_digits, self._flat_results)
+            for digits, m in zip(leading_digits, self._flat_results, strict=True)
             if (m is not None) and (digits is not None)
         ) if self._trim_significant_figures else 1
         length = unit_digits + decimal_digits + (1 if decimal_digits else 0)
@@ -79,7 +79,7 @@ def optional_min(seq):
 
 class _Row:
     def __init__(self, results, row_group, render_env, env_str_len,
-                 row_name_str_len, time_scale, colorize, num_threads=None):
+                 row_name_str_len, time_scale, colorize, num_threads=None) -> None:
         super().__init__()
         self._results = results
         self._row_group = row_group
@@ -91,7 +91,7 @@ class _Row:
         self._columns: tuple[_Column, ...] = ()
         self._num_threads = num_threads
 
-    def register_columns(self, columns: tuple[_Column, ...]):
+    def register_columns(self, columns: tuple[_Column, ...]) -> None:
         self._columns = columns
 
     def as_column_strings(self):
@@ -99,7 +99,7 @@ class _Row:
         env = f"({concrete_results[0].env})" if self._render_env else ""
         env = env.ljust(self._env_str_len + 4)
         output = ["  " + env + concrete_results[0].as_row_name]
-        for m, col in zip(self._results, self._columns or ()):
+        for m, col in zip(self._results, self._columns or (), strict=False):
             if m is None:
                 output.append(col.num_to_str(None, 1, None))
             else:
@@ -141,7 +141,7 @@ class _Row:
             ]
 
         row_contents = [column_strings[0].ljust(col_widths[0])]
-        for col_str, width, result, best_value in zip(column_strings[1:], col_widths[1:], self._results, best_values):
+        for col_str, width, result, best_value in zip(column_strings[1:], col_widths[1:], self._results, best_values, strict=False):
             col_str = col_str.center(width)
             if self._colorize != Colorize.NONE and result is not None and best_value is not None:
                 col_str = self.color_segment(col_str, result.median, best_value)
@@ -156,7 +156,7 @@ class Table:
             colorize: Colorize,
             trim_significant_figures: bool,
             highlight_warnings: bool
-    ):
+    ) -> None:
         if len({r.label for r in results}) != 1:
             raise AssertionError("All results must share the same label")
 
@@ -206,7 +206,7 @@ class Table:
         prior_env = ""
         row_group = -1
         rows_by_group: list[list[list[Optional[common.Measurement]]]] = []
-        for (num_threads, env, _), row in zip(self.row_keys, ordered_results):
+        for (num_threads, env, _), row in zip(self.row_keys, ordered_results, strict=True):
             thread_transition = (num_threads != prior_num_threads)
             if thread_transition:
                 prior_num_threads = num_threads
@@ -250,10 +250,10 @@ class Table:
         for sr in string_rows:
             sr.extend(["" for _ in range(num_cols - len(sr))])
 
-        col_widths = [max(len(j) for j in i) for i in zip(*string_rows)]
-        finalized_columns = ["  |  ".join(i.center(w) for i, w in zip(string_rows[0], col_widths))]
+        col_widths = [max(len(j) for j in i) for i in zip(*string_rows, strict=True)]
+        finalized_columns = ["  |  ".join(i.center(w) for i, w in zip(string_rows[0], col_widths, strict=True))]
         overall_width = len(finalized_columns[0])
-        for string_row, row in zip(string_rows[1:], self.rows):
+        for string_row, row in zip(string_rows[1:], self.rows, strict=True):
             finalized_columns.extend(row.row_separator(overall_width))
             finalized_columns.append("  |  ".join(row.finalize_column_strings(string_row, col_widths)))
 
@@ -283,17 +283,17 @@ class Compare:
     Args:
         results: List of Measurement to display.
     """
-    def __init__(self, results: list[common.Measurement]):
+    def __init__(self, results: list[common.Measurement]) -> None:
         self._results: list[common.Measurement] = []
         self.extend_results(results)
         self._trim_significant_figures = False
         self._colorize = Colorize.NONE
         self._highlight_warnings = False
 
-    def __str__(self):
+    def __str__(self) -> str:
         return "\n".join(self._render())
 
-    def extend_results(self, results):
+    def extend_results(self, results) -> None:
         """Append results to already stored ones.
 
         All added results must be instances of ``Measurement``.
@@ -305,22 +305,22 @@ class Compare:
                 )
         self._results.extend(results)
 
-    def trim_significant_figures(self):
+    def trim_significant_figures(self) -> None:
         """Enables trimming of significant figures when building the formatted table."""
         self._trim_significant_figures = True
 
-    def colorize(self, rowwise=False):
+    def colorize(self, rowwise=False) -> None:
         """Colorize formatted table.
 
         Colorize columnwise by default.
         """
         self._colorize = Colorize.ROWWISE if rowwise else Colorize.COLUMNWISE
 
-    def highlight_warnings(self):
+    def highlight_warnings(self) -> None:
         """Enables warning highlighting when building formatted table."""
         self._highlight_warnings = True
 
-    def print(self):
+    def print(self) -> None:
         """Print formatted table"""
         print(str(self))
 

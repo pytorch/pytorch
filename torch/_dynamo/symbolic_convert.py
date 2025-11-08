@@ -97,7 +97,7 @@ from .exc import (
     get_stack_above_dynamo,
     ResumePrologueTracingError,
     StepUnsupported,
-    unimplemented_v2,
+    unimplemented,
     Unsupported,
 )
 from .funcname_cache import get_funcname
@@ -171,6 +171,7 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+from .variables.streams import SymbolicStreamState
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.torch_function import (
     SymbolicTorchFunctionState,
@@ -433,12 +434,15 @@ class BlockStackEntry:
         else:
             return ReenterWith(self.stack_index - 1)
 
-    def exit(self, tx: InstructionTranslatorBase, is_graph_break: bool) -> None:
+    def exit(
+        self, tx: InstructionTranslatorBase, is_graph_break: bool
+    ) -> VariableTracker | None:
         assert self.with_context is not None
         if (
             is_graph_break and self.with_context.exit_on_graph_break()
         ) or not is_graph_break:
             return self.with_context.exit(tx)  # type: ignore[arg-type]
+        return None
 
 
 class SpeculationLogDivergence(AssertionError):
@@ -538,91 +542,35 @@ def _detect_and_normalize_assert_statement(
 explain = False
 
 
-def log_graph_break(
-    code_options: dict[str, Any],
-    reason: str = "",
-    exc_info: bool = False,
-    user_stack: Optional[StackSummary] = None,
-    latest_bytecode_log: Optional[str] = None,
-) -> None:
-    if user_stack is None:
-        user_stack = torch._guards.TracingContext.extract_stack()
-
-    try:
-        frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
-    except IndexError:
-        # first instruction
-        frame_loc = (
-            code_options["co_filename"],
-            code_options["co_firstlineno"],
-        )
-
-    stack_above_dynamo_formatted = ""
-    if config.verbose:
-        stack_above_dynamo = get_stack_above_dynamo()
-        stack_above_dynamo_formatted = "".join(
-            traceback.format_list(stack_above_dynamo)
-        )
-    else:
-        user_stack = get_stack_above_dynamo() + user_stack  # type: ignore[assignment]
-        # pyrefly: ignore [bad-argument-type]
-        user_stack = collapse_resume_frames(user_stack)
-    user_stack_formatted = "".join(traceback.format_list(user_stack))
-    user_stack_trace = (
-        f"Graph break in user code at {frame_loc[0]}:{frame_loc[1]}\n"
-        f"Graph Break Reason: {reason}\n"
-        "User code traceback:\n"
-    )
-
-    if config.verbose:
-        user_stack_trace += (
-            f"{stack_above_dynamo_formatted}\n"
-            "========== most recent `torch.compile` tracing attempt started here ==========\n\n"
-            f"{user_stack_formatted}\n"
-            "NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! "
-            "This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another "
-            "Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python "
-            "function, which Dynamo intercepts as a top-level frame.\n"
-        )
-    else:
-        user_stack_trace += str(user_stack_formatted)
-
-    torch._logging.trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "dynamo_graph_break_reason",
-            "encoding": "string",
-        },
-        payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc() if exc_info else ''}",
-    )
-
-    # torch._dynamo.explain() formats this a little nicer, and presents a slightly
-    # more actionable user code pointer
-    if (
-        graph_break_log.isEnabledFor(logging.DEBUG)
-        and not explain
-        and graph_break_dup_warning_checker.add(frame_loc)
-    ):
-        # This log line MUST contain the string "Graph break in user code",
-        # This log line is exercised from
-        #   python test/dynamo/test_exc.py -k test_graph_break_log
-        if latest_bytecode_log and config.verbose:
-            user_stack_trace += "Most recent bytecode instructions traced (max 20):\n"
-            user_stack_trace += latest_bytecode_log
-
-        graph_break_log.debug(
-            user_stack_trace,
-        )
-    else:
-        # This log line MUST not contain the string "Graph break in user code",
-        # exercised by
-        #   python test/dynamo/test_misc.py -k test_duplicate_graph_break_log
-        graph_break_log.debug(
-            "Graph break (user stack suppressed due to duplicate graph break) in user code at %s:%s\nGraph Break Reason: %s",
-            frame_loc[0],
-            frame_loc[1],
-            reason,
-        )
+# [NOTE] graph break handling in symbolic_convert
+# There are 4 possible graph break cases that InstructionTranslatorBase handles:
+#   1. Regular graph breaks from CALL, BINARY_SUBSCR, etc. (implemented by break_graph_if_unsupported)
+#   2. Data-dependent condition graph breaks (implemented by generic_jump)
+#   3. STORE_ATTR graph breaks (implemented in InstructionTranslatorBase.STORE_ATTR)
+#   4. All other unhandled graph breaks - unsupported step graph breaks (implemented in InstructionTranslatorBase.step)
+#
+# Graph breaks are handled in the following manner:
+#   1. The Unsupported exception is caught. If we cannot compile a partial graph (should_compile_partial_graph() is False),
+#      then propagate the exception upward. For unsupported step graph breaks, the condition to abort partial compilation is
+#      more restrictive (see InstructionTranslatorBase.step).
+#   2. If the Unsupported exception escapes symbolic_convert.py, then we are done.
+#      Otherwise, we want to attempt partial compilation.
+#      Log the graph break via log_graph_break. If we're handling a data-dependent graph break (type 2.), then we can immediately
+#      codegen the compiled graph and resume function and we're done. This is because the jump instruction we graph break on is
+#      limited in how it can manipulate Python state (say, in comparison, to CALL, which can modify Python state arbitrarily).
+#      Otherwise, we need to restart compilation. We need to restart because by processing the unsupported instruction,
+#      we may have modified the VariableTrackers, and we need all of our VariableTrackers to be in the state BEFORE tracing the
+#      unsupported instruction.
+#   3. During the first compilation, we updated a speculation log, indicating points in the code that we can resume from.
+#      On the second compilation, we will stop tracing at the first speculation log that fails. Then we compile the partial
+#      graph and resume function.
+#
+# Logging invariants:
+#   1. No logs need to be made if Unsupported escapes symbolic_convert.py. Python's default exception printing will
+#      print out all of the necessary information and no partial compilation will be attempted.
+#   2. log_graph_break should be called as soon as Unsupported is caught and we determined we want to partial compile.
+#      This always happens on the first compilation, NOT the restart handling this graph
+#   3. Any compile_subgraph call should be preceded immediately by a log in the form of "... triggered compile".
 
 
 def generic_jump(
@@ -645,7 +593,8 @@ def generic_jump(
         value: VariableTracker,
         extra_msg: str = "",
     ) -> None:
-        log_graph_break(
+        assert self.should_compile_partial_graph()
+        self.log_graph_break(
             self.code_options,
             reason=format_graph_break_message(
                 gb_type=_gb_type,
@@ -654,7 +603,6 @@ def generic_jump(
                 hints=_hints,
             ),
         )
-        assert self.should_compile_partial_graph()
         # compile a partial subgraph prefix then jump into user code
         if self.maybe_has_backedge():
             msg = (
@@ -709,7 +657,7 @@ def generic_jump(
                 elif self.should_compile_partial_graph():
                     jump_graph_break(self, inst, value)
                 else:
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Data-dependent assertion failed (cannot compile partial graph)",
                         context=f"value: {value}",
                         explanation="Dynamo has determined when encountering a data-dependent assert failure "
@@ -748,7 +696,7 @@ def generic_jump(
 
                 result = torch.fx.experimental.symbolic_shapes.expect_true(sym_expr)
                 if not result:
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Assertion failed on symbolic shapes",
                         context=str(sym_expr),
                         explanation="",
@@ -824,7 +772,7 @@ def generic_jump(
                             self.push(value)
                         self.jump(inst)
                 else:
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Data-dependent branching with non-constant __bool__",
                         context=f"method: {x}, result: {result}",
                         explanation="Attempted to perform data-dependent branching on a user-defined "
@@ -877,7 +825,7 @@ def generic_jump(
                         self.push(value)
                     self.jump(inst)
             else:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Data-dependent branching",
                     context=f"attempted to jump with {value}",
                     explanation=_explanation,
@@ -911,7 +859,7 @@ def break_graph_if_unsupported(
                     # We don't support graph break under GenericContextWrappingVariable,
                     # If there is, we roll back to the checkpoint and fall back.
                     excp.remove_from_stats()
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Graph break under GenericContextWrappingVariable",
                         context=f"Active generic context managers: {self.active_generic_context_managers}",
                         explanation="Attempted to graph break in an active context manager(s) that doesn't support graph breaking.",
@@ -928,12 +876,10 @@ def break_graph_if_unsupported(
                 if not self.should_compile_partial_graph():
                     raise
 
-                log_graph_break(
+                self.log_graph_break(
                     self.code_options,
-                    exc_info=True,
                     reason=str(excp),
                     user_stack=excp.real_stack,
-                    latest_bytecode_log="\n".join(self.latest_bytecode_queue),
                 )
 
                 if self.maybe_has_backedge():
@@ -966,6 +912,7 @@ def break_graph_if_unsupported(
             else:
                 stack_effect = dis.stack_effect(inst.opcode, inst.arg)
 
+            log.debug("%s triggered compile", inst.opname)
             all_stack_locals_metadata = self.output.compile_subgraph(
                 self, reason=reason, stack_pops=push - stack_effect
             )
@@ -1036,7 +983,7 @@ class BytecodeDispatchTableMeta(type):
         super().__init__(name, bases, dct)  # type: ignore[misc]
 
         def _missing(opname: str, *args: Any) -> None:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Missing bytecode handler",
                 context=f"{opname} with args {args}",
                 explanation=f"Dynamo does not know how to handle the bytecode instruction `{opname}`.",
@@ -1161,6 +1108,7 @@ class InstructionTranslatorBase(
     symbolic_locals: dict[str, VariableTracker]
     symbolic_globals: dict[str, VariableTracker]
     symbolic_torch_function_state: SymbolicTorchFunctionState
+    symbolic_stream_state: SymbolicStreamState
     post_prune_cell_and_freevars: Optional[dict[str, VariableTracker]]
     stack: list[VariableTracker]
     instruction_pointer: Optional[int]
@@ -1388,11 +1336,23 @@ class InstructionTranslatorBase(
                 or self.error_on_graph_break
                 or self.is_tracing_resume_prologue
             ):
+                if isinstance(e, StepUnsupported):
+                    unimplemented(
+                        gb_type="cannot resume from torch._dynamo.step_unsupported()",
+                        context="",
+                        explanation="traced torch._dynamo.step_unsupported(), but Dynamo is instructed "
+                        "to error on graph break. This graph break is used for debugging only.",
+                        hints=[
+                            "Remove the torch._dynamo.step_unsupported() call.",
+                            "Make sure fullgraph=False and error_on_graph_break=False.",
+                            *graph_break_hints.DYNAMO_BUG,
+                        ],
+                    )
                 raise
             if self.current_speculation is None:
-                log.debug("empty checkpoint")
+                log.debug("empty checkpoint - cannot resume from graph break")
                 if isinstance(e, StepUnsupported):
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="torch._dynamo.step_unsupported() with empty checkpoint",
                         context="",
                         explanation="traced torch._dynamo.step_unsupported(), but there is no checkpoint "
@@ -1405,7 +1365,17 @@ class InstructionTranslatorBase(
                         ],
                     )
                 raise
-            log.debug("step triggered compile", exc_info=True)
+            reason = (
+                "Encountered graph break that we cannot resume from. "
+                "Compiling up to the previous resumable state, "
+                "then skipping the rest of the function. "
+                f"Graph break encountered:\n{str(e)}"
+            )
+            self.log_graph_break(
+                self.code_options,
+                reason=reason,
+                user_stack=e.real_stack,
+            )
 
         self.current_speculation.fail_and_restart_analysis(self.error_on_graph_break)
         return False
@@ -1477,6 +1447,7 @@ class InstructionTranslatorBase(
         # NOTE: if we support non-empty self.stack in the future, the `stack_pops` argument
         # below should be set to the stack length to ensure that the stack is codegen'd
         # for the rest of the function.
+        log.debug("step triggered compile")
         all_stack_locals_metadata = self.output.compile_subgraph(
             self,
             partial_convert=True,
@@ -1738,7 +1709,7 @@ class InstructionTranslatorBase(
                     new_name = name.replace(".", "implicit")
                     self.push(self.symbolic_locals[new_name])
                 except KeyError:
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Attempted to read undefined local variable (implicit)",
                         context=f"LOAD_FAST {name}",
                         explanation=f"Could not find an implicit local variable with name `{name}`",
@@ -1748,7 +1719,7 @@ class InstructionTranslatorBase(
                         ],
                     )
             else:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Attempted to read undefined local variable",
                     context=f"LOAD_FAST {name}",
                     explanation=f"Could not find a local variable with name `{name}`",
@@ -1853,7 +1824,7 @@ class InstructionTranslatorBase(
             source, self.symbolic_globals[name]
         )
         if isinstance(value, RemovableHandleVariable):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Storing Tensor hook handle in globals",
                 context=name,
                 explanation="This is not supported.",
@@ -1949,7 +1920,7 @@ class InstructionTranslatorBase(
                     globals=self.f_globals,
                 )
             except ImportError:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Import failure",
                     context=f"module_name: {module_name}, fromlist: {fromlist}, level={level}",
                     explanation="Failure when attempting to import.",
@@ -1980,7 +1951,7 @@ class InstructionTranslatorBase(
             # pyrefly: ignore [unbound-name]
             self.push(PythonModuleVariable(value, source=source))
         else:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Bad import result",
                 # pyrefly: ignore [unbound-name]
                 context=typestr(value),
@@ -2000,7 +1971,14 @@ class InstructionTranslatorBase(
     @cache_method
     def load_builtin_from_argval(self, argval: Any) -> VariableTracker:
         if argval not in self.f_builtins:
-            raise Unsupported(f"name '{argval}' is not defined")
+            unimplemented(
+                gb_type="failed to find name in frame builtins",
+                context="",
+                explanation=f"Failed to find name `{argval}` in frame's builtins.",
+                hints=[
+                    *graph_break_hints.DYNAMO_BUG,
+                ],
+            )
         val = self.f_builtins[argval]
 
         if callable(val):
@@ -2121,7 +2099,7 @@ class InstructionTranslatorBase(
         if self._isinstance_exception(val):
             observed_exception_type = exc.get_dynamo_observed_exception(val.exc_type)  # type: ignore[attr-defined, union-attr]
             raise observed_exception_type(f"raised exception {val}")
-        unimplemented_v2(
+        unimplemented(
             gb_type="Failed to raise exception",
             context=str(exc),
             explanation="Attempted to raise a non-Exception type/value.",
@@ -2161,7 +2139,7 @@ class InstructionTranslatorBase(
         tos = self.stack[-1]
         assert isinstance(tos, ExceptionVariable)
         if tos.exc_type is StopIteration:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="CLEANUP_THROW with StopIteration",
                 context="",
                 explanation="Received StopIteration when handling generator.throw/close. This is not supported.",
@@ -2247,7 +2225,7 @@ class InstructionTranslatorBase(
             curr_exc = self.exn_vt_stack.get_current_exception()
             dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
             assert isinstance(raised_exception, dynamo_exc)  # sanity check
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Observed exception",
                 context=f"raised exception {curr_exc.python_type_name()}({curr_exc.args})",  # type: ignore[union-attr]
                 explanation=observed_exn_gb_explanation,
@@ -2302,7 +2280,7 @@ class InstructionTranslatorBase(
                         # instruction translator.
                         self.stack.clear()
                         if type(self) is InstructionTranslator:
-                            unimplemented_v2(
+                            unimplemented(
                                 gb_type="Observed exception (EXCEPT_HANDLER)",
                                 context=str(raised_exception),
                                 explanation=observed_exn_gb_explanation
@@ -2440,7 +2418,7 @@ class InstructionTranslatorBase(
                 UserDefinedExceptionObjectVariable,
             ),
         ):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Exception with bad expected type",
                 context=str(expected_exc_types),
                 explanation=f"`except ...` has unsupported type {expected_exc_types}.",
@@ -2449,7 +2427,7 @@ class InstructionTranslatorBase(
 
         if sys.version_info >= (3, 11):
             if not self._isinstance_exception(exc_instance):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Caught non-Exception value",
                     context=str(exc_instance),
                     explanation=f"Except expects to receive an object of Exception type but received {exc_instance}.",
@@ -2472,7 +2450,7 @@ class InstructionTranslatorBase(
                     UserDefinedExceptionClassVariable,
                 ),
             ):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Exception with non-type expectation",
                     context=str(expected_type),
                     explanation=f"`except ...` expects a non-type: {expected_type}.",
@@ -2527,7 +2505,7 @@ class InstructionTranslatorBase(
                 kwargsvars = ConstDictVariable({})
             argsvars = self.pop()
         else:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Variadic function call with bad flags",
                 context=f"flags: {inst.argval}",
                 explanation=f"Attempted to call a variadic function (CALL_FUNCTION_EX) with bad flags {inst.argval}",
@@ -2565,7 +2543,7 @@ class InstructionTranslatorBase(
             kwargsvars,
             ConstDictVariable,
         ):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Variadic function call with bad args/kwargs type",
                 # pyrefly: ignore [unbound-name]
                 context=f"args type: {typestr(argsvars)}, kwargs type: {typestr(kwargsvars)}",
@@ -2669,21 +2647,26 @@ class InstructionTranslatorBase(
         except Unsupported as e:
             if not self.should_compile_partial_graph():
                 raise
-            log.debug("STORE_ATTR triggered compile", exc_info=True)
+            reason = f"Encountered graph break when attempting to store an object's attribute (STORE_ATTR):\n\n{str(e)}"
+            self.log_graph_break(
+                self.code_options,
+                reason=reason,
+                user_stack=e.real_stack,
+            )
             e.remove_from_stats()
             e.add_to_stats("graph_break")
         speculation.fail_and_restart_analysis(self.error_on_graph_break)
 
     def store_attr_graph_break(self, inst: Instruction) -> None:
-        log_graph_break(self.code_options, reason="STORE_ATTR-caused graph break")
         if not self.should_compile_partial_graph():
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Should not compile partial graph (STORE_ATTR)",
                 context="",
                 explanation="Dynamo has determined when encountering an unsupported "
                 "STORE_ATTR instruction (i.e. `obj.attr = val`) that it should not compile the partial graph.",
                 hints=[],
             )
+        log.debug("STORE_ATTR triggered compile")
         all_stack_locals_metadata = self.output.compile_subgraph(
             self,
             reason=GraphCompileReason("store_attr", [self.frame_summary()]),
@@ -2833,7 +2816,7 @@ class InstructionTranslatorBase(
             reads = livevars_analysis(self.instructions, resume_inst)
             all_argnames = tuple(
                 k
-                for k in self.symbolic_locals.keys()
+                for k in self.symbolic_locals
                 if k in reads and k not in self.cell_and_freevars()
             )
             argnames_null_set = set(meta.locals_null_keys)
@@ -3205,7 +3188,7 @@ class InstructionTranslatorBase(
             ]
         )
 
-        # TOS: resumes, frames (popped), frame 1 stack + locals
+        # TOS: resume 1, remaining resumes, frames (popped), frame 1 stack + locals
         cg.extend_output(
             [
                 *create_rot_n(3),
@@ -3216,12 +3199,8 @@ class InstructionTranslatorBase(
             ]
         )
 
-        # TOS: [resumes, frames, *(frame 1 stack + locals)]
-        cg.extend_output(
-            [
-                *create_call_function_ex(False, True),
-            ]
-        )
+        # TOS: resume 1, [remaining resumes, frames, *(frame 1 stack + locals)]
+        cg.extend_output(create_call_function_ex(False, True))
 
     def should_compile_partial_graph(self) -> bool:
         if sys.version_info >= (3, 11):
@@ -3256,7 +3235,7 @@ class InstructionTranslatorBase(
 
     def BUILD_SLICE(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
-        self.push(SliceVariable(items, tx=self))
+        self.push(SliceVariable(items, tx=self))  # type: ignore[arg-type]
 
     def BUILD_LIST(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
@@ -3264,7 +3243,7 @@ class InstructionTranslatorBase(
 
     def BUILD_SET(self, inst: Instruction) -> None:
         if config.inject_BUILD_SET_unimplemented_TESTING_ONLY:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="missing BUILD_SET handler",
                 context="",
                 explanation="Missing BUILD_SET bytecode handler (for testing purposes).",
@@ -3281,7 +3260,7 @@ class InstructionTranslatorBase(
             try:
                 items.extend(seq.force_unpack_var_sequence(self))
             except NotImplementedError:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Failed to unpack object for BUILD_LIST_UNPACK",
                     context=str(seq),
                     explanation=f"{seq} cannot be unpacked into a list for the BUILD_LIST_UNPACK "
@@ -3348,7 +3327,7 @@ class InstructionTranslatorBase(
         obj = self.stack[-inst.arg]
         assert isinstance(obj, SetVariable)
         assert obj.is_mutable()
-        obj.call_method(self, "add", [v], {})
+        obj.call_method(self, "add", [v], {})  # type: ignore[arg-type]
 
     def SET_UPDATE(self, inst: Instruction) -> None:
         v = self.pop()
@@ -3357,7 +3336,7 @@ class InstructionTranslatorBase(
         obj = self.stack[-inst.arg]
         assert isinstance(obj, SetVariable)
         assert obj.is_mutable()
-        obj.call_method(self, "update", [v], {})
+        obj.call_method(self, "update", [v], {})  # type: ignore[arg-type]
 
     def LIST_APPEND(self, inst: Instruction) -> None:
         v = self.pop()
@@ -3419,7 +3398,7 @@ class InstructionTranslatorBase(
         elif seq.has_force_unpack_var_sequence(self):
             val = seq.force_unpack_var_sequence(self)
         else:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Failed to unpack object for UNPACK_SEQUENCE",
                 context=str(seq),
                 explanation=f"{seq} cannot be unpacked into a list for the UNPACK_SEQUENCE bytecode "
@@ -3428,7 +3407,7 @@ class InstructionTranslatorBase(
             )
         # pyrefly: ignore [unbound-name]
         if len(val) != inst.argval:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Length mismatch when unpacking object for UNPACK_SEQUENCE",
                 # pyrefly: ignore [unbound-name]
                 context=f"expected length: {inst.argval}, actual: {len(val)}",
@@ -3457,7 +3436,7 @@ class InstructionTranslatorBase(
             for item in reversed(vals_prefix):
                 self.push(item)
         else:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Failed to unpack object for UNPACK_EX",
                 context=str(seq),
                 explanation=f"{seq} cannot be unpacked into a list for the UNPACK_EX bytecode.",
@@ -3467,7 +3446,7 @@ class InstructionTranslatorBase(
     @break_graph_if_unsupported(push=0)
     def graph_break_on_leaf_function(self, inst: Instruction) -> None:
         if self.is_leaf_tracer:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Forced graph break on leaf function",
                 context="",
                 explanation="Forced graph break for nested graph break testing purposes",
@@ -3573,7 +3552,7 @@ class InstructionTranslatorBase(
                 format_string_parts.append(part.format_string)
                 args.extend(part.sym_args)
                 if set(kwargs.keys()) & set(part.sym_kwargs.keys()):
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="BUILD_STRING key conflict",
                         context=f"format_string_parts: {format_string_parts}, kwargs: {kwargs}, part.sym_kwargs: {part.sym_kwargs}",
                         explanation="Failed to build format string due to key conflict",
@@ -3581,7 +3560,7 @@ class InstructionTranslatorBase(
                     )
                 kwargs.update(part.sym_kwargs)
             else:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="BUILD_STRING type error",
                     context=str(part),
                     explanation="Format string part type is not correct - expected constant or format string.",
@@ -3635,7 +3614,7 @@ class InstructionTranslatorBase(
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ListVariable)
         assert obj.is_mutable()
-        obj.call_method(self, "extend", [v], {})
+        obj.call_method(self, "extend", [v], {})  # type: ignore[arg-type]
 
     def LIST_TO_TUPLE(self, inst: Instruction) -> None:
         self.push(BuiltinVariable(tuple).call_function(self, [self.pop()], {}))  # type: ignore[arg-type]
@@ -3665,7 +3644,7 @@ class InstructionTranslatorBase(
         obj = self.stack[-inst.arg].realize()
         assert isinstance(obj, ConstDictVariable)
         assert obj.is_mutable()
-        obj.call_method(self, "update", [v], {})
+        obj.call_method(self, "update", [v], {})  # type: ignore[arg-type]
 
     DICT_UPDATE = DICT_MERGE
 
@@ -3701,7 +3680,7 @@ class InstructionTranslatorBase(
     def MATCH_KEYS(self, inst: Instruction) -> None:
         tos = self.stack[-1]
         assert isinstance(tos, TupleVariable)
-        keys = tos.unpack_var_sequence(self)
+        keys = tos.unpack_var_sequence(self)  # type: ignore[arg-type]
         tos1 = self.stack[-2]
         assert isinstance(tos1, ConstDictVariable)
 
@@ -3891,11 +3870,11 @@ class InstructionTranslatorBase(
             else:
                 self.block_stack.append(BlockStackEntry(inst, target, len(self.stack)))
 
-        return ctx.enter(self)
+        return ctx.enter(self)  # type: ignore[arg-type]
 
     @staticmethod
     def unsupported_ctx_graph_break(ctx: VariableTracker) -> NoReturn:
-        unimplemented_v2(
+        unimplemented(
             gb_type="Unsupported context manager",
             context=f"Attempted SETUP_WITH/BEFORE_WITH/LOAD_SPECIAL on {ctx}",
             explanation=f"Dynamo does not know how to enter a `{ctx.python_type_name()}` context manager.",
@@ -3958,7 +3937,7 @@ class InstructionTranslatorBase(
 
     def LOAD_FAST_CHECK(self, inst: Instruction) -> None:
         if istype(self.symbolic_locals.get(inst.argval, None), NullVariable):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="LOAD_FAST_CHECK on uninitialized variable",
                 context=inst.argval,
                 explanation=f"Attempted to load uninitialized local variable {inst.argval}",
@@ -3992,7 +3971,7 @@ class InstructionTranslatorBase(
             # INTRINSIC_LIST_TO_TUPLE
             self.push(TupleVariable(self.pop().force_unpack_var_sequence(self)))
         else:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Missing CALL_INTRINSIC_1 handler",
                 context=f"CALL_INTRINSIC_1 operand: {inst.argval}",
                 explanation=f"No handler implemented for CALL_INTRINSIC_1 {inst.argval} instruction.",
@@ -4178,6 +4157,93 @@ class InstructionTranslatorBase(
             self.instructions[self.instruction_pointer - 1],
         )
 
+    def log_graph_break(
+        self,
+        code_options: dict[str, Any],
+        reason: str = "",
+        user_stack: Optional[StackSummary] = None,
+    ) -> None:
+        if user_stack is None:
+            user_stack = torch._guards.TracingContext.extract_stack()
+
+        try:
+            frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+        except IndexError:
+            # first instruction
+            frame_loc = (
+                code_options["co_filename"],
+                code_options["co_firstlineno"],
+            )
+
+        stack_above_dynamo_formatted = ""
+        if config.verbose:
+            stack_above_dynamo = get_stack_above_dynamo()
+            stack_above_dynamo_formatted = "".join(
+                traceback.format_list(stack_above_dynamo)
+            )
+        else:
+            user_stack = get_stack_above_dynamo() + user_stack  # type: ignore[assignment]
+            # pyrefly: ignore [bad-argument-type]
+            user_stack = collapse_resume_frames(user_stack)
+        user_stack_formatted = "".join(traceback.format_list(user_stack))
+        user_stack_trace = (
+            f"Graph break in user code at {frame_loc[0]}:{frame_loc[1]}\n"
+            f"Graph Break Reason: {reason}\n"
+            "User code traceback:\n"
+        )
+
+        if config.verbose:
+            user_stack_trace += (
+                f"{stack_above_dynamo_formatted}\n"
+                "========== most recent `torch.compile` tracing attempt started here ==========\n\n"
+                f"{user_stack_formatted}\n"
+                "NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! "
+                "This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another "
+                "Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python "
+                "function, which Dynamo intercepts as a top-level frame.\n"
+            )
+        else:
+            user_stack_trace += str(user_stack_formatted)
+
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "dynamo_graph_break_reason",
+                "encoding": "string",
+            },
+            payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc()}",
+        )
+
+        # torch._dynamo.explain() formats this a little nicer, and presents a slightly
+        # more actionable user code pointer
+        if (
+            graph_break_log.isEnabledFor(logging.DEBUG)
+            and not explain
+            and graph_break_dup_warning_checker.add(frame_loc)
+        ):
+            # This log line MUST contain the string "Graph break in user code",
+            # This log line is exercised from
+            #   python test/dynamo/test_exc.py -k test_graph_break_log
+            if config.verbose:
+                user_stack_trace += (
+                    "\nMost recent bytecode instructions traced (max 20):\n"
+                )
+                user_stack_trace += "\n".join(self.latest_bytecode_queue) + "\n"
+
+            graph_break_log.debug(
+                user_stack_trace,
+            )
+        else:
+            # This log line MUST not contain the string "Graph break in user code",
+            # exercised by
+            #   python test/dynamo/test_misc.py -k test_duplicate_graph_break_log
+            graph_break_log.debug(
+                "Graph break (user stack suppressed due to duplicate graph break) in user code at %s:%s\nGraph Break Reason: %s",
+                frame_loc[0],
+                frame_loc[1],
+                reason,
+            )
+
     def __init__(
         self,
         output: OutputGraph,
@@ -4189,6 +4255,7 @@ class InstructionTranslatorBase(
         symbolic_locals: dict[str, VariableTracker],
         symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
+        symbolic_stream_state: SymbolicStreamState,
         f_code: types.CodeType,
         export: bool,
         inline_depth: int,
@@ -4208,6 +4275,7 @@ class InstructionTranslatorBase(
         self.symbolic_locals = symbolic_locals
         self.symbolic_globals = symbolic_globals
         self.symbolic_torch_function_state = symbolic_torch_function_state
+        self.symbolic_stream_state = symbolic_stream_state
         # used to keep cell/freevars alive after pruning symbolic_locals (prune_dead_locals)
         # in order to generate any nested closures
         self.post_prune_cell_and_freevars = None
@@ -4362,6 +4430,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             # A global var is inserted only after a STORE_GLOBAL happens to it
             symbolic_globals={},
             symbolic_torch_function_state=None,  # type: ignore[arg-type] # set below
+            symbolic_stream_state=None,  # type: ignore[arg-type] # set below
             f_code=f_code,
             export=export,
             inline_depth=0,
@@ -4466,6 +4535,8 @@ class InstructionTranslator(InstructionTranslatorBase):
                 torch_function_mode_stack
             )
 
+            self.symbolic_stream_state = SymbolicStreamState()
+
             if export:
                 # export gets confused if we never realize unused inputs
                 # in export mode just eagerly realize everything
@@ -4497,7 +4568,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 # if it reaches here, it means Dynamo failed to inline a functorch function
                 f"- torch.func.{name}(fn) requires the function to be inlined by dynamo"
             )
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported functorch tracing attempt",
                 context="",
                 explanation=msg,
@@ -4555,7 +4626,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             logging.INFO,
             f"torchdynamo done tracing {self.f_code.co_name} ({inst.opname})",
         )
-        log.debug("%s triggered compile", inst.opname)
+        log.debug("return triggered compile")
         all_stack_locals_metadata = self.output.compile_subgraph(
             self,
             reason=GraphCompileReason(
@@ -4605,7 +4676,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     @staticmethod
     def check_inlineable(func: Any) -> trace_rules.SkipResult:
         if func.has_self():
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Inline attempt with __self__",
                 context=str(func),
                 explanation="Attempted to inline a function with the `__self__` attribute. "
@@ -4619,7 +4690,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             msg = inspect.getattr_static(
                 func.get_function(), "_torchdynamo_disable_msg", None
             )
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Skip inlining `torch.compiler.disable()`d function",
                 context=str(func.get_function()),
                 explanation=f"Skip inlining function {func.get_function()} since it was wrapped "
@@ -4655,7 +4726,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     "More graph breaks may occur as a result of attempting to trace into the function.",
                     "Please file an issue to PyTorch.",
                 ]
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Attempted to inline function marked as skipped",
                 context=f"qualname: {fn_qualname}, name: {func.get_name()}, "
                 f"filename: `{func.get_filename()}`, skip reason: {result.reason}",
@@ -4697,7 +4768,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if result is None:
             if isinstance(func, SkipFunctionVariable):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Attempted to inline function marked as skipped (SkipFunctionVariable)",
                     context=f"Attempted to inline a SkipFunctionVariable {func}",
                     explanation=(
@@ -4728,7 +4799,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         for v in itertools.chain(sub_locals.values()):
             if not isinstance(v, VariableTracker):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Encountered unconverted argument when attempting to inline",
                     context=f"func: {func}, arg: {v}",
                     explanation="An argument to an inlined function was not successfully converted to a VariableTracker.",
@@ -4738,7 +4809,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if code.co_name in ("__setitem__", "__setattr__") and not (
             args and isinstance(args[0], variables.UserDefinedObjectVariable)
         ):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported __setitem__/__setattr__ inline attempt",
                 context=f"code name: {code.co_name}, args: {args}",
                 explanation=f"Attempted to inline {code.co_name} where first argument (self) is not a user-defined object.",
@@ -4792,6 +4863,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 sub_locals,
                 parent.symbolic_globals,
                 parent.symbolic_torch_function_state,
+                parent.symbolic_stream_state,
                 func,
             )
         else:
@@ -4803,6 +4875,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 sub_locals,
                 parent.symbolic_globals,
                 parent.symbolic_torch_function_state,
+                parent.symbolic_stream_state,
                 # pyrefly: ignore [bad-argument-type]
                 func,
             )
@@ -4886,6 +4959,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         symbolic_locals: dict[str, VariableTracker],
         symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
+        symbolic_stream_state: SymbolicStreamState,
         funcvar: BaseUserFunctionVariable,
     ) -> None:
         f_globals = funcvar.get_globals()  # type: ignore[attr-defined]
@@ -4919,6 +4993,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             symbolic_locals=symbolic_locals,
             symbolic_globals=symbolic_globals,
             symbolic_torch_function_state=symbolic_torch_function_state,
+            symbolic_stream_state=symbolic_stream_state,
             instructions=instructions,
             code_options={k: getattr(code, k) for k in get_code_keys()},
             f_code=code,
@@ -4957,7 +5032,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     ) -> list[Instruction]:
         if config.nested_graph_breaks:
             return super().create_call_resume_at(inst, all_stack_locals_metadata)
-        unimplemented_v2(
+        unimplemented(
             gb_type="Graph break in inlined function",
             context="",
             explanation="Graph breaks in an inlined call are not supported.",
@@ -5038,7 +5113,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         else:
             value = self.pop()
             if isinstance(value, RemovableHandleVariable):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Storing Tensor hook handle in globals (inline call)",
                     context=inst.argval,
                     explanation="This is not supported.",
@@ -5105,7 +5180,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             # lifted the `unimplemented("generator")` in frame conversion. This codepath handles
             # subgenerator and lines up with this line in Python 3.10
             # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L2599
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unreachable sub-generator code",
                 context="",
                 explanation="Should only be encountered while implementing generator support.",
@@ -5143,7 +5218,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         ):
             if isinstance(val, ConstantVariable) and val.value is None:
                 try:
-                    val = tos.next_variable(self)
+                    val = tos.next_variable(self)  # type: ignore[arg-type]
                 except (StopIteration, exc.ObservedUserStopIteration) as ex:
                     # To implement SEND, we have to look at the implementation
                     # when the iterator returns StopIteration. This translates to this code
@@ -5163,14 +5238,14 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                 # lifted the `unimplemented("generator")` in frame conversion. This codepath handles
                 # subgenerator and lines up with this line in Python 3.11
                 # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2597
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Unreachable sub-generator code",
                     context="",
                     explanation="Should only be encountered while implementing generator support.",
                     hints=[],
                 )
         else:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="SEND with bad type",
                 context=f"TOS type: {typestr(tos)}",
                 explanation=f"Attempted to SEND with unsupported type {typestr(tos)}.",
