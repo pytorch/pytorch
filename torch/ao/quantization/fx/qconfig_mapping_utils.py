@@ -206,7 +206,7 @@ def _check_is_valid_config_dict(
       `config_dict`: dictionary whose keys we want to check
     """
 
-    for k in config_dict.keys():
+    for k in config_dict:
         if k not in allowed_keys:
             raise ValueError(
                 "Expected "
@@ -250,7 +250,7 @@ def _compare_prepare_convert_qconfig_mappings(
         _MODULE_NAME_REGEX_DICT_KEY,
     ]
     for i in range(len(prepare_dicts)):
-        for name in prepare_dicts[i].keys():
+        for name in prepare_dicts[i]:
             if name not in convert_dicts[i]:
                 raise AssertionError(
                     f"Missing key {dict_names[i]} {name} in convert QConfigMapping when it was present in prepare"

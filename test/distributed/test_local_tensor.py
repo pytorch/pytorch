@@ -128,14 +128,14 @@ class TestLocalTensorWorld2(LocalTensorTestBase):
         self.assertEqual(len(result_add._local_tensors), 2)
 
         # Verify the operation was applied to each local tensor
-        for rank in identical_local_tensors.keys():
+        for rank in identical_local_tensors:
             expected = identical_local_tensors[rank] + identical_local_tensors[rank]
             self.assertEqual(result_add._local_tensors[rank], expected)
 
         # Test multiplication
         result_mul = lt1 * 2.0
         self.assertIsInstance(result_mul, LocalTensor)
-        for rank in identical_local_tensors.keys():
+        for rank in identical_local_tensors:
             expected = identical_local_tensors[rank] * 2.0
             self.assertEqual(result_mul._local_tensors[rank], expected)
 
@@ -163,7 +163,7 @@ class TestLocalTensorWorld2(LocalTensorTestBase):
         result = lt + regular_tensor
         self.assertIsInstance(result, LocalTensor)
 
-        for rank in identical_local_tensors.keys():
+        for rank in identical_local_tensors:
             expected = identical_local_tensors[rank] + regular_tensor
             self.assertEqual(result._local_tensors[rank], expected)
 
@@ -212,14 +212,14 @@ class TestLocalTensorWorld2(LocalTensorTestBase):
             dist.all_reduce(lt_sum, group=fake_pg)
 
             expected_sum = torch.tensor([[6.0, 8.0], [10.0, 12.0]])
-            for rank in test_tensors.keys():
+            for rank in test_tensors:
                 self.assertEqual(lt_sum._local_tensors[rank], expected_sum)
 
             # Test broadcast within mode
             lt_broadcast = LocalTensor({k: v.clone() for k, v in test_tensors.items()})
             dist.broadcast(lt_broadcast, src=0, group=fake_pg)
 
-            for rank in test_tensors.keys():
+            for rank in test_tensors:
                 self.assertEqual(lt_broadcast._local_tensors[rank], test_tensors[0])
 
             # Test that regular operations still work
@@ -293,21 +293,21 @@ class TestLocalTensorWorld3(LocalTensorTestBase):
         lt_sum = LocalTensor({k: v.clone() for k, v in test_tensors.items()})
         dist.all_reduce(lt_sum, op=dist.ReduceOp.SUM, group=fake_pg)
         expected_sum = torch.tensor([[6.0, 7.0], [6.0, 15.0]])  # Sum of all tensors
-        for rank in test_tensors.keys():
+        for rank in test_tensors:
             self.assertEqual(lt_sum._local_tensors[rank], expected_sum)
 
         # Test MAX reduction
         lt_max = LocalTensor({k: v.clone() for k, v in test_tensors.items()})
         dist.all_reduce(lt_max, op=dist.ReduceOp.MAX, group=fake_pg)
         expected_max = torch.tensor([[3.0, 4.0], [3.0, 6.0]])  # Max across all tensors
-        for rank in test_tensors.keys():
+        for rank in test_tensors:
             self.assertEqual(lt_max._local_tensors[rank], expected_max)
 
         # Test MIN reduction
         lt_min = LocalTensor({k: v.clone() for k, v in test_tensors.items()})
         dist.all_reduce(lt_min, op=dist.ReduceOp.MIN, group=fake_pg)
         expected_min = torch.tensor([[1.0, 1.0], [1.0, 4.0]])  # Min across all tensors
-        for rank in test_tensors.keys():
+        for rank in test_tensors:
             self.assertEqual(lt_min._local_tensors[rank], expected_min)
 
     def test_all_reduce_collective(self):
@@ -328,7 +328,7 @@ class TestLocalTensorWorld3(LocalTensorTestBase):
 
         # Verify all ranks have the sum of all tensors (after adding 1 to each)
         expected_sum = torch.tensor([[114.0, 225.0, 336.0], [447.0, 558.0, 669.0]])
-        for rank in different_tensors.keys():
+        for rank in different_tensors:
             self.assertEqual(lt_sum._local_tensors[rank], expected_sum)
 
     def test_broadcast_collective(self):
@@ -348,7 +348,7 @@ class TestLocalTensorWorld3(LocalTensorTestBase):
 
         # Verify all ranks have rank 1's original tensor
         expected_broadcast = different_tensors[1]
-        for rank in different_tensors.keys():
+        for rank in different_tensors:
             self.assertEqual(lt_broadcast._local_tensors[rank], expected_broadcast)
 
     def test_all_gather_collective(self):
