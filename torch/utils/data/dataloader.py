@@ -1189,9 +1189,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
             try:
                 w.start()
-            except PicklingError:
+            except (TypeError, AttributeError, PicklingError):
                 warnings.warn(
-                    "Got PicklingError when attempting to start a worker Process. "
+                    "Got pickle error when attempting to start a worker Process. "
                     "This might be because the worker Process arguments are not picklable. "
                     "Python 3.14+ changed the multiprocessing start method in non-Mac POSIX platforms "
                     "to 'forkserver', which requires the worker Process arguments to be picklable. "
