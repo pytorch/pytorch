@@ -278,15 +278,16 @@ def convolution_backward_handler(
     dtensor.DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
     output_sharding = op_info.output_sharding
     assert output_sharding is not None, "output sharding should not be None"
-    output_spec = output_sharding.output_spec
-    assert isinstance(output_spec, tuple)
+    assert isinstance(op_info.flat_args_schema[0], dtensor.DTensorSpec)
 
     # local propagation
     local_results = tp_convolution_backward(
         op_call,
         tuple(op_info.local_args),
         op_info.local_kwargs,
-        output_spec[0].dim_map,
+        op_info.flat_args_schema[0].dim_map,
     )
 
-    return dtensor.DTensor._op_dispatcher.wrap(local_results, output_spec)
+    return dtensor.DTensor._op_dispatcher.wrap(
+        local_results, output_sharding.output_spec
+    )
