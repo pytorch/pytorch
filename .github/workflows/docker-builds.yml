@@ -175,9 +175,9 @@ jobs:
         #runner: [linux.rocm.gfx942.docker-cache]
         runner: [linux.rocm.gpu.gfx942.1]
         docker-image: [
-          ${{ needs.docker-build.outputs.docker-pytorch-linux-jammy-rocm-n-py3 }},
-          ${{ needs.docker-build.outputs.docker-pytorch-linux-noble-rocm-n-py3 }},
-          ${{ needs.docker-build.outputs.docker-pytorch-linux-jammy-rocm-n-py3-benchmarks }}
+          "${{ needs.docker-build.outputs.docker-pytorch-linux-jammy-rocm-n-py3 }}",
+          "${{ needs.docker-build.outputs.docker-pytorch-linux-noble-rocm-n-py3 }}",
+          "${{ needs.docker-build.outputs.docker-pytorch-linux-jammy-rocm-n-py3-benchmarks }}"
         ]
     runs-on: "${{ matrix.runner }}"
     steps:
