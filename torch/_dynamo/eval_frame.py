@@ -1155,6 +1155,8 @@ class DisableContext(_TorchDynamoContext):
         # of decorators.
         _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
 
+        _fn._torchdynamo_disable_recursive = True  # type: ignore[attr-defined]
+
         return _fn
 
     def __reduce__(self) -> tuple[type[DisableContext], tuple[Any, ...]]:
@@ -2138,7 +2140,7 @@ def export(
 
             # Error if we have any constraints on static values
 
-            for k in shape_env.var_to_range.keys():
+            for k in shape_env.var_to_range:
                 if isinstance(k, sympy.Integer):
                     constraint_violation_error = ConstraintViolationError(
                         f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"

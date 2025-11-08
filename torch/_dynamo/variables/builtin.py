@@ -1991,7 +1991,7 @@ class BuiltinVariable(VariableTracker):
             # If the object implements a __getitem__ method, iter(...) will call obj.__getitem__()
             # with an integer argument starting at 0, until __getitem__ raises IndexError
             ret = variables.UserFunctionVariable(
-                polyfills.builtins.iter_
+                polyfills.builtins.iter_  # type: ignore[arg-type]
             ).call_function(tx, [obj, *args], {})
 
             if args:
@@ -2150,7 +2150,7 @@ class BuiltinVariable(VariableTracker):
         )
 
         if isinstance(arg, dict):
-            arg_list = [ConstantVariable.create(k) for k in arg.keys()]
+            arg_list = [ConstantVariable.create(k) for k in arg]
             return DictVariableType(
                 # pyrefly: ignore [bad-argument-type]
                 dict.fromkeys(arg_list, value),
