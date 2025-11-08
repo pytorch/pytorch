@@ -586,7 +586,7 @@ class VariableBuilder:
         # This might be suboptimal compared to dict guards. But mappingproxy is
         # not very common, so its ok to guard on all keys.
         self.install_guards(GuardBuilder.MAPPING_KEYS_CHECK)
-        all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
+        all_const = all(ConstantVariable.is_literal(k) for k in value)
 
         if not all_const:
             unimplemented_v2(
@@ -732,7 +732,7 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
+            all_const = all(ConstantVariable.is_literal(k) for k in value)
 
             # For all_const, we don't have to guard on anything yet. We guard on
             # keys lazily by adding a dict_getitem entry for each accessed key.
@@ -1061,9 +1061,7 @@ class VariableBuilder:
             )
             set_example_value(stream_proxy.node, value)
             var = StreamVariable(
-                stream_proxy,
-                value,
-                source=self.source,
+                stream_proxy, value, source=self.source, user_object_index=index
             )
             return self.tx.output.side_effects.track_object_existing(value, var)
         elif isinstance(value, (torch._C._SDPAParams)):
@@ -1085,6 +1083,7 @@ class VariableBuilder:
             return EventVariable(
                 event_proxy,
                 value,
+                index,
                 source=self.source,
             )
         elif (
@@ -1170,7 +1169,7 @@ class VariableBuilder:
                 f"{sym_expr} is not a basic Symbol."
             )
             self.tx.output.tracked_fakes.append(TrackedFake(node, source, None))
-            return SymNodeVariable(sym_node_proxy, node)
+            return SymNodeVariable.create(self.tx, sym_node_proxy, node)
         elif is_torch_sym(value):
             # Note: this doesn't handle nested symints.
             # For SymBool input, we reuse the infra for SymInt by simulating SymBool with a SymInt in dynamo.
@@ -2455,7 +2454,7 @@ class VariableBuilder:
         sym_expr = wrapped_value.node.expr
         assert isinstance(sym_expr, sympy.Symbol), f"{sym_expr} is not a basic Symbol."
         self.tx.output.root_tracer.bound_symbols[sym_expr] = proxy
-        unspec_var = SymNodeVariable(proxy, wrapped_value, **options)
+        unspec_var = SymNodeVariable.create(self.tx, proxy, wrapped_value, **options)
         self.tx.output.unspec_variable_map[self.name] = unspec_var
 
         if not is_constant_source(self.get_source()):
@@ -3003,17 +3002,31 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         tx.output.current_tracer.track_produced_symints(example_value, proxy)
         set_example_value(proxy.node, example_value)
-        return SymNodeVariable(proxy, example_value, **options)
+        return SymNodeVariable.create(tx, proxy, example_value, **options)
     elif (
         isinstance(example_value, torch.Stream)
-        and proxy.node.target
-        in (get_external_object_by_index, torch.accelerator.current_stream)
+        and proxy.node.target is get_external_object_by_index
     ) or proxy.node.target in [
         device_interface.current_stream
         for _, device_interface in get_registered_device_interfaces()
     ]:
         set_example_value(proxy.node, example_value)
-        return StreamVariable(proxy, example_value, **options)
+        index = None
+        if proxy.node.target is get_external_object_by_index:
+            index = proxy.node.args[0]
+        return StreamVariable(proxy, example_value, index, **options)
+    elif (
+        isinstance(example_value, torch.Event)
+        and proxy.node.target is get_external_object_by_index
+    ) or proxy.node.target in [
+        device_interface.current_stream
+        for _, device_interface in get_registered_device_interfaces()
+    ]:
+        index = None
+        if proxy.node.target is get_external_object_by_index:
+            index = proxy.node.args[0]
+        set_example_value(proxy.node, example_value)
+        return EventVariable(proxy, example_value, index, **options)
     elif (
         inspect.isclass(proxy.node.target)
         and issubclass(proxy.node.target, torch.Event)
@@ -3022,7 +3035,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         for _, device_interface in get_registered_device_interfaces()
     ]:
         set_example_value(proxy.node, example_value)
-        return EventVariable(proxy, example_value, **options)
+        return EventVariable(proxy, example_value, None, **options)
     elif proxy.node.target == "query" and proxy.node.op == "call_method":
         set_example_value(proxy.node, example_value)
         return ConstantVariable(example_value, **options)
@@ -3033,7 +3046,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         and proxy.node.op == "call_method"
     ):
         set_example_value(proxy.node, example_value)
-        return EventVariable(proxy, example_value, **options)
+        return EventVariable(proxy, example_value, None, **options)
     elif isinstance(example_value, int) and (
         proxy.node.target
         in [

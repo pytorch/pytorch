@@ -828,6 +828,7 @@ def trace_frame(
             raise
         finally:
             tracer.output.call_cleanup_hooks()
+            tracer.f_locals = {}
 
     try:
         run_tracer()
@@ -1285,7 +1286,6 @@ def _compile(
     # in the case of normal and exception code paths
     convert_frame_box: Optional[ConvertFrameBox] = None,
 ) -> ConvertFrameReturn:
-    from torch._inductor.async_compile import async_compile_pool_manager
     from torch.fx.experimental.validator import (
         BisectValidationException,
         ValidationException,
@@ -1479,7 +1479,6 @@ def _compile(
     with (
         _use_lazy_graph_module(config.use_lazy_graph_module),
         compile_context(CompileContext(compile_id)),
-        async_compile_pool_manager(),
         chromium_event_timed(
             "dynamo", reset_event_log_on_exit=True, log_pt2_compile_event=True
         ),
