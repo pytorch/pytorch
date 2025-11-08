@@ -255,15 +255,10 @@ def _fa4_flash_attention_forward_impl(
     )
     if error is not None:
         raise RuntimeError(f"FA4 flash_attention forward unsupported: {error}")
-    dense = cum_seq_q is None
-    if dense:
-        q, k, v = _transpose_dense(query, key, value)
-    else:
-        q, k, v = query, key, value
     out, lse = _fa4_run_forward(
-        q,
-        k,
-        v,
+        query,
+        key,
+        value,
         cum_seq_q,
         cum_seq_k,
         scale,
@@ -272,8 +267,6 @@ def _fa4_flash_attention_forward_impl(
         window_size_right,
         seqused_k,
     )
-    if dense:
-        (out,) = _transpose_dense(out)
     rng_state = torch.zeros((2,), dtype=torch.uint64, device=query.device)
     philox_offset = torch.zeros((), dtype=torch.uint64, device=query.device)
     debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
@@ -314,27 +307,18 @@ def _fa4_flash_attention_backward_impl(
     )
     if error is not None:
         raise RuntimeError(f"FA4 flash_attention backward unsupported: {error}")
-    dense = cum_seq_q is None
-    if dense:
-        q, k, v, o, go = _transpose_dense(query, key, value, out, grad_out)
-    else:
-        q, k, v = query, key, value
-        o = out
-        go = grad_out
     dq, dk, dv = _fa4_run_backward(
-        go,
-        q,
-        k,
-        v,
-        o,
+        grad_out,
+        query,
+        key,
+        value,
+        out,
         logsumexp,
         cum_seq_q,
         cum_seq_k,
         scale,
         is_causal,
     )
-    if dense:
-        dq, dk, dv = _transpose_dense(dq, dk, dv)
     return dq, dk, dv
 
 
@@ -360,25 +344,24 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
     )
     if error is not None:
         raise RuntimeError(f"FA4 SDPA forward unsupported: {error}")
-    dense = True
     q, k, v = _transpose_dense(query, key, value)
-    out, lse = _fa4_run_forward(
+
+    max_q_flash = q.size(1)
+    max_k_flash = k.size(1)
+    out, lse, rng_state, philox_offset, debug_mask = _fa4_flash_attention_forward_impl(
         q,
         k,
         v,
         None,
         None,
-        scale,
+        max_q_flash,
+        max_k_flash,
+        dropout_p,
         is_causal,
-        None,
-        None,
-        None,
+        return_debug_mask,
+        scale=scale,
     )
-    if dense:
-        (out,) = _transpose_dense(out)
-    rng_state = torch.zeros((2,), dtype=torch.uint64, device=query.device)
-    philox_offset = torch.zeros((), dtype=torch.uint64, device=query.device)
-    debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
+    (out,) = _transpose_dense(out)
     max_q = query.size(2)
     max_k = key.size(2)
     return (
@@ -427,7 +410,9 @@ def _fa4_scaled_dot_product_flash_attention_backward_impl(
     if error is not None:
         raise RuntimeError(f"FA4 SDPA backward unsupported: {error}")
     q, k, v, o, go = _transpose_dense(query, key, value, out, grad_out)
-    dq, dk, dv = _fa4_run_backward(
+    max_q = query.size(2)
+    max_k = key.size(2)
+    dq, dk, dv = _fa4_flash_attention_backward_impl(
         go,
         q,
         k,
@@ -436,8 +421,13 @@ def _fa4_scaled_dot_product_flash_attention_backward_impl(
         logsumexp,
         None,
         None,
-        scale,
+        max_q,
+        max_k,
+        dropout_p,
         is_causal,
+        philox_seed,
+        philox_offset,
+        scale=scale,
     )
     dq, dk, dv = _transpose_dense(dq, dk, dv)
     return dq, dk, dv
