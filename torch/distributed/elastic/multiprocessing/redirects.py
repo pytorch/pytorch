@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 def get_libc():
     if IS_WINDOWS or IS_MACOS:
         logger.warning(
-            "NOTE: Redirects are currently not supported in Windows or MacOs."
+            "NOTE: Redirects are currently not supported in Windows or macOS."
         )
         return None
     else:
