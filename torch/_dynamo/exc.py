@@ -802,12 +802,18 @@ def format_frame_info(code: types.CodeType) -> str:
     )
 
 
-def format_skip_frame_message(code: types.CodeType, reason: str) -> str:
-    frame_info = format_frame_info(code)
-    return (
-        f"torch.compile intentionally decided to skip the frame {frame_info} and fall back to eager.\n"
-        f"Reason: {reason}"
-    )
+def format_skip_frame_message(code: Optional[types.CodeType], reason: str) -> str:
+    if code is not None:
+        frame_info = format_frame_info(code)
+        return (
+            f"torch.compile intentionally decided to skip the frame {frame_info} and fall back to eager.\n"
+            f"Reason: {reason}"
+        )
+    else:
+        return (
+            f"torch.compile intentionally decided to skip the frame and fall back to eager.\n"
+            f"Reason: {reason}"
+        )
 
 
 def format_loop_skip_frame_message(code: types.CodeType, frame_summary: str) -> str:

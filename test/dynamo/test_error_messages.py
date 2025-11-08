@@ -1140,6 +1140,28 @@ The graph break occurred in the following user code:
 """,
         )
 
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_skip_frame_empty_function_message(self, records):
+        def empty_fn(x):
+            pass
+
+        torch.compile(empty_fn, backend="eager")(torch.randn(3))
+        skip_messages = [
+            r
+            for r in records
+            if "intentionally decided to skip the frame" in r.getMessage()
+        ]
+        self.assertEqual(len(skip_messages), 1)
+        msg = munge_exc(skip_messages[0].getMessage(), suppress_suffix=True, skip=0)
+        msg = re.sub(r" (\d+)$", r" N", msg, flags=re.MULTILINE)
+
+        self.assertExpectedInline(
+            msg,
+            """\
+Skipping frame torch.compile intentionally decided to skip the frame empty_fn (test_error_messages.py line N) and fall back to eager.
+Reason: no content in function call empty_fn                 test_error_messages.py N""",
+        )
+
     @make_logging_test(graph_breaks=True)
     def test_nested_compile_user_frames(self, records):
         def fn(x):

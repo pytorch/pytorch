@@ -93,9 +93,9 @@ from .exc import (
     ArgsMismatchError,
     BackendCompilerFailed,
     collapse_resume_frames,
-    format_frame_info,
     format_graph_break_message,
     format_loop_skip_frame_message,
+    format_skip_frame_message,
     get_stack_above_dynamo,
     ResumePrologueTracingError,
     StepUnsupported,
@@ -4628,10 +4628,8 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.error_on_graph_break
             and not self.is_tracing_resume_prologue
         ):
-            frame_info = format_frame_info(self.f_code)
             raise exc.SkipFrame(
-                f"torch.compile intentionally decided to skip the frame {frame_info} and fall back to eager.\n"
-                "Reason: no content in function call"
+                format_skip_frame_message(self.f_code, "no content in function call")
             )
         self.instruction_pointer = None
         _step_logger()(
