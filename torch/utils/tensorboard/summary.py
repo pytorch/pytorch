@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import json
 import logging
-import os
 import struct
 
 from typing import Any, Optional
@@ -695,7 +694,7 @@ def make_video(tensor, fps):
     # encode sequence of images into gif string
     clip = mpy.ImageSequenceClip(list(tensor), fps=fps)
 
-    with tempfile.NamedTemporaryFile(suffix=".gif", delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix=".gif") as f:
         filename = f.name
         try:  # newer version of moviepy use logger instead of progress_bar argument.
             clip.write_gif(filename, verbose=False, logger=None)
@@ -705,13 +704,8 @@ def make_video(tensor, fps):
             except TypeError:
                 clip.write_gif(filename, verbose=False)
 
-        with open(filename, "rb") as f:
-            tensor_string = f.read()
-
-        try:
-            os.remove(filename)
-        except OSError:
-            logger.warning("The temporary file used by moviepy cannot be deleted.")
+        f.seek(0)
+        tensor_string = f.read()
 
         # pyrefly: ignore [missing-attribute]
         return Summary.Image(

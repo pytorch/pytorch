@@ -271,13 +271,11 @@ class _KinetoProfile:
                 "Profiler must be initialized before exporting chrome trace"
             )
         if path.endswith(".gz"):
-            with tempfile.NamedTemporaryFile("w+b", suffix=".json", delete=False) as fp:
-                fp.close()
+            with tempfile.NamedTemporaryFile("w+b", suffix=".json") as fp:
                 retvalue = self.profiler.export_chrome_trace(fp.name)
-                with open(fp.name, "rb") as fin:
-                    with gzip.open(path, "wb") as fout:
-                        fout.writelines(fin)
-                os.remove(fp.name)
+                fp.seek(0)
+                with gzip.open(path, "wb") as fout:
+                    fout.writelines(fp)
             return retvalue
         else:
             return self.profiler.export_chrome_trace(path)
