@@ -586,7 +586,7 @@ class _ConfigAutoWrap:
             )
         _ConfigAutoWrap.in_autowrap_context = True
         # Get and save the wrapper cls for the context.
-        if "wrapper_cls" not in kwargs.keys():
+        if "wrapper_cls" not in kwargs:
             raise AssertionError(
                 "Expected to pass in wrapper_cls arg into _ConfigAutoWrap."
             )
