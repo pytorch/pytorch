@@ -14,7 +14,7 @@ import operator
 
 _MEASURE_TIME = 1.0
 
-def assert_dicts_equal(dict_0, dict_1):
+def assert_dicts_equal(dict_0, dict_1) -> None:
     """Builtin dict comparison will not compare numpy arrays.
     e.g.
         x = {"a": np.ones((2, 1))}
@@ -25,7 +25,7 @@ def assert_dicts_equal(dict_0, dict_1):
     if all(np.all(v != dict_1[k]) for k, v in dict_0.items() if k != "dtype"):
         raise AssertionError("dict values differ for keys other than 'dtype'")
 
-def run(n, stmt, fuzzer_cls):
+def run(n, stmt, fuzzer_cls) -> None:
     float_iter = fuzzer_cls(seed=0, dtype=torch.float32).take(n)
     double_iter = fuzzer_cls(seed=0, dtype=torch.float64).take(n)
     raw_results = []
@@ -92,7 +92,7 @@ def run(n, stmt, fuzzer_cls):
         print(spacer)
 
 
-def main():
+def main() -> None:
     run(n=100, stmt="torch.sparse.sum(x, dim=0)", fuzzer_cls=UnaryOpSparseFuzzer)
     run(n=100, stmt="torch.sparse.softmax(x, dim=0)", fuzzer_cls=UnaryOpSparseFuzzer)
     run(n=100, stmt="x + y", fuzzer_cls=BinaryOpSparseFuzzer)

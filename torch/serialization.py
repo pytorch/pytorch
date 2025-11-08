@@ -1250,7 +1250,7 @@ def _save(
         zip_file.write_record("byteorder", sys.byteorder, len(sys.byteorder))
 
     # Write each tensor to a file named tensor/the_tensor_key in the zip archive
-    for key in serialized_storages.keys():
+    for key in serialized_storages:
         name = f"data/{key}"
         storage = serialized_storages[key]
         num_bytes = storage.nbytes()
@@ -1494,7 +1494,7 @@ def load(
 
     _check_dill_version(pickle_module)
 
-    if "encoding" not in pickle_load_args.keys():
+    if "encoding" not in pickle_load_args:
         pickle_load_args["encoding"] = "utf-8"
 
     with _open_file_like(f, "rb") as opened_file:
