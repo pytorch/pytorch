@@ -725,7 +725,7 @@ def _flatten_optim_state_dict(state_dict: OptimizerStateType) -> dict[str, Value
 
         return flattened
 
-    def _raise_if_type_not_supported(v) -> None:
+    def _raise_if_type_not_supported(v):
         if not isinstance(v, (torch.Tensor, int, float, dict)):
             raise NotImplementedError(
                 "Flattening optimizer state_dict only supports "

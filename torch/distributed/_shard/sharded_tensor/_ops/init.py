@@ -1,10 +1,18 @@
 # mypy: allow-untyped-defs
+from typing import Any, Never, overload
+
 import torch
 import torch.distributed._shard.sharded_tensor as sharded_tensor
 from torch.distributed._shard.sharded_tensor import _sharded_op_impl
 
 
-def validate_param(param, param_name) -> None:
+@overload
+def validate_param(param: None, param_name: str) -> Never: ...
+@overload
+def validate_param(param: Any, param_name: str) -> None: ...
+
+
+def validate_param(param, param_name):
     if param is None:
         raise ValueError(f"param: {param_name} shouldn't be None!")
 

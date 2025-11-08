@@ -29,7 +29,6 @@ except Exception:
 
     def is_torchdynamo_compiling() -> bool:  # type: ignore[misc]
         return False
-        return False
 
 
 """
