@@ -607,8 +607,7 @@ class _ValgrindWrapper:
 
         def run(args: list[str], **kwargs: Any) -> tuple[CompletedProcessType, str]:
             # https://thraxil.org/users/anders/posts/2008/03/13/Subprocess-Hanging-PIPE-is-your-enemy/
-            f_stdout_stderr = open(stdout_stderr_log, "wb")
-            try:
+            with open(stdout_stderr_log, "wb") as f_stdout_stderr:
                 invocation = subprocess.run(
                     args,
                     stdout=f_stdout_stderr,
@@ -617,8 +616,6 @@ class _ValgrindWrapper:
                 )
                 with open(stdout_stderr_log) as f:
                     return invocation, f.read()
-            finally:
-                f_stdout_stderr.close()
 
         try:
             if is_python:
