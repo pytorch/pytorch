@@ -71,7 +71,8 @@ def _gloo_factory(
 ) -> ProcessGroup:
     from torch.distributed import ProcessGroupGloo
 
-    assert len(kwargs) == 0, "Gloo backend received unexpected kwargs"
+    if len(kwargs) != 0:
+        raise AssertionError("Gloo backend received unexpected kwargs")
 
     backend_class = ProcessGroupGloo(store, rank, world_size, timeout)
     backend_class._set_sequence_number_for_group()

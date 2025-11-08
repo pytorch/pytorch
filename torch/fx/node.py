@@ -496,7 +496,7 @@ class Node(_NodeBase):
         _new_input_nodes: dict[Node, None] = {}
         _fx_map_arg(arg, _new_input_nodes.setdefault)
 
-        for new_use in _new_input_nodes.keys():
+        for new_use in _new_input_nodes:
             if new_use not in self._input_nodes:
                 self._input_nodes.setdefault(new_use)
                 new_use.users.setdefault(self)
@@ -765,7 +765,9 @@ class Node(_NodeBase):
                 if node.op == "call_function" and node.is_impure(impure_random):
                     return True
                 if (
+                    # pyrefly: ignore [invalid-argument]
                     node.op == "call_module"
+                    # pyrefly: ignore [not-callable]
                     and (submodule := module.get_submodule(node.target))
                     and isinstance(submodule, torch.fx.GraphModule)
                 ):

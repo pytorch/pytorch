@@ -20,7 +20,7 @@ _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
 
-def check_decomposition_has_type_annotations(f):
+def check_decomposition_has_type_annotations(f) -> None:
     inspect_empty = inspect._empty  # type: ignore[attr-defined]
     sig = inspect.signature(f)
     for param in sig.parameters.values():
