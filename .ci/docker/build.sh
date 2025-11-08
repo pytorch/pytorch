@@ -317,6 +317,7 @@ case "$tag" in
       then
         ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION%?}
         PYTHON_FREETHREADED=1
+      fi
     fi
     if [[ "$image" == *cuda* ]]; then
       extract_version_from_image_name cuda CUDA_VERSION
