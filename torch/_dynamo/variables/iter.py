@@ -590,7 +590,7 @@ class FilterVariable(IteratorVariable):
             else:
                 res = self.fn.call_function(tx, [item], {})
             pred_res = variables.UserFunctionVariable(
-                polyfills.predicate
+                polyfills.predicate  # type: ignore[arg-type]
             ).call_function(tx, [res], {})
             if pred_res.as_python_constant():
                 return item
