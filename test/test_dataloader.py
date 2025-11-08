@@ -2027,7 +2027,7 @@ except RuntimeError as e:
         dataloader = self._get_data_loader(
             dataset, batch_size=2, num_workers=2, worker_init_fn=local_init_fn
         )
-        with self.assertWarnsRegex(UserWarning, "Got PicklingError when"):
+        with self.assertWarnsRegex(UserWarning, "Got pickle error when"):
             with self.assertRaises(Exception):
                 next(iter(dataloader))
 
