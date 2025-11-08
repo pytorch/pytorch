@@ -669,7 +669,7 @@ std::optional<c10::ScalarType> out_dtype) {
   // _scaled_mm_allowed_device is used here within _grouped_mm_cuda which seems incorrect since scale is not used.
   // the _grouped_mm_fallback should be safe for any ROCm GPU since it's just calling typical mm/bmm
   bool use_fast_path = false;
-  // For windows ROCm, make sure use_fast_path is false
+  // On non CK system(w/ ROCm), make sure use_fast_path is false
 #if defined(USE_ROCM_CK_GEMM)
   if (at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"})) {
     use_fast_path = true;
