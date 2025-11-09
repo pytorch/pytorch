@@ -6,7 +6,7 @@
 # classes/objects here, even though we are not injecting extra code into them at the moment.
 
 from collections.abc import Callable, Iterable, Iterator
-from typing import Any, Literal, Optional, TypeVar, Union
+from typing import Any, Literal, Optional, TypeVar
 
 from torch.utils.data import Dataset, default_collate, IterableDataset
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
