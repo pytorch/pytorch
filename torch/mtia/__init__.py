@@ -395,8 +395,8 @@ def set_rng_state(
     )
 
 
-from .mtia_graph import *  # noqa: F403
 from .memory import *  # noqa: F403
+from .mtia_graph import *  # noqa: F403
 
 
 __all__ = [

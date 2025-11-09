@@ -11,15 +11,6 @@ The MTIA backend is implemented out of the tree, only interfaces are defined her
 ```
 
 ```{eval-rst}
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    MTIAGraph
-    graph
-```
-
-```{eval-rst}
 .. autoclass:: MTIAGraph
     :members:
 ```
