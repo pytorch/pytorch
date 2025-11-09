@@ -172,9 +172,9 @@ ignore = [
     "SIM102", "SIM103", "SIM112", # flake8-simplify code styles
     "SIM105", # these ignores are from flake8-simplify. please fix or ignore with commented reason
     "SIM108", # SIM108 ignored because we prefer if-else-block instead of ternary expression
-    "SIM110",
+    "SIM110", # Checks for for loops that can be replaced with a builtin function, like any or all.
     "SIM114", # Combine `if` branches using logical `or` operator
-    "SIM115",
+    "SIM115", # Checks for cases where files are opened without using a context manager.
     "SIM116", # Disable Use a dictionary instead of consecutive `if` statements
     "SIM117",
     "SIM118",

@@ -14,8 +14,9 @@ import getpass
 import os
 import sys
 import tempfile
+from collections.abc import Callable
 from os.path import abspath, dirname
-from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 from torch._environment import is_fbcode
 from torch.utils._config_module import Config, get_tristate_env, install_config_module

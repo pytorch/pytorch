@@ -1681,7 +1681,7 @@ class CudaKernelParamCache:
 
         if config.aot_inductor.emit_multi_arch_kernel:
             bin_type_to_ext = {"cubin": ".fatbin", "spv": ".spv", "hsaco": ".hsaco"}
-            assert bin_type in bin_type_to_ext.keys(), (
+            assert bin_type in bin_type_to_ext, (
                 "multi_arch_kernel_binary only supported in CUDA/XPU/ROCm"
             )
             base_path, _ = os.path.splitext(bin_path)
@@ -2151,7 +2151,7 @@ end
             )
             all_cuda = all(
                 graph.get_original_value_of_constant(name).is_cuda
-                for name in graph.constants.keys()
+                for name in graph.constants
                 if name not in graph.folded_constants
             )
 
@@ -2192,7 +2192,7 @@ end
             ):
                 serialized_weights = b"".join(
                     _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
-                    for name in graph.constants.keys()
+                    for name in graph.constants
                     if name not in graph.folded_constants
                 )
             else:
@@ -2206,7 +2206,7 @@ end
                             graph.get_original_value_of_constant(name),
                             TensorProperties(graph.constants[name]),
                         )
-                        for name in graph.constants.keys()
+                        for name in graph.constants
                         if name not in graph.folded_constants
                     }
                 )
@@ -3798,11 +3798,13 @@ def cutlass_key() -> bytes:
     Note: OSS and fbcode will have different keys.
     """
     if config.is_fbcode():
-        with importlib.resources.path(
-            "cutlass_library", "src_hash.txt"
-        ) as resource_path:
-            with open(resource_path) as resource_file:
-                return resource_file.read().encode()
+        with (
+            importlib.resources.path(
+                "cutlass_library", "src_hash.txt"
+            ) as resource_path,
+            open(resource_path) as resource_file,
+        ):
+            return resource_file.read().encode()
 
     combined_hash = hashlib.sha256()
     build_code_hash([config.cuda.cutlass_dir], "", combined_hash)

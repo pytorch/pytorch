@@ -291,7 +291,6 @@ class PallasKernel(SIMDKernel):
             import jax
             import jax.numpy as jnp
             from jax.experimental import pallas as pl
-            from torch.utils import dlpack as torch_dlpack
             """,
             strip=True,
         )
@@ -314,6 +313,12 @@ class PallasKernel(SIMDKernel):
         main_name = f"{kernel_name}_main"
         code.writeline(f"def {main_name}({', '.join(kernel_params)}, stream=None):")
         with code.indent():
+            # Determine interpret statically based on codegen device
+            interpret_literal = (
+                "True"
+                if V.graph.get_current_device_or_throw().type == "cpu"
+                else "False"
+            )
             # Identify inputs (in_ptr*) and output (out_ptr*)
             input_params = [
                 p for p in kernel_params if p.startswith(("in_ptr", "in_out_ptr"))
@@ -330,9 +335,7 @@ class PallasKernel(SIMDKernel):
             # Convert inputs to JAX arrays
             code.writeline("# Convert Torch -> JAX for inputs")
             for inp in input_params:
-                code.writeline(
-                    f"{inp}_jax = jax.dlpack.from_dlpack(torch_dlpack.to_dlpack({inp}))"
-                )
+                code.writeline(f"{inp}_jax = jax.dlpack.from_dlpack({inp})")
 
             # Get output spec from PyTorch tensor
             code.writeline("# Prepare output spec from PyTorch tensor")
@@ -351,9 +354,11 @@ class PallasKernel(SIMDKernel):
             )
 
             # Call pallas
+            # Pass interpret=True on CPU, False otherwise (single call, no duplication)
             code.writeline("compiled = pl.pallas_call(")
             code.writeline(f"    lambda *refs: {kernel_name}_kernel(*refs),")
             code.writeline("    out_shape=out_spec,")
+            code.writeline(f"    interpret={interpret_literal},")
             code.writeline("    grid=(1,),")
             code.writeline(")")
 
@@ -362,9 +367,7 @@ class PallasKernel(SIMDKernel):
 
             # Copy result back
             code.writeline("# Copy result back into the provided torch output tensor")
-            code.writeline(
-                "res_t = torch_dlpack.from_dlpack(jax.dlpack.to_dlpack(res))"
-            )
+            code.writeline("res_t = torch.from_dlpack(res)")
             code.writeline(f"{output_param}.copy_(res_t)")
 
         return code.getvalue()
