@@ -3,7 +3,7 @@
 
 import contextlib
 from collections.abc import Iterable
-from typing import Union
+from typing import Callable, Literal, Union
 from warnings import warn
 
 import torch.backends.cuda
@@ -14,12 +14,19 @@ from torch.backends.cuda import (
     SDPAParams,
 )
 
+from . import _fa4
+
 
 __all__: list[str] = [
     "SDPBackend",
     "sdpa_kernel",
     "WARN_FOR_UNFUSED_KERNELS",
+    "register_flash_attention_backend",
+    "install_flash_attention_impl",
+    "list_flash_attention_backends",
+    "current_flash_attention_backend",
 ]
+
 
 # Note: [SDPA warnings]
 # TODO: Consider using this for sdpa regardless of subclasses
@@ -162,3 +169,73 @@ def _sdpa_kernel_variadic(*backends: SDPBackend):
 def _get_flash_version() -> str:
     """This returns the closest matching tag for the flash attention backend"""
     return "2.5.7"
+
+
+_FlashAttentionBackend = Literal["FA4"]
+_FLASH_BACKEND_FA4: _FlashAttentionBackend = "FA4"
+
+_FLASH_ATTENTION_BACKENDS: dict[str, Callable[..., None]] = {}
+_FLASH_ATTENTION_ACTIVE: str | None = None
+
+
+def register_flash_attention_backend(
+    backend: str | _FlashAttentionBackend,
+    *,
+    register_fn: Callable[..., None],
+) -> None:
+    """
+    Register the callable that installs a flash attention backend.
+
+    Args:
+        backend: Backend identifier (e.g., ``"FA4"``).
+        register_fn: Callable that performs the actual dispatcher registration.
+    """
+    _FLASH_ATTENTION_BACKENDS[backend] = register_fn
+
+
+def install_flash_attention_impl(
+    backend: str | _FlashAttentionBackend,
+    *,
+    module_path: str | None = None,
+) -> None:
+    """
+    Install into the dispatcher a previously registered flash attention backend.
+
+    Args:
+        backend: Backend identifier to activate.
+        module_path: Optional override forwarded to the backend register function.
+
+    Example:
+        >>> install_flash_attention_impl("FA4", module_path="flash_attn.cute.interface")
+    """
+    register_fn = _FLASH_ATTENTION_BACKENDS.get(backend)
+    if register_fn is None:
+        raise ValueError(f"Unknown flash attention backend '{backend}'")
+    kwargs: dict[str, object] = {}
+    if module_path is not None:
+        kwargs["module_path"] = module_path
+    register_fn(**kwargs)
+    global _FLASH_ATTENTION_ACTIVE
+    _FLASH_ATTENTION_ACTIVE = backend
+
+
+def list_flash_attention_backends() -> list[str]:
+    """Return the names of all registered flash attention backends."""
+    return list(_FLASH_ATTENTION_BACKENDS.keys())
+
+
+def current_flash_attention_backend() -> str | None:
+    """
+    Return the currently installed flash attention backend name, if any.
+
+    ``None`` indicates that no custom backend has been installed.
+    """
+    return _FLASH_ATTENTION_ACTIVE
+
+
+# We are registering FA4 as a possible hot swap, but it is not actually installed in the dispatcher
+# until a user calls install_flash_attention_impl("FA4", module_path="...")
+register_flash_attention_backend(
+    _FLASH_BACKEND_FA4,
+    register_fn=_fa4.register_flash_attention_fa4,
+)
