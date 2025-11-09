@@ -342,8 +342,18 @@ test_python_smoke() {
 }
 
 test_python_smoke_b200() {
-  # Targeted smoke tests for B200 - staged approach to avoid too many failures
-  time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # Targeted smoke tests for B200 including FlashAttention CuTe coverage
+  install_flash_attn_cute
+  time python test/run_test.py \
+    --include \
+      test_matmul_cuda \
+      test_scaled_matmul_cuda \
+      inductor/test_fp8 \
+      nn/attention/test_fa4 \
+      nn/attention/test_open_registry \
+      inductor/test_flex_flash \
+    $PYTHON_TEST_EXTRA_OPTION \
+    --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
