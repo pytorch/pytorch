@@ -17,7 +17,7 @@ import queue
 import threading
 import warnings
 from collections.abc import Callable
-from typing import Any, Generic, NoReturn, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Generic, NoReturn, TYPE_CHECKING, TypeVar
 from typing_extensions import Self
 
 import torch
@@ -233,34 +233,34 @@ class DataLoader(Generic[_T_co]):
     """
 
     dataset: Dataset[_T_co]
-    batch_size: Optional[int]
+    batch_size: int | None
     num_workers: int
     pin_memory: bool
     drop_last: bool
     timeout: float
-    sampler: Union[Sampler, Iterable]
+    sampler: Sampler | Iterable
     pin_memory_device: str
-    prefetch_factor: Optional[int]
-    _iterator: Optional[_BaseDataLoaderIter]
+    prefetch_factor: int | None
+    _iterator: _BaseDataLoaderIter | None
     __initialized = False
 
     def __init__(
         self,
         dataset: Dataset[_T_co],
-        batch_size: Optional[int] = 1,
-        shuffle: Optional[bool] = None,
-        sampler: Union[Sampler, Iterable, None] = None,
-        batch_sampler: Union[Sampler[list], Iterable[list], None] = None,
+        batch_size: int | None = 1,
+        shuffle: bool | None = None,
+        sampler: Sampler | Iterable | None = None,
+        batch_sampler: Sampler[list] | Iterable[list] | None = None,
         num_workers: int = 0,
-        collate_fn: Optional[_collate_fn_t] = None,
+        collate_fn: _collate_fn_t | None = None,
         pin_memory: bool = False,
         drop_last: bool = False,
         timeout: float = 0,
-        worker_init_fn: Optional[_worker_init_fn_t] = None,
+        worker_init_fn: _worker_init_fn_t | None = None,
         multiprocessing_context=None,
         generator=None,
         *,
-        prefetch_factor: Optional[int] = None,
+        prefetch_factor: int | None = None,
         persistent_workers: bool = False,
         pin_memory_device: str = "",
         in_order: bool = True,

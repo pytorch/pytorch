@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import gc
 import sys
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple
 import types
 import weakref
 import json
@@ -256,7 +256,7 @@ def object_annotation(obj):
 
 class Node(NamedTuple):
     label: str
-    context: Optional[str]
+    context: str | None
     root: bool
     referrents: list[tuple[str, int]]
 
