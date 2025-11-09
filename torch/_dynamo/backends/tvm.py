@@ -211,7 +211,8 @@ def has_tvm() -> bool:
 @functools.cache
 def llvm_target() -> str:
     if sys.platform == "linux":
-        cpuinfo = open("/proc/cpuinfo").read()
+        with open("/proc/cpuinfo") as f:
+            cpuinfo = f.read()
         if "avx512" in cpuinfo:
             return "llvm -mcpu=skylake-avx512"
         elif "avx2" in cpuinfo:

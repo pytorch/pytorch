@@ -15,8 +15,8 @@ import sys
 # This script is not very well written, feel free to rewrite it as necessary
 
 assert len(sys.argv) == 2
-
-full_log = open(sys.argv[1]).read()
+with open(sys.argv[1]) as f:
+    full_log = f.read()
 
 # If the log contains a gist URL, extract it so we can include it in the CSV
 gist_url = ""
