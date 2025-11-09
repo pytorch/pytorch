@@ -68,6 +68,33 @@ class TensorAccessorDetail
   }
 };
 
+template <
+    class ArrayRefCls,
+    typename T,
+    template <typename U> class PtrTraits,
+    typename index_t>
+class TensorAccessorDetail<ArrayRefCls, T, 1, PtrTraits, index_t>
+    : public torch::headeronly::TensorAccessorBaseDetail<ArrayRefCls, T, 1, PtrTraits, index_t> {
+ public:
+  typedef typename PtrTraits<T>::PtrType PtrType;
+
+  C10_HOST_DEVICE TensorAccessorDetail(
+      PtrType data_,
+      const index_t* sizes_,
+      const index_t* strides_)
+    : torch::headeronly::TensorAccessorBaseDetail<ArrayRefCls, T, 1, PtrTraits, index_t>(
+            data_,
+            sizes_,
+            strides_) {}
+  C10_HOST_DEVICE T& operator[](index_t i) {
+    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
+    return this->data_[this->strides_[0] * i];
+  }
+  C10_HOST_DEVICE const T& operator[](index_t i) const {
+    return this->data_[this->strides_[0] * i];
+  }
+};
+
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
 using TensorAccessor = TensorAccessorDetail<c10::IntArrayRef, T, N, PtrTraits, index_t>;
 
