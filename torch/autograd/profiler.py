@@ -869,7 +869,7 @@ class record_function(ContextDecorator):
         # self.record: Optional["torch.classes.profiler._RecordFunction"] = None
         self.record = torch.jit.annotate(
             # pyrefly: ignore [not-a-type]
-            Optional["torch.classes.profiler._RecordFunction"],
+            Optional["torch.classes.profiler._RecordFunction"],  # noqa: UP045
             None,
         )
 
