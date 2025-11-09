@@ -17,13 +17,7 @@ jobs:
   test:
     runs-on: linux.rocm.gpu.gfx942.1.test
     steps:
-      - name: Debug git config
-        shell: bash
-        run: |
-          sudo git config --system --get core.alternateObjectDirectories | tr ':' '\n' | nl
-
       - name: Checkout PyTorch
-        uses: saienduri/pytorch/.github/actions/checkout-pytorch@dev/saienduri/test-frac
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
-          clean: false
