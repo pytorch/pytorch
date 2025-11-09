@@ -142,7 +142,7 @@ def cal_conv_generated_kernel_number(mod, input, dtype, dim=4, device="cpu"):
 
 class TestPatternMatcherBase(TestCase):
     def setUp(self):
-        TestCase.setUp(self)
+        super().setUp()
         self.ctx_stack = contextlib.ExitStack()
         self.ctx_stack.enter_context(config.patch({"freezing": True}))
 
@@ -760,7 +760,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
             metrics.reset()
             mod = M(unary_fn, 10, 30, bias=bias).eval()
             # only fuse for linear when the dtype is bf16
-            mod = mod
             v = torch.randn(2, 10)
 
             def matcher_check_fn():

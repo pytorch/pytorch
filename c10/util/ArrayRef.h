@@ -53,19 +53,12 @@ template <typename T>
 class ArrayRef final : public HeaderOnlyArrayRef<T> {
  public:
   /// @name Constructors, all inherited from HeaderOnlyArrayRef except for
-  /// SmallVector.
+  /// SmallVector. As inherited constructors won't work with class template
+  /// argument deduction (CTAD) until C++23, we add deduction guides after
+  /// the class definition to enable CTAD.
   /// @{
 
   using HeaderOnlyArrayRef<T>::HeaderOnlyArrayRef;
-
-  /// Construct an ArrayRef from a std::vector.
-  /// This constructor is identical to the one in HeaderOnlyArrayRef, but we
-  /// include it to help with Class Template Argument Deduction (CTAD).
-  /// Without it, CTAD can fail sometimes due to the indirect constructor
-  /// inheritance. So we explicitly include this constructor.
-  template <typename A>
-  /* implicit */ ArrayRef(const std::vector<T, A>& Vec)
-      : HeaderOnlyArrayRef<T>(Vec.data(), Vec.size()) {}
 
   /// Construct an ArrayRef from a SmallVector. This is templated in order to
   /// avoid instantiating SmallVectorTemplateCommon<T> whenever we
@@ -162,6 +155,45 @@ class ArrayRef final : public HeaderOnlyArrayRef<T> {
 
   /// @}
 };
+
+/// Deduction guides for ArrayRef to support CTAD with inherited constructors
+/// These mirror the constructors inherited from HeaderOnlyArrayRef
+/// @{
+
+// Single element constructor
+template <typename T>
+ArrayRef(const T&) -> ArrayRef<T>;
+
+// Pointer and length constructor
+template <typename T>
+ArrayRef(const T*, size_t) -> ArrayRef<T>;
+
+// Range constructor (begin, end)
+template <typename T>
+ArrayRef(const T*, const T*) -> ArrayRef<T>;
+
+// Generic container constructor (anything with .data() and .size())
+template <typename Container>
+ArrayRef(const Container&) -> ArrayRef<
+    std::remove_pointer_t<decltype(std::declval<Container>().data())>>;
+
+// std::vector constructor
+template <typename T, typename A>
+ArrayRef(const std::vector<T, A>&) -> ArrayRef<T>;
+
+// std::array constructor
+template <typename T, size_t N>
+ArrayRef(const std::array<T, N>&) -> ArrayRef<T>;
+
+// C array constructor
+template <typename T, size_t N>
+ArrayRef(const T (&)[N]) -> ArrayRef<T>;
+
+// std::initializer_list constructor
+template <typename T>
+ArrayRef(const std::initializer_list<T>&) -> ArrayRef<T>;
+
+/// @}
 
 template <typename T>
 std::ostream& operator<<(std::ostream& out, ArrayRef<T> list) {

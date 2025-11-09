@@ -109,7 +109,7 @@ def torch_dtype_to_onnx_dtype(dtype: torch.dtype) -> ir.DataType:
 
 
 class TorchTensor(ir.Tensor):
-    def __init__(self, tensor: torch.Tensor, name: str | None = None):
+    def __init__(self, tensor: torch.Tensor, name: str | None = None) -> None:
         # Pass the tensor as the raw data to ir.Tensor's constructor
         if tensor.dtype == torch.float4_e2m1fn_x2:
             # Change the shape to the unpacked shape
@@ -132,10 +132,10 @@ class TorchTensor(ir.Tensor):
         # view the tensor as that dtype so that it is convertible to NumPy,
         # and then view it back to the proper dtype (using ml_dtypes obtained by
         # calling dtype.numpy()).
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         if self.dtype == ir.DataType.BFLOAT16:
             return (
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 self.raw.view(torch.uint16).numpy(force=True).view(self.dtype.numpy())
             )
         if self.dtype in {
@@ -144,11 +144,11 @@ class TorchTensor(ir.Tensor):
             ir.DataType.FLOAT8E5M2,
             ir.DataType.FLOAT8E5M2FNUZ,
         }:
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             return self.raw.view(torch.uint8).numpy(force=True).view(self.dtype.numpy())
         if self.dtype == ir.DataType.FLOAT4E2M1:
             return _type_casting.unpack_float4x2_as_uint8(self.raw).view(
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 self.dtype.numpy()
             )
 
@@ -170,7 +170,7 @@ class TorchTensor(ir.Tensor):
 
         if isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor):
             raise TypeError(
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 f"Cannot take content out from the FakeTensor ('{self.name}'). Please replace the tensor "
                 "with a tensor backed by real data using ONNXProgram.apply_weights() "
                 "or save the model without initializers by setting include_initializers=False."
@@ -251,7 +251,7 @@ def _set_shape_type(
             if isinstance(dim, int):
                 dims.append(dim)
             else:
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 dims.append(str(dim.node))
 
         # If the dtype is set already (e.g. by the onnx_symbolic ops),
@@ -392,7 +392,7 @@ def _handle_call_function_node(
         node: The FX node to translate.
         node_name_to_values: A mapping of FX node names to their produced ir.Value.
     """
-    if node.target == operator.getitem:
+    if node.target is operator.getitem:
         _handle_getitem_node(node, node_name_to_values)
     # Add op to the graph
     op = str(node.target)
@@ -402,7 +402,7 @@ def _handle_call_function_node(
         if input_ is None:
             inputs.append(None)
         elif hasattr(input_, "name"):
-            if isinstance(input_, torch.fx.Node) and input_.target == operator.getitem:
+            if isinstance(input_, torch.fx.Node) and input_.target is operator.getitem:
                 actual_input = _handle_getitem_node(input_, node_name_to_values)
                 inputs.append(actual_input)
             else:
@@ -456,7 +456,7 @@ def _convert_fx_arg_to_onnx_arg(
         # The actual dropping of a None attribute value is done by OpRecorder
         return None
     if hasattr(arg, "name"):
-        if isinstance(arg, torch.fx.Node) and arg.target == operator.getitem:
+        if isinstance(arg, torch.fx.Node) and arg.target is operator.getitem:
             source = arg.all_input_nodes[0]
             source_outputs = node_name_to_values[source.name]
             if isinstance(source_outputs, Sequence):
@@ -527,7 +527,7 @@ def _handle_call_function_node_with_lowering(
         opset: The ONNX Script opset object for constructing ONNX nodes.
         node_name_to_local_functions: A mapping of subgraph names to the corresponding ONNX functions.
     """
-    if node.target == operator.getitem:
+    if node.target is operator.getitem:
         source = node.all_input_nodes[0]
         source_outputs = node_name_to_values[source.name]
         if isinstance(source_outputs, Sequence):
@@ -988,16 +988,22 @@ def _prepare_exported_program_for_export(
 ) -> torch.export.ExportedProgram:
     """Decompose and apply pre-export transformations to the exported program."""
 
-    # Decompose the graph given the implemented torch ops in ONNX
-    exported_program = _fx_passes.decompose_with_registry(exported_program, registry)
+    with (
+        # Support the dynamism with 0/1 input dim
+        torch.fx.experimental._config.patch(backed_size_oblivious=True),  # type: ignore[attr-defined]
+    ):
+        # Decompose the graph given the implemented torch ops in ONNX
+        exported_program = _fx_passes.decompose_with_registry(
+            exported_program, registry
+        )
 
-    graph_module = exported_program.graph_module
-    # Include explicit type promotion nodes
-    _fx_passes.insert_type_promotion_nodes(graph_module)
-    graph_module = _fx_passes.remove_assertion_nodes(graph_module)
-    # Reassign the graph module to save some runtime.
-    exported_program._graph_module = graph_module
-    return exported_program
+        graph_module = exported_program.graph_module
+        # Include explicit type promotion nodes
+        _fx_passes.insert_type_promotion_nodes(graph_module)
+        graph_module = _fx_passes.remove_assertion_nodes(graph_module)
+        # Reassign the graph module to save some runtime.
+        exported_program._graph_module = graph_module
+        return exported_program
 
 
 def _get_scope_name(scoped_name: str) -> tuple[str, str]:
@@ -1226,7 +1232,7 @@ def _exported_program_to_onnx_program(
     # so we need to get them from the name_* apis.
     for name, torch_tensor in itertools.chain(
         exported_program.named_parameters(),
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         exported_program.named_buffers(),
         exported_program.constants.items(),
     ):
@@ -1259,6 +1265,7 @@ def _verbose_printer(verbose: bool | None) -> Callable[..., None]:
     """Prints messages based on `verbose`."""
     if verbose is False:
         return lambda *_, **__: None
+    # pyrefly: ignore [not-iterable]
     return lambda *args, **kwargs: print("[torch.onnx]", *args, **kwargs)
 
 

@@ -3,6 +3,7 @@
 #include <c10/core/AllocatorConfig.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAMacros.h>
+#include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
 
@@ -17,9 +18,14 @@ enum class Expandable_Segments_Handle_Type : int {
 // Environment config parser
 class C10_CUDA_API CUDAAllocatorConfig {
  public:
+  C10_DEPRECATED_MESSAGE(
+      "c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::max_split_size() is deprecated. Please use c10::CachingAllocator::AcceleratorAllocatorConfig::max_split_size() instead.")
   static size_t max_split_size() {
     return c10::CachingAllocator::AcceleratorAllocatorConfig::max_split_size();
   }
+
+  C10_DEPRECATED_MESSAGE(
+      "c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::garbage_collection_threshold() is deprecated. Please use c10::CachingAllocator::AcceleratorAllocatorConfig::garbage_collection_threshold() instead.")
   static double garbage_collection_threshold() {
     return c10::CachingAllocator::AcceleratorAllocatorConfig::
         garbage_collection_threshold();
@@ -55,6 +61,10 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return instance().m_graph_capture_record_stream_reuse;
   }
 
+  static double per_process_memory_fraction() {
+    return instance().m_per_process_memory_fraction;
+  }
+
   /** Pinned memory allocator settings */
   static bool pinned_use_cuda_host_register() {
     return instance().m_pinned_use_cuda_host_register;
@@ -64,6 +74,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return instance().m_pinned_num_register_threads;
   }
 
+  C10_DEPRECATED_MESSAGE(
+      "c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::pinned_use_background_threads() is deprecated. Please use c10::CachingAllocator::AcceleratorAllocatorConfig::pinned_use_background_threads() instead.")
   static bool pinned_use_background_threads() {
     return c10::CachingAllocator::AcceleratorAllocatorConfig::
         pinned_use_background_threads();
@@ -80,11 +92,15 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return 128;
   }
 
+  C10_DEPRECATED_MESSAGE(
+      "c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::roundup_power2_divisions() is deprecated. Please use c10::CachingAllocator::AcceleratorAllocatorConfig::roundup_power2_divisions() instead.")
   static size_t roundup_power2_divisions(size_t size) {
     return c10::CachingAllocator::AcceleratorAllocatorConfig::
         roundup_power2_divisions(size);
   }
 
+  C10_DEPRECATED_MESSAGE(
+      "c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::roundup_power2_divisions() is deprecated. Please use c10::CachingAllocator::AcceleratorAllocatorConfig::roundup_power2_divisions() instead.")
   static std::vector<size_t> roundup_power2_divisions() {
     return c10::CachingAllocator::AcceleratorAllocatorConfig::
         roundup_power2_divisions();
@@ -95,6 +111,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
         max_non_split_rounding_size();
   }
 
+  C10_DEPRECATED_MESSAGE(
+      "c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::last_allocator_settings() is deprecated. Please use c10::CachingAllocator::AcceleratorAllocatorConfig::last_allocator_settings() instead.")
   static std::string last_allocator_settings() {
     return c10::CachingAllocator::getAllocatorSettings();
   }
@@ -138,7 +156,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
         "pinned_use_hip_host_register",
         "graph_capture_record_stream_reuse",
         "pinned_reserve_segment_size_mb",
-        "pinned_num_register_threads"};
+        "pinned_num_register_threads",
+        "per_process_memory_fraction"};
     return keys;
   }
 
@@ -163,6 +182,9 @@ class C10_CUDA_API CUDAAllocatorConfig {
   size_t parseGraphCaptureRecordStreamReuse(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
+  double parsePerProcessMemoryFraction(
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+      size_t i);
 
   std::atomic<size_t> m_pinned_num_register_threads{1};
   std::atomic<size_t> m_pinned_reserve_segment_size_mb{0};
@@ -175,6 +197,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
   std::atomic<bool> m_release_lock_on_cudamalloc{false};
   std::atomic<bool> m_pinned_use_cuda_host_register{false};
   std::atomic<bool> m_graph_capture_record_stream_reuse{false};
+  std::atomic<double> m_per_process_memory_fraction{1.0};
 };
 
 // Keep this for backwards compatibility

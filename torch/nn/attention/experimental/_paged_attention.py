@@ -40,7 +40,7 @@ class PagedAttention:
         page_size: int,
         max_batch_size: int,
         device: str = "cuda",
-    ):
+    ) -> None:
         # number of pages
         self.n_pages = n_pages
 

@@ -159,8 +159,6 @@ ignore = [
     "EXE001",
     "F405",
     "FURB122", # writelines
-    # these ignores are from flake8-logging-format; please fix!
-    "G101",
     # these ignores are from ruff NPY; please fix!
     "NPY002",
     # these ignores are from ruff PERF; please fix!
@@ -174,9 +172,9 @@ ignore = [
     "SIM102", "SIM103", "SIM112", # flake8-simplify code styles
     "SIM105", # these ignores are from flake8-simplify. please fix or ignore with commented reason
     "SIM108", # SIM108 ignored because we prefer if-else-block instead of ternary expression
-    "SIM110",
+    "SIM110", # Checks for for loops that can be replaced with a builtin function, like any or all.
     "SIM114", # Combine `if` branches using logical `or` operator
-    "SIM115",
+    "SIM115", # Checks for cases where files are opened without using a context manager.
     "SIM116", # Disable Use a dictionary instead of consecutive `if` statements
     "SIM117",
     "SIM118",
@@ -186,7 +184,6 @@ ignore = [
     "TC006",
     # TODO: Remove Python-3.10 specific suppressions
     "B905",
-    "UP035",
 ]
 select = [
     "B",
@@ -210,11 +207,13 @@ select = [
     "PLC1802", # len({expression}) used as condition without comparison
     "PLC0205", # string as __slots__
     "PLC3002", # unnecessary-direct-lambda-call
+    "PLC0414", # Import alias does not rename original package
     "PLE",
     "PLR0133", # constant comparison
     "PLR0206", # property with params
     "PLR1722", # use sys exit
     "PLR1736", # unnecessary list index
+    "PLW0127", # Self-assignment of variable
     "PLW0129", # assert on string literal
     "PLW0131", # named expr without context
     "PLW0133", # useless exception statement
