@@ -195,11 +195,11 @@ class DistTestCases:
         backend_feature["xpu"] = {"xccl"}
 
 
-def requires_ddp_rank(device):
+def requires_ddp_rank(device) -> bool:
     return device in DDP_RANK_DEVICES
 
 
-def exit_if_lt_x_cuda_devs(x):
+def exit_if_lt_x_cuda_devs(x: int):
     """Exit process unless at least the given number of CUDA devices are available"""
     if torch.cuda.device_count() < x:
         sys.exit(TEST_SKIPS[f"multi-device-{x}"].exit_code)
@@ -208,7 +208,7 @@ def exit_if_lt_x_cuda_devs(x):
 # allows you to check for multiple accelerator irrespective of device type
 # to add new device types to this check simply follow the same format
 # and append an elif with the conditional and appropriate device count function for your new device
-def exit_if_lt_x_accelerators(x):
+def exit_if_lt_x_accelerators(x: int):
     if torch.accelerator.device_count() < x:
         sys.exit(TEST_SKIPS[f"multi-device-{x}"].exit_code)
 
@@ -291,11 +291,11 @@ def import_transformers_or_skip():
         return unittest.skip(TEST_SKIPS["importerror"].message)
 
 
-def at_least_x_gpu(x):
+def at_least_x_gpu(x: int) -> bool:
     return torch.accelerator.is_available() and torch.accelerator.device_count() >= x
 
 
-def skip_if_lt_x_gpu(x, *, allow_cpu=False):
+def skip_if_lt_x_gpu(x: int, *, allow_cpu=False):
     """Skip if fewer than x accelerators available.
 
     Args:
