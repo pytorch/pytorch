@@ -705,7 +705,7 @@ class ElasticLaunchTest(TestCase):
             if use_virtual_local_rank:
                 args.append("--virtual-local-rank")
 
-            args.append(path("bin/test_script_deviceid.py"))
+            args.append(path("script_deviceid.py"))
 
             captured_out = io.StringIO()
             captured_err = io.StringIO()

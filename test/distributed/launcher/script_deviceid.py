@@ -1,4 +1,7 @@
-# This is a helper script for test_virtual_local_rank. It prints out the
+# Owner(s): ["oncall: r2p"]
+
+# This is a helper script for
+# test_run.py::ElasticLaunchTest::test_virtual_local_rank. It prints out the
 # generated inductor output for a simple function.
 
 import os
