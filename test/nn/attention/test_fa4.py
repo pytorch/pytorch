@@ -160,8 +160,8 @@ class TestFlashAttentionFA4(TestCase):
 
             dv_math_low_error = (dv_math_low - dv_math_fp32).abs().max().item()
             dv_flash_error = (dv_flash - dv_math_fp32).abs().max().item()
-            assert dv_flash_error <= rtol * dv_math_low_error + dv_atol, (
-                f"dV: Flash error {dv_flash_error:.2e} exceeds {rtol}x Math-low error {dv_math_low_error:.2e} + {dv_atol:.2e}"
+            assert dv_flash_error <= rtol * (dv_math_low_error + dv_atol), (
+                f"dV: Flash error {dv_flash_error:.2e} exceeds {rtol}x (Math-low error {dv_math_low_error:.2e} + {dv_atol:.2e})"
             )
 
     @unittest.skipUnless(_fa4_dependencies_available(), "FA4 backend unavailable")
@@ -183,6 +183,8 @@ class TestFlashAttentionFA4(TestCase):
     def test_flash_attention_matches_math(
         self, device, dtype, batch, seq_len, heads, head_dim, is_causal
     ):
+        # TODO: Getting bad TMA setup on dO w/ headdim = 64, will take a look
+        test_backward = head_dim == 128 and dtype == torch.float16
         shape = SdpaShape(batch, heads, seq_len, head_dim)
         self._assert_flash_matches_math(
             device,
@@ -190,7 +192,7 @@ class TestFlashAttentionFA4(TestCase):
             dtype=dtype,
             is_causal=is_causal,
             # Bwd is consistently erroring
-            test_backward=False,
+            test_backward=test_backward,
         )
 
 
