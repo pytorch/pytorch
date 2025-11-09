@@ -86,8 +86,8 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-jammy-py3.12-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-py3.12-pallas
+      build-environment: linux-jammy-cuda12.8-py3.12-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-py3.12-pallas
       cuda-arch-list: '8.9'
       runner: linux.8xlarge.memory
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
