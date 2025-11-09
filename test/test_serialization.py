@@ -397,7 +397,6 @@ class SerializationMixin:
                 b = torch.load(f)
                 self.assertTrue(torch.equal(a, b))
                 self.assertEqual(i, j)
-        os.unlink(f2.name)
 
     def _test_serialization_sparse(self, weights_only):
         def _test_serialization(conversion):
