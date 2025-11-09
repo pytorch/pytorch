@@ -41,6 +41,7 @@ def make_pallas(cls):
         cls,
         cls_prefix,
         suffix,
+        (config, "cpu_backend", "pallas"),
         (config, "cuda_backend", "pallas"),
         xfail_prop="_expected_failure_pallas",
     )
@@ -318,15 +319,59 @@ class PallasTestsCUDA(PallasTestsMixin, TestCase):
 class PallasTestsCPU(PallasTestsMixin, TestCase):
     DEVICE = "cpu"
 
+    def test_cpu_strided_int_pallas(self):
+        """Test strided access patterns with the Pallas backend."""
 
-# Create test variants using the main test suite
-# Note: Only enable GPU tests since Pallas primarily targets GPU
-if hasattr(sys.modules.get(__name__), "test_torchinductor") and HAS_PALLAS:
-    if getattr(test_torchinductor, "HAS_GPU", False):
-        # Uncomment these to run full test suite with Pallas backend
-        # make_pallas(test_torchinductor.SweepInputsGPUTest)
-        # make_pallas(test_torchinductor.GPUTests)
-        pass
+        def fn(x):
+            # Access every other element (strided access)
+            return x[::2] * 2.0
+
+        compiled = self._compile(fn)
+
+        x = torch.arange(16, dtype=torch.float32, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_cpu_strided_offset_pallas(self):
+        """Test strided access with offset."""
+
+        def fn(x):
+            # Access every other element starting from index 1
+            return x[1::2] + 1.0
+
+        compiled = self._compile(fn)
+
+        x = torch.arange(16, dtype=torch.float32, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_cpu_strided_2d_pallas(self):
+        """Test strided access on 2D tensors."""
+
+        def fn(x):
+            # Simple operation on 2D tensor
+            return x * 3.0
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(8, 16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+
+if test_torchinductor.HAS_CPU and HAS_PALLAS:
+    make_pallas(test_torchinductor.SweepInputsCpuTest)
+    # make_pallas(test_torchinductor.CpuTests)
+
+
+if test_torchinductor.HAS_GPU and HAS_PALLAS:
+    # make_pallas(test_torchinductor.SweepInputsGPUTest)
+    # make_pallas(test_torchinductor.GPUTests)
+    pass
+
 
 if __name__ == "__main__":
     if HAS_PALLAS:
