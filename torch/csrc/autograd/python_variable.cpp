@@ -408,6 +408,8 @@ static PyObject* THPVariable_WrapWithType(
   new (&v->cdata) Tensor(std::forward<T>(var));
 
   if (THPVariable_Unpack(obj).is_uniquely_owned()) {
+    // We can use a faster non-atomic code path if we have the only reference to
+    // a fresh Tensor.
     PyObjectPreservation::init_fresh_nonatomic(tensor_impl, pyobj_slot, obj);
     return obj;
   }
@@ -2360,7 +2362,20 @@ static int THPVariable_clear(THPVariable* self) {
   Py_CLEAR(self->backward_hooks);
   Py_CLEAR(self->post_accumulate_grad_hooks);
   if (self->cdata.defined()) {
-    self->cdata.unsafeGetTensorImpl()->pyobj_slot()->clear();
+    auto pyobj_slot = self->cdata.unsafeGetTensorImpl()->pyobj_slot();
+    // Typically the Tensor's pyobj_slot points back to this object. The only
+    // time that's not the case is if we had a race in THPVariable_Wrap and we
+    // need to discard the Python object because some other thread beat us to
+    // setting the pyobj_slot.
+    if (pyobj_slot->load_pyobj() == (PyObject*)self) {
+      // A Tensor's Python object should only be destroyed when the Tensor has
+      // no other references too.
+      TORCH_INTERNAL_ASSERT(self->cdata.use_count() == 1);
+
+      // Clear the pyobj_slot so that a try_incref() call from
+      // weak_intrusive_ptr::lock() won't see a freed pointer.
+      pyobj_slot->clear();
+    }
   }
   {
     // MapAllocator can take significant time to release large tensors;
