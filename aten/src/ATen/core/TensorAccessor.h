@@ -1,11 +1,12 @@
 #pragma once
 
-#include <torch/headeronly/core/TensorAccessor.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+#include <torch/headeronly/core/TensorAccessor.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
@@ -16,14 +17,12 @@ using torch::headeronly::DefaultPtrTraits;
 #if defined(__CUDACC__) || defined(__HIPCC__)
   using torch::headeronly::RestrictPtrTraits;
 #endif
-using torch::headeronly::TensorAccessorDetail;
-using torch::headeronly::TensorAccessorBaseDetail;
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using TensorAccessorBase = TensorAccessorBaseDetail<c10::IntArrayRef, T, N, PtrTraits, index_t>;
+using TensorAccessorBase = torch::headeronly::TensorAccessorBaseDetail<c10::IntArrayRef, T, N, PtrTraits, index_t>;
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using TensorAccessor = TensorAccessorDetail<c10::IntArrayRef, T, N, PtrTraits, index_t>;
+using TensorAccessor = torch::headeronly::TensorAccessorDetail<c10::IntArrayRef, T, N, PtrTraits, index_t>;
 
 namespace {
 

@@ -30,8 +30,8 @@ template <
     class ArrayRefCls,
     typename T,
     size_t N,
-    template <typename U> class PtrTraits = DefaultPtrTraits,
-    typename index_t = int64_t>
+    template <typename U> class PtrTraits,
+    typename index_t>
 class TensorAccessorBaseDetail {
  public:
   typedef typename PtrTraits<T>::PtrType PtrType;
