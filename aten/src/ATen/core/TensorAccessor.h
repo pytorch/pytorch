@@ -69,7 +69,7 @@ class TensorAccessorDetail
 };
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using TensorAccessor = torch::headeronly::TensorAccessorDetail<c10::IntArrayRef, T, N, PtrTraits, index_t>;
+using TensorAccessor = TensorAccessorDetail<c10::IntArrayRef, T, N, PtrTraits, index_t>;
 
 namespace {
 
