@@ -14,6 +14,10 @@ inputs:
     description: Works as stated in actions/checkout, but the default value is 0
     required: false
     default: "0"
+  clean:
+    description: Works as stated in actions/checkout, but the default value is true
+    required: false
+    default: "true"
 
 runs:
   using: composite
@@ -56,6 +60,7 @@ runs:
         fetch-depth: ${{ inputs.fetch-depth }}
         submodules: ${{ inputs.submodules }}
         show-progress: false
+        clean: ${{ inputs.clean }}
 
     - name: Clean submodules post checkout
       id: clean-submodules
@@ -98,3 +103,4 @@ runs:
         fetch-depth: ${{ inputs.fetch-depth }}
         submodules: ${{ inputs.submodules }}
         show-progress: false
+        clean: ${{ inputs.clean }}
