@@ -40,6 +40,7 @@ static PyObject* THPStorage_New(PyTypeObject* type, c10::Storage _storage) {
   PyObject* obj = type->tp_alloc(type, 0);
   TORCH_CHECK(obj, "Failed to allocate a ", type->tp_name, " object");
 
+  PyUnstable_EnableTryIncRef(obj);
   auto s = (THPStorage*)obj;
   new (&s->cdata) c10::Storage(std::move(_storage));
   return obj;
