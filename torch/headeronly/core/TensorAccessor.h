@@ -74,8 +74,8 @@ template <
     class ArrayRefCls,
     typename T,
     size_t N,
-    template <typename U> class PtrTraits = DefaultPtrTraits,
-    typename index_t = int64_t>
+    template <typename U> class PtrTraits,
+    typename index_t>
 class TensorAccessorDetail
     : public TensorAccessorBaseDetail<ArrayRefCls, T, N, PtrTraits, index_t> {
  public:
@@ -158,8 +158,8 @@ template <
     typename IndexBoundsCheck,
     typename T,
     size_t N,
-    template <typename U> class PtrTraits = DefaultPtrTraits,
-    typename index_t = int64_t>
+    template <typename U> class PtrTraits,
+    typename index_t>
 class GenericPackedTensorAccessorBase {
  public:
   typedef typename PtrTraits<T>::PtrType PtrType;
@@ -220,8 +220,8 @@ template <
     typename IndexBoundsCheck,
     typename T,
     size_t N,
-    template <typename U> class PtrTraits = DefaultPtrTraits,
-    typename index_t = int64_t>
+    template <typename U> class PtrTraits,
+    typename index_t>
 class GenericPackedTensorAccessor : public GenericPackedTensorAccessorBase<
                                         IndexBoundsCheck,
                                         T,
