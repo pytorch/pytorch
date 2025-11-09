@@ -404,7 +404,11 @@ static PyObject* THPVariable_WrapWithType(
 
   obj = type->tp_alloc(type, 0);
   TORCH_CHECK(obj, "Failed to allocate a ", type->tp_name, " object");
+
+  // Ensure that PyUnstable_TryIncref calls don't fail spuriously in
+  // free-threaded Python.
   PyUnstable_EnableTryIncRef(obj);
+
   auto v = reinterpret_cast<THPVariable*>(obj);
   new (&v->cdata) Tensor(std::forward<T>(var));
 
