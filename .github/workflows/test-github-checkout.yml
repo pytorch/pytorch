@@ -22,4 +22,4 @@ jobs:
         uses: ./.github/actions/checkout-pytorch
         with:
           no-sudo: true
-          clean: ${{ steps.detect_container.outputs.clean-flag }}
+          clean: false
