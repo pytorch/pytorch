@@ -101,7 +101,7 @@ jobs:
           echo "Detected container mode: $(cat $GITHUB_OUTPUT)"
 
       - name: Checkout PyTorch
-        uses: saienduri/pytorch/.github/actions/checkout-pytorch@dev/saienduri/test-frac
+        uses: ./.github/actions/checkout-pytorch
         with:
           no-sudo: true
           clean: ${{ steps.detect_container.outputs.clean-flag }}
