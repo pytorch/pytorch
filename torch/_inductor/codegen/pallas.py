@@ -460,21 +460,8 @@ class PallasKernel(SIMDKernel):
             output_param = output_params[0]
 
             # Convert inputs to JAX arrays
-            code.writeline("# Convert Torch -> JAX for inputs")
             for inp in input_params:
-                code.writeline(f"if {inp}.is_contiguous():")
-                with code.indent():
-                    code.writeline(f"{inp}_jax = jax.dlpack.from_dlpack({inp})")
-                code.writeline("else:")
-                with code.indent():
-                    code.writeline("# For non-contiguous tensors, convert via numpy")
-                    code.writeline("# Need to move to CPU first if on CUDA")
-                    code.writeline(f"if {inp}.is_cuda:")
-                    with code.indent():
-                        code.writeline(f"{inp}_jax = jnp.asarray({inp}.cpu().numpy())")
-                    code.writeline("else:")
-                    with code.indent():
-                        code.writeline(f"{inp}_jax = jnp.asarray({inp}.numpy())")
+                code.writeline(f"{inp}_jax = jax.dlpack.from_dlpack({inp}.contiguous())")
 
             # Get output spec from PyTorch tensor
             code.writeline("# Prepare output spec from PyTorch tensor")
