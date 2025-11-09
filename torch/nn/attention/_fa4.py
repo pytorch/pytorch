@@ -7,6 +7,7 @@ import importlib
 from dataclasses import dataclass
 from functools import cache
 from typing import Any, TYPE_CHECKING
+from typing_extensions import TypeVarTuple, Unpack
 
 
 if TYPE_CHECKING:
@@ -163,8 +164,11 @@ def _fa4_backward_support_error(
     return None
 
 
-def _transpose_dense(*tensors: torch.Tensor) -> tuple[torch.Tensor, ...]:
-    return tuple(t.transpose(1, 2) for t in tensors)
+Ts = TypeVarTuple("Ts")
+
+
+def _transpose_dense(*tensors: Unpack[Ts]) -> tuple[Unpack[Ts]]:
+    return tuple(t.transpose(1, 2) for t in tensors)  # type: ignore[attr-defined]
 
 
 def _fa4_run_forward(
