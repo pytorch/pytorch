@@ -232,7 +232,7 @@ def get_file_binaries_from_pathnames(
             raise TypeError(
                 f"Expected string type for pathname, but got {type(pathname)}"
             )
-        yield pathname, StreamWrapper(open(pathname, mode, encoding=encoding))
+        yield pathname, StreamWrapper(open(pathname, mode, encoding=encoding))  # noqa:SIM115
 
 
 def validate_pathname_binary_tuple(data: tuple[str, IOBase]) -> None:

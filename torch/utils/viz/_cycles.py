@@ -498,7 +498,7 @@ def warn_tensor_cycles():
     logger.info("Watching Python reference cycles for CUDA Tensors.")
 
     def write_and_log(html) -> None:
-        with NamedTemporaryFile('w', suffix='.html', delete=False) as f:
+        with NamedTemporaryFile('w', suffix='.html') as f:
             f.write(html)
             logger.warning('Reference cycle includes a CUDA Tensor see visualization of cycle %s', f.name)
     return observe_tensor_cycles(write_and_log)
