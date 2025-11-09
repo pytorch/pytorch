@@ -461,7 +461,9 @@ class PallasKernel(SIMDKernel):
 
             # Convert inputs to JAX arrays
             for inp in input_params:
-                code.writeline(f"{inp}_jax = jax.dlpack.from_dlpack({inp}.contiguous())")
+                code.writeline(
+                    f"{inp}_jax = jax.dlpack.from_dlpack({inp}.contiguous())"
+                )
 
             # Get output spec from PyTorch tensor
             code.writeline("# Prepare output spec from PyTorch tensor")
