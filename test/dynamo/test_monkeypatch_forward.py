@@ -7,7 +7,7 @@ import torch._dynamo.test_case
 class MonkeypatchForwardTests(torch._dynamo.test_case.TestCase):
     def test_patch_forward_inside_compiled_region_eager_backend(self):
         """Test patching nn.Module.forward inside a compiled region."""
-        
+
         class SimpleModule(torch.nn.Module):
             def forward(self, x):
                 return x - 1
@@ -34,4 +34,5 @@ class MonkeypatchForwardTests(torch._dynamo.test_case.TestCase):
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
+
     run_tests()
