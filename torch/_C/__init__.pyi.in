@@ -3,23 +3,25 @@
 # mypy: allow-untyped-defs
 # ruff: noqa: F401
 
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from enum import Enum, IntEnum
 from pathlib import Path
 from types import EllipsisType
 from typing import (
     Any,
     AnyStr,
-    Callable,
     Generic,
     IO,
     Literal,
     NamedTuple,
     overload,
+    Protocol,
+    runtime_checkable,
     SupportsIndex,
+    TypeAlias,
     TypeVar,
 )
-from typing_extensions import ParamSpec, Protocol, runtime_checkable, Self, TypeAlias
+from typing_extensions import ParamSpec, Self
 
 import numpy
 
