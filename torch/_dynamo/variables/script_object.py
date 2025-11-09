@@ -28,7 +28,7 @@ from torch._guards import Source
 from torch.fx.proxy import Proxy
 
 from .. import graph_break_hints
-from ..exc import unimplemented_v2, UnsafeScriptObjectError, Unsupported
+from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
 from .base import VariableTracker
 from .user_defined import UserDefinedObjectVariable
 
@@ -87,7 +87,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
         method = getattr(self.value, name, None)
         if method is None:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="FakeScriptObject missing method implementation",
                 context=f"value={self.value}, method={name}",
                 explanation=f"TorchScript object {self.value} doesn't define the method {name}.",
@@ -98,7 +98,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             )
 
         if not callable(method):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Attempted to access non-callable attribute of TorchScript object",
                 context=f"value={self.value}, method={name}",
                 explanation="Attribute accesses of TorchScript objects to non-callable attributes are not supported.",
@@ -128,7 +128,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         args: Iterable[Any],
         kwargs: dict[str, Any],
     ) -> VariableTracker:
-        unimplemented_v2(
+        unimplemented(
             gb_type="Weird method call on TorchScript object",
             context=f"value={self.value}, method={name}",
             explanation=(
