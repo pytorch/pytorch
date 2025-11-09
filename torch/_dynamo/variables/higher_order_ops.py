@@ -484,6 +484,9 @@ def _call_while_loop(
         else:
             return operands
 
+    # NB - for while_loop_stacked_output, the output shape is different from
+    # body shape, therefore we do not flatten the outputs, and keep one to one
+    # mapping between subgraph output and output vts.
     # create body subgraph
     (
         body_r,
@@ -498,7 +501,7 @@ def _call_while_loop(
         "while_loop",
         source_target=self.value,
         set_subgraph_inputs="flatten_manual",
-        should_flatten_outputs=True,
+        should_flatten_outputs=not stack_output,
         supports_input_mutation=False,
         supports_aliasing=False,
         remove_consts_from_outputs=False,
@@ -511,7 +514,7 @@ def _call_while_loop(
     # torch.contiguous_format is not yet implemented". This is okay because stride
     # is still checked.
     check_meta_consistency_vt(
-        body_graph_output_vts,
+        body_r.unpack_var_sequence(tx) if stack_output else body_graph_output_vts,
         operands_seq,
         "body_fn_output",
         "carried_inputs",
@@ -558,15 +561,34 @@ def _call_while_loop(
         operands_proxy,
         additional_inputs_proxy,
     )
-    return _call_function_and_unflatten_output(
-        tx,
-        self.value,
-        p_args,
-        {},
-        None,
-        body_r,
-        body_graph_output_vts,
-    )
+    if stack_output:
+        # NB - for while_loop_stacked_output, the output shape is different from
+        # body shape, therefore we do not flatten the outputs, and keep one to one
+        # mapping between subgraph output and output vts.
+        from .builder import wrap_fx_proxy
+
+        # Store the invocation as a call
+        flat_variable = wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=p_args,
+                kwargs={},
+            ),
+            example_value=None,
+        )
+        return flat_variable
+    else:
+        return _call_function_and_unflatten_output(
+            tx,
+            self.value,
+            p_args,
+            {},
+            None,
+            body_r,
+            body_graph_output_vts,
+        )
 
 
 def are_same_graph_modules(fn_name, a_mod, b_mod, fake_mode):
