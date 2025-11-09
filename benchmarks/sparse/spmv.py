@@ -137,4 +137,3 @@ if __name__ == "__main__":
         )
     if need_close:
         outfile.close()
-
