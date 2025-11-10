@@ -4292,6 +4292,7 @@
   dispatch:
     SparseCPU: sparse_sparse_matmul_cpu
     SparseCUDA: sparse_sparse_matmul_cuda
+    SparseMPS: sparse_sparse_matmul_mps
   autogen: _sparse_sparse_matmul.out
 
 - func: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
