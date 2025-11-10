@@ -899,14 +899,14 @@ class GraphModule(torch.nn.Module):
     class subgraph_0(torch.nn.Module):
         def forward(self, l_x_: "f32[8]", l_y_: "f32[8]"):
             mul: "f32[8]" = torch.mul(l_x_, l_y_);  l_x_ = l_y_ = None
-            child: "f32[8]" = mul * 2;  mul = None
-            return (child,)
+            mul_1: "f32[8]" = mul * 2;  mul = None
+            return (mul_1,)
 
     class subgraph_1(torch.nn.Module):
         def forward(self, a: "f32[8]", l_y_: "f32[8]"):
             mul: "f32[8]" = torch.mul(a, l_y_);  a = l_y_ = None
-            child: "f32[8]" = mul * 3;  mul = None
-            return (child,)
+            mul_1: "f32[8]" = mul * 3;  mul = None
+            return (mul_1,)
 """,
             )
 
@@ -983,20 +983,20 @@ class GraphModule(torch.nn.Module):
 
         subgraph_0 = self.subgraph_0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_);  subgraph_0 = l_x_ = None
-        x: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
+        getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
         subgraph_1 = self.subgraph_0
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', x, l_y_);  subgraph_1 = x = None
-        x_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', getitem, l_y_);  subgraph_1 = getitem = None
+        getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
         subgraph_2 = self.subgraph_0
-        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(subgraph_2, 'subgraph_0', x_1, l_y_);  subgraph_2 = x_1 = None
-        x_2: "f32[8]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
+        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(subgraph_2, 'subgraph_0', getitem_1, l_y_);  subgraph_2 = getitem_1 = None
+        getitem_2: "f32[8]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
         subgraph_3 = self.subgraph_0
-        invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(subgraph_3, 'subgraph_0', x_2, l_y_);  subgraph_3 = x_2 = None
-        x_3: "f32[8]" = invoke_subgraph_3[0];  invoke_subgraph_3 = None
+        invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(subgraph_3, 'subgraph_0', getitem_2, l_y_);  subgraph_3 = getitem_2 = None
+        getitem_3: "f32[8]" = invoke_subgraph_3[0];  invoke_subgraph_3 = None
         subgraph_4 = self.subgraph_0
-        invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(subgraph_4, 'subgraph_0', x_3, l_y_);  subgraph_4 = x_3 = l_y_ = None
-        x_4: "f32[8]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
-        return (x_4,)
+        invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(subgraph_4, 'subgraph_0', getitem_3, l_y_);  subgraph_4 = getitem_3 = l_y_ = None
+        getitem_4: "f32[8]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
+        return (getitem_4,)
 
     class subgraph_0(torch.nn.Module):
         def forward(self, l_x_: "f32[8]", l_y_: "f32[8]"):
@@ -1495,9 +1495,9 @@ class GraphModule(torch.nn.Module):
 
     class subgraph_0(torch.nn.Module):
         def forward(self, l_x_: "f32[8, 8]"):
-            child: "f32[8, 8]" = l_x_ * 2
-            child_1: "f32[8, 8]" = l_x_ * 3;  l_x_ = None
-            return (child, child_1)
+            mul: "f32[8, 8]" = l_x_ * 2
+            mul_1: "f32[8, 8]" = l_x_ * 3;  l_x_ = None
+            return (mul, mul_1)
 """,
             )
 
