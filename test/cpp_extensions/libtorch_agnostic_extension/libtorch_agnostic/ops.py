@@ -375,3 +375,81 @@ def make_tensor_clones_and_call_foreach(t1, t2) -> list[Tensor]:
     return torch.ops.libtorch_agnostic.make_tensor_clones_and_call_foreach.default(
         t1, t2
     )
+
+
+def test_device_constructor(is_cuda, index, use_str):
+    """
+    Tests creating a Device from DeviceType and index, or from a string.
+
+    Args:
+        is_cuda: bool - if True, creates CUDA device; if False, creates CPU device
+        index: int - device index
+        use_str: bool - if True, constructs from string; if False, constructs from DeviceType
+
+    Returns: Device - A device with the specified type and index
+    """
+    return torch.ops.libtorch_agnostic.test_device_constructor.default(
+        is_cuda, index, use_str
+    )
+
+
+def test_device_equality(d1, d2) -> bool:
+    """
+    Tests Device equality operator.
+
+    Args:
+        d1: Device - first device
+        d2: Device - second device
+
+    Returns: bool - True if devices are equal
+    """
+    return torch.ops.libtorch_agnostic.test_device_equality.default(d1, d2)
+
+
+def test_device_set_index(device, index):
+    """
+    Tests Device set_index() method.
+
+    Args:
+        device: Device - device to modify
+        index: int - new device index
+
+    Returns: Device - device with updated index
+    """
+    return torch.ops.libtorch_agnostic.test_device_set_index.default(device, index)
+
+
+def test_device_index(device) -> int:
+    """
+    Tests Device index() method.
+
+    Args:
+        device: Device - device to query
+
+    Returns: int - device index
+    """
+    return torch.ops.libtorch_agnostic.test_device_index.default(device)
+
+
+def test_device_is_cuda(device) -> bool:
+    """
+    Tests Device is_cuda() method.
+
+    Args:
+        device: Device - device to check
+
+    Returns: bool - True if device is CUDA
+    """
+    return torch.ops.libtorch_agnostic.test_device_is_cuda.default(device)
+
+
+def test_device_is_cpu(device) -> bool:
+    """
+    Tests Device is_cpu() method.
+
+    Args:
+        device: Device - device to check
+
+    Returns: bool - True if device is CPU
+    """
+    return torch.ops.libtorch_agnostic.test_device_is_cpu.default(device)

@@ -65,6 +65,13 @@ torch_list_push_back(StableListHandle list_handle, StableIValue element);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_delete_list(StableListHandle list_handle);
 
+// Helper function to parse device string using c10::Device
+// Returns device type and index via output parameters
+AOTI_TORCH_EXPORT AOTITorchError torch_parse_device_string(
+    const char* device_string,
+    uint32_t* out_device_type,
+    int32_t* out_device_index);
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 #ifdef __cplusplus
