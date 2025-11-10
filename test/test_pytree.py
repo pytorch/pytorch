@@ -53,6 +53,14 @@ class GlobalDummyType:
         self.x = x
         self.y = y
 
+    def __eq__(self, other):
+        if not isinstance(other, GlobalDummyType):
+            return NotImplemented
+        return self.x == other.x and self.y == other.y
+
+    def __hash__(self):
+        return hash((self.x, self.y))
+
 
 cxx_pytree.register_pytree_node(
     GlobalDummyType,
@@ -1539,9 +1547,16 @@ class TestCxxPytree(TestCase):
         # C++ class. So we compare the type names and reprs instead because the types themselves
         # won't be equal.
         super().assertEqual(x_typename, y_typename, *args, **kwargs)
-        super().assertEqual(repr(x), repr(y), *args, **kwargs)
         if not TEST_WITH_TORCHDYNAMO or type(x) is type(y):
             super().assertEqual(x, y, *args, **kwargs)
+        else:
+            super().assertEqual(repr(x), repr(y), *args, **kwargs)
+            super().assertEqual(
+                x.unflatten(range(x.num_leaves)),
+                y.unflatten(range(y.num_leaves)),
+                *args,
+                **kwargs,
+            )
 
     def test_treespec_equality(self):
         self.assertEqual(cxx_pytree.treespec_leaf(), cxx_pytree.treespec_leaf())
@@ -1617,6 +1632,14 @@ class TestCxxPytree(TestCase):
             def __init__(self, x, y):
                 self.x = x
                 self.y = y
+
+            def __eq__(self, other):
+                if not isinstance(other, LocalDummyType):
+                    return NotImplemented
+                return self.x == other.x and self.y == other.y
+
+            def __hash__(self):
+                return hash((self.x, self.y))
 
         cxx_pytree.register_pytree_node(
             LocalDummyType,
