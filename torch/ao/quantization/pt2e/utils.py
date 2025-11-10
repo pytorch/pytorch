@@ -7,6 +7,7 @@ from typing import Any, Optional, Union
 import torch
 import torch.ao.quantization.pt2e._affine_quantization  # noqa: F401
 import torch.nn.functional as F
+import torch.utils._pytree as pytree
 
 # Makes sure that quantized_decomposed ops are registered
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
@@ -14,7 +15,6 @@ from torch.ao.quantization.quantizer import QuantizationAnnotation
 from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx import GraphModule, Node
 from torch.nn.utils.fusion import fuse_conv_bn_weights
-from torch.utils._pytree import LeafSpec
 
 
 __all__ = [
@@ -97,10 +97,10 @@ def _find_q_dq_node_for_user(
 def _is_sym_size_node(node: Node):
     return (
         node.op == "call_function"
-        and node.target == torch.ops.aten.sym_size.default
-        or node.target == torch.ops.aten.sym_numel.default
-        or node.target == torch.ops.aten.sym_numel
-        or node.target == torch.ops.aten.sym_size
+        and node.target is torch.ops.aten.sym_size.default
+        or node.target is torch.ops.aten.sym_numel.default
+        or node.target is torch.ops.aten.sym_numel
+        or node.target is torch.ops.aten.sym_size
     )
 
 
@@ -204,7 +204,7 @@ def _is_conv_transpose_fn(conv_fn: Callable):
 def _is_bn_node(n: Node):
     return (
         _is_supported_batch_norm_for_training(n)
-        or n.target == torch.ops.aten._native_batch_norm_legit_no_training.default
+        or n.target is torch.ops.aten._native_batch_norm_legit_no_training.default
     )
 
 
@@ -228,7 +228,7 @@ def fold_bn_weights_into_conv_node(
     bn_b = _get_tensor_constant_from_node(bn_args[2], m)
     bn_rm = _get_tensor_constant_from_node(bn_args[3], m)
     bn_rv = _get_tensor_constant_from_node(bn_args[4], m)
-    if bn_node.target == torch.ops.aten._native_batch_norm_legit_no_training.default:
+    if bn_node.target is torch.ops.aten._native_batch_norm_legit_no_training.default:
         eps_arg_index = 6
     elif _is_supported_batch_norm_for_training(bn_node):
         eps_arg_index = 7
@@ -268,7 +268,7 @@ def fold_bn_weights_into_conv_node(
     # native_batch_norm has 3 outputs, we expect getitem calls on the output
     # and we want to replace the uses of getitem 0 with the output of conv
     #
-    if bn_node.target == torch.ops.aten.batch_norm.default:
+    if bn_node.target is torch.ops.aten.batch_norm.default:
         # With the new training ir, instead of batch_norm + getitem,
         # we only have the batch_norm node.
         #
@@ -377,7 +377,7 @@ def _get_aten_graph_module_for_pattern(
     for node in aten_pattern.graph.nodes:  # type: ignore[union-attr]
         if (
             node.op == "call_function"
-            and node.target == torch.ops.aten.copy_.default
+            and node.target is torch.ops.aten.copy_.default
             and len(node.users) == 0
         ):
             aten_pattern.graph.erase_node(node)  # type: ignore[operator, union-attr]
@@ -477,7 +477,10 @@ def _replace_literals_with_new_placeholders(
         exclude_literals = []
 
     in_spec = gm._in_spec
-    args_spec = in_spec.children_specs[0]
+    assert in_spec.type is tuple
+    args_spec = in_spec.child(0)
+    assert args_spec.type is tuple
+    args_spec_children = args_spec.children()
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             last_ph = node
@@ -492,7 +495,7 @@ def _replace_literals_with_new_placeholders(
                     else:
                         ph_node = gm.graph.placeholder("arg" + str(cnt))
                         new_args.append(ph_node)
-                        args_spec.children_specs.append(LeafSpec())
+                        args_spec_children.append(pytree.treespec_leaf())
                         cnt += 1
                         if merge_dup:
                             literal_to_ph[arg] = ph_node
@@ -503,8 +506,8 @@ def _replace_literals_with_new_placeholders(
         node.args = new_args
 
     # Update `num_nodes`, `num_leaves`, `num_children`.
-    args_spec.__post_init__()
-    in_spec.__post_init__()
+    args_spec = pytree.treespec_tuple(args_spec_children)
+    gm._in_spec = in_spec = pytree.treespec_tuple([args_spec, *in_spec.children()[1:]])
     return gm
 
 

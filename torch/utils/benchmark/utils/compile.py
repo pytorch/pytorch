@@ -25,7 +25,7 @@ except ModuleNotFoundError:
     print("tabulate is not installed, please pip install tabulate to use this utility")
 
 if HAS_TABULATE:
-    def _enable_tensor_cores():
+    def _enable_tensor_cores() -> None:
         global _warned_tensor_cores
 
         if torch.cuda.is_available():
@@ -36,7 +36,7 @@ if HAS_TABULATE:
                     print("we will enable it automatically by setting `torch.set_float32_matmul_precision('high')`")
                     _warned_tensor_cores = True
 
-    def _disable_tensor_cores():
+    def _disable_tensor_cores() -> None:
         torch.set_float32_matmul_precision(_default_float_32_precision)
 
     def bench_loop(

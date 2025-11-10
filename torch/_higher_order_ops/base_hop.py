@@ -170,7 +170,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             out = self(functionalized_subgraph, *unwrapped_operands, **kwargs)
         return ctx.wrap_tensors(out)
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def gen_schema(self, subgraph, *operands, **kwargs):
         from .schema import HopSchemaGenerator
 
@@ -216,7 +216,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
 
 class BaseHOPFunction(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(ctx, hop, subgraph, kwargs, *operands):
         ctx.hop = hop
         ctx.operands = operands

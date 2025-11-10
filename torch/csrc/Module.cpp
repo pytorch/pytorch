@@ -71,6 +71,7 @@
 #include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/cpu/Module.h>
+#include <torch/csrc/distributed/python_placement.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/export/pybind.h>
 #include <torch/csrc/functionalization/Module.h>
@@ -1604,6 +1605,32 @@ static PyObject* THPModule_are_vmap_fallback_warnings_enabled(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_set_warn_on_accumulate_grad_stream_mismatch(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "enabled must be a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setWarnOnAccumulateGradStreamMismatch(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_warn_on_accumulate_grad_stream_mismatch(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  if (at::globalContext().warnOnAccumulateGradStreamMismatch()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THCPModule_ensureCUDADeviceGuardSet(
     PyObject* self,
     PyObject* noargs) {
@@ -1819,6 +1846,14 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_debug_only_are_vmap_fallback_warnings_enabled",
      THPModule_are_vmap_fallback_warnings_enabled,
+     METH_NOARGS,
+     nullptr},
+    {"_set_warn_on_accumulate_grad_stream_mismatch",
+     THPModule_set_warn_on_accumulate_grad_stream_mismatch,
+     METH_O,
+     nullptr},
+    {"_warn_on_accumulate_grad_stream_mismatch",
+     THPModule_warn_on_accumulate_grad_stream_mismatch,
      METH_NOARGS,
      nullptr},
     {"_to_dlpack",
@@ -2158,6 +2193,8 @@ PyObject* initModule() {
   THXPStream_init(module);
   THXPEvent_init(module);
 #endif
+
+  torch::distributed::initPlacementBindings(module);
 
   auto set_module_attr =
       [&](const char* name, PyObject* v, bool incref = true) {
