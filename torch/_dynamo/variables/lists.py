@@ -18,7 +18,8 @@ import collections
 import inspect
 import operator
 import sys
-from typing import Any, Optional, Sequence, TYPE_CHECKING
+from collections.abc import Sequence
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -30,7 +31,7 @@ from ..bytecode_transformation import (
     create_instruction,
     create_rot_n,
 )
-from ..exc import raise_observed_exception, unimplemented_v2
+from ..exc import raise_observed_exception, unimplemented
 from ..source import AttrSource, NamedTupleFieldsSource
 from ..utils import (
     cmp_name_to_op_mapping,
@@ -162,7 +163,7 @@ class BaseListVariable(VariableTracker):
                 if value.constant is not None and value.constant.numel() == 1:
                     value = variables.ConstantVariable.create(value.constant.item())
                 else:
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Indexing list with non-scalar tensor",
                         context=f"call_method {self} {name} {args} {kwargs}",
                         explanation=(
@@ -878,7 +879,7 @@ class ListVariable(CommonListMethodsVariable):
                 except NotImplementedError:
                     python_type = "unknown"
 
-                unimplemented_v2(
+                unimplemented(
                     gb_type="sort with non-constant keys",
                     context=str(first_non_constant_key),
                     explanation=(
@@ -1498,6 +1499,7 @@ class NamedTupleVariable(TupleVariable):
                     variables.UserDefinedClassVariable(self.tuple_cls),
                 )
             elif isinstance(method, staticmethod):
+                # pyrefly: ignore[bad-argument-type]
                 return UserFunctionVariable(method.__func__)
             elif inspect.isfunction(method):
                 return UserMethodVariable(method, self)
@@ -1606,7 +1608,7 @@ class SliceVariable(VariableTracker):
             return variables.GetAttrVariable(self, name)
         fields = ["start", "stop", "step"]
         if name not in fields:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported attribute for slice() object",
                 context=f"var_getattr {self} {name}",
                 explanation=f"Expected attribute to be one of {','.join(fields)} "

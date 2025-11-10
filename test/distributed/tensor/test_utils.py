@@ -34,6 +34,10 @@ from torch.distributed.tensor.placement_types import (
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
+    generate_shard_orders,
+    LocalDTensorTestBase,
+    patched_distribute_tensor as _distribute_tensor,
+    shard_order_to_placement,
     with_comms,
 )
 
@@ -772,6 +776,63 @@ class TestStridedSharding(DTensorTestBase):
                 mesh, placements=(_StridedShard(dim=1, split_factor=2), Shard(1))
             )
             self.assertEqual(dtensor.full_tensor(), tensor)
+
+
+class Test_StridedShard_with_shard_order(LocalDTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 32
+
+    @with_comms
+    def test_StridedShard_to_shard_order(self):
+        with LocalTensorMode(ranks=self.world_size):
+            mesh = DeviceMesh("cpu", torch.arange(self.world_size).view(2, 2, 2, 2, 2))
+            shard_iter = generate_shard_orders(mesh, 3)
+            # It takes ~4.8h to complete total 2520 shard order combinations here
+            # using LocalTensor. So we only randomly pick 25 shard orders to test.
+            all_shard_order = list(shard_iter)
+            import random
+
+            random.seed(42)
+            shard_order_choices = random.sample(
+                all_shard_order, min(25, len(all_shard_order))
+            )
+
+            x = torch.randn(32, 32, 32)
+            for shard_order in shard_order_choices:
+                a = _distribute_tensor(x, mesh, None, shard_order)
+
+                placement_without_stridedshard = shard_order_to_placement(
+                    shard_order, mesh
+                )
+                placements_with_stridedshard = (
+                    DTensorSpec._convert_shard_order_to_StridedShard(
+                        shard_order, placement_without_stridedshard, mesh
+                    )
+                )
+                b = distribute_tensor(x, mesh, placements_with_stridedshard)
+                shard_order_from_stridedshard = (
+                    DTensorSpec._maybe_convert_StridedShard_to_shard_order(
+                        placements_with_stridedshard, mesh
+                    )
+                )
+                self.assertEqual(shard_order, shard_order_from_stridedshard)
+                self.assertEqual(a.to_local(), b.to_local())
+
+    @with_comms
+    def test_StridedShard_not_convertible_to_shard_order(self):
+        with LocalTensorMode(ranks=self.world_size):
+            mesh = DeviceMesh("cpu", torch.arange(self.world_size).view(4, 8))
+            unconvertible_placements_list = [
+                [_StridedShard(0, split_factor=2), _StridedShard(1, split_factor=2)],
+                [_StridedShard(0, split_factor=2), Shard(1)],
+                [_StridedShard(1, split_factor=16), Shard(1)],
+            ]
+            for placements in unconvertible_placements_list:
+                shard_order = DTensorSpec._maybe_convert_StridedShard_to_shard_order(
+                    tuple(placements), mesh
+                )
+                self.assertIsNone(shard_order)
 
 
 class Test2DStridedLocalShard(DTensorTestBase):
