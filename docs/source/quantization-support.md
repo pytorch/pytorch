@@ -253,7 +253,6 @@ regular full-precision tensor.
 .. autosummary::
     :toctree: generated
     :nosignatures:
-    :template: classtemplate.rst
 
     view
     as_strided

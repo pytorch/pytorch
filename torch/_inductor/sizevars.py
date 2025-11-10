@@ -882,7 +882,7 @@ class SizeVarAllocator:
         # Start building the unbacked replacements mapping using CanonicalExprFinder
         # The mapping is from Expr to its "canonical" Expr.
         self.unbacked_replacements = {}
-        for expr in self.equality_graph.keys():
+        for expr in self.equality_graph:
             canonical_expr = uf.find_expr(expr)
             if expr != canonical_expr:
                 self.unbacked_replacements[expr] = canonical_expr
