@@ -4138,6 +4138,10 @@ if HAS_CUDA_AND_TRITON:
                     FileCheck().check_count(
                         "def triton_poi_fused_add_", 2, exactly=True
                     ).run(code[0])
+                    # cpu kernel definition should only appence once, not in the auto-tuning block
+                    FileCheck().check_count(
+                        "cpp_fused__to_copy_add_1 = ", 1, exactly=True
+                    ).run(code[0])
                 else:
                     # triton_poi_fused_add_ should appear once, because of kernel reuse
                     FileCheck().check_count(
