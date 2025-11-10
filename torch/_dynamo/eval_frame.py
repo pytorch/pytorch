@@ -1316,8 +1316,8 @@ def argument_names(
 
 
 def check_if_dynamo_supported() -> None:
-    if sys.version_info >= (3, 14):
-        raise RuntimeError("Python 3.14+ not yet supported for torch.compile")
+    if sys.version_info >= (3, 15):
+        raise RuntimeError("Python 3.15+ not yet supported for torch.compile")
     elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
         3,
         13,
@@ -1785,16 +1785,21 @@ def rewrite_signature(
         # Check if function has optional input.
         for name, param in f_sig.parameters.items():
             if param.default is not inspect.Parameter.empty:
-                from torch._dynamo.exc import Unsupported
+                import torch._dynamo.graph_break_hints as graph_break_hints
+                from torch._dynamo.exc import unimplemented
 
                 log.error(
                     "Parameter %s is optional with a default value of %s",
                     name,
                     param.default,
                 )
-                raise Unsupported(
-                    "Tracing through optional input is not supported yet",
-                    case_name="optional_input",
+                unimplemented(
+                    gb_type="rewrite_signature: cannot trace optional function input",
+                    context="",
+                    explanation=f"Parameter {name} is optional with a default value of {param.default}. This is not supported yet.",
+                    hints=[
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
                 )
 
     def produce_matching(

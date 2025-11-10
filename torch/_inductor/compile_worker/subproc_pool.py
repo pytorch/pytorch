@@ -321,7 +321,7 @@ class SubprocPool:
         self._send(MsgHeader.QUIESCE)
         if self.quiesce_waitcounter is None:
             self.quiesce_waitcounter = _WaitCounter(
-                "pytorch.wait_counter.subproc_pool.running"
+                "pytorch.wait_counter.subproc_pool.quiesced"
             ).guard()
             self.quiesce_waitcounter.__enter__()
 
