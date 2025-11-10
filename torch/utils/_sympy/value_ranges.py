@@ -574,13 +574,24 @@ class SymPyValueRangeAnalysis:
     def bitwise_xor(cls, a, b):
         a, b = ValueRanges.wrap(a), ValueRanges.wrap(b)
         if a.is_bool and b.is_bool:
-            lower_lower = a.lower ^ b.lower
-            lower_upper = a.lower ^ b.upper
-            upper_lower = a.upper ^ b.lower
-            upper_upper = a.upper ^ b.upper
+            bounds = {
+                a.lower ^ b.lower,
+                a.lower ^ b.upper,
+                a.upper ^ b.lower,
+                a.upper ^ b.upper,
+            }
 
-            lower = min(lower_lower, lower_upper, upper_lower, upper_upper)
-            upper = max(lower_lower, lower_upper, upper_lower, upper_upper)
+            has_false = any(bound == sympy.false for bound in bounds)
+            has_true = any(bound == sympy.true for bound in bounds)
+
+            if has_false and has_true:
+                lower, upper = sympy.false, sympy.true
+            elif has_true:
+                lower = upper = sympy.true
+            elif has_false:
+                lower = upper = sympy.false
+            else:
+                raise AssertionError(f"Non-boolean xor result: {bounds}")
 
             return ValueRanges(lower, upper)
         if a.is_bool:

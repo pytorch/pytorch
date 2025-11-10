@@ -332,6 +332,10 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     def bitwise_or(a, b):
         return a | b
 
+    @staticmethod
+    def bitwise_xor(a, b):
+        return a ^ b
+
 
 # Like PythonReferenceAnalysis, but some export-unfriendly choices of
 # operators to make things faster
@@ -390,6 +394,10 @@ class TensorReferenceAnalysis:
     @staticmethod
     def bitwise_or(a, b):
         return torch.ops.aten.bitwise_or(a, b)
+
+    @staticmethod
+    def bitwise_xor(a, b):
+        return torch.ops.aten.bitwise_xor(a, b)
 
     @staticmethod
     def eq(a, b):
