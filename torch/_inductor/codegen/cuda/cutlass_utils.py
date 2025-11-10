@@ -95,10 +95,7 @@ def try_import_cutlass() -> bool:
         return True
 
     try:
-        try:
-            cutlass_version = Version(importlib.metadata.version("cutlass_cppgen"))
-        except (ModuleNotFoundError, importlib.metadata.PackageNotFoundError):
-            cutlass_version = Version(importlib.metadata.version("cutlass"))
+        cutlass_version = Version(importlib.metadata.version("nvidia-cutlass"))
         if cutlass_version < Version("3.7"):
             log.warning("CUTLASS version < 3.7 is not recommended.")
 
