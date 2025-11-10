@@ -84,11 +84,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
     steps:
-      - name: Debug git config
-        shell: bash
-        run: |
-          sudo git config --system --get core.alternateObjectDirectories | tr ':' '\n' | nl
-
       - name: Detect container mode
         id: detect_container
         shell: bash
