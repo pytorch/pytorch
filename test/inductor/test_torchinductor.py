@@ -2125,44 +2125,89 @@ class CommonTemplate:
             size_hints["x"] = next_power_of_2(size_hints["x"])
             triton_config_reduction(size_hints, 1, 2048, 1, 8)
 
-    def test_reduction_hint_inner_with_large_outer_dims(self):
+    def test_reduction_hint_inner_with_large_outer_dims_checked(self):
         """
-        Test that reductions correctly use ReductionHint.INNER when reducing
-        over the innermost dimension with large outer dimensions.
+        Test that inner reductions with large outer dimensions
+        get ReductionHint.INNER instead of ReductionHint.DEFAULT.
 
+        This tests the fix for cases where tiling_scores show
+        high r_coalesce_ratio (r0_ >> x), indicating an inner reduction.
         """
 
-        def check_inner_reduction(x, dim=-1):
-            @torch.compile
-            def f(tensor):
-                return tensor.sum(dim=dim, keepdim=True)
+        def f(x, y):
+            # Inner reduction: sum along the innermost dimension
+            out = x.sum(dim=-1, keepdim=True) + (x + y[..., None])
+            return out
 
-            result = f(x)
-            expected = x.sum(dim=dim, keepdim=True)
-            self.assertEqual(result.shape, expected.shape)
-            torch.testing.assert_close(result, expected, rtol=1e-4, atol=1e-4)
-            return result
+        M = 2048
+        N = 128
+        K = 1024
 
-        # large outer dims (2048*128), inner reduction (1024)
-        x1 = torch.randn(2048, 128, 1024, device=self.device)
-        check_inner_reduction(x1, dim=-1)
+        # x has stride (131072, 1024, 1), last dim is innermost
+        x = torch.randn(M, N, K, device="cuda")
+        # y transposed to get stride (1, 2048)
+        y = torch.randn(N, M, device="cuda").t()
 
-        # Variant with different sizes
-        x2 = torch.randn(512, 256, 2048, device=self.device)
-        check_inner_reduction(x2, dim=-1)
+        # Get expected result before compilation
+        expected = f(x, y)
 
-        # Test with fused ops
-        @torch.compile
-        def f_fused(x, y):
-            return x.sum(dim=-1, keepdim=True) + (x + y.unsqueeze(-1))
+        # Reset and compile
+        torch._dynamo.reset()
+        opt_f = torch.compile(f)
 
-        x3 = torch.randn(2048, 128, 1024, device=self.device)
-        y3 = torch.randn(2048, 128, device=self.device)
-        result = f_fused(x3, y3)
-        expected = x3.sum(dim=-1, keepdim=True) + (x3 + y3.unsqueeze(-1))
+        # Run compiled version
+        result = opt_f(x, y)
 
-        self.assertEqual(result.shape, (2048, 128, 1024))
+        # Verify correctness with appropriate tolerance for floating point
+        # Sum reductions can have slightly different accumulation order
         torch.testing.assert_close(result, expected, rtol=1e-4, atol=1e-4)
+
+        # Check generated code contains INNER hint
+        torch._dynamo.reset()
+        code = run_and_get_triton_code(opt_f, x, y)
+        self.assertIn("ReductionHint.INNER", code)
+        self.assertNotIn("reduction_hint=ReductionHint.DEFAULT", code)
+
+        # Test case 2: Smaller batch size, larger reduction dimension
+        def g(x):
+            # Mean reduction on innermost dimension
+            return x.mean(dim=-1, keepdim=True) * x
+
+        B = 512
+        H = 64
+        D = 2048
+        x2 = torch.randn(B, H, D, device="cuda")
+        expected2 = g(x2)
+
+        torch._dynamo.reset()
+        opt_g = torch.compile(g)
+        result2 = opt_g(x2)
+
+        torch.testing.assert_close(result2, expected2, rtol=1e-4, atol=1e-4)
+
+        torch._dynamo.reset()
+        code2 = run_and_get_triton_code(opt_g, x2)
+        self.assertIn("ReductionHint.INNER", code2)
+
+        # Test case 3: Single outer dimension with large inner reduction
+        def h(x):
+            # Sum with multiple operations
+            return x.sum(dim=1, keepdim=True) + x * 2.0
+
+        N = 16384
+        M = 4096
+        x3 = torch.randn(N, M, device="cuda")
+        expected3 = h(x3)
+
+        torch._dynamo.reset()
+        opt_h = torch.compile(h)
+        result3 = opt_h(x3)
+
+        torch.testing.assert_close(result3, expected3, rtol=1e-4, atol=1e-4)
+
+        torch._dynamo.reset()
+        code3 = run_and_get_triton_code(opt_h, x3)
+        self.assertIn("ReductionHint.INNER", code3)
 
     def test_prod(self):
         def fn(a):
