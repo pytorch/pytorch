@@ -482,8 +482,8 @@ class TestExecutionTrace(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
     @unittest.skipIf(
-        (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
-        "need triton and device(CUDA or XPU) availability to run",
+        (not has_triton()) or (not TEST_CUDA),
+        "need triton and device CUDA availability to run",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
     def test_triton_fx_graph_with_et(self, device):
