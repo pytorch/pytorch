@@ -15,7 +15,7 @@ import inspect
 import pickle
 import warnings
 from collections.abc import Callable
-from typing import Any, Sequence, TypeVar, Union
+from typing import Any, Mapping, Sequence, TypeVar, Union
 from typing_extensions import deprecated, Self
 
 import torch
@@ -374,7 +374,7 @@ def script_method(fn):
 
 
 class ConstMap:
-    def __init__(self, const_mapping):
+    def __init__(self, const_mapping: Mapping[str, Any]) -> None:
         self.const_mapping = const_mapping
 
     def __getattr__(self, attr: str) -> Any:
@@ -1259,7 +1259,7 @@ def script(
     obj: Any,
     optimize: None = None,
     _frames_up: int = 0,
-    _rcb: Callable[[Any], Any] | None = None,
+    _rcb: Callable[[str], Any] | None = None,
     example_inputs: Union[list[tuple], dict[Callable, list[tuple]], None] = None,
 ) -> Any:
     r"""Script the function.
