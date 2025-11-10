@@ -4251,7 +4251,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @skipIfRocm
-    @torch._dynamo.config.patch("enrich_profiler_metadata", True)
+    @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_profiler_stack_trace_augmentation(self):
         """
         Test that map_recorded_events_to_aten_ops_with_stack_trace correctly
@@ -4307,7 +4307,7 @@ event=cudaLaunchKernel node=addmm_1 stack_trace=x = self.linear2(x)"""
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @skipIfRocm
-    @torch._dynamo.config.patch("enrich_profiler_metadata", True)
+    @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_profiler_multiple_modules(self):
         """
         Test that multiple compiled modules under the same profiler session
@@ -4351,7 +4351,7 @@ event=cudaLaunchKernel node=sub stack_trace=return x - 1"""
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @skipIfRocm
-    @torch._dynamo.config.patch("enrich_profiler_metadata", True)
+    @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_profiler_nested_graph_modules(self):
         """
         Test that nested graph modules (e.g., graph modules calling subgraphs)
