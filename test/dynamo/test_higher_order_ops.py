@@ -762,15 +762,15 @@ class GraphModule(torch.nn.Module):
         def forward(self, s77: "Sym(s77)", l_x_: "f32[s77]", u0: "Sym(u0)", c: "i64[u0, 1]"):
             wrap_body_0 = self.wrap_body_0
             wrap = torch.ops.higher_order.wrap(wrap_body_0, s77, l_x_, u0, c);  wrap_body_0 = s77 = l_x_ = u0 = c = None
-            child: "f32[s77]" = wrap[0]
-            child_1: "f32[u0, 1]" = wrap[1];  wrap = None
-            return (child, child_1)
+            getitem: "f32[s77]" = wrap[0]
+            getitem_1: "f32[u0, 1]" = wrap[1];  wrap = None
+            return (getitem, getitem_1)
 
         class wrap_body_0(torch.nn.Module):
             def forward(self, s77: "Sym(s77)", l_x_: "f32[s77]", u0: "Sym(u0)", c: "i64[u0, 1]"):
-                child: "f32[s77]" = l_x_.sin();  l_x_ = None
-                child_1: "f32[u0, 1]" = c.sin();  c = None
-                return (child, child_1)
+                sin: "f32[s77]" = l_x_.sin();  l_x_ = None
+                sin_1: "f32[u0, 1]" = c.sin();  c = None
+                return (sin, sin_1)
 """,
             )
         else:
