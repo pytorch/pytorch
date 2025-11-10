@@ -287,6 +287,7 @@ class PallasKernel(SIMDKernel):
         code = IndentedBuffer()
         code.splice(
             """
+            import functools
             import torch
             import jax
             import jax.numpy as jnp
@@ -301,6 +302,9 @@ class PallasKernel(SIMDKernel):
         kernel_params = [a.name for a in arg_defs]
 
         kernel_name = name or "<KERNEL_NAME>"
+        interpret_literal = (
+            "True" if V.graph.get_current_device_or_throw().type == "cpu" else "False"
+        )
         code.writeline(f"def {kernel_name}_kernel({', '.join(kernel_params)}):")
         with code.indent():
             # Emit compute (CSE) and store lines; they reference *_ptr[...] directly
@@ -309,16 +313,22 @@ class PallasKernel(SIMDKernel):
             for line in self.stores._lines:
                 code.writeline(str(line))
 
+        jit_wrapper_name = f"{kernel_name}_jit_wrapper"
+        code.writeline("@functools.partial(jax.jit, static_argnums=(0, 1))")
+        code.writeline(f"def {jit_wrapper_name}(out_shape, out_dtype, *kernel_refs):")
+        with code.indent():
+            code.writeline("out_spec = jax.ShapeDtypeStruct(out_shape, out_dtype)")
+            code.writeline("return pl.pallas_call(")
+            code.writeline(f"    {kernel_name}_kernel,")
+            code.writeline("    out_shape=out_spec,")
+            code.writeline(f"    interpret={interpret_literal},")
+            code.writeline("    grid=(1,),")
+            code.writeline(")(*kernel_refs)")
+
         # Host entry: convert torch tensors <-> jax, call pallas_call and copy back
         main_name = f"{kernel_name}_main"
         code.writeline(f"def {main_name}({', '.join(kernel_params)}, stream=None):")
         with code.indent():
-            # Determine interpret statically based on codegen device
-            interpret_literal = (
-                "True"
-                if V.graph.get_current_device_or_throw().type == "cpu"
-                else "False"
-            )
             # Identify inputs (in_ptr*) and output (out_ptr*)
             input_params = [
                 p for p in kernel_params if p.startswith(("in_ptr", "in_out_ptr"))
@@ -337,9 +347,9 @@ class PallasKernel(SIMDKernel):
             for inp in input_params:
                 code.writeline(f"{inp}_jax = jax.dlpack.from_dlpack({inp})")
 
-            # Get output spec from PyTorch tensor
-            code.writeline("# Prepare output spec from PyTorch tensor")
-            code.writeline("# Map PyTorch dtype to JAX dtype string")
+            # Get output metadata from PyTorch tensor
+            code.writeline("# Prepare output metadata from PyTorch tensor")
+            code.writeline("# Map PyTorch dtype to JAX dtype")
             code.writeline("_torch_dtype_to_jax = {")
             code.writeline(
                 "    torch.float32: jnp.float32, torch.float64: jnp.float64, torch.float16: jnp.float16,"
@@ -349,21 +359,14 @@ class PallasKernel(SIMDKernel):
             )
             code.writeline("    torch.uint8: jnp.uint8, torch.bool: jnp.bool_,")
             code.writeline("}")
-            code.writeline(
-                f"out_spec = jax.ShapeDtypeStruct({output_param}.shape, _torch_dtype_to_jax[{output_param}.dtype])"
-            )
+            code.writeline(f"out_shape = tuple({output_param}.shape)")
+            code.writeline(f"out_dtype = _torch_dtype_to_jax[{output_param}.dtype]")
 
-            # Call pallas
-            # Pass interpret=True on CPU, False otherwise (single call, no duplication)
-            code.writeline("compiled = pl.pallas_call(")
-            code.writeline(f"    lambda *refs: {kernel_name}_kernel(*refs),")
-            code.writeline("    out_shape=out_spec,")
-            code.writeline(f"    interpret={interpret_literal},")
-            code.writeline("    grid=(1,),")
-            code.writeline(")")
-
-            jax_input_args = ", ".join([f"{inp}_jax" for inp in input_params])
-            code.writeline(f"res = compiled({jax_input_args})")
+            call_args = ["out_shape", "out_dtype"] + [
+                f"{inp}_jax" for inp in input_params
+            ]
+            call_arg_str = ", ".join(call_args)
+            code.writeline(f"res = {jit_wrapper_name}({call_arg_str})")
 
             # Copy result back
             code.writeline("# Copy result back into the provided torch output tensor")
