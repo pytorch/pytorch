@@ -6,7 +6,6 @@ from typing import Any
 
 import torch
 import torch.distributed as dist
-from torch.autograd import Function
 from torch.distributed._local_tensor import (
     local_tensor_mode,
     LocalTensor,
@@ -958,7 +957,6 @@ class TestExplicitRedistribute(LocalTensorTestBase):
                 # and re-enable
                 with self.assertRaisesRegex(RuntimeError, "Implicit redistribution"):
                     loss.backward(retain_graph=True)
-
 
 
 if __name__ == "__main__":

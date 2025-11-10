@@ -33,7 +33,6 @@ class ExplicitRedistributionContext:
     """
 
     _local = threading.local()
-    _local._stack = []
 
     def __init__(self, enable: bool = True, strict: bool = False):
         self._enable = enable
@@ -41,20 +40,20 @@ class ExplicitRedistributionContext:
 
     @classmethod
     def is_redistribute_allowed(cls, src_spec: DTensorSpec, dst_spec: DTensorSpec):
-        if len(cls._local._stack):
-            instance = cls._local._stack[-1]
+        if instance := getattr(cls._local, "_active", None):
             if instance._enable:
                 if instance._strict:
                     return False
-                return redistribute_cost(src_spec, dst_spec) == 0
+                return redistribute_cost(src_spec, dst_spec) <= 0
         return True
 
     def __enter__(self):
-        ExplicitRedistributionContext._local._stack.append(self)
+        self._prev = getattr(ExplicitRedistributionContext._local, "_active", None)
+        ExplicitRedistributionContext._local._active = self
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        ExplicitRedistributionContext._local._stack.pop()
+        ExplicitRedistributionContext._local._active = self._prev
 
 
 def _explicit_order_placements(

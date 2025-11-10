@@ -392,7 +392,7 @@ class OpDispatcher:
                         reshard_arg_spec,
                     ):
                         raise RuntimeError(
-                            f"Implicit redistribution occurred while ExplicitRedistributionContext was active for {op_info.schema}"
+                            f"Implicit redistribution occurred for {op_info.schema} while ExplicitRedistributionContext was active"
                         )
                     with redistribute_context:
                         resharded_local_tensor = redistribute_local_tensor(
