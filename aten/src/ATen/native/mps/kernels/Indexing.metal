@@ -1,4 +1,5 @@
 #include <c10/metal/atomic.h>
+#include <c10/metal/error.h>
 #include <c10/metal/indexing.h>
 #include <metal_stdlib>
 
@@ -60,7 +61,7 @@ kernel void index_select(
     constant int64_t* index_sizes,
     constant int64_t* index_strides,
     constant uint4& ndim_nindices_numel,
-    device int* error_buffer,
+    device ErrorMessages* error_buffer,
     uint thread_index [[thread_position_in_grid]]) {
   const auto ndim = ndim_nindices_numel.x;
   const auto num_indices = ndim_nindices_numel.y;
@@ -75,7 +76,8 @@ kernel void index_select(
   auto input_offs = index_apply_indices<OffsetT>(
       offs.yz, indices, index_sizes, index_strides, num_indices, error);
   if (error) {
-    error_buffer[0] = 1;
+    report_error(
+        error_buffer, __FILE__, __LINE__, __func__, "index out of range");
     output[offs.x / sizeof(T)] = 0;
     return;
   }
@@ -94,7 +96,7 @@ inline void index_put_impl(
     constant int64_t* index_sizes,
     constant int64_t* index_strides,
     constant uint4& ndim_nindices_numel,
-    device int* error_buffer,
+    device ErrorMessages* error_buffer,
     uint thread_index) {
   bool error = false;
   const auto ndim = ndim_nindices_numel.x;
@@ -109,7 +111,8 @@ inline void index_put_impl(
   auto output_offs = index_apply_indices<OffsetT>(
       offs.xz, indices, index_sizes, index_strides, num_indices, error);
   if (error) {
-    error_buffer[0] = 1;
+    report_error(
+        error_buffer, __FILE__, __LINE__, __func__, "index out of range");
     return;
   }
   output[output_offs / sizeof(T)] = input[offs.y / sizeof(T)];
@@ -127,7 +130,7 @@ kernel void index_put(
     constant int64_t* index_sizes,
     constant int64_t* index_strides,
     constant uint4& ndim_nindices_numel,
-    device int* error_buffer,
+    device ErrorMessages* error_buffer,
     uint thread_index [[thread_position_in_grid]]) {
   index_put_impl(
       output,
@@ -156,7 +159,7 @@ kernel void index_put_serial(
     constant int64_t* index_sizes,
     constant int64_t* index_strides,
     constant uint4& ndim_nindices_numel,
-    device int* error_buffer,
+    device ErrorMessages* error_buffer,
     uint thread_index [[thread_position_in_grid]]) {
   (void)thread_index; // Suppress unused vairable varning
   for (uint idx = 0; idx < ndim_nindices_numel.z; ++idx) {
@@ -188,7 +191,7 @@ kernel void index_put_accumulate(
     constant int64_t* index_sizes,
     constant int64_t* index_strides,
     constant uint4& ndim_nindices_numel,
-    device int* error_buffer,
+    device ErrorMessages* error_buffer,
     uint thread_index [[thread_position_in_grid]]) {
   const auto ndim = ndim_nindices_numel.x;
   const auto num_indices = ndim_nindices_numel.y;
@@ -203,7 +206,8 @@ kernel void index_put_accumulate(
   auto output_offs = index_apply_indices<OffsetT>(
       offs.xz, indices, index_sizes, index_strides, num_indices, error);
   if (error) {
-    error_buffer[0] = 1;
+    report_error(
+        error_buffer, __FILE__, __LINE__, __func__, "index out of range");
     return;
   }
   AtomicType<T>::atomic_add(
@@ -225,7 +229,7 @@ kernel void index_put_accumulate(
           constant int64_t* index_sizes,                            \
           constant int64_t* index_strides,                          \
           constant uint4& ndim_nindices_numel,                      \
-          device int* error_buffer,                                 \
+          device ErrorMessages* error_buffer,                       \
           uint thread_index [[thread_position_in_grid]])
 
 #define REGISTER_INDEX_OP_ALL_DTYPES(OP_NAME) \

@@ -263,7 +263,10 @@ def _is_quantized_op_pt2e(node: torch.fx.Node):
         # The node has not been annotated, directly return False
         return False
     quantization_annotation = node.meta.get(QUANT_ANNOTATION_KEY, None)
-    assert isinstance(quantization_annotation, _X86InductorQuantizationAnnotation)
+    if not isinstance(quantization_annotation, _X86InductorQuantizationAnnotation):
+        raise AssertionError(
+            "quantization_annotation must be an _X86InductorQuantizationAnnotation"
+        )
     return quantization_annotation._is_output_of_quantized_pattern
 
 
@@ -429,20 +432,22 @@ class X86InductorQuantizer(Quantizer):
                 if qat_state is None:
                     qat_state = qconfig.is_qat
                 else:
-                    assert qat_state == qconfig.is_qat, (
-                        f"All non-None quantization configs should have the same `is_qat`,"
-                        f"but got {qat_state} and {qconfig.is_qat}."
-                    )
+                    if qat_state != qconfig.is_qat:
+                        raise AssertionError(
+                            f"All non-None quantization configs should have the same `is_qat`,"
+                            f"but got {qat_state} and {qconfig.is_qat}."
+                        )
                 # Query the `is_dynamic` state
                 input_activation_spec = qconfig.input_activation
                 if input_activation_spec is not None:
                     if dynamic_state is None:
                         dynamic_state = input_activation_spec.is_dynamic
                     else:
-                        assert dynamic_state == input_activation_spec.is_dynamic, (
-                            f"All non-None `input_activation_spec` should have the same `is_dynamic`,"
-                            f"but got {dynamic_state} and {input_activation_spec.is_dynamic}."
-                        )
+                        if dynamic_state != input_activation_spec.is_dynamic:
+                            raise AssertionError(
+                                f"All non-None `input_activation_spec` should have the same `is_dynamic`,"
+                                f"but got {dynamic_state} and {input_activation_spec.is_dynamic}."
+                            )
         return _CurrentQuantizationMode(
             qat_state=qat_state, dynamic_state=dynamic_state
         )
@@ -576,10 +581,12 @@ class X86InductorQuantizer(Quantizer):
             return
         input_qspec_map = {}
         input_node = conv_node.args[0]
-        assert isinstance(input_node, Node)
+        if not isinstance(input_node, Node):
+            raise AssertionError("input_node must be a FX Node")
         input_qspec_map[input_node] = get_input_act_qspec(quantization_config)
         weight_node = conv_node.args[1]
-        assert isinstance(weight_node, Node)
+        if not isinstance(weight_node, Node):
+            raise AssertionError("weight_node must be a FX Node")
         input_qspec_map[weight_node] = get_weight_qspec(quantization_config)
         bias_node = None if len(conv_node.args) == 2 else conv_node.args[2]
         if isinstance(bias_node, Node):
@@ -607,18 +614,23 @@ class X86InductorQuantizer(Quantizer):
             _annotate_nodes_not_quantize(linear_node)
             return
         input_qspec_map = {}
-        assert linear_node.target == torch.ops.aten.linear.default
+        if linear_node.target is not torch.ops.aten.linear.default:
+            raise AssertionError(
+                "linear_node.target must be torch.ops.aten.linear.default"
+            )
         has_bias = len(linear_node.args) == 3
         input_index = 0
         weight_index = 1
         bias_index = 2
 
         input_node = linear_node.args[input_index]
-        assert isinstance(input_node, Node)
+        if not isinstance(input_node, Node):
+            raise AssertionError("input_node must be a FX Node")
         input_qspec_map[input_node] = get_input_act_qspec(quantization_config)
 
         weight_node = linear_node.args[weight_index]
-        assert isinstance(weight_node, Node)
+        if not isinstance(weight_node, Node):
+            raise AssertionError("weight_node must be a FX Node")
         input_qspec_map[weight_node] = get_weight_qspec(quantization_config)
 
         bias_node = linear_node.args[bias_index] if has_bias else None
@@ -646,7 +658,8 @@ class X86InductorQuantizer(Quantizer):
             if len(partition.output_nodes) > 1:
                 raise ValueError("Input partition has more than one output node")
             output_node = partition.output_nodes[0]
-            assert isinstance(output_node, Node)
+            if not isinstance(output_node, Node):
+                raise AssertionError("output_node must be a FX Node")
             output_node_list.append(output_node)
         if len(output_node_list) != len(partition_list):
             raise ValueError(
@@ -675,7 +688,8 @@ class X86InductorQuantizer(Quantizer):
             conv_gemm_node_idx = 1
             extra_input_node_idx = 0
         extra_input_node = binary_node.args[extra_input_node_idx]  # type: ignore[index]
-        assert isinstance(extra_input_node, Node)
+        if not isinstance(extra_input_node, Node):
+            raise AssertionError("extra_input_node must be a FX Node")
         return conv_gemm_node_idx, extra_input_node_idx
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
@@ -1132,7 +1146,8 @@ class X86InductorQuantizer(Quantizer):
             if conv_node != binary_node.args[conv_node_idx]:
                 raise ValueError(f"{conv_node} doesn't match input of binary node")
             extra_input_node = binary_node.args[extra_input_node_idx]
-            assert isinstance(conv_node, Node)
+            if not isinstance(conv_node, Node):
+                raise AssertionError("conv_node must be a FX Node")
             if (
                 conv_node.op != "call_function"
                 or conv_node.target != torch.ops.aten.conv2d.default
@@ -1246,7 +1261,8 @@ class X86InductorQuantizer(Quantizer):
             return
 
         input_node = maxpool_node.args[0]
-        assert isinstance(input_node, Node)
+        if not isinstance(input_node, Node):
+            raise AssertionError("input_node must be a FX Node")
         input_qspec_map = {}
         input_qspec_map[input_node] = get_input_act_qspec(quantization_config)
         maxpool_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
@@ -1263,11 +1279,14 @@ class X86InductorQuantizer(Quantizer):
             return
         cat_node = node
         input_nodes = cat_node.args[0]
-        assert isinstance(input_nodes, Sequence)
+        if not isinstance(input_nodes, Sequence):
+            raise AssertionError("input_nodes must be a Sequence of FX Nodes")
         first_input_node = input_nodes[0]
         input_qspec_map = {}
-        assert isinstance(first_input_node, Node)
-        assert isinstance(cat_node, Node)
+        if not isinstance(first_input_node, Node):
+            raise AssertionError("first_input_node must be a FX Node")
+        if not isinstance(cat_node, Node):
+            raise AssertionError("cat_node must be a FX Node")
         input_qspec_map[first_input_node] = get_input_act_qspec(quantization_config)
         share_qparams_with_input_act0_qspec = SharedQuantizationSpec(
             (first_input_node, cat_node)
@@ -1276,7 +1295,8 @@ class X86InductorQuantizer(Quantizer):
         for input_node in input_nodes[1:]:
             if input_node not in input_qspec_map:
                 # There has the case of cat same nodes: torch.cat([input0, input0], 1)
-                assert isinstance(input_node, Node)
+                if not isinstance(input_node, Node):
+                    raise AssertionError("input_node must be a FX Node")
                 input_qspec_map[input_node] = share_qparams_with_input_act0_qspec
 
         cat_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
@@ -1341,9 +1361,7 @@ class X86InductorQuantizer(Quantizer):
             elif (
                 node.target is torch.ops.aten.flatten.using_ints
                 and len(node.users) > 0
-                and not any(
-                    user.target in quantizable_ops for user in node.users.keys()
-                )
+                and not any(user.target in quantizable_ops for user in node.users)
             ):
                 # Recipe of flatten: check if any users of flatten node are quantizable ops or not
                 return
@@ -1396,7 +1414,7 @@ class X86InductorQuantizer(Quantizer):
         """  # noqa: B950
         edge_or_node: tuple[Node, Node]
         if (node.target in int8_in_int8_out_ops) and (_is_any_annotated([node])):
-            if node.target == torch.ops.aten.max_pool2d.default:
+            if node.target is torch.ops.aten.max_pool2d.default:
                 maxpool_node = node
                 if not _is_all_annotated(
                     [
@@ -1415,8 +1433,10 @@ class X86InductorQuantizer(Quantizer):
                 ):
                     # Annotate the output_qspec of getitem_node
                     input_act = maxpool_node.args[0]
-                    assert isinstance(input_act, Node)
-                    assert isinstance(maxpool_node, Node)
+                    if not isinstance(input_act, Node):
+                        raise AssertionError("input_act must be a FX Node")
+                    if not isinstance(maxpool_node, Node):
+                        raise AssertionError("maxpool_node must be a FX Node")
                     edge_or_node = (input_act, maxpool_node)
                     maxpool_node_quantization_annotation.output_qspec = (
                         SharedQuantizationSpec(edge_or_node)
@@ -1544,7 +1564,8 @@ class X86InductorQuantizer(Quantizer):
                     raise ValueError(
                         f"{linear_node} doesn't match input of binary node"
                     )
-                assert isinstance(linear_node, Node)
+                if not isinstance(linear_node, Node):
+                    raise AssertionError("linear_node must be a FX Node")
                 if (
                     linear_node.op != "call_function"
                     or linear_node.target != torch.ops.aten.linear.default

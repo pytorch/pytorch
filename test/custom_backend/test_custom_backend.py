@@ -11,6 +11,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 class TestCustomBackend(TestCase):
     def setUp(self):
+        super().setUp()
         # Load the library containing the custom backend.
         self.library_path = get_custom_backend_library_path()
         torch.ops.load_library(self.library_path)

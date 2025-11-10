@@ -892,10 +892,16 @@ fn(torch.randn(5))
                 os.remove(
                     file_path
                 )  # Delete temp file manually, due to setup NamedTemporaryFile as delete=False.
-                self.assertEqual(  # process wrap difference: /r/n on Windows, /n on posix.
-                    empty_line_normalizer(lines),
-                    empty_line_normalizer(stderr.decode("utf-8")),
-                )
+                orig_maxDiff = unittest.TestCase.maxDiff
+                unittest.TestCase.maxDiff = None
+                try:
+                    self.assertEqual(  # process wrap difference: /r/n on Windows, /n on posix.
+                        empty_line_normalizer(lines),
+                        empty_line_normalizer(stderr.decode("utf-8")),
+                    )
+                except Exception:
+                    unittest.TestCase.maxDiff = orig_maxDiff
+                    raise
 
     @make_settings_test("torch._dynamo.eval_frame")
     def test_log_traced_frames(self, records):
@@ -982,6 +988,7 @@ exclusions = {
     "hierarchical_compile",
     "compute_dependencies",
     "annotation",
+    "node_runtime_estimation",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:
