@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import base64
+import contextlib
 import io
 import json
 import operator
@@ -751,14 +752,11 @@ if __name__ == "__main__":
 
     def _read(name):
         if name == "-":
-            f = sys.stdin.buffer
-            need_close = False
+            f_context = contextlib.closing(sys.stdin.buffer)
         else:
-            f = open(name, "rb")
-            need_close = True
-        data = pickle.load(f)
-        if need_close:
-            f.close()
+            f_context = open(name, "rb")
+        with f_context as f:
+            data = pickle.load(f)
         if isinstance(data, list):  # segments only...
             data = {"segments": data, "traces": []}
         return data
