@@ -1,6 +1,6 @@
 import os
+from collections.abc import Callable
 from functools import cache, partial
-from typing import Callable
 
 import torch
 from torch._environment import is_fbcode

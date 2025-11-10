@@ -2158,6 +2158,19 @@ class GuardBuilder(GuardBuilderBase):
             metadata_checker, get_verbose_code_parts(global_name, guard)
         )
 
+    def DTENSOR_SPEC_MATCH(self, guard: Guard) -> None:
+        # Copied from DTensor __metadata_guard__
+        # TODO - Consider moving this to C++ if stable
+        value = deepcopy(self.get(guard.name))
+
+        def guard_fn(x: Any) -> bool:
+            return x._check_equals(value, skip_shapes=True)
+
+        code = f"__dtensor_spec_{id(guard_fn)}"
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard)
+        )
+
     def EQUALS_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
@@ -2284,7 +2297,7 @@ class GuardBuilder(GuardBuilderBase):
                 # If guard_nn_modules is true, we will guard on the right set of guards
                 self._guard_on_attribute(guard, "training", GuardBuilder.CONSTANT_MATCH)  # type: ignore[arg-type]
         else:
-            exc.unimplemented_v2(
+            exc.unimplemented(
                 gb_type="Attempted to guard on uninitialized nn.Module",
                 context="",
                 explanation="Attempted to setup an NN_MODULE guard on uninitialized "
