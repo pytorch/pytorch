@@ -1186,8 +1186,6 @@ def all_gather_inplace(
         raise AssertionError(
             "Can't remap async version of inplace op to functional collective"
         )
-    if tensor.dim() != 0 and not all(t.size(0) == tensor.size(0) for t in tensor_list):
-        raise AssertionError("Remapping variable size all_gather is not yet supported")
 
     group = group or dist.group.WORLD
     if group is None:
@@ -1199,10 +1197,13 @@ def all_gather_inplace(
     # tensor.shape(0) to be unnecessarily baked in when it's a SymInt.
     output_splits = []
     offset = 0
+    torch._check(output.size(0) == sum(t.size(0) for t in tensor_list))
     for t in tensor_list:
         is_scalar = t.dim() == 0
         t_offset = 1 if is_scalar else t.size(0)
         # pyrefly: ignore [unsupported-operation]
+        torch._check(t.size(0) < output.size(0))
+        torch._check(offset + t_offset <= output.size(0))
         out = output[offset] if is_scalar else output[offset : offset + t_offset]
         output_splits.append(out)
         # pyrefly: ignore [unsupported-operation]
