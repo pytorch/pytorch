@@ -549,7 +549,10 @@ def foreach_reduce(
         else:
             # For single GPU, just copy the input to output (no actual reduce-scatter needed), and
             # accounting for a possible gradient_divide_factor.
-            reduce_output.copy_(reduce_scatter_input / gradient_divide_factor)
+            if gradient_divide_factor is not None:
+                reduce_output.copy_(reduce_scatter_input / gradient_divide_factor)
+            else:
+                reduce_output.copy_(reduce_scatter_input)
         reduce_scatter_event = reduce_scatter_stream.record_event()
         post_reduce_stream = reduce_scatter_stream
         if all_reduce_group is not None:  # HSDP or DDP/replicate
