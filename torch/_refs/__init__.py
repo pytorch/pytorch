@@ -2773,7 +2773,8 @@ def atleast_3d(
     res = tuple(a if a.ndim >= 3 else unsqueeze_atleast_2d(a) for a in args_)
     return res if len(res) > 1 else res[0]
 
-
+# Functionality: creates a new view of an existing tensor (a)
+# with specified size, stride, and storage_offset, without copying any data.
 def as_strided(
     a: TensorLikeType,
     size: ShapeType,
