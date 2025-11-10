@@ -5492,7 +5492,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         # Test with replay disabled
         lst_without_replay = []
         with torch._dynamo.config.patch(
-            replay_side_effects=False, side_effect_replay_policy=2
+            replay_side_effects=False, side_effect_replay_policy="warn"
         ):
             opt_fn_without_replay = torch.compile(fn, backend="eager")
             result2 = opt_fn_without_replay(x, lst_without_replay)
@@ -5504,7 +5504,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         torch._dynamo.reset()
         lst_without_replay = []
         with torch._dynamo.config.patch(
-            replay_side_effects=False, side_effect_replay_policy=3
+            replay_side_effects=False, side_effect_replay_policy="error"
         ):
             opt_fn_without_replay = torch.compile(fn, backend="eager")
             with self.assertRaisesRegex(
@@ -5524,7 +5524,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
 
         # This mutation should still exist
         with torch._dynamo.config.patch(
-            replay_side_effects=False, side_effect_replay_policy=2
+            replay_side_effects=False, side_effect_replay_policy="warn"
         ):
             inp = torch.randn(4, 4)
             res = torch.compile(fn, fullgraph=True)(inp)
@@ -5539,7 +5539,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             return lst, d
 
         with torch._dynamo.config.patch(
-            replay_side_effects=False, side_effect_replay_policy=2
+            replay_side_effects=False, side_effect_replay_policy="warn"
         ):
             inp = torch.randn(4, 4)
             lst, d = torch.compile(fn, fullgraph=True)(inp)
@@ -5561,7 +5561,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             return lst
 
         with torch._dynamo.config.patch(
-            replay_side_effects=False, side_effect_replay_policy=2
+            replay_side_effects=False, side_effect_replay_policy="warn"
         ):
             inp = torch.randn(4, 4)
             # Test true branch
@@ -5585,7 +5585,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             return lst
 
         with torch._dynamo.config.patch(
-            replay_side_effects=False, side_effect_replay_policy=2
+            replay_side_effects=False, side_effect_replay_policy="warn"
         ):
             inp = torch.randn(4, 4)
             lst = torch.compile(fn, fullgraph=True)(inp)
@@ -5603,7 +5603,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             return local_lst, external_lst
 
         with torch._dynamo.config.patch(
-            replay_side_effects=False, side_effect_replay_policy=2
+            replay_side_effects=False, side_effect_replay_policy="warn"
         ):
             inp = torch.randn(4, 4)
             external_lst = []
@@ -5631,7 +5631,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             return lst
 
         with torch._dynamo.config.patch(
-            replay_side_effects=False, side_effect_replay_policy=2
+            replay_side_effects=False, side_effect_replay_policy="warn"
         ):
             inp = torch.randn(4, 4)
             lst = torch.compile(fn, fullgraph=True)(inp)
@@ -5648,7 +5648,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             return lst
 
         with torch._dynamo.config.patch(
-            replay_side_effects=False, side_effect_replay_policy=2
+            replay_side_effects=False, side_effect_replay_policy="warn"
         ):
             inp = torch.randn(4, 4)
             lst = torch.compile(fn, fullgraph=True)(inp)
@@ -5679,7 +5679,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
                 return x.cos() + res.sum() + self.tensor
 
         with torch._dynamo.config.patch(
-            replay_side_effects=False, side_effect_replay_policy=3
+            replay_side_effects=False, side_effect_replay_policy="error"
         ):
             foo = Foo()
             with self.assertRaisesRegex(
@@ -5691,7 +5691,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
                 torch.compile(foo, fullgraph=True)(torch.randn(4, 4))
 
         with torch._dynamo.config.patch(
-            replay_side_effects=False, side_effect_replay_policy=1
+            replay_side_effects=False, side_effect_replay_policy="silent"
         ):
             foo_v2_compile = Foo()
             foo_v2_eager = Foo()
@@ -5717,7 +5717,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         # has mutation. In export, we never retrace the actual
         # gm so we won't see any mutation applied to inputs
         with torch._dynamo.config.patch(
-            replay_side_effects=False, side_effect_replay_policy=3
+            replay_side_effects=False, side_effect_replay_policy="error"
         ):
             foo = Foo()
             torch.compile(foo, fullgraph=True)(torch.randn(4, 4))

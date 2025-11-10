@@ -51,10 +51,10 @@ dead_code_elimination = True
 replay_side_effects = True
 
 # Configure side effect warning level
-# If 1, we silently allow side effects
-# If 2, we warn side effects
-# If 3, we error on side effects
-side_effect_replay_policy = 1
+# If `silent`, we silently allow side effects
+# If `warn``, we warn side effects
+# If `error``, we error on side effects
+side_effect_replay_policy = "silent"
 
 # disable (for a function) when cache reaches this size
 
