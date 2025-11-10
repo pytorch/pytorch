@@ -4,6 +4,8 @@
 
 #include <cstdint>
 #include <utility>
+#include <list>
+#include <unordered_map>
 
 #include <ATen/mps/MPSDevice.h>
 #include <c10/core/DeviceGuard.h>
@@ -122,11 +124,59 @@ class TORCH_API MPSStream {
   // CommitAndContinue is enabled by default
   bool _enableCommitAndContinue = true;
 
+  // LRU cache for tracking operations - PERSISTS across command buffer flushes
+  // This provides performance benefits as cached operations can reuse compiled graphs
+  // Key: operation signature (MPSGraph pointer cast to uintptr_t)
+  // Value: iterator to position in LRU list
+  std::list<uintptr_t> _operationLRUList;
+  std::unordered_map<uintptr_t, std::list<uintptr_t>::iterator> _operationCache;
+
+  // Maximum size of LRU cache - when exceeded, least recently used items are evicted
+  // Default 100 matches flush threshold for consistency
+  size_t _maxOperationCacheSize = 100;
+
+  // Track total operations in current command buffer
+  size_t _commandBufferOperationCount = 0;
+
+  // Flush threshold - number of total operations before forcing a flush
+  // Default 100 prevents unbounded buffer growth while allowing batch efficiency
+  size_t _commandBufferFlushThreshold = 100;
+
   // use synchronize() to access any of these commit functions outside MPSStream
   void commit();
   void commitAndWait();
   void commitAndContinue();
   void flush();
+
+  // LRU cache helper methods
+  bool isOperationCached(uintptr_t opSignature);
+  void addOperationToCache(uintptr_t opSignature);
+  void clearOperationCache();
+
+ public:
+  // Set the flush threshold for command buffer operations
+  void setCommandBufferFlushThreshold(size_t threshold) {
+    _commandBufferFlushThreshold = threshold;
+  }
+
+  size_t getCommandBufferFlushThreshold() const {
+    return _commandBufferFlushThreshold;
+  }
+
+  // Set the maximum LRU cache size
+  void setMaxOperationCacheSize(size_t size) {
+    _maxOperationCacheSize = size;
+    // If current cache exceeds new size, evict oldest entries
+    while (_operationCache.size() > _maxOperationCacheSize) {
+      uintptr_t lruSignature = _operationLRUList.back();
+      _operationLRUList.pop_back();
+      _operationCache.erase(lruSignature);
+    }
+  }
+
+  size_t getMaxOperationCacheSize() const {
+    return _maxOperationCacheSize;
+  }
 };
 
 /**
