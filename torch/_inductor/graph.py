@@ -1642,8 +1642,8 @@ class GraphLowering(torch.fx.Interpreter):
                 )
                 and should_fallback_by_default(n)
             ):
-                # this path supports fallback of both OpOverload and HOPs
-                # (e.g., triton_kernel_wrapper_functional)
+                # this path supports fallback due to inductor lite mode. It supports
+                # both OpOverload and HOPs (e.g., triton_kernel_wrapper_functional).
                 debug("fallback_handler")
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
                     *args,  # type: ignore[possibly-undefined]

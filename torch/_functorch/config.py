@@ -376,9 +376,9 @@ joint_custom_pass: Callable = None  # type: ignore[assignment]
 
 # Note [Selective Decomposition]
 # This config allows for selective decomposition of certain operators in the graph.
-# The current use case is regional inductor compile, where users specify nodes that
-# should be decomposed and compiled with inductor. When true, we skip decomposition
-# for all operators except the user specified nodes.
+# When True, it does NOT decompose any nodes, except those nodes that users explicitly
+# annotated with regional inductor compile. Please read torch.fx.passes.regional_inductor
+# on to explicitly annotate. This is currently only used by inductor lite mode.
 selective_decompose: bool = False
 
 

@@ -565,10 +565,6 @@ fallback_by_default: bool = False
 selective_decompose: bool = False
 
 
-# When False, skip decompositions unless for fx nodes with special annotations.
-use_decomposition: bool = True
-
-
 # Use dead code elimination
 use_dce: bool = True
 
