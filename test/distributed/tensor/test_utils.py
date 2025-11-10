@@ -31,16 +31,13 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.testing._internal.common_utils import (
-    distribute_tensor as _distribute_tensor,
-    generate_shard_orders,
-    run_tests,
-    shard_order_to_placement,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
+    generate_shard_orders,
     LocalDTensorTestBase,
+    patched_distribute_tensor as _distribute_tensor,
+    shard_order_to_placement,
     with_comms,
 )
 

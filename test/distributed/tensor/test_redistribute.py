@@ -24,12 +24,8 @@ from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard, MaskPartial
 from torch.testing._internal.common_utils import (
-    distribute_tensor as _distribute_tensor,
-    generate_shard_orders,
     instantiate_parametrized_tests,
-    make_full_tensor,
     parametrize,
-    redistribute,
     run_tests,
     TEST_CUDA,
     TEST_HPU,
@@ -37,7 +33,11 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
+    generate_shard_orders,
+    make_full_tensor,
     map_local_tensor_for_rank,
+    patched_distribute_tensor as _distribute_tensor,
+    redistribute,
     with_comms,
 )
 from torch.utils._debug_mode import DebugMode
