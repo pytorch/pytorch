@@ -289,19 +289,6 @@ def allgather_cost(bytes_gb: float, mesh_topo: MeshTopoInfo, mesh_dim: int) -> f
     return latency + bw * 1e6  # rescale to us
 
 
-def alltoall_cost(bytes_gb: float, mesh_topo: MeshTopoInfo, mesh_dim: int) -> float:
-    num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
-    mesh_dim_bandwidth = mesh_topo.mesh_dim_bandwidth[mesh_dim]
-    num_hops = num_devices_on_mesh_dim - 1
-
-    latency = 6.6 + num_hops * mesh_topo.mesh_dim_latency[mesh_dim]  # us
-    # Communication time: alltoall is more expensive, as all links are used
-    # Each device sends (bytes_gb / num_devices_on_mesh_dim) to each peer, but all in parallel
-    # So, total communication time is (bytes_gb / mesh_dim_bandwidth)
-    bw = bytes_gb / mesh_dim_bandwidth  # s
-    return latency + bw * 1e6  # rescale to us
-
-
 def allreduce_cost(bytes_gb: float, mesh_topo: MeshTopoInfo, mesh_dim: int) -> float:
     num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
     mesh_dim_bandwidth = mesh_topo.mesh_dim_bandwidth[mesh_dim]
@@ -386,8 +373,10 @@ def redistribute_cost(
             # add up allgather comm cost
             cost += allgather_cost(comm_bytes_gb, mesh_topo, mesh_dim)
         elif current.is_shard() and target.is_shard():
-            # add up alltoall comm cost
-            cost += alltoall_cost(comm_bytes_gb, mesh_topo, mesh_dim)
+            # should be alltoall comm, since we haven't implement it yet, add penalty
+            # to favor allgather instead
+            comm_bytes_gb /= num_devices_on_mesh_dim
+            cost += allgather_cost(comm_bytes_gb, mesh_topo, mesh_dim) + 1.0
         elif current.is_partial() and target.is_replicate():
             # add up allreduce comm cost
             cost += allreduce_cost(comm_bytes_gb, mesh_topo, mesh_dim)
