@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import math
 import operator
-from typing import NoReturn, Union
+from typing import NoReturn
 
 import sympy
 
@@ -359,7 +359,7 @@ class TensorReferenceAnalysis:
     # function isn't traced correctly.  Here for completeness.
     @staticmethod
     def constant(c, dtype):
-        d: Union[int, float, bool]
+        d: int | float | bool
         if dtype is torch.int64:
             d = int(c)
         elif dtype is torch.double:
