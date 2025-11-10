@@ -568,7 +568,6 @@ class TestAnalysis(TestCase):
         (not torch.xpu.is_available()) and (not SM80OrLater),
         "Requires XPU or CUDA SM80",
     )
-    @skipIf(not SM80OrLater, "Requires SM80")
     @dtypes(torch.float, torch.float16)
     def test_combine_profiles(self, device, dtype):
         """
