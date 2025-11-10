@@ -564,8 +564,10 @@ class TestAnalysis(TestCase):
             if event["name"] == "triton_poi_fused_add_randn_sin_0":
                 event["args"]["kernel_num_gb"] = 0.002097168
 
-    # XPU test is not enabled due to profiler not enabled for CI.
-    # See https://github.com/pytorch/pytorch/pull/165423
+    @skipIf(
+        (not torch.xpu.is_available()) and (not SM80OrLater),
+        "Requires XPU or CUDA SM80",
+    )
     @skipIf(not SM80OrLater, "Requires SM80")
     @dtypes(torch.float, torch.float16)
     def test_combine_profiles(self, device, dtype):
