@@ -1806,7 +1806,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         # Handle specific pytree classes
         import torch.utils._pytree as pytree
 
-        if self.value_type is pytree.LeafSpec:
+        if isinstance(self.value_type, pytree.TreeSpec) and self.value_type.is_leaf():
             # Create a new LeafSpec instance by calling the constructor
             codegen.add_push_null(
                 lambda: codegen.load_import_from("torch.utils._pytree", "LeafSpec")
