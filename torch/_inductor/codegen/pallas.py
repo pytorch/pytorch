@@ -10,8 +10,10 @@ import torch  # noqa: TC001
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
+from ..runtime.runtime_utils import torch_dtype_to_jax
 from ..utils import get_fused_kernel_name, get_kernel_metadata
 from ..virtualized import V
+from .block_analysis import BlockPatternMatcher
 from .common import BackendFeature, CSEVariable, IndentedBuffer, OpOverrides
 from .simd import pexpr, SIMDKernel, SIMDScheduling
 
@@ -194,20 +196,7 @@ class PallasKernelOverrides(OpOverrides):
         src_dtype: Optional[torch.dtype] = None,
         use_compute_types: bool = True,
     ) -> str:
-        # Map PyTorch dtype to JAX dtype
-        dtype_map = {
-            torch.float32: "jnp.float32",
-            torch.float64: "jnp.float64",
-            torch.float16: "jnp.float16",
-            torch.bfloat16: "jnp.bfloat16",
-            torch.int32: "jnp.int32",
-            torch.int64: "jnp.int64",
-            torch.int16: "jnp.int16",
-            torch.int8: "jnp.int8",
-            torch.uint8: "jnp.uint8",
-            torch.bool: "jnp.bool_",
-        }
-        jax_dtype = dtype_map.get(dtype, f"jnp.{dtype}")
+        jax_dtype = torch_dtype_to_jax(dtype)
         return f"{x}.astype({jax_dtype})"
 
 
@@ -266,25 +255,18 @@ class PallasKernel(SIMDKernel):
         - stride*var + offset -> offset::stride
 
         For more complex patterns, falls back to explicit indexing.
+        Uses BlockPatternMatcher for robust pattern matching.
         """
         # Get the iteration variables for this kernel
         if not self.range_trees:
             return "..."
 
-        # Try to match pattern: stride * var + offset
-        # where var is one of our iteration variables
+        # Simplify the index
         index = V.graph.sizevars.simplify(index)
-
-        # Check if this is a simple linear expression in one variable
-        # Pattern: a*x + b where x is an iteration variable
         free_symbols = index.free_symbols
 
-        # Get iteration variables from range_tree_nodes (these are the actual symbols used in indices)
-        iter_vars = (
-            OrderedSet(self.range_tree_nodes.keys())
-            if hasattr(self, "range_tree_nodes")
-            else OrderedSet()
-        )
+        # Get iteration variables from range_tree_nodes
+        iter_vars = OrderedSet(self.range_tree_nodes.keys())
 
         # Find which iteration variable(s) are used
         used_vars = free_symbols & iter_vars
@@ -293,42 +275,48 @@ class PallasKernel(SIMDKernel):
             # No iteration variables, this is a constant index
             return str(index)
         elif len(used_vars) == 1:
-            # Single iteration variable - try to extract stride and offset
+            # Single iteration variable - try to extract stride and offset using BlockPatternMatcher
             var = next(iter(used_vars))
 
-            # Expand and collect terms
-            expanded = sympy.expand(index)
+            # Get the subexpression involving this variable
+            var_expr = BlockPatternMatcher.get_subexpr_involving_symbol(index, var)
 
-            # Try to extract coefficient (stride) and constant (offset)
-            # index = stride*var + offset
-            stride = expanded.coeff(var, 1)
-            offset = expanded.coeff(var, 0)
+            # Try to match affine pattern: stride * var
+            stride = BlockPatternMatcher.match_affine_block_expr(var_expr, var)
 
             if stride is not None:
-                stride_val = stride
-                offset_val = offset if offset is not None else 0
+                # Extract the constant offset (terms not involving var)
+                offset = index - var_expr
+                offset = V.graph.sizevars.simplify(offset)
 
                 # Generate JAX slice notation
-                if stride_val == 1 and offset_val == 0:
+                if stride == 1 and offset == 0:
                     # Contiguous access
                     return "..."
-                elif offset_val == 0:
+                elif offset == 0:
                     # Pure stride: ::stride
-                    return f"::{stride_val}"
+                    stride_str = self.kexpr(stride)
+                    return f"::{stride_str}"
                 else:
                     # Offset + stride: offset::stride
-                    return f"{offset_val}::{stride_val}"
+                    offset_str = self.kexpr(offset)
+                    stride_str = self.kexpr(stride)
+                    return f"{offset_str}::{stride_str}"
+            else:
+                # Couldn't match affine pattern, fall back to original logic
+                offset = index - var_expr
+                offset = V.graph.sizevars.simplify(offset)
+                if offset == 0 and var_expr == var:
+                    # Just the variable itself, unit stride
+                    return "..."
         elif len(used_vars) > 1:
-            # Multi-dimensional indexing - need to generate proper index arrays
-            # For patterns like 2*x0 + 30*x1, we need to reshape and use advanced indexing
-            # For now, we'll use ellipsis which works for contiguous multi-dim access
-            # and fall back to error for truly strided multi-dim cases
-
-            # Check if all coefficients are 1 (contiguous multi-dim access)
+            # Multi-dimensional indexing
+            # For contiguous multi-dim access, all terms should have unit stride
             all_unit_stride = True
             for var in used_vars:
-                coeff = index.coeff(var, 1)
-                if coeff != 1:
+                var_expr = BlockPatternMatcher.get_subexpr_involving_symbol(index, var)
+                stride = BlockPatternMatcher.match_affine_block_expr(var_expr, var)
+                if stride != 1:
                     all_unit_stride = False
                     break
 
@@ -341,9 +329,7 @@ class PallasKernel(SIMDKernel):
                 # TODO: Implement proper multi-dimensional strided indexing
                 return "..."
 
-        # For complex cases, we need to use explicit indexing
-        # Generate an index array using JAX operations
-        # This requires computing the indices within the kernel
+        # For complex cases, raise an error
         return self._generate_index_array(index)
 
     def _generate_index_array(self, index: sympy.Expr) -> str:
@@ -405,9 +391,15 @@ class PallasKernel(SIMDKernel):
                 "Pallas backend currently supports single-output elementwise kernels only"
             )
 
+        # Get output dtype at compile time
+        output_name = live_outs[0]
+        output_dtype = V.graph.get_dtype(output_name)
+        output_dtype_jax = torch_dtype_to_jax(output_dtype)
+
         code = IndentedBuffer()
         code.splice(
             """
+            import functools
             import torch
             import jax
             import jax.numpy as jnp
@@ -422,6 +414,9 @@ class PallasKernel(SIMDKernel):
         kernel_params = [a.name for a in arg_defs]
 
         kernel_name = name or "<KERNEL_NAME>"
+        interpret_literal = (
+            "True" if V.graph.get_current_device_or_throw().type == "cpu" else "False"
+        )
         code.writeline(f"def {kernel_name}_kernel({', '.join(kernel_params)}):")
         with code.indent():
             # Emit compute (CSE) and store lines; they reference *_ptr[index] directly
@@ -433,6 +428,18 @@ class PallasKernel(SIMDKernel):
             for line in self.stores._lines:
                 code.writeline(str(line))
 
+        jit_wrapper_name = f"{kernel_name}_jit_wrapper"
+        code.writeline("@functools.partial(jax.jit, static_argnums=(0, 1))")
+        code.writeline(f"def {jit_wrapper_name}(out_shape, out_dtype, *kernel_refs):")
+        with code.indent():
+            code.writeline("out_spec = jax.ShapeDtypeStruct(out_shape, out_dtype)")
+            code.writeline("return pl.pallas_call(")
+            code.writeline(f"    {kernel_name}_kernel,")
+            code.writeline("    out_shape=out_spec,")
+            code.writeline(f"    interpret={interpret_literal},")
+            code.writeline("    grid=(1,),")
+            code.writeline(")(*kernel_refs)")
+
         # Host entry: convert torch tensors <-> jax, call pallas_call and copy back
         main_name = f"{kernel_name}_main"
         code.writeline(f"def {main_name}({', '.join(kernel_params)}, stream=None):")
@@ -440,12 +447,6 @@ class PallasKernel(SIMDKernel):
             # Enable JAX x64 mode to support float64/int64 types
             code.writeline("# Enable JAX x64 mode for float64/int64 support")
             code.writeline("jax.config.update('jax_enable_x64', True)")
-            # Determine interpret statically based on codegen device
-            interpret_literal = (
-                "True"
-                if V.graph.get_current_device_or_throw().type == "cpu"
-                else "False"
-            )
             # Identify inputs (in_ptr*) and output (out_ptr*)
             input_params = [
                 p for p in kernel_params if p.startswith(("in_ptr", "in_out_ptr"))
@@ -465,33 +466,16 @@ class PallasKernel(SIMDKernel):
                     f"{inp}_jax = jax.dlpack.from_dlpack({inp}.contiguous())"
                 )
 
-            # Get output spec from PyTorch tensor
-            code.writeline("# Prepare output spec from PyTorch tensor")
-            code.writeline("# Map PyTorch dtype to JAX dtype string")
-            code.writeline("_torch_dtype_to_jax = {")
-            code.writeline(
-                "    torch.float32: jnp.float32, torch.float64: jnp.float64, torch.float16: jnp.float16,"
-            )
-            code.writeline(
-                "    torch.int32: jnp.int32, torch.int64: jnp.int64, torch.int16: jnp.int16, torch.int8: jnp.int8,"
-            )
-            code.writeline("    torch.uint8: jnp.uint8, torch.bool: jnp.bool_,")
-            code.writeline("}")
-            code.writeline(
-                f"out_spec = jax.ShapeDtypeStruct({output_param}.shape, _torch_dtype_to_jax[{output_param}.dtype])"
-            )
+            # Get output metadata from PyTorch tensor
+            code.writeline("# Prepare output metadata from PyTorch tensor")
+            code.writeline(f"out_shape = tuple({output_param}.shape)")
+            code.writeline(f"out_dtype = {output_dtype_jax}")
 
-            # Call pallas
-            # Pass interpret=True on CPU, False otherwise (single call, no duplication)
-            code.writeline("compiled = pl.pallas_call(")
-            code.writeline(f"    lambda *refs: {kernel_name}_kernel(*refs),")
-            code.writeline("    out_shape=out_spec,")
-            code.writeline(f"    interpret={interpret_literal},")
-            code.writeline("    grid=(1,),")
-            code.writeline(")")
-
-            jax_input_args = ", ".join([f"{inp}_jax" for inp in input_params])
-            code.writeline(f"res = compiled({jax_input_args})")
+            call_args = ["out_shape", "out_dtype"] + [
+                f"{inp}_jax" for inp in input_params
+            ]
+            call_arg_str = ", ".join(call_args)
+            code.writeline(f"res = {jit_wrapper_name}({call_arg_str})")
 
             # Copy result back
             code.writeline("# Copy result back into the provided torch output tensor")
