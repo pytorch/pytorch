@@ -8,7 +8,6 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.print import print
 from torch._higher_order_ops.torchbind import call_torchbind
-from torch._higher_order_ops.print import print
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode

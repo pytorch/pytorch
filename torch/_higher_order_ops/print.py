@@ -1,4 +1,3 @@
-from torch.distributed.utils import _unpack_kwargs
 import builtins
 
 import torch
@@ -7,7 +6,6 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
-from typing import Any
 
 class Print(HigherOrderOperator):
     """
@@ -46,6 +44,7 @@ def print_proxy_torch_dispatch_mode(
 ) -> None:
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)  # type: ignore[union-attr]  # noqa: F841
     mode.tracer.create_proxy("call_function", print, (format_str,), proxy_kwargs)
+
 
 @print.py_impl(FakeTensorMode)
 # pyre-ignore
