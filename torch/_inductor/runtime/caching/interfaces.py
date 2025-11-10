@@ -12,8 +12,8 @@ from os import PathLike
 from pathlib import Path
 from threading import Lock
 from time import time
-from typing import Any, Callable, TYPE_CHECKING
-from typing_extensions import override, TypeAlias
+from typing import Any, TYPE_CHECKING, TypeAlias
+from typing_extensions import override
 
 from filelock import FileLock
 
@@ -21,6 +21,8 @@ from . import config, context, exceptions, implementations as impls, locks
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .utils import P, R
 
 
@@ -183,6 +185,7 @@ class _CacheIntf(ABC):
         fkey: Any = (
             (callee, params)
             if not custom_params_encoder
+            # pyrefly: ignore [invalid-param-spec]
             else (callee, custom_params_encoder(*params[0], **params[1]))
         )
         ikey: Any = context._isolation_key(
@@ -193,8 +196,10 @@ class _CacheIntf(ABC):
     def _make_dummy_record_wrapper(self, fn: Callable[P, R]) -> Callable[P, R]:
         @wraps(fn)
         def dummy_wrapper(*args: Any, **kwargs: Any) -> R:
+            # pyrefly: ignore [invalid-param-spec]
             return fn(*args, **kwargs)
 
+        # pyrefly: ignore [bad-return]
         return dummy_wrapper
 
     @abstractmethod
@@ -359,6 +364,7 @@ class _FastCacheIntf(_CacheIntf):
             callee_sub_dir: PathLike[str] = Path(callee)
             odc = impls._OnDiskCacheImpl(sub_dir=callee_sub_dir)
             self._callee_to_odc[callee] = odc
+        # pyrefly: ignore [unbound-name]
         return odc
 
     @override
@@ -501,6 +507,7 @@ class _DeterministicCacheIntf(_CacheIntf):
         self._imc: impls._InMemoryCacheImpl = impls._InMemoryCacheImpl()
 
         if fpath := os.environ.get("TORCHINDUCTOR_PRE_POPULATE_DETERMINISTIC_CACHE"):
+            # pyrefly: ignore [bad-assignment]
             flock: FileLock = FileLock(str(fpath) + ".lock")
             with locks._acquire_flock_with_timeout(flock):
                 with open(fpath) as fp:
@@ -545,6 +552,7 @@ class _DeterministicCacheIntf(_CacheIntf):
             callee_sub_dir: PathLike[str] = Path(callee)
             odc = impls._OnDiskCacheImpl(sub_dir=callee_sub_dir)
             self._callee_to_odc[callee] = odc
+        # pyrefly: ignore [unbound-name]
         return odc
 
     def _dump_imc_to_disk(self) -> Path | None:

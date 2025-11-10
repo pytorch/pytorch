@@ -49,7 +49,7 @@ SHORTHAND_TO_FLAGS = {
 
 class Flags:
     def __init__(self, flag_to_value: dict):
-        assert all(k in FLAGS for k in flag_to_value.keys())  # sanity check
+        assert all(k in FLAGS for k in flag_to_value)  # sanity check
         self._flag_to_value = flag_to_value
 
     def __getattr__(self, attr: str):
@@ -59,7 +59,7 @@ class Flags:
             raise AttributeError(f"No flag attribute '{attr}'")
 
     def __getitem__(self, key):
-        if key in SHORTHAND_TO_FLAGS.keys():
+        if key in SHORTHAND_TO_FLAGS:
             key = SHORTHAND_TO_FLAGS[key]
         if key in FLAGS:
             try:
@@ -76,7 +76,7 @@ class Flags:
             super().__setattr__(attr, value)
 
     def __setitem__(self, key, value):
-        if key in FLAGS or key in SHORTHAND_TO_FLAGS.keys():
+        if key in FLAGS or key in SHORTHAND_TO_FLAGS:
             raise NotImplementedError("Modifying flags is not implemented")
         else:
             raise KeyError(f"No flag key '{key}'")
