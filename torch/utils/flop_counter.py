@@ -2,7 +2,7 @@
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
-from typing import Any, Optional, Union, TypeVar
+from typing import Any, TypeVar
 from collections.abc import Callable
 from collections.abc import Iterator
 from typing_extensions import ParamSpec
@@ -314,7 +314,7 @@ def _unpack_flash_attention_nested_shapes(
     cum_seq_k,
     max_q,
     max_k,
-) -> Iterator[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], Optional[tuple[int, ...]]]]:
+) -> Iterator[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...] | None]]:
     """
     Given inputs to a flash_attention_(forward|backward) kernel, this will handle behavior for
     NestedTensor inputs by effectively unbinding the NestedTensor and yielding the shapes for
@@ -366,7 +366,7 @@ def _unpack_efficient_attention_nested_shapes(
     cu_seqlens_k,
     max_seqlen_q,
     max_seqlen_k,
-) -> Iterator[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], Optional[tuple[int, ...]]]]:
+) -> Iterator[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...] | None]]:
     """
     Given inputs to a efficient_attention_(forward|backward) kernel, this will handle behavior for
     NestedTensor inputs by effectively unbinding the NestedTensor and yielding the shapes for
@@ -661,15 +661,15 @@ class FlopCounterMode:
 
     def __init__(
             self,
-            mods: Optional[Union[torch.nn.Module, list[torch.nn.Module]]] = None,
+            mods: torch.nn.Module | list[torch.nn.Module] | None = None,
             depth: int = 2,
             display: bool = True,
-            custom_mapping: Optional[dict[Any, Any]] = None) -> None:
+            custom_mapping: dict[Any, Any] | None = None) -> None:
         super().__init__()
         self.flop_counts: dict[str, dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.display = display
-        self.mode: Optional[_FlopCounterMode] = None
+        self.mode: _FlopCounterMode | None = None
         if custom_mapping is None:
             custom_mapping = {}
         if mods is not None:

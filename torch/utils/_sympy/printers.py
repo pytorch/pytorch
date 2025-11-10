@@ -1,5 +1,4 @@
 import sys
-from typing import Optional
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE, precedence
@@ -23,7 +22,7 @@ class ExprPrinter(StrPrinter):
     def _print_Not(self, expr: sympy.Expr) -> str:
         return f"not ({self._print(expr.args[0])})"
 
-    def _print_Add(self, expr: sympy.Expr, order: Optional[str] = None) -> str:
+    def _print_Add(self, expr: sympy.Expr, order: str | None = None) -> str:
         return self.stringify(expr.args, " + ", precedence(expr))
 
     def _print_Relational(self, expr: sympy.Expr) -> str:
@@ -310,7 +309,7 @@ class PythonPrinter(ExprPrinter):
         # Convert Piecewise(expr_cond_pairs) to nested ternary expressions
         # Piecewise((e1, c1), (e2, c2), ..., (eN, cN))
         # becomes: e1 if c1 else (e2 if c2 else (... else eN))
-        result: Optional[str] = None
+        result: str | None = None
         for expr_i, cond_i in reversed(expr.args):
             expr_str = self._print(expr_i)
             if cond_i == True:  # noqa: E712
@@ -349,7 +348,7 @@ class CppPrinter(ExprPrinter):
         # Convert Piecewise(expr_cond_pairs) to nested ternary operators
         # Piecewise((e1, c1), (e2, c2), ..., (eN, cN))
         # becomes: c1 ? e1 : (c2 ? e2 : (... : eN))
-        result: Optional[str] = None
+        result: str | None = None
         for expr_i, cond_i in reversed(expr.args):
             expr_str = self.parenthesize(expr_i, PRECEDENCE["Atom"] - 0.5)
             if cond_i == True:  # noqa: E712
