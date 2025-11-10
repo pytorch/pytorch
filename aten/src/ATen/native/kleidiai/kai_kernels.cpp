@@ -456,8 +456,7 @@ void kai_quant_pack_lhs_int4_mm(
     if (bl == k) {
         const auto input_dtype = input.dtype();
 
-        if ((input_dtype == at::kBFloat16) )
-        {
+        if (input_dtype == at::kBFloat16) {
             if (cpuinfo_has_arm_bf16()){
                 kleidiai::kai_quant_pack_lhs_int4_mm_bf16_channelwise(
                     output, input, weight, m, n, k);
