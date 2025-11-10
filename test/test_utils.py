@@ -28,11 +28,11 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
+    HAS_GPU,
     IS_FBCODE,
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
-    HAS_GPU
 )
 from torch.utils._device import set_device
 from torch.utils._pytree import tree_all_only, tree_any
