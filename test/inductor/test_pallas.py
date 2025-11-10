@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: pt2"]
 import functools
+import re
 import sys
 import unittest
 
@@ -229,6 +230,33 @@ class PallasTestsMixin:
         self.assertIn("import jax", code)
         self.assertIn("import jax.numpy as jnp", code)
         self.assertIn("from jax.experimental import pallas as pl", code)
+
+    def test_jax_jit_wrapper_is_emitted(self):
+        """Ensure generated Pallas code wraps pl.pallas_call in jax.jit."""
+
+        key = "cuda_backend" if self.DEVICE == "cuda" else "cpu_backend"
+
+        @torch.compile(backend="inductor", options={key: "pallas"})
+        def pallas_fn(a, b):
+            return a + b
+
+        _, (code,) = run_and_get_code(
+            pallas_fn,
+            torch.randn(32, device=self.DEVICE),
+            torch.randn(32, device=self.DEVICE),
+        )
+
+        kernel_match = re.search(r"def (pallas_[A-Za-z0-9_]+)_kernel", code)
+        self.assertIsNotNone(kernel_match)
+        kernel_name = kernel_match.group(1)
+        wrapper_name = f"{kernel_name}_jit_wrapper"
+        self.assertIn(wrapper_name, code)
+        start = code.index(f"def {wrapper_name}")
+        end = code.index(f"def {kernel_name}_main", start)
+        wrapper_block = code[start:end]
+
+        self.assertIn("jax.jit", code)
+        self.assertNotIn("torch.", wrapper_block)
 
     def test_2d_tensor(self):
         """Test with 2D tensors (though current implementation flattens)."""
