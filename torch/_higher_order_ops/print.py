@@ -25,6 +25,7 @@ class Print(HigherOrderOperator):
         return super().__call__(format_str, **kwargs)
 
     @staticmethod
+    # pyre-ignore
     def schema() -> torch.FunctionSchema:
         """
         Returns the schema of ``Print.__call__``.
@@ -70,15 +71,6 @@ def print_impl(format_str: str, **kwargs: object) -> None:
     builtins.print(format_str.format(**new_kwargs))
 
 
-@print.py_autograd_impl
-# pyre-ignore
-def print_autograd(format_str: str, **kwargs: object):
-    # with torch._C._ExcludeDispatchKeyGuard(
-    #     torch._C.DispatchKeySet(torch._C.DispatchKey.AutogradCPU)
-    # ):
-    return None
-
-
 print.fallthrough(torch._C.DispatchKey.AutogradCPU)
 print.fallthrough(torch._C.DispatchKey.AutogradCUDA)
 
@@ -90,7 +82,7 @@ def print_func(ctx, format_str: str, **kwargs: object):
     return handle_effects(
         ctx.mode._allow_token_discovery,
         ctx.mode._tokens,
-        print,
+        print,  # type: ignore[arg-type]
         (format_str,),
         kwargs,  # type: ignore[arg-type]
     )
