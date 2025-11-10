@@ -186,7 +186,7 @@ def _ignore_backend_decomps():
 def _disable_custom_triton_op_functional_decomposition():
     old = torch._functorch.config.decompose_custom_triton_ops
     try:
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         torch._functorch.config.decompose_custom_triton_ops = False
         yield torch._functorch.config.decompose_custom_triton_ops
     finally:
@@ -222,7 +222,7 @@ def _rewrite_tracepoint_node(gm: torch.fx.GraphModule):
     that has the same target and args, but with the _export_root stripped from path.
     """
     for node in gm.graph.nodes:
-        if node.target == torch.ops.higher_order._export_tracepoint:
+        if node.target is torch.ops.higher_order._export_tracepoint:
             if "path" in node.kwargs:
                 path = _strip_root(node.kwargs["path"])
                 with gm.graph.inserting_before(node):
@@ -365,7 +365,7 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
 
                 nn_module_stack = {
                     root_key: (root, root_cls.__module__ + "." + root_cls.__qualname__),
-                    # pyrefly: ignore  # unbound-name
+                    # pyrefly: ignore [unbound-name]
                     **nn_module_stack,
                 }
                 node.meta["nn_module_stack"] = {
@@ -687,7 +687,7 @@ def _restore_state_dict(
     for name, _ in list(
         chain(
             original_module.named_parameters(remove_duplicate=False),
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             original_module.named_buffers(remove_duplicate=False),
         )
     ):
@@ -922,7 +922,7 @@ def _export_to_aten_ir(
         if decompose_custom_triton_ops
         else _disable_custom_triton_op_functional_decomposition
     )
-    # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
+    # This _reparameterize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
     with ExitStack() as stack:
@@ -1533,7 +1533,7 @@ def _strict_export(
 
     # aot_export expect the return type to always be a tuple.
     if out_spec.type not in (list, tuple):
-        out_spec = pytree.TreeSpec(tuple, None, [out_spec])
+        out_spec = pytree.treespec_tuple([out_spec])
 
     orig_arg_names = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
 
@@ -1843,7 +1843,7 @@ def _export_to_aten_ir_make_fx(
         )
         return gm, sig
 
-    # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
+    # This _reparameterize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
     with ExitStack() as stack:

@@ -112,7 +112,7 @@ class XPUInductorQuantizer(X86InductorQuantizer):
         node: Node,
     ) -> None:
         if (node.target in int8_in_int8_out_ops) and (_is_any_annotated([node])):
-            if node.target == torch.ops.aten.max_pool2d.default:
+            if node.target is torch.ops.aten.max_pool2d.default:
                 return
             else:
                 input_node = node.all_input_nodes[0]

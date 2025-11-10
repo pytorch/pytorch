@@ -11,7 +11,7 @@ import math
 import operator
 import textwrap
 from collections import Counter
-from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, Union
+from typing import Any, Generic, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeVar
 
 import sympy
@@ -35,15 +35,19 @@ from torch.utils._sympy.symbol import (
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..analyze_preserves_zero_mask import prologue_preserves_zero_mask
-from ..codecache import code_hash
+from ..codecache import code_hash, PyCodeCache
 from ..dependencies import MemoryDep, StarDep, WeakDep
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ..ir import IRNode
 
 from ..optimize_indexing import indexing_dtype_strength_reduction
-from ..runtime.runtime_utils import green_text, yellow_text
+from ..runtime.coordinate_descent_tuner import CoordescTuner
+from ..runtime.hints import DeviceProperties
+from ..runtime.runtime_utils import green_text, next_power_of_2, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     cache_property_on_self,
@@ -589,6 +593,17 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             if not tree.is_reduction or self.inside_reduction:
                 sizes[tree.tensor_dim] = f"{tree.prefix.upper()}BLOCK"
         return sizes
+
+    def create_constant_mask(self, entry) -> str:
+        x = entry.prefix
+        if entry.tensor_dim is None:
+            sizestr = self.dense_size_str()
+            return f"{x}mask = tl.full({sizestr}, True, tl.int1)"
+        sizes = ["None"] * self.triton_tensor_ndim()
+        sizes[entry.tensor_dim] = ":"
+        suffix = ", ".join(sizes)
+        out = f"{x}mask = tl.full([{x.upper()}BLOCK], True, tl.int1)[{suffix}]"
+        return out
 
     def dense_size_str(self) -> str:
         sizes = self.dense_size_list()
@@ -1535,39 +1550,17 @@ class SIMDScheduling(BaseScheduling):
                 epilogues.append(node)
         return reductions, epilogues
 
-    def _codegen_mix_order_reduction(self, node1, node2):
-        if not V.graph.sizevars.statically_known_gt(
-            node1.group[1][0], node1.group[1][1]
-        ):
-            return self._codegen_mix_order_reduction(node2, node1)
+    def _generate_kernel_code_for_mix_order_reduction(
+        self, kernel_features, split_size, for_benchmark
+    ):
+        """
+        for_benchmark:
+            True if the generated code is for benchmarking. We need make
+            sure benchmark harness code is generated.
+        """
+        numel, rnumel = kernel_features.numel, kernel_features.reduction_numel
+        node_schedule = kernel_features.node_schedule
 
-        metrics.codegen_mix_order_reduction += 1
-
-        assert V.graph.sizevars.statically_known_gt(
-            node1.group[1][0], node1.group[1][1]
-        )
-
-        # split epilogue out of node2
-        node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
-            node2
-        )
-
-        # decide the split size
-        nrow, ncol = node1.group[1]
-        split_size = 64  # TODO need add heuristics
-        nsplit = (nrow + split_size - 1) // split_size
-
-        numel, rnumel = node1.group[1]
-
-        converted_nodes = []
-        for subnode in node2_reductions:
-            converted = subnode.extract_pw_from_reduction()
-            converted.swap_pw_red_dimension()
-            converted_nodes.append(converted)
-        node_schedule = self.generate_node_schedule(
-            node1.get_nodes() + converted_nodes, numel, rnumel
-        )
-        kernel_features = SIMDKernelFeatures(node_schedule, numel, rnumel, None)
         kernel = self.create_kernel_choices(
             kernel_features,
             [{"x": numel, "r0_": rnumel}],
@@ -1575,12 +1568,12 @@ class SIMDScheduling(BaseScheduling):
                 "features": kernel_features,
                 "tiling_scores": None,
                 "mix_order_reduction": True,
+                "override_persistent_reduction": True,
             },
         )[0]
         assert kernel.persistent_reduction
         assert kernel.mix_order_reduction
         kernel.rsplit_size = split_size
-
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
         # allocate workspace for this kernel
@@ -1594,15 +1587,144 @@ class SIMDScheduling(BaseScheduling):
         assert ws_off == 0, f"{ws_off=}"
         with kernel:
             kernel.codegen_body()
-        with V.set_kernel_handler(kernel):
+
+        stack = contextlib.ExitStack()
+        with V.set_kernel_handler(kernel), stack:
+            if for_benchmark:
+                stack.enter_context(config.patch(benchmark_kernel=True))
             src_code = kernel.codegen_kernel()
+
+        if for_benchmark:
+            # only do this if we are doing benchmarking.
+            # When we are generating final code, the kernel name
+            # should be decided differently with node type, fx node name
+            # etc.
+            src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
+        return kernel, ws_name, src_code
+
+    def benchmark_codegened_module(
+        self, mod, n_spills_threshold=8, node_names: Optional[OrderedSet[str]] = None
+    ) -> tuple[float, str]:
+        raise NotImplementedError
+
+    def _codegen_mix_order_reduction(self, node1, node2):
+        numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
+
+        if not V.graph.sizevars.statically_known_gt(
+            numel,
+            rnumel,
+        ):
+            return self._codegen_mix_order_reduction(node2, node1)
+
+        def _pick_split_size():
+            # the overridden has highest priority
+            if config.triton.mix_order_reduction_split_size is not None:
+                return config.triton.mix_order_reduction_split_size
+
+            # heuristics based on number of SMs
+            device_prop = DeviceProperties.create(node1.get_device())
+            num_sm = device_prop.multi_processor_count
+            estimated_num_splits = num_sm * 8
+            split_size = max(next_power_of_2(numel // estimated_num_splits), 16)
+            split_size = min(split_size, 128)
+            return split_size
+
+        split_size = _pick_split_size()
+
+        # pyrefly: ignore [bad-assignment]
+        metrics.codegen_mix_order_reduction += 1
+
+        assert V.graph.sizevars.statically_known_gt(
+            numel,
+            rnumel,
+        )
+
+        # split epilogue out of node2
+        node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
+            node2
+        )
+
+        converted_nodes = []
+        for subnode in node2_reductions:
+            subnode.cancel_reduction_split()
+            converted = subnode.extract_pw_from_reduction()
+            converted.swap_pw_red_dimension()
+            converted_nodes.append(converted)
+        node_schedule = self.generate_node_schedule(
+            node1.get_nodes() + converted_nodes, numel, rnumel
+        )
+        kernel_features = SIMDKernelFeatures(node_schedule, numel, rnumel)
+
+        # The autotuning is skipped in deterministic mode
+        if (
+            not torch._inductor.config.deterministic
+            and config.triton.mix_order_reduction_split_size is None
+            and (
+                config.triton.mix_order_reduction_autotune_split_size
+                or config.max_autotune
+                or config.coordinate_descent_tuning
+            )
+        ):
+
+            def _bench(candidate_split_size):
+                _, _, src_code = self._generate_kernel_code_for_mix_order_reduction(
+                    kernel_features,
+                    split_size=candidate_split_size,
+                    for_benchmark=True,
+                )
+                mod = PyCodeCache.load(src_code)
+                ms, _ = self.benchmark_codegened_module(mod)
+                return ms
+
+            split_size = CoordescTuner.autotune_single_field(
+                _bench,
+                split_size,
+                8,
+            )
+            # print(f"Autotuning pick split size {split_size}")
+
+        kernel, ws_name, src_code = self._generate_kernel_code_for_mix_order_reduction(
+            kernel_features,
+            split_size=split_size,
+            for_benchmark=False,
+        )
+
+        # rename intermediate reduction output to final reduction
+        # output
+        is_split_reduction = bool(node2_reductions[0].node._split_size)
+        rename = {}
+        if is_split_reduction:
+            for subnode in node2_reductions:
+                bufname = subnode.get_outputs()[0].node.get_name()
+                username = (
+                    subnode.get_outputs()[0]
+                    .users[0]
+                    .node.get_outputs()[0]
+                    .node.get_name()
+                )
+                rename[bufname] = username
+                assert self.scheduler
+                self.scheduler.removed_ops.add(
+                    subnode.get_outputs()[0].users[0].node.get_name()
+                )
+                V.graph.removed_buffers.add(bufname)
+
+            for partial_accum in kernel.saved_partial_accumulate:
+                partial_accum.buffer_name = rename.get(
+                    partial_accum.buffer_name, partial_accum.buffer_name
+                )
+
         kernel_name = self.define_kernel(src_code, node_schedule, kernel)
         kernel.kernel_name = kernel_name
         kernel.code_hash = code_hash(src_code)
 
         with V.set_kernel_handler(kernel):
             for node in kernel_features.scheduler_nodes():
-                node.mark_run()
+                # No need to allocate buffer for split reduction
+                # since we are gonna to allocate workspace to store the
+                # intermediate reduction reduction
+                if node.get_outputs()[0].node.get_name() not in rename:
+                    node.mark_run()
 
         # workspace args is still needed after the call
         kernel.call_kernel(kernel.kernel_name, deallocate_ws=False)
@@ -1611,10 +1733,9 @@ class SIMDScheduling(BaseScheduling):
 
         # a extra round of reduction
         assert len(converted_nodes) == len(kernel.saved_partial_accumulate)
-        for idx, (buffer_name, partial_accum) in enumerate(
-            zip(node2.get_buffer_names(), kernel.saved_partial_accumulate)
-        ):
-            assert buffer_name == partial_accum.buffer_name
+        nsplit = (numel + split_size - 1) // split_size
+        for idx, partial_accum in enumerate(kernel.saved_partial_accumulate):
+            buffer_name = partial_accum.buffer_name
 
             stride_str = f"{nsplit} * {rnumel}"
             start = f"{idx} * {stride_str}"
@@ -1626,9 +1747,13 @@ class SIMDScheduling(BaseScheduling):
             opname = reduction_type2op.get(
                 partial_accum.reduction_type, partial_accum.reduction_type
             )
+
             V.graph.wrapper_code.writeline(
                 f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)",
             )
+            # mark the buffer as allocated, so we don't try to allocate
+            # it again when it's later used
+            V.graph.wrapper_code.allocated.add(buffer_name)
 
         kernel.deallocate_workspaces()
 
@@ -1642,6 +1767,12 @@ class SIMDScheduling(BaseScheduling):
         nodes: Sequence[scheduler.SchedulerNode],
         coalesce_analysis: Optional[CoalesceVarAnalysis] = None,
     ):
+        assert self.scheduler
+        nodes = [
+            node for node in nodes if node.get_name() not in self.scheduler.removed_ops
+        ]
+        if not nodes:
+            return
         _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
 
         node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
@@ -1657,14 +1788,24 @@ class SIMDScheduling(BaseScheduling):
         """
         Given a set of pre-fused nodes, generate a Triton kernel.
         """
+        assert self.scheduler
+        nodes = [
+            node
+            for node in node.get_nodes()
+            if node.get_name() not in self.scheduler.removed_ops
+        ]
+        if len(nodes) == 0:
+            return
 
         if torch._inductor.config.triton.coalesce_tiling_analysis:
+            if len(nodes) != len(node.get_nodes()):
+                assert self.scheduler
+                node = scheduler.FusedSchedulerNode(self.scheduler, nodes)
             coalesce_analysis = analyze_memory_coalescing(node)
         else:
             coalesce_analysis = None
 
-        nodes: list[scheduler.SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
-        return self._codegen_nodes(nodes, coalesce_analysis)
+        return self._codegen_nodes(nodes, coalesce_analysis)  # type: ignore[arg-type]
 
     @staticmethod
     def can_use_32bit_indexing(
@@ -1706,6 +1847,9 @@ class SIMDScheduling(BaseScheduling):
         return True
 
     def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
+        """
+        Generate code for nodes in kernel_features
+        """
         node_schedule = kernel_features.node_schedule
 
         tiling, tiling_score = self.get_tiling_and_scores(
@@ -1746,7 +1890,15 @@ class SIMDScheduling(BaseScheduling):
             node for node in node_schedule if isinstance(node, BaseSchedulerNode)
         ]
         self.codegen_comment(base_scheduler_nodes, final_kernel.kernel_name)
+        if config.cpp.enable_kernel_profile:
+            V.graph.wrapper_code.write_kernel_context_guard_begin()
+            V.graph.wrapper_code.write_kernel_context_guard(
+                final_kernel.kernel_name,
+                base_scheduler_nodes,  # type: ignore[arg-type]
+            )
         final_kernel.call_kernel(final_kernel.kernel_name)
+        if config.cpp.enable_kernel_profile:
+            V.graph.wrapper_code.write_kernel_context_guard_end()
 
         if config.nan_asserts:
             final_kernel.codegen_nan_check()
@@ -1915,7 +2067,7 @@ class SIMDScheduling(BaseScheduling):
 
             # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
 
-            for input_name in kernel.named_input_nodes.keys():
+            for input_name in kernel.named_input_nodes:
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
                 # pyrefly: ignore [missing-attribute]
                 partial_code.finalize_hook(subgraph_name, strict=False)
@@ -2152,13 +2304,12 @@ class SIMDScheduling(BaseScheduling):
         for node_group in partitions:
             if len(node_group) == 0:
                 continue
-            fused_node_lists = [node.get_nodes() for node in node_group]
             kernel = ComboKernel(
                 enable_autotune=enable_autotune,
                 mixed_sizes=mixed_sizes,
             )
 
-            for pn, nodes in zip(node_group, fused_node_lists):
+            for pn in node_group:
                 self.codegen_node_schedule_with_kernel(
                     node_schedule_map[pn][0],
                     kernel.create_sub_kernel(subkernel_map[pn]),
@@ -2413,8 +2564,10 @@ class SIMDScheduling(BaseScheduling):
                 all_var_ranges = [*dep.ranges.items()]
                 pointwise_vars_numel = sympy.S.One
                 sizevars = V.graph.sizevars
-                for pointwise_end_idx, (var, numel) in enumerate(all_var_ranges):
+                pointwise_end_idx = 0
+                for idx, (_var, numel) in enumerate(all_var_ranges):
                     pointwise_vars_numel *= numel
+                    pointwise_end_idx = idx
                     if sizevars.statically_known_geq(
                         pointwise_vars_numel, pointwise_numel
                     ):
@@ -2520,6 +2673,7 @@ class SIMDScheduling(BaseScheduling):
             sympy_product(pw_ranges) == pointwise_numel,
             lambda: f"{pw_ranges}, {pointwise_numel}, {node_schedule}",
         )
+
         torch._check(
             sympy_product(red_ranges) == reduction_numel,
             lambda: f"{red_ranges}, {reduction_numel}, {node_schedule}",

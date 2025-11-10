@@ -242,14 +242,14 @@ class TestDatasetRandomSplit(TestCase):
         dataset = CustomDataset(self, x)
         dataset = random_split(dataset, [5])[0]
         data_loader = DataLoader(dataset)
-        for batch in data_loader:
+        for _batch in data_loader:
             pass
 
         # fractional splitting
         dataset = CustomDataset(self, x)
         dataset = random_split(dataset, [1.0])[0]
         data_loader = DataLoader(dataset)
-        for batch in data_loader:
+        for _batch in data_loader:
             pass
 
     def test_splits_reproducibility(self):
@@ -1155,7 +1155,7 @@ class TestMultiEpochDataset(IterableDataset):
         worker_info = torch.utils.data.get_worker_info()
         assert worker_info is not None
         worker_id = worker_info.id
-        for idx in range(self.length // worker_info.num_workers):
+        for _ in range(self.length // worker_info.num_workers):
             yield worker_id
 
     def __len__(self):
@@ -2000,7 +2000,7 @@ except RuntimeError as e:
             dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
         )
 
-        for ind in range(num_epochs):
+        for _ in range(num_epochs):
             for batch_idx, sample in enumerate(dataloader):
                 self.assertEqual(
                     sample.tolist(), [batch_idx % num_workers] * batch_size
@@ -2014,6 +2014,22 @@ except RuntimeError as e:
         for batch in dataloader:
             self.assertEqual(12345, batch[0])
             self.assertEqual(12345, batch[1])
+
+    def test_worker_init_fn_forkserver(self):
+        def local_init_fn(worker_id):
+            torch.manual_seed(12345)
+
+        import multiprocessing as py_mp
+
+        py_mp.set_start_method("forkserver", force=True)
+
+        dataset = SeedDataset(4)
+        dataloader = self._get_data_loader(
+            dataset, batch_size=2, num_workers=2, worker_init_fn=local_init_fn
+        )
+        with self.assertWarnsRegex(UserWarning, "Got pickle error when"):
+            with self.assertRaises(Exception):
+                next(iter(dataloader))
 
     def test_get_worker_info(self):
         p = ErrorTrackingProcess(target=_test_get_worker_info)
@@ -3018,7 +3034,7 @@ class IntegrationTestDataLoaderDataPipe(TestCase):
 
                 # Same seeds
                 dl_res = []
-                for epoch in range(2):
+                for _epoch in range(2):
                     torch.manual_seed(123)
                     dl_res.append(list(dl))
                 self.assertEqual(dl_res[0], dl_res[1])
@@ -3238,7 +3254,7 @@ except RuntimeError as e:
             )
             dataset.start = 0
             for i in range(10):
-                for x in dataloader:
+                for _ in dataloader:
                     pass
                 # Changing the start value here doesn't have any effect in the dataset
                 # cached by the workers. since they are not recreated between epochs
@@ -3523,6 +3539,11 @@ class TestSetAffinity(TestCase):
             os.sched_setaffinity(0, [expected_affinity])
 
         dataset = SetAffinityDataset()
+
+        if not IS_WINDOWS and not IS_MACOS:
+            import multiprocessing as py_mp
+
+            py_mp.set_start_method("fork", force=True)
 
         dataloader = torch.utils.data.DataLoader(
             dataset, num_workers=2, worker_init_fn=worker_set_affinity

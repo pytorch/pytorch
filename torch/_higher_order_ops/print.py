@@ -96,5 +96,3 @@ def print_func(ctx, format_str: str, **kwargs: object):
         (format_str,),
         kwargs,  # type: ignore[arg-type]
     )
-print.fallthrough(torch._C.DispatchKey.AutogradCPU)
-print.fallthrough(torch._C.DispatchKey.AutogradCUDA)

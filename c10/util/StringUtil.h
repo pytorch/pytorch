@@ -135,7 +135,7 @@ struct _str_wrapper<> final {
 
 // Convert a list of string-like arguments into a single string.
 template <typename... Args>
-inline decltype(auto) str(const Args&... args) {
+inline auto str(const Args&... args) {
   return detail::_str_wrapper<
       typename detail::CanonicalizeStrTypes<Args>::type...>::call(args...);
 }

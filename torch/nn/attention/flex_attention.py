@@ -34,7 +34,7 @@ from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
 )
 from torch.nn.attention._utils import _validate_sdpa_input
-from torch.utils._pytree import GetAttrKey, register_pytree_node, tree_map_only
+from torch.utils._pytree import GetAttrKey, tree_map_only
 
 
 # Private debug flag to disable internal compilation wrapping for debugging purposes.
@@ -550,7 +550,7 @@ class BlockMask:
         full_q_indices: Optional[Tensor],
         BLOCK_SIZE: tuple[int, int],
         mask_mod: _mask_mod_signature,
-    ):
+    ) -> None:
         if kv_indices.dim() < 2:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
         assert kv_num_blocks is not None, "kv_num_blocks must be provided"
@@ -682,7 +682,7 @@ class BlockMask:
         *batch_dims, _, _ = self.kv_indices.shape
         return tuple(batch_dims) + self.seq_lengths
 
-    def __str__(self):
+    def __str__(self) -> str:
         s = f"BlockMask(shape={self.shape}, sparsity={self.sparsity():.2f}%, \n"
         mask_str = self.to_string().strip()
         s += mask_str
@@ -738,7 +738,7 @@ class BlockMask:
             (slice(i + n, i + n + 1) if -n <= i < 0 else slice(i, i + 1))
             if isinstance(i, int)
             else i
-            for i, n in zip(padded, sizes)
+            for i, n in zip(padded, sizes, strict=True)
         )
         new_kv_num_blocks = self.kv_num_blocks[index]
         new_kv_indices = self.kv_indices[index]
@@ -760,7 +760,7 @@ class BlockMask:
             compute_q_blocks=self.q_indices is not None,
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         def shape_or_none(x: Optional[torch.Tensor]):
             return x.shape if x is not None else None
 
@@ -864,7 +864,7 @@ class BlockMask:
 
             vis = ", ".join(reversed(descriptors)) + "\n"
 
-            def summarize_section(section):
+            def summarize_section(section) -> str:
                 percentage = section.float().mean().item()
                 if percentage == 1:
                     return "█"
@@ -944,6 +944,7 @@ class BlockMask:
             **dict(zip(cls._CONTEXT_ATTRS, context)),
             **dict(zip(cls._TENSOR_ATTRS, tensors)),
         }
+        # pyrefly: ignore [bad-argument-type]
         return cls(**kwargs)
 
     def _flatten_with_keys(self):
@@ -1288,7 +1289,7 @@ def _apply_kernel_options(
     return kernel_options
 
 
-def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
+def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor) -> None:
     if query.size(-1) != key.size(-1):
         raise ValueError(
             f"Expect query and key/value to have the same embedding dimension "
@@ -1296,7 +1297,7 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
         )
 
 
-def _validate_device(query: Tensor, key: Tensor, value: Tensor):
+def _validate_device(query: Tensor, key: Tensor, value: Tensor) -> None:
     """TODO: Remove once non cuda/cpu devices support is added
     We only need to check query since we have already that q,k,v are on the same device
     """
@@ -1648,12 +1649,3 @@ def flex_attention(
     return _finalize_outputs(
         out, lse, max_scores, return_aux=return_aux, return_lse=return_lse
     )
-
-
-register_pytree_node(
-    BlockMask,
-    BlockMask._flatten,
-    BlockMask._unflatten,
-    flatten_with_keys_fn=BlockMask._flatten_with_keys,
-    serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
-)

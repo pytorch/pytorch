@@ -11,6 +11,7 @@ import keyword
 import logging
 import math
 import operator
+import re
 import traceback
 import typing
 from collections import namedtuple, OrderedDict
@@ -383,7 +384,7 @@ def _reconstruct_fake_tensor(
     fake_tensor = _CURRENT_DESERIALIZER.deserialize_tensor_meta(tensor_meta)
     if is_parameter:
         fake_tensor = torch.nn.Parameter(fake_tensor)  # type: ignore[assignment]
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return fake_tensor
 
 
@@ -511,6 +512,15 @@ class Final(type):
         return type.__new__(metacls, name, bases, dict(classdict))
 
 
+def is_metadata_matched(config, entry_metadata):
+    metadata_attrs = ["num_cpu_threads", "num_warps", "num_stages", "num_ctas"]
+    for attr in metadata_attrs:
+        if hasattr(config, attr) and hasattr(entry_metadata, attr):
+            if getattr(config, attr) != getattr(entry_metadata, attr):
+                return False
+    return True
+
+
 def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
     assert (
         node.target
@@ -519,49 +529,114 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
 
     assert has_triton(), "triton required to serialize triton kernels"
     from triton.runtime.autotuner import Autotuner
+    from triton.runtime.jit import JITFunction
 
     assert isinstance(node.kwargs["kernel_idx"], int)
     kernel = torch._higher_order_ops.triton_kernel_wrap.kernel_side_table.get_kernel(
         node.kwargs["kernel_idx"]
     )
 
-    kNumWarpsDefault = 4
+    # For Autotuner, we need to look at the underlying JITFunction's cache
+    # since the Autotuner itself doesn't have a cache
+    is_autotuner = isinstance(kernel, Autotuner)
+    # pyrefly: ignore [missing-attribute]
+    actual_kernel = kernel.fn if is_autotuner else kernel
 
-    # currently we only support specialization of
-    # num_warps -- so search for the entry that
-    # matches the value from the associated kernel
-    if isinstance(kernel, Autotuner):
-        assert len(kernel.configs) == 1
-        num_warps = kernel.configs[0].num_warps
-        assert kernel.configs[0].num_ctas == 1, (
-            "serialization only supports num_ctas == 1"
-        )
-        kernel = kernel.fn
-    else:
-        num_warps = kNumWarpsDefault
-
-    if hasattr(kernel, "device_caches"):
-        caches = kernel.device_caches
+    if hasattr(actual_kernel, "device_caches"):
+        caches = actual_kernel.device_caches
         assert len(caches.keys()) == 1
         cache = next(iter(caches.values()))[0]
-    elif hasattr(kernel, "cache"):
+    elif hasattr(actual_kernel, "cache"):
         # old path, still used for cpu triton builds
-        caches = kernel.cache
+        caches = actual_kernel.cache
         assert len(caches.keys()) == 1
         cache = next(iter(caches.values()))
     else:
-        raise AssertionError(f"kernel caches not found for kernel {kernel.__name__}")
-
-    # can also get num_warps, num_ctas, etc. from here ig
-    if len(cache.keys()) == 1:
-        return kernel, next(iter(cache.values()))
-    else:
-        for cache_entry in cache.values():
-            if cache_entry.metadata.num_warps == num_warps:
-                return kernel, cache_entry
         raise AssertionError(
-            f"couldn't find a kernel cache entry with metadata matching the autotuner configs for kernel {kernel.__name__}"
+            # pyrefly: ignore [missing-attribute]
+            f"kernel caches not found for kernel {actual_kernel.__name__}"
         )
+
+    if len(cache.keys()) == 1:
+        return actual_kernel, next(iter(cache.values()))
+
+    has_constexprs = (
+        isinstance(actual_kernel, JITFunction)
+        and hasattr(actual_kernel, "constexprs")
+        and len(actual_kernel.constexprs) > 0
+    )
+
+    if has_constexprs:
+        constexpr_vals = {}
+        # pyrefly: ignore [missing-attribute]
+        for constexpr_idx in actual_kernel.constexprs:
+            # pyrefly: ignore [missing-attribute]
+            if constexpr_idx < len(actual_kernel.arg_names):
+                # pyrefly: ignore [missing-attribute]
+                param_name = actual_kernel.arg_names[constexpr_idx]
+                kwargs_dict = node.kwargs.get("kwargs", {})
+                if isinstance(kwargs_dict, dict):
+                    if param_name in kwargs_dict:
+                        constexpr_vals[param_name] = kwargs_dict[param_name]
+
+        expected_values = [
+            # pyrefly: ignore [missing-attribute]
+            constexpr_vals[actual_kernel.arg_names[idx]]
+            # pyrefly: ignore [missing-attribute]
+            for idx in actual_kernel.constexprs
+            # pyrefly: ignore [missing-attribute]
+            if actual_kernel.arg_names[idx] in constexpr_vals
+        ]
+
+        matching_entries = []
+        for sig_key, cache_entry in cache.items():
+            constexpr_matches = re.findall(r"\('constexpr',\s*([^)]+)\)", sig_key)
+            if constexpr_matches:
+                constexpr_values = []
+                for match in constexpr_matches:
+                    if match in ("True", "False"):
+                        constexpr_values.append(match == "True")
+                    elif "." in match or "e" in match or "E" in match:
+                        constexpr_values.append(float(match))
+                    else:
+                        constexpr_values.append(int(match))
+
+                if constexpr_values == expected_values:
+                    matching_entries.append((sig_key, cache_entry))
+    else:
+        matching_entries = list(cache.items())
+
+    if len(matching_entries) == 0:
+        raise AssertionError(
+            # pyrefly: ignore [missing-attribute]
+            f"couldn't find a kernel cache entry with metadata matching the autotuner configs for kernel {actual_kernel.__name__}. "
+            f"Available cache keys: {list(cache.keys())}"
+        )
+
+    if len(matching_entries) == 1:
+        return actual_kernel, matching_entries[0][1]
+
+    if is_autotuner:
+        for _sig_key, cache_entry in matching_entries:
+            entry_metadata = cache_entry.metadata
+            # pyrefly: ignore [missing-attribute]
+            for config in kernel.configs:
+                if is_metadata_matched(config, entry_metadata):
+                    return actual_kernel, cache_entry
+
+        raise AssertionError(
+            # pyrefly: ignore [missing-attribute]
+            f"Multiple cache entries found for autotuned kernel {actual_kernel.__name__} "
+            f"{'with same constexpr values' if has_constexprs else 'with no constexpr'} "
+            f"and couldn't disambiguate using configs. "
+        )
+
+    raise AssertionError(
+        # pyrefly: ignore [missing-attribute]
+        f"Multiple cache entries found for non-autotuned kernel {actual_kernel.__name__} "
+        f"{'with same constexpr values' if has_constexprs else 'with no constexpr'}. "
+        f"This should not happen. Available cache keys: {[key for key, _ in matching_entries]}"
+    )
 
 
 @final
@@ -763,8 +838,12 @@ class GraphModuleSerializer(metaclass=Final):
                     i += 1
 
                 assert isinstance(node.kwargs["grid"], list)
+
+                kernel_name_with_hash = (
+                    f"{kernel.fn.__name__}_{kernel_cache_metadata.hash}"
+                )
                 kwargs_new = {
-                    "name": kernel.fn.__name__,
+                    "name": kernel_name_with_hash,
                     "grid": node.kwargs["grid"][0],
                     "output_indices": output_indices,
                     "num_warps": kernel_cache_metadata.num_warps,
@@ -1463,10 +1542,10 @@ class GraphModuleSerializer(metaclass=Final):
         else:
             raise AssertionError("TODO")
 
-    def serialize_treespec(self, treespec):
+    def serialize_treespec(self, treespec: pytree.TreeSpec) -> str:
         # We want to additionally save all the field names of the namedtuples in
         # case users want to check that the treespec types are equivalent
-        def store_namedtuple_fields(ts):
+        def store_namedtuple_fields(ts: pytree.TreeSpec) -> None:
             if ts.type is None:
                 return
             if ts.type is namedtuple or pytree.is_namedtuple_class(ts.type):
@@ -1488,7 +1567,7 @@ class GraphModuleSerializer(metaclass=Final):
                         NamedTupleDef(field_names=ts.context._fields)
                     )
 
-            for child in ts.children_specs:
+            for child in ts.children():
                 store_namedtuple_fields(child)
 
         serialized_treespec = treespec_dumps(treespec, TREESPEC_VERSION)
@@ -2287,14 +2366,14 @@ class GraphModuleDeserializer(metaclass=Final):
         )
 
         # handle ShapeEnv asserts
-        if target == torch.ops.aten._assert_scalar.default:
+        if target is torch.ops.aten._assert_scalar.default:
             if not isinstance((arg := fx_node.args[0]), bool):
                 expr = arg.meta["val"]  # type: ignore[union-attr]
                 if isinstance(expr, torch.SymBool):
                     self.shape_env.guard_or_defer_runtime_assert(
                         expr.node.expr, "", fx_node
                     )
-        elif target == torch.ops.aten.sym_constrain_range_for_size.default:
+        elif target is torch.ops.aten.sym_constrain_range_for_size.default:
             sym = fx_node.args[0].meta["val"]  # type: ignore[union-attr]
             if isinstance(sym, torch.SymInt):
                 self.shape_env._constrain_range_for_size(sym.node.expr)
@@ -2741,7 +2820,7 @@ class GraphModuleDeserializer(metaclass=Final):
                     serialized_node.metadata
                 )
                 assert arg is not None
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 self.generate_getitem(meta_val, fx_node, arg, 0, deserialized_metadata)
                 fx_node.meta["val"] = tuple(meta_val)
                 self.serialized_name_to_node[fx_node.name] = fx_node
@@ -3152,7 +3231,7 @@ def serialize(
 
 def _dict_to_dataclass(cls, data):
     assert not isinstance(cls, str), f"Unresolved class type: '{cls}'."
-    if typing.get_origin(cls) == Annotated:
+    if typing.get_origin(cls) is Annotated:
         return _dict_to_dataclass(cls.__origin__, data)
     if typing.get_origin(cls) == typing.Union and type(None) in typing.get_args(cls):
         if data is None:
@@ -3167,7 +3246,7 @@ def _dict_to_dataclass(cls, data):
         _value = next(iter(data.values()))
         assert isinstance(_type, str)
         field_type = cls.__annotations__[_type]
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         return cls.create(**{_type: _dict_to_dataclass(field_type, _value)})
     elif dataclasses.is_dataclass(cls):
         fields = {}
@@ -3474,23 +3553,23 @@ def _canonicalize_graph(
         n.metadata.clear()
 
     # Stage 4: Aggregate values.
-    # pyrefly: ignore  # no-matching-overload
+    # pyrefly: ignore [no-matching-overload]
     sorted_tensor_values = dict(
         sorted(graph.tensor_values.items(), key=operator.itemgetter(0))
     )
-    # pyrefly: ignore  # no-matching-overload
+    # pyrefly: ignore [no-matching-overload]
     sorted_sym_int_values = dict(
         sorted(graph.sym_int_values.items(), key=operator.itemgetter(0))
     )
-    # pyrefly: ignore  # no-matching-overload
+    # pyrefly: ignore [no-matching-overload]
     sorted_sym_float_values = dict(
         sorted(graph.sym_float_values.items(), key=operator.itemgetter(0))
     )
-    # pyrefly: ignore  # no-matching-overload
+    # pyrefly: ignore [no-matching-overload]
     sorted_sym_bool_values = dict(
         sorted(graph.sym_bool_values.items(), key=operator.itemgetter(0))
     )
-    # pyrefly: ignore  # no-matching-overload
+    # pyrefly: ignore [no-matching-overload]
     sorted_custom_obj_values = dict(
         sorted(graph.custom_obj_values.items(), key=operator.itemgetter(0))
     )
@@ -3547,7 +3626,7 @@ def canonicalize(
         ExportedProgram: The canonicalized exported program.
     """
     ep = copy.deepcopy(ep)
-    # pyrefly: ignore  # annotation-mismatch
+    # pyrefly: ignore [annotation-mismatch]
     constants: set[str] = constants or set()
 
     opset_version = dict(sorted(ep.opset_version.items(), key=operator.itemgetter(0)))

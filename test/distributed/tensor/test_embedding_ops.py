@@ -168,7 +168,7 @@ class TestEmbeddingOp(DTensorTestBase):
         self._run_embedding_op_test(mesh, 0, [6, 7, 6], 13, 22)
         self._run_embedding_op_test(mesh, 0, [34], 15, 14, padding_idx=10)
 
-        from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
+        from torch.distributed.tensor.placement_types import MaskPartial
 
         # test collectives
         embedding_mod = torch.nn.Embedding(10, 20, device=self.device_type)
@@ -176,7 +176,7 @@ class TestEmbeddingOp(DTensorTestBase):
         inp = torch.randint(0, 10, (8, 8), device=self.device_type)
         replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
         output = sharded_embedding(replicated_inp)
-        self.assertIsInstance(output.placements[0], _MaskPartial)
+        self.assertIsInstance(output.placements[0], MaskPartial)
 
         comm_mode = CommDebugMode()
 
@@ -192,9 +192,9 @@ class TestEmbeddingOp(DTensorTestBase):
         inp = torch.randint(0, 10, (4, 4), device=self.device_type)
         replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
 
-        from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
+        from torch.distributed.tensor.placement_types import MaskPartial
 
-        # case 1: two embeddings with the same shape, thus sharing the underlying _MaskPartial
+        # case 1: two embeddings with the same shape, thus sharing the underlying MaskPartial
         # and MaskBuffer, because of cache hit from sharding propagation
 
         emb1 = torch.nn.Embedding(10, 23, device=self.device_type)
@@ -206,23 +206,23 @@ class TestEmbeddingOp(DTensorTestBase):
         output2 = sharded_emb2(replicated_inp)
 
         partial_placement1 = output1.placements[0]
-        self.assertIsInstance(partial_placement1, _MaskPartial)
+        self.assertIsInstance(partial_placement1, MaskPartial)
         output1.full_tensor()
 
         partial_placement2 = output2.placements[0]
-        self.assertIsInstance(partial_placement2, _MaskPartial)
+        self.assertIsInstance(partial_placement2, MaskPartial)
         output2.full_tensor()
 
         self.assertTrue(id(partial_placement1), id(partial_placement2))
 
         # case 2: two embeddings with the same logical_dim_size, but different logical_shape
-        # thus they will have different _MaskPartial placements (with no cache hit)
+        # thus they will have different MaskPartial placements (with no cache hit)
 
         emb3 = torch.nn.Embedding(10, 29, device=self.device_type)
         sharded_emb3 = self._apply_sharding(emb3, 0, mesh)
         output3 = sharded_emb3(replicated_inp)
         partial_placement3 = output3.placements[0]
-        self.assertIsInstance(partial_placement3, _MaskPartial)
+        self.assertIsInstance(partial_placement3, MaskPartial)
         output2.full_tensor()
 
         # not equal because of different logical_shape, despite of same logical_dim_size

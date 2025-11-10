@@ -591,7 +591,7 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
         )
 
     def is_mm(node: torch.fx.Node) -> bool:
-        return node.target == torch.ops.aten.mm.default
+        return node.target is torch.ops.aten.mm.default
 
     # the inner MM
     inner_mm = match.nodes[-1]
@@ -641,7 +641,7 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
                 if node is dst:
                     visited.add(node)
                 elif (node is src) or is_pointwise_node(node):
-                    for user in node.users.keys():
+                    for user in node.users:
                         # for nodes other than dst, bookkeep their users' input counts
                         if user not in input_counter:
                             input_counter[user] = len(user.all_input_nodes)

@@ -87,6 +87,14 @@ def forward(self, arg0_1):
     return (add,)""",
         )
 
+        new_inp = torch.randn(4)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            gm(
+                new_inp,
+            )
+            printed_output = mock_stdout.getvalue().strip()
+
+        self.assertEqual(printed_output, f"moo 1 2\nmoo {new_inp}\nmoo 1 2\nyeehop 4")
     def test_print_with_side_effect(self):
         class M(torch.nn.Module):
             def forward(self, x):
