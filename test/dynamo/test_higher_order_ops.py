@@ -3318,17 +3318,17 @@ class GraphModule(torch.nn.Module):
 
         hints_wrapper_body_1 = self.hints_wrapper_body_1
         hints_wrapper = torch.ops.higher_order.hints_wrapper(hints_wrapper_body_1, (x, l_y_), {}, hints = {'outer_body': True});  hints_wrapper_body_1 = x = l_y_ = None
-        res: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
-        return (res,)
+        getitem: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
+        return (getitem,)
 
     class hints_wrapper_body_1(torch.nn.Module):
         def forward(self, x: "f32[2, 4]", l_y_: "f32[4]"):
             hints_wrapper_body_0 = self.hints_wrapper_body_0
             hints_wrapper = torch.ops.higher_order.hints_wrapper(hints_wrapper_body_0, (x, l_y_), {}, hints = {'inner_body': True});  hints_wrapper_body_0 = x = l_y_ = None
-            x_1: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
+            getitem: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
 
-            x_2: "f32[2, 4]" = torch.abs(x_1);  x_1 = None
-            return (x_2,)
+            x_1: "f32[2, 4]" = torch.abs(getitem);  getitem = None
+            return (x_1,)
 
         class hints_wrapper_body_0(torch.nn.Module):
             def forward(self, x: "f32[2, 4]", l_y_: "f32[4]"):
