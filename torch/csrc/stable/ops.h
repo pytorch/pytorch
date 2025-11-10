@@ -273,6 +273,31 @@ inline torch::stable::Tensor clone(const torch::stable::Tensor& self) {
 
 // New ops should be added here if they use a brand new shim API
 
+// Parallel utility wrapper that provides a stable interface to at::parallel_for
+// This function has the same signature as at::parallel_for and allows stable
+// ABI code to leverage PyTorch's parallel execution capabilities.
+//
+// The function f will be called with (begin, end) ranges to process in
+// parallel. grain_size controls the minimum work size per thread for efficient
+// parallelization.
+template <class F>
+inline void parallel_for(
+    const int64_t begin,
+    const int64_t end,
+    const int64_t grain_size,
+    const F& f) {
+  auto callback = [](int64_t cb_begin, int64_t cb_end, void* ctx) {
+    const F* func = static_cast<const F*>(ctx);
+    (*func)(cb_begin, cb_end);
+  };
+  TORCH_ERROR_CODE_CHECK(torch_parallel_for(
+      begin,
+      end,
+      grain_size,
+      callback,
+      const_cast<void*>(static_cast<const void*>(&f))));
+}
+
 #endif
 
 HIDDEN_NAMESPACE_END(torch, stable)

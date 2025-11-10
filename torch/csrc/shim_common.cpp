@@ -8,6 +8,7 @@
 #include <torch/csrc/stable/library.h>
 #include <torch/library.h>
 
+#include <ATen/Parallel.h>
 #include <torch/csrc/shim_conversion_utils.h>
 #include <torch/csrc/stable/c/shim.h>
 
@@ -532,4 +533,22 @@ AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher(
           ret_type, torch::jit::pop(ivalue_stack), extension_build_version);
     }
   });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_parallel_for(
+    int64_t begin,
+    int64_t end,
+    int64_t grain_size,
+    ParallelFunc func,
+    void* ctx) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::parallel_for(
+        begin, end, grain_size, [func, ctx](int64_t begin, int64_t end) {
+          func(begin, end, ctx);
+        });
+  });
+}
+
+AOTI_TORCH_EXPORT uint32_t torch_get_thread_idx() {
+  return static_cast<uint32_t>(at::get_thread_num());
 }
