@@ -6,7 +6,7 @@ import functools
 import warnings
 from collections import deque
 from dataclasses import dataclass
-from typing import cast, Optional, overload, Protocol, TYPE_CHECKING, Union
+from typing import cast, overload, Protocol, TYPE_CHECKING
 from typing_extensions import TypeIs
 
 import torch
@@ -207,7 +207,7 @@ class TorchDispatchMode:
         return False
 
 
-def _get_current_dispatch_mode() -> Optional[TorchDispatchMode]:
+def _get_current_dispatch_mode() -> TorchDispatchMode | None:
     """
     Return the top user mode on the stack (the next one that would be
     executed) if there are any.
@@ -308,7 +308,7 @@ def _push_mode(mode: TorchDispatchMode) -> None:
     _set_mode_pre_dispatch(mode)
 
 
-def _pop_mode(k: Optional[Union[DispatchKey, torch._C._TorchDispatchModeKey]] = None):
+def _pop_mode(k: DispatchKey | torch._C._TorchDispatchModeKey | None = None):
     if k == torch._C.DispatchKey.PreDispatch:  # type: ignore[attr-defined]
         from torch._ops import _pop_mode_from_pre_dispatch
 
@@ -319,7 +319,7 @@ def _pop_mode(k: Optional[Union[DispatchKey, torch._C._TorchDispatchModeKey]] = 
 
 
 @contextlib.contextmanager
-def _pop_mode_temporarily(k: Optional[DispatchKey] = None):
+def _pop_mode_temporarily(k: DispatchKey | None = None):
     old = _pop_mode(k)
     try:
         yield old
@@ -429,18 +429,18 @@ class TensorWithFlatten(Protocol):
         non_blocking: bool = False,
         copy: bool = False,
         *,
-        memory_format: Optional[torch.memory_format] = None,
+        memory_format: torch.memory_format | None = None,
     ) -> torch.Tensor: ...
 
     @overload
     def to(
         self,
-        device: Optional[torch._prims_common.DeviceLikeType] = None,
-        dtype: Optional[torch.types._dtype] = None,
+        device: torch._prims_common.DeviceLikeType | None = None,
+        dtype: torch.types._dtype | None = None,
         non_blocking: bool = False,
         copy: bool = False,
         *,
-        memory_format: Optional[torch.memory_format] = None,
+        memory_format: torch.memory_format | None = None,
     ) -> torch.Tensor: ...
 
     @overload
@@ -450,7 +450,7 @@ class TensorWithFlatten(Protocol):
         non_blocking: bool = False,
         copy: bool = False,
         *,
-        memory_format: Optional[torch.memory_format] = None,
+        memory_format: torch.memory_format | None = None,
     ) -> torch.Tensor: ...
 
 
@@ -610,7 +610,7 @@ def _correct_storage_aliasing(func, schema_info, args, outs) -> None:
         alias_non_inplace_storage(args[arg_idx], outs[return_idx])
 
 
-def _get_write_alias(x) -> Optional[str]:
+def _get_write_alias(x) -> str | None:
     alias_set = x.alias_set
     if not alias_set or not x.is_write:
         return None
@@ -629,7 +629,7 @@ def _get_write_alias(x) -> Optional[str]:
 class AliasInfo:
     alias_set: set[str]
     is_write: bool
-    name: Optional[str]
+    name: str | None
 
 
 @dataclass
@@ -642,7 +642,7 @@ class SchemaInfo:
     # [_get_write_alias(x) for x in outs]. Guaranteed to contain no Nones; we coerce
     # all-Nones result to empty list instead, and we don't support
     # some-but-not-all-Nones.
-    outs_write_aliases: Optional[list[str]]
+    outs_write_aliases: list[str] | None
 
     # List of (arg_idx, return_idx) where args[arg_idx].alias_set &
     # outs[out_idx].alias_set is not empty, and not args[arg_idx].is_write.
@@ -726,12 +726,12 @@ def get_alias_info(func) -> SchemaInfo:
             if is_read_only_alias_match:
                 read_only_alias_match_indexes.append((arg_idx, return_idx))
 
-    outs_write_aliases_list: list[Optional[str]] = [
+    outs_write_aliases_list: list[str | None] = [
         _get_write_alias(r) for r in out_schemas
     ]
     non_nones = sum(x is not None for x in outs_write_aliases_list)
     if non_nones == 0:
-        outs_write_aliases: Optional[list[str]] = None
+        outs_write_aliases: list[str] | None = None
     elif non_nones != len(outs_write_aliases_list):
         # simplifying assumption: we don't have **any** ops with return types like "-> (Tensor(a!), Tensor)"
         raise RuntimeError("Unsupported schema: " + str(func._schema))
@@ -751,7 +751,7 @@ def get_alias_info(func) -> SchemaInfo:
 
 
 def autograd_would_have_decomposed(
-    func: torch._ops.OpOverload, flat_args: Sequence[Union[torch.Tensor, object]]
+    func: torch._ops.OpOverload, flat_args: Sequence[torch.Tensor | object]
 ) -> bool:
     """
     Suppose that an operator has CompositeImplicitAutograd decomp registered.
