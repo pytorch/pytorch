@@ -245,7 +245,7 @@ def stage_backward_weight(
             if non_none_grads:
                 summed_grad = sum(non_none_grads)
                 valid_edges.append(GradientEdge(intermediate, 0))
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 valid_grad_outputs.append(summed_grad)
 
         # Break a reference cycle caused inside stage_backward_input->get_hook->hook
@@ -337,7 +337,7 @@ def stage_backward(
                     return
                 assert isinstance(grad_val, dict)
                 assert set(output_val.keys()) == set(grad_val.keys())
-                for k in output_val.keys():
+                for k in output_val:
                     extract_tensors_with_grads(
                         output_val[k], grad_val[k], extract_tensors_with_grads
                     )

@@ -471,7 +471,7 @@ def _rref_typeof_on_user(
 
 
 T = TypeVar("T")
-# pyrefly: ignore  # invalid-annotation
+# pyrefly: ignore [invalid-annotation]
 GenericWithOneTypeVar = Generic[T]
 
 
@@ -718,7 +718,7 @@ def _invoke_rpc(
         is_async_exec = hasattr(func, "_wrapped_async_rpc_function")
 
         if is_async_exec:
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             wrapped = func._wrapped_async_rpc_function
             if isinstance(wrapped, torch.jit.ScriptFunction):
                 func = wrapped

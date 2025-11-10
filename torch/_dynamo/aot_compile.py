@@ -1,12 +1,14 @@
 import dataclasses
 import importlib
 import inspect
+import io
 import logging
 import pickle
 import types
+from collections.abc import Callable
 from contextlib import AbstractContextManager, ExitStack
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -48,6 +50,7 @@ class CompileArtifacts:
     compiled_fn: SerializableCallable
     original_code: types.CodeType
     closure: Optional[tuple[Any, ...]]
+    argdefs: Optional[tuple[Any, ...]]
     source_info: "SourceInfo"
     device_type: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
@@ -57,13 +60,40 @@ class CompileArtifacts:
         current_system.check_compatibility(self.system_info, self.device_type)
 
 
+class AOTCompilePickler(pickle.Pickler):
+    @classmethod
+    def _unpickle_cell(cls, val: Any) -> Any:
+        def _() -> Any:
+            return val
+
+        assert _.__closure__ is not None
+        return _.__closure__[0]
+
+    # pyrefly: ignore [bad-override]
+    def reducer_override(self, obj: Any) -> Any:
+        if isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
+            return type(self)._unpickle_cell, (obj.cell_contents,)
+        return NotImplemented
+
+
 @dataclass
 class AOTCompiledFunction:
     _artifacts: CompileArtifacts
     _guard_check_enabled: bool = True
 
     def guard_check(self, *args: Any, **kwargs: Any) -> bool:
-        f_locals = bind_locals(self._artifacts.signature, *args, **kwargs)
+        f_locals: dict[str, Any] = {}
+        if self._artifacts.closure:
+            assert self._artifacts.bytecode.co_freevars and len(
+                self._artifacts.closure
+            ) == len(self._artifacts.bytecode.co_freevars)
+            f_locals = {
+                name: cell.cell_contents
+                for name, cell in zip(
+                    self._artifacts.bytecode.co_freevars, self._artifacts.closure
+                )
+            }
+        f_locals.update(bind_locals(self._artifacts.signature, *args, **kwargs))
         assert self._artifacts.guard_manager is not None
         return self._artifacts.guard_manager.check(f_locals)
 
@@ -80,9 +110,12 @@ class AOTCompiledFunction:
             **import_sources,
             self._artifacts.backend_id: self._artifacts.compiled_fn,
         }
-        # pyrefly: ignore  # read-only
+        # pyrefly: ignore [read-only]
         self.fn = types.FunctionType(
-            self._artifacts.bytecode, f_globals, closure=self._artifacts.closure
+            self._artifacts.bytecode,
+            f_globals,
+            closure=self._artifacts.closure,
+            argdefs=self._artifacts.argdefs,
         )
 
         if self._artifacts.guard_manager is None:
@@ -121,7 +154,10 @@ class AOTCompiledFunction:
             type(compiled_fn).serialize_compile_artifacts(compiled_fn),
         )
         state["original_code"] = SerializedCode.from_code_object(state["original_code"])
-        return pickle.dumps(state)
+        buf = io.BytesIO()
+        pickler = AOTCompilePickler(buf)
+        pickler.dump(state)
+        return buf.getvalue()
 
     @classmethod
     def deserialize(cls, data: bytes) -> "AOTCompiledFunction":
@@ -234,6 +270,7 @@ def aot_compile_fullgraph(
             compiled_fn=compiled_fn,
             original_code=fn.__code__,
             closure=fn.__closure__,
+            argdefs=fn.__defaults__,
             source_info=source_info,
             device_type=device_type,
         )

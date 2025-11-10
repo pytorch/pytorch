@@ -14,11 +14,12 @@ import re
 import sys
 import textwrap
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
+from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
 from typing_extensions import Self
 from unittest.mock import patch
 
@@ -332,7 +333,7 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         """Convert index variable to symbolic form."""
         return sympy_index_symbol(str(index_var))
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> str:
@@ -436,7 +437,7 @@ class TritonTemplateKernel(TritonKernel):
         # for templates with fixed epilogues
         self.prefix_args = prefix_args
         self.suffix_args = suffix_args
-        # pyrefly: ignore  # invalid-type-var
+        # pyrefly: ignore [invalid-type-var]
         self.epilogue_fn = epilogue_fn
         self.render_hooks = {}  # type: ignore[var-annotated]
         self.triton_meta: Optional[dict[str, object]] = None
@@ -554,7 +555,7 @@ class TritonTemplateKernel(TritonKernel):
         context = (
             contextlib.nullcontext
             if not self.ops_handler
-            # pyrefly: ignore  # not-callable
+            # pyrefly: ignore [not-callable]
             else lambda: V.set_ops_handler(self.ops_handler(V.get_ops_handler()))
         )
         with context():  # type: ignore[operator]
@@ -993,7 +994,7 @@ class TritonTemplateKernel(TritonKernel):
                             f"{output_name} = {value_str}.broadcast_to(xindex.shape)"
                         )
 
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self.ops_handler = StoreOutputSubstitution
 
             input_node = self.named_input_nodes[input_name]
@@ -1197,7 +1198,7 @@ class TritonTemplateKernel(TritonKernel):
                                 val_shape[i],
                                 i,
                                 len(index_order),
-                                # pyrefly: ignore  # missing-argument
+                                # pyrefly: ignore [missing-argument]
                                 block_name=range_tree.symt.name,
                             )
                         )
@@ -1211,7 +1212,7 @@ class TritonTemplateKernel(TritonKernel):
                         )
                         # Update the val_shape information to use consistent naming
                         # after the remapping.
-                        # pyrefly: ignore  # missing-argument
+                        # pyrefly: ignore [missing-argument]
                         val_shape_copy[i] = range_tree.symt.name
                     # Reverse the index symbols because TMA is indexed
                     # as (x, y) whereas the variables will naturally be indexed
@@ -1289,7 +1290,7 @@ class TritonTemplateKernel(TritonKernel):
                 if output_index == contiguous_index:
                     output_index = sympy.Symbol("xindex", integer=True)
 
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self.template_out_shape = val_shape if val_shape else val
             acc_dtype = (
                 triton_type_to_torch(self.meta["ACC_TYPE"])
@@ -1458,7 +1459,9 @@ class TritonTemplateKernel(TritonKernel):
             return (grid_args, map(type, grid_args))
         return ((), ())
 
-    def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
+    def call_kernel(
+        self, name: str, node: Optional[ir.IRNode] = None, deallocate_ws: bool = True
+    ):
         wrapper = V.graph.wrapper_code
         _, call_args, _, arg_types = self.args.python_argdefs()
 
@@ -1906,7 +1909,7 @@ class TritonTemplate(KernelTemplate):
             extra,
             input_call_args,
             prologue_supported_inputs,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             kernel_args_sizevars_keys,
             kernel_options,
         )
@@ -2102,6 +2105,11 @@ class TritonTemplate(KernelTemplate):
                 "matrix_instr_nonkdim": kwargs.get("matrix_instr_nonkdim", 0),
                 "waves_per_eu": kwargs.get("waves_per_eu", 0),
                 "kpack": kwargs.get("kpack", 2),
+                **{
+                    k: kwargs[k]
+                    for k in AlgorithmSelectorCache.FLEX_ATTENTION_TUNABLE_KEYS
+                    if k in kwargs
+                },
             },
             mutated_inputs=mutated_inputs,
             workspace_arg=workspace_arg,
@@ -2137,6 +2145,8 @@ class ExternKernelChoice:
         # There is no src hash for ExternKernelChoice in the traditional sense
         # so we indicate this by returning None
         self.src_hash = None
+        # By default GraphModule is None for extern kernels if not set
+        self.gm = None
 
     def to_callable(self):
         return getattr(extern_kernels, self.name)
@@ -2309,6 +2319,7 @@ class ExternKernelCaller(ChoiceCaller):
         self.choice = choice
         self.kwargs = kwargs or {}
         self.has_out_variant = has_out_variant
+        self.gm = choice.gm
 
     def __str__(self) -> str:
         return f"ExternKernelCaller({self.choice.call_name()})"
@@ -2395,6 +2406,17 @@ def get_mm_log_filename() -> Optional[str]:
     return mm_file_name
 
 
+@functools.cache
+def get_flex_attention_log_filename() -> Optional[str]:
+    flex_attention_file_name = os.environ.get(
+        "TORCHINDUCTOR_FLEX_ATTENTION_LOGGING_FILE", None
+    )
+    if not flex_attention_file_name:
+        return None
+
+    return str(Path(flex_attention_file_name).with_suffix(".json"))
+
+
 def append_to_log(filename, data):
     lock_file = filename.replace(".json", ".lock")
     lock = FileLock(lock_file)
@@ -2470,7 +2492,7 @@ class DataProcessorTemplateWrapper:
             self._postprocessor = lambda x: x
         assert "input_nodes" in kwargs
         assert "layout" in kwargs
-        # pyrefly: ignore  # not-callable
+        # pyrefly: ignore [not-callable]
         kwargs["input_nodes"], kwargs["layout"] = preprocessor(
             kwargs["input_nodes"], kwargs["layout"]
         )
@@ -2605,6 +2627,25 @@ class AlgorithmSelectorCache(PersistentCache):
     doesn't depend on the output layout.
     """
 
+    FLEX_ATTENTION_TUNABLE_KEYS = tuple(
+        dict.fromkeys(
+            [
+                "num_warps",
+                "num_stages",
+                "BLOCK_M",
+                "BLOCK_N",
+                "BLOCK_M1",
+                "BLOCK_N1",
+                "BLOCK_M2",
+                "BLOCK_N2",
+                "USE_TMA",
+                "kpack",
+                "matrix_instr_nonkdim",
+                "waves_per_eu",
+            ]
+        )
+    )
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
@@ -2642,7 +2683,7 @@ class AlgorithmSelectorCache(PersistentCache):
             choice for choice in choices if isinstance(choice, ExternKernelChoice)
         ]
         if len(externs) > 0:
-            # pyrefly: ignore  # bad-return
+            # pyrefly: ignore [bad-return]
             return externs[0]
         else:
             return choices[0]
@@ -2662,6 +2703,7 @@ class AlgorithmSelectorCache(PersistentCache):
         precompilation_timeout_seconds: int = 60 * 60,
         return_multi_template=False,
         best_config_future=None,
+        return_choice=False,  # TODO: return_choice is temporary and will be refactored soon
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
@@ -2671,8 +2713,10 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # Templates selected with input_gen_fns require specific input data to avoid IMA
         # Passing custom input gen fns to benchmark_fusion NYI, so skip deferred template selection
-        # TODO(jgong5): support multi-template on CPU
-        if input_gen_fns is not None or layout.device.type == "cpu":
+        # TODO(jgong5): support multi-template on CPU C++ backend
+        if input_gen_fns is not None or (
+            layout.device.type == "cpu" and config.cpu_backend != "triton"
+        ):
             return_multi_template = False
 
         # TODO - assert that we have not mutating kernels here
@@ -2919,7 +2963,6 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
         timings = do_autotuning(choices, precompile_fn)
-
         # if timings is empty, we really have no choice but to return a semi-random
         # choice. returning the first `ExternKernelCaller` is probably the safest bet
         # in this case, since it will generally be the ATen kernel. if there are no
@@ -2934,18 +2977,25 @@ class AlgorithmSelectorCache(PersistentCache):
                         "Autotuning returned empty timings, falling back to first `ExternKernelCaller`: %s",
                         node,
                     )
+                    if return_choice:
+                        return node, choice
                     return node
             node = choices[0].output_node()
+            choice = choices[0]
             log.debug(
                 "Autotuning returned empty timings, falling back to first choice: %s",
                 node,
             )
+            if return_choice:
+                return node, choice
             return node
 
         # if we got any timings at all, pick the best of those
         choice = min(timings, key=timings.__getitem__)
         node = choice.output_node()
         log.debug("Autotuning selected choice: %s", node)
+        if return_choice:
+            return node, choice
         return node
 
     def make_precompile_fn(
@@ -3142,7 +3192,7 @@ class AlgorithmSelectorCache(PersistentCache):
             x.get_name(): input_gen_fns.get(
                 i,
                 lambda x: cls.benchmark_example_value(x, hint_override=hint_override),
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
             )(x)
             for i, x in enumerate(input_nodes)
         }
@@ -3287,9 +3337,11 @@ class AlgorithmSelectorCache(PersistentCache):
                 msg = str(e)
                 if "invalid argument" in msg:
                     msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
-                else:
-                    if "illegal memory access" in msg:
-                        msg += "\n\nEither error in template or triton bug.\n"
+                elif "illegal memory access" in msg:
+                    msg += "\n\nEither error in template or triton bug.\n"
+                elif "unspecified launch failure" in msg:
+                    msg += "\n\nAn unrecoverable unspecified launch failure was caught during autotuning."
+                    msg += "\nPlease try re-running with TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC=1.\n\n"
 
                 if isinstance(choice, CUDATemplateCaller):
                     log.debug(
@@ -3537,6 +3589,74 @@ class AlgorithmSelectorCache(PersistentCache):
         return pruned_choices
 
     @staticmethod
+    def get_flex_attention_choice_info(
+        choice: ChoiceCaller, timings: dict[ChoiceCaller, float]
+    ) -> dict[str, Any]:
+        if isinstance(choice, torch._inductor.select_algorithm.ExternKernelCaller):
+            return {"type": "extern", "time": timings[choice]}
+
+        assert isinstance(choice, torch._inductor.select_algorithm.TritonTemplateCaller)
+
+        info = choice.info_dict()
+        result = {
+            "type": "triton",
+            "time": timings[choice],
+        }
+
+        for key in AlgorithmSelectorCache.FLEX_ATTENTION_TUNABLE_KEYS:
+            if key in info:
+                # pyrefly: ignore [unsupported-operation]
+                result[key] = info[key]
+
+        return result
+
+    @staticmethod
+    def maybe_log_flex_attention_results(
+        name: str, input_nodes: list[ir.IRNode], timings: dict[ChoiceCaller, float]
+    ) -> None:
+        flex_attention_filename = get_flex_attention_log_filename()
+        if not flex_attention_filename or "flex_attention" not in name:
+            return
+
+        if len(input_nodes) < 3:
+            return
+
+        query_size = input_nodes[0].get_size()
+        key_size = input_nodes[1].get_size()
+        value_size = input_nodes[2].get_size()
+
+        B = query_size[0]
+        Hq = query_size[1]
+        seq_len_q = query_size[2]
+        qk_head_dim = query_size[3]
+        Hkv = key_size[1]
+        seq_len_kv = key_size[2]
+        v_head_dim = value_size[3]
+
+        kernel_type = "backward" if "backward" in name else "forward"
+        dims_key = str(
+            (
+                kernel_type,
+                B,
+                Hq,
+                Hkv,
+                seq_len_q,
+                seq_len_kv,
+                qk_head_dim,
+                v_head_dim,
+            )
+        )
+
+        sorted_choices = sorted(timings, key=timings.__getitem__)
+        out_dict = {
+            dims_key: [
+                AlgorithmSelectorCache.get_flex_attention_choice_info(choice, timings)
+                for choice in sorted_choices
+            ]
+        }
+        append_to_log(flex_attention_filename, out_dict)
+
+    @staticmethod
     def log_results(
         name: str,
         input_nodes: list[ir.IRNode],
@@ -3546,6 +3666,7 @@ class AlgorithmSelectorCache(PersistentCache):
         prescreening_elapse: Optional[float] = None,
         hint_override: Optional[int] = None,
     ):
+        """Log the autotuning results, currently only handles mm and flex"""
         V.debug.log_autotuning_results(
             name, input_nodes, timings, elapse, precompile_elapse
         )
@@ -3571,6 +3692,7 @@ class AlgorithmSelectorCache(PersistentCache):
         dtypes = ", ".join([str(n.get_dtype()) for n in input_nodes])
         if config.autotune_num_choices_displayed == 0:
             return
+
         # when autotune_num_choices_displayed is None, [:None] means all
         n = config.autotune_num_choices_displayed
         top_k = sorted(timings, key=timings.__getitem__)[:n]
@@ -3608,11 +3730,13 @@ class AlgorithmSelectorCache(PersistentCache):
             M, K = input_nodes[-2].get_size()[:2]
             N = input_nodes[-1].get_size()[-1]
 
-            out_dict = {
-                str((M, K, N)): [get_choice_info(choice) for choice in timings.keys()]
-            }
+            out_dict = {str((M, K, N)): [get_choice_info(choice) for choice in timings]}
 
             append_to_log(mm_filename, out_dict)
+
+        AlgorithmSelectorCache.maybe_log_flex_attention_results(
+            name, input_nodes, timings
+        )
 
         best_time = timings[best]
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
@@ -3681,8 +3805,8 @@ class AlgorithmSelectorCache(PersistentCache):
             ),
             node.get_device(),
             node.get_dtype(),
-            # pyrefly: ignore  # missing-attribute
             V.graph.sizevars.atomically_apply_size_hint(
+                # pyrefly: ignore [missing-attribute]
                 node.layout.offset,
                 fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
@@ -3693,7 +3817,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     fallback=config.unbacked_symint_fallback,
                     hint_override=hint_override,
                 )
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 for size in V.graph.get_allocation_size(node)
             ),
         )

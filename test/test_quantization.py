@@ -51,7 +51,7 @@ from quantization.eager.test_quantize_eager_qat import TestQuantizeEagerQAT  # n
 from quantization.eager.test_quantize_eager_qat import TestQuantizeEagerQATNumerics  # noqa: F401
 # 3. Eager mode fusion passes
 from quantization.eager.test_fuse_eager import TestFuseEager  # noqa: F401
-# 4. Testing model numerics between quanitzed and FP32 models
+# 4. Testing model numerics between quantized and FP32 models
 from quantization.eager.test_model_numerics import TestModelNumericsEager  # noqa: F401
 # 5. Tooling: numeric_suite
 from quantization.eager.test_numeric_suite_eager import TestNumericSuiteEager  # noqa: F401

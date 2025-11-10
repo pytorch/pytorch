@@ -32,7 +32,7 @@ import pickle
 from collections.abc import Sequence
 from typing import Optional
 
-from tools.flight_recorder.components.builder import build_db
+from tools.flight_recorder.components.builder import build_db, transform_ft
 from tools.flight_recorder.components.config_manager import JobConfig
 from tools.flight_recorder.components.loader import read_dir
 from tools.flight_recorder.components.types import types
@@ -40,17 +40,23 @@ from tools.flight_recorder.components.types import types
 
 def main(args: Optional[Sequence[str]] = None) -> None:
     config = JobConfig()
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     args = config.parse_args(args)
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     assert args.trace_dir, "Trace directory trace_dir is required"
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     details, version = read_dir(args)
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [missing-attribute]
+    if args.transform_ft:
+        # pyrefly: ignore [missing-attribute]
+        assert args.group_world_size, "World size is required for transform_ft"
+        # pyrefly: ignore [bad-argument-type]
+        details = transform_ft(details, args.group_world_size)
+    # pyrefly: ignore [bad-argument-type]
     db = build_db(details, args, version)
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     if args.output:
-        # pyrefly: ignore  # no-matching-overload
+        # pyrefly: ignore [no-matching-overload]
         with open(args.output, "wb") as f:
             pickle.dump((types, db), f)
 

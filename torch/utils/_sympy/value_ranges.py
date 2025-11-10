@@ -10,7 +10,6 @@ import operator
 from collections.abc import Callable
 from typing import (
     Generic,
-    Optional,
     overload,
     SupportsFloat,
     TYPE_CHECKING,
@@ -126,9 +125,9 @@ AllFn2 = Union[ExprFn2, BoolFn2]
 class ValueRanges(Generic[_T]):
     if TYPE_CHECKING:
         # ruff doesn't understand circular references but mypy does
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         ExprVR = ValueRanges[sympy.Expr]  # noqa: F821
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         BoolVR = ValueRanges[SympyBoolean]  # noqa: F821
         AllVR = Union[ExprVR, BoolVR]
 
@@ -325,16 +324,16 @@ class ValueRanges(Generic[_T]):
     @overload
     @staticmethod
     # work around the fact that bool and int overlap
-    def wrap(arg: Union[ExprIn, ExprVR]) -> ExprVR:  # type: ignore[overload-overlap]
+    def wrap(arg: ExprIn | ExprVR) -> ExprVR:  # type: ignore[overload-overlap]
         ...
 
     @overload
     @staticmethod
-    def wrap(arg: Union[BoolIn, BoolVR]) -> BoolVR:  # type: ignore[misc]
+    def wrap(arg: BoolIn | BoolVR) -> BoolVR:  # type: ignore[misc]
         ...
 
     @staticmethod
-    def wrap(arg: Union[AllIn, AllVR]) -> AllVR:
+    def wrap(arg: AllIn | AllVR) -> AllVR:
         if isinstance(arg, ValueRanges):
             return arg
         if isinstance(arg, float) and math.isnan(arg):
@@ -343,29 +342,29 @@ class ValueRanges(Generic[_T]):
         return ValueRanges(arg, arg)  # type: ignore[arg-type]
 
     @staticmethod
-    def increasing_map(x: Union[ExprIn, ExprVR], fn: ExprFn) -> ExprVR:
+    def increasing_map(x: ExprIn | ExprVR, fn: ExprFn) -> ExprVR:
         """Increasing: x <= y => f(x) <= f(y)."""
         x = ValueRanges.wrap(x)
         return ValueRanges(fn(x.lower), fn(x.upper))
 
     @overload
     @staticmethod
-    def decreasing_map(x: Union[ExprIn, ExprVR], fn: ExprFn) -> ExprVR: ...
+    def decreasing_map(x: ExprIn | ExprVR, fn: ExprFn) -> ExprVR: ...
 
     @overload
     @staticmethod
-    def decreasing_map(x: Union[BoolIn, BoolVR], fn: BoolFn) -> BoolVR:  # type: ignore[misc]
+    def decreasing_map(x: BoolIn | BoolVR, fn: BoolFn) -> BoolVR:  # type: ignore[misc]
         ...
 
     @staticmethod
-    def decreasing_map(x: Union[AllIn, AllVR], fn: AllFn) -> AllVR:
+    def decreasing_map(x: AllIn | AllVR, fn: AllFn) -> AllVR:
         """Decreasing: x <= y => f(x) >= f(y)."""
         x = ValueRanges.wrap(x)
         # consistently either Expr or Bool, but we don't know it here
         return ValueRanges(fn(x.upper), fn(x.lower))  # type: ignore[arg-type]
 
     @staticmethod
-    def monotone_map(x: Union[ExprIn, ExprVR], fn: ExprFn) -> ExprVR:
+    def monotone_map(x: ExprIn | ExprVR, fn: ExprFn) -> ExprVR:
         """It's increasing or decreasing."""
         x = ValueRanges.wrap(x)
         l = fn(x.lower)
@@ -373,7 +372,7 @@ class ValueRanges(Generic[_T]):
         return ValueRanges(min(l, u), max(l, u))
 
     @staticmethod
-    def convex_min_zero_map(x: Union[ExprIn, ExprVR], fn: ExprFn) -> ExprVR:
+    def convex_min_zero_map(x: ExprIn | ExprVR, fn: ExprFn) -> ExprVR:
         """Fn is convex and has a minimum at 0."""
         x = ValueRanges.wrap(x)
         if 0 in x:
@@ -387,23 +386,23 @@ class ValueRanges(Generic[_T]):
     @overload
     @staticmethod
     def coordinatewise_increasing_map(
-        x: Union[ExprIn, ExprVR],
-        y: Union[ExprIn, ExprVR],
+        x: ExprIn | ExprVR,
+        y: ExprIn | ExprVR,
         fn: ExprFn2,
     ) -> ExprVR: ...
 
     @overload
     @staticmethod
     def coordinatewise_increasing_map(  # type: ignore[misc]
-        x: Union[BoolIn, BoolVR],
-        y: Union[BoolIn, BoolVR],
+        x: BoolIn | BoolVR,
+        y: BoolIn | BoolVR,
         fn: BoolFn2,
     ) -> BoolVR: ...
 
     @staticmethod
     def coordinatewise_increasing_map(
-        x: Union[AllIn, AllVR],
-        y: Union[AllIn, AllVR],
+        x: AllIn | AllVR,
+        y: AllIn | AllVR,
         fn: AllFn2,
     ) -> AllVR:
         """
@@ -484,7 +483,7 @@ class SymPyValueRangeAnalysis:
     @staticmethod
     def to_dtype(a, dtype, src_dtype=None):
         if dtype == torch.float64:
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             return ValueRanges.increasing_map(a, ToFloat)
         elif dtype == torch.bool:
             return ValueRanges.unknown_bool()
@@ -494,7 +493,7 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def trunc_to_int(a, dtype):
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         return ValueRanges.increasing_map(a, TruncToInt)
 
     @staticmethod
@@ -652,7 +651,7 @@ class SymPyValueRangeAnalysis:
             return ValueRanges.coordinatewise_monotone_map(
                 a,
                 b,
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 _keep_float(IntTrueDiv),
             )
 
@@ -668,7 +667,7 @@ class SymPyValueRangeAnalysis:
             return ValueRanges.coordinatewise_monotone_map(
                 a,
                 b,
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 _keep_float(FloatTrueDiv),
             )
 
@@ -748,7 +747,7 @@ class SymPyValueRangeAnalysis:
             # We should know that b >= 0 but we may have forgotten this fact due
             # to replacements, so don't assert it, but DO clamp it to prevent
             # degenerate problems
-            # pyrefly: ignore  # no-matching-overload
+            # pyrefly: ignore [no-matching-overload]
             return ValueRanges.coordinatewise_increasing_map(
                 a, b & ValueRanges(0, int_oo), PowByNatural
             )
@@ -915,7 +914,7 @@ class SymPyValueRangeAnalysis:
 
     @classmethod
     def round_to_int(cls, number, dtype):
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         return ValueRanges.increasing_map(number, RoundToInt)
 
     # It's used in some models on symints
@@ -1032,12 +1031,12 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def trunc(x):
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         return ValueRanges.increasing_map(x, TruncToFloat)
 
 
 def bound_sympy(
-    expr: sympy.Expr, ranges: Optional[dict[sympy.Symbol, ValueRanges]] = None
+    expr: sympy.Expr, ranges: dict[sympy.Symbol, ValueRanges] | None = None
 ) -> ValueRanges:
     log.debug(
         "bound_sympy(%s)%s",
