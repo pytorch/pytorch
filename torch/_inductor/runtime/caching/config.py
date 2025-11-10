@@ -8,6 +8,16 @@ from torch._environment import is_fbcode
 
 @cache
 def _env_var_config(env_var: str, default: bool) -> bool:
+    """Get boolean configuration value from environment variable with default fallback.
+
+    Args:
+        env_var: Name of the environment variable to check
+        default: Default value to return if environment variable is not set
+
+    Returns:
+        True if environment variable is "1", False if it's any other value,
+        or the default value if the environment variable is not set
+    """
     if (env_val := os.environ.get(env_var)) is not None:
         return env_val == "1"
     return default
