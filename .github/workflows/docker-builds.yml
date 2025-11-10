@@ -90,9 +90,9 @@ jobs:
     # runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}"
     runs-on: "${{ matrix.runner }}"
     outputs:
-      docker-pytorch-linux-jammy-rocm-n-py3: ${{ steps.generate_output.outputs.pytorch-linux-jammy-rocm-n-py3 }}
-      docker-pytorch-linux-noble-rocm-n-py3: ${{ steps.generate_output.outputs.pytorch-linux-noble-rocm-n-py3 }}
-      docker-pytorch-linux-jammy-rocm-n-py3-benchmarks: ${{ steps.generate_output.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}
+      docker-pytorch-linux-jammy-rocm-n-py3: ${{ steps.push-to-ghcr-io.outputs.pytorch-linux-jammy-rocm-n-py3 }}
+      docker-pytorch-linux-noble-rocm-n-py3: ${{ steps.push-to-ghcr-io.outputs.pytorch-linux-noble-rocm-n-py3 }}
+      docker-pytorch-linux-jammy-rocm-n-py3-benchmarks: ${{ steps.push-to-ghcr-io.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}
 
     steps:
       - name: Clean workspace
@@ -124,12 +124,12 @@ jobs:
       #  with:
       #    docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
 
-      - name: Generate output
-        id: generate_output
-        run: |
-          docker_image_name="${{ matrix.docker-image-name }}"
-          docker_image_tag="${{ steps.build-docker-image.outputs.docker-image }}"
-          echo "${docker_image_name}=${docker_image_tag}" >> "$GITHUB_OUTPUT"
+      #- name: Generate output
+      #  id: generate_output
+      #  run: |
+      #    docker_image_name="${{ matrix.docker-image-name }}"
+      #    docker_image_tag="${{ steps.build-docker-image.outputs.docker-image }}"
+      #    echo "${docker_image_name}=${docker_image_tag}" >> "$GITHUB_OUTPUT"
 
       - uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
         name: Push to https://ghcr.io/
@@ -150,6 +150,9 @@ jobs:
             echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
             docker tag "${ECR_DOCKER_IMAGE}" "${ghcr_image}:${tag}"
             docker push "${ghcr_image}:${tag}"
+            docker_image_name="${{ matrix.docker-image-name }}"
+            docker_image_tag="${{ steps.build-docker-image.outputs.docker-image }}"
+            echo "${docker_image_name}=${ghcr_image}:${tag}" >> "$GITHUB_OUTPUT"
 
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
