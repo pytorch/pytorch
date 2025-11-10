@@ -1,3 +1,4 @@
+import threading
 from collections import defaultdict
 from collections.abc import Sequence
 from typing import cast, Optional
@@ -7,6 +8,7 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
 from torch._prims_common import ShapeType
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor._collective_utils import redistribute_cost
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
@@ -30,19 +32,28 @@ class ExplicitRedistributionContext:
     during forward and perform a manual redistribution during backwards.
     """
 
-    _explicit_redistribute_mode = False
+    _local = threading.local()
+
+    def __init__(self, enable: bool = True, strict: bool = False):
+        self._enable = enable
+        self._strict = strict
 
     @classmethod
-    def is_active(cls) -> bool:
-        return cls._explicit_redistribute_mode
+    def is_redistribute_allowed(cls, src_spec: DTensorSpec, dst_spec: DTensorSpec):
+        if instance := getattr(cls._local, "_active", None):
+            if instance._enable:
+                if instance._strict:
+                    return False
+                return redistribute_cost(src_spec, dst_spec) <= 0
+        return True
 
     def __enter__(self):
-        self.prev = ExplicitRedistributionContext._explicit_redistribute_mode
-        ExplicitRedistributionContext._explicit_redistribute_mode = True
+        self._prev = getattr(ExplicitRedistributionContext._local, "_active", None)
+        ExplicitRedistributionContext._local._active = self
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        ExplicitRedistributionContext._explicit_redistribute_mode = self.prev
+        ExplicitRedistributionContext._local._active = self._prev
 
 
 def _explicit_order_placements(
