@@ -23,7 +23,7 @@ jobs:
           sudo git config --system --get core.alternateObjectDirectories | tr ':' '\n' | nl
 
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: saienduri/pytorch/.github/actions/checkout-pytorch@dev/saienduri/test-frac
         with:
           no-sudo: true
           clean: false
