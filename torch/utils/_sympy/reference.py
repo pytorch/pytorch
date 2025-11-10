@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import math
 import operator
-from typing import Union
+from typing import NoReturn
 
 import sympy
 
@@ -139,7 +139,7 @@ class ReferenceAnalysis:
         return FloorDiv(a, b)
 
     @staticmethod
-    def truncdiv(a, b):
+    def truncdiv(a, b) -> NoReturn:
         raise NotImplementedError("TODO: truncdiv")
 
     @staticmethod
@@ -257,11 +257,11 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
         raise NotImplementedError(f"to_dtype {dtype} NYI")
 
     @staticmethod
-    def exp(x):
+    def exp(x) -> NoReturn:
         raise AssertionError("exp is not valid shape sympy expr")
 
     @staticmethod
-    def log(x):
+    def log(x) -> NoReturn:
         raise AssertionError("log is not valid shape sympy expr")
 
     @staticmethod
@@ -359,7 +359,7 @@ class TensorReferenceAnalysis:
     # function isn't traced correctly.  Here for completeness.
     @staticmethod
     def constant(c, dtype):
-        d: Union[int, float, bool]
+        d: int | float | bool
         if dtype is torch.int64:
             d = int(c)
         elif dtype is torch.double:
@@ -448,7 +448,7 @@ class TensorReferenceAnalysis:
         return _to_dtype(x, dtype)
 
     @staticmethod
-    def mod(x, y):
+    def mod(x, y) -> NoReturn:
         # TODO: https://github.com/pytorch/pytorch/pull/133654
         raise NotImplementedError(
             "no C-style modulus operation available from frontend atm"
@@ -484,7 +484,7 @@ class TensorReferenceAnalysis:
         return torch.ops.aten.div.Tensor_mode(a, b, rounding_mode="floor")
 
     @staticmethod
-    def truncdiv(a, b):
+    def truncdiv(a, b) -> NoReturn:
         raise NotImplementedError(
             "no C-style truncdiv operation available from frontend atm"
         )
@@ -575,7 +575,7 @@ class TensorReferenceAnalysis:
         return torch.ops.aten.round.default(a)
 
     @staticmethod
-    def round_decimal(a, b):
+    def round_decimal(a, b) -> NoReturn:
         raise NotImplementedError(
             "round decimal doesn't support Tensor second argument atm"
         )

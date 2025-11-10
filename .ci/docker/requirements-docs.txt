@@ -1,15 +1,11 @@
-sphinx==5.3.0
+sphinx==7.2.6
 #Description: This is used to generate PyTorch docs
-#Pinned versions: 5.3.0
+#Pinned versions: 7.2.6
 
-standard-imghdr==3.13.0; python_version >= "3.13"
-#Description: This is needed by Sphinx, so it needs to be added here.
-# The reasons are as follows:
-# 1) This module has been removed from the Python standard library since Python 3.13(https://peps.python.org/pep-0594/#imghdr);
-# 2) The current version of Sphinx (5.3.0) is not compatible with Python 3.13.
-# Once Sphinx is upgraded to a version compatible with Python 3.13 or later, we can remove this dependency.
+pytorch_sphinx_theme2==0.2.0
+#Description: This is needed to generate PyTorch docs
+#Pinned versions: 0.2.0
 
--e git+https://github.com/pytorch/pytorch_sphinx_theme.git@71e55749be14ceb56e7f8211a9fb649866b87ad4#egg=pytorch_sphinx_theme2
 # TODO: sphinxcontrib.katex 0.9.0 adds a local KaTeX server to speed up pre-rendering
 # but it doesn't seem to work and hangs around idly. The initial thought that it is probably
 # something related to Docker setup. We can investigate this later.
@@ -36,17 +32,17 @@ tensorboard==2.18.0 ; python_version >= "3.13"
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 2.13.0
 
-breathe==4.34.0
+breathe==4.36.0
 #Description: This is used to generate PyTorch C++ docs
-#Pinned versions: 4.34.0
+#Pinned versions: 4.36.0
 
-exhale==0.2.3
+exhale==0.3.7
 #Description: This is used to generate PyTorch C++ docs
-#Pinned versions: 0.2.3
+#Pinned versions: 0.3.7
 
-docutils==0.16
+docutils==0.20
 #Description: This is used to generate PyTorch C++ docs
-#Pinned versions: 0.16
+#Pinned versions: 0.20
 
 bs4==0.0.1
 #Description: This is used to generate PyTorch C++ docs
@@ -56,13 +52,13 @@ IPython==8.12.0
 #Description: This is used to generate PyTorch functorch docs
 #Pinned versions: 8.12.0
 
-myst-nb==0.17.2
+myst-nb==1.3.0
 #Description: This is used to generate PyTorch functorch and torch.compile docs.
-#Pinned versions: 0.17.2
+#Pinned versions: 1.3.0
 
 # The following are required to build torch.distributed.elastic.rendezvous.etcd* docs
 python-etcd==0.4.5
 sphinx-copybutton==0.5.0
-sphinx-design==0.4.0
+sphinx-design==0.6.1
 sphinxcontrib-mermaid==1.0.0
-myst-parser==0.18.1
+myst-parser==4.0.1

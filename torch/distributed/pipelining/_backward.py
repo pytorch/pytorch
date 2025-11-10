@@ -337,7 +337,7 @@ def stage_backward(
                     return
                 assert isinstance(grad_val, dict)
                 assert set(output_val.keys()) == set(grad_val.keys())
-                for k in output_val.keys():
+                for k in output_val:
                     extract_tensors_with_grads(
                         output_val[k], grad_val[k], extract_tensors_with_grads
                     )

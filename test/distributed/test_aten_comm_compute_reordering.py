@@ -54,6 +54,7 @@ def apply_reordering_and_get_graph(graph, out_li) -> None:
         "max_compute_pre_fetch",
         "custom_runtime_estimation",
         "insert_overlap_deps",
+        "collective_estimator",
     )
     for key in config_keys:
         if (val := getattr(dist_opts, key)) is not None:
@@ -942,6 +943,50 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
 
             correct = func(inputs_a, inputs_b, ranks=ranks)
             self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_collective_benchmarking_with_real_pg(self):
+        """Test collective benchmarking with real process group (falls back on fake)."""
+
+        def func(a):
+            # Test all three collective types with 8x8 (power of 2 size = 256 elements = 1024 bytes for fp32)
+            ar = _functional_collectives.all_reduce(a, "sum", "0")
+            ag = _functional_collectives.all_gather_tensor(
+                a, 0, list(range(self.world_size))
+            )
+            rs = _functional_collectives.reduce_scatter_tensor(a, "sum", 0, "0")
+
+            b = torch.matmul(a, a)
+            c = torch.matmul(ar, b)
+            return c.sum() + ag.sum() + rs.sum()
+
+        patches = {
+            **get_patches(),
+            "aten_distributed_optimizations.collective_estimator": "benchmark",
+            "aten_distributed_optimizations.custom_runtime_estimation": None,  # Remove custom estimation so benchmarking happens
+        }
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            inputs = torch.ones(8, 8, dtype=torch.float, device=device_type) + self.rank
+
+            with torch._inductor.config.patch(patches):
+                compiled = torch.compile(func)
+                out, aten_graph_str = run_and_get_aten_graph(compiled, inputs)
+
+                # Verify all three collective types are present
+                FileCheck().check("all_reduce").check("all_gather").check(
+                    "reduce_scatter"
+                ).run(aten_graph_str)
+
+                # Test passes if compilation succeeded with benchmarking enabled
+                # Cache verification is tricky due to multiprocess test setup
+                correct = func(inputs)
+                self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_bucket_patches())
