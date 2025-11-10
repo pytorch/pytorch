@@ -37,6 +37,34 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_impl(
     void (*fn)(StableIValue*, uint64_t, uint64_t),
     uint64_t extension_build_version);
 
+struct StableListOpaque;
+using StableListHandle = StableListOpaque*;
+
+// returns an owning reference of a StableList. callee is responsible for
+// freeing memory.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_new_list_reserve_size(size_t size, StableListHandle* ret);
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_list_size(StableListHandle list_handle, size_t* size);
+
+AOTI_TORCH_EXPORT AOTITorchError torch_list_get_item(
+    StableListHandle list_handle,
+    size_t index,
+    StableIValue* element);
+
+AOTI_TORCH_EXPORT AOTITorchError torch_list_set_item(
+    StableListHandle list_handle,
+    size_t index,
+    StableIValue element);
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_list_push_back(StableListHandle list_handle, StableIValue element);
+
+// deletes the underlying list referenced by list_handle
+AOTI_TORCH_EXPORT AOTITorchError
+torch_delete_list(StableListHandle list_handle);
+
 // Helper function to parse device string using c10::Device
 // Returns device type and index via output parameters
 AOTI_TORCH_EXPORT AOTITorchError torch_parse_device_string(
@@ -58,10 +86,11 @@ AOTI_TORCH_EXPORT AOTITorchError torch_parallel_for(
 
 // Get the current thread index in a parallel region
 // Returns 0 if not in a parallel region
-AOTI_TORCH_EXPORT uint32_t torch_get_thread_idx();
+AOTI_TORCH_EXPORT AOTITorchError torch_get_thread_idx(uint32_t* out_thread_idx);
 
 // Get the number of threads for the parallel backend
-AOTI_TORCH_EXPORT uint32_t torch_get_num_threads();
+AOTI_TORCH_EXPORT AOTITorchError
+torch_get_num_threads(uint32_t* out_num_threads);
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
