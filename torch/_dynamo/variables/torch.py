@@ -610,7 +610,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 if len(args) != 3 or kwargs:
                     return None
 
-                if any(isinstance(arg, variables.TensorVariable) for arg in args):
+                if all(isinstance(arg, variables.TensorVariable) for arg in args):
                     x, y, z = args
                     addcmul_fn = TorchInGraphFunctionVariable(torch.addcmul)
                     return addcmul_fn.call_function(tx, [z, x, y], {})

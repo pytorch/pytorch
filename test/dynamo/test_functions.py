@@ -2363,6 +2363,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(output, expected))
         assert cnt.frame_count == 1
 
+    @unittest.skipIf(sys.version_info < (3, 13), "math.fma introduced in python 3.13")
     def test_math_fma(self):
         def fma_func(a, b, c):
             return math.fma(a, b, c)
