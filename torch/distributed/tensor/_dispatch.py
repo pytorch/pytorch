@@ -322,10 +322,7 @@ class OpDispatcher:
         participating: bool,
     ) -> object:
         """
-        Tail of main dispatching logic, called from C++ fast path.  Follows precedence order:
-        (1) custom_op_handler
-        (2) registered sharding strategy, then rule
-        (3) composite implicit autograd decomposition
+        Tail of main dispatching logic, called from C++ fast path.
         """
 
         if output_sharding.output_spec is None:

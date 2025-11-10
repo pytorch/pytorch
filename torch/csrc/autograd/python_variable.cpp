@@ -1307,7 +1307,7 @@ static bool is_random_op(const c10::OperatorHandle& op) {
       memcmp(op_name.name.data(), "aten::", aten_namespace_prefix_len) != 0) {
     return false;
   }
-  static constexpr std::array<std::string_view, aten_namespace_prefix_len>
+  static constexpr std::array<std::string_view, 6>
       random_names = {{
           "native_dropout",
           "normal_",
