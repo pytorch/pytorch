@@ -30,7 +30,7 @@ skip = functools.partial(skipif, True)
 
 
 @xpassIfTorchDynamo_np  # (
-#    reason="We do not disctinguish between scalar and array types."
+#    reason="We do not distinguish between scalar and array types."
 #    " Thus, scalars can upcast arrays."
 # )
 class TestCommonType(TestCase):

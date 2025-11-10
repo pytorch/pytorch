@@ -2090,7 +2090,7 @@ class CommonTemplate:
         from torch._inductor.runtime.triton_heuristics import triton_config_reduction
 
         size_hints = {"x": 67108864, "r0_": 8192}
-        for i in range(4):
+        for _ in range(4):
             size_hints["x"] = next_power_of_2(size_hints["x"])
             triton_config_reduction(size_hints, 1, 2048, 1, 8)
 
@@ -2938,17 +2938,18 @@ class CommonTemplate:
             self.common(fn2, (torch.randn(size1), torch.randn(size2)))
 
     def test_views2(self):
-        def fn1(x):
-            return (x.view(size2) + 1,)
-
-        def fn2(x):
-            return ((x * 2).view(size2) + 1,)
-
         for size1, size2 in [
             ([2, 2, 2, 2], [4, -1]),
             ([10, 1, 10, 1, 10], [-1, 100]),
             ([10 * 5, 20], [10, -1, 20]),
         ]:
+
+            def fn1(x):
+                return (x.view(size2) + 1,)
+
+            def fn2(x):
+                return ((x * 2).view(size2) + 1,)
+
             self.common(fn1, (torch.randn(size1),))
             self.common(fn2, (torch.randn(size1),))
 
@@ -5033,13 +5034,13 @@ class CommonTemplate:
 
         def run_weights_sharing_model(m, inp):
             with torch.no_grad():
-                for i in range(num_run):
+                for _ in range(num_run):
                     y = m(inp)
 
         numb_instance = 2
         threads = []
         compiled_m = torch.compile(model)
-        for i in range(1, numb_instance + 1):
+        for _ in range(1, numb_instance + 1):
             thread = threading.Thread(
                 target=run_weights_sharing_model, args=(compiled_m, inp)
             )
@@ -5876,6 +5877,22 @@ class CommonTemplate:
             reference_in_float=False,
         )
 
+    @skipIfMPS
+    def test_linalg_eig_stride_consistency(self):
+        def fn(x):
+            eigenvals, eigenvecs = torch.linalg.eig(x)
+            return eigenvecs
+
+        x = torch.randn(5, 5, device=self.device, dtype=torch.float32)
+
+        self.common(
+            fn,
+            [x],
+            exact_stride=True,
+            exact_dtype=True,
+            check_lowp=False,
+        )
+
     def test_view_as_complex(self):
         class Repro(torch.nn.Module):
             def __init__(self) -> None:
@@ -6474,7 +6491,11 @@ class CommonTemplate:
     # Constant folding was explicitly turned off due to issue #108388
     # Turn it back on for test
     @unittest.skipIf(config.triton.native_matmul, "native matmul has better precision")
-    @torch._inductor.config.patch(joint_graph_constant_folding=True)
+    @torch._inductor.config.patch(
+        joint_graph_constant_folding=True,
+        # Numerical accuracy failure for triton fp16
+        max_autotune_gemm_backends="ATEN",
+    )
     def test_remove_no_ops(self):
         def matmul_with_op(x, y, fn):
             return fn(x @ y)
@@ -6902,7 +6923,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         _, (code0, code1) = _run_and_get_stripped_kernels(b, x)
         self.assertEqual(code0, code1)
 
-    @config.patch(force_disable_caches=True)
+    @config.patch(
+        force_disable_caches=True,
+        # Test expects a single (fused) kernel to be generated
+        max_autotune_gemm_backends="ATEN",
+    )
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
     @unittest.skipIf(config.triton.native_matmul, "matmul is now generated")
     def test_deterministic_codegen_with_suffix(self):
@@ -8422,6 +8447,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             x = torch.randn(1024, device=self.device)
             self.assertEqual(fn(x[0:]), x[16:][:16])
             self.assertEqual(fn(x[128:]), x[128 + 16 :][:16])
+
+    def test_index_float_zero(self):
+        def fn(arg0, arg1, arg2):
+            t1 = torch.tanh(arg0)
+            t2 = t1.clone()
+            t2.fill_(arg1.item())
+            t3 = torch.clamp(t2, 0, arg2.size(0) - 1).to(torch.long)
+            return torch.nn.functional.embedding(t3, arg2)
+
+        arg0 = torch.randint(0, 1000, [47], dtype=torch.int64, device=self.device)
+        arg1 = torch.randint(0, 1000, [], dtype=torch.int64, device=self.device)
+        arg2 = torch.rand([256, 88], dtype=torch.float16, device=self.device)
+
+        cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
+
+        self.assertEqual(fn(arg0, arg1, arg2), cfn(arg0, arg1, arg2))
 
     # from GPT2ForSequenceClassification
     @skip_if_gpu_halide
@@ -10988,6 +11029,29 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = torch.randn((128, 64), device=self.device)
         p = torch.tensor(0.50, device=self.device)
         get_mask(x, p)
+
+    def test_flexible_layout_immutable_free_symbols(self):
+        import sympy
+
+        x = sympy.Symbol("x")
+        y = sympy.Symbol("y")
+        z = sympy.Symbol("z")
+
+        layout = torch._inductor.ir.FlexibleLayout(
+            self.device, torch.float32, size=(x, y)
+        )
+
+        # pad_strides works since it does not add new symints
+        layout.pad_strides()
+
+        # same symints and different order should work
+        layout.size = (y, x)
+
+        # adding new symints should fail
+        with self.assertRaisesRegex(
+            AssertionError, "Expected free symbols unchanged, but got"
+        ):
+            layout.size = (z,)
 
     def test_sqrt_dynamic_shapes(self):
         # TIMM convit_base model: https://github.com/pytorch/pytorch/issues/97877.
@@ -14115,6 +14179,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         code_disallowed = re.sub(r"AOT ID: .*", "AOT ID: ['test']", code_disallowed)
         return code_allowed != code_disallowed
 
+    # If matmul is implemented by triton there is more reuse
+    @config.patch(max_autotune_gemm_backends="ATEN")
     @unittest.skipIf(config.triton.native_matmul, "matmul is now generated")
     def test_allow_reuse_disable_if_exceed_peak(self):
         @torch.compile
@@ -14269,6 +14335,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue("'enable_fp_fusion': False" in code)
         torch.testing.assert_close(out, fn(a, b), atol=0, rtol=0)
 
+    @requires_cuda_and_triton
+    @config.patch(runtime_triton_nan_asserts=True)
+    def test_nan_assert_inside_triton_kernel(self):
+        def fn(x):
+            x = x - 1
+            # Uncomment the following line can trigger the failure of
+            # the device size assertion
+            # x = torch.log(x)
+            return torch.where(x.isnan(), 3.14, x)
+
+        compiled = torch.compile(fn)
+        x = torch.randn(4096, device=GPU_TYPE)
+        out, (code,) = run_and_get_code(compiled, x)
+        self.assertTrue("'NaN or Inf found'" in code)
+        torch.testing.assert_close(out, fn(x))
+
     @skip_if_cpp_wrapper("skip cpp wrapper")
     @requires_cuda_and_triton
     def test_repeat_interleave_decomposition_has_clamp(self):
@@ -14342,6 +14424,20 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return (x.argmin(), x.argmax())
 
         self.common(fn, (torch.randn(6, 4, device=GPU_TYPE).t().contiguous().t(),))
+
+    @skip_if_halide
+    @requires_cuda_and_triton
+    def test_unbacked_float_item(self):
+        def fn(x, max_val):
+            return torch.clamp(x, 0, max_val.item())
+
+        self.common(
+            fn,
+            (
+                torch.randn(10, 20, 30, device=self.device),
+                torch.tensor(5.0, device=self.device),
+            ),
+        )
 
     # end of class CommonTemplate - add new tests here
 
@@ -15506,6 +15602,9 @@ if RUN_GPU:
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
         @torch._functorch.config.patch("donated_buffer", True)
+        # The inplace updating does not happen after we fused the
+        # layernorm backward
+        @torch._inductor.config.patch("triton.mix_order_reduction", False)
         def test_donated_buffer_inplace(self):
             batch_size = 32
             seq_length = 50

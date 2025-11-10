@@ -226,8 +226,10 @@ class PythonCode:
     # Values in global scope during execution of `src_def`.
     globals: dict[str, Any]
     # Optional mapping from the forward function's line number to
-    # node index.
+    # node index. Line number starts at the prologue (i.e. forward()).
     _lineno_map: Optional[dict[int, Optional[int]]]
+    # The line number of prologue in fn_code
+    _prologue_start: int = 0
 
 
 def _format_target(base: str, target: str) -> str:
@@ -441,6 +443,7 @@ class CodeGen:
         colored: bool = False,
         # Render each argument on its own line
         expanded_def: bool = False,
+        record_func: bool = False,
     ) -> PythonCode:
         free_vars: list[str] = []
         body: list[str] = []
@@ -645,6 +648,15 @@ class CodeGen:
 
             if verbose:
                 # override annotation with more detailed information
+                try:
+                    from torch.distributed.tensor._api import DTensor, DTensorSpec
+
+                    dtensorspec_format_shard_order_str = (
+                        DTensorSpec.format_shard_order_str
+                    )
+                except ModuleNotFoundError:
+                    DTensor = None  # type: ignore[assignment,misc]
+                    dtensorspec_format_shard_order_str = None
                 from torch.fx.experimental.proxy_tensor import py_sym_types
                 from torch.fx.passes.shape_prop import TensorMetadata
 
@@ -675,6 +687,16 @@ class CodeGen:
                     core = _tensor_annotation(meta_val)
                     if is_plain:
                         maybe_type_annotation = f': "{core}"'
+                    elif type(meta_val) is DTensor:
+                        assert dtensorspec_format_shard_order_str is not None
+                        dtensor_meta = dtensorspec_format_shard_order_str(
+                            meta_val._spec.placements,  # type: ignore[attr-defined]
+                            meta_val._spec.shard_order,  # type: ignore[attr-defined]
+                        )
+                        cls = meta_val.__class__.__name__
+                        maybe_type_annotation = (
+                            f': "{cls}({core}, {dim_green(dtensor_meta)})"'
+                        )
                     else:
                         cls = meta_val.__class__.__name__
                         maybe_type_annotation = f': "{cls}({core})"'
@@ -796,6 +818,10 @@ class CodeGen:
                 return
             raise NotImplementedError(f"node: {node.op} {node.target}")
 
+        if record_func:
+            body.append(
+                "_rf = torch._C._profiler._RecordFunctionFast('## ENTER_GRAPH_PLACEHOLDER_KEY ##'); _rf.__enter__()\n"
+            )
         for i, node in enumerate(nodes):
             # NOTE: emit_node does not emit a string with newline. It depends
             # on delete_unused_values to append one
@@ -805,8 +831,22 @@ class CodeGen:
             # node index, which will be deleted later
             # after going through _body_transformer
             body.append(f"# COUNTER: {i}\n")
+            do_record = record_func and node.op in (
+                "call_function",
+                "call_method",
+                "call_module",
+            )
+            if do_record:
+                # The double hash ## convention is used by post-processing to find the fx markers
+                body.append(
+                    f"_rf_{node.name} = torch._C._profiler._RecordFunctionFast('## {i} ##'); _rf_{node.name}.__enter__()\n"
+                )
             emit_node(node)
             delete_unused_values(node)
+            if do_record:
+                body.append(f"_rf_{node.name}.__exit__(None, None, None)\n")
+        if record_func:
+            body.append("_rf.__exit__(None, None, None)\n")
 
         if len(body) == 0:
             # If the Graph has no non-placeholder nodes, no lines for the body
@@ -854,7 +894,14 @@ class CodeGen:
 
 {prologue}
 {code}"""
-        return PythonCode(fn_code, globals_, _lineno_map=lineno_map)
+        # The +4 accounts for the empty lines before prologue in fn_code
+        prologue_start = wrap_stmts.count("\n") + 4
+        return PythonCode(
+            fn_code,
+            globals_,
+            _lineno_map=lineno_map,
+            _prologue_start=prologue_start,
+        )
 
 
 # Ideally, we'd like to refactor all of the pytree logic into this codegen
@@ -933,24 +980,25 @@ class _PyTreeCodeGen(CodeGen):
             return "\n    " + "".join(x + "; " for x in has_annotation) + "\n"
 
     def gen_var_bindings(self, fn_args, free_vars, expanded_def) -> str:
+        in_spec = self.pytree_info.in_spec
         # when kwargs is present, in_spec is tuple(args, kwargs)
         has_args_kwargs_tuple = (
-            self.pytree_info.in_spec.type is tuple
-            and self.pytree_info.in_spec.num_children == 2
-            and self.pytree_info.in_spec.children_specs[0].type is tuple
-            and self.pytree_info.in_spec.children_specs[1].type is dict
+            in_spec.type is tuple
+            and in_spec.num_children == 2
+            and in_spec.child(0).type is tuple
+            and in_spec.child(1).type is dict
         )
         fn_kwargs = "{}"
         fn_signature = f"[{', '.join(fn_args)}], self._in_spec"
         if has_args_kwargs_tuple:
-            count_args = self.pytree_info.in_spec.children_specs[0].num_children
+            count_args = in_spec.child(0).num_children
             fn_args = self.pytree_info.orig_args[:count_args]
             fn_kwargs = (
                 "{"
                 + ", ".join(
                     f"'{k}':{v}"
                     for k, v in zip(
-                        self.pytree_info.in_spec.children_specs[1].context,
+                        in_spec.child(1).context,
                         self.pytree_info.orig_args[count_args:],
                     )
                 )
@@ -1097,7 +1145,7 @@ class _FindNodesLookupTable:
             return [*self.table[(op, None)].keys()]
 
         # op is call_method, get_attr, call_module
-        return [node for node in self.table[(op, None)].keys() if node.target == target]
+        return [node for node in self.table[(op, None)] if node.target == target]
 
 
 @compatibility(is_backward_compatible=True)
@@ -1379,7 +1427,7 @@ class Graph:
                 f(to_erase)
 
         self._find_nodes_lookup_table.remove(to_erase)
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         to_erase._remove_from_list()
         to_erase._erased = True  # iterators may retain handles to erased nodes
         self._len -= 1
@@ -1750,6 +1798,7 @@ class Graph:
         include_device: bool = False,
         colored: bool = False,
         expanded_def: bool = False,
+        record_func: bool = False,
     ) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
@@ -1817,6 +1866,7 @@ class Graph:
                 include_device=include_device,
                 colored=colored,
                 expanded_def=expanded_def,
+                record_func=record_func,
             )
 
     def _python_code(
@@ -1829,6 +1879,7 @@ class Graph:
         include_device: bool = False,
         colored: bool = False,
         expanded_def: bool = False,
+        record_func: bool = False,
     ) -> PythonCode:
         return self._codegen._gen_python_code(
             self.nodes,
@@ -1839,6 +1890,7 @@ class Graph:
             include_device=include_device,
             colored=colored,
             expanded_def=expanded_def,
+            record_func=record_func,
         )
 
     def __str__(self) -> str:
@@ -1940,7 +1992,7 @@ class Graph:
                             "a str is expected"
                         )
                 if node.op in ["get_attr", "call_module"]:
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     target_atoms = node.target.split(".")
                     m_itr = self.owning_module
                     for i, atom in enumerate(target_atoms):

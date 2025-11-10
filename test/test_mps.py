@@ -130,7 +130,7 @@ class MpsMemoryLeakCheck:
 
         discrepancy_detected = True
         # Query memory multiple items to ensure leak was not transient
-        for n in range(3):
+        for _ in range(3):
             caching_allocator_mem_allocated = torch.mps.current_allocated_memory()
             driver_mem_allocated = torch.mps.driver_allocated_memory()
 
@@ -646,6 +646,11 @@ class MatmulTest(TestCaseMPS):
         matmul_cpu = torch.matmul(tensor1_cpu, tensor2_cpu)
 
         self.assertEqual(matmul_cpu, matmul_mps.to("cpu"))
+
+    def test_empty_matmul_vec(self):
+        tensor_1 = torch.rand((0, 100), device="mps")
+        tensor_2 = torch.rand((100, ), device="mps")
+        self.assertEqual((tensor_1 @ tensor_2).cpu(), tensor_1.cpu() @ tensor_2.cpu())
 
 class MPSLeakyReluTest(TestCaseMPS):
     def _npLeakyRelu(self, np_features, negative_slope=0.1):
@@ -1762,13 +1767,13 @@ class TestMPS(TestCaseMPS):
                             continue
                         # Running stats must be tracked in eval mode
                         if (track_running_stats):
-                            helper(shape, eps=0, momentum=1, channels_last=channels_last,
+                            helper(shape, eps=1e-5, momentum=1, channels_last=channels_last,
                                    track_running_stats=track_running_stats, test_module=test_module)
                             helper(shape, channels_last=channels_last,
                                    track_running_stats=track_running_stats, test_module=test_module)
                             helper(shape, eps=1e-05, momentum=0.1, wts=False, training=False, channels_last=channels_last,
                                    track_running_stats=track_running_stats, test_module=test_module)
-                            helper(shape, eps=0, momentum=1.0, wts=False, training=False, channels_last=channels_last,
+                            helper(shape, eps=1e-5, momentum=1.0, wts=False, training=False, channels_last=channels_last,
                                    track_running_stats=track_running_stats, test_module=test_module)
                             helper(shape, eps=1, momentum=1, wts=True, training=False, channels_last=channels_last,
                                    track_running_stats=track_running_stats, test_module=test_module)
@@ -1776,7 +1781,7 @@ class TestMPS(TestCaseMPS):
                                    track_running_stats=track_running_stats, test_module=test_module)
                         helper(shape, eps=1e-05, momentum=0.1, wts=False, training=True, channels_last=channels_last,
                                track_running_stats=track_running_stats, test_module=test_module)
-                        helper(shape, eps=0, momentum=1.0, wts=False, training=True, channels_last=channels_last,
+                        helper(shape, eps=1e-5, momentum=1.0, wts=False, training=True, channels_last=channels_last,
                                track_running_stats=track_running_stats, test_module=test_module)
                         helper(shape, eps=1, momentum=1, wts=True, training=True, channels_last=channels_last,
                                track_running_stats=track_running_stats, test_module=test_module)
@@ -4470,6 +4475,14 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(out1, out2)
 
+    def test_bce_backward_with_no_reduction_and_one_in_shape(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/166746
+        output = torch.zeros(3, 2, 1, requires_grad=True, device='mps')
+        target = torch.zeros(3, 2, 1, device='mps')
+        torch.sum(nn.BCELoss(reduction='none')(output, target)).backward()
+        expected_grad = torch.zeros(3, 2, 1, device='mps')
+        self.assertEqual(output.grad, expected_grad)
+
     def test_cross_entropy_loss(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/116095
         loss = nn.CrossEntropyLoss()
@@ -4902,7 +4915,7 @@ class TestMPS(TestCaseMPS):
             input_xs.append(torch.ones(prod, dtype=torch.int).reshape(shape).bool())
             input_xs.append(torch.zeros(prod, dtype=torch.int).reshape(shape).bool())
 
-            for i, cpu_x in enumerate(input_xs):
+            for cpu_x in input_xs:
                 x = cpu_x.detach().clone().to('mps')
                 y = torch.any(x)
                 ref_y = torch.any(cpu_x)
@@ -4984,7 +4997,7 @@ class TestMPS(TestCaseMPS):
             input_xs.append(torch.ones(prod, dtype=torch.int).reshape(shape).bool())
             input_xs.append(torch.zeros(prod, dtype=torch.int).reshape(shape).bool())
 
-            for i, cpu_x in enumerate(input_xs):
+            for cpu_x in input_xs:
                 x = cpu_x.detach().clone().to('mps')
                 y = torch.all(x)
                 ref_y = torch.all(cpu_x)
@@ -7842,7 +7855,7 @@ class TestMPS(TestCaseMPS):
         shape = (2, 3, 4, 5, 6)
         x = torch.rand(shape, device="mps")
         self.assertNotEqual(x[0], x[1])
-        # Check that normal distributino is not affected by the same
+        # Check that normal distributions is not affected by the same
         y = torch.normal(torch.zeros(shape, device="mps"), torch.ones(shape, device="mps"))
         self.assertNotEqual(y[0], y[1])
 
@@ -9452,7 +9465,7 @@ class TestSDPA(TestCaseMPS):
         torch.manual_seed(1729)
         causal_mask = torch.tril(torch.ones(S, S, dtype=torch.bool, device='mps'))
         with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
-            i = 42
+            i = 42 if S > 42 else S // 2
 
             q = torch.randn([1, NH, L, HS], dtype=dtype, device="mps")
             k = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
@@ -9601,7 +9614,7 @@ class TestSDPA(TestCaseMPS):
         key = torch.randn(batch_size, num_heads, seq_len, head_dim, device="mps", dtype=torch.float32)
         value = torch.randn(batch_size, num_heads, seq_len, head_dim, device="mps", dtype=torch.float32)
         memory_footprints = []
-        for i in range(100):
+        for _ in range(100):
             output = F.scaled_dot_product_attention(query, key, value)
             current_mem, driver_mem = get_mps_memory_usage()
             memory_footprints.append((current_mem, driver_mem))
@@ -12644,7 +12657,7 @@ class TestConsistency(TestCaseMPS):
         self.assertEqual(out_mps, out_cpu)
 
     def test_fmax_mixed_dtypes(self, device):
-        # Regression tesing for https://github.com/pytorch/pytorch/issues/149951
+        # Regression testing for https://github.com/pytorch/pytorch/issues/149951
         # fmax and fmin are implemented as binary metal shaders and they were implemented
         # with the assumption that both args have the same dtype
         x = torch.rand((3, 3), device=device, dtype=torch.float32)

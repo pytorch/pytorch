@@ -1865,7 +1865,7 @@ class TestFlexAttention(InductorTestCase):
             requires_grad=True,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
-        # floor_div is not decomposed in decompostion_table is empty
+        # floor_div is not decomposed in decomposition_table is empty
         attention = functools.partial(flex_attention, score_mod=score_mod_func)
         gm = make_fx(attention, decomposition_table={})(query, key, value)
         self.assertExpectedInline(
@@ -5807,11 +5807,11 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
         from torch.utils._pytree import GetAttrKey
 
-        for key, tensor in tensors_with_keys:
+        for key, _tensor in tensors_with_keys:
             self.assertIsInstance(key, GetAttrKey)
             self.assertIsNotNone(key)
 
-        for key, value in context_with_keys:
+        for key, _value in context_with_keys:
             self.assertIsInstance(key, GetAttrKey)
             self.assertIsNotNone(key)
 

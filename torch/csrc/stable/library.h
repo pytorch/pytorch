@@ -4,12 +4,14 @@
 // code for better UX.
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/stable/c/shim.h>
 #include <torch/headeronly/macros/Macros.h>
 
 // Technically, this file doesn't use anything from stableivalue_conversions.h,
 // but we need to include it here as the contents of stableivalue_conversions.h
 // used to live here and so we need to expose them for backwards compatibility.
 #include <torch/csrc/stable/stableivalue_conversions.h>
+#include <torch/csrc/stable/version.h>
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
 
@@ -81,7 +83,11 @@ class StableLibrary final {
   StableLibrary& impl(
       const char* name,
       void (*fn)(StableIValue*, uint64_t, uint64_t)) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+    torch_library_impl(lib_, name, fn, TORCH_ABI_VERSION);
+#else
     aoti_torch_library_impl(lib_, name, fn);
+#endif
     return *this;
   }
 

@@ -112,8 +112,12 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
     or quantize_per_channel and dequantize_per_channel
     """
     graph = model.graph
-    assert modules is not None
-    assert isinstance(node.target, str)
+    if modules is None:
+        raise AssertionError("modules must not be None")
+    if not isinstance(node.target, str):
+        raise AssertionError(
+            f"Expected node.target to be a str, but got {type(node.target)}"
+        )
     module_path, prefix = _get_module_path_and_prefix(
         node, node_name_to_scope, node_name_to_qconfig
     )
@@ -260,10 +264,10 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
         # and that can be done after we remove reduce_range flag
         # 1. extract qparams from activation_post_process module
         dtype_ = to_underlying_dtype(dtype)
-        assert dtype_ in [torch.uint8, torch.int8], (
-            "only uint8 and int8 are supported in reference flow for "
-            "dynamic quantization right now"
-        )
+        if dtype_ not in [torch.uint8, torch.int8]:
+            raise AssertionError(
+                "only uint8 and int8 are supported in reference flow for dynamic quantization right now"
+            )
         quant_min = activation_post_process.quant_min  # type: ignore[attr-defined]
         quant_max = activation_post_process.quant_max  # type: ignore[attr-defined]
         qscheme = getattr(activation_post_process, "qscheme", torch.per_tensor_affine)  # type: ignore[attr-defined]
@@ -282,11 +286,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
         # 2. insert choose_qparams op and update the qparams list
         with graph.inserting_before(node):
             input_node = node.args[0]
-            choose_qparams_op_inputs = [node.args[0]]
-            for key, value in qparams.items():
-                # we have quant_min, quant_max and dtype, all should be stored
-                # as literals
-                choose_qparams_op_inputs.append(value)
+            choose_qparams_op_inputs = [node.args[0]] + list(qparams.values())
             choose_qparams_node = graph.create_node(
                 "call_function", choose_qparams_op, tuple(choose_qparams_op_inputs), {}
             )
@@ -297,6 +297,8 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             zero_point_node = graph.create_node(
                 "call_function", operator.getitem, (choose_qparams_node, 1), {}
             )
+            # we have quant_min, quant_max and dtype, all should be stored
+            # as literals
             quant_min = qparams["_quant_min_"]
             quant_max = qparams["_quant_max_"]
             dtype = qparams["_dtype_"]
@@ -381,8 +383,12 @@ def _replace_observer_with_quantize_dequantize_node(
     After:
     ... -> torch.quantize_per_tensor(x, ...) -> x.dequantize() -> ...
     """
-    assert modules is not None
-    assert isinstance(node.target, str)
+    if modules is None:
+        raise AssertionError("modules must not be None")
+    if not isinstance(node.target, str):
+        raise AssertionError(
+            f"Expected node.target to be a str, but got {type(node.target)}"
+        )
     graph = model.graph
     module_path, prefix = _get_module_path_and_prefix(
         node, node_name_to_scope, node_name_to_qconfig
@@ -482,7 +488,7 @@ def _replace_observer_with_quantize_dequantize_node(
         with graph.inserting_before(node):
             input_node = node.args[0]
             quantize_op_inputs = [input_node]
-            for key, value in qparams.items():
+            for value in qparams.values():
                 quantize_op_inputs.append(value)
 
             quantized_node = graph.create_node(
@@ -498,7 +504,7 @@ def _replace_observer_with_quantize_dequantize_node(
         with graph.inserting_before(node):
             input_node = node.args[0]
             quantize_op_inputs = [input_node]
-            for key, value in qparams.items():
+            for value in qparams.values():
                 # TODO: we can add the information of whether a value needs to
                 # be registered as an attribute in qparams dict itself
                 quantize_op_inputs.append(value)
@@ -523,9 +529,10 @@ def _replace_observer_or_dequant_stub_with_dequantize_node(
     node: Node, graph: Graph
 ) -> None:
     call_custom_module_node = node.args[0]
-    assert isinstance(call_custom_module_node, Node), (
-        f"Expecting the for call custom module node to be a Node, but got {call_custom_module_node}"
-    )
+    if not isinstance(call_custom_module_node, Node):
+        raise AssertionError(
+            f"Expecting the for call custom module node to be a Node, but got {call_custom_module_node}"
+        )
     node.replace_all_uses_with(call_custom_module_node)
     graph.erase_node(node)
     _insert_dequantize_node(call_custom_module_node, graph)
@@ -619,9 +626,10 @@ def _get_module_path_and_prefix(
     # operator (they can be the same)
     # this flag identifies if the observer is inserted only because the observed node is
     # the input of the next operator
-    assert isinstance(observed_node, Node), (
-        f"Expecting observed node to be a Node, but got {observed_node}"
-    )
+    if not isinstance(observed_node, Node):
+        raise AssertionError(
+            f"Expecting observed node to be a Node, but got {observed_node}"
+        )
     is_input_observer_only = (
         node_name_to_qconfig[observed_node.name] is None
         if observed_node.name in node_name_to_qconfig
@@ -635,7 +643,7 @@ def _get_module_path_and_prefix(
         first_linear_use_or_first_use = users[0] if users else None
         linear_node = None
         for n in users:
-            if n.op == "call_function" and n.target == torch.nn.functional.linear:
+            if n.op == "call_function" and n.target is torch.nn.functional.linear:
                 linear_node = n
                 break
         if linear_node:
@@ -675,7 +683,7 @@ def _maybe_get_observer_for_node(
     If the node is observed, return the observer
     instance. Otherwise, return None.
     """
-    for maybe_obs_node in node.users.keys():
+    for maybe_obs_node in node.users:
         if maybe_obs_node.op == "call_module":
             maybe_obs = modules[str(maybe_obs_node.target)]
             if _is_activation_post_process(maybe_obs):
@@ -729,8 +737,10 @@ def convert_standalone_module(
         "_observed_graph_module_attrs"
     ].standalone_module_output_quantized_idxs
     if len(sm_output_quantized_idxs) > 0:
-        assert sm_output_quantized_idxs[0] == 0, "Currently only quantized"
-        "output idxs = [0] is supported"
+        if sm_output_quantized_idxs[0] != 0:
+            raise AssertionError(
+                "Currently only quantized output idxs = [0] is supported"
+            )
 
         # if it's non-empty, then it means the output is kept in quantized form
         # we'll just add a dequantize node after this node
@@ -884,9 +894,10 @@ def convert_weighted_module(
     ref_qmodule_cls = root_module_to_quantized_reference_module.get(
         type_before_parametrizations(float_module), None
     )
-    assert ref_qmodule_cls is not None, (
-        f"No reference quantized module class configured for {type_before_parametrizations(float_module)}"
-    )
+    if ref_qmodule_cls is None:
+        raise AssertionError(
+            f"No reference quantized module class configured for {type_before_parametrizations(float_module)}"
+        )
     ref_qmodule = ref_qmodule_cls.from_float(float_module, wq_or_wq_dict)  # type: ignore[attr-defined]
     if fused_module is not None:
         fused_module[0] = ref_qmodule  # type: ignore[operator]
@@ -906,9 +917,10 @@ def _remove_previous_dequantize_in_custom_module(
                  \\ - dequantize
     """
     # expecting the input node for a custom module node to be a Node
-    assert isinstance(prev_node, Node), (
-        f"Expecting the argument for custom module node to be a Node, but got {prev_node}"
-    )
+    if not isinstance(prev_node, Node):
+        raise AssertionError(
+            f"Expecting the argument for custom module node to be a Node, but got {prev_node}"
+        )
     if prev_node.op == "call_method" and prev_node.target == "dequantize":
         node.replace_input_with(prev_node, prev_node.args[0])
         # Remove the dequantize node if it doesn't have other users
@@ -954,15 +966,21 @@ def convert_custom_module(
         if _is_custom_module_lstm(node, modules):
             # The inputs are tuples in the form (input, (hidden0, hidden1))
             # Ensure all three input nodes are quantized
-            assert (
+            if not (
                 len(node.args) == 2
                 and isinstance(node.args[1], tuple)
                 and len(node.args[1]) == 2
-            )
+            ):
+                raise AssertionError(
+                    "Expected LSTM custom module inputs to be (input, (hidden0, hidden1))"
+                )
             (inputs, (hidden0, hidden1)) = node.args  # type: ignore[misc]
-            assert isinstance(inputs, Node)
-            assert isinstance(hidden0, Node)
-            assert isinstance(hidden1, Node)
+            if not isinstance(inputs, Node):
+                raise AssertionError("Expected inputs to be a Node")
+            if not isinstance(hidden0, Node):
+                raise AssertionError("Expected hidden0 to be a Node")
+            if not isinstance(hidden1, Node):
+                raise AssertionError("Expected hidden1 to be a Node")
             _remove_previous_dequantize_in_custom_module(node, inputs, graph)
             _remove_previous_dequantize_in_custom_module(node, hidden0, graph)
             _remove_previous_dequantize_in_custom_module(node, hidden1, graph)
@@ -973,22 +991,32 @@ def convert_custom_module(
             # to the module.
             # Additional handling is yet to be implemented for the outputs, similar
             # to LSTM custom module
-            assert len(node.args) == 3
+            if len(node.args) != 3:
+                raise AssertionError(
+                    "Expected MHA custom module inputs to be (query, key, value)"
+                )
             query, key, value = node.args
-            assert isinstance(query, Node)
-            assert isinstance(key, Node)
-            assert isinstance(value, Node)
+            if not isinstance(query, Node):
+                raise AssertionError("Expected query to be a Node")
+            if not isinstance(key, Node):
+                raise AssertionError("Expected key to be a Node")
+            if not isinstance(value, Node):
+                raise AssertionError("Expected value to be a Node")
             _remove_previous_dequantize_in_custom_module(node, query, graph)
             _remove_previous_dequantize_in_custom_module(node, key, graph)
             _remove_previous_dequantize_in_custom_module(node, value, graph)
         else:
             # remove the previous dequant node to ensure the inputs are quantized
             arg = node.args[0]
-            assert isinstance(arg, Node)
+            if not isinstance(arg, Node):
+                raise AssertionError("Expected arg to be a Node")
             _remove_previous_dequantize_in_custom_module(node, arg, graph)
             # absorb the following observer into the module conversion
             activation_post_process = _maybe_get_observer_for_node(node, modules)
-            assert activation_post_process is not None
+            if activation_post_process is None:
+                raise AssertionError(
+                    "Expected activation_post_process to be present for observed custom module"
+                )
             observed_custom_module.activation_post_process = activation_post_process
 
     # swap the observed custom module to quantized custom module
@@ -1063,7 +1091,8 @@ def convert(
             QConfigMapping.from_dict(qconfig_mapping) if qconfig_mapping else None
         )
     qconfig_mapping = copy.deepcopy(qconfig_mapping)
-    assert qconfig_mapping is None or isinstance(qconfig_mapping, QConfigMapping)
+    if not (qconfig_mapping is None or isinstance(qconfig_mapping, QConfigMapping)):
+        raise AssertionError("qconfig_mapping must be None or a QConfigMapping")
 
     if isinstance(backend_config, dict):
         warnings.warn(
@@ -1077,7 +1106,8 @@ def convert(
     if backend_config is None:
         backend_config = get_native_backend_config()
 
-    assert _is_observed_module(model), "incoming model must be produced by prepare_fx"
+    if not _is_observed_module(model):
+        raise AssertionError("incoming model must be produced by prepare_fx")
     observed_graph_module_attrs = model.meta["_observed_graph_module_attrs"]
     node_name_to_scope: dict[str, tuple[str, type]] = (
         observed_graph_module_attrs.node_name_to_scope
@@ -1123,14 +1153,16 @@ def convert(
         # all the values either match what was set in prepare node_name_to_qconfig
         # or are set to None in the convert_node_name_to_qconfig.
         for k, v in node_name_to_qconfig.items():
-            assert k in convert_node_name_to_qconfig, (
-                f"Expected key {k} in convert node_name_to_qconfig"
-            )
-            if convert_node_name_to_qconfig[k] is not None:
-                assert qconfig_equals(v, convert_node_name_to_qconfig[k]), (
-                    f"Expected k {k} to have the same value in prepare and convert QConfigMappings, "
-                    f"but {v} was updated to {convert_node_name_to_qconfig[k]}"
+            if k not in convert_node_name_to_qconfig:
+                raise AssertionError(
+                    f"Expected key {k} in convert node_name_to_qconfig"
                 )
+            if convert_node_name_to_qconfig[k] is not None:
+                if not qconfig_equals(v, convert_node_name_to_qconfig[k]):
+                    raise AssertionError(
+                        f"Expected k {k} to have the same value in prepare and convert QConfigMappings, "
+                        f"but {v} was updated to {convert_node_name_to_qconfig[k]}"
+                    )
         node_name_to_qconfig = convert_node_name_to_qconfig
 
     custom_module_classes = get_custom_module_class_keys(
@@ -1203,7 +1235,10 @@ def convert(
                 )
         elif node.op == "call_module":
             mod = _get_module(node, modules)
-            assert mod is not None
+            if mod is None:
+                raise AssertionError(
+                    "Expected module for call_module node to be present in modules mapping"
+                )
             if _is_activation_post_process(mod):
                 observed_node = node.args[0]
                 if observed_node in statically_quantized_custom_module_nodes:

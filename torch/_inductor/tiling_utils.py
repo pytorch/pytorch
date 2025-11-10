@@ -1,7 +1,8 @@
 import dataclasses
 import itertools
 from collections import Counter, defaultdict
-from typing import Callable, Literal, Optional, overload, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable
+from typing import Literal, Optional, overload, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 
@@ -164,7 +165,7 @@ def find_coalesced_var(
             variables[v] = get_hint(v)
 
     zero_index = sympy_subs(index, variables)
-    for v in var_ranges.keys():
+    for v in var_ranges:
         variables[v] = 1
         try:
             new_val = sympy_subs(index, variables)
@@ -425,7 +426,7 @@ def apply_var_mapping(
         new_ranges, norm_pw_vars + norm_red_vars, strict=True
     ):
         range_vars = []
-        for i in range(len(new_range)):
+        for _ in range(len(new_range)):
             range_vars.append(flat_vars[count])
             count += 1
 

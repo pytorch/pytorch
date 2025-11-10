@@ -26,6 +26,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -60,9 +61,9 @@ class DistMathOpsTest(DTensorTestBase):
         shard_spec = [Shard(0)]
 
         tensor = torch.randn(12, 8, 8)
-        # TODO: check `all` correctness and test `all` on a bool tensor
-        if op_str in ("any"):
-            # test out a bool tensor for any
+        if op_str in ("any", "all"):
+            # Test bool tensor for any() and all() reduction ops
+            # Previously all() had a bug using sum reduction instead of product
             tensor = tensor < 0
         dtensor = distribute_tensor(tensor, device_mesh, shard_spec)
 
@@ -764,6 +765,7 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(grad1_norm.device_mesh, mesh_y)
 
     @with_comms
+    @skip_if_lt_x_gpu(4)
     def test_foreach_add_different_mesh(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
