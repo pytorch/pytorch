@@ -54,6 +54,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     dtypesIfMPS,
+    expectedFailureMPS,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
@@ -72,6 +73,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     scoped_load_inline,
     set_warn_always_context,
+    skipCUDANonDefaultStreamIf,
     skipIfMPS,
     skipIfNoLapack,
     skipIfTorchDynamo,
@@ -582,14 +584,14 @@ class TestAutograd(TestCase):
         ctx_1 = torch.autograd.graph.saved_tensors_hooks(lambda x: x, unpack)
         ctx_2 = torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x)
 
-        for i in range(10):
+        for _ in range(10):
             with ctx_2:
                 ctx_1.__enter__()
                 x = torch.randn(3, 3, requires_grad=True)
                 x.sin().sum().backward()
 
         # Clean up
-        for i in range(10):
+        for _ in range(10):
             ctx_1.__exit__()
 
         # Validate there are no more hooks on the stack
@@ -2989,7 +2991,7 @@ class TestAutograd(TestCase):
         state = set()
         with torch.enable_grad():
             coro = coro_no_grad(state)
-            for i in range(5):
+            for _ in range(5):
                 next(coro)
 
             coro.close()
@@ -2998,7 +3000,7 @@ class TestAutograd(TestCase):
         state = set()
         with torch.no_grad():
             coro = coro_enable_grad(state)
-            for i in range(5):
+            for _ in range(5):
                 next(coro)
 
             coro.close()
@@ -5293,7 +5295,7 @@ Done""",
         rnn = torch.nn.LSTM(10, 20, 2)
         total_time_s = 0
         with profile(record_shapes=True, use_kineto=kineto_available()) as prof:
-            for i in range(20):
+            for _ in range(20):
                 input = torch.randn(5, 3, 10)
                 h = torch.randn(2, 3, 20)
                 c = torch.randn(2, 3, 20)
@@ -5896,7 +5898,7 @@ Done""",
 
             @staticmethod
             def backward(ctx, grad):
-                # Create a sparse tensor with non-contigous indices and values
+                # Create a sparse tensor with non-contiguous indices and values
                 # and return as grad.
                 v = torch.rand(1, 3)
                 i = torch.ones(1, 1, dtype=torch.long)
@@ -5925,7 +5927,7 @@ Done""",
         self.assertTrue(p_a == p_g or p_b == p_g)
 
         # Run backwards multiple times to ensure accumulation works.
-        for i in range(10):
+        for _ in range(10):
             loss.backward(retain_graph=True)
 
         # non-contiguous indices and value, we should trigger a copy.
@@ -5943,7 +5945,7 @@ Done""",
         self.assertFalse(p_b == p_g)
 
         # Run backwards multiple times to ensure accumulation works.
-        for i in range(10):
+        for _ in range(10):
             loss.backward(retain_graph=True)
 
     def test_gradcheck_single_input(self):
@@ -7132,7 +7134,7 @@ for shape in [(1,), ()]:
         )
 
         feat_combined = []
-        for r in range(num_inp):
+        for _ in range(num_inp):
             data_r = torch.empty(1, nz_inp)
             data_r.uniform_()
             data_r.requires_grad = True
@@ -7202,7 +7204,7 @@ for shape in [(1,), ()]:
                 self.use_checkpoint = use_checkpoint
                 self.use_reentrant = use_reentrant
                 self.layers = nn.ModuleList()
-                for i in range(self.n):
+                for _ in range(self.n):
                     layer = nn.Sequential(
                         nn.Linear(256, 256), nn.Linear(256, 256), nn.Linear(256, 256)
                     )
@@ -7362,6 +7364,62 @@ for shape in [(1,), ()]:
         ):
             checkpoint_sequential(modules_list, 3, a)
 
+    @skipIfTorchDynamo("GraphExecGroup does not support compile")
+    def test_checkpoint_graph_execution_group(self):
+        def run(use_graph_execution_group):
+            counter = [0]
+
+            def fn(x):
+                counter[0] += 1
+                y = x.sin().cos()
+                z = y.sin().cos()
+                return y, z
+
+            x = torch.randn(3, 3, requires_grad=True)
+
+            y, z = checkpoint(fn, x, use_reentrant=False)
+
+            group = torch.utils.checkpoint.GraphExecGroup()
+
+            ctx = contextlib.nullcontext()
+            if use_graph_execution_group:
+                ctx = group
+
+            with ctx:
+                (grad_y,) = torch.autograd.grad(
+                    z, inputs=(y,), grad_outputs=(torch.ones(3, 3),)
+                )
+
+                (grad_x,) = torch.autograd.grad(
+                    y,
+                    inputs=(x,),
+                    grad_outputs=(grad_y,),
+                )
+
+            if use_graph_execution_group:
+                self.assertEqual(counter[0], 2)
+            else:
+                self.assertEqual(counter[0], 3)
+
+        run(use_graph_execution_group=True)
+        run(use_graph_execution_group=False)
+
+        # Test the not actually disjoint case (using retain_graph=True since
+        # otherwise autograd itself will catch this)
+        def fn(x):
+            return x.sin().cos()
+
+        x = torch.randn(3, 3, requires_grad=True)
+        out = checkpoint(fn, x, use_reentrant=False)
+        with torch.utils.checkpoint.GraphExecGroup():
+            # Under this context, we will enforce that two backward are disjoint
+            # even if retain_graph=True.
+            out.sum().backward(retain_graph=True)
+            with self.assertRaisesRegex(
+                RuntimeError, "Performing two backward calls that overlap"
+            ):
+                out.sum().backward()
+
     def test_checkpoint_detects_non_determinism(self):
         def save_3_tensors(x):
             out = x.sin().exp()
@@ -7513,7 +7571,7 @@ for shape in [(1,), ()]:
 
         feat_combined = []
         feat_combined_no_checkpoint = []
-        for r in range(num_inp):
+        for _ in range(num_inp):
             data_r = torch.empty(1, nz_inp)
             data_r.uniform_()
             data_r.requires_grad = input_requires_grad
@@ -11714,7 +11772,7 @@ class TestAutogradDeviceType(TestCase):
     def test_parameter_resize(self, device):
         asd = torch.nn.Parameter(torch.ones(16, dtype=torch.double, device=device))
 
-        for i in range(2):
+        for _ in range(2):
             with torch.no_grad():
                 asd.set_(asd[1:])
                 asd.grad = None
@@ -11942,7 +12000,7 @@ class TestAutogradDeviceType(TestCase):
 
         # Child gpu graph (much longer than parent graph).
         prev = t2 * t2
-        for i in range(10):
+        for _ in range(10):
             prev = prev * t2
         reentrant_root = prev
 
@@ -13325,9 +13383,12 @@ class TestAutogradStreamSynchronization(TestCase):
                 )
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
-    @skipIfMPS
-    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
-    def test_consumer_to_single_producer_case_2_correctness(self):
+    @expectedFailureMPS
+    @skipCUDANonDefaultStreamIf(True)
+    def test_consumer_to_single_producer_case_2_correctness(self, device):
+        if device == "cpu":
+            self.skipTest("requires accelerator")
+
         #                          Device    Stream
         # Consumer (MulBackward):  cuda:0    s0
         # Producer              :  cuda:0    s1
@@ -13430,36 +13491,43 @@ class TestAutogradStreamSynchronization(TestCase):
             test()
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
-    @skipIfMPS
-    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    @expectedFailureMPS
+    @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
     def test_consumer_to_single_producer_case_3_correctness_non_default_ambient_stream(
-        self,
+        self, device
     ):
+        if device == "cpu":
+            self.skipTest("requires accelerator")
         self._test_consumer_to_single_producer_case_3_correctness(
             non_default_ambient_stream=True
         )
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
-    @skipIfMPS
-    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    @expectedFailureMPS
+    @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
-    def test_consumer_to_single_producer_case_3_correctness(self):
+    def test_consumer_to_single_producer_case_3_correctness(self, device):
+        if device == "cpu":
+            self.skipTest("requires accelerator")
         self._test_consumer_to_single_producer_case_3_correctness(
             non_default_ambient_stream=False
         )
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
-    @skipIfMPS
-    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    @expectedFailureMPS
+    @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
-    def test_consumer_to_single_producer_case_4_correctness(self):
+    def test_consumer_to_single_producer_case_4_correctness(self, device):
+        if device == "cpu":
+            self.skipTest("requires accelerator")
+
         #           Device    Stream
         # Consumer: cuda:0    cuda:0 default
         # Producer: cuda:1    s1
@@ -13516,12 +13584,15 @@ class TestAutogradStreamSynchronization(TestCase):
             test()
 
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
-    @skipIfMPS
-    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    @expectedFailureMPS
+    @skipCUDANonDefaultStreamIf(True)
     @unittest.skipIf(
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
-    def test_consumer_to_multi_producer_case_4_correctness(self):
+    def test_consumer_to_multi_producer_case_4_correctness(self, device):
+        if device == "cpu":
+            self.skipTest("requires accelerator")
+
         #             Device    Stream
         # Consumer  : cuda:0    cuda:0 default
         #
@@ -13603,12 +13674,11 @@ class TestAutogradStreamSynchronization(TestCase):
         for _ in range(2):
             test()
 
-    # AttributeError: module 'torch.mps' has no attribute 'default_stream'
-    @skipIfMPS
     # This test may spuriously fail on non-cuda accelerators (since we won't
     # be calling sleep)
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
-    def test_side_stream_backward_overlap(self):
+    @onlyCUDA
+    @skipCUDANonDefaultStreamIf(True)
+    def test_side_stream_backward_overlap(self, device):
         # In case 2/3, we would designate the consumer as the accumulation
         # stream and naively, one might have the consumer wait for the producer
         # as soon as we've added to the InputBuffer the first time.
@@ -13708,6 +13778,54 @@ class TestAutogradStreamSynchronization(TestCase):
         # Test
         populate_events()
         check_ordering()
+
+    @expectedFailureMPS
+    def test_warn_on_accumulate_grad_stream_mismatch_flag(self, device):
+        if device == "cpu":
+            self.skipTest("requires accelerator")
+
+        def do_test(suppress_warn, keep_grad_acc):
+            def _test():
+                with warnings.catch_warnings(record=True) as warns:
+                    warnings.simplefilter("always")
+
+                    with torch.Stream(0) as s0:
+                        a = torch.ones(8, 8, device=device, requires_grad=True)
+                        if keep_grad_acc:
+                            # create grad_acc under s1 and keep alive with b
+                            b = a.clone()
+
+                    with torch.Stream(0) as s1:
+                        s1.wait_stream(s0)
+                        c = a.sum()
+
+                    c.backward()
+
+                filter_str = "set_warn_on_accumulate_grad_stream_mismatch"
+                return sum([filter_str in str(w.message) for w in warns]) > 0
+
+            if suppress_warn:
+                try:
+                    torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(
+                        False
+                    )
+                    actual_warn = _test()
+                finally:
+                    torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(
+                        True
+                    )
+            else:
+                actual_warn = _test()
+
+            expect_warn = not suppress_warn and keep_grad_acc
+            self.assertEqual(actual_warn, expect_warn)
+
+        # Warn by default
+        self.assertTrue(torch._C._warn_on_accumulate_grad_stream_mismatch())
+
+        for suppress_warn in (True, False):
+            for keep_grad_acc in (True, False):
+                do_test(suppress_warn=suppress_warn, keep_grad_acc=keep_grad_acc)
 
 
 class TestMultithreadAutograd(TestCase):
@@ -15195,6 +15313,9 @@ instantiate_device_type_tests(TestAutogradDeviceType, globals(), except_for=None
 
 instantiate_device_type_tests(
     TestAutogradMultipleDispatch, globals(), only_for=("cpu", "cuda")
+)
+instantiate_device_type_tests(
+    TestAutogradStreamSynchronization, globals(), except_for=None
 )
 
 instantiate_parametrized_tests(TestAutograd)

@@ -335,8 +335,8 @@ def common_reduction_strategy(
 
 
 LINEAR_REDUCTION_OP_MAP = {
-    aten.all.default: "sum",
-    aten.all.dim: "sum",
+    aten.all.default: "product",
+    aten.all.dim: "product",
     aten.sum.default: "sum",
     aten.sum.dim_IntList: "sum",
     aten.any.default: "sum",
@@ -441,15 +441,11 @@ def vector_norm_strategy(op_schema: OpSchema) -> OpStrategy:
     keepdim = args_schema[3] if len(args_schema) > 3 else False
     dims = _infer_reduction_dims(dim, input_strategy.ndim)
     reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
-    reduction_linear = all(
-        all(not p.is_partial() for p in op_spec.output_spec.placements)
-        for op_spec in input_strategy.strategies
-    )
     return common_reduction_strategy(
         input_strategy,
         reduce_dims,
         keep_dim=cast(bool, keepdim),
-        reduction_linear=reduction_linear,
+        reduction_linear=True,
         reduction_op=NormReduction(norm_type),
     )
 
@@ -472,14 +468,10 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
         if not isinstance(op_strategy, OpStrategy):
             raise AssertionError(f"Expected OpStrategy, got {type(op_strategy)}")
         reduce_dims = list(range(op_strategy.ndim))
-        reduction_linear = all(
-            all(not p.is_partial() for p in op_spec.output_spec.placements)
-            for op_spec in op_strategy.strategies
-        )
         output_strategy = common_reduction_strategy(
             op_strategy,
             reduce_dims,
-            reduction_linear=reduction_linear,
+            reduction_linear=True,
             reduction_op=NormReduction(norm_type),
         )
         output_tuple_strategy_children.append(output_strategy)

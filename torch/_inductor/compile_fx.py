@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -104,7 +104,7 @@ from .._dynamo.exc import ShortenTraceback, SkipFrame
 from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
 from ..utils._triton import has_triton
-from . import config, metrics
+from . import config, distributed_autotune, metrics
 from .codegen.common import get_wrapper_codegen_for_device, init_backend_registration
 from .debug import DebugContext
 from .decomposition import select_decomp_table
@@ -131,7 +131,7 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Sequence
+    from collections.abc import Callable, Generator, Sequence
 
     from torch._inductor.output_code import _StrideExprStr
     from torch._ops import OpOverload
@@ -214,7 +214,7 @@ def _fx_compile_mode_default() -> FxCompileConfig:
             "Invalid value of %s for %s. Expected one of %s. Using default.",
             value,
             name,
-            ", ".join(sorted(repr(x) for x in FxCompileMode.__members__.keys())),
+            ", ".join(sorted(repr(x) for x in FxCompileMode.__members__)),
         )
         # Remove from the environment so subprocesses don't ALSO complain.
         os.environ.pop(name)
@@ -469,7 +469,7 @@ def _unlift_graph(
         gm,
         lifted_inputs,
         mutated_outputs,
-        pytree.LeafSpec(),
+        pytree.treespec_leaf(),
         None,
     )
     return unlifted_gm
@@ -1431,7 +1431,11 @@ class _InProcessFxCompile(FxCompile):
                 # We are going to start code generating runtime asserts, so make sure
                 # you don't start adding new ones in the lowering process
                 graph.freeze_runtime_asserts()
-                with V.set_graph_handler(graph), V.set_extern_kernel_nodes([]):
+                with (
+                    V.set_graph_handler(graph),
+                    V.set_extern_kernel_nodes([]),
+                    distributed_autotune.graph_context(),
+                ):
                     graph.run(*example_inputs)
                     output_strides: list[Optional[tuple[_StrideExprStr, ...]]] = []
                     if graph.graph_outputs is not None:
@@ -1550,9 +1554,12 @@ class _InProcessFxCompile(FxCompile):
                             payload_fn=lambda: inductor_kernel_stack_trace_str,
                         )
                         if inductor_kernel_stack_trace_str:
-                            get_metrics_context().add_to_set(
-                                "inductor_provenance", inductor_kernel_stack_trace_str
-                            )
+                            metrics_context = get_metrics_context()
+                            if metrics_context.in_progress():
+                                metrics_context.add_to_set(
+                                    "inductor_provenance",
+                                    inductor_kernel_stack_trace_str,
+                                )
 
                     node_runtimes = None
                     if inductor_metrics_log.isEnabledFor(logging.INFO):
@@ -2444,6 +2451,11 @@ def compile_fx(
     """
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
+
+    from torch._inductor.compiler_bisector import CompilerBisector
+
+    if CompilerBisector.disable_subsystem("inductor", "pre_grad_graph"):
+        return model_
 
     if config_patches:
         with config.patch(config_patches):

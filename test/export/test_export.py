@@ -91,13 +91,13 @@ from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
-    LeafSpec,
     register_constant,
     tree_flatten,
     tree_map,
     tree_unflatten,
     TreeSpec,
     treespec_dumps,
+    treespec_leaf,
     treespec_loads,
 )
 
@@ -721,6 +721,37 @@ class TestExport(TestCase):
                 )
                 self.assertEqual(node.meta["from_node"][-1].graph_id, graph_id)
 
+    def test_annotate_on_assert(self):
+        # nodes added in `apply_runtime_assertion_pass` will be annotated
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                with torch.fx.traceback.annotate({"moo": 0}):
+                    x = torch.cat([x, x])
+                    b = y.item()
+                    torch._check(b >= x.shape[0])
+                    return x * b
+
+        with torch.fx.traceback.preserve_node_meta():
+            ep = torch.export.export(
+                M(),
+                (torch.randn(3), torch.tensor(6)),
+                dynamic_shapes={"x": {0: Dim("b")}, "y": None},
+            )
+
+        custom_metadata = torch.fx.traceback._get_custom_metadata(ep.module())
+        self.assertExpectedInline(
+            str(custom_metadata),
+            """\
+('placeholder', 'x', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace'})
+('placeholder', 'y', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace'})
+('call_function', 'cat', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
+('call_function', 'item', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
+('call_function', 'ge_1', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
+('call_function', '_assert_scalar_default', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
+('call_function', 'mul', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
+('output', 'output', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace'})""",
+        )
+
     @requires_gpu
     def test_flex_attention_export(self):
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
@@ -1193,8 +1224,14 @@ graph():
     %p_block_linear2_bias : [num_users=1] = placeholder[target=p_block_linear2_bias]
     %x : [num_users=1] = placeholder[target=x]
     %wrap_body0 : [num_users=1] = get_attr[target=wrap_body0]
-    %tag_activation_checkpoint : [num_users=1] = call_function[target=torch.ops.higher_order.tag_activation_checkpoint](args = (%wrap_body0, %x, %p_block_linear1_weight, %p_block_linear1_bias, %p_block_linear2_weight, %p_block_linear2_bias), kwargs = {})
+    %tag_activation_checkpoint : [num_users=7] = call_function[target=torch.ops.higher_order.tag_activation_checkpoint](args = (%wrap_body0, %x, %p_block_linear1_weight, %p_block_linear1_bias, %p_block_linear2_weight, %p_block_linear2_bias), kwargs = {})
     %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 0), kwargs = {})
+    %getitem_1 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 1), kwargs = {})
+    %getitem_2 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 2), kwargs = {})
+    %getitem_3 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 3), kwargs = {})
+    %getitem_4 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 4), kwargs = {})
+    %getitem_5 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 5), kwargs = {})
+    %getitem_6 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 6), kwargs = {})
     return (getitem,)""",
         )
 
@@ -1203,14 +1240,14 @@ graph():
             """\
 graph():
     %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
-    %arg1_1 : [num_users=1] = placeholder[target=arg1_1]
-    %arg2_1 : [num_users=1] = placeholder[target=arg2_1]
-    %arg3_1 : [num_users=1] = placeholder[target=arg3_1]
-    %arg4_1 : [num_users=1] = placeholder[target=arg4_1]
-    %linear : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%arg0_1, %arg1_1, %arg2_1), kwargs = {})
-    %relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default](args = (%linear,), kwargs = {})
+    %arg1_1 : [num_users=2] = placeholder[target=arg1_1]
+    %arg2_1 : [num_users=2] = placeholder[target=arg2_1]
+    %arg3_1 : [num_users=2] = placeholder[target=arg3_1]
+    %arg4_1 : [num_users=2] = placeholder[target=arg4_1]
+    %linear : [num_users=2] = call_function[target=torch.ops.aten.linear.default](args = (%arg0_1, %arg1_1, %arg2_1), kwargs = {})
+    %relu : [num_users=2] = call_function[target=torch.ops.aten.relu.default](args = (%linear,), kwargs = {})
     %linear_1 : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%relu, %arg3_1, %arg4_1), kwargs = {})
-    return (linear_1,)""",
+    return (linear_1, arg1_1, arg2_1, linear, relu, arg3_1, arg4_1)""",
         )
 
         stack = contextlib.ExitStack()
@@ -3955,7 +3992,7 @@ def forward(self, causal_mask, fill_value):
     def test_export_custom_op_lib(self):
         ops_registered_before = set(torch.ops.mylib)
 
-        # Assert warning for CompositeImplictAutograd op
+        # Assert warning for CompositeImplicitAutograd op
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             lib.define("foo123(Tensor x) -> Tensor")
             lib.impl("foo123", lambda x: x.sin(), "CompositeImplicitAutograd")
@@ -6093,26 +6130,19 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         retry_export(
             cf_implicitsize(),
             (torch.tensor(2), torch.randn(10)),
-            fixes=[
-                # Could not guard on data-dependent expression u0 < 0
-                "torch._check(i >= 0)",
-            ],
+            fixes=[],
         )
 
         class cf_stacklist(torch.nn.Module):
             def forward(self, xs, y, fixes):
                 i = y.item()
                 eval(fixes)
-                # instead of xs[i]
                 return torch.stack(xs, 0).narrow(0, i, 1).squeeze()
 
         retry_export(
             cf_stacklist(),
             ([torch.ones(5) * i for i in range(10)], torch.tensor(2)),
-            fixes=[
-                # Could not guard on data-dependent expression u0 < 0
-                "torch._check(i >= 0)",
-            ],
+            fixes=[],
         )
 
         class cf_tensorsplit(torch.nn.Module):
@@ -6166,7 +6196,12 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         class cf_stacklist(torch.nn.Module):
             def forward(self, xs, y):
                 # y.item() is not a local, so we can't suggest a fix
-                return torch.stack(xs, 0).narrow(0, y.item(), 1).squeeze()
+                if y.item() < 0:
+                    return (
+                        torch.stack(xs, 0).narrow(0, y.item() + xs.size(), 1).squeeze()
+                    )
+                else:
+                    return torch.stack(xs, 0).narrow(0, y.item(), 1).squeeze()
 
         with self.assertRaisesRegex(
             error_type,
@@ -6196,7 +6231,18 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, xs, y):
                 box = Box(y.item())
                 # box.content is not a local, so we can't suggest a fix
-                return torch.stack(xs, 0).narrow(0, box.content, 1).squeeze()
+                if box.content < 0:
+                    return (
+                        torch.stack(xs, 0)
+                        .narrow(0, box.content + xs.size(), 1)
+                        .squeeze()
+                    )
+                else:
+                    return (
+                        torch.stack(xs, 0)
+                        .narrow(0, box.content + xs.size(), 1)
+                        .squeeze()
+                    )
 
         with self.assertRaisesRegex(
             error_type,
@@ -7791,7 +7837,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         dt = MyDataClass(x=3, y=4)
         flat, spec = tree_flatten(dt)
-        self.assertTrue(spec, LeafSpec())
+        self.assertTrue(spec, treespec_leaf())
         self.assertTrue(len(flat) == 1)
 
         torch.export.register_dataclass(
@@ -7802,7 +7848,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         flat, spec = tree_flatten(dt)
         self.assertEqual(
             spec,
-            TreeSpec(MyDataClass, [["x", "y"], ["z"]], [LeafSpec(), LeafSpec()]),
+            TreeSpec(
+                MyDataClass, [["x", "y"], ["z"]], [treespec_leaf(), treespec_leaf()]
+            ),
         )
         self.assertEqual(flat, [3, 4])
 
@@ -7835,7 +7883,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             TreeSpec(
                 MyOtherDataClass,
                 [["x", "y", "z"], []],
-                [LeafSpec(), LeafSpec(), LeafSpec()],
+                [treespec_leaf(), treespec_leaf(), treespec_leaf()],
             ),
         )
         self.assertEqual(flat, [3, 4, None])
@@ -16744,6 +16792,74 @@ def forward(self, q, k, v):
         result_strict = ep_strict.module()(*inp)
 
         self.assertEqual(result_non_strict, result_strict)
+
+    def test_tril_dynamic_diagonal(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                x_len = x.shape[0]
+                y_len = y.shape[0]
+                mask = torch.ones(x_len, y_len, dtype=torch.bool, device=x.device)
+                mask = mask.tril(diagonal=y_len - x_len)
+                return mask
+
+        x = torch.randn(3, 4)
+        y = torch.randn(5, 4)
+        x_len = Dim("x_len", min=1, max=64)
+        y_len = Dim("y_len", min=1, max=64)
+        ep = export(
+            Module(),
+            (x, y),
+            dynamic_shapes={
+                "x": {0: x_len},
+                "y": {0: y_len},
+            },
+        )
+        eager_out = Module()(x, y)
+        exported_out = ep.module()(x, y)
+        self.assertEqual(eager_out, exported_out)
+        self.assertEqual(exported_out.shape, (3, 5))
+        x2 = torch.randn(4, 4)
+        y2 = torch.randn(7, 4)
+        eager_out2 = Module()(x2, y2)
+        exported_out2 = ep.module()(x2, y2)
+        self.assertEqual(eager_out2, exported_out2)
+        self.assertEqual(exported_out2.shape, (4, 7))
+        expected_mask = torch.ones(3, 5, dtype=torch.bool).tril(diagonal=2)
+        self.assertEqual(eager_out, expected_mask)
+
+    def test_triu_dynamic_diagonal(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                x_len = x.shape[0]
+                y_len = y.shape[0]
+                mask = torch.ones(x_len, y_len, dtype=torch.bool, device=x.device)
+                mask = mask.triu(diagonal=y_len - x_len)
+                return mask
+
+        x = torch.randn(3, 4)
+        y = torch.randn(5, 4)
+        x_len = Dim("x_len", min=1, max=64)
+        y_len = Dim("y_len", min=1, max=64)
+        ep = export(
+            Module(),
+            (x, y),
+            dynamic_shapes={
+                "x": {0: x_len},
+                "y": {0: y_len},
+            },
+        )
+        eager_out = Module()(x, y)
+        exported_out = ep.module()(x, y)
+        self.assertEqual(eager_out, exported_out)
+        self.assertEqual(exported_out.shape, (3, 5))
+        x2 = torch.randn(4, 4)
+        y2 = torch.randn(7, 4)
+        eager_out2 = Module()(x2, y2)
+        exported_out2 = ep.module()(x2, y2)
+        self.assertEqual(eager_out2, exported_out2)
+        self.assertEqual(exported_out2.shape, (4, 7))
+        expected_mask = torch.ones(3, 5, dtype=torch.bool).triu(diagonal=2)
+        self.assertEqual(eager_out, expected_mask)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")

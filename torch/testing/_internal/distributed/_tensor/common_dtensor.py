@@ -3,6 +3,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import contextlib
+import copy
 import functools
 import itertools
 import sys
@@ -17,7 +18,6 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._local_tensor import (
-    local_tensor_mode,
     LocalIntNode,
     LocalTensor,
     LocalTensorMode,
@@ -33,6 +33,8 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
+from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -447,7 +449,7 @@ class DTensorTestBase(MultiProcessTestCase):
                 torch.cuda.current_device() if self.device_type == "cuda" else self.rank
             )
 
-        if self.device_type == "cpu" and torch._C._get_accelerator().type != "cpu":
+        if self.device_type == "cpu":
             # NOTE: when `device_id` is not None, barrier() will choose the accelerator
             # of the most pripority, which means if the test specifies to use CPU for
             # testing while CUDA is available on the host, the barrier() will use CUDA.
@@ -715,9 +717,6 @@ class LocalDTensorTestBase(DTensorTestBase):
         self.skipTest(msg)
 
     def _get_local_tensor_mode(self):
-        lm = local_tensor_mode()
-        if lm is not None:
-            breakpoint()
         return LocalTensorMode(frozenset(range(self.world_size)))
 
     def setUp(self) -> None:
@@ -818,3 +817,129 @@ def map_local_tensor_for_rank(tensor, rank, func):
 @maybe_run_for_local_tensor
 def map_local_for_rank(rank, func):
     return func(rank)
+
+
+def reduce_local_int(val, func):
+    return func(val.node._local_ints)
+
+
+def _convert_shard_order_dict_to_ShardOrder(shard_order):
+    """Convert shard_order dict to ShardOrder"""
+    return tuple(
+        ShardOrderEntry(tensor_dim=tensor_dim, mesh_dims=tuple(mesh_dims))
+        for tensor_dim, mesh_dims in shard_order.items()
+    )
+
+
+# TODO(zpcore): remove once the native redistribute supports shard_order arg
+def redistribute(
+    dtensor_input,
+    device_mesh,
+    placements,
+    shard_order,
+    use_graph_based_transform=True,
+):
+    """
+    wrapper function to support shard_order for redistribution
+    This is a simpler version of Redistribute, only considers the forward.
+    """
+    if placements is None:
+        placements = shard_order_to_placement(shard_order, device_mesh)
+    placements = tuple(placements)
+    old_spec = dtensor_input._spec
+    new_spec = copy.deepcopy(old_spec)
+    new_spec.placements = placements
+    if shard_order is not None:
+        new_spec.shard_order = shard_order
+    else:
+        new_spec.shard_order = ()
+    if old_spec == new_spec:
+        return dtensor_input
+    dtensor_input = DTensor.from_local(
+        redistribute_local_tensor(
+            dtensor_input.to_local(),
+            old_spec,
+            new_spec,
+            use_graph_based_transform=use_graph_based_transform,
+        ),
+        device_mesh,
+    )
+    dtensor_input._spec = copy.deepcopy(new_spec)
+    return dtensor_input  # returns DTensor
+
+
+# TODO(zpcore): remove once the native distribute_tensor supports
+# shard_order arg
+def patched_distribute_tensor(
+    input_tensor,
+    device_mesh,
+    placements,
+    shard_order,
+    use_graph_based_transform=True,
+):
+    """wrapper function to support shard_order for tensor distribution"""
+    if placements is None:
+        placements = shard_order_to_placement(shard_order, device_mesh)
+    placements = tuple(placements)
+    tensor_dt = distribute_tensor(input_tensor, device_mesh, placements)
+    # fix the shard order
+    return redistribute(
+        tensor_dt, device_mesh, placements, shard_order, use_graph_based_transform
+    )
+
+
+# TODO(zpcore): remove once the native redistribute supports shard_order arg
+def make_full_tensor(dtensor_input):
+    """wrapper function to support DTensor.full_tensor"""
+    return redistribute(
+        dtensor_input, dtensor_input.device_mesh, placements=None, shard_order=()
+    ).to_local()
+
+
+def shard_order_to_placement(shard_order, mesh):
+    """convert shard_order to placement with only Replicate() and Shard()"""
+    placements: list[Any] = [Replicate() for _ in range(mesh.ndim)]
+    if shard_order is not None:
+        for entry in shard_order:
+            tensor_dim = entry.tensor_dim
+            mesh_dims = entry.mesh_dims
+            for mesh_dim in mesh_dims:
+                placements[mesh_dim] = Shard(tensor_dim)
+    return tuple(placements)
+
+
+def generate_shard_orders(mesh, tensor_rank):
+    # Generate all possible sharding placement of tensor with rank
+    # `tensor_rank` over mesh.
+    def _split_list(lst: list, N: int):
+        def compositions(n: int, k: int):
+            # yields lists of length k, positive ints summing to n
+            for cuts in itertools.combinations(range(1, n), k - 1):
+                # add 0 and n as sentinels, then take consecutive differences
+                yield [b - a for a, b in itertools.pairwise((0, *cuts, n))]
+
+        length = len(lst)
+        for comp in compositions(length, N):
+            result = []
+            start = 0
+            for size in comp:
+                result.append(lst[start : start + size])
+                start += size
+            yield result
+
+    all_mesh = list(range(mesh.ndim))
+    all_device_order = list(itertools.permutations(all_mesh))
+    for device_order in all_device_order:
+        # split on device orders, and assign each device order segment to a tensor dim
+        for num_split in range(1, mesh.ndim + 1):
+            for splitted_list in _split_list(list(range(mesh.ndim)), num_split):
+                for tensor_dims in itertools.combinations(
+                    range(tensor_rank), len(splitted_list)
+                ):
+                    shard_order = {}
+                    assert len(tensor_dims) == len(splitted_list)
+                    for tensor_dim, mesh_dims in zip(tensor_dims, splitted_list):
+                        shard_order[tensor_dim] = device_order[
+                            mesh_dims[0] : mesh_dims[-1] + 1
+                        ]
+                    yield _convert_shard_order_dict_to_ShardOrder(shard_order)

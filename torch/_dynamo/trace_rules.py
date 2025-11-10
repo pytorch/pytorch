@@ -180,6 +180,7 @@ manual_torch_name_rule_map: dict[
     "torch.compiler.is_exporting": TorchInGraphFunctionVariable,
     "torch._C._to_dlpack": SkipFunctionVariable,
     "torch.to_dlpack": SkipFunctionVariable,
+    "torch._check": TorchInGraphFunctionVariable,
     # We graph break on RNG state setters or getters like
     # `torch.get_rng_state` or `torch.set_rng_state`. These functions
     # are not aten operations and therefore they are completely ignored
@@ -2343,7 +2344,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._check_type",
         "torch._check_value",
         "torch._check_with",
-        "torch._check",
         "torch._compile._disable_dynamo",
         "torch._functorch.apis.chunk_vmap",
         "torch._functorch.batch_norm_replacement.batch_norm_without_running_stats",
@@ -2590,6 +2590,8 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda._set_rng_state_offset",
         "torch.cuda._set_stream_by_id",
         "torch.cuda._sleep",
+        "torch.cuda._busy_wait_for_flag",
+        "torch.cuda._clear_flag",
         "torch.cuda._transform_uuid_to_ordinals",
         "torch.cuda._utils._get_device_index",
         "torch.cuda.amp.autocast_mode._cast",

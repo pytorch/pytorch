@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 
@@ -253,6 +253,7 @@ class DtypePropagationOpsHandler:
         name: str,
         reduction_type: str,
         value: DTypeArg,
+        extra_meta: dict[str, Any],
     ) -> None:
         return None
 

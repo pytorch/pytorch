@@ -264,6 +264,7 @@ def generate_ttir(
 
     assert isinstance(kernel, JITFunction)
 
+    # pyrefly: ignore  # missing-attribute
     context = triton._C.libtriton.ir.context()
     target = triton.runtime.driver.active.get_current_target()
     backend = triton.compiler.compiler.make_backend(target)
@@ -292,7 +293,7 @@ def generate_ttir(
             ordered_args[name] = 2
         elif (
             stable_meta := maybe_unpack_tma_stable_metadata(
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 tma_descriptor_metadata.get(name, None)
             )
         ) is not None:
@@ -305,6 +306,7 @@ def generate_ttir(
                 base_tensor = torch.empty(
                     [elements_per_dim] * len(block_shape), dtype=a.dtype
                 )
+            # pyrefly: ignore  # bad-argument-type
             ordered_args[name] = TensorDescriptor.from_tensor(base_tensor, block_shape)
         elif isinstance(a, (FakeTensor, torch._inductor.ir.TensorBox)):
             with torch._C._DisableTorchDispatch():
@@ -368,6 +370,7 @@ def generate_ttir(
 
             target = triton.runtime.driver.active.get_current_target()
             backend_ = triton.compiler.compiler.make_backend(target)
+            # pyrefly: ignore  # missing-attribute
             return backend_.get_attrs_descriptor(args, kernel.params)
         else:
             assert (
@@ -384,6 +387,7 @@ def generate_ttir(
                 except TypeError:  # Unknown arg `specialize_extra`
                     # Older versions of Triton take specialize_extra as an arg to specialize_impl
                     specialize_impl = functools.partial(
+                        # pyrefly: ignore  # missing-argument
                         triton.runtime.jit.create_specialize_impl(),
                         specialize_extra=backend.get_arg_specialization,
                     )
@@ -426,7 +430,7 @@ def generate_ttir(
                         specialize_value=not kp.do_not_specialize,
                         align=not kp.do_not_specialize_on_alignment,
                     )
-                    # pyrefly: ignore  # unsupported-operation
+                    # pyrefly: ignore [unsupported-operation]
                     attrvals.append(spec[1])
 
             attrs = find_paths_if(attrvals, lambda _, x: isinstance(x, str))
@@ -445,7 +449,7 @@ def generate_ttir(
         def get_signature_value(idx: int, arg: Any) -> str:
             if kernel.params[idx].is_constexpr:
                 return "constexpr"
-            # pyrefly: ignore  # not-callable
+            # pyrefly: ignore [not-callable]
             return mangle_type(arg)
 
     else:
@@ -468,6 +472,7 @@ def generate_ttir(
             if i not in constexprs
         }
 
+    # pyrefly: ignore  # missing-attribute
     triton._C.libtriton.ir.load_dialects(context)
     backend.load_dialects(context)
 
@@ -477,22 +482,30 @@ def generate_ttir(
     # backward compatibility here.
     make_ir_sig_params = len(inspect.signature(src.make_ir).parameters)
     get_codegen_implementation_sig_params = len(
+        # pyrefly: ignore  # missing-attribute
         inspect.signature(backend.get_codegen_implementation).parameters
     )
     if make_ir_sig_params == 2:
+        # pyrefly: ignore  # missing-argument
         ttir_module = src.make_ir(options, context)
     elif make_ir_sig_params == 3:
+        # pyrefly: ignore  # missing-attribute
         codegen_fns = backend.get_codegen_implementation()
+        # pyrefly: ignore  # missing-argument
         ttir_module = src.make_ir(options, codegen_fns, context)
     elif make_ir_sig_params == 4:
         codegen_args = [options] if get_codegen_implementation_sig_params == 1 else []
+        # pyrefly: ignore  # missing-attribute
         codegen_fns = backend.get_codegen_implementation(*codegen_args)
         module_map = backend.get_module_map()
+        # pyrefly: ignore[missing-argument,bad-argument-type]
         ttir_module = src.make_ir(options, codegen_fns, module_map, context)
     else:
         codegen_args = [options] if get_codegen_implementation_sig_params == 1 else []
+        # pyrefly: ignore  # missing-attribute
         codegen_fns = backend.get_codegen_implementation(*codegen_args)
         module_map = backend.get_module_map()
+        # pyrefly: ignore  # bad-argument-count
         ttir_module = src.make_ir(target, options, codegen_fns, module_map, context)
     if not ttir_module.verify():
         raise RuntimeError("Verification for TTIR module has failed")
@@ -819,7 +832,7 @@ def get_tma_stores(
         for op in op_list:
             if op.name == "tt.call":
                 assert op.fn_call_name in functions
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 tma_stores = get_tma_stores(functions, op.fn_call_name)
                 for i, inp in enumerate(op.args):
                     if Param(idx=i) in tma_stores:
@@ -901,7 +914,7 @@ def analyze_kernel_mutations(
                 assert op.fn_call_name in functions
                 mutations = analyze_kernel_mutations(
                     functions,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     op.fn_call_name,
                     len(op.args),
                 )
@@ -956,7 +969,7 @@ def identify_mutated_tensors(
         assert functions is not None
         kernel_name = next(iter(functions.keys()))
         # Triton codegen modifies the name
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         assert kernel.fn.__name__ in kernel_name
         # Reset the cache between top level invocations
         # The cache for analyze kernel mutations is mainly used for cycle
@@ -1060,9 +1073,9 @@ def triton_kernel_wrapper_mutation_dense(
         grid_fn = grid[0]
     else:
         fn_name, code = user_defined_kernel_grid_fn_code(
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             kernel.fn.__name__,
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             kernel.configs,
             grid,
         )
@@ -1102,6 +1115,7 @@ def triton_kernel_wrapper_mutation_dense(
                 from triton.tools.tensor_descriptor import TensorDescriptor
 
                 block_shape = stable_meta[0]
+                # pyrefly: ignore  # bad-argument-type
                 kwargs[k] = TensorDescriptor.from_tensor(tensor, block_shape)
 
     # move as many positional arguments from dicts to args as we
@@ -1113,7 +1127,7 @@ def triton_kernel_wrapper_mutation_dense(
     # avoid mutating the original inputs
     kwargs = kwargs.copy()
     constant_args = constant_args.copy()
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     for name in kernel.arg_names:
         if name in kwargs:
             args.append(kwargs.pop(name))
@@ -1122,7 +1136,7 @@ def triton_kernel_wrapper_mutation_dense(
         else:
             break
 
-    # pyrefly: ignore  # index-error
+    # pyrefly: ignore [index-error]
     kernel[grid_fn](*args, **kwargs, **constant_args)
 
 
@@ -1528,7 +1542,7 @@ class TritonHOPifier:
 
         assert kernel_idx is None or variable.kernel_idx == kernel_idx
 
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         variable.grid = grid
 
         if isinstance(kernel, Autotuner):
@@ -1658,6 +1672,7 @@ class TritonHOPifier:
                     "Passing multiple @triton.autotune decorators is not supported. "
                     "Please use a single @triton.autotune decorator instead."
                 )
+            # pyrefly: ignore  # missing-attribute
             iter_kernel = iter_kernel.fn
 
         # Process the @triton.heuristics decorator:
@@ -1868,6 +1883,7 @@ class TritonHOPifier:
 
         # Both for grid's meta as well as for the kernel, we need combined
         # args and kwargs combined and normalized
+        # pyrefly: ignore  # missing-attribute
         combined_args_raw = {**dict(zip(variable.kernel.arg_names, args)), **kwargs}
 
         # precompute the grid for the kernel
@@ -2061,6 +2077,7 @@ class TraceableTritonKernelWrapper:
         kernel_idx: Optional[int],
         grid: Optional["TritonGridType"],
     ) -> None:
+        # pyrefly: ignore  # bad-assignment
         self.kernel = None
         self.grid = None
         tracing_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
@@ -2076,7 +2093,7 @@ class TraceableTritonKernelWrapper:
             return tracing_triton_hopifier_singleton.call_run(self, args, kwargs, None)
         else:
             assert self.kernel is not None
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             return self.kernel.run(*args, **kwargs)
 
     def __call__(self, *args: Sequence[Any], **kwargs: dict[str, Any]) -> Any:
@@ -2088,7 +2105,7 @@ class TraceableTritonKernelWrapper:
             )
         else:
             assert self.kernel is not None
-            # pyrefly: ignore  # index-error
+            # pyrefly: ignore [index-error]
             return self.kernel[self.grid](*args, **kwargs)
 
     def specialize_symbolic(self, arg: Sequence[Any]) -> Any:

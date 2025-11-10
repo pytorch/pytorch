@@ -34,7 +34,7 @@ from pathlib import Path
 from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
 from types import ModuleType
-from typing import Any, Callable, cast, Generic, NoReturn, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, Generic, NoReturn, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import override, Self
 
 import torch
@@ -126,7 +126,7 @@ if config.is_fbcode():
 T = TypeVar("T")
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, KeysView, Sequence
+    from collections.abc import Callable, Generator, KeysView, Sequence
     from concurrent.futures import Future
 
     from .compile_fx import _CompileFxKwargs
@@ -1680,30 +1680,42 @@ class CudaKernelParamCache:
         basename, _ = get_name_and_dir_from_output_file_path(bin_path)
 
         if config.aot_inductor.emit_multi_arch_kernel:
-            bin_type_to_ext = {"cubin": ".fatbin", "spv": ".spv"}
-            assert bin_type in bin_type_to_ext.keys(), (
-                "multi_arch_kernel_binary only supported in CUDA/XPU"
+            bin_type_to_ext = {"cubin": ".fatbin", "spv": ".spv", "hsaco": ".hsaco"}
+            assert bin_type in bin_type_to_ext, (
+                "multi_arch_kernel_binary only supported in CUDA/XPU/ROCm"
             )
             base_path, _ = os.path.splitext(bin_path)
             bin_path = base_path + bin_type_to_ext[bin_type]
 
         asm_path: str = ""
+
+        # Kernel assembly/IR requirements for AOT Inductor:
+        # - CUDA/XPU: Always require PTX/SPV
+        # - ROCm multi-arch: Require LLVM IR (.ll) for bundle compilation
         if (
             config.aot_inductor.emit_multi_arch_kernel
             or config.aot_inductor.package_cpp_only
         ):
-            assert asm, "Missing kernel assembly code"
-            assert asm_type, "Missing kernel assembly type"
-            _, asm_path = write(
-                asm,
-                asm_type,
-                hash_type=asm_type,
-                specified_dir=split_aot_inductor_output_path(
-                    config.aot_inductor.output_path
-                )[0],
-                # make sure asm file has the same basename
-                key=basename,
-            )
+            # Allow ROCm single-arch to skip (asm=None OK), require for everything else
+            if torch.version.hip is None or (asm and asm_type):
+                assert asm, "Missing kernel assembly code"
+                assert asm_type, "Missing kernel assembly type"
+
+                # Cache directory mapping: asm_type → hash_type
+                # Problem: LLVM IR extension ".ll" isn't a recognized cache category
+                # Solution: Map to "code" (generic category for non-standard formats)
+                # Recognized categories: "ptx", "amdgcn", "spv", "code"
+                hash_kind = asm_type if asm_type in {"amdgcn", "ptx", "spv"} else "code"
+
+                _, asm_path = write(
+                    asm,
+                    asm_type,
+                    hash_type=hash_kind,
+                    specified_dir=split_aot_inductor_output_path(
+                        config.aot_inductor.output_path
+                    )[0],
+                    key=basename,
+                )
 
         params[get_cpp_wrapper_cubin_path_name()] = bin_path
         params["asm"] = asm_path
@@ -2139,7 +2151,7 @@ end
             )
             all_cuda = all(
                 graph.get_original_value_of_constant(name).is_cuda
-                for name in graph.constants.keys()
+                for name in graph.constants
                 if name not in graph.folded_constants
             )
 
@@ -2180,7 +2192,7 @@ end
             ):
                 serialized_weights = b"".join(
                     _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
-                    for name in graph.constants.keys()
+                    for name in graph.constants
                     if name not in graph.folded_constants
                 )
             else:
@@ -2194,7 +2206,7 @@ end
                             graph.get_original_value_of_constant(name),
                             TensorProperties(graph.constants[name]),
                         )
-                        for name in graph.constants.keys()
+                        for name in graph.constants
                         if name not in graph.folded_constants
                     }
                 )
@@ -2383,28 +2395,57 @@ end
                         config.aot_inductor.emit_multi_arch_kernel
                         and device_type == "cuda"
                     ):
-                        current_arch = _nvcc_arch_as_compile_option()
-                        cmd = (
-                            # pyrefly: ignore [unbound-name]
-                            f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
-                            # Triton only allows generating PTX version as same as the current arch
-                            f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
-                            # Include SASS for the current specific arch
-                            f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
-                        )
-                        try:
-                            subprocess.run(
-                                cmd.split(),
-                                capture_output=True,
-                                text=True,
-                                check=True,
+                        if torch.version.hip is None:
+                            current_arch = _nvcc_arch_as_compile_option()
+                            cmd = (
+                                # pyrefly: ignore [unbound-name]
+                                f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
+                                # Triton only allows generating PTX version as same as the current arch
+                                f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
+                                # Include SASS for the current specific arch
+                                f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
                             )
-                        except subprocess.CalledProcessError as e:
-                            print(
-                                f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
-                                file=sys.stderr,
+                            try:
+                                subprocess.run(
+                                    cmd.split(),
+                                    capture_output=True,
+                                    text=True,
+                                    check=True,
+                                )
+                            except subprocess.CalledProcessError as e:
+                                print(
+                                    f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
+                                    file=sys.stderr,
+                                )
+                                raise
+
+                        else:
+                            # ROCm multi-arch: compile LLVM IR to multi-arch bundle
+                            from torch._inductor.rocm_multiarch_utils import (
+                                compile_multiarch_bundle_from_llvm_ir,
                             )
-                            raise
+
+                            if not os.path.exists(asm_file):
+                                raise RuntimeError(
+                                    f"Multi-arch ROCm compilation requires LLVM IR file, "
+                                    f"but {asm_file} not found. "
+                                    f"Ensure asm_type='ll' is captured in triton_heuristics.py"
+                                )
+
+                            # Compile for multiple archs and bundle them
+                            success = compile_multiarch_bundle_from_llvm_ir(
+                                llvm_ir_path=asm_file,
+                                output_bundle_path=cubin_file,
+                                target_archs=None,
+                            )
+
+                            if not success:
+                                raise RuntimeError(
+                                    f"Failed to compile multi-arch bundle for kernel {kernel_name}. "
+                                    f"Check that ROCm toolchain is available and LLVM IR is valid."
+                                )
+
+                            log.info("Created multi-arch bundle: %s", cubin_file)
 
                     if config.aot_inductor.embed_kernel_binary:
                         # Embed cubin files into model.so using objcopy
@@ -2471,10 +2512,18 @@ end
                     generated_files.append(consts_o)
                     so_builder.save_src_to_cmake(cmake_path, consts_o)
 
-                if config.aot_inductor.emit_multi_arch_kernel:
+                # Different CMake strategies for CUDA vs ROCm:
+                # - CUDA: Save asm for CMake to recompile (user has nvcc)
+                # - ROCm: Link pre-compiled bundle (user may lack dev tools)
+                if (
+                    config.aot_inductor.emit_multi_arch_kernel
+                    and torch.version.hip is None
+                ):
                     so_builder.save_kernel_asm_to_cmake(cmake_path, asm_files)
                     generated_files.extend(asm_files)
                 else:
+                    # ROCm multi-arch + all single-arch: Link pre-compiled objects
+                    # Bundle already embedded in .o files - just link into .so
                     obj_srcs = [*gpu_kernels_o, *cubins_o]
                     generated_files.extend(obj_srcs)
                     for obj in obj_srcs:
@@ -2606,7 +2655,7 @@ def custom_op_wrapper(op: str, *args: Any) -> list[c_void_p] | c_void_p | None:
     if isinstance(result, (list, tuple)):
         # unsafe_alloc_void_ptrs_from_tensors expects result contains tensor only
         result = [torch.tensor([]) if r is None else r for r in result]
-        for i, r in enumerate(result):
+        for r in result:
             assert isinstance(r, torch.Tensor), op + " returns a list of non-tensors"
         return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)  # type: ignore[arg-type]
 
@@ -2969,6 +3018,12 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             if(unlikely(result == reinterpret_cast<void*>(-1) && PyErr_Occurred()))
                 throw std::runtime_error("expected int arg");
             return reinterpret_cast<uintptr_t>(result);
+        }}
+        template <> inline float parse_arg<float>(PyObject* args, size_t n) {{
+            auto result = PyFloat_AsDouble(PyTuple_GET_ITEM(args, n));
+            if(unlikely(result == -1.0 && PyErr_Occurred()))
+                throw std::runtime_error("expected float arg");
+            return static_cast<float>(result);
         }}
 
         {extra_parse_arg}
@@ -3743,11 +3798,13 @@ def cutlass_key() -> bytes:
     Note: OSS and fbcode will have different keys.
     """
     if config.is_fbcode():
-        with importlib.resources.path(
-            "cutlass_library", "src_hash.txt"
-        ) as resource_path:
-            with open(resource_path) as resource_file:
-                return resource_file.read().encode()
+        with (
+            importlib.resources.path(
+                "cutlass_library", "src_hash.txt"
+            ) as resource_path,
+            open(resource_path) as resource_file,
+        ):
+            return resource_file.read().encode()
 
     combined_hash = hashlib.sha256()
     build_code_hash([config.cuda.cutlass_dir], "", combined_hash)
