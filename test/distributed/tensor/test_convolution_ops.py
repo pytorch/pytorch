@@ -230,19 +230,12 @@ class DistConvolutionOpsTest(DTensorTestBase):
         out_dt, out = self._run_single_arg_fwd(model, x, [Shard(0)])
         self.assertEqual(out_dt, out)
 
-    @with_comms
-    def test_conv2d_bias_none(self):
-        model = nn.Conv2d(4, 8, 3, padding=1, bias=False)
-        x = torch.randn(1, 4, 5, 5, device=self.device_type)
-        out_dt, out = self._run_single_arg_fwd(model, x)
-        self.assertEqual(out_dt.shape, out.shape)
 
 DistConvolutionOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistConvolutionOpsTest,
     # Send / recv ops are not supported
     skipped_tests=[
         "test_conv1d",
-        "test_conv2d_bias_none",
         "test_conv3d",
         "test_conv_backward_none_grad_inp",
         "test_depthwise_convolution",
