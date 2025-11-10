@@ -49,8 +49,7 @@ def print_proxy_torch_dispatch_mode(
 @print.py_impl(FakeTensorMode)
 # pyre-ignore
 def print_fake_tensor_mode(mode, format_str: str, **kwargs: object):
-    with mode:
-        return None
+    return None
 
 
 @print.py_impl(torch._C.DispatchKey.CompositeExplicitAutograd)
