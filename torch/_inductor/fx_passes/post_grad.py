@@ -692,7 +692,7 @@ def register_addmm_activation_replacement():
                     return inp
             else:
                 def apply_bias(inp, beta=1):
-                    return inp * x
+                    return beta * inp
 
             for activation in (aten.relu, aten.gelu):
                 def bias_add_mm_activation_pattern(inp, mat1, mat2, beta=1, alpha=1):
@@ -740,7 +740,7 @@ def register_addmm_activation_replacement():
     )
 
     for addmm_activation_pattern in gen_addmm_activation_patterns():
-        for beta, alpha in itertools.product((1, 0.5), repeat=2):
+        for beta, alpha in itertools.product((0.5,), repeat=2):
             register_replacement(
                 # pyrefly: ignore [bad-argument-type]
                 addmm_activation_pattern,
