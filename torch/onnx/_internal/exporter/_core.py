@@ -109,7 +109,7 @@ def torch_dtype_to_onnx_dtype(dtype: torch.dtype) -> ir.DataType:
 
 
 class TorchTensor(ir.Tensor):
-    def __init__(self, tensor: torch.Tensor, name: str | None = None):
+    def __init__(self, tensor: torch.Tensor, name: str | None = None) -> None:
         # Pass the tensor as the raw data to ir.Tensor's constructor
         if tensor.dtype == torch.float4_e2m1fn_x2:
             # Change the shape to the unpacked shape

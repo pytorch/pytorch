@@ -912,7 +912,7 @@ def visualize_results(
     assert len(results) > 0
 
     input_set: OrderedSet[str] = OrderedSet({})
-    for key in results.keys():
+    for key in results.keys():  # noqa: SIM118
         input_set.add(key[0])
         input_set.add(key[1])
     input_list = sorted(input_set)
