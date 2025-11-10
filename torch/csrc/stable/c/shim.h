@@ -86,7 +86,11 @@ AOTI_TORCH_EXPORT AOTITorchError torch_parallel_for(
 
 // Get the current thread index in a parallel region
 // Returns 0 if not in a parallel region
-AOTI_TORCH_EXPORT uint32_t torch_get_thread_idx();
+AOTI_TORCH_EXPORT AOTITorchError torch_get_thread_idx(uint32_t* out_thread_idx);
+
+// Get the number of threads for the parallel backend
+AOTI_TORCH_EXPORT AOTITorchError
+torch_get_num_threads(uint32_t* out_num_threads);
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 

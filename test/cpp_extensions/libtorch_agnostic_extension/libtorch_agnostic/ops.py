@@ -477,3 +477,13 @@ def test_parallel_for(size, grain_size) -> Tensor:
         (if multiple threads are used the threadid will be encoded in the upper 32 bits)
     """
     return torch.ops.libtorch_agnostic.test_parallel_for.default(size, grain_size)
+
+
+def test_get_num_threads() -> int:
+    """
+    Tests the get_num_threads functionality by returning the number of threads
+    for the parallel backend.
+
+    Returns: int - the number of threads for the parallel backend
+    """
+    return torch.ops.libtorch_agnostic.test_get_num_threads.default()

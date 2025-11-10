@@ -786,7 +786,8 @@ Tensor test_parallel_for(int64_t size, int64_t grain_size) {
       0, size, grain_size, [data_ptr](int64_t begin, int64_t end) {
         for (auto i = begin; i < end; i++) {
           STD_TORCH_CHECK(i <= UINT32_MAX);
-          int thread_id = torch_get_thread_idx();
+          uint32_t thread_id;
+          torch_get_thread_idx(&thread_id);
           data_ptr[i] = i | (static_cast<int64_t>(thread_id) << 32);
         }
       });
@@ -802,10 +803,24 @@ void boxed_test_parallel_for(
   stack[0] = from(res);
 }
 
+uint32_t test_get_num_threads() {
+  return torch::stable::get_num_threads();
+}
+
+void boxed_test_get_num_threads(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  uint32_t res = test_get_num_threads();
+  stack[0] = from(res);
+}
+
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("test_parallel_for(int size, int grain_size) -> Tensor");
+  m.def("test_get_num_threads() -> int");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("test_parallel_for", &boxed_test_parallel_for);
+  m.impl("test_get_num_threads", &boxed_test_get_num_threads);
 }

@@ -298,6 +298,14 @@ inline void parallel_for(
       const_cast<void*>(static_cast<const void*>(&f))));
 }
 
+// Get the number of threads for the parallel backend
+// This provides a stable interface to at::get_num_threads
+inline uint32_t get_num_threads() {
+  uint32_t num_threads;
+  TORCH_ERROR_CODE_CHECK(torch_get_num_threads(&num_threads));
+  return num_threads;
+}
+
 #endif
 
 HIDDEN_NAMESPACE_END(torch, stable)

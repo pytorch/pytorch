@@ -549,6 +549,14 @@ AOTI_TORCH_EXPORT AOTITorchError torch_parallel_for(
   });
 }
 
-AOTI_TORCH_EXPORT uint32_t torch_get_thread_idx() {
-  return static_cast<uint32_t>(at::get_thread_num());
+AOTI_TORCH_EXPORT AOTITorchError
+torch_get_thread_idx(uint32_t* out_thread_idx) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *out_thread_idx = static_cast<uint32_t>(at::get_thread_num()); });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_get_num_threads(uint32_t* out_num_threads) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *out_num_threads = static_cast<uint32_t>(at::get_num_threads()); });
 }

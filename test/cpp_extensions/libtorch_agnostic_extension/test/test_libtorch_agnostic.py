@@ -517,6 +517,14 @@ if not IS_WINDOWS:
             self.assertEqual(result_values, expected)
             self.assertEqual(result_thread_ids, torch.arange(expected_num_threads_used))
 
+        @onlyCPU
+        def test_get_num_threads(self, device):
+            import libtorch_agnostic
+
+            num_threads = libtorch_agnostic.ops.test_get_num_threads()
+            expected_num_threads = torch.get_num_threads()
+            self.assertEqual(num_threads, expected_num_threads)
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":
