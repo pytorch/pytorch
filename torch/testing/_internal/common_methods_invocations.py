@@ -6404,6 +6404,53 @@ def sample_inputs_fake_quantize_per_channel_affine(op_info, device, dtype, requi
         yield SampleInput(make_arg(shape, dtype=dtype), args=args)
 
 
+def sample_inputs_fake_quantize_per_tensor_affine(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, requires_grad=requires_grad)
+
+    # Test 1D, empty and scalar tensors (like sample_inputs_elementwise_unary)
+    shapes = [
+        (S,),
+        (1, 0, 3),
+        (),
+    ]
+
+    scale_zero_point_dtypes = [
+        # default (float, int)
+        (None, None)
+    ] + [
+        # tensor_qparams (tensor, tensor)
+        (t1, t2)
+        for t1 in all_types_and()
+        for t2 in all_types_and()
+    ]
+
+    # NOTE: (0, 127) is allowed as special case. PyTorch restricts activations to be in the range (0, 127).
+    #   https://github.com/pytorch/pytorch/blob/b34b192d6b97325c9f78e5995c48c8498ede34bd/torch/ao/quantization/observer.py#L1422
+    quant_vals = [(0, 255), (-128, 127), (0, 127)]
+
+    cases = product(shapes, scale_zero_point_dtypes, quant_vals)
+    for shape, (scale_dtype, zero_point_dtype), (quant_min, quant_max) in cases:
+        scale = make_arg(
+            (),
+            dtype=scale_dtype or torch.float64,
+        )
+        if scale_dtype is None:
+            scale = scale.item()
+
+        zero_point = make_arg(
+            (),
+            dtype=zero_point_dtype or torch.int64,
+            # zero_point must be between quant_min and quant_max
+            low=quant_min,
+            high=quant_max,
+        )
+        if zero_point_dtype is None:
+            zero_point = zero_point.item()
+
+        args = (scale, zero_point, quant_min, quant_max)
+        yield SampleInput(make_arg(shape, dtype=dtype), args=args)
+
+
 def sample_inputs_flip(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     sizes = ((S, M, S), (S, 0, M))
@@ -13658,6 +13705,13 @@ op_db: list[OpInfo] = [
            op=torch.fake_quantize_per_channel_affine,
            dtypes=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_fake_quantize_per_channel_affine,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_out=False),
+    OpInfo('fake_quantize_per_tensor_affine',
+           op=torch.fake_quantize_per_tensor_affine,
+           dtypes=floating_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_fake_quantize_per_tensor_affine,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),
