@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/Exception.h>
+// NOLINTNEXTLINE(clang-diagnostic-error)
 #include <sycl/sycl.hpp>
 
 namespace c10::xpu {
