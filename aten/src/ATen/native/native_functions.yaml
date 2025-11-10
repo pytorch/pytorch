@@ -2803,7 +2803,7 @@
 - func: floor_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MPS: floor_divide_out
+    CPU, CUDA, MPS, MTIA: floor_divide_out
     SparseCPU, SparseCUDA, SparseMPS: floor_divide_out_sparse_zerodim
 
 - func: floor_divide.Scalar(Tensor self, Scalar other) -> Tensor
@@ -4383,7 +4383,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: mv
-    SparseCPU, SparseCUDA: mv_sparse
+    SparseCPU, SparseCUDA, SparseMPS: mv_sparse
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
