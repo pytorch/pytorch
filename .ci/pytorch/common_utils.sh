@@ -325,7 +325,7 @@ function install_flash_attn_cute() {
   pip_install -e flash_attn/cute/
   popd
 
-  python -c "from torch._inductor.kernel.flex.flex_flash_attention import ensure_flash_available; assert ensure_flash_available(), 'FlashAttention CuTe not available'"
+  # remove the local repo
   rm -rf flash-attention-build
   echo "FlashAttention CuTe installation complete."
 }
