@@ -64,20 +64,27 @@ void bernoulli_scalar_kernel(const TensorBase &self, double p, std::optional<Gen
     int *sample_int_ptr = tmp_int_tensor.data_ptr<int>();
 
     auto mklGenerator = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
+    VSLStreamStatePtr main_stream;
+
+    // Get a local copy of the global stream and immediately advance the global
+    // state before the generation step to avoid multiple threads using the same state.
+    {
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(mklGenerator->mutex_);
+    mklGenerator->get_stream_copy(main_stream);
+    mklGenerator->skip_ahead(n);
+    }
 
     auto sample = [&](int64_t begin, int64_t end) {
       int64_t len = end - begin;
       if (len > 0) {
-        VSLStreamStatePtr stream;
-        {
-          // See Note [Acquire lock when using random generators]
-          std::lock_guard<std::mutex> lock(mklGenerator->mutex_);
-          mklGenerator->get_stream_copy(stream);
-        }
-        vslSkipAheadStream(stream, begin);
-        viRngBernoulli(VSL_RNG_METHOD_BERNOULLI_ICDF, stream, len,
+        VSLStreamStatePtr sample_stream;
+        vslCopyStream(&sample_stream, main_stream);
+        vslSkipAheadStream(sample_stream, begin);
+
+        viRngBernoulli(VSL_RNG_METHOD_BERNOULLI_ICDF, sample_stream, len,
           sample_int_ptr + begin, p);
-        vslDeleteStream(&stream);
+        vslDeleteStream(&sample_stream);
 
         // vectorized copy if using buffer and contiguous, i.e., being non-int
         // type and contiguous
@@ -90,11 +97,7 @@ void bernoulli_scalar_kernel(const TensorBase &self, double p, std::optional<Gen
     };
 
     parallel_for(0, n, /* grain_size= */ 800, sample);
-    {
-      // See Note [Acquire lock when using random generators]
-      std::lock_guard<std::mutex> lock(mklGenerator->mutex_);
-      mklGenerator->skip_ahead(n);
-    }
+    vslDeleteStream(&main_stream);
 
     // copy_ if using buffer and non contiguous
     if (!contig) {
@@ -150,26 +153,34 @@ void exponential_kernel(TensorIteratorBase &iter, double lambda, std::optional<G
       auto eps = std::numeric_limits<tmp_scalar_t>::min();
 
       auto mklGenerator = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
+      VSLStreamStatePtr main_stream;
+
+      // Get a local copy of the global stream and immediately advance the global
+      // state before the generation step to avoid multiple threads using the same state.
+      {
+        // See Note [Acquire lock when using random generators]
+        std::lock_guard<std::mutex> lock(mklGenerator->mutex_);
+        mklGenerator->get_stream_copy(main_stream);
+        mklGenerator->skip_ahead(n);
+      }
 
       auto sample = [&](int64_t begin, int64_t end) {
         int64_t len = end - begin;
         if (len > 0) {
-          VSLStreamStatePtr stream;
-          {
-            // See Note [Acquire lock when using random generators]
-            std::lock_guard<std::mutex> lock(mklGenerator->mutex_);
-            mklGenerator->get_stream_copy(stream);
-          }
-          vslSkipAheadStream(stream, begin);
+          VSLStreamStatePtr sample_stream;
+          vslCopyStream(&sample_stream, main_stream);
+          vslSkipAheadStream(sample_stream, begin);
+
           if constexpr (std::is_same_v<scalar_t, double>) {
-            vdRngExponential(VSL_RNG_METHOD_EXPONENTIAL_ICDF, stream, len,
+            vdRngExponential(VSL_RNG_METHOD_EXPONENTIAL_ICDF, sample_stream, len,
               (double *)(sample_ptr + begin), eps, 1./lambda);
-            vslDeleteStream(&stream);
+            vslDeleteStream(&sample_stream);
           } else {
-            vsRngExponential(VSL_RNG_METHOD_EXPONENTIAL_ICDF, stream, len,
+            vsRngExponential(VSL_RNG_METHOD_EXPONENTIAL_ICDF, sample_stream, len,
               (float *) (sample_ptr + begin), eps, 1./lambda);
-            vslDeleteStream(&stream);
+            vslDeleteStream(&sample_stream);
           }
+
           // vectorized copy if using buffer and contiguous
           if (!is_df && contig) {
             scalar_t *self_seg = self_ptr + begin;
@@ -180,11 +191,7 @@ void exponential_kernel(TensorIteratorBase &iter, double lambda, std::optional<G
       };
 
       parallel_for(0, n, /* grain_size= */ 800, sample);
-      {
-        // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(mklGenerator->mutex_);
-        mklGenerator->skip_ahead(n);
-      }
+      vslDeleteStream(&main_stream);
 
       // copy_ if using buffer and non contiguous
       if (!contig) {
