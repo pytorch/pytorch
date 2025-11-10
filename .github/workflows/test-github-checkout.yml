@@ -27,3 +27,7 @@ jobs:
         with:
           no-sudo: true
           clean: false
+
+      - name: Debug
+        shell: bash
+        run: sleep 600
