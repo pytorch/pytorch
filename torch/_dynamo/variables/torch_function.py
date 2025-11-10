@@ -44,7 +44,7 @@ from torch.overrides import (
 from torch.utils._device import DeviceContext
 
 from .. import graph_break_hints
-from ..exc import unimplemented_v2
+from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..polyfills import NoEnterTorchFunctionMode
 from ..source import AttrSource, GlobalSource, TorchFunctionModeStackSource, TypeSource
@@ -558,7 +558,7 @@ def dispatch_torch_function(
         if not (isinstance(res, ConstantVariable) and res.value is NotImplemented):
             return res
 
-    unimplemented_v2(
+    unimplemented(
         gb_type="All __torch_function__ overrides returned NotImplemented due to TypeError from user code",
         context=f"{fn=}, {args=}, {kwargs=}",
         explanation=f"All __torch_function__ overrides for for function {fn} returned NotImplemented",
@@ -626,7 +626,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # I think only `_base` is breaking because we aren't modelling view
         # relationship perfectly in some scenarios.
         if name in banned_attrs:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported tensor subclass attribute access",
                 context=f"{name}",
                 explanation="`torch.compile` currently can't trace this",
@@ -686,7 +686,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
                     )
 
                 elif attr_is_overridden:
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Unsupported tensor subclass overridden attribute access",
                         context=f"{name}",
                         explanation="`torch.compile` only support tracing certain types of overridden tensor subclass attributes",
@@ -734,7 +734,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
             import torch
 
             if _is_attr_overridden(tx, self, name):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Tensor subclass overridden method call",
                     context=f"{name}",
                     explanation="`torch.compile` currently can't trace this",

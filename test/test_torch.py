@@ -259,7 +259,8 @@ class TestTorchDeviceType(TestCase):
     def test_storage_use_count(self, device):
         a = torch.randn(10, device=device)
         prev_cf = torch._C._storage_Use_Count(a.untyped_storage()._cdata)
-        self.assertEqual(prev_cf, 1)
+        # Two references: 'a' and the wrapper returned by untyped_storage()
+        self.assertEqual(prev_cf, 2)
         b = a.view(2, 5)
         self.assertEqual(torch._C._storage_Use_Count(b.untyped_storage()._cdata), prev_cf + 1)
 
@@ -9316,7 +9317,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             member_var = object()
 
         err_msg = "Creating a Tensor subclass from a class that does not inherit from Tensor"
-        with self.assertRaisesRegex(RuntimeError, err_msg):
+        with self.assertRaisesRegex(TypeError, err_msg):
             s0 = t0.as_subclass(BadSubTensor)
 
     # FIXME: Port to a test suite that better fits slicing
@@ -10316,20 +10317,21 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
     def test_tensor_dead_weak_ref(self):
-        x = torch.empty(2)
+        x = torch.ones(2)
         w_x = weakref.ref(x)
-        y = torch.empty(2)
+        y = torch.ones(2)
         y.grad = x
         del x
 
         x = w_x()
-        # Ideally, x would keep the tensor live.  But CPython doesn't
-        # provide enough hooks to do this.  So it will go dead and x
-        # will transmute into an undefined tensor.  Not great, but the
-        # best we can do.
+        # x should keep the tensor live. This didn't happen in earlier PyTorch
+        # versions.
         del y
 
-        self.assertRaises(RuntimeError, lambda: x.sigmoid())
+        self.assertEqual(2, x.sum())
+
+        del x
+        self.assertIsNone(w_x())
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
     def test_storage_dead_weak_ref(self):
@@ -10337,16 +10339,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         w_x = weakref.ref(x)
         y = torch.tensor(x)
         del x
-
-        x = w_x()
-        # Ideally, x would keep the storage live.  But CPython doesn't
-        # provide enough hooks to do this.  So it will go dead and x
-        # will transmute into storage with null StorageImpl. Not great, but the
-        # best we can do.
+        self.assertIsNotNone(w_x())
         del y
-
-        self.assertRaisesRegex(RuntimeError, "Got a null Storage", lambda: x[0])
-        self.assertRaisesRegex(RuntimeError, "Got a null Storage", lambda: x.float())
+        self.assertIsNone(w_x())
 
     def test_tensor_resurrected_weak_ref(self):
         x = torch.empty(2)
@@ -10406,6 +10401,31 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del a
 
         self.assertTrue(called)
+
+    def test_storage_thread_safety(self):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        NUM_ITERS = 10
+        NUM_THREADS = 4
+
+        # Concurrent calls to tensor.untyped_storage()
+        def access_untyped_storage(tensor, barrier):
+            barrier.wait()
+            return weakref.ref(tensor.untyped_storage())
+
+        for i in range(NUM_ITERS):
+            tensor = torch.tensor([1.0, 2.0, 3.0])
+            barrier = threading.Barrier(NUM_THREADS)
+            with ThreadPoolExecutor(max_workers=NUM_THREADS) as executor:
+                futures = [
+                    executor.submit(access_untyped_storage, tensor, barrier)
+                    for _ in range(NUM_THREADS)
+                ]
+
+                # Check that all the storages returned were the same
+                for future in futures:
+                    self.assertEqual(future.result()(), tensor.untyped_storage())
 
     # FIXME: move to test_linalg
     @torch.inference_mode()
