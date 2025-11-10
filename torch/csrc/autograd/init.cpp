@@ -1218,6 +1218,33 @@ static PyObject* is_view_replay_enabled(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* set_graph_exec_group(PyObject* self, PyObject* obj) {
+  HANDLE_TH_ERRORS
+  if (obj == Py_None) {
+    c10::AutogradState::get_tls_state().set_graph_exec_group(std::nullopt);
+  } else {
+    Py_INCREF(obj);
+    c10::AutogradState::get_tls_state().set_graph_exec_group(
+        c10::SafePyObject(obj, getPyInterpreter()));
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* get_graph_exec_group(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  const auto& group =
+      c10::AutogradState::get_tls_state().get_graph_exec_group();
+  if (group.has_value()) {
+    PyObject* obj = group->ptr(getPyInterpreter());
+    Py_INCREF(obj);
+    return obj;
+  } else {
+    Py_RETURN_NONE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* is_inference_mode_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (c10::InferenceMode::is_enabled()) {
@@ -1598,6 +1625,8 @@ static PyMethodDef methods[] = {
      castPyCFunctionWithKeywords(set_view_replay_enabled),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
+    {"_set_graph_exec_group", set_graph_exec_group, METH_O, nullptr},
+    {"_get_graph_exec_group", get_graph_exec_group, METH_NOARGS, nullptr},
     {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
     {"_exit_dual_level",
      castPyCFunctionWithKeywords(python_exit_dual_level),
