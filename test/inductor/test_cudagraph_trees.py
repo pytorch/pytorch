@@ -4102,7 +4102,7 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(eager_out, compiled_out)
 
         # Use autotune_at_compile_time=True to test standalone_compile
-        @parametrize("autotune_at_compile_time", [True])
+        @parametrize("autotune_at_compile_time", [True, False])
         @config.patch("graph_partition", True)
         def test_graph_partition_kernel_reuse(self, autotune_at_compile_time):
             def foo(x):
@@ -4111,6 +4111,8 @@ if HAS_CUDA_AND_TRITON:
                 y1 = x1 + 1
                 z_cpu = y1.cpu() + 1
                 # partition 2
+                # partition 2 should reuse the fused triton kernel generated
+                # in partition 1
                 x2 = z_cpu.to("cuda") @ z_cpu.to("cuda")
                 y2 = x2 + 1
                 return y1, y2
@@ -4124,21 +4126,27 @@ if HAS_CUDA_AND_TRITON:
                 compiled_out, code = run_and_get_code(compiled_foo, x)
                 self.assertEqual(eager_out, compiled_out)
 
-                # auto-tuning block should only appear once. We generate auto-tuning code
-                # for all the kernels no matter if they are defined in the main graph or
-                # subgraph, to avoid the overhead of executing multiple auto-tuning code blocks.
-                FileCheck().check_count(
-                    "Compile-time auto-tuning block", 1, exactly=True
-                ).run(code[0])
-                # triton_poi_fused_add_0 should appear twice, first in the auto-tuning block,
-                # and then in the main code block
-                FileCheck().check_count(
-                    "def triton_poi_fused_add_0", 2, exactly=True
-                ).run(code[0])
-                # cpu kernel definition should only appence once, not in the auto-tuning block
-                FileCheck().check_count(
-                    "cpp_fused__to_copy_add_1 = ", 1, exactly=True
-                ).run(code[0])
+                if autotune_at_compile_time:
+                    # auto-tuning block should only appear once. We generate auto-tuning code
+                    # for all the kernels no matter if they are defined in the main graph or
+                    # subgraph, to avoid the overhead of executing multiple auto-tuning code blocks.
+                    FileCheck().check_count(
+                        "Compile-time auto-tuning block", 1, exactly=True
+                    ).run(code[0])
+                    # triton_poi_fused_add_ should appear twice, first in the auto-tuning block,
+                    # and then in the main code block
+                    FileCheck().check_count(
+                        "def triton_poi_fused_add_", 2, exactly=True
+                    ).run(code[0])
+                    # cpu kernel definition should only appence once, not in the auto-tuning block
+                    FileCheck().check_count(
+                        "cpp_fused__to_copy_add_1 = ", 1, exactly=True
+                    ).run(code[0])
+                else:
+                    # triton_poi_fused_add_ should appear once, because of kernel reuse
+                    FileCheck().check_count(
+                        "def triton_poi_fused_add_", 1, exactly=True
+                    ).run(code[0])
 
         def test_meta_tensor(self):
             def foobar(x, y):
