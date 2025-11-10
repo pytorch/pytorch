@@ -18,7 +18,6 @@ jobs:
     runs-on: linux.rocm.gpu.gfx942.1.test
     steps:
       - name: Checkout PyTorch
-        uses: saienduri/pytorch/.github/actions/checkout-pytorch@dev/saienduri/test-frac
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
-          clean: false
