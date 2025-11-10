@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable
+from typing import Any
 
 import torch
 from torch._C._profiler import (
@@ -78,6 +79,7 @@ class _KinetoEvent:
     def privateuse1_elapsed_us(self) -> int: ...
     def is_user_annotation(self) -> bool: ...
     def is_hidden_event(self) -> bool: ...
+    def metadata_json(self) -> str: ...
 
 class _ProfilerResult:
     def events(self) -> list[_KinetoEvent]: ...

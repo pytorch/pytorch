@@ -10,8 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from functools import cache
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 from .base import TemplateConfigHeuristics
 
@@ -21,14 +20,19 @@ if TYPE_CHECKING:
 
 
 # Module-wide registry for template heuristics
-_TEMPLATE_HEURISTIC_REGISTRY: dict[tuple[str, ...], type[TemplateConfigHeuristics]] = {}
+_TEMPLATE_HEURISTIC_REGISTRY: dict[
+    tuple[Union[str, None], ...], type[TemplateConfigHeuristics]
+] = {}
+
+# Manual cache for successful lookups only (fallback instances are not cached)
+_HEURISTIC_CACHE: dict[tuple[str, str, str], TemplateConfigHeuristics] = {}
 
 log = logging.getLogger(__name__)
 
 
 def register_template_heuristic(
     template_name: str,
-    device_type: str,
+    device_type: Union[str, None],
     register: bool = True,
     op_name: Optional[str] = None,
 ) -> Any:
@@ -38,6 +42,7 @@ def register_template_heuristic(
     Args:
         template_name: Name of the template (e.g., "mm", "bmm", "scaled_mm")
         device_type: Device type ("cuda", "cpu", "xpu")
+            Set this to None to indicate that the heuristic is applicable to all device types.
         register: Whether to register this heuristic. Caller should pass the condition directly.
         op_name: Name of the operator (e.g., "mm", "bmm", "scaled_mm"). This is optional
             and is only used when a template uses different heuristics for different ops
@@ -55,9 +60,7 @@ def register_template_heuristic(
         cls: type[TemplateConfigHeuristics],
     ) -> type[TemplateConfigHeuristics]:
         if register:
-            key: tuple[str, ...] = (device_type, template_name)
-            if op_name is not None:
-                key = (device_type, template_name, op_name)
+            key: tuple[Union[str, None], ...] = (template_name, device_type, op_name)
             _TEMPLATE_HEURISTIC_REGISTRY[key] = cls
             log.info(
                 f"Registered template heuristic: {cls.__name__} for '{template_name=}', '{device_type=}', '{op_name=}'"  # noqa: G004
@@ -67,7 +70,6 @@ def register_template_heuristic(
     return decorator
 
 
-@cache
 def get_template_heuristic(
     template_name: str, device_type: str, op_name: str
 ) -> TemplateConfigHeuristics:
@@ -77,15 +79,27 @@ def get_template_heuristic(
     Args:
         template_name: Name of the template (e.g., "mm", "bmm", "scaled_mm")
         device_type: Device type ("cuda", "cpu", "xpu")
+        op_name: Name of the operator (e.g., "mm", "bmm", "scaled_mm")
 
     Returns:
-        Template heuristic instance.
-
-    Raises:
-        ValueError: If no heuristic is found for the given combination.
+        Template heuristic instance. If no specific heuristic is found,
+        returns a fallback TemplateConfigHeuristics() instance (uncached).
     """
-    # First check the more specific key
-    keys = [(device_type, template_name, op_name), (device_type, template_name)]
+    # Check cache first
+    cache_key = (template_name, device_type, op_name)
+    if cache_key in _HEURISTIC_CACHE:
+        return _HEURISTIC_CACHE[cache_key]
+
+    keys = [
+        # everything is specified
+        (template_name, device_type, op_name),
+        # heuristic is valid across all devices
+        (template_name, None, op_name),
+        # heuristic is valid across all ops for that device
+        (template_name, device_type, None),
+        # heuristic is always valid for that template
+        (template_name, None, None),
+    ]
 
     # Look up in registry
     heuristic_class = None
@@ -93,13 +107,33 @@ def get_template_heuristic(
         if key in _TEMPLATE_HEURISTIC_REGISTRY:
             heuristic_class = _TEMPLATE_HEURISTIC_REGISTRY[key]
             break
+
     if heuristic_class is None:
-        raise ValueError(
-            f"No template heuristic found for '{template_name=}', "
-            f"'{device_type=}', '{op_name=}'. "
-            f"Available combinations: {list(_TEMPLATE_HEURISTIC_REGISTRY.keys())}"
+        # Log error and return fallback instance (uncached)
+        log.error(
+            "No template heuristic found - template_name=%s, device_type=%s, op_name=%s. "
+            "Available combinations: %s. Using fallback TemplateConfigHeuristics instance.",
+            template_name,
+            device_type,
+            op_name,
+            list(_TEMPLATE_HEURISTIC_REGISTRY.keys()),
         )
-    return heuristic_class()
+        return TemplateConfigHeuristics()
+
+    # Cache successful lookup and return
+    instance = heuristic_class()
+    _HEURISTIC_CACHE[cache_key] = instance
+    return instance
+
+
+def clear_registry() -> None:
+    """
+    Clear all registered template heuristics.
+
+    This is primarily useful for testing purposes to ensure a clean state.
+    """
+    _TEMPLATE_HEURISTIC_REGISTRY.clear()
+    _HEURISTIC_CACHE.clear()
 
 
 @contextlib.contextmanager
@@ -120,7 +154,7 @@ def override_template_heuristics(
     # Save original entries to restore later
     original_entries = {}
     new_keys = []
-    get_template_heuristic.cache_clear()
+    _HEURISTIC_CACHE.clear()
     try:
         for template_name, op_name in template_op_pairs:
             assert op_name is not None
@@ -138,4 +172,4 @@ def override_template_heuristics(
             _TEMPLATE_HEURISTIC_REGISTRY.pop(key, None)
             if key in original_entries:
                 _TEMPLATE_HEURISTIC_REGISTRY[key] = original_entries[key]
-        get_template_heuristic.cache_clear()
+        _HEURISTIC_CACHE.clear()

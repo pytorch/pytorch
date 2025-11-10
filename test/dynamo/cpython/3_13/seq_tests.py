@@ -169,7 +169,7 @@ class CommonTest(__TestCase):
         uu2 = self.type2test(u2)
 
         v = self.type2test(tuple(u))
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class OtherSeq:
                 def __init__(self, initseq):
                     self.__data = initseq
@@ -294,7 +294,7 @@ class CommonTest(__TestCase):
         # Sequences must test in-order.  If a rich comparison has side
         # effects, these will be visible to tests against later members.
         # In this test, the "side effect" is a short-circuiting raise.
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class DoNotTestEq(Exception):
                 pass
             class StopCompares:
@@ -339,7 +339,7 @@ class CommonTest(__TestCase):
         self.assertEqual(u2+u2+u2, u2*3)
         self.assertEqual(u2+u2+u2, 3*u2)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class subclass(self.type2test):
                 pass
         u3 = subclass([0, 1])
@@ -368,7 +368,7 @@ class CommonTest(__TestCase):
 
     def test_getitemoverwriteiter(self):
         # Verify that __getitem__ overrides are not recognized by __iter__
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class T(self.type2test):
                 def __getitem__(self, key):
                     return str(key) + '!!!'
@@ -419,7 +419,7 @@ class CommonTest(__TestCase):
 
         self.assertRaises(TypeError, a.count)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class BadExc(Exception):
                 pass
 
@@ -453,7 +453,7 @@ class CommonTest(__TestCase):
 
         self.assertRaises(TypeError, u.index)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class BadExc(Exception):
                 pass
 

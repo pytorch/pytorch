@@ -125,7 +125,7 @@ static at::Tensor empty_strided_p2p_persistent(
   const size_t numel = std::accumulate(
       size.begin(),
       size.end(),
-      size_t(1),
+      static_cast<size_t>(1),
       // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::multiplies<size_t>());
   const size_t element_size = c10::elementSize(dtype);
@@ -152,8 +152,7 @@ static at::Tensor empty_strided_p2p_persistent(
   auto allocated = at::from_blob(dev_ptr, size, stride, options);
 
   // Track the allocation's activeness
-  alloc_id_to_storage.erase(alloc_id);
-  alloc_id_to_storage.emplace(
+  alloc_id_to_storage.insert_or_assign(
       alloc_id, allocated.storage().getWeakStorageImpl());
   return allocated;
 }
@@ -231,7 +230,7 @@ at::Tensor empty_strided_p2p(
   const size_t numel = std::accumulate(
       size.begin(),
       size.end(),
-      size_t(1),
+      static_cast<size_t>(1),
       // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::multiplies<size_t>());
   const size_t element_size = c10::elementSize(dtype);
@@ -267,25 +266,58 @@ TORCH_API bool has_multicast_support(
   }
 }
 
-static std::unordered_map<c10::DeviceType, std::shared_ptr<c10::Allocator>>
-    _mempool_allocators;
+// MemPool Support
 
-void register_mempool_allocator(
+// A map from device type to allocator for MemPool.
+// TODO: Consolidate with `AllocatorMap` above.
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
+class MemPoolAllocatorMap {
+ public:
+  MemPoolAllocatorMap(const MemPoolAllocatorMap&) = delete;
+  MemPoolAllocatorMap& operator=(const MemPoolAllocatorMap&) = delete;
+  static MemPoolAllocatorMap& get() {
+    static MemPoolAllocatorMap instance;
+    return instance;
+  }
+
+  // Register allocator for MemPool given device type
+  void register_mempool_allocator(
+      c10::DeviceType device_type,
+      std::shared_ptr<c10::Allocator> allocator) {
+    mempool_allocators_[device_type] = std::move(allocator);
+  }
+
+  // Get allocator for MemPool given device
+  std::shared_ptr<c10::Allocator> get_mempool_allocator(c10::Device device) {
+    auto it = mempool_allocators_.find(device.type());
+    if (it == mempool_allocators_.end()) {
+      TORCH_CHECK(
+          false,
+          "SymmetricMemory MemPool did not find backend for device type ",
+          device.type());
+    }
+    return it->second;
+  }
+
+ private:
+  MemPoolAllocatorMap() = default;
+
+  std::unordered_map<c10::DeviceType, std::shared_ptr<c10::Allocator>>
+      mempool_allocators_;
+};
+
+// Register allocator for MemPool given device type
+C10_EXPORT void register_mempool_allocator(
     c10::DeviceType device_type,
     std::shared_ptr<c10::Allocator> allocator) {
-  _mempool_allocators[device_type] = std::move(allocator);
+  return MemPoolAllocatorMap::get().register_mempool_allocator(
+      device_type, std::move(allocator));
 }
 
 // Get allocator for MemPool given device
-std::shared_ptr<c10::Allocator> get_mempool_allocator(c10::Device device) {
-  auto it = _mempool_allocators.find(device.type());
-  if (it == _mempool_allocators.end()) {
-    TORCH_CHECK(
-        false,
-        "SymmetricMemory MemPool did not find backend for device type ",
-        device.type());
-  }
-  return it->second;
+TORCH_API std::shared_ptr<c10::Allocator> get_mempool_allocator(
+    c10::Device device) {
+  return MemPoolAllocatorMap::get().get_mempool_allocator(device);
 }
 
 // Helper function:
@@ -425,6 +457,8 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "multimem_one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)");
   m.def(
+      "multimem_one_shot_reduce_out(Tensor input, str reduce_op, int root, str group_name, Tensor(a!) out) -> Tensor(a!)");
+  m.def(
       "multimem_all_gather_out(Tensor input, str group_name, Tensor(a!) out) -> Tensor(a!)");
   m.def(
       "one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor");
@@ -464,15 +498,23 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
 
   m.def("nvshmem_put(Tensor(a!) tensor, int peer) -> ()");
   m.def("nvshmem_get(Tensor(a!) tensor, int peer) -> ()");
-  m.def("nvshmem_broadcast(Tensor(a!) input, str group_name) -> Tensor(a!)");
+  m.def(
+      "nvshmem_broadcast(Tensor(a!) input, int root, str group_name) -> Tensor(a!)");
+  m.def("nvshmem_wait_for_signal(Tensor sigpad, int signal, int peer) -> ()");
+  m.def(
+      "nvshmem_put_with_signal(Tensor(a) tensor, Tensor(a) sigpad, int signal, int peer) -> ()");
   m.def(
       "nvshmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
   m.def(
-      "all_to_all_vdev(Tensor input, Tensor(a!) out, Tensor(a!) in_out_splits, str group_name) -> Tensor(a!)");
+      "all_to_all_vdev(Tensor input, Tensor(a!) out, Tensor in_splits, Tensor(a!) out_splits_offsets, str group_name) -> ()");
   m.def(
       "all_to_all_vdev_2d(Tensor input, Tensor(a!) out, Tensor in_splits, Tensor(a!) out_splits_offsets, str group_name, int? major_align=None) -> ()");
   m.def(
       "all_to_all_vdev_2d_offset(Tensor input, Tensor(a!) out, Tensor in_splits_offsets, Tensor(a!) out_splits_offsets, str group_name) -> ()");
+  m.def(
+      "tile_reduce(Tensor in_tile, Tensor(a!) out_tile, int root, str group_name, str reduce_op='sum') -> ()");
+  m.def(
+      "multi_root_tile_reduce(Tensor[] in_tiles, Tensor(a!) out_tile, int[] roots, str group_name, str reduce_op='sum') -> ()");
 }
 
 TORCH_LIBRARY_IMPL(symm_mem, Meta, m) {

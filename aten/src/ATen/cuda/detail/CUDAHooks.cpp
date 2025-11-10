@@ -21,6 +21,7 @@
 
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
+#include <cudnn_frontend.h>
 #endif
 
 #if AT_MAGMA_ENABLED()
@@ -281,6 +282,9 @@ bool CUDAHooks::compiledWithMIOpen() const {
 
 bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {
 #if AT_CUDNN_ENABLED()
+  if (!hasCUDA()) {
+    return false;
+  }
   // NOTE: extra parenthesis around numbers disable clang warnings about
   // dead code
   return true;
@@ -291,6 +295,9 @@ bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {
 
 bool CUDAHooks::supportsDepthwiseConvolutionWithCuDNN() const {
 #if AT_CUDNN_ENABLED()
+  if (!hasCUDA()) {
+    return false;
+  }
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   // Check for Volta cores
   if (prop->major >= 7) {
@@ -305,6 +312,26 @@ bool CUDAHooks::supportsDepthwiseConvolutionWithCuDNN() const {
 
 bool CUDAHooks::supportsBFloat16ConvolutionWithCuDNNv8() const {
 #if AT_CUDNN_ENABLED()
+  if (!hasCUDA()) {
+    return false;
+  }
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  // Check for Volta cores
+  if (prop->major >= 8) {
+    return true;
+  } else {
+    return false;
+  }
+#else
+  return false;
+#endif
+}
+
+bool CUDAHooks::supportsBFloat16RNNWithCuDNN() const {
+#if AT_CUDNN_ENABLED() && (CUDNN_VERSION >= 91300)
+  if (!hasCUDA()) {
+    return false;
+  }
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   // Check for Volta cores
   if (prop->major >= 8) {
@@ -322,6 +349,26 @@ long CUDAHooks::versionCuDNN() const {
   return CUDNN_VERSION;
 #else
   TORCH_CHECK(false, "Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
+#endif
+}
+
+long CUDAHooks::versionRuntimeCuDNN() const {
+#if AT_CUDNN_ENABLED()
+#ifndef USE_STATIC_CUDNN
+  return cudnnGetVersion();
+#else
+  return CUDNN_VERSION;
+#endif
+#else
+  TORCH_CHECK(false, "Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
+#endif
+}
+
+long CUDAHooks::versionCuDNNFrontend() const {
+#if AT_CUDNN_ENABLED()
+  return CUDNN_FRONTEND_VERSION;
+#else
+  TORCH_CHECK(false, "Cannot query CuDNN Frontend version if ATen_cuda is not built with CuDNN");
 #endif
 }
 

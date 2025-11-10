@@ -41,6 +41,7 @@ torch.distributed.fsdp.fully_shard <distributed.fsdp.fully_shard>
 torch.distributed.tensor.parallel <distributed.tensor.parallel>
 torch.distributed.optim <distributed.optim>
 torch.distributed.pipelining <distributed.pipelining>
+torch.distributed._symmetric_memory <symmetric_memory>
 torch.distributed.checkpoint <distributed.checkpoint>
 torch.distributions <distributions>
 torch.compiler <torch.compiler>
@@ -56,6 +57,7 @@ torch.monitor <monitor>
 torch.signal <signal>
 torch.special <special>
 torch.overrides
+torch.nativert <nativert>
 torch.package <package>
 profiler
 nn.init
@@ -75,7 +77,6 @@ storage
 torch.testing <testing>
 torch.utils <utils>
 torch.utils.benchmark <benchmark_utils>
-torch.utils.bottleneck <bottleneck>
 torch.utils.checkpoint <checkpoint>
 torch.utils.cpp_extension <cpp_extension>
 torch.utils.data <data>

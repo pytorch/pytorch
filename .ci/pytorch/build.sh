@@ -89,7 +89,7 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
   export USE_MKLDNN=1
   export USE_MKLDNN_ACL=1
-  export ACL_ROOT_DIR=/ComputeLibrary
+  export ACL_ROOT_DIR=/acl
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
@@ -233,7 +233,9 @@ if [[ "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
   export BUILD_STATIC_RUNTIME_BENCHMARK=ON
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-full-debug* ]]; then
+  export CMAKE_BUILD_TYPE=Debug
+elif [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
   export CMAKE_BUILD_TYPE=RelWithAssert
 fi
 
@@ -290,15 +292,20 @@ else
 
       WERROR=1 python setup.py clean
 
-      WERROR=1 python setup.py bdist_wheel
+      WERROR=1 python -m build --wheel --no-isolation
     else
       python setup.py clean
       if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
         source .ci/pytorch/install_cache_xla.sh
       fi
-      python setup.py bdist_wheel
+      python -m build --wheel --no-isolation
     fi
     pip_install_whl "$(echo dist/*.whl)"
+    if [[ "$BUILD_ENVIRONMENT" == *full-debug* ]]; then
+      # Regression test for https://github.com/pytorch/pytorch/issues/164297
+      # Torch should be importable and that's about it
+      pushd /; python -c "import torch;print(torch.__config__.show(), torch.randn(5) + 1.7)"; popd
+    fi
 
     if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *vision* ]]; then
       install_torchvision
@@ -419,7 +426,7 @@ fi
 if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; then
   # export test times so that potential sharded tests that'll branch off this build will use consistent data
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
-  python tools/stats/export_test_times.py
+  PYTHONPATH=. python tools/stats/export_test_times.py
 fi
 # don't do this for bazel or s390x or riscv64 as they don't use sccache
 if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* && "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then

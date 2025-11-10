@@ -134,6 +134,7 @@ def build_collectives(
     _memberships: dict[str, set[Any]],
     _pg_guids: dict[tuple[str, int], str],
     version: str,
+    mismatch_cap: int = 10,
 ) -> tuple[list[Traceback], list[Collective], list[NCCLCall]]:
     """
     groups, memberships are the non-flat dicts that are indexable
@@ -171,7 +172,6 @@ def build_collectives(
     # once we find one mismatch, we stop pairing up collectives since the pairing is possibly incorrect
     # instead, just record the remaining ops as NCCLCalls
     mismatch = {_groups[g].id: 0 for g in _groups}
-    MISMATCH_TAIL = 10
 
     # For best effort partial analysis.
     dumps_ranks = {int(key) for key in all_entries.keys()}
@@ -365,13 +365,29 @@ def build_collectives(
                     )
                 )
 
-        if mismatch[pg_name] > MISMATCH_TAIL:
+        if mismatch[pg_name] > mismatch_cap:
             logger.error(
                 "Too many mismatches for process_group %s: %s aborting", pg_name, desc
             )
             break
 
     return tracebacks, collectives, nccl_calls
+
+
+def transform_ft(
+    details: dict[str, dict[str, Any]], group_world_size: int
+) -> dict[str, dict[str, Any]]:
+    for dump_key, dump in details.items():
+        rank = dump["rank"]
+        for key, pg_config in dump["pg_config"].items():
+            if pg_config["desc"] == "default_pg":
+                ranks = eval(pg_config["ranks"])
+                replica_id = rank // group_world_size
+                first_rank = replica_id * group_world_size
+                new_ranks = [r + first_rank for r in ranks]
+                details[dump_key]["pg_config"][key]["ranks"] = f"{new_ranks}"
+
+    return details
 
 
 def build_db(
@@ -412,7 +428,7 @@ def build_db(
         check_no_missing_dump_files(entries, memberships)
 
     tracebacks, collectives, nccl_calls = build_collectives(
-        entries, _groups, _memberships, _pg_guids, version
+        entries, _groups, _memberships, _pg_guids, version, args.mismatch_cap
     )
     logger.debug("built collectives, nccl_calls")
     if args.verbose:
