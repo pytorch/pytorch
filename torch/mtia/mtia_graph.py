@@ -10,25 +10,47 @@ _POOL_HANDLE = tuple[int, int]
 
 
 class MTIAGraph(torch._C._MTIAGraph):
+    """
+    Wrapper around a MTIA graph.
+    """
+
     def __new__(cls, keep_graph: bool = False) -> Self:
         return super().__new__(cls, keep_graph)
 
     def capture_begin(self, pool: _POOL_HANDLE) -> None:
+        """
+        Begin capturing a MTIA graph.
+        """
         super().capture_begin(pool)
 
     def capture_end(self) -> None:
+        """
+        End the capture of a MTIA graph.
+        """
         super().capture_end()
 
     def instantiate(self) -> None:
+        """
+        Instantiate the captured MTIA graph.
+        """
         super().instantiate()
 
     def replay(self) -> None:
+        """
+        Replay the captured MTIA graph.
+        """
         super().replay()
 
     def reset(self) -> None:
+        """
+        Destroy the captured graph and reset the states.
+        """
         super().reset()
 
     def pool(self) -> _POOL_HANDLE:
+        """
+        Return an opaque token representing the id of this graph's memory pool
+        """
         return super().pool()
 
 
