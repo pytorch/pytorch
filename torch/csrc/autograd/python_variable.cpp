@@ -1581,9 +1581,9 @@ py::object dispatchDTensorOp(
   const auto output_spec =
       cached_sharding.attr(dtensor_interned_strings.output_spec);
   if (!is_inplace_op && !is_out_variant_op &&
-      (!output_spec.is_none() ||
-       (op.operator_name().name == "aten::equal" &&
-        op.operator_name().overload_name == "default"))) {
+      !(output_spec.is_none() &&
+        (op.operator_name().name == "aten::equal" &&
+         op.operator_name().overload_name == "default"))) {
     const auto wrap = get_dtensor_dispatcher_wrap();
     auto wrapped_result = checked_vectorcall(
         wrap.ptr(), py_local_results.ptr(), output_spec.ptr());
@@ -1593,9 +1593,13 @@ py::object dispatchDTensorOp(
     }
 
     // Direct C++ implementation of return_and_correct_aliasing for view ops.
-    const py::tuple wrapped_result_tuple = PyTuple_Check(wrapped_result.ptr())
-        ? py::reinterpret_borrow<py::tuple>(wrapped_result)
-        : py::tuple();
+
+    // py::tuple's default constructor allocates a size-0 tuple, so we
+    // wrap in optional to get a detectable empty state.
+    std::optional<py::tuple> wrapped_result_tuple;
+    if (PyTuple_Check(wrapped_result.ptr())) {
+      wrapped_result_tuple = py::reinterpret_borrow<py::tuple>(wrapped_result);
+    }
     const auto& returns = op.schema().returns();
     const auto num_arguments = op.schema().arguments().size();
     for (const auto arg_idx : c10::irange(num_arguments)) {
@@ -1626,8 +1630,8 @@ py::object dispatchDTensorOp(
         if (sets_intersect(
                 arg_alias_info->beforeSets(), ret_alias_info->beforeSets())) {
           py::handle ret;
-          if (wrapped_result_tuple) {
-            ret = wrapped_result_tuple[ret_idx];
+          if (wrapped_result_tuple.has_value()) {
+            ret = wrapped_result_tuple.value()[ret_idx];
           } else {
             TORCH_INTERNAL_ASSERT(ret_idx == 0);
             ret = wrapped_result;

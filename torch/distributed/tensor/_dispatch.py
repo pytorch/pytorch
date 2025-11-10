@@ -376,7 +376,7 @@ class OpDispatcher:
             assert len(out_dts) >= 1, "out variant should have at least one out arg"
             return tuple(out_dts) if len(out_dts) > 1 else out_dts[0]
         else:
-            assert op_call == aten.equal.default
+            assert op_call == aten.equal.default, op_call
             ret = self.wrap(local_results, output_sharding.output_spec)  # type: ignore[possibly-undefined]
             if participating and op_call._schema._is_view_op():
                 return return_and_correct_aliasing(op_call, args, kwargs, ret)
