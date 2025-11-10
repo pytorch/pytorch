@@ -29,5 +29,6 @@ jobs:
           clean: false
 
       - name: Debug
+        if: always()
         shell: bash
         run: sleep 600
