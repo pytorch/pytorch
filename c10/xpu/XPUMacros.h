@@ -1,6 +1,7 @@
 #pragma once
 
 #ifndef C10_USING_CUSTOM_GENERATED_MACROS
+// NOLINTNEXTLINE(clang-diagnostic-error)
 #include <c10/xpu/impl/xpu_cmake_macros.h>
 #endif
 
