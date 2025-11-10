@@ -1336,7 +1336,7 @@ def register_onednn_fusion_ops():
                     )
                 )
             if len(x_size) > 2 and binary_attr in ["add", "sum"]:
-                result = view(result, (*x_size[:-1], result.get_size()[-1]))
+                result = view(result, (*x_size[:-1], result.get_size()[-1]))  # type: ignore[arg-type]
             return result
 
         if torch._C.has_mkl:

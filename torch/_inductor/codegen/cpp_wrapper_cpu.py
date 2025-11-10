@@ -1874,9 +1874,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 final_tensor_str, tmp_call_strs = create_new_tensor_handle()
             call_strs.extend(tmp_call_strs)
         else:
-            # need reinterpret
+            # firstly create reinterpretview
             final_tensor_str = create_reinterpret_call()
             if dtype is not None and dtype != base_dtype:
+                # wrap it with dtypeview
                 final_tensor_str, tmp_call_strs = create_dtypeview_call(
                     final_tensor_str
                 )

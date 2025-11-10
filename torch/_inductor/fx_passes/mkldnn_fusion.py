@@ -767,6 +767,7 @@ if torch._C._has_mkldnn:
 
     def _qlinear_binary_can_be_inplace(_other):
         if isinstance(_other.data, ir.BaseView):
+
             def unwrap_buffer(data):
                 if isinstance(data, ir.StorageBox):
                     return data.data
