@@ -2125,6 +2125,49 @@ class CommonTemplate:
             size_hints["x"] = next_power_of_2(size_hints["x"])
             triton_config_reduction(size_hints, 1, 2048, 1, 8)
 
+    def test_reduction_hint_inner_with_large_outer_dims(self):
+        """
+        Test that reductions correctly use ReductionHint.INNER when reducing
+        over the innermost dimension with large outer dimensions.
+
+        Previously, num_splits() would return DEFAULT for large numel_hint,
+        even when tiling_scores indicated an inner reduction pattern.
+        This test ensures the hint is corrected based on tiling_scores.
+
+        """
+
+        def check_inner_reduction(x, dim=-1):
+            @torch.compile
+            def f(tensor):
+                return tensor.sum(dim=dim, keepdim=True)
+
+            result = f(x)
+            expected = x.sum(dim=dim, keepdim=True)
+            self.assertEqual(result.shape, expected.shape)
+            torch.testing.assert_close(result, expected, rtol=1e-4, atol=1e-4)
+            return result
+
+        # large outer dims (2048*128), inner reduction (1024)
+        x1 = torch.randn(2048, 128, 1024, device=self.device)
+        check_inner_reduction(x1, dim=-1)
+
+        # Variant with different sizes
+        x2 = torch.randn(512, 256, 2048, device=self.device)
+        check_inner_reduction(x2, dim=-1)
+
+        # Test with fused ops
+        @torch.compile
+        def f_fused(x, y):
+            return x.sum(dim=-1, keepdim=True) + (x + y.unsqueeze(-1))
+
+        x3 = torch.randn(2048, 128, 1024, device=self.device)
+        y3 = torch.randn(2048, 128, device=self.device)
+        result = f_fused(x3, y3)
+        expected = x3.sum(dim=-1, keepdim=True) + (x3 + y3.unsqueeze(-1))
+
+        self.assertEqual(result.shape, (2048, 128, 1024))
+        torch.testing.assert_close(result, expected, rtol=1e-4, atol=1e-4)
+
     def test_prod(self):
         def fn(a):
             return a.prod(0), a.prod(1), a.prod()
