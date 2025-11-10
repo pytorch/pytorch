@@ -13,18 +13,43 @@ PyObject* torch_c_dynamo_guards_init();
 void* convert_to_root_guard_manager(py::object root);
 bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals);
 
+// If we're in a mode with ignore_compile_internals=False, we WON'T mask
+// Python keys from guard checking (they should be visible, so eager fallback is
+// possible). Otherwise (invisible mode or no mode), we WILL mask Python keys to
+// avoid guard failures at runtime.
+inline bool get_is_in_mode_without_ignore_compile_internals() {
+  py::gil_scoped_acquire gil;
+  try {
+    py::object python_dispatch_module =
+        py::module_::import("torch.utils._python_dispatch");
+    return python_dispatch_module
+        .attr("is_in_any_mode_without_ignore_compile_internals")()
+        .cast<bool>();
+  } catch (const std::exception& e) {
+    return false;
+  }
+}
+
 struct LocalState {
   // TLS state that changes operators
   c10::impl::LocalDispatchKeySet dispatch_modifier;
   c10::DispatchKeySet override_dispatch_key_set;
   bool grad_mode_enabled;
+  bool should_mask_python_keys;
 
   at::DispatchKeySet apply(at::DispatchKeySet ks) const {
     if (override_dispatch_key_set.empty()) {
-      return (ks | dispatch_modifier.included_) - dispatch_modifier.excluded_ -
-          c10::DispatchKeySet(
-                 {c10::DispatchKey::Python,
-                  c10::DispatchKey::PythonTLSSnapshot});
+      auto result =
+          (ks | dispatch_modifier.included_) - dispatch_modifier.excluded_;
+
+      if (should_mask_python_keys) {
+        result = result -
+            c10::DispatchKeySet(
+                     {c10::DispatchKey::Python,
+                      c10::DispatchKey::PythonTLSSnapshot});
+      }
+
+      return result;
     } else {
       return override_dispatch_key_set;
     }
@@ -33,7 +58,9 @@ struct LocalState {
   LocalState()
       : dispatch_modifier(c10::impl::tls_local_dispatch_key_set()),
         override_dispatch_key_set(c10::BackendComponent::InvalidBit),
-        grad_mode_enabled(at::GradMode::is_enabled()) {}
+        grad_mode_enabled(at::GradMode::is_enabled()),
+        should_mask_python_keys(
+            !get_is_in_mode_without_ignore_compile_internals()) {}
 
   void overrideDispatchKeySet(c10::DispatchKeySet ks) {
     override_dispatch_key_set = ks;

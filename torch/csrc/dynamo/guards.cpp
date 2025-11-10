@@ -617,18 +617,6 @@ struct AutocastState {
   }
 };
 
-static bool get_is_in_mode_without_ignore_compile_internals() {
-  try {
-    py::object python_dispatch_module =
-        py::module_::import("torch.utils._python_dispatch");
-    return python_dispatch_module
-        .attr("is_in_any_mode_without_ignore_compile_internals")()
-        .cast<bool>();
-  } catch (const std::exception& e) {
-    return false;
-  }
-}
-
 // TODO (janimesh) - Remove the PyObject_HEAD part when C++ guard manager is
 // merged.
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -654,8 +642,6 @@ struct GlobalStateGuard {
     _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
     _num_threads = at::get_num_threads();
     _default_dtype = at::get_default_dtype();
-    _is_in_mode_without_ignore_compile_internals =
-        get_is_in_mode_without_ignore_compile_internals();
   }
 
   bool check() const {
@@ -675,9 +661,7 @@ struct GlobalStateGuard {
             _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
             _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
             _num_threads == at::get_num_threads()) &&
-        _default_dtype == at::get_default_dtype() &&
-        _is_in_mode_without_ignore_compile_internals ==
-        get_is_in_mode_without_ignore_compile_internals();
+        _default_dtype == at::get_default_dtype();
   }
 
   std::string reason() const {
@@ -707,9 +691,6 @@ struct GlobalStateGuard {
       os << "num_threads ";
     if (_default_dtype != at::get_default_dtype())
       os << "default_dtype ";
-    if (_is_in_mode_without_ignore_compile_internals !=
-        get_is_in_mode_without_ignore_compile_internals())
-      os << "mode_without_ignore_compile_internals ";
     return os.str();
   }
 
@@ -729,8 +710,6 @@ struct GlobalStateGuard {
         static_cast<int64_t>(json_t._allow_bf16_reduce);
     json_j["num_threads"] = json_t._num_threads;
     json_j["default_dtype"] = json_t._default_dtype.toScalarType();
-    json_j["is_in_mode_without_ignore_compile_internals"] =
-        json_t._is_in_mode_without_ignore_compile_internals;
   }
 
   template <typename T>
@@ -751,13 +730,6 @@ struct GlobalStateGuard {
     json_t._num_threads = json_j.at("num_threads");
     json_t._default_dtype =
         caffe2::TypeMeta::fromScalarType(json_j.at("default_dtype"));
-    // For backward compatibility, default to false if not present
-    if (json_j.contains("is_in_mode_without_ignore_compile_internals")) {
-      json_t._is_in_mode_without_ignore_compile_internals =
-          json_j.at("is_in_mode_without_ignore_compile_internals");
-    } else {
-      json_t._is_in_mode_without_ignore_compile_internals = false;
-    }
   }
 
   bool _grad_mode;
@@ -771,7 +743,6 @@ struct GlobalStateGuard {
   at::CuBLASReductionOption _allow_bf16_reduce;
   int _num_threads;
   caffe2::TypeMeta _default_dtype;
-  bool _is_in_mode_without_ignore_compile_internals;
   // TODO(jansel): we should guard on more state as inductor starts using it
 };
 

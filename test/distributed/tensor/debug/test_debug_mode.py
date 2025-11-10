@@ -384,11 +384,12 @@ class TestDTensorDebugMode(TestCase):
             return x.sin().cos()
 
         x = torch.randn(8)
+        f(x)
         with DebugMode() as debug_mode:
             f(x)
             self.assertEqual(len(debug_mode.debug_string()), 0)
             f(x)
-            f(x)
+        f(x)
         self.assertEqual(
             cnt.frame_count, 1
         )  # check DebugMode doesn't trigger additional recompilations
