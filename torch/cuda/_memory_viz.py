@@ -754,7 +754,7 @@ if __name__ == "__main__":
         if name == "-":
             data = pickle.load(sys.stdin.buffer)
         else:
-            data = pickle.load(Path(name).read_bytes())
+            data = pickle.loads(Path(name).read_bytes())
         if isinstance(data, list):  # segments only...
             data = {"segments": data, "traces": []}
         return data
