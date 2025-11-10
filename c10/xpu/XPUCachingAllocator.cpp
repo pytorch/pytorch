@@ -1240,6 +1240,10 @@ class XPUAllocator : public DeviceAllocator {
         c10::xpu::get_raw_device(dev_to_access));
   }
 
+  std::pair<size_t, size_t> getMemoryInfo(DeviceIndex device) override {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented yet.");
+  }
+
   double getMemoryFraction(DeviceIndex device) {
     assertValidDevice(device);
     return device_allocators[device]->getMemoryFraction();
