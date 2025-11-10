@@ -166,7 +166,6 @@ for tracking purposes -->
 .. py:module:: torch.utils.file_baton
 .. py:module:: torch.utils.hipify.constants
 .. py:module:: torch.utils.hipify.cuda_to_hip_mappings
-.. py:module:: torch.utils.hipify.hipify_python
 .. py:module:: torch.utils.hipify.version
 .. py:module:: torch.utils.hooks
 .. py:module:: torch.utils.jit.log_extract
