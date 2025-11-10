@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.utils._debug_mode import _OpCall, _RedistributeCall, DebugMode
+from torch.utils._debug_mode import _OpCall, _RedistributeCall, DebugMode, hash_tensor_fn, norm_hash_fn
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -105,6 +105,25 @@ class TestDTensorDebugMode(TestCase):
         self.assertTrue(
             "aten::sum(t: f32[1, 32])  # {'hash': " in debug_mode.debug_string()
         )
+
+        # check tuple hash functions
+        with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_fn=["norm", "hash_tensor"]):
+            mm(x_dtensor, y_dtensor)
+
+        output_hash = debug_mode.operators[-1].log["hash"]
+        norm_ = lambda x: norm_hash_fn(x, use_scalar=True)
+        hash_ = lambda x: hash_tensor_fn(x, use_scalar=True)
+
+        self.assertEqual(output_hash[0], norm_(eager_out))
+        self.assertEqual(output_hash[1], hash_(eager_out))
+
+        # some edge cases
+        self.assertEqual(norm_(torch.tensor(torch.nan)), torch.nan)
+        self.assertEqual(norm_(torch.tensor(torch.inf)), torch.inf)
+        self.assertEqual(norm_(torch.complex(torch.ones(4), torch.zeros(4))), 4)
+        self.assertEqual(hash_(torch.ones(4, dtype=torch.float8_e5m2)), 0)
+        self.assertEqual(hash_(torch.ones(4, dtype=torch.int8)), 0)
+        self.assertEqual(hash_(torch.ones(5, dtype=torch.int8)), 1)
 
     def test_debug_string_inside_context(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))

@@ -361,7 +361,7 @@ class ShardingPropagator:
         """
         # special case op, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
-        if op_schema.op is aten._local_scalar_dense.default:
+        if op_schema.op in (aten._local_scalar_dense.default, aten.hash_tensor.default):
             return OutputSharding(None, op_schema)
 
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
