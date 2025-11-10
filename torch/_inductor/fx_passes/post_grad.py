@@ -694,6 +694,9 @@ def register_addmm_activation_replacement():
                 def apply_bias(inp, beta=1):
                     return beta * inp
 
+            beta = 1 if is_beta_eq_one else 0.2
+            alpha = 1 if is_alpha_eq_one else 0.8
+
             for activation in (aten.relu, aten.gelu):
                 def bias_add_mm_activation_pattern(inp, mat1, mat2, beta=1, alpha=1):
                     return activation(apply_bias(inp, beta) + apply_mm(mat1, mat2, alpha))
@@ -701,8 +704,8 @@ def register_addmm_activation_replacement():
                 def mm_add_bias_activation_pattern(inp, mat1, mat2, beta=1, alpha=1):
                     return activation(apply_mm(mat1, mat2, alpha) + apply_bias(inp, beta))
 
-                yield bias_add_mm_activation_pattern
-                yield mm_add_bias_activation_pattern
+                yield beta, alpha, bias_add_mm_activation_pattern
+                yield beta, alpha, mm_add_bias_activation_pattern
 
     def is_valid_addmm_activation_fusion(match: Match):
         if config.max_autotune_gemm:
@@ -739,20 +742,19 @@ def register_addmm_activation_replacement():
         torch.empty(4, 5),  # mat2
     )
 
-    for addmm_activation_pattern in gen_addmm_activation_patterns():
-        for beta, alpha in itertools.product((0.5,), repeat=2):
-            register_replacement(
-                # pyrefly: ignore [bad-argument-type]
-                addmm_activation_pattern,
-                # pyrefly: ignore [bad-argument-type]
-                addmm_activation_replacement,
-                [*args, beta, alpha],
-                # pyrefly: ignore [bad-argument-type]
-                trace_fn=fwd_only,
-                # pyrefly: ignore [bad-argument-type]
-                pass_dicts=pass_patterns[2],
-                extra_check=is_valid_addmm_activation_fusion,
-            )
+    for beta, alpha, addmm_activation_pattern in gen_addmm_activation_patterns():
+        register_replacement(
+            # pyrefly: ignore [bad-argument-type]
+            addmm_activation_pattern,
+            # pyrefly: ignore [bad-argument-type]
+            addmm_activation_replacement,
+            [*args, beta, alpha],
+            # pyrefly: ignore [bad-argument-type]
+            trace_fn=fwd_only,
+            # pyrefly: ignore [bad-argument-type]
+            pass_dicts=pass_patterns[2],
+            extra_check=is_valid_addmm_activation_fusion,
+        )
 
 
 @init_once_fakemode
