@@ -997,6 +997,12 @@ if "optree" in sys.modules:
                     python_pytree.TreeSpec(dict, [], []),
                 ],
             ),
+            # python_pytree.tree_structure(torch.return_types.sort((torch.zeros(1), torch.zeros(1))))
+            python_pytree.TreeSpec(
+                python_pytree.structseq,
+                torch.return_types.sort,
+                [python_pytree.treespec_leaf(), python_pytree.treespec_leaf()],
+            ),
         ],
     )
     def test_pytree_serialize(self, spec):
@@ -1517,6 +1523,9 @@ class TestCxxPytree(TestCase):
             cxx_pytree.tree_structure([(0, 1, [2, 3])]),
             cxx_pytree.tree_structure(
                 defaultdict(list, {"a": [0, 1], "b": [1, 2], "c": {}})
+            ),
+            cxx_pytree.tree_structure(
+                torch.return_types.sort((torch.zeros(1), torch.zeros(1)))
             ),
         ],
     )
