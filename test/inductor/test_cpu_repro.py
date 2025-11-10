@@ -1308,7 +1308,6 @@ class CPUReproTests(TestCase):
                 (torch.randn(2, 3, 4, 4),),
             )
 
-
     def test_load_inf_bf16(self):
         def fn1(x):
             return torch.where(x > 0, x, math.inf)
@@ -1991,11 +1990,10 @@ class CPUReproTests(TestCase):
 
     @requires_vectorization
     def test_to_channels_last_fp8(self):
-        for dtype in [torch.float8_e4m3fn, torch.float8_e5m2]:
-            
-            def fn(x):
-                return x.to(memory_format=torch.channels_last)
+        def fn(x):
+            return x.to(memory_format=torch.channels_last)
 
+        for dtype in [torch.float8_e4m3fn, torch.float8_e5m2]:
             torch._dynamo.reset()
             metrics.reset()
             self.common(
