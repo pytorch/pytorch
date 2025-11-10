@@ -1377,9 +1377,13 @@ static bool get_local_results(
     //   None.
     //   2. if the return type is Tensor or List[Tensor], return
     //   empty tensor(s) with correct dtype.
+
+    stack->clear();
+
     auto spec = output_sharding.attr(dtensor_interned_strings.output_spec);
     if (spec.is_none()) {
-      stack->clear();
+      // For a scalar return type, the non-participating device has
+      // None as its local result.
       stack->emplace_back(); // Return None.
       return true;
     }
@@ -1397,7 +1401,7 @@ static bool get_local_results(
           "spec.tensor_meta.dtype must be a torch.dtype");
       const auto scalar_type =
           reinterpret_cast<THPDtype*>(dtype.ptr())->scalar_type;
-      if (py::reinterpret_steal<py::tuple>(py::object(sizes)).empty()) {
+      if (py::cast<py::tuple>(sizes).empty()) {
         // scalar tensor
         return torch::zeros({}, scalar_type);
       } else {
@@ -1406,7 +1410,6 @@ static bool get_local_results(
       }
     };
     auto handle_sequence = [&default_tensor, &op, stack](auto sequence) {
-      stack->clear();
       for (const auto& item : sequence) {
         TORCH_CHECK(
             !item.is_none(),
@@ -1418,7 +1421,6 @@ static bool get_local_results(
     };
 
     if (py::isinstance(spec, get_dtensor_spec_class())) {
-      stack->clear();
       stack->push_back(default_tensor(spec));
     } else if (PyList_Check(spec.ptr())) {
       handle_sequence(py::reinterpret_borrow<py::list>(spec));
@@ -1428,7 +1430,6 @@ static bool get_local_results(
       handle_sequence(py::reinterpret_borrow<py::sequence>(spec));
     } else {
       // return None.
-      stack->clear();
       stack->emplace_back();
     }
   }
