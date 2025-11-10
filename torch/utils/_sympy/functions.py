@@ -4,7 +4,7 @@ import math
 import operator
 import sys
 from collections.abc import Callable
-from typing import Optional, SupportsFloat, TYPE_CHECKING, TypeVar, Union
+from typing import SupportsFloat, TYPE_CHECKING, TypeVar
 from typing_extensions import TypeVarTuple, Unpack
 
 import sympy
@@ -102,11 +102,11 @@ def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
 
 def _keep_float(
     f: Callable[[Unpack[_Ts]], _T],
-) -> Callable[[Unpack[_Ts]], Union[_T, sympy.Float]]:
+) -> Callable[[Unpack[_Ts]], _T | sympy.Float]:
     @functools.wraps(f)
-    def inner(*args: Unpack[_Ts]) -> Union[_T, sympy.Float]:
+    def inner(*args: Unpack[_Ts]) -> _T | sympy.Float:
         # pyrefly: ignore [bad-argument-type]
-        r: Union[_T, sympy.Float] = f(*args)
+        r: _T | sympy.Float = f(*args)
         if any(isinstance(a, sympy.Float) for a in args) and not isinstance(
             r, sympy.Float
         ):
@@ -117,7 +117,7 @@ def _keep_float(
     return inner
 
 
-def fuzzy_eq(x: Optional[bool], y: Optional[bool]) -> Optional[bool]:
+def fuzzy_eq(x: bool | None, y: bool | None) -> bool | None:
     if None in (x, y):
         return None
     return x == y
@@ -216,9 +216,7 @@ class FloorDiv(sympy.Function):
     # Automatic evaluation.
     # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
     @classmethod
-    def eval(
-        cls, base: sympy.Integer, divisor: sympy.Integer
-    ) -> Union[sympy.Basic, None]:
+    def eval(cls, base: sympy.Integer, divisor: sympy.Integer) -> sympy.Basic | None:
         # python test/test_dynamic_shapes.py -k TestDimConstraints.test_dim_constraints_solve_full
         # Assert triggered by inequality solver
         # assert base.is_integer, base
@@ -324,7 +322,7 @@ class ModularIndexing(sympy.Function):
     @classmethod
     def eval(
         cls, base: sympy.Integer, divisor: sympy.Integer, modulus: sympy.Integer
-    ) -> Optional[sympy.Basic]:
+    ) -> sympy.Basic | None:
         if base == 0 or modulus == 1:
             return sympy.S.Zero
         if (
@@ -373,7 +371,7 @@ class ModularIndexing(sympy.Function):
 
         return None
 
-    def _eval_is_nonnegative(self) -> Optional[bool]:
+    def _eval_is_nonnegative(self) -> bool | None:
         # pyrefly: ignore [missing-attribute]
         p, q = self.args[:2]
         return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
@@ -387,23 +385,21 @@ class Where(sympy.Function):
     nargs: tuple[int, ...] = (3,)
     precedence: int = 35  # lower precedence than add
 
-    def _eval_is_integer(self) -> Optional[bool]:
+    def _eval_is_integer(self) -> bool | None:
         return True if self.args[1].is_integer and self.args[2].is_integer else None  # type: ignore[attr-defined]
 
-    def _eval_is_nonnegative(self) -> Optional[bool]:
+    def _eval_is_nonnegative(self) -> bool | None:
         return (
             True
             if self.args[1].is_nonnegative and self.args[2].is_nonnegative  # type: ignore[attr-defined]
             else None
         )
 
-    def _eval_is_positive(self) -> Optional[bool]:
+    def _eval_is_positive(self) -> bool | None:
         return True if self.args[1].is_positive and self.args[2].is_positive else None  # type: ignore[attr-defined]
 
     @classmethod
-    def eval(
-        cls, c: sympy.Basic, p: sympy.Basic, q: sympy.Basic
-    ) -> Optional[sympy.Basic]:
+    def eval(cls, c: sympy.Basic, p: sympy.Basic, q: sympy.Basic) -> sympy.Basic | None:
         if c == sympy.true:
             return p
         elif c == sympy.false:
@@ -419,7 +415,7 @@ class PythonMod(sympy.Function):
     is_integer: bool = True
 
     @classmethod
-    def eval(cls, p: sympy.Expr, q: sympy.Expr) -> Optional[sympy.Expr]:
+    def eval(cls, p: sympy.Expr, q: sympy.Expr) -> sympy.Expr | None:
         # python test/dynamo/test_export.py -k ExportTests.test_trivial_constraint
         # Triggered by sympy.solvers.inequalities.reduce_inequalities
         # assert p.is_integer, p
@@ -465,10 +461,10 @@ class PythonMod(sympy.Function):
         return None
 
     # NB: args[1] for PythonMod
-    def _eval_is_nonnegative(self) -> Optional[bool]:
+    def _eval_is_nonnegative(self) -> bool | None:
         return True if self.args[1].is_positive else None  # type: ignore[attr-defined]
 
-    def _eval_is_nonpositive(self) -> Optional[bool]:
+    def _eval_is_nonpositive(self) -> bool | None:
         return True if self.args[1].is_negative else None  # type: ignore[attr-defined]
 
     def _ccode(self, printer) -> str:
@@ -664,7 +660,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
     @classmethod
     def _satisfy_unique_summations_symbols(
         cls, args
-    ) -> Optional[set[sympy.core.symbol.Symbol]]:
+    ) -> set[sympy.core.symbol.Symbol] | None:
         """
         One common case in some models is building expressions of the form
         max(max(max(a+b...), c+d), e+f) which is simplified to max(a+b, c+d, e+f, ...).
@@ -719,8 +715,8 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
 
     @classmethod
     def _unique_symbols(
-        cls, args, initial_set: Optional[set[sympy.core.symbol.Symbol]] = None
-    ) -> Optional[set[sympy.core.symbol.Symbol]]:
+        cls, args, initial_set: set[sympy.core.symbol.Symbol] | None = None
+    ) -> set[sympy.core.symbol.Symbol] | None:
         """
         Return seen_symbols if all atoms in all args are all unique symbols,
         else returns None. initial_set can be used to represent initial value for seen_symbols
