@@ -1,9 +1,7 @@
 #pragma once
 
 #include <c10/util/Exception.h>
-#ifdef USE_XPU
 #include <sycl/sycl.hpp>
-#endif
 
 namespace c10::xpu {
 
