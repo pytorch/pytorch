@@ -206,7 +206,9 @@ def install_flash_attention_impl(
         module_path: Optional override forwarded to the backend register function.
 
     Example:
-        >>> install_flash_attention_impl("FA4", module_path="flash_attn.cute.interface")
+        >>> install_flash_attention_impl(
+        ...     "FA4", module_path="flash_attn.cute.interface"
+        ... )  # doctest: +SKIP
     """
     register_fn = _FLASH_ATTENTION_BACKENDS.get(backend)
     if register_fn is None:
