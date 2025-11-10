@@ -12706,7 +12706,7 @@ class TestErrorInputs(TestCase):
     def test_index_put_out_of_bounds(self, device):
         x = torch.rand(10, 1, 10, device=device)
         with self.assertRaises(torch.AcceleratorError):
-            y = x[:,[1]]
+            y = x[:, [1]]
             torch.mps.synchronize()
 
 class TestComplex(TestCase):
