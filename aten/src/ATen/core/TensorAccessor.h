@@ -6,7 +6,6 @@
 #include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
@@ -19,10 +18,10 @@ using torch::headeronly::DefaultPtrTraits;
 #endif
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using TensorAccessorBase = torch::headeronly::TensorAccessorBaseDetail<c10::IntArrayRef, T, N, PtrTraits, index_t>;
+using TensorAccessorBase = torch::headeronly::detail::TensorAccessorBase<c10::IntArrayRef, T, N, PtrTraits, index_t>;
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using TensorAccessor = torch::headeronly::TensorAccessorDetail<c10::IntArrayRef, T, N, PtrTraits, index_t>;
+using TensorAccessor = torch::headeronly::detail::TensorAccessor<c10::IntArrayRef, T, N, PtrTraits, index_t>;
 
 namespace {
 
