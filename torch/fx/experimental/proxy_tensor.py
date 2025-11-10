@@ -40,6 +40,7 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch._logging import trace_structured
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
@@ -63,6 +64,7 @@ from torch.utils._python_dispatch import (
     _disable_infra_mode,
     _push_mode,
     _unset_infra_mode,
+    autograd_would_have_decomposed,
     TorchDispatchMode,
 )
 from torch.utils._stats import count
@@ -124,7 +126,7 @@ pytree.register_pytree_node(
     torch.Size,
     lambda xs: (list(xs), None),
     lambda xs, _: tuple(xs),
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     flatten_with_keys_fn=lambda xs: (
         [(pytree.SequenceKey(i), x) for i, x in enumerate(xs)],
         None,
@@ -310,7 +312,7 @@ def set_proxy_slot(  # type: ignore[no-redef]
 
 def has_proxy_slot(obj: Tensor, tracer: _ProxyTracer) -> bool:
     assert isinstance(obj, (Tensor, SymNode)), type(obj)
-    # pyrefly: ignore  # no-matching-overload
+    # pyrefly: ignore [no-matching-overload]
     return bool(get_proxy_slot(obj, tracer, False, lambda _: True))
 
 
@@ -407,7 +409,8 @@ def get_proxy_slot(
         assert isinstance(obj, py_sym_types), type(obj)
         tracker = tracer.symnode_tracker
 
-    # pyrefly: ignore  # index-error
+    # pyrefly: ignore [index-error]
+    # pyrefly: ignore [no-matching-overload, bad-argument-type]
     value = tracker.get(obj)
 
     if value is None and isinstance(obj, py_sym_types):
@@ -420,7 +423,7 @@ def get_proxy_slot(
             else:
                 # Attempt to build it from first principles.
                 _build_proxy_for_sym_expr(tracer, obj.node.expr, obj)
-                # pyrefly: ignore  # no-matching-overload
+                # pyrefly: ignore [no-matching-overload]
                 value = tracker.get(obj)
 
     if value is None:
@@ -916,7 +919,6 @@ def fetch_object_proxy(
 def fetch_object_proxy(
     tracer: _ProxyTracer, t: Union[Tensor, _AnyScriptObjectType, PySymType]
 ) -> object:
-    # pyrefly: ignore  # no-matching-overload
     return get_proxy_slot(t, tracer, t)
 
 
@@ -965,7 +967,6 @@ def _fetch_proxies_and_all_constant_flag(
     """
     f_flat_args_kwargs = [
         (
-            # pyrefly: ignore  # no-matching-overload
             fetch_object_proxy(tracer, x)
             if isinstance(x, (Tensor, _AnyScriptObject))
             else x
@@ -1032,11 +1033,16 @@ def proxy_call(
         return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
-    if not pre_dispatch and func not in [
-        torch.ops.aten.size.default,
-        torch.ops.aten.stride.default,
-        torch.ops.aten.storage_offset.default,
-    ]:
+    if (
+        not pre_dispatch
+        and func
+        not in [
+            torch.ops.aten.size.default,
+            torch.ops.aten.stride.default,
+            torch.ops.aten.storage_offset.default,
+        ]
+        and autograd_would_have_decomposed(func, flat_args_kwargs)
+    ):
         with proxy_mode:
             r = func.decompose(*args, **kwargs)
             if r is not NotImplemented:
@@ -1491,11 +1497,19 @@ def wrap_key(
 
     @functools.wraps(f)
     def wrapped(*proxies: _P.args, **_unused: _P.kwargs) -> R:
+        nonlocal tensors
+
         flat_proxies, _proxies_spec = pytree.tree_flatten(proxies)
         assert len(flat_proxies) == len(flat_tensors)
         with disable_proxy_modes_tracing() as m:
             assert isinstance(m, ProxyTorchDispatchMode)
             track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
+
+        if getattr(tracer, "proxy_module_inputs", False):
+            tensors = [  # type: ignore[assignment, var-annotated]
+                p if isinstance(t, torch.nn.Module) else t
+                for t, p in zip(tensors, proxies)  # type: ignore[arg-type]
+            ]
 
         def get_tensor_proxy_slot(t: Tensor) -> Union[Tensor, Proxy]:
             return get_proxy_slot(t, tracer, t, lambda x: x.proxy)  # type: ignore[attr-defined]
@@ -1546,7 +1560,7 @@ class TorchFunctionMetadataMode(TorchFunctionMode):
         kwargs: Optional[dict[str, object]] = None,
     ) -> object:
         kwargs = kwargs or {}
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         self.tracer.torch_fn_metadata = func
         self.tracer.torch_fn_counts[func] = self.tracer.torch_fn_counts.get(func, 0) + 1
         return func(*args, **kwargs)
@@ -1581,11 +1595,11 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             # TODO(tmanlaibaatar): we should systematically couple it with export verifier,
             # instead of hardcoding it here.
             # T203648563
-            if func == torch.amp.autocast_mode._exit_autocast:
+            if func is torch.amp.autocast_mode._exit_autocast:
                 enter_node = self.enter_autocast_nodes.pop()
                 args = (enter_node,)
             node = self.tracer.create_node("call_function", func, args, {})  # type: ignore[arg-type]
-            if func == torch.amp.autocast_mode._enter_autocast:
+            if func is torch.amp.autocast_mode._enter_autocast:
                 self.enter_autocast_nodes.append(node)
             if func in [
                 torch._C._set_grad_enabled,
@@ -1596,7 +1610,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             # For autocast, the python APIs run so we don't have to run them again
             # here.
             if func is torch._C._set_grad_enabled:
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 func(*args, **kwargs)
             return node
 
@@ -1711,7 +1725,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     ) -> object:
         # Peephole optimize multiply by one
         # NB: be careful not to trigger guards here!
-        if func == operator.mul:
+        if func is operator.mul:
             if isinstance(args[1], int) and args[1] == 1:
                 return args[0]
             elif isinstance(args[0], int) and args[0] == 1:
@@ -1815,7 +1829,7 @@ class DecompositionInterpreter(fx.Interpreter):
         self.decomposition_table = decomposition_table or {}
         self.mode = ProxyTorchDispatchMode(self.tracer, tracing_mode="real")
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def placeholder(
         self,
         target: str,  # type: ignore[override]
@@ -1828,7 +1842,7 @@ class DecompositionInterpreter(fx.Interpreter):
         # TODO handle case where the first character of target is '*'
         return out
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def get_attr(
         self,
         target: str,  # type: ignore[override]
@@ -1842,7 +1856,7 @@ class DecompositionInterpreter(fx.Interpreter):
 
     # call_function, call_method, call_module get traced automatically by the outer mode.
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def output(
         self,
         target: str,  # type: ignore[override]
@@ -1961,7 +1975,8 @@ class _ModuleStackTracer(PythonKeyTracer):
                 # Class is modified to be a subclass of torch.nn.Module
                 # Warning: We blow away our own attributes here to mimic the base class
                 # - so don't expect `self.x` to do anything useful.
-                # pyrefly: ignore  # no-matching-overload
+                # pyrefly: ignore [no-matching-overload]
+                # pyrefly: ignore [bad-override]
                 self.__class__ = type(
                     base.__class__.__name__,
                     (self.__class__, base.__class__),
@@ -1984,7 +1999,7 @@ class _ModuleStackTracer(PythonKeyTracer):
                 if not isinstance(attr_val, Module):
                     return attr_val
 
-                # pyrefly: ignore  # index-error
+                # pyrefly: ignore [index-error]
                 return AttrProxy(attr_val, tracer.proxy_paths[self] + "." + name)
 
             def get_base(self) -> Module:
@@ -1997,12 +2012,12 @@ class _ModuleStackTracer(PythonKeyTracer):
                         res = torch.nn.Sequential(
                             OrderedDict(list(self._modules.items())[idx])
                         )
-                        # pyrefly: ignore  # index-error
+                        # pyrefly: ignore [index-error]
                         return AttrProxy(res, f"{tracer.proxy_paths[self]}.{idx}")
                     elif isinstance(self, torch.nn.ModuleList):
                         # Copied from nn/modules/container.py
                         res = torch.nn.ModuleList(list(self._modules.values())[idx])
-                        # pyrefly: ignore  # index-error
+                        # pyrefly: ignore [index-error]
                         return AttrProxy(res, f"{tracer.proxy_paths[self]}.{idx}")
 
                 return super().__getitem__(idx)  # type: ignore[misc]
@@ -2210,6 +2225,7 @@ class _MakefxTracer:
         _error_on_data_dependent_ops: bool,
         record_stack_traces: bool = False,
         parent_tracer: Optional[_MakefxTracer] = None,
+        proxy_module_inputs: bool = False,
     ) -> None:
         # Configurations that are used to initialize the context managers and their states.
         # Should not modify them during tracing.
@@ -2242,6 +2258,7 @@ class _MakefxTracer:
         )
         self.record_stack_traces = record_stack_traces
         self.parent_tracer: Optional[_MakefxTracer] = parent_tracer
+        self.proxy_module_inputs = proxy_module_inputs
 
     def _checkpoint_modes(self) -> list[Any]:
         return [
@@ -2351,6 +2368,7 @@ class _MakefxTracer:
             self.python_dispatcher_mode = enable_python_dispatcher()
 
         self.torch_fn_metadata_mode = TorchFunctionMetadataMode(fx_tracer)
+        fx_tracer.proxy_module_inputs = self.proxy_module_inputs  # type: ignore[union-attr]
 
     @contextmanager
     def _init_modes_from_parent(
@@ -2418,7 +2436,7 @@ class _MakefxTracer:
                         hint=x,
                         source=source,
                     )
-                elif isinstance(x, torch.ScriptObject):
+                elif isinstance(x, torch.ScriptObject) or is_opaque_type(type(x)):
                     return torch._library.fake_class_registry.maybe_to_fake_obj(
                         self.fake_tensor_mode, x
                     )
@@ -2497,7 +2515,6 @@ class _MakefxTracer:
         ):
             from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
-            # pyrefly: ignore  # unbound-name
             insert_deferred_runtime_asserts(t, fake_mode.shape_env, "reenter_make_fx")
             t.recompile()
         # TODO: kind of a bad way to do it, should maybe figure out a better way
@@ -2554,6 +2571,7 @@ def make_fx(
     _allow_fake_constant: bool = False,
     _error_on_data_dependent_ops: bool = True,
     record_stack_traces: bool = False,
+    proxy_module_inputs: bool = False,
 ) -> Callable[..., GraphModule]:
     """
     Given a function f, return a new function which when executed with valid
@@ -2577,6 +2595,7 @@ def make_fx(
         _error_on_data_dependent_ops,
         record_stack_traces=record_stack_traces
         or config.trace.provenance_tracking_level == 1,
+        proxy_module_inputs=proxy_module_inputs,
     )
 
     @functools.wraps(f)

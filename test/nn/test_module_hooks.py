@@ -873,7 +873,7 @@ class TestStateDictHooks(TestCase):
         )
 
         def linear_state_dict_post_hook(module, state_dict, prefix, local_metadata):
-            for name, param in module.named_parameters(recurse=False):
+            for name, _param in module.named_parameters(recurse=False):
                 state_dict[prefix + name] = torch.nn.Parameter(
                     state_dict[prefix + name]
                 )

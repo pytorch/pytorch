@@ -1,6 +1,3 @@
-# mypy: allow-untyped-decorators
-# mypy: allow-untyped-defs
-
 """
 This module implements variable tracking for TorchScript objects during Dynamo tracing.
 
@@ -22,19 +19,33 @@ by limiting operations to known-safe patterns and failing fast for unsafe usage.
 """
 
 import functools
+from collections.abc import Callable, Iterable
+from typing import Any, TYPE_CHECKING, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
+from torch._guards import Source
+from torch.fx.proxy import Proxy
 
 from .. import graph_break_hints
-from ..exc import unimplemented_v2, UnsafeScriptObjectError, Unsupported
+from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
 from .base import VariableTracker
 from .user_defined import UserDefinedObjectVariable
 
 
-def _raise_hard_error_if_graph_break(reason):
-    def deco(fn):
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+
+
+def _raise_hard_error_if_graph_break(
+    reason: str,
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    def deco(fn: Callable[_P, _T]) -> Callable[_P, _T]:
         @functools.wraps(fn)
-        def graph_break_as_hard_error(*args, **kwargs):
+        def graph_break_as_hard_error(*args: _P.args, **kwargs: _P.kwargs) -> _T:
             try:
                 return fn(*args, **kwargs)
             except Unsupported as e:
@@ -49,26 +60,26 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
     _fake_script_object_cache: dict[int, "TorchScriptObjectVariable"] = {}
 
     @classmethod
-    def is_matching_cls(cls, user_cls: type):
+    def is_matching_cls(cls, user_cls: type) -> bool:
         return issubclass(user_cls, torch.ScriptObject)
 
     @staticmethod
-    def create(proxy, value, **options):
+    def create(proxy: Proxy, value: Any, **options: Any) -> "TorchScriptObjectVariable":
         return TorchScriptObjectVariable(proxy, value, **options)
 
-    def __init__(self, proxy, value, source, **kwargs) -> None:
+    def __init__(self, proxy: Proxy, value: Any, source: Source, **kwargs: Any) -> None:
         super().__init__(value, **kwargs)
         self.proxy = proxy
         self.proxy.node.meta["example_value"] = value
         self.source = source
 
-    def as_proxy(self):
+    def as_proxy(self) -> Proxy:
         return self.proxy
 
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
     )
-    def var_getattr(self, tx, name: str) -> VariableTracker:
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         from torch._higher_order_ops.torchbind import call_torchbind
 
         from ..source import AttrSource
@@ -76,7 +87,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
         method = getattr(self.value, name, None)
         if method is None:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="FakeScriptObject missing method implementation",
                 context=f"value={self.value}, method={name}",
                 explanation=f"TorchScript object {self.value} doesn't define the method {name}.",
@@ -87,7 +98,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             )
 
         if not callable(method):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Attempted to access non-callable attribute of TorchScript object",
                 context=f"value={self.value}, method={name}",
                 explanation="Attribute accesses of TorchScript objects to non-callable attributes are not supported.",
@@ -95,7 +106,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                     "Use method calls instead of attribute access.",
                 ],
             )
-
+        assert self.source is not None
         return TorchHigherOrderOperatorVariable.make(
             call_torchbind,
             source=AttrSource(self.source, name),
@@ -110,8 +121,14 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
     )
-    def call_method(self, tx, name, args, kwargs):
-        unimplemented_v2(
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: Iterable[Any],
+        kwargs: dict[str, Any],
+    ) -> VariableTracker:
+        unimplemented(
             gb_type="Weird method call on TorchScript object",
             context=f"value={self.value}, method={name}",
             explanation=(

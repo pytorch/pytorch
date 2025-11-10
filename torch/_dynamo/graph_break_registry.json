@@ -1736,6 +1736,14 @@
   "GB0175": [
     {
       "Gb_type": "builtin isinstance() cannot determine type of argument",
+      "Context": "isinstance({arg}, {isinstance_type_var})",
+      "Explanation": "Dynamo doesn't have a rule to determine the type of argument {arg}",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    },
+    {
+      "Gb_type": "builtin isinstance() cannot determine type of argument",
       "Context": "isinstance({arg}, {isinstance_type})",
       "Explanation": "Dynamo doesn't have a rule to determine the type of argument {arg}",
       "Hints": [
@@ -2496,6 +2504,30 @@
   ],
   "GB0249": [
     {
+      "Gb_type": "bad device argument to torch.accelerator.current_stream",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "Expected valid string/torch.device argument ('cpu', 'cuda', etc.)",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    },
+    {
+      "Gb_type": "bad device argument to torch.get_device_module",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "Expected valid string/torch.device argument ('cpu', 'cuda', etc.)",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    },
+    {
+      "Gb_type": "bad device argument to torch.accelerator.current_stream",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "Expected valid string/torch.device argument ('cpu', 'cuda', etc.)",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    },
+    {
       "Gb_type": "bad device argument to torch.get_device_module",
       "Context": "args={args}, kwargs={kwargs}",
       "Explanation": "Expected valid string/torch.device argument ('cpu', 'cuda', etc.)",
@@ -2819,6 +2851,811 @@
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
+    }
+  ],
+  "GB0280": [
+    {
+      "Gb_type": "1-arg super not implemented",
+      "Context": "",
+      "Explanation": "Dynamo failed to trace attribute `{name}` accessed via `super()` (for type `{self.typevar}` and object `{self.objvar}`) because one-argument of super() is not supported.",
+      "Hints": [
+        "Use two-argument super(type, object_or_type)."
+      ]
+    }
+  ],
+  "GB0281": [
+    {
+      "Gb_type": "Invalid or non-const argument in nn.Module __getitem__",
+      "Context": "call_method: {self} {name} {args} {kwargs}",
+      "Explanation": "Dynamo does not support calling method `{name}` of ``nn.Module`` {module} with a non-constant or non-(str, int) key.",
+      "Hints": [
+        "Use constant arguments of type str or int for __getitem__"
+      ]
+    }
+  ],
+  "GB0282": [
+    {
+      "Gb_type": "Placement with custom __getattr__ not supported",
+      "Context": "{value_type.__name__} with custom __getattr__",
+      "Explanation": "Dynamo does not support Placement types with custom __getattr__ methods",
+      "Hints": [
+        "Use Placement types without custom __getattr__ methods",
+        "Move the Placement usage outside the compiled region"
+      ]
+    }
+  ],
+  "GB0283": [
+    {
+      "Gb_type": "Failed to make weakref to graph-created external object",
+      "Context": "user_object: {example_value}",
+      "Explanation": "Object does not allow us to make a weakref to it",
+      "Hints": []
+    }
+  ],
+  "GB0284": [
+    {
+      "Gb_type": "cannot resume from torch._dynamo.step_unsupported()",
+      "Context": "",
+      "Explanation": "traced torch._dynamo.step_unsupported(), but Dynamo is instructed to error on graph break. This graph break is used for debugging only.",
+      "Hints": [
+        "Remove the torch._dynamo.step_unsupported() call.",
+        "Make sure fullgraph=False and error_on_graph_break=False.",
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0285": [
+    {
+      "Gb_type": "unsupported arguments to torch.accelerator.current_stream",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "torch.accelerator.current_stream accepts one optional argument `device`",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0286": [
+    {
+      "Gb_type": "bad device argument to torch.get_device_module",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "Expected valid string/torch.device argument ('cpu', 'cuda', etc.)",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0287": [
+    {
+      "Gb_type": "unsupported type.__dict__['__annotations__'].__get__ call",
+      "Context": "call_function {self}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "`torch.compile` only supports calling type.__dict__['__annotations__'].__get__ on a single constant argument (i.e. a type).",
+      "Hints": [
+        "Make sure your call to type.__dict__['__annotations__'] only has ",
+        "one positional argument (no keyword arguments).",
+        "Make sure the argument to type.__dict__['__annotations__'] is a constant ",
+        "(i.e. type). For example, `object`, `int`, `MyCustomClass`.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0288": [
+    {
+      "Gb_type": "Can't extract message from torch._check()",
+      "Context": "str(message_vt)",
+      "Explanation": "The second argument of torch._check() must be a functiondefined within the torch.compile regionthat does not reference a non-local variable.",
+      "Hints": [
+        "Make sure the message function is defined in the torch.compile region.",
+        "Remove any closure variables, e.g. ",
+        "remove references to closure variable `x` in `lambda: f'{x} failed check'`",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0289": [
+    {
+      "Gb_type": "unsupported method call on `typing` variable",
+      "Context": "typing variable: {self.value}, method name: {name}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "`torch.compile` does not support method call `{name}` on `typing` variable f{self.value}.",
+      "Hints": [
+        "Avoid calling the {name} method on {self.value}.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0290": [
+    {
+      "Gb_type": "attempted to trace numpy.* function as a method",
+      "Context": "numpy function: {self.value}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "Tracing numpy.* functions as methods is not supported.",
+      "Hints": [
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
+  "GB0291": [
+    {
+      "Gb_type": "logging.Logger method not supported for non-export cases",
+      "Context": "method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "logging.Logger methods are not supported for non-export cases.",
+      "Hints": [
+        "Add the logging method to `torch._dynamo.config.ignore_logger_methods."
+      ]
+    }
+  ],
+  "GB0292": [
+    {
+      "Gb_type": "constant-like method call with unsupported return type",
+      "Context": "{self._error_prefix}.{name}(*{args}, **{kwargs}) returned {result}",
+      "Explanation": "Attempted to call {self._error_prefix}.{name}, got unsupported return value {result}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0293": [
+    {
+      "Gb_type": "attempted to trace numpy function with config.trace_numpy=False",
+      "Context": "numpy function: {self.value}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "Attempted to trace numpy function {self.value} while `torch._dynamo.config.trace_numpy` was set to False.",
+      "Hints": [
+        "Set `torch._dynamo.config.trace_numpy` to True to trace numpy functions."
+      ]
+    }
+  ],
+  "GB0294": [
+    {
+      "Gb_type": "attempted to trace numpy function unsupported by PyTorch",
+      "Context": "numpy function: {self.value}, args: {args}, kwargs: {kwargs} (corresponding torch function: {func})",
+      "Explanation": "Can't find numpy numpy function {self.value} in torch._numpy.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0295": [
+    {
+      "Gb_type": "cannot reconstruct NullVariable in Python < 3.11",
+      "Context": "",
+      "Explanation": "Attempted to generate PUSH_NULL instruction in Python < 3.11; where this instruction does not exist.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0296": [
+    {
+      "Gb_type": "attempted to reorder a debugging function that can't actually be reordered",
+      "Context": "fn: {self.value}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "`torch.compile` can only reorder functions where the arguments are Tensors, constants, or string formatters.",
+      "Hints": [
+        "Avoid calling the logging function {self.value} with args that are not supported."
+      ]
+    }
+  ],
+  "GB0297": [
+    {
+      "Gb_type": "random.Random() with improper arguments",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "random.Random() with > 1 arg or with kwargs is not supported.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0298": [
+    {
+      "Gb_type": "attempted to trace torch._numpy.random function with config.use_numpy_random_stream=True",
+      "Context": "numpy function: {self.value}, args: {args}, kwargs: {kwargs} (corresponding torch function: {func})",
+      "Explanation": "Attempted to trace {self.value} when `torch._dynamo.config.use_numpy_random_stream` is set to True.",
+      "Hints": [
+        "Set `torch._dynamo.config.use_numpy_random_stream` to False.",
+        "Avoid calling {self.value}."
+      ]
+    }
+  ],
+  "GB0299": [
+    {
+      "Gb_type": "constant-like method call with non-constant args",
+      "Context": "{self._error_prefix}.{name}(*{args}, **{kwargs})",
+      "Explanation": "Attempted to call {self._error_prefix}.{name} with non-constant args.",
+      "Hints": [
+        "Ensure that the args to the method call are constant (int, str, etc.)."
+      ]
+    }
+  ],
+  "GB0300": [
+    {
+      "Gb_type": "numpy function that produces a const collection type encountered non-const arguments",
+      "Context": "numpy function: {self.value}, args: {args}, kwargs: {kwargs} (corresponding torch function: {func})",
+      "Explanation": "numpy function {self.value} that produces a const collection type (e.g. np.dtype, np.iinfo/np.finfo) received arguments that are not constant.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0301": [
+    {
+      "Gb_type": "HOP: non torch.Tensor leaf",
+      "Context": "args types: {[type(a.realize()) for a in args]}",
+      "Explanation": "Expected all leaves to be of torch.Tensor type.",
+      "Hints": []
+    }
+  ],
+  "GB0302": [
+    {
+      "Gb_type": "HOP: non-callable variable",
+      "Context": "arg name: {arg_name}, func_var type: {str(func_var)}",
+      "Explanation": "{arg_name} should be a callable but is of type {str(func_var)}.",
+      "Hints": []
+    }
+  ],
+  "GB0303": [
+    {
+      "Gb_type": "torch.while_loop: improper args/kwargs",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "torch.while_loop expects 4 positional arguments (got {len(args)}) and no keyword arguments (got {len(kwargs)}) Usage: while_loop(cond_fn, body_fn, operands)",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0304": [
+    {
+      "Gb_type": "torch.while_loop: improper additional_inputs",
+      "Context": "str(additional_inputs)",
+      "Explanation": "Expected additional_inputs to be a list/tuple but got {additional_inputs.python_type()}",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0305": [
+    {
+      "Gb_type": "invalid set_subgraph_inputs and sub_kwargs settings",
+      "Context": "set_subgraph_inputs: {set_subgraph_inputs}, sub_kwargs: {sub_kwargs}",
+      "Explanation": "`sub_kwargs` cannot be used when `set_subgraph_inputs` is not set to 'automatic'.",
+      "Hints": [
+        "Use `set_subgraph_inputs='automatic'` when passing `sub_kwargs`.",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0306": [
+    {
+      "Gb_type": "unsupported HigherOrderOperator",
+      "Context": "str(value)",
+      "Explanation": "Unable to create higher order operator variable for {value.__name__}.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0307": [
+    {
+      "Gb_type": "unsupported HigherOrderOperator function call",
+      "Context": "str(self.value)",
+      "Explanation": "Unable to trace calling higher order operator variable for {self.value.__name__}.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0308": [
+    {
+      "Gb_type": "torch.while_loop: unsupported cond_fn return type",
+      "Context": "str(cond_r)",
+      "Explanation": "Expected cond_fn to return a scalar tensor or a bool but got {cond_r_meta.shape}.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0309": [
+    {
+      "Gb_type": "torch.cond: improper args/kwargs",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "torch.cond expects 4 positional arguments (got {len(args)}) and no keyword arguments (got {len(kwargs)}) Usage: cond(pred, cond_fn, body_fn, operands)",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0310": [
+    {
+      "Gb_type": "torch.cond: improper predicate",
+      "Context": "str(pred)",
+      "Explanation": "Expected `pred` to be a bool or a boolean tensor with a single item but got {str(type(pred))} with original python type {str(pred.python_type())}.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0311": [
+    {
+      "Gb_type": "torch.cond: improper operands",
+      "Context": "str(operands)",
+      "Explanation": "Expected `operands` to be a list/tuple but got {operands.python_type()}.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0312": [
+    {
+      "Gb_type": "torch.cond: improper operands contents",
+      "Context": "str(operands)",
+      "Explanation": "Expected `operands` to be a list/tuple of pytrees that only consists of tensor leaves.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0313": [
+    {
+      "Gb_type": "torch.cond: differing branch outputs",
+      "Context": "true_spec: {true_spec.treespec}, false_spec: {false_spec.treespec}, same_spec: {same_spec}",
+      "Explanation": "Expected branches to return the same pytree structure.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0314": [
+    {
+      "Gb_type": "HOP body output unsupported",
+      "Context": "non-tensor outputs: {non_tensor_output}",
+      "Explanation": "HigherOrderOperator body's output must consist of tensors or ints/bools only but got {out.python_type()}.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0315": [
+    {
+      "Gb_type": "torch.associative_scan: improper xs",
+      "Context": "str(xs)",
+      "Explanation": "Expected xs to be a list/tuple but got {xs.python_type()}",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0316": [
+    {
+      "Gb_type": "torch.associative_scan: improper additional_inputs",
+      "Context": "str(additional_inputs)",
+      "Explanation": "Expected additional_inputs to be a list/tuple but got {additional_inputs.python_type()}",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0317": [
+    {
+      "Gb_type": "torch.associative_scan: zero-sized tensor",
+      "Context": "str(xs_vars[0])",
+      "Explanation": "associative_scan() operator doesn't support zero-sized tensors during tracing.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0318": [
+    {
+      "Gb_type": "torch.associative_scan: combine_fn improper number of leaves",
+      "Context": "str(_combine_treespec.as_python_constant())",
+      "Explanation": "combine_fn needs to produce one pytree for the output but combine_fn produces the pytree {_combine_treespec.as_python_constant()}.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0319": [
+    {
+      "Gb_type": "torch.associative_scan: mismatched input/output tree structure",
+      "Context": "xs: {xs_treespec.as_python_constant()}, output: {_combine_treespec.as_python_constant()}",
+      "Explanation": "The tree structure of the xs and the outs of the combine_fn are are expected to be identical, but got xs: {xs_treespec.as_python_constant()} vs output: {_combine_treespec.as_python_constant()}.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0320": [
+    {
+      "Gb_type": "torch.scan: improper xs",
+      "Context": "str(xs)",
+      "Explanation": "Expected xs to be a list/tuple but got {xs.python_type()}",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0321": [
+    {
+      "Gb_type": "torch.scan: improper init",
+      "Context": "str(init)",
+      "Explanation": "Expected init to be a list/tuple with at least one element but got {init.python_type()}",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0322": [
+    {
+      "Gb_type": "torch.scan: no init leaves",
+      "Context": "",
+      "Explanation": "Expected init leaves.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0323": [
+    {
+      "Gb_type": "torch.scan: improper additional_inputs",
+      "Context": "str(additional_inputs)",
+      "Explanation": "Expected additional_inputs to be a list/tuple but got {additional_inputs.python_type()}",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0324": [
+    {
+      "Gb_type": "torch.scan: zero-sized tensor",
+      "Context": "str(xs_vars[0])",
+      "Explanation": "associative_scan() operator doesn't support zero-sized tensors during tracing.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0325": [
+    {
+      "Gb_type": "torch.map: kwargs not supported",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "torch.map expects no keyword arguments (got {len(kwargs)})",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0326": [
+    {
+      "Gb_type": "torch.map: improper inputs",
+      "Context": "str(sample_shape)",
+      "Explanation": "torch.map doesn't support scalar or non-zero sized tensors during tracing.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0327": [
+    {
+      "Gb_type": "executorch_call_delegate: kwargs not supported",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "executorch_call_delegate expects no keyword arguments (got {len(kwargs)})",
+      "Hints": []
+    }
+  ],
+  "GB0328": [
+    {
+      "Gb_type": "torch.func.functional_call capture is disabled",
+      "Context": "",
+      "Explanation": "torch.func.functional_call capture is disabled",
+      "Hints": [
+        "Set `torch._dynamo.config.inline_inbuilt_nn_modules=True` to enable."
+      ]
+    }
+  ],
+  "GB0329": [
+    {
+      "Gb_type": "WrapHigherOrderVariable: kwargs unexpected",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "kwargs should have been flattened into lifted args.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0330": [
+    {
+      "Gb_type": "wrap_with_set_grad_enabled: unexpected kwargs",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "wrap_with_set_grad_enabled expects no keyword arguments (got {len(kwargs)}).",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0331": [
+    {
+      "Gb_type": "wrap_with_set_grad_enabled: non-constant grad_enabled",
+      "Context": "str(grad_enabled)",
+      "Explanation": "wrap_with_set_grad_enabled expects grad_enabled argument to be a constant.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0332": [
+    {
+      "Gb_type": "wrap_with_set_grad_enabled: unexpected freevars",
+      "Context": "str(body_lifted_freevars)",
+      "Explanation": "wrap_with_set_grad_enabled expects no freevars.",
+      "Hints": []
+    }
+  ],
+  "GB0333": [
+    {
+      "Gb_type": "wrap_with_autocast: unexpected kwargs",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "wrap_with_autocast expects no keyword arguments (got {len(kwargs)}).",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0334": [
+    {
+      "Gb_type": "wrap_with_autocast: unexpected freevars",
+      "Context": "str(body_lifted_freevars)",
+      "Explanation": "wrap_with_autocast expects no freevars.",
+      "Hints": []
+    }
+  ],
+  "GB0335": [
+    {
+      "Gb_type": "hints_wrapper: improper args/kwargs",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "hints_wrapper expects 3 positional arguments (got {len(args)}) and 1 keyword argument (got {len(kwargs)}). Usage: hints_wrapper(body_fn, args, kwargs, hints=...). args is expected to be list/tuple and kwargs is expected to be a dict.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0336": [
+    {
+      "Gb_type": "out_dtype: unexpected kwargs",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "out_dtype expects no keyword arguments (got {len(kwargs)}).",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0337": [
+    {
+      "Gb_type": "strict_mode: unexpected kwargs",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "strict_mode higher order op expects no keyword arguments (got {len(kwargs)}).",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0338": [
+    {
+      "Gb_type": "invoke_subgraph: kwargs unexpected",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "kwargs should have been flattened into lifted args.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0339": [
+    {
+      "Gb_type": "torch.while_loop: infinite loop detected",
+      "Context": "str(cond_r)",
+      "Explanation": "Infinite loop detected because while_loop's cond_fn always returns the same value {pred}.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0340": [
+    {
+      "Gb_type": "torch.cond: unsupported branch return type",
+      "Context": "str(ret_val)",
+      "Explanation": "Expected branches to return a possibly nested pytree of tensors or constant ints.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0341": [
+    {
+      "Gb_type": "torch.associative_scan: improper args",
+      "Context": "args: {args}",
+      "Explanation": "torch.associative_scan expects 2 positional arguments (got {len(args)}) Usage: associative_scan(combine_fn, xs)",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0342": [
+    {
+      "Gb_type": "torch.scan: improper combine_fn",
+      "Context": "str(combine_fn_var)",
+      "Explanation": "Expected combine_fn to be wrapped as functools.partial in scan user-facing api or a graph module if we're re-exporting but got {combine_fn_var.python_type()}.",
+      "Hints": [
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
+  "GB0343": [
+    {
+      "Gb_type": "torch.scan: improper combine_fn number of returns",
+      "Context": "str(combine_result_vars)",
+      "Explanation": "Expect combine_fn to return a tuple (next_carry, y) but got {combine_result_vars}.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0344": [
+    {
+      "Gb_type": "wrap_with_autocast: expected constant arg",
+      "Context": "str(args)",
+      "Explanation": "wrap_with_autocast expects device_type, dtype, enabled, and cache_enabled arguments to be constants.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0345": [
+    {
+      "Gb_type": "strict_mode: improper args",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "strict_mode higher order op expects flat inputs (list/tuple/dict)",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0346": [
+    {
+      "Gb_type": "autograd.Function.apply: non-function or method forward",
+      "Context": "str(self.fwd_graph)",
+      "Explanation": "Expected forward function to be a function or method.",
+      "Hints": []
+    }
+  ],
+  "GB0347": [
+    {
+      "Gb_type": "autograd.Function.apply: _materialize_non_diff_grads mutation",
+      "Context": "",
+      "Explanation": "Mutations to autograd.Function.ctx._materialize_non_diff_grads are not supported.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0348": [
+    {
+      "Gb_type": "autograd.Function.apply: non-function or method backward",
+      "Context": "str(self.bwd_graph)",
+      "Explanation": "Expected backward function to be a function or method.",
+      "Hints": []
+    }
+  ],
+  "GB0349": [
+    {
+      "Gb_type": "cannot unwrap variable for check_meta_consistency",
+      "Context": "str(var)",
+      "Explanation": "Expected {var} to be TensorVariable, SymNodeVariable, or ConstantVariable",
+      "Hints": []
+    }
+  ],
+  "GB0350": [
+    {
+      "Gb_type": "torch.cond: unsupported branch return type (constant non-int)",
+      "Context": "str(ret_val)",
+      "Explanation": "Constants returned from branches must be ints.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0351": [
+    {
+      "Gb_type": "HOP body taking non-Tensor as input",
+      "Context": "str(sub_args)",
+      "Explanation": "{description} with body that accepts non-Tensors as input. Got type {a.python_type()} at index {idx}.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0352": [
+    {
+      "Gb_type": "autograd.Function.apply: non-function or method backward (2)",
+      "Context": "str(self.bwd_graph)",
+      "Explanation": "Expected backward function to be a function or method.",
+      "Hints": []
+    }
+  ],
+  "GB0353": [
+    {
+      "Gb_type": "rewrite_signature: cannot trace optional function input",
+      "Context": "",
+      "Explanation": "Parameter {name} is optional with a default value of {param.default}. This is not supported yet.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0354": [
+    {
+      "Gb_type": "failed to find name in frame builtins",
+      "Context": "",
+      "Explanation": "Failed to find name `{argval}` in frame's builtins.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0355": [
+    {
+      "Gb_type": "non-single Tensor return unsupported",
+      "Context": "api: {api}, ret: {ret}",
+      "Explanation": "{api} over function that returns something other than one Tensor.",
+      "Hints": []
+    }
+  ],
+  "GB0356": [
+    {
+      "Gb_type": "failed to handle argument for FlexAttentionBackward HOP",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "Missing Dynamo support for FlexAttentionBackward HOP argument.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0357": [
+    {
+      "Gb_type": "UnspecializedNNModuleVariable wrapped around ScriptModules unsupported",
+      "Context": "str(value)",
+      "Explanation": "ScriptModules aren't supported in UnspecializedNNModuleVariable because their .forward function isn't a static member of their type.",
+      "Hints": [
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
+  "GB0358": [
+    {
+      "Gb_type": "optimizer: pending mutation on parameter",
+      "Context": "variable: {variable}, parameter: {p}",
+      "Explanation": "Pending mutations on a parameter (e.g. due to using closure) require a graph break.",
+      "Hints": []
+    }
+  ],
+  "GB0359": [
+    {
+      "Gb_type": "unsupported torch._C._SDPAParams attribute",
+      "Context": "name: {name}",
+      "Explanation": "Unable to fetch attribute {name} from torch._C._SDPAParams.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0360": [
+    {
+      "Gb_type": "torch.fx.experimental.symbolic_shapes.guard_scalar branch not supported",
+      "Context": "expr: {expr}",
+      "Explanation": "Expected `expr` to be a symbolic variable or constant.",
+      "Hints": []
+    }
+  ],
+  "GB0361": [
+    {
+      "Gb_type": "triton kernel unsupported feature",
+      "Context": "",
+      "Explanation": "Encountered triton kernel unsupported feature: {msg}",
+      "Hints": []
     }
   ]
 }

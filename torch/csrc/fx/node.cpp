@@ -365,6 +365,43 @@ static PyObject* NodeBase__remove_from_list(
   Py_RETURN_NONE;
 }
 
+static PyObject* NodeBase__replace_input_with(
+    PyObject* self,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
+  if (nargs != 2) {
+    PyErr_SetString(
+        PyExc_TypeError,
+        "_replace_input_with() requires exactly 2 arguments (old_input, new_input)");
+    return nullptr;
+  }
+  PyObject* old_input = args[0];
+  PyObject* new_input = args[1];
+  auto replace_fn = [old_input, new_input](PyObject* maybe_node) {
+    if (maybe_node == old_input) {
+      return Py_NewRef(new_input);
+    }
+    return Py_NewRef(maybe_node);
+  };
+
+  auto node = reinterpret_cast<NodeBase*>(self);
+  try {
+    THPObjectPtr new_args(map_aggregate(node->_args, replace_fn));
+    if (!new_args) {
+      return nullptr;
+    }
+    THPObjectPtr new_kwargs(map_aggregate(node->_kwargs, replace_fn));
+    if (!new_kwargs) {
+      return nullptr;
+    }
+
+    PyObject* update_args[2] = {new_args.get(), new_kwargs.get()};
+    return NodeBase__update_args_kwargs(self, update_args, 2);
+  } catch (const PythonError& e) {
+    return nullptr;
+  }
+}
+
 static PyObject* NodeBase__prepend(PyObject* self_, PyObject* arg) {
   if (self_ == arg) {
     Py_RETURN_NONE;
@@ -507,15 +544,19 @@ static int NodeBase_set_sort_key(
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static PyMethodDef NodeBase_methods[] = {
     {"_update_args_kwargs",
-     (PyCFunction)(void*)(NodeBase__update_args_kwargs),
+     (PyCFunction)(void*)NodeBase__update_args_kwargs,
      METH_FASTCALL,
      "Internal method: do not call directly."},
     {"_remove_from_list",
-     (PyCFunction)(void*)(NodeBase__remove_from_list),
+     (PyCFunction)(void*)NodeBase__remove_from_list,
      METH_NOARGS,
      "Internal method: do not call directly."},
+    {"_replace_input_with",
+     (PyCFunction)(void*)NodeBase__replace_input_with,
+     METH_FASTCALL,
+     "Internal method: replace occurrences of one input Node with another."},
     {"_prepend",
-     (PyCFunction)(void*)(NodeBase__prepend),
+     (PyCFunction)(void*)NodeBase__prepend,
      METH_O,
      "Internal method: do not call directly."},
     {"__lt__",
@@ -791,11 +832,11 @@ static PyObject* py_map_arg(
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static PyMethodDef extra_methods[] = {
     {"_fx_map_aggregate",
-     (PyCFunction)(void*)(py_map_aggregate),
+     (PyCFunction)(void*)py_map_aggregate,
      METH_FASTCALL,
      "Recursively apply a function to every element in an aggregate object."},
     {"_fx_map_arg",
-     (PyCFunction)(void*)(py_map_arg),
+     (PyCFunction)(void*)py_map_arg,
      METH_FASTCALL,
      "Recursively apply a function to every Node in an aggregate object."},
     {nullptr, nullptr, 0, nullptr} // Sentinel

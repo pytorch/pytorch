@@ -18,7 +18,7 @@ __all__ = [
 # Metaclass to combine _TensorMeta and the instance check override for Parameter.
 class _ParameterMeta(torch._C._TensorMeta):
     # Make `isinstance(t, Parameter)` return True for custom tensor instances that have the _is_param flag.
-    def __instancecheck__(self, instance):
+    def __instancecheck__(self, instance) -> bool:
         if self is Parameter:
             if isinstance(instance, torch.Tensor) and getattr(
                 instance, "_is_param", False
@@ -81,8 +81,8 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
             memo[id(self)] = result
             return result
 
-    # pyrefly: ignore  # bad-override
-    def __repr__(self):
+    # pyrefly: ignore [bad-override]
+    def __repr__(self) -> str:
         return "Parameter containing:\n" + super().__repr__()
 
     def __reduce_ex__(self, proto):
@@ -125,7 +125,7 @@ class UninitializedTensorMixin:
         torch._has_compatible_shallow_copy_type,
     ]
 
-    def materialize(self, shape, device=None, dtype=None):
+    def materialize(self, shape, device=None, dtype=None) -> None:
         r"""Create a Parameter or Tensor with the same properties of the uninitialized one.
 
         Given a shape, it materializes a parameter in the same device
@@ -144,7 +144,7 @@ class UninitializedTensorMixin:
         if dtype is None:
             dtype = self.data.dtype
         self.data = torch.empty(shape, device=device, dtype=dtype)
-        # pyrefly: ignore  # bad-override, missing-attribute
+        # pyrefly: ignore [bad-override, missing-attribute]
         self.__class__ = self.cls_to_become
 
     @property
@@ -163,12 +163,12 @@ class UninitializedTensorMixin:
             "`module.share_memory()`."
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<{self.__class__.__name__}>"
 
     def __reduce_ex__(self, proto):
         # See Note [Don't serialize hooks]
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         return (self.__class__, (self.requires_grad,))
 
     @classmethod
@@ -178,7 +178,7 @@ class UninitializedTensorMixin:
         if func in cls._allowed_methods or func.__class__.__name__ == "method-wrapper":
             if kwargs is None:
                 kwargs = {}
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             return super().__torch_function__(func, types, args, kwargs)
         raise ValueError(
             f"Attempted to use an uninitialized parameter in {func}. "
@@ -220,7 +220,7 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
     def __new__(cls, requires_grad=True, device=None, dtype=None) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         data = torch.empty(0, **factory_kwargs)
-        # pyrefly: ignore  # bad-return
+        # pyrefly: ignore [bad-return]
         return torch.Tensor._make_subclass(cls, data, requires_grad)
 
     def __deepcopy__(self, memo):
@@ -235,7 +235,7 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
 # Metaclass to combine _TensorMeta and the instance check override for Buffer.
 class _BufferMeta(torch._C._TensorMeta):
     # Make `isinstance(t, Buffer)` return True for custom tensor instances that have the _is_buffer flag.
-    def __instancecheck__(self, instance):
+    def __instancecheck__(self, instance) -> bool:
         if self is Buffer:
             if isinstance(instance, torch.Tensor) and getattr(
                 instance, "_is_buffer", False
@@ -266,9 +266,9 @@ class Buffer(torch.Tensor, metaclass=_BufferMeta):
             data = torch.empty(0)
 
         t = data.detach().requires_grad_(data.requires_grad)
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         t.persistent = persistent
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         t._is_buffer = True
         return t
 
@@ -299,9 +299,9 @@ class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
         factory_kwargs = {"device": device, "dtype": dtype}
         data = torch.empty(0, **factory_kwargs)
         ret = torch.Tensor._make_subclass(cls, data, requires_grad)
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         ret.persistent = persistent
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         ret._is_buffer = True
-        # pyrefly: ignore  # bad-return
+        # pyrefly: ignore [bad-return]
         return ret

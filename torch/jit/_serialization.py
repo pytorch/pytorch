@@ -18,7 +18,7 @@ from torch.jit._recursive import wrap_cpp_module
 from torch.serialization import validate_cuda_device
 
 
-def save(m, f, _extra_files=None):
+def save(m, f, _extra_files=None) -> None:
     r"""
     Save an offline version of this module for use in a separate process.
 
@@ -167,21 +167,20 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
     if isinstance(f, (str, os.PathLike)):
         cpp_module = torch._C.import_ir_module(
             cu,
-            # pyrefly: ignore  # no-matching-overload
             os.fspath(f),
             map_location,
             _extra_files,
-            # pyrefly: ignore  # bad-argument-count
+            # pyrefly: ignore [bad-argument-count]
             _restore_shapes,
         )  # type: ignore[call-arg]
     else:
         cpp_module = torch._C.import_ir_module_from_buffer(
             cu,
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             f.read(),
             map_location,
             _extra_files,
-            # pyrefly: ignore  # bad-argument-count
+            # pyrefly: ignore [bad-argument-count]
             _restore_shapes,
         )  # type: ignore[call-arg]
 
@@ -208,14 +207,13 @@ def validate_map_location(map_location=None):
 
 def jit_module_from_flatbuffer(f):
     if isinstance(f, (str, os.PathLike)):
-        # pyrefly: ignore  # no-matching-overload
         f = os.fspath(f)
         return wrap_cpp_module(torch._C._load_jit_module_from_file(f))
     else:
         return wrap_cpp_module(torch._C._load_jit_module_from_bytes(f.read()))
 
 
-def save_jit_module_to_flatbuffer(m, f, _extra_files=None):
+def save_jit_module_to_flatbuffer(m, f, _extra_files=None) -> None:
     r"""
     Save an offline version of this module for use in a separate process.
 
@@ -258,7 +256,6 @@ def save_jit_module_to_flatbuffer(m, f, _extra_files=None):
         extra_files = {}
 
     if isinstance(f, (str, os.PathLike)):
-        # pyrefly: ignore  # no-matching-overload
         f = os.fspath(f)
         torch._C._save_jit_module(m._c, f, extra_files)
     else:
