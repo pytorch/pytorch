@@ -1,5 +1,6 @@
 import weakref
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from torch._dynamo.source import Source
 
