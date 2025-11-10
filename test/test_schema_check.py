@@ -534,7 +534,7 @@ class TestSchemaCheckModeOpInfo(JitTestCase):
      'test_schema_correctness_torch_ops_aten__flash_attention_forward_xpu_float16')
 
     def _is_xpu_and_supported(self, op):
-        if torch.xpu.is_available():
+        if HAS_XPU:
             for case in TestSchemaCheckModeOpInfo._xpu_not_supported_cases:
                 if op and op.formatted_name and case in op.formatted_name:
                     return False
