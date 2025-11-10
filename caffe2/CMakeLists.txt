@@ -1206,20 +1206,6 @@ if(USE_XPU)
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/ATen/
         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
 
-    message(INFO "Install ${TORCH_SRC_DIR}/headeronly/core to ${TORCH_INSTALL_INCLUDE_DIR}/torch/headeronly/core")
-    install(DIRECTORY "${TORCH_SRC_DIR}/headeronly/core"
-        DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch/headeronly/core
-        FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
-
-    message(INFO "Install ${TORCH_SRC_DIR}/headeronly/util to ${TORCH_INSTALL_INCLUDE_DIR}/torch/headeronly/util")
-    install(DIRECTORY "${TORCH_SRC_DIR}/headeronly/util"
-        DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch/headeronly/util
-        FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
-
-    message(INFO "Install ${TORCH_SRC_DIR}/headeronly/macros to ${TORCH_INSTALL_INCLUDE_DIR}/torch/headeronly/macros")
-    install(DIRECTORY "${TORCH_SRC_DIR}/headeronly/macros"
-        DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch/headeronly/macros
-        FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
   endif()
 endif()
 

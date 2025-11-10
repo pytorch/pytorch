@@ -162,3 +162,5 @@ THO_DISPATCH_V2
 # torch/headeronly/core/TensorAccessor.h
 TensorAccessor
 GenericPackedTensorAccessor
+# TensorAccessorBase and GenericPackedTensorAccessorBase are tested
+# through TensorAccessor and GenericPackedTensorAccessor
