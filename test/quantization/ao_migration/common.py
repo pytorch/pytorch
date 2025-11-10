@@ -46,7 +46,7 @@ class AOMigrationTestCase(TestCase):
             old_dict = getattr(old_location, dict_name)
             new_dict = getattr(new_location, dict_name)
             assert old_dict == new_dict, f"Dicts don't match: {dict_name}"
-            for key in new_dict.keys():
+            for key in new_dict:
                 assert old_dict[key] == new_dict[key], (
                     f"Dicts don't match: {dict_name} for key {key}"
                 )

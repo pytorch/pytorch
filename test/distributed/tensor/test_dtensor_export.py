@@ -520,6 +520,34 @@ class DTensorExportTest(TestCase):
             2,
         )
 
+    def test_union_typed_annotation(self):
+        def fn(leaf: torch.Tensor | DTensor):
+            def nest_fn(leaf: torch.Tensor | DTensor):
+                # def nest_fn(leaf: Union[torch.Tensor, DTensor]):  # this works
+                if isinstance(leaf, DTensor):
+                    leaf = leaf.to_local()
+                return leaf
+
+            return nest_fn(leaf) + 1
+
+        z = torch.randn(16, 16)
+        gm = graph_capture_and_aot_export_joint_with_descriptors(fn, (z,))
+
+        self.assertEqual(fn(z), gm(z)[0])
+
+    def test_dtensor_data_dependent_index(self):
+        device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x[y]
+
+        x = torch.randn(10)
+        y = torch.randint(1, (10,)).bool()
+        x_dt = distribute_tensor(x, device_mesh, placements=[Replicate()])
+        y_dt = distribute_tensor(y, device_mesh, placements=[Replicate()])
+        _dynamo_graph_capture_for_export(Foo())(x_dt, y_dt)
+
 
 instantiate_parametrized_tests(DTensorExportTest)
 

@@ -726,8 +726,7 @@ class CPUReproTests(TestCase):
             seq_len,
         )
 
-    @parametrize(
-        "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
+    _test_lstm_packed_change_input_sizes_cpu_params = list(
         itertools.product(
             *[
                 [False],
@@ -741,7 +740,12 @@ class CPUReproTests(TestCase):
                 [2],
                 [3],
             ]
-        ),
+        )
+    )
+
+    @parametrize(
+        "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
+        _test_lstm_packed_change_input_sizes_cpu_params,
     )
     def test_lstm_packed_change_input_sizes_cpu(
         self,
@@ -1543,21 +1547,25 @@ class CPUReproTests(TestCase):
             with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
-                self.common(
-                    fn,
-                    (
-                        x,
-                        scale,
-                        zero_point,
-                        use_dequant,
-                        use_quant,
-                        quant_min,
-                        quant_max,
-                        dtype,
-                        dequant_out_dtype,
-                    ),
+                inputs = (
+                    x,
+                    scale,
+                    zero_point,
+                    use_dequant,
+                    use_quant,
+                    quant_min,
+                    quant_max,
+                    dtype,
+                    dequant_out_dtype,
                 )
+                self.common(fn, inputs)
                 check_metrics_vec_kernel_count(1)
+
+                # Check that both main and tail loops are vectorized
+                if dtype in [torch.float8_e4m3fn, torch.float8_e5m2]:
+                    compiled_fn = torch.compile(fn)
+                    _, code = run_and_get_cpp_code(compiled_fn, *inputs)
+                    FileCheck().check_count("loadu", 2, exactly=True).run(code)
 
     @requires_vectorization
     def test_dequant_quant_lowering_uint8(self):
@@ -3271,6 +3279,15 @@ class CPUReproTests(TestCase):
             return x
 
         x = torch.randn(8, 8, 2)
+        metrics.reset()
+        self.common(fn, (x,))
+
+    def test_softmax_with_zero_dim(self):
+        def fn(x):
+            x = torch.softmax(x, 0)
+            return x
+
+        x = torch.rand([], dtype=torch.bfloat16)
         metrics.reset()
         self.common(fn, (x,))
 

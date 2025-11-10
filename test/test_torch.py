@@ -138,7 +138,7 @@ class TestTorchDeviceType(TestCase):
     # TODO: move all tensor creation to common ops
     def _rand_shape(self, dim, min_size, max_size):
         shape = []
-        for i in range(dim):
+        for _ in range(dim):
             shape.append(random.randint(min_size, max_size))
         return tuple(shape)
 
@@ -172,7 +172,7 @@ class TestTorchDeviceType(TestCase):
 
         element_size = torch._utils._element_size(dtype)
 
-        for i in range(10):
+        for _ in range(10):
             bytes_list = [rand_byte() for _ in range(element_size)]
             scalar = bytes_to_scalar(bytes_list, dtype, device)
             self.assertEqual(scalar.storage().untyped().tolist(), bytes_list)
@@ -259,7 +259,8 @@ class TestTorchDeviceType(TestCase):
     def test_storage_use_count(self, device):
         a = torch.randn(10, device=device)
         prev_cf = torch._C._storage_Use_Count(a.untyped_storage()._cdata)
-        self.assertEqual(prev_cf, 1)
+        # Two references: 'a' and the wrapper returned by untyped_storage()
+        self.assertEqual(prev_cf, 2)
         b = a.view(2, 5)
         self.assertEqual(torch._C._storage_Use_Count(b.untyped_storage()._cdata), prev_cf + 1)
 
@@ -2012,7 +2013,7 @@ class TestTorchDeviceType(TestCase):
             res = x.scatter_add(dim, idx, src)
 
             # Checking if scatter_add is deterministic
-            for i in range(5):
+            for _ in range(5):
                 res_next = x.scatter_add(dim, idx, src)
                 self.assertEqual(res, res_next, atol=0, rtol=0)
                 res = res_next
@@ -2264,7 +2265,7 @@ class TestTorchDeviceType(TestCase):
                 fweights = torch.randint(1, 10, (num_observations,), device=device)
                 aweights = make_tensor((num_observations,), dtype=torch.float, device=device, low=1)
                 for correction, fw, aw in product([0, 1, 2], [None, fweights], [None, aweights]):
-                    check(x, correction, fweights, aweights)
+                    check(x, correction, fw, aw)
 
     @skipIfNoSciPy
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
@@ -2479,7 +2480,8 @@ class TestTorchDeviceType(TestCase):
                         self.assertEqual(x1.grad, x2.grad, rtol=0, atol=0.001)
                         self.assertEqual(y1.grad, y2.grad, rtol=0, atol=0.001)
 
-    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @skipIfRocmArch(MI300_ARCH)
+    @tf32_on_and_off(0.005)
     @reduced_f32_on_and_off(0.08)
     def test_cdist_large(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
@@ -5151,7 +5153,7 @@ class TestTorchDeviceType(TestCase):
         prob_dist = torch.rand(10000, 1000, device=device, dtype=dtype)
         n_sample = 1
 
-        for i in range(trials):
+        for _ in range(trials):
             gen.manual_seed(seed)
             samples_1 = torch.multinomial(prob_dist, n_sample, True, generator=gen)
 
@@ -5229,7 +5231,7 @@ class TestTorchDeviceType(TestCase):
         # TODO copy _like constructors to stride permutation instead of just layout
         if not TEST_WITH_TORCHINDUCTOR:
             x = torch.randn((3, 4, 5, 6, 7, 8, 9), device=device)
-            for i in range(10):
+            for _ in range(10):
                 permutation = list(range(len(x.shape)))
                 random.shuffle(permutation)
                 x = x.permute(permutation)
@@ -9315,7 +9317,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             member_var = object()
 
         err_msg = "Creating a Tensor subclass from a class that does not inherit from Tensor"
-        with self.assertRaisesRegex(RuntimeError, err_msg):
+        with self.assertRaisesRegex(TypeError, err_msg):
             s0 = t0.as_subclass(BadSubTensor)
 
     # FIXME: Port to a test suite that better fits slicing
@@ -10315,20 +10317,21 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
     def test_tensor_dead_weak_ref(self):
-        x = torch.empty(2)
+        x = torch.ones(2)
         w_x = weakref.ref(x)
-        y = torch.empty(2)
+        y = torch.ones(2)
         y.grad = x
         del x
 
         x = w_x()
-        # Ideally, x would keep the tensor live.  But CPython doesn't
-        # provide enough hooks to do this.  So it will go dead and x
-        # will transmute into an undefined tensor.  Not great, but the
-        # best we can do.
+        # x should keep the tensor live. This didn't happen in earlier PyTorch
+        # versions.
         del y
 
-        self.assertRaises(RuntimeError, lambda: x.sigmoid())
+        self.assertEqual(2, x.sum())
+
+        del x
+        self.assertIsNone(w_x())
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
     def test_storage_dead_weak_ref(self):
@@ -10336,16 +10339,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         w_x = weakref.ref(x)
         y = torch.tensor(x)
         del x
-
-        x = w_x()
-        # Ideally, x would keep the storage live.  But CPython doesn't
-        # provide enough hooks to do this.  So it will go dead and x
-        # will transmute into storage with null StorageImpl. Not great, but the
-        # best we can do.
+        self.assertIsNotNone(w_x())
         del y
-
-        self.assertRaisesRegex(RuntimeError, "Got a null Storage", lambda: x[0])
-        self.assertRaisesRegex(RuntimeError, "Got a null Storage", lambda: x.float())
+        self.assertIsNone(w_x())
 
     def test_tensor_resurrected_weak_ref(self):
         x = torch.empty(2)
@@ -10405,6 +10401,31 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del a
 
         self.assertTrue(called)
+
+    def test_storage_thread_safety(self):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        NUM_ITERS = 10
+        NUM_THREADS = 4
+
+        # Concurrent calls to tensor.untyped_storage()
+        def access_untyped_storage(tensor, barrier):
+            barrier.wait()
+            return weakref.ref(tensor.untyped_storage())
+
+        for i in range(NUM_ITERS):
+            tensor = torch.tensor([1.0, 2.0, 3.0])
+            barrier = threading.Barrier(NUM_THREADS)
+            with ThreadPoolExecutor(max_workers=NUM_THREADS) as executor:
+                futures = [
+                    executor.submit(access_untyped_storage, tensor, barrier)
+                    for _ in range(NUM_THREADS)
+                ]
+
+                # Check that all the storages returned were the same
+                for future in futures:
+                    self.assertEqual(future.result()(), tensor.untyped_storage())
 
     # FIXME: move to test_linalg
     @torch.inference_mode()
