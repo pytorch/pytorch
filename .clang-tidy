@@ -74,6 +74,7 @@ HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
 WarningsAsErrors: '*'
 LineFilter:
   - name: '/usr/include/.*'
+  - name: 'sycl/sycl.hpp'
 CheckOptions:
   cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor: true
   cppcoreguidelines-special-member-functions.AllowImplicitlyDeletedCopyOrMove: true

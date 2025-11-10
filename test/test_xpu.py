@@ -167,7 +167,7 @@ if __name__ == "__main__":
         IS_WINDOWS, "Only for lazy initialization on Linux, not applicable on Windows."
     )
     def test_lazy_init(self):
-        """Validate that no XPU calls are made during `import torch` call"""
+        """Validate that no XPU calls are made during `import torch` call."""
 
         def check_output(script: str) -> str:
             return (
