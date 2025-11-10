@@ -23,7 +23,7 @@ from torch.fx.proxy import Node
 
 from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
-from ..exc import raise_observed_exception, unimplemented_v2
+from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
 from ..utils import cmp_name_to_op_mapping, istype
@@ -90,7 +90,7 @@ class MutationType:
         elif typ is SourceType.New:
             self.scope = current_scope_id()
         else:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported SourceType",
                 context=f"MutationType.__init__ {self} {typ}",
                 explanation=f"Dynamo does not support the type `{typ}`",
@@ -349,7 +349,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         try:
             return self.as_python_constant()
         except NotImplementedError:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Not a Python constant",
                 context=f"guard_as_python_constant {self}",
                 explanation=f"Failed to convert {self} into a Python constant.",
@@ -444,7 +444,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             fn(v)
 
     def inspect_parameter_names(self) -> list[str]:
-        unimplemented_v2(
+        unimplemented(
             gb_type="Unsupported inspect call",
             context=f"inspect_parameter_names {self}",
             explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
@@ -452,7 +452,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         )
 
     def call_obj_hasattr(self, tx: Any, name: str) -> "VariableTracker":
-        unimplemented_v2(
+        unimplemented(
             gb_type="Unsupported hasattr call",
             context=f"call_obj_hasattr {self} {name}",
             explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
@@ -468,7 +468,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         args: Sequence["VariableTracker"],
         kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
-        unimplemented_v2(
+        unimplemented(
             gb_type="Unsupported function call",
             context=f"call_function {self} {args} {kwargs}",
             explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
@@ -514,7 +514,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 or tx.output.side_effects.has_pending_mutation(self)
                 or tx.output.side_effects.has_pending_mutation(other)
             ):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Builtin `operator.*` comparison with constant `self` failed",
                     context=f"call_method {self} {name} {args} {kwargs}",
                     explanation=f"Failed to compare {self} with {other}, "
@@ -560,7 +560,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 "(2) fix any graph breaks in the function above the comprehension, (3) wrap the comprehension in a "
                 "function, or (4) use Python 3.12+."
             )
-        unimplemented_v2(
+        unimplemented(
             gb_type="Unsupported method call",
             context=f"call_method {self} {name} {args} {kwargs}",
             explanation=f"Dynamo does not know how to trace method `{name}` of class `{self.python_type_name()}`",
@@ -583,7 +583,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         return True
 
     def next_variable(self, tx: Any) -> "VariableTracker":
-        unimplemented_v2(
+        unimplemented(
             gb_type="Unsupported next() call",
             context=f"next({self})",
             explanation=f"Dynamo does not know how to trace calling `next()` on variable `{self}`.",
