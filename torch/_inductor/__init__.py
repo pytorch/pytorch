@@ -320,17 +320,14 @@ lite_mode_options = {
     # regional inductor compile.
     "fallback_by_default": True,
     "selective_decompose": True,
-
     # Disable reorder optimizations
     "reorder_for_peak_memory": False,
     "reorder_for_compute_comm_overlap": False,
     "triton.reorder_for_reducing_graph_partitions": False,
-
     # Disable pre-, joint-, post-grad passes
     "use_pre_grad_passes": False,
     "use_joint_graph_passes": False,
     "use_post_grad_passes": False,
-
     # Disable dead code elimination (dce) and buffer reuse
     "use_dce": False,
     "allow_buffer_reuse": False,
