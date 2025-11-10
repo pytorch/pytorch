@@ -6362,6 +6362,48 @@ def sample_inputs_einsum(op_info, device, dtype, requires_grad=False, **kwargs):
     yield SampleInput([c(C), c(x)], '...ik, ...j -> ij')
 
 
+def sample_inputs_fake_quantize_per_channel_affine(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, requires_grad=requires_grad)
+
+    # Test 1D, 2D, 4D and empty tensors (scalar tensors not supported)
+    axes_and_shapes = [
+        # 1D, 2D, 4D
+        (axis, (S,) * dims)
+        for dims in (1, 2, 4)
+        for axis in range(dims)
+    ] + [
+        # empty
+        (0, (1, 0, 3)),
+        (2, (1, 0, 3)),
+        # empty channel axis causes an error due to
+        # an internal zero_point.min() calculation
+        # (1, (1, 0, 3)),
+    ]
+
+    # tensor_qparams
+    scale_dtype = torch.float
+    zero_point_dtypes = [torch.int32, torch.float, torch.half]
+
+    # NOTE: (0, 127) is allowed as special case. PyTorch restricts activations to be in the range (0, 127).
+    #   https://github.com/pytorch/pytorch/blob/b34b192d6b97325c9f78e5995c48c8498ede34bd/torch/ao/quantization/observer.py#L1422
+    quant_vals = [(0, 255), (-128, 127), (0, 127)]
+
+    cases = product(axes_and_shapes, zero_point_dtypes, quant_vals)
+    for (axis, shape), zero_point_dtype, (quant_min, quant_max) in cases:
+        scale = make_arg((shape[axis],), dtype=scale_dtype)
+
+        zero_point = make_arg(
+            (shape[axis],),
+            dtype=zero_point_dtype or torch.int64,
+            # zero_point must be between quant_min and quant_max
+            low=quant_min,
+            high=quant_max,
+        )
+
+        args = (scale, zero_point, axis, quant_min, quant_max)
+        yield SampleInput(make_arg(shape, dtype=dtype), args=args)
+
+
 def sample_inputs_flip(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     sizes = ((S, M, S), (S, 0, M))
@@ -13612,6 +13654,13 @@ op_db: list[OpInfo] = [
                    supports_sparse_bsr=True,
                    supports_sparse_bsc=True,
                    assert_autodiffed=True),
+    OpInfo('fake_quantize_per_channel_affine',
+           op=torch.fake_quantize_per_channel_affine,
+           dtypes=floating_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_fake_quantize_per_channel_affine,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_out=False),
     OpInfo('flip',
            op=torch.flip,
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
