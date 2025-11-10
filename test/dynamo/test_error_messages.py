@@ -1050,7 +1050,7 @@ Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especiall
         msg = re.sub(r"line (\d+)", "line N", msg)
         msg = re.sub(
             r"""(?s)Traceback \(most recent call last\):.*
-  File "exc.py", line N, in unimplemented_v2
+  File "exc.py", line N, in unimplemented
     raise Unsupported\(msg\)""",
             "<Internal traceback>\n",
             msg,

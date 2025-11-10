@@ -450,9 +450,10 @@ exceptions_allowed_to_be_fallback = (
 )
 
 
-def unimplemented_v2_with_warning(
+def unimplemented_with_warning(
     e: Exception,
     code: types.CodeType,
+    *,
     gb_type: str,
     context: str,
     explanation: str,
@@ -475,7 +476,16 @@ def unimplemented_v2_with_warning(
         payload_fn=lambda: graph_break_msg,
     )
     graph_breaks_log.debug("%s", graph_break_msg)
-    unimplemented_v2(gb_type, context, explanation, hints, from_exc=e, log_warning=True)
+    _unimplemented = unimplemented
+    # to prevent a graph break registry entry
+    _unimplemented(
+        gb_type=gb_type,
+        context=context,
+        explanation=explanation,
+        hints=hints,
+        from_exc=e,
+        log_warning=True,
+    )
 
 
 def format_graph_break_message(
@@ -553,13 +563,12 @@ def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
 _NOTHING = object()
 
 
-# TODO replace old unimplemented later
-def unimplemented_v2(
+def unimplemented(
+    *,
     gb_type: str,
     context: str,
     explanation: str,
     hints: list[str],
-    *,
     from_exc: Any = _NOTHING,
     log_warning: bool = False,
 ) -> NoReturn:
