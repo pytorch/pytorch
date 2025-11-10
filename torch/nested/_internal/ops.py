@@ -400,7 +400,7 @@ def jagged_torch_function(func, *args, **kwargs):
     # Handle flatten() here because it's CompositeImplicit.
     if func.__name__ == "flatten":
 
-        def _flatten_sig(input, start_dim=0, end_dim=-1):
+        def _flatten_sig(input, start_dim=0, end_dim=-1) -> None:
             pass
 
         _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -466,7 +466,7 @@ def jagged_torch_function(func, *args, **kwargs):
     # Handle nested-specific input validation for CompositeImplicit rms_norm
     if func.__name__ == "rms_norm":
 
-        def _rms_norm_sig(input, normalized_shape, weight=None, eps=None):
+        def _rms_norm_sig(input, normalized_shape, weight=None, eps=None) -> None:
             pass
 
         _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -532,7 +532,7 @@ def prim_layout_default(func, *args, **kwargs):
     [torch.ops.aten.size.default],
     "self: jt_all",
 )
-def tensor_attr_unsupported_getter(func, *args, **kwargs):
+def tensor_attr_unsupported_getter(func, *args, **kwargs) -> None:
     if func is torch.ops.aten.size.default:
         raise RuntimeError(
             "NestedTensor does not support directly calling torch.ops.aten.size; "
@@ -1138,7 +1138,7 @@ def unbind_int(func, *args, **kwargs):
     lengths = inp.lengths()
     ragged_idx = inp._ragged_idx
 
-    def _torch_check(_lengths: list[int], _offsets: Optional[list[int]] = None):
+    def _torch_check(_lengths: list[int], _offsets: Optional[list[int]] = None) -> None:
         # This torch._check are needed for torch.compile
         # symbolic shapes processing.
         # offsets and lengths are symbolic variables during compilation,
@@ -2615,7 +2615,7 @@ def _nested_select_backward_default(func, *args, **kwargs):
 
 
 @register_jagged_func(torch.ops.aten.record_stream.default, "self: jt_all, s: any")
-def record_stream_default(func, *args, **kwargs):
+def record_stream_default(func, *args, **kwargs) -> None:
     inp = args[0]
     stream = args[1]
     # ensure all components live until stream computation completes

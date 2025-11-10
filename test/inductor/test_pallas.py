@@ -52,9 +52,12 @@ def make_pallas(cls):
     return test_class
 
 
-@unittest.skipUnless(HAS_PALLAS, "requires jax and pallas")
-class PallasTests(TestCase):
-    """Basic tests for Pallas backend functionality."""
+class PallasTestsMixin:
+    """Basic tests for Pallas backend functionality (parameterized by DEVICE). Mixin only, not collected."""
+
+    def _compile(self, fn):
+        key = "cuda_backend" if self.DEVICE == "cuda" else "cpu_backend"
+        return torch.compile(fn, backend="inductor", options={key: "pallas"})
 
     def test_simple_add(self):
         """Test basic element-wise addition."""
@@ -62,12 +65,10 @@ class PallasTests(TestCase):
         def fn(a, b):
             return a + b
 
-        compiled = torch.compile(
-            fn, backend="inductor", options={"cuda_backend": "pallas"}
-        )
+        compiled = self._compile(fn)
 
-        a = torch.randn(1024, device="cuda")
-        b = torch.randn(1024, device="cuda")
+        a = torch.randn(1024, device=self.DEVICE)
+        b = torch.randn(1024, device=self.DEVICE)
         result = compiled(a, b)
         expected = fn(a, b)
         self.assertEqual(result, expected)
@@ -78,12 +79,10 @@ class PallasTests(TestCase):
         def fn(a, b):
             return a * b
 
-        compiled = torch.compile(
-            fn, backend="inductor", options={"cuda_backend": "pallas"}
-        )
+        compiled = self._compile(fn)
 
-        a = torch.randn(1024, device="cuda")
-        b = torch.randn(1024, device="cuda")
+        a = torch.randn(1024, device=self.DEVICE)
+        b = torch.randn(1024, device=self.DEVICE)
         result = compiled(a, b)
         expected = fn(a, b)
         self.assertEqual(result, expected)
@@ -94,11 +93,9 @@ class PallasTests(TestCase):
         def fn(x):
             return torch.sin(x)
 
-        compiled = torch.compile(
-            fn, backend="inductor", options={"cuda_backend": "pallas"}
-        )
+        compiled = self._compile(fn)
 
-        x = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=self.DEVICE)
         result = compiled(x)
         expected = fn(x)
         self.assertEqual(result, expected)
@@ -109,12 +106,10 @@ class PallasTests(TestCase):
         def fn(x, y):
             return x.sin() + y
 
-        compiled = torch.compile(
-            fn, backend="inductor", options={"cuda_backend": "pallas"}
-        )
+        compiled = self._compile(fn)
 
-        x = torch.randn(1024, device="cuda")
-        y = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=self.DEVICE)
+        y = torch.randn(1024, device=self.DEVICE)
         result = compiled(x, y)
         expected = fn(x, y)
         self.assertEqual(result, expected)
@@ -125,11 +120,9 @@ class PallasTests(TestCase):
         def fn(x):
             return torch.log(torch.exp(x))
 
-        compiled = torch.compile(
-            fn, backend="inductor", options={"cuda_backend": "pallas"}
-        )
+        compiled = self._compile(fn)
 
-        x = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=self.DEVICE)
         result = compiled(x)
         expected = fn(x)
         self.assertEqual(result, expected)
@@ -140,11 +133,9 @@ class PallasTests(TestCase):
         def fn(x):
             return torch.sqrt(x)
 
-        compiled = torch.compile(
-            fn, backend="inductor", options={"cuda_backend": "pallas"}
-        )
+        compiled = self._compile(fn)
 
-        x = torch.randn(1024, device="cuda").abs()  # Ensure positive for sqrt
+        x = torch.randn(1024, device=self.DEVICE).abs()  # Ensure positive for sqrt
         result = compiled(x)
         expected = fn(x)
         self.assertEqual(result, expected)
@@ -155,11 +146,9 @@ class PallasTests(TestCase):
         def fn(x):
             return torch.tanh(x)
 
-        compiled = torch.compile(
-            fn, backend="inductor", options={"cuda_backend": "pallas"}
-        )
+        compiled = self._compile(fn)
 
-        x = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=self.DEVICE)
         result = compiled(x)
         expected = fn(x)
         self.assertEqual(result, expected)
@@ -170,11 +159,9 @@ class PallasTests(TestCase):
         def fn(x):
             return torch.abs(-x)
 
-        compiled = torch.compile(
-            fn, backend="inductor", options={"cuda_backend": "pallas"}
-        )
+        compiled = self._compile(fn)
 
-        x = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=self.DEVICE)
         result = compiled(x)
         expected = fn(x)
         self.assertEqual(result, expected)
@@ -185,12 +172,10 @@ class PallasTests(TestCase):
         def fn(a, b):
             return torch.maximum(a, b) + torch.minimum(a, b)
 
-        compiled = torch.compile(
-            fn, backend="inductor", options={"cuda_backend": "pallas"}
-        )
+        compiled = self._compile(fn)
 
-        a = torch.randn(1024, device="cuda")
-        b = torch.randn(1024, device="cuda")
+        a = torch.randn(1024, device=self.DEVICE)
+        b = torch.randn(1024, device=self.DEVICE)
         result = compiled(a, b)
         expected = fn(a, b)
         self.assertEqual(result, expected)
@@ -228,15 +213,17 @@ class PallasTests(TestCase):
 
         @torch.compile(
             backend="inductor",
-            options={"cuda_backend": "pallas"},
+            options={
+                ("cuda_backend" if self.DEVICE == "cuda" else "cpu_backend"): "pallas"
+            },
         )
         def pallas_fn(a, b):
             return a.sin() + b.cos()
 
         _, (code,) = run_and_get_code(
             pallas_fn,
-            torch.randn(64, device="cuda"),
-            torch.randn(64, device="cuda"),
+            torch.randn(64, device=self.DEVICE),
+            torch.randn(64, device=self.DEVICE),
         )
         # Verify Pallas-specific code generation
         self.assertIn("import jax", code)
@@ -249,12 +236,10 @@ class PallasTests(TestCase):
         def fn(x, y):
             return x + y
 
-        compiled = torch.compile(
-            fn, backend="inductor", options={"cuda_backend": "pallas"}
-        )
+        compiled = self._compile(fn)
 
-        x = torch.randn(32, 32, device="cuda")
-        y = torch.randn(32, 32, device="cuda")
+        x = torch.randn(32, 32, device=self.DEVICE)
+        y = torch.randn(32, 32, device=self.DEVICE)
         result = compiled(x, y)
         expected = fn(x, y)
         self.assertEqual(result, expected)
@@ -265,12 +250,10 @@ class PallasTests(TestCase):
         def fn(x):
             return x * 2.0
 
-        compiled = torch.compile(
-            fn, backend="inductor", options={"cuda_backend": "pallas"}
-        )
+        compiled = self._compile(fn)
 
         for shape in [(64,), (128,), (256,), (1024,)]:
-            x = torch.randn(shape, device="cuda")
+            x = torch.randn(shape, device=self.DEVICE)
             result = compiled(x)
             expected = fn(x)
             self.assertEqual(result, expected)
@@ -282,12 +265,10 @@ class PallasTests(TestCase):
         def contiguous_add(a, b):
             return a + b
 
-        compiled = torch.compile(
-            contiguous_add, backend="inductor", options={"cuda_backend": "pallas"}
-        )
+        compiled = self._compile(contiguous_add)
 
-        a = torch.randn(1024, device="cuda")
-        b = torch.randn(1024, device="cuda")
+        a = torch.randn(1024, device=self.DEVICE)
+        b = torch.randn(1024, device=self.DEVICE)
         result = compiled(a, b)
         expected = contiguous_add(a, b)
         self.assertEqual(result, expected)
@@ -296,11 +277,9 @@ class PallasTests(TestCase):
         def contiguous_mul(x):
             return x * 2.0
 
-        compiled = torch.compile(
-            contiguous_mul, backend="inductor", options={"cuda_backend": "pallas"}
-        )
+        compiled = self._compile(contiguous_mul)
 
-        x = torch.randn(128, 8, device="cuda")
+        x = torch.randn(128, 8, device=self.DEVICE)
         result = compiled(x)
         expected = contiguous_mul(x)
         self.assertEqual(result, expected)
@@ -310,12 +289,10 @@ class PallasTests(TestCase):
         def operate_on_tensor(x):
             return x.sin()
 
-        compiled = torch.compile(
-            operate_on_tensor, backend="inductor", options={"cuda_backend": "pallas"}
-        )
+        compiled = self._compile(operate_on_tensor)
 
         # Create a transposed (non-contiguous) view
-        x = torch.randn(64, 32, device="cuda")
+        x = torch.randn(64, 32, device=self.DEVICE)
         x_t = x.t()  # Non-contiguous view
         self.assertFalse(x_t.is_contiguous())
 
@@ -332,13 +309,24 @@ class PallasTests(TestCase):
         self.assertEqual(result, expected)
 
 
+@unittest.skipUnless(HAS_PALLAS, "requires jax and pallas")
+class PallasTestsCUDA(PallasTestsMixin, TestCase):
+    DEVICE = "cuda"
+
+
+@unittest.skipUnless(HAS_PALLAS, "requires jax and pallas")
+class PallasTestsCPU(PallasTestsMixin, TestCase):
+    DEVICE = "cpu"
+
+
 # Create test variants using the main test suite
 # Note: Only enable GPU tests since Pallas primarily targets GPU
-if test_torchinductor.HAS_GPU and HAS_PALLAS:
-    # Uncomment these to run full test suite with Pallas backend
-    # make_pallas(test_torchinductor.SweepInputsGPUTest)
-    # make_pallas(test_torchinductor.GPUTests)
-    pass
+if hasattr(sys.modules.get(__name__), "test_torchinductor") and HAS_PALLAS:
+    if getattr(test_torchinductor, "HAS_GPU", False):
+        # Uncomment these to run full test suite with Pallas backend
+        # make_pallas(test_torchinductor.SweepInputsGPUTest)
+        # make_pallas(test_torchinductor.GPUTests)
+        pass
 
 if __name__ == "__main__":
     if HAS_PALLAS:
