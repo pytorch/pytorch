@@ -50,7 +50,7 @@ import weakref
 from collections import defaultdict
 from contextlib import AbstractContextManager
 from enum import auto, Enum
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch.fx
 from torch import Tensor
@@ -86,7 +86,7 @@ from torch.utils.weak import TensorWeakRef
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterator, Sequence
+    from collections.abc import Callable, Generator, Iterator, Sequence
 
     from torch._guards import CompileId
     from torch._inductor.utils import InputType
@@ -949,7 +949,7 @@ class CUDAGraphNode:
         self.recorded_liveness_before_graph: LevelList[OutputList[bool]] = []
         self.recorded_liveness_after_graph: LevelList[OutputList[bool]] = []
 
-        # List of Tuples of (depth, output_index) that index into node at depth
+        # List of tuples of (depth, output_index) that index into node at depth
         # number of nodes from root and output_index of outputs. Will index into
         # path_weakrefs.
         self.expected_dead_indices_before_graph: list[PathOutputIndex] = []

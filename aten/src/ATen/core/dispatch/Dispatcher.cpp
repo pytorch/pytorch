@@ -537,7 +537,7 @@ int64_t Dispatcher::sequenceNumberForRunningRecordFunction(DispatchKey dispatchK
 
   // Note: this records a sequence number for both Autograd keys, and for
   // non-Autograd keys where the dispatchKeySet still contains an autograd key.
-  // This means that we might collect the same sequence nubmer two different
+  // This means that we might collect the same sequence number two different
   // events if they all occurred above Autograd and still had the Autograd
   // dispatch key in the dispatch key set.
   // However, this usually doesn't happen: normally the first call will

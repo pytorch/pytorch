@@ -28,19 +28,19 @@ _P = ParamSpec("_P")
 
 
 @overload
-# pyrefly: ignore  # bad-return
+# pyrefly: ignore [bad-return]
 def _maybe_convert_to_dtype(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
     pass
 
 
 @overload
-# pyrefly: ignore  # bad-return
+# pyrefly: ignore [bad-return]
 def _maybe_convert_to_dtype(a: NumberType, dtype: torch.dtype) -> NumberType:
     pass
 
 
 @overload
-# pyrefly: ignore  # bad-return
+# pyrefly: ignore [bad-return]
 def _maybe_convert_to_dtype(a: Sequence, dtype: torch.dtype) -> Sequence:
     pass
 
@@ -133,7 +133,7 @@ class elementwise_type_promotion_wrapper:
             type_promoting_args = tuple(
                 bound.arguments[x]
                 for x in self.type_promoting_arg_names  # type: ignore[union-attr]
-                if x in bound.arguments.keys()
+                if x in bound.arguments
             )
 
             flattened_type_promoting_args = pytree.arg_tree_leaves(*type_promoting_args)
@@ -145,7 +145,7 @@ class elementwise_type_promotion_wrapper:
             promoted_args = {
                 x: _maybe_convert_to_dtype(bound.arguments[x], compute_dtype)
                 for x in self.type_promoting_arg_names  # type: ignore[union-attr]
-                if x in bound.arguments.keys()
+                if x in bound.arguments
             }
             bound.arguments.update(promoted_args)
 
@@ -280,7 +280,7 @@ def out_wrapper(
             if is_tensor
             else NamedTuple(
                 f"return_types_{fn.__name__}",
-                # pyrefly: ignore  # bad-argument-count
+                # pyrefly: ignore [bad-argument-count]
                 [(o, TensorLikeType) for o in out_names],
             )
         )
@@ -299,7 +299,7 @@ def out_wrapper(
                         kwargs[k] = out_attr
 
             def maybe_check_copy_devices(out):
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 if isinstance(out, TensorLike) and isinstance(args[0], TensorLike):
                     check_copy_devices(copy_from=args[0], copy_to=out)
 
@@ -435,7 +435,7 @@ def backwards_not_supported(prim):
 
     class BackwardsNotSupported(torch.autograd.Function):
         @staticmethod
-        # pyrefly: ignore  # bad-override
+        # pyrefly: ignore [bad-override]
         def forward(ctx, args_spec, *flat_args):
             args, kwargs = tree_unflatten(flat_args, args_spec)  # type: ignore[arg-type]
             return redispatch_prim(args, kwargs)
@@ -484,14 +484,14 @@ def elementwise_unary_scalar_wrapper(
             dtype = utils.type_to_dtype(type(args[0]))
             args_ = list(args)
             args_[0] = torch.tensor(args[0], dtype=dtype)
-            # pyrefly: ignore  # invalid-param-spec
+            # pyrefly: ignore [invalid-param-spec]
             result = fn(*args_, **kwargs)
             assert isinstance(result, torch.Tensor)
             return result.item()
 
-        # pyrefly: ignore  # invalid-param-spec
+        # pyrefly: ignore [invalid-param-spec]
         return fn(*args, **kwargs)
 
     _fn.__signature__ = sig  # type: ignore[attr-defined]
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return _fn
