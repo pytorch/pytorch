@@ -234,4 +234,4 @@ using c10::guts::tuple_map;
 using c10::guts::tuple_slice;
 using c10::guts::tuple_take;
 
-HIDDEN_NAMESPACE_END(torch, headeronl, guts)
+HIDDEN_NAMESPACE_END(torch, headeronly, guts)
