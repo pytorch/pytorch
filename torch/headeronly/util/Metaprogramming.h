@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/headeronly/util/TypeList.h>
 #include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/TypeList.h>
 #include <type_traits>
 
 namespace c10::guts {
@@ -224,12 +224,11 @@ auto tuple_map(std::tuple<Args...>&& tuple, const Mapper& mapper) {
 
 } // namespace c10::guts
 
-
 HIDDEN_NAMESPACE_BEGIN(torch, headeronly, guts);
 
 using c10::guts::function_traits;
-using c10::guts::make_function_traits_t;
 using c10::guts::infer_function_traits_t;
+using c10::guts::make_function_traits_t;
 using c10::guts::tuple_elements;
 using c10::guts::tuple_map;
 using c10::guts::tuple_slice;

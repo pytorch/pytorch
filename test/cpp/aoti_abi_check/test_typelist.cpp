@@ -1,5 +1,5 @@
-#include <torch/headeronly/util/TypeList.h>
 #include <gtest/gtest.h>
+#include <torch/headeronly/util/TypeList.h>
 #include <memory>
 
 using namespace torch::headeronly::guts::typelist;

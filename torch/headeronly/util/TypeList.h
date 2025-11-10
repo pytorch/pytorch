@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/headeronly/util/TypeTraits.h>
 #include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/TypeTraits.h>
 #include <algorithm>
 #include <cstddef>
 #include <tuple>
@@ -521,27 +521,28 @@ namespace guts {
 using c10::guts::false_t;
 
 namespace typelist {
-using c10::guts::typelist::typelist;
-using c10::guts::typelist::size;
-using c10::guts::typelist::from_tuple_t;
-using c10::guts::typelist::to_tuple_t;
+using c10::guts::typelist::all;
 using c10::guts::typelist::concat_t;
-using c10::guts::typelist::filter_t;
+using c10::guts::typelist::contains;
 using c10::guts::typelist::count_if;
-using c10::guts::typelist::map_t;
+using c10::guts::typelist::drop_if_nonempty_t;
+using c10::guts::typelist::drop_t;
+using c10::guts::typelist::filter_t;
+using c10::guts::typelist::find_if;
+using c10::guts::typelist::from_tuple_t;
 using c10::guts::typelist::head_t;
 using c10::guts::typelist::head_with_default_t;
-using c10::guts::typelist::reverse_t;
+using c10::guts::typelist::map_t;
 using c10::guts::typelist::map_types_to_values;
-using c10::guts::typelist::find_if;
-using c10::guts::typelist::contains;
+using c10::guts::typelist::reverse_t;
+using c10::guts::typelist::size;
 using c10::guts::typelist::take_t;
-using c10::guts::typelist::drop_t;
-using c10::guts::typelist::drop_if_nonempty_t;
+using c10::guts::typelist::to_tuple_t;
+using c10::guts::typelist::true_for_any_type;
+using c10::guts::typelist::typelist;
 
 } // namespace typelist
 
 } // namespace guts
-
 
 HIDDEN_NAMESPACE_END(torch, headeronly);

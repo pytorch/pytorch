@@ -1,5 +1,5 @@
-#include <torch/headeronly/util/TypeTraits.h>
 #include <gtest/gtest.h>
+#include <torch/headeronly/util/TypeTraits.h>
 
 using namespace torch::headeronly::guts;
 

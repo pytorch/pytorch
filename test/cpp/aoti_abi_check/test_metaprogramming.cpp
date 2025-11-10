@@ -1,5 +1,5 @@
-#include <torch/headeronly/util/Metaprogramming.h>
 #include <gtest/gtest.h>
+#include <torch/headeronly/util/Metaprogramming.h>
 #include <cstdlib>
 
 using namespace torch::headeronly::guts;
@@ -66,13 +66,12 @@ static_assert(
     "");
 
 struct Functor final {
-  std::string operator()(int64_t a,  float b) const;
+  std::string operator()(int64_t a, float b) const;
 };
 static_assert(
     std::is_same<
         std::string(int64_t, float),
-        typename infer_function_traits_t<Functor>::
-            func_type>::value,
+        typename infer_function_traits_t<Functor>::func_type>::value,
     "");
 } // namespace test_function_traits
 
