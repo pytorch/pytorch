@@ -1,18 +1,10 @@
 import hashlib
 import subprocess
+import sys
 from pathlib import Path
 
 import click
 import spin
-
-
-DEFAULT_HASH_FILE = Path(".lintbin/.lintrunner.sha256")
-
-DEFAULT_FILES_TO_HASH = [
-    "requirements.txt",
-    "pyproject.toml",
-    ".lintrunner.toml",
-]
 
 
 def file_digest(file, algorithm: str):
@@ -50,12 +42,98 @@ def _read_hashes(hash_file: Path):
     return hashes
 
 
-def _updated_hashes():
-    new_hashes = _hash_files(DEFAULT_FILES_TO_HASH)
-    old_hashes = _read_hashes(DEFAULT_HASH_FILE)
+def _updated_hashes(hash_file, files_to_hash):
+    old_hashes = _read_hashes(hash_file)
+    new_hashes = _hash_files(files_to_hash)
     if new_hashes != old_hashes:
         return new_hashes
     return None
+
+
+def _regenerate_version():
+    cmd = [
+        sys.executable,
+        "-m",
+        "tools.generate_torch_version",
+        "--is-debug=false",
+    ]
+    spin.util.run(cmd)
+
+
+@click.command()
+def regenerate_version():
+    """Regenerate version.py."""
+    _regenerate_version()
+
+
+TYPE_STUBS = [
+    (
+        "Pytorch type stubs",
+        Path(".lintbin/.pytorch-type-stubs.sha256"),
+        [
+            "aten/src/ATen/native/native_functions.yaml",
+            "aten/src/ATen/native/tags.yaml",
+            "tools/autograd/deprecated.yaml",
+        ],
+        [
+            sys.executable,
+            "-m",
+            "tools.pyi.gen_pyi",
+            "--native-functions-path",
+            "aten/src/ATen/native/native_functions.yaml",
+            "--tags-path",
+            "aten/src/ATen/native/tags.yaml",
+            "--deprecated-functions-path",
+            "tools/autograd/deprecated.yaml",
+        ],
+    ),
+    (
+        "Datapipes type stubs",
+        None,
+        [],
+        [
+            sys.executable,
+            "torch/utils/data/datapipes/gen_pyi.py",
+        ],
+    ),
+]
+
+
+def _regenerate_type_stubs():
+    for name, hash_file, files_to_hash, cmd in TYPE_STUBS:
+        if hash_file:
+            if hashes := _updated_hashes(hash_file, files_to_hash):
+                click.echo(
+                    f"Changes detected in type stub files for {name}. Regenerating..."
+                )
+                spin.util.run(cmd)
+                hash_file.parent.mkdir(parents=True, exist_ok=True)
+                with hash_file.open("w") as f:
+                    for file, hash in hashes.items():
+                        f.write(f"{hash}  {file}\n")
+                click.echo("Type stubs and hashes updated.")
+            else:
+                click.echo(f"No changes detected in type stub files for {name}.")
+        else:
+            click.echo(f"No hash file for {name}. Regenerating...")
+            spin.util.run(cmd)
+            click.echo("Type stubs regenerated.")
+
+
+@click.command()
+def regenerate_type_stubs():
+    """Regenerate type stubs."""
+    _regenerate_type_stubs()
+
+
+LINTRUNNER_CACHE_INFO = (
+    Path(".lintbin/.lintrunner.sha256"),
+    [
+        "requirements.txt",
+        "pyproject.toml",
+        ".lintrunner.toml",
+    ],
+)
 
 
 @click.command()
@@ -72,17 +150,17 @@ def setup_lint():
 
         Compares the stored old hashes of configuration files with new ones and
         performs setup via setup-lint if the hashes have changed.
-        Hashes are stored in {DEFAULT_HASH_FILE}; the following files are
-        considered: {", ".join(DEFAULT_FILES_TO_HASH)}.
+        Hashes are stored in {LINTRUNNER_CACHE_INFO[0]}; the following files are
+        considered: {", ".join(LINTRUNNER_CACHE_INFO[1])}.
         """,
 )
 def lazy_setup_lint(*, parent_callback, **kwargs):
-    if hashes := _updated_hashes():
+    if hashes := _updated_hashes(*LINTRUNNER_CACHE_INFO):
         click.echo(
             "Changes detected in lint configuration files. Setting up linting tools..."
         )
         parent_callback(**kwargs)
-        hash_file = DEFAULT_HASH_FILE
+        hash_file = LINTRUNNER_CACHE_INFO[0]
         hash_file.parent.mkdir(parents=True, exist_ok=True)
         with hash_file.open("w") as f:
             for file, hash in hashes.items():
@@ -90,6 +168,11 @@ def lazy_setup_lint(*, parent_callback, **kwargs):
         click.echo("Linting tools set up and hashes updated.")
     else:
         click.echo("No changes detected in lint configuration files. Skipping setup.")
+    click.echo("Regenerating version...")
+    _regenerate_version()
+    click.echo("Regenerating type stubs...")
+    _regenerate_type_stubs()
+    click.echo("Done.")
 
 
 @spin.util.extend_command(
