@@ -616,11 +616,7 @@ class ComboKernel(Kernel):
         dispatch = self.dispatch_class
         assert dispatch is not None
 
-        triton_scheduler = V.graph.scheduler
-        assert isinstance(V.graph.scheduler, TritonScheduling)
-        triton_scheduler = cast(TritonScheduling, V.graph.scheduler)
-        triton_kernel_cls: TritonKernel = triton_scheduler.kernel_type
-
+        triton_kernel_cls = self._get_triton_kernel_cls_type()
         inductor_meta = {
             "grid_type": dispatch.grid_expr.__name__,
             "combo_grid_meta": self.combo_grid_meta(),
@@ -752,6 +748,16 @@ class ComboKernel(Kernel):
                     )
         return extra_args
 
+    def _get_triton_kernel_cls_type(self) -> type[TritonKernel]:
+        triton_scheduler = V.graph.scheduler
+        assert isinstance(V.graph.scheduler, TritonScheduling)
+        triton_scheduler = cast(TritonScheduling, V.graph.scheduler)
+        triton_kernel_cls = TritonKernel
+        if issubclass(triton_scheduler.kernel_type, TritonKernel):
+            triton_kernel_cls = triton_scheduler.kernel_type
+            triton_kernel_cls = cast(type[TritonKernel], triton_kernel_cls)
+        return triton_kernel_cls
+
     def codegen_kernel(self, name: Optional[str] = None) -> str:
         """Generate the triton code for a combo kernel that fuses multiple sub-kernels."""
         # TODO: is it correct to use the first sub kernel's heuristics?
@@ -770,7 +776,8 @@ class ComboKernel(Kernel):
         )
         code = IndentedBuffer()
 
-        code.splice(gen_common_triton_imports())
+        triton_kernel_cls = self._get_triton_kernel_cls_type()
+        code.splice(triton_kernel_cls.gen_common_triton_imports())
         if config.benchmark_combo_kernel:
             code.splice(self.imports_for_benchmark_kernel())
 

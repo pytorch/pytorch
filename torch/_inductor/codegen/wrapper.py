@@ -2453,8 +2453,10 @@ class PythonWrapperCodegen(CodeGen):
         # user defined triton kernel
         device = V.graph.get_current_device_or_throw()
         device_scheduler = get_scheduling_for_device(device)
-        if isinstance(device_scheduler, TritonScheduling):
-            triton_kernel_cls = device_scheduler.kernel_type
+        if isinstance(device_scheduler, TritonScheduling) and issubclass(
+            device_scheduler.kernel_type, TritonKernel
+        ):
+            triton_kernel_cls = cast(type[TritonKernel], device_scheduler.kernel_type)
 
         original_name = kernel.__name__
         signature: list[KernelArgType] = []
