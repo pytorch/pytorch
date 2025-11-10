@@ -43,7 +43,8 @@ __all__ = ["PackageImporter"]
 # https://github.com/pytorch/multipy/issues/46  # codespell:ignore multipy
 IMPLICIT_IMPORT_ALLOWLIST: Iterable[str] = [
     "numpy",
-    "numpy.core",
+    "numpy.core", #PSS2, numpy.__version__ < 2.0 (1.24.x)
+    "numpy._core", #PSS3, numpy.__version__ >= 2.0 (2.2.x)
     "numpy.core._multiarray_umath",
     # FX GraphModule might depend on builtins module and users usually
     # don't extern builtins. Here we import it here by default.
