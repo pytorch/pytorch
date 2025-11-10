@@ -15,10 +15,11 @@ import time
 import traceback
 import warnings
 from collections import defaultdict
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch.distributed.elastic.rendezvous as rdzv
 import torch.distributed.elastic.utils.store as store_util
@@ -74,6 +75,10 @@ class WorkerSpec:
              takes precedence over ``redirects`` settings.
         event_log_handler: name of the event logging handler as registered in
           `elastic/events/handlers.py <https://docs.pytorch.org/docs/stable/elastic/events.html>`_.
+        duplicate_stdout_filters: If non-empty, duplicates stdout to a file containing only lines
+                                 that match _any_ of the filter strings.
+        duplicate_stderr_filters: If non-empty, duplicates stderr to a file containing only lines
+                                 that match _any_ of the filter strings.
     """
 
     role: str
@@ -90,6 +95,8 @@ class WorkerSpec:
     local_addr: Optional[str] = None
     event_log_handler: str = "null"
     numa_options: Optional[NumaOptions] = None
+    duplicate_stdout_filters: Optional[list[str]] = None
+    duplicate_stderr_filters: Optional[list[str]] = None
 
     def __post_init__(self):
         assert self.local_world_size > 0
@@ -99,6 +106,7 @@ class WorkerSpec:
             warnings.warn(
                 "WorkerSpec.fn will be deprecated,"
                 " please use WorkerSpec.entrypoint instead",
+                stacklevel=2,
                 category=DeprecationWarning,
             )
             self.entrypoint = self.fn
@@ -720,7 +728,7 @@ class SimpleElasticAgent(ElasticAgent):
             self._record_worker_events(result)
             return result
         except RendezvousGracefulExitError as e:
-            logger.info("Rendezvous gracefully exited: %s", e)
+            logger.info("Rendezvous gracefully exited: %s", e)  # noqa: G200
         except SignalException as e:
             logger.warning("Received %s death signal, shutting down workers", e.sigval)
             self._shutdown(e.sigval)
@@ -750,8 +758,17 @@ class SimpleElasticAgent(ElasticAgent):
             failure = result.failures.get(worker.global_rank)
             state: str = self._get_worker_state(worker, result)
             raw_error = json.dumps(failure.error_file_data) if failure else None
+            exit_code = failure.exitcode if failure else None
+            worker_pid = failure.pid if failure else None
             record(
-                self._construct_event(state, EventSource.WORKER, worker, raw_error),
+                self._construct_event(
+                    state=state,
+                    source=EventSource.WORKER,
+                    worker=worker,
+                    raw_error=raw_error,
+                    exit_code=exit_code,
+                    worker_pid=worker_pid,
+                ),
                 self._worker_group.spec.event_log_handler,
             )
 
@@ -787,6 +804,8 @@ class SimpleElasticAgent(ElasticAgent):
         worker: Optional[Worker] = None,
         raw_error: Optional[str] = None,
         duration_ms: Optional[float] = None,
+        exit_code: Optional[int] = None,
+        worker_pid: Optional[int] = None,
     ) -> Event:
         wg = self._worker_group
         spec = wg.spec
@@ -798,6 +817,8 @@ class SimpleElasticAgent(ElasticAgent):
             md["local_rank"] = (worker.local_rank,)
             md["role_rank"] = (worker.role_rank,)
             md["role_world_size"] = (worker.role_world_size,)
+            md["exit_code"] = (exit_code,)
+            md["worker_pid"] = (worker_pid,)
             global_rank = worker.global_rank
             worker_id = str(worker.id)
         else:

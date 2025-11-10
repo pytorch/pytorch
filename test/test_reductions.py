@@ -1710,7 +1710,7 @@ class TestReductions(TestCase):
                                             with_extremal=False, atol=None, rtol=None,
                                             exact_dtype=True, with_keepdim=False):
         # Test 0-d to 3-d tensors.
-        for ndims in range(0, 4):
+        for ndims in range(4):
             shape = _rand_shape(ndims, min_size=5, max_size=10)
             for n in range(ndims + 1):
                 for c in combinations(list(range(ndims)), n):
@@ -1899,7 +1899,7 @@ class TestReductions(TestCase):
         # Note [all, any uint8 compatibility]: However for compatibility reason,
         # for `uint8`, they return Tensor of same dtype `uint8`.
         # Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
-        exact_dtype = True if dtype != torch.uint8 else False
+        exact_dtype = dtype != torch.uint8
 
         def _test_all_any(x):
             self.compare_with_numpy(torch.all, np.all, x)
@@ -2623,7 +2623,7 @@ class TestReductions(TestCase):
         # Generate some random test cases
         ops = ['quantile', 'nanquantile']
         inputs = [tuple(np.random.randint(2, 10, size=i)) for i in range(1, 4)]
-        quantiles = [tuple(np.random.rand(i)) for i in range(0, 5)]
+        quantiles = [tuple(np.random.rand(i)) for i in range(5)]
         keepdims = [True, False]
 
         # Add corner cases
@@ -3047,9 +3047,13 @@ class TestReductions(TestCase):
             torch.tensor([1], dtype=torch.float, device=device),
             actual)
         # tensors with inf; min, max not provided -- should throw a RuntimeError
-        with self.assertRaisesRegex(RuntimeError, r'range of \[inf, inf\] is not finite'):
+        with self.assertRaisesRegex(RuntimeError, r'range of \[[\w,+\-\.\ ]+\] is not finite'):
             torch.histc(torch.tensor([float("inf")], dtype=torch.float, device=device))
-        with self.assertRaisesRegex(RuntimeError, r'range of \[1, inf\] is not finite'):
+        with self.assertRaisesRegex(RuntimeError, r'range of \[[\w,+\-\.\ ]+\] is not finite'):
+            torch.histc(torch.tensor([float("-inf")], dtype=torch.float, device=device))
+        with self.assertRaisesRegex(RuntimeError, r'range of \[[\w,+\-\.\ ]+\] is not finite'):
+            torch.histc(torch.tensor([float("-inf"), float("inf")], dtype=torch.float, device=device))
+        with self.assertRaisesRegex(RuntimeError, r'range of \[[\w,+\-\.\ ]+\] is not finite'):
             torch.histc(torch.tensor([1., 2., float("inf")], dtype=torch.float, device=device))
         # tensors with inf; min, max provided
         self.assertEqual(
@@ -3129,6 +3133,20 @@ class TestReductions(TestCase):
         self.assertEqual(
             torch.tensor([2, 0, 0, 1], dtype=dtype, device=device),
             actual)
+
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_histc_value_corner_cases(self, device, dtype):
+        min_val = torch.finfo(dtype).min
+        actual = torch.histc(
+            torch.tensor([min_val, min_val, min_val], dtype=dtype, device=device),
+            bins=4)
+        self.assertEqual(3.0, actual.sum())
+        max_val = torch.finfo(dtype).max
+        actual = torch.histc(
+            torch.tensor([max_val, max_val, max_val], dtype=dtype, device=device),
+            bins=4)
+        self.assertEqual(3.0, actual.sum())
 
     @onlyCUDA
     @dtypes(torch.uint8, torch.int8, torch.int, torch.long)
@@ -3309,7 +3327,7 @@ class TestReductions(TestCase):
     """
     def _test_histogramdd_numpy(self, t, bins, bin_range, weights, density):
         def to_np(t):
-            if type(t) == list:
+            if type(t) is list:
                 return list(map(to_np, t))
             if not torch.is_tensor(t):
                 return t

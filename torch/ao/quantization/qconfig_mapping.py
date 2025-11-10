@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import Any, Callable, Union
+from typing import Any, TYPE_CHECKING, Union
 
 import torch
 
@@ -24,6 +24,10 @@ from .qconfig import (
     QConfig,
     QConfigAny,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 __all__ = [
@@ -183,7 +187,7 @@ def _get_default_qconfig_mapping_with_default_qconfig(
     else:
         qconfig_mapping = get_default_qconfig_mapping(backend)
     qconfig_mapping.set_global(default_qconfig)
-    for pattern in qconfig_mapping.object_type_qconfigs.keys():
+    for pattern in qconfig_mapping.object_type_qconfigs:
         if pattern not in _FIXED_QPARAMS_OP_TO_OBSERVER:
             qconfig_mapping.set_object_type(pattern, default_qconfig)
     return qconfig_mapping

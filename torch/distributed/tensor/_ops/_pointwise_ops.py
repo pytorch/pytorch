@@ -421,6 +421,7 @@ linear_pointwise_ops = {
     aten.mul_.Scalar: 0,
     aten.mul.Tensor: 2,
     aten.mul_.Tensor: 2,
+    aten.copy_.default: 1,
 }
 
 
@@ -617,7 +618,7 @@ def common_pointwise_strategy(
     return pointwise_strategy
 
 
-for op in linear_pointwise_ops.keys():
+for op in linear_pointwise_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
         linear_pointwise_strategy
     )
@@ -659,6 +660,8 @@ for_each_ops = [
     aten._foreach_mul_.ScalarList,
     aten._foreach_mul_.Tensor,
     aten._foreach_mul_.List,
+    aten._foreach_pow.List,
+    aten._foreach_pow.ScalarList,
     aten._foreach_neg.default,
     aten._foreach_neg_.default,
     aten._foreach_reciprocal_.default,
@@ -748,9 +751,9 @@ def list_pointwise_strategy(
             args_schema,
             child_strtgy,
             linearity,
-            scalar_tensor_idx=_FUSED_OP_SCALAR_IDX
-            if op_schema.op in fused_ops
-            else None,
+            scalar_tensor_idx=(
+                _FUSED_OP_SCALAR_IDX if op_schema.op in fused_ops else None
+            ),
         )
         list_strategy.append(pointwise_strategy)
     return TupleStrategy(list_strategy)

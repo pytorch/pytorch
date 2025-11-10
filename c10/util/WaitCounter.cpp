@@ -49,7 +49,7 @@ class DynamicBackendWrapper : public WaitCounterBackendIf {
 
   void stop(std::chrono::steady_clock::time_point now, intptr_t ctx) noexcept
       override {
-    return impl_.stop(
+    impl_.stop(
         impl_.self,
         std::chrono::duration_cast<std::chrono::microseconds>(
             now.time_since_epoch())
@@ -162,6 +162,6 @@ WaitCounterHandle::WaitGuard WaitCounterHandle::start() {
 }
 
 void WaitCounterHandle::stop(const SmallVector<intptr_t>& ctxs) {
-  return impl_.stop(ctxs);
+  impl_.stop(ctxs);
 }
 } // namespace c10::monitor

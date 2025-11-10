@@ -48,6 +48,7 @@ MATH_TRANSPILATIONS = collections.OrderedDict(
     ]
 )
 
+# pyrefly: ignore [no-matching-overload]
 CUDA_TYPE_NAME_MAP = collections.OrderedDict(
     [
         ("CUresult", ("hipError_t", CONV_TYPE, API_DRIVER)),
@@ -341,6 +342,7 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict(
         ("cudaPos", ("hipPos", CONV_MEM, API_RUNTIME)),
         ("cudaEvent_t", ("hipEvent_t", CONV_TYPE, API_RUNTIME)),
         ("cudaStream_t", ("hipStream_t", CONV_TYPE, API_RUNTIME)),
+        ("cudaHostFn_t", ("hipHostFn_t", CONV_TYPE, API_RUNTIME)),
         ("cudaPointerAttributes", ("hipPointerAttribute_t", CONV_TYPE, API_RUNTIME)),
         ("cudaDeviceAttr", ("hipDeviceAttribute_t", CONV_TYPE, API_RUNTIME)),
         ("cudaDeviceProp", ("hipDeviceProp_t", CONV_TYPE, API_RUNTIME)),
@@ -585,6 +587,7 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict(
     ]
 )
 
+# pyrefly: ignore [no-matching-overload]
 CUDA_INCLUDE_MAP = collections.OrderedDict(
     [
         # since pytorch uses "\b{pattern}\b" as the actual re pattern,
@@ -674,6 +677,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
     ]
 )
 
+# pyrefly: ignore [no-matching-overload]
 CUDA_IDENTIFIER_MAP = collections.OrderedDict(
     [
         ("__CUDACC__", ("__HIPCC__", CONV_DEF, API_RUNTIME)),
@@ -4326,12 +4330,15 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cudaStreamGetCaptureInfo_v2", ("hipStreamGetCaptureInfo_v2", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamCaptureStatus", ("hipStreamCaptureStatus", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamCaptureStatusActive", ("hipStreamCaptureStatusActive", CONV_TYPE, API_RUNTIME)),
+        ("cudaStreamCaptureStatusNone", ("hipStreamCaptureStatusNone", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamCaptureMode", ("hipStreamCaptureMode", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamCaptureModeGlobal", ("hipStreamCaptureModeGlobal", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamCaptureModeRelaxed", ("hipStreamCaptureModeRelaxed", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamCaptureModeThreadLocal", ("hipStreamCaptureModeThreadLocal", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamBeginCapture", ("hipStreamBeginCapture", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamEndCapture", ("hipStreamEndCapture", CONV_TYPE, API_RUNTIME)),
+        ("cudaStreamSetCaptureDependencies", ("hipStreamSetCaptureDependencies", CONV_STREAM, API_RUNTIME)),
+        ("cudaStreamUpdateCaptureDependencies", ("hipStreamUpdateCaptureDependencies", CONV_STREAM, API_RUNTIME)),
         ("cudaGraphInstantiate", ("hipGraphInstantiate", CONV_TYPE, API_RUNTIME)),
         ("cudaGraphInstantiateWithFlags", ("hipGraphInstantiateWithFlags", CONV_TYPE, API_RUNTIME)),
         (
@@ -7696,8 +7703,11 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE", ("HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE", CONV_MATH_FUNC, API_BLAS)),
         ("CUBLASLT_MATMUL_DESC_A_SCALE_MODE", ("HIPBLASLT_MATMUL_DESC_A_SCALE_MODE", CONV_MATH_FUNC, API_BLAS)),
         ("CUBLASLT_MATMUL_DESC_B_SCALE_MODE", ("HIPBLASLT_MATMUL_DESC_B_SCALE_MODE", CONV_MATH_FUNC, API_BLAS)),
+        ("CUBLASLT_MATMUL_DESC_POINTER_MODE", ("HIPBLASLT_MATMUL_DESC_POINTER_MODE", CONV_MATH_FUNC, API_BLAS)),
         ("CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0", ("HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0", CONV_MATH_FUNC, API_BLAS)),
         ("CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3", ("HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3", CONV_MATH_FUNC, API_BLAS)),
+        ("CUBLASLT_POINTER_MODE_DEVICE", ("HIPBLASLT_POINTER_MODE_DEVICE", CONV_NUMERIC_LITERAL, API_BLAS)),
+        ("CUBLASLT_POINTER_MODE_HOST", ("HIPBLASLT_POINTER_MODE_HOST", CONV_NUMERIC_LITERAL, API_BLAS)),
         ("cublasLtMatrixLayout_t", ("hipblasLtMatrixLayout_t", CONV_MATH_FUNC, API_BLAS)),
         ("cublasLtMatrixLayoutOpaque_t", ("hipblasLtMatrixLayoutOpaque_t", CONV_MATH_FUNC, API_BLAS)),
         ("cublasLtMatrixLayoutAttribute_t", ("hipblasLtMatrixLayoutAttribute_t", CONV_MATH_FUNC, API_BLAS)),
@@ -8361,6 +8371,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
     ]
 )
 
+# pyrefly: ignore [no-matching-overload]
 CUDA_SPECIAL_MAP = collections.OrderedDict(
     [
         # SPARSE
@@ -8843,6 +8854,7 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
     ]
 )
 
+# pyrefly: ignore [no-matching-overload]
 PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
     [
         ("USE_CUDA", ("USE_ROCM", API_PYTORCH)),
@@ -9307,6 +9319,7 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
     ]
 )
 
+# pyrefly: ignore [no-matching-overload]
 CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
     [
         ("PYTORCH_NO_CUDA_MEMORY_CACHING", ("PYTORCH_NO_CUDA_MEMORY_CACHING", API_CAFFE2)),
@@ -9392,6 +9405,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
 #
 # NB: if you want a transformation to ONLY apply to the c10/ directory,
 # put it as API_CAFFE2
+# pyrefly: ignore [no-matching-overload]
 C10_MAPPINGS = collections.OrderedDict(
     [
         ("CUDA_VERSION", ("TORCH_HIP_VERSION", API_PYTORCH)),

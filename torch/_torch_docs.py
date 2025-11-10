@@ -156,6 +156,7 @@ factory_like_common_args = parse_kwargs(
     input (Tensor): the size of :attr:`input` will determine size of the output tensor.
     layout (:class:`torch.layout`, optional): the desired layout of returned tensor.
         Default: if ``None``, defaults to the layout of :attr:`input`.
+    generator (:class:`torch.Generator`, optional): a pseudorandom number generator for sampling.
     dtype (:class:`torch.dtype`, optional): the desired data type of returned Tensor.
         Default: if ``None``, defaults to the dtype of :attr:`input`.
     device (:class:`torch.device`, optional): the desired device of returned tensor.
@@ -253,7 +254,7 @@ add_docstr(
     r"""
 acos(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
-Computes the inverse cosine of each element in :attr:`input`.
+Returns a new tensor with the arccosine (in radians) of each element in :attr:`input`.
 
 .. math::
     \text{out}_{i} = \cos^{-1}(\text{input}_{i})
@@ -1047,7 +1048,7 @@ add_docstr(
     r"""
 asin(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
-Returns a new tensor with the arcsine of the elements of :attr:`input`.
+Returns a new tensor with the arcsine of the elements (in radians) in the :attr:`input` tensor.
 
 .. math::
     \text{out}_{i} = \sin^{-1}(\text{input}_{i})
@@ -1119,7 +1120,7 @@ add_docstr(
     r"""
 atan(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
-Returns a new tensor with the arctangent of the elements of :attr:`input`.
+Returns a new tensor with the arctangent of the elements (in radians) in the :attr:`input` tensor.
 
 .. math::
     \text{out}_{i} = \tan^{-1}(\text{input}_{i})
@@ -3135,7 +3136,7 @@ add_docstr(
     r"""
 cos(input, *, out=None) -> Tensor
 
-Returns a new tensor with the cosine  of the elements of :attr:`input`.
+Returns a new tensor with the cosine of the elements of :attr:`input` given in radians.
 
 .. math::
     \text{out}_{i} = \cos(\text{input}_{i})
@@ -5308,7 +5309,7 @@ add_docstr(
 index_select(input, dim, index, *, out=None) -> Tensor
 
 Returns a new tensor which indexes the :attr:`input` tensor along dimension
-:attr:`dim` using the entries in :attr:`index` which is a `LongTensor`.
+:attr:`dim` using the entries in :attr:`index`.
 
 The returned tensor has the same number of dimensions as the original tensor
 (:attr:`input`).  The :attr:`dim`\ th dimension has the same size as the length
@@ -5555,26 +5556,48 @@ Example::
 add_docstr(
     torch.is_floating_point,
     r"""
-is_floating_point(input) -> (bool)
+is_floating_point(input: Tensor) -> bool
 
 Returns True if the data type of :attr:`input` is a floating point data type i.e.,
 one of ``torch.float64``, ``torch.float32``, ``torch.float16``, and ``torch.bfloat16``.
 
 Args:
     {input}
+
+Example::
+
+    >>> torch.is_floating_point(torch.tensor([1.0, 2.0, 3.0]))
+    True
+    >>> torch.is_floating_point(torch.tensor([1, 2, 3], dtype=torch.int32))
+    False
+    >>> torch.is_floating_point(torch.tensor([1.0, 2.0, 3.0], dtype=torch.float16))
+    True
+    >>> torch.is_floating_point(torch.tensor([1, 2, 3], dtype=torch.complex64))
+    False
 """.format(**common_args),
 )
 
 add_docstr(
     torch.is_complex,
     r"""
-is_complex(input) -> (bool)
+is_complex(input: Tensor) -> bool
 
 Returns True if the data type of :attr:`input` is a complex data type i.e.,
 one of ``torch.complex64``, and ``torch.complex128``.
 
 Args:
     {input}
+
+Example::
+
+    >>> torch.is_complex(torch.tensor([1, 2, 3], dtype=torch.complex64))
+    True
+    >>> torch.is_complex(torch.tensor([1, 2, 3], dtype=torch.complex128))
+    True
+    >>> torch.is_complex(torch.tensor([1, 2, 3], dtype=torch.int32))
+    False
+    >>> torch.is_complex(torch.tensor([1.0, 2.0, 3.0], dtype=torch.float16))
+    False
 """.format(**common_args),
 )
 
@@ -7110,7 +7133,7 @@ indices ``i`` and ``j`` in the sorted order, result is computed according to the
 - ``linear``: ``a + (b - a) * fraction``, where ``fraction`` is the fractional part of the computed quantile index.
 - ``lower``: ``a``.
 - ``higher``: ``b``.
-- ``nearest``: ``a`` or ``b``, whichever's index is closer to the computed quantile index (rounding down for .5 fractions).
+- ``nearest``: ``a`` or ``b``, whichever's index is closer to the computed quantile index (follows :func:`torch.round`).
 - ``midpoint``: ``(a + b) / 2``.
 
 If :attr:`q` is a 1D tensor, the first dimension of the output represents the quantiles and has size
@@ -7126,7 +7149,7 @@ Args:
     {opt_keepdim}
 
 Keyword arguments:
-    interpolation (str): interpolation method to use when the desired quantile lies between two data points.
+    interpolation (str, optional): interpolation method to use when the desired quantile lies between two data points.
                             Can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``.
                             Default is ``linear``.
     {out}
@@ -7650,8 +7673,6 @@ If :attr:`keepdim` is ``True``, the output tensors are of the same size as
 :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
 in the output tensors having 1 fewer dimension than :attr:`input`.
-
-.. note:: This function is not defined for ``torch.cuda.Tensor`` yet.
 
 Args:
     {input}
@@ -8992,9 +9013,11 @@ Example::
 
 add_docstr(
     torch.rand_like,
-    r"""
-rand_like(input, *, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
-
+    """
+rand_like(input, *, generator=None, dtype=None, layout=None, device=None, \
+requires_grad=False, memory_format=torch.preserve_format) -> Tensor
+"""
+    + r"""
 Returns a tensor with the same size as :attr:`input` that is filled with
 random numbers from a uniform distribution on the interval :math:`[0, 1)`.
 ``torch.rand_like(input)`` is equivalent to
@@ -9004,6 +9027,7 @@ Args:
     {input}
 
 Keyword args:
+    {generator}
     {dtype}
     {layout}
     {device}
@@ -9064,9 +9088,10 @@ Example::
 add_docstr(
     torch.randint_like,
     """
-randint_like(input, low=0, high, \\*, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
-memory_format=torch.preserve_format) -> Tensor
-
+randint_like(input, low=0, high, \\*, generator=None, dtype=None, layout=torch.strided, \
+device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
+"""
+    + r"""
 Returns a tensor with the same shape as Tensor :attr:`input` filled with
 random integers generated uniformly between :attr:`low` (inclusive) and
 :attr:`high` (exclusive).
@@ -9081,6 +9106,7 @@ Args:
     high (int): One above the highest integer to be drawn from the distribution.
 
 Keyword args:
+    {generator}
     {dtype}
     {layout}
     {device}
@@ -9148,9 +9174,11 @@ Example::
 
 add_docstr(
     torch.randn_like,
-    r"""
-randn_like(input, *, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
-
+    """
+randn_like(input, *, generator=None, dtype=None, layout=None, device=None, \
+requires_grad=False, memory_format=torch.preserve_format) -> Tensor
+"""
+    + r"""
 Returns a tensor with the same size as :attr:`input` that is filled with
 random numbers from a normal distribution with mean 0 and variance 1. Please refer to :func:`torch.randn` for the
 sampling process of complex dtypes. ``torch.randn_like(input)`` is equivalent to
@@ -9160,6 +9188,7 @@ Args:
     {input}
 
 Keyword args:
+    {generator}
     {dtype}
     {layout}
     {device}
@@ -9920,7 +9949,8 @@ add_docstr(
     r"""
 sin(input, *, out=None) -> Tensor
 
-Returns a new tensor with the sine of the elements of :attr:`input`.
+Returns a new tensor with the sine of the elements in the :attr:`input` tensor,
+where each value in this input tensor is in radians.
 
 .. math::
     \text{out}_{i} = \sin(\text{input}_{i})
@@ -10052,7 +10082,7 @@ Example::
 add_docstr(
     torch.argsort,
     r"""
-argsort(input, dim=-1, descending=False, stable=False) -> Tensor
+argsort(input, dim=-1, descending=False, *, stable=False) -> Tensor
 
 Returns the indices that sort a tensor along a given dimension in ascending
 order by value.
@@ -10068,6 +10098,8 @@ Args:
     {input}
     dim (int, optional): the dimension to sort along
     descending (bool, optional): controls the sorting order (ascending or descending)
+
+Keyword args:
     stable (bool, optional): controls the relative order of equivalent elements
 
 Example::
@@ -11335,7 +11367,8 @@ add_docstr(
     r"""
 tan(input, *, out=None) -> Tensor
 
-Returns a new tensor with the tangent of the elements of :attr:`input`.
+Returns a new tensor with the tangent of the elements in the :attr:`input` tensor,
+where each value in this input tensor is in radians.
 
 .. math::
     \text{out}_{i} = \tan(\text{input}_{i})
@@ -12395,6 +12428,24 @@ Keyword args:
     {device}
     {requires_grad}
     {memory_format}
+
+Example::
+
+    >>> x = torch.ones(2, 3)
+    >>> torch.full_like(x, 3.141592)
+    tensor([[ 3.1416,  3.1416,  3.1416],
+            [ 3.1416,  3.1416,  3.1416]])
+    >>> torch.full_like(x, 7)
+    tensor([[7., 7., 7.],
+            [7., 7., 7.]])
+    >>> torch.full_like(x, 0.5, dtype=torch.int32)
+    tensor([[0, 0, 0],
+            [0, 0, 0]], dtype=torch.int32)
+    >>> y = torch.randn(3, 4, dtype=torch.float64)
+    >>> torch.full_like(y, -1.0)
+    tensor([[-1., -1., -1., -1.],
+            [-1., -1., -1., -1.],
+            [-1., -1., -1., -1.]], dtype=torch.float64)
 """.format(**factory_like_common_args),
 )
 
