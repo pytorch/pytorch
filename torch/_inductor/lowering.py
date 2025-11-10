@@ -482,9 +482,7 @@ def _register_lowering(
             (fn in fallbacks or in_namespace(fn, "_c10d_functional")) for fn in aten_fn
         ):
             # explicitly assert for "out=" ops for better error messages
-            assert not any(x == "out" for x in kwargs.keys()), (
-                "out= ops aren't yet supported"
-            )
+            assert not any(x == "out" for x in kwargs), "out= ops aren't yet supported"
 
         args, kwargs = transform_args(
             args, kwargs, broadcast, type_promotion_kind, convert_input_to_bool
@@ -2381,6 +2379,10 @@ fallback_randn_default = fallback_handler(aten.randn.default)
 fallback_randn_generator = fallback_handler(aten.randn.generator)
 make_fallback(aten.randint)
 
+# TODO: mlazos reevaluate if we want to codegen something different
+make_fallback(torch.ops.streams.record_event.default)
+make_fallback(torch.ops.streams.wait_event.default)
+
 
 @register_lowering(aten.rand)
 def rand(*args, **kwargs):
@@ -2705,9 +2707,7 @@ def constrain_to_fake_tensor(arg, fake_arg):
         ]
         return ir.ExternKernel.require_exact_strides(arg, meta_stride_expr)
     if isinstance(arg, dict):
-        return {
-            key: constrain_to_fake_tensor(arg[key], fake_arg[key]) for key in arg.keys()
-        }
+        return {key: constrain_to_fake_tensor(arg[key], fake_arg[key]) for key in arg}
     elif isinstance(arg, (tuple, list)):
         return type(arg)(
             constrain_to_fake_tensor(a, f_a) for (a, f_a) in zip(arg, fake_arg)
@@ -2732,7 +2732,7 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
             )
             return ir.ExternKernel.require_stride_order(arg, stride_order)
         if isinstance(arg, dict):
-            return {key: apply_constraint(arg[key], fx_arg[key]) for key in arg.keys()}
+            return {key: apply_constraint(arg[key], fx_arg[key]) for key in arg}
         return arg
 
     args = tuple(
@@ -7307,6 +7307,35 @@ def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, *operands):
     return list(map(TensorBox.create, result))  # type: ignore[call-overload]
 
 
+def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
+    """Process nodes from a FX graph by executing them through V.graph.
+
+    This is a common pattern for executing a subgraph's nodes:
+    - Placeholder nodes are mapped to the provided args
+    - Output nodes return their result
+    - Other nodes are executed via V.graph.run_node
+
+    """
+    output = None
+
+    for i, node in enumerate(graph_module.graph.nodes):
+        if node.op == "placeholder":
+            assert node not in V.graph.env
+            V.graph.env[node] = args[i]
+            continue
+        elif node.op == "output":
+            output_args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
+            output = torch.fx.Interpreter.output(V.graph, node, output_args, kwargs)
+        else:
+            assert node not in V.graph.env
+            V.graph.env[node] = V.graph.run_node(node)
+
+    if output is None:
+        raise RuntimeError("No output node found in graph")
+
+    return output
+
+
 # Import the control_deps_op HOP for lowering
 from torch._inductor.fx_passes.control_dependencies import control_deps
 
@@ -7334,21 +7363,11 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     arg_offset = 2  # first two args (additional_deps, subgraph)
     assert len(args) + arg_offset == len(original_args)
 
-    output = None
-
     operation_len = len(V.graph.operations)
     assert len(subgraph_fn.graph_module.graph.find_nodes(op="placeholder")) == len(args)
-    for i, node in enumerate(subgraph_fn.graph_module.graph.nodes):
-        if node.op == "placeholder":
-            assert node not in V.graph.env
-            V.graph.env[node] = args[i]
-            continue
-        elif node.op == "output":
-            args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
-            output = torch.fx.Interpreter.output(V.graph, node, args, kwargs)
-        else:
-            assert node not in V.graph.env
-            V.graph.env[node] = V.graph.run_node(node)
+
+    # Process subgraph nodes using the shared helper
+    output = process_subgraph_nodes(subgraph_fn.graph_module, list(args))
 
     assert output is not None and additional_deps
 
