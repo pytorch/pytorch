@@ -514,6 +514,10 @@ static int THPFake_clear(THPVariable* self) {
   return 0;
 }
 
+PyObject* THPVariable_Wrap(const at::TensorBase& var, PyTypeObject* type) {
+  return THPVariable_WrapWithType(var, type);
+}
+
 static PyObject* THPVariable_pynew(
     PyTypeObject* type,
     PyObject* args,
