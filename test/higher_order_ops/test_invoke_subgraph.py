@@ -2539,7 +2539,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
 
-
         if not TEST_WITH_CROSSREF:
             self.assertExpectedInline(
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
@@ -2605,7 +2604,6 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
-
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
