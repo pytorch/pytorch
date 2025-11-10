@@ -74,6 +74,23 @@ class TestCompileWorker(TestCase):
             pool.shutdown()
 
     @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_quiesce_repeatedly(self):
+        pool = SubprocPool(2)
+        try:
+            a = pool.submit(operator.add, 100, 1)
+            pool.quiesce()
+            pool.wakeup()
+            b = pool.submit(operator.sub, 100, 1)
+            pool.quiesce()
+            pool.quiesce()
+            pool.wakeup()
+            b = pool.submit(operator.sub, 100, 1)
+            self.assertEqual(a.result(), 101)
+            self.assertEqual(b.result(), 99)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_logging(self):
         os.environ["MAST_HPC_JOB_NAME"] = "test_job"
         os.environ["ROLE_RANK"] = "0"
