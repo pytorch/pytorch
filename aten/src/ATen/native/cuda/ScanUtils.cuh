@@ -274,7 +274,7 @@ __global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, const scalar_t *src
 {
   for (uint32_t orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
     for (uint32_t irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
-      const scalar_t *src = src_ + (index_t) orow * row_size * num_irows + irow;
+      const scalar_t *src = src_ + static_cast<index_t>(orow) * row_size * num_irows + irow;
       scalar_t *tgt = tgt_ + (index_t) orow * row_size * num_irows + irow;
       scalar_t acc = init;
 
@@ -409,7 +409,7 @@ __host__ void scan_outer_dim(const TensorBase& self, const TensorBase& result,
   check_fits_in_unsigned(num_irows, "num_irows");
   check_fits_in_unsigned(num_orows, "num_orows");
   check_fits_in_unsigned(row_size, "row_size");
-  if ((size_t) num_irows * num_orows * row_size <= UINT_MAX) {
+  if (static_cast<size_t>(num_irows) * num_orows * row_size <= UINT_MAX) {
   tensor_kernel_scan_outer_dim<scalar_t, uint32_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
     num_orows, num_irows, row_size, init, binary_op);
