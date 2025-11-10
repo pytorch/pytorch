@@ -674,6 +674,87 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
         raise AssertionError("scan is not lowered to while_loop")
 
 
+def register_addmm_activation_replacement():
+    def addmm_activation_replacement(inp, mat1, mat2, beta=1, alpha=1):
+        return aten._addmm_activation(inp, mat1, mat2, beta=beta, alpha=alpha)
+
+    def gen_addmm_activation_patterns():
+        for is_beta_eq_one, is_alpha_eq_one in itertools.product((True, False), repeat=2):
+            if is_alpha_eq_one:
+                def apply_mm(mat1, mat2, alpha=1):
+                    return mat1 @ mat2
+            else:
+                def apply_mm(mat1, mat2, alpha=1):
+                    return alpha * (mat1 @ mat2)
+
+            if is_beta_eq_one:
+                def apply_bias(inp, beta=1):
+                    return inp
+            else:
+                def apply_bias(inp, beta=1):
+                    return inp * x
+
+            for activation in (aten.relu, aten.gelu):
+                def bias_add_mm_activation_pattern(inp, mat1, mat2, beta=1, alpha=1):
+                    return activation(apply_bias(inp, beta) + apply_mm(mat1, mat2, alpha))
+
+                def mm_add_bias_activation_pattern(inp, mat1, mat2, beta=1, alpha=1):
+                    return activation(apply_mm(mat1, mat2, alpha) + apply_bias(inp, beta))
+
+                yield bias_add_mm_activation_pattern
+                yield mm_add_bias_activation_pattern
+
+    def is_valid_addmm_activation_fusion(match: Match):
+        if config.max_autotune_gemm:
+            return False
+
+        inp = match.kwargs["input"].meta["val"]
+        mat1 = match.kwargs["mat1"].meta["val"]
+        mat2 = match.kwargs["mat2"].meta["val"]
+        beta = match.kwargs["beta"].meta["val"]
+
+        if beta != 1:
+            return False
+
+        if not inp.is_cuda:
+            return False
+
+        if not (mat1.dim() == 2 and mat2.dim() == 2):
+            return False
+
+        if inp.size(0) != mat2.size(1):
+            return False
+
+        if inp.dtype != mat1.dtype or inp.dtype != mat2.dtype:
+            return False
+
+        return not has_uses_tagged_as(
+            match.output_node(),
+            (torch.Tag.pointwise, torch.Tag.reduction),
+        )
+
+    args = (
+        torch.empty(5),  # bias
+        torch.empty(3, 4),  # mat1
+        torch.empty(4, 5),  # mat2
+    )
+
+    for addmm_activation_pattern in gen_addmm_activation_patterns():
+        for beta, alpha in itertools.product((1, 0.5), repeat=2):
+            register_replacement(
+                # pyrefly: ignore [bad-argument-type]
+                addmm_activation_pattern,
+                # pyrefly: ignore [bad-argument-type]
+                addmm_activation_replacement,
+                [*args, beta, alpha],
+                # pyrefly: ignore [bad-argument-type]
+                trace_fn=fwd_only,
+                # pyrefly: ignore [bad-argument-type]
+                pass_dicts=pass_patterns[2],
+                extra_check=is_valid_addmm_activation_fusion,
+            )
+
+
 @init_once_fakemode
 def lazy_init():
     if torch._C._has_mkldnn:
@@ -698,6 +779,8 @@ def lazy_init():
         pass_dicts=pass_patterns[1],
         extra_check=prepare_softmax_extra_check,
     )
+
+    register_addmm_activation_replacement()
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
@@ -1528,7 +1611,7 @@ def should_prefer_unfused_addmm(match):
         alpha=KeywordArg("alpha"),
     ),
     # pyrefly: ignore [bad-argument-type]
-    pass_dict=pass_patterns[2],
+    pass_dict=pass_patterns[1],
     extra_check=should_prefer_unfused_addmm,
 )
 def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
@@ -1575,7 +1658,7 @@ def is_valid_addmm_fusion(match):
         KeywordArg("inp"),
     ),
     # pyrefly: ignore [bad-argument-type]
-    pass_dict=pass_patterns[2],
+    pass_dict=pass_patterns[1],
     extra_check=is_valid_addmm_fusion,
 )
 @register_graph_pattern(
@@ -1585,7 +1668,7 @@ def is_valid_addmm_fusion(match):
         CallFunction(aten.mm, Arg(), Arg()),
     ),
     # pyrefly: ignore [bad-argument-type]
-    pass_dict=pass_patterns[2],
+    pass_dict=pass_patterns[1],
     extra_check=is_valid_addmm_fusion,
 )
 def addmm(match, mat1, mat2, *, inp):
