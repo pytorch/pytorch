@@ -2,6 +2,8 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/JitLoops.cuh>
+#include <ATen/native/cuda/jit_utils.h>
 #include <ATen/native/cuda/ScanUtils.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
@@ -114,8 +116,132 @@ __host__ __device__ c10::complex<scalar_t> _log_add_exp_helper(const c10::comple
   }
 }
 
+// logaddexp jiterator string
+const auto logaddexp_string = jiterator_stringify(
+    template <typename T>
+    T logaddexp(T a, T b) {
+        if (isinf(a) && a == b) {
+            return a;
+        } else {
+            const T m = max(a, b);
+            return m + log(T(1) + exp(-abs(a - b)));
+        }
+    }
+);
+
+// Complex logaddexp jiterator string
+const auto logaddexp_complex_string = jiterator_stringify(
+    template <typename T>
+    struct get_scalar_type;
+
+    template <typename U>
+    struct get_scalar_type<std::complex<U>> {
+        using type = U;
+    };
+
+    // separated _logaddexp_minmax into 2 different functions for jiterator_string
+    template <typename T>
+    T logaddexp_min(const T& x, const T& y) {
+        using scalar_t = typename get_scalar_type<T>::type;
+        scalar_t xr = x.real();
+        scalar_t yr = y.real();
+        if (isnan(yr) || isnan(y.imag())) {
+            return y;
+        } else if (isnan(xr) || isnan(x.imag())) {
+            return x;
+        } else {
+            return (xr < yr) ? x : y;
+        }
+    }
+
+    template <typename T>
+    T logaddexp_max(const T& x, const T& y) {
+        using scalar_t = typename get_scalar_type<T>::type;
+        scalar_t xr = x.real();
+        scalar_t yr = y.real();
+        if (isnan(yr) || isnan(y.imag())) {
+            return y;
+        } else if (isnan(xr) || isnan(x.imag())) {
+            return x;
+        } else {
+            return (xr >= yr) ? x : y;
+        }
+    }
+
+    template <typename T>
+    T fast_build_exp(const T& x) {
+        using scalar_t = typename get_scalar_type<T>::type;
+        const auto xreal = x.real();
+        const auto ximag = x.imag();
+        const auto exp_x_abs = exp(xreal);
+        auto exp_x_real = exp_x_abs * cos(ximag);
+        auto exp_x_imag = exp_x_abs * sin(ximag);
+        return T(exp_x_real, exp_x_imag);
+    }
+
+    template <typename T>
+    T fast_build_exp_inf(const T& x) {
+        using scalar_t = typename get_scalar_type<T>::type;
+        const auto ximag = x.imag();
+        const scalar_t exp_x_abs = INFINITY;
+        if (!isfinite(ximag)) {
+            return T(exp_x_abs, NAN);
+        }
+        const auto sin_val = sin(ximag);
+        const auto cos_val = cos(ximag);
+        auto exp_x_real = (cos_val == scalar_t(0)) ? scalar_t(0) : exp_x_abs * cos_val;
+        auto exp_x_imag = (sin_val == scalar_t(0)) ? scalar_t(0) : exp_x_abs * sin_val;
+        return T(exp_x_real, exp_x_imag);
+    }
+
+    template <typename T>
+    T logaddexp_complex(T x, T y) {
+        using scalar_t = typename get_scalar_type<T>::type;
+
+        T min_val = logaddexp_min(x, y);
+        T max_val = logaddexp_max(x, y);
+        scalar_t min_real = min_val.real();
+        scalar_t max_real = max_val.real();
+
+        if (isnan(min_real) || isnan(min_val.imag())) {
+            return T(NAN, NAN);
+        }
+        else if ((!isfinite(min_real)) && (min_real == max_real)) {
+            if (min_real < scalar_t(0)) {
+                return min_val;
+            } else {
+                const auto exp_min = fast_build_exp_inf<T>(min_val);
+                const auto exp_max = fast_build_exp_inf<T>(max_val);
+                return log(exp_min + exp_max);
+            }
+        } else {
+            const auto minmax = min_val - max_val;
+            T exp_minmax;
+            if (!isfinite(minmax.real())) {
+                exp_minmax = (minmax.real() < scalar_t(0)) ? T(0, 0) : fast_build_exp_inf<T>(minmax);
+            } else {
+                exp_minmax = fast_build_exp<T>(minmax);
+            }
+            return log(T(1, 0) + exp_minmax) + max_val;
+        }
+    }
+);
+
+#if AT_USE_JITERATOR()
+constexpr char logaddexp_name[] = "logaddexp";
+constexpr char logaddexp_complex_name[] = "logaddexp_complex";
+#endif
 void logaddexp_kernel_cuda(TensorIteratorBase& iter) {
   if (at::isComplexType(iter.dtype())) {
+#if AT_USE_JITERATOR()
+    AT_DISPATCH_COMPLEX_TYPES_AND(at::ScalarType::ComplexHalf, iter.dtype(), "logaddexp_cuda", [&]() {
+      jitted_gpu_kernel<
+          /*name=*/logaddexp_complex_name,
+          /*return_dtype=*/scalar_t,
+          /*common_dtype=*/scalar_t,
+          /*arity=*/2>(iter, logaddexp_complex_string);
+    });
+#else
     AT_DISPATCH_COMPLEX_TYPES_AND(at::ScalarType::ComplexHalf, iter.dtype(), "logaddexp_cuda", [&]() {
       using opmath_t = at::opmath_type<scalar_t>;
       gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a_, scalar_t b_) -> scalar_t {
@@ -124,7 +250,18 @@ void logaddexp_kernel_cuda(TensorIteratorBase& iter) {
         return static_cast<scalar_t>(_log_add_exp_helper(a, b));
       });
     });
+#endif
   } else {
+#if AT_USE_JITERATOR()
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::BFloat16, ScalarType::Half,
+      iter.dtype(), "logaddexp_cuda",
+      [&]() {
+        opmath_jitted_gpu_kernel_with_scalars</*name=*/logaddexp_name,
+                                        /*return_dtype=*/ scalar_t,
+                                        /*f_inputs_dtype=*/ scalar_t>(iter, logaddexp_string);
+      });
+#else
     AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::BFloat16, ScalarType::Half,
       iter.dtype(), "logaddexp_cuda",
@@ -141,6 +278,7 @@ void logaddexp_kernel_cuda(TensorIteratorBase& iter) {
           }
         });
       });
+#endif
   }
 }
 
