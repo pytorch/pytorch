@@ -17,7 +17,6 @@ import gc
 import hashlib
 import inspect
 import io
-import itertools
 import json
 import logging
 import math
@@ -38,7 +37,6 @@ import time
 import types
 import unittest
 import warnings
-from collections import namedtuple
 from collections.abc import Mapping, Sequence
 from contextlib import closing, contextmanager
 from copy import deepcopy
@@ -72,8 +70,6 @@ from torch import Tensor
 from torch._C import ScriptDict, ScriptList  # type: ignore[attr-defined]
 from torch._utils_internal import get_writable_path
 from torch._logging.scribe import open_source_signpost
-from torch.distributed.tensor import DTensor, Replicate, Shard, distribute_tensor as native_distribute_tensor
-from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.nn import (
     ModuleDict,
     ModuleList,
@@ -5881,122 +5877,3 @@ def patch_test_members(updates: dict[str, Any]):
 
         return wrapper
     return decorator
-
-
-def _convert_shard_order_dict_to_ShardOrder(shard_order):
-    """Convert shard_order dict to ShardOrder"""
-    # For some reason, the macos build will error out if we import ShardOrderEntry.
-    ShardOrderEntry = namedtuple('ShardOrderEntry', ['tensor_dim', 'mesh_dims'])
-    return tuple(
-        ShardOrderEntry(tensor_dim=tensor_dim, mesh_dims=tuple(mesh_dims))
-        for tensor_dim, mesh_dims in shard_order.items()
-    )
-
-# TODO(zpcore): remove once the native redistribute supports shard_order arg
-def redistribute(
-    dtensor_input,
-    device_mesh,
-    placements,
-    shard_order,
-    use_graph_based_transform=True,
-):
-    """
-    wrapper function to support shard_order for redistribution
-    This is a simpler version of Redistribute, only considers the forward.
-    """
-    if placements is None:
-        placements = shard_order_to_placement(shard_order, device_mesh)
-    placements = tuple(placements)
-    old_spec = dtensor_input._spec
-    new_spec = copy.deepcopy(old_spec)
-    new_spec.placements = placements
-    if shard_order is not None:
-        new_spec.shard_order = shard_order
-    else:
-        new_spec.shard_order = ()
-    if old_spec == new_spec:
-        return dtensor_input
-    dtensor_input = DTensor.from_local(
-        redistribute_local_tensor(
-            dtensor_input.to_local(),
-            old_spec,
-            new_spec,
-            use_graph_based_transform=use_graph_based_transform,
-        ),
-        device_mesh,
-    )
-    dtensor_input._spec = copy.deepcopy(new_spec)
-    return dtensor_input  # returns DTensor
-
-# TODO(zpcore): remove once the native distribute_tensor supports
-# shard_order arg
-def distribute_tensor(
-    input_tensor,
-    device_mesh,
-    placements,
-    shard_order,
-    use_graph_based_transform=True,
-):
-    """wrapper function to support shard_order for tensor distribution"""
-    if placements is None:
-        placements = shard_order_to_placement(shard_order, device_mesh)
-    placements = tuple(placements)
-    tensor_dt = native_distribute_tensor(input_tensor, device_mesh, placements)
-    # fix the shard order
-    return redistribute(
-        tensor_dt, device_mesh, placements, shard_order, use_graph_based_transform
-    )
-
-# TODO(zpcore): remove once the native redistribute supports shard_order arg
-def make_full_tensor(dtensor_input):
-    """wrapper function to support DTensor.full_tensor"""
-    return redistribute(
-        dtensor_input, dtensor_input.device_mesh, placements=None, shard_order=()
-    ).to_local()
-
-def shard_order_to_placement(shard_order, mesh):
-    """convert shard_order to placement with only Replicate() and Shard()"""
-    placements: list[Any] = [Replicate() for _ in range(mesh.ndim)]
-    if shard_order is not None:
-        for entry in shard_order:
-            tensor_dim = entry.tensor_dim
-            mesh_dims = entry.mesh_dims
-            for mesh_dim in mesh_dims:
-                placements[mesh_dim] = Shard(tensor_dim)
-    return tuple(placements)
-
-def generate_shard_orders(mesh, tensor_rank):
-    # Generate all possible sharding placement of tensor with rank
-    # `tensor_rank` over mesh.
-    def _split_list(lst: list, N: int):
-        def compositions(n: int, k: int):
-            # yields lists of length k, positive ints summing to n
-            for cuts in itertools.combinations(range(1, n), k - 1):
-                # add 0 and n as sentinels, then take consecutive differences
-                yield [b - a for a, b in itertools.pairwise((0, *cuts, n))]
-
-        length = len(lst)
-        for comp in compositions(length, N):
-            result = []
-            start = 0
-            for size in comp:
-                result.append(lst[start : start + size])
-                start += size
-            yield result
-
-    all_mesh = list(range(mesh.ndim))
-    all_device_order = list(itertools.permutations(all_mesh))
-    for device_order in all_device_order:
-        # split on device orders, and assign each device order segment to a tensor dim
-        for num_split in range(1, mesh.ndim + 1):
-            for splitted_list in _split_list(list(range(mesh.ndim)), num_split):
-                for tensor_dims in itertools.combinations(
-                    range(tensor_rank), len(splitted_list)
-                ):
-                    shard_order = {}
-                    assert len(tensor_dims) == len(splitted_list)
-                    for tensor_dim, mesh_dims in zip(tensor_dims, splitted_list):
-                        shard_order[tensor_dim] = device_order[
-                            mesh_dims[0] : mesh_dims[-1] + 1
-                        ]
-                    yield _convert_shard_order_dict_to_ShardOrder(shard_order)
