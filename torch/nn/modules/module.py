@@ -2438,6 +2438,7 @@ class Module:
                     not is_param_lazy
                     and len(param.shape) == 0
                     and len(input_param.shape) == 1
+                    and input_param.shape[0] == 1
                 ):
                     input_param = input_param[0]
 
