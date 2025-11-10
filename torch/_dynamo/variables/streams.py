@@ -9,7 +9,7 @@ from torch.fx import has_side_effect, Proxy
 
 from .. import graph_break_hints
 from ..bytecode_transformation import create_call_function
-from ..exc import TYPE_CHECKING, unimplemented_v2
+from ..exc import TYPE_CHECKING, unimplemented
 from ..graph_bytecode_inputs import get_external_object_by_index
 from .base import VariableTracker
 from .constant import ConstantVariable
@@ -389,7 +389,7 @@ class EventVariable(VariableTracker):
             method_name = (
                 f"{type(self.value).__module__}.{type(self.value).__qualname__}.{name}"
             )
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported event method",
                 context=str(name),
                 explanation=f"Dynamo doesn't support tracing the {method_name} method. "

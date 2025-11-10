@@ -5,7 +5,6 @@ import os.path
 import tempfile
 import traceback
 from types import TracebackType
-from typing import Optional
 
 
 # This file contains utilities for ensuring dynamically compile()'d
@@ -234,7 +233,7 @@ class CapturedTraceback:
         import torch._C._profiler
 
         # Directly populate tracebacks that already have cached summaries
-        rs: list[Optional[list[str]]] = []
+        rs: list[list[str] | None] = []
         delayed_idxs = []
         for i, tb in enumerate(tbs):
             if tb.tb is None:
