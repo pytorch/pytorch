@@ -617,7 +617,7 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
         return actual_kernel, matching_entries[0][1]
 
     if is_autotuner:
-        for sig_key, cache_entry in matching_entries:
+        for _sig_key, cache_entry in matching_entries:
             entry_metadata = cache_entry.metadata
             # pyrefly: ignore [missing-attribute]
             for config in kernel.configs:

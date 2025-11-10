@@ -1,5 +1,4 @@
 import sys
-from typing import Optional
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE, precedence
@@ -23,7 +22,7 @@ class ExprPrinter(StrPrinter):
     def _print_Not(self, expr: sympy.Expr) -> str:
         return f"not ({self._print(expr.args[0])})"
 
-    def _print_Add(self, expr: sympy.Expr, order: Optional[str] = None) -> str:
+    def _print_Add(self, expr: sympy.Expr, order: str | None = None) -> str:
         return self.stringify(expr.args, " + ", precedence(expr))
 
     def _print_Relational(self, expr: sympy.Expr) -> str:
@@ -306,6 +305,24 @@ class PythonPrinter(ExprPrinter):
             raise TypeError("ndigits must be an instance of sympy.Integer")
         return f"round({self._print(number)}, {ndigits})"
 
+    def _print_Piecewise(self, expr: sympy.Expr) -> str:
+        # Convert Piecewise(expr_cond_pairs) to nested ternary expressions
+        # Piecewise((e1, c1), (e2, c2), ..., (eN, cN))
+        # becomes: e1 if c1 else (e2 if c2 else (... else eN))
+        result: str | None = None
+        for expr_i, cond_i in reversed(expr.args):
+            expr_str = self._print(expr_i)
+            if cond_i == True:  # noqa: E712
+                # This is the default case
+                result = expr_str
+            else:
+                cond_str = self._print(cond_i)
+                if result is None:
+                    result = expr_str
+                else:
+                    result = f"({expr_str} if {cond_str} else {result})"
+        return result if result else "0"
+
 
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr: sympy.Expr) -> str:
@@ -326,6 +343,24 @@ class CppPrinter(ExprPrinter):
             self.parenthesize(arg, PRECEDENCE["Atom"] - 0.5) for arg in expr.args
         )
         return f"{c} ? {p} : {q}"
+
+    def _print_Piecewise(self, expr: sympy.Expr) -> str:
+        # Convert Piecewise(expr_cond_pairs) to nested ternary operators
+        # Piecewise((e1, c1), (e2, c2), ..., (eN, cN))
+        # becomes: c1 ? e1 : (c2 ? e2 : (... : eN))
+        result: str | None = None
+        for expr_i, cond_i in reversed(expr.args):
+            expr_str = self.parenthesize(expr_i, PRECEDENCE["Atom"] - 0.5)
+            if cond_i == True:  # noqa: E712
+                # This is the default case
+                result = expr_str
+            else:
+                cond_str = self.parenthesize(cond_i, PRECEDENCE["Atom"] - 0.5)
+                if result is None:
+                    result = expr_str
+                else:
+                    result = f"{cond_str} ? {expr_str} : {result}"
+        return f"({result})" if result else "0"
 
     def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
         x, div, mod = expr.args
