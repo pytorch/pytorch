@@ -27,8 +27,3 @@ jobs:
         with:
           no-sudo: true
           clean: false
-
-      - name: Debug
-        if: always()
-        shell: bash
-        run: sleep 600
