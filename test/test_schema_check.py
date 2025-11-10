@@ -205,7 +205,6 @@ class TestSchemaCheck(JitTestCase):
         )
 
     # Tests that SchemaCheckMode records mutations and aliases with aliasing outputs
-    @unittest.skipIf(HAS_XPU, "Not supported on XPU yet")
     def test_schema_check_mode_mutated_aliasing_aliasing_outputs(self):
         x = torch.rand((3, 3))
         actual = torch.zeros(3)
@@ -304,7 +303,6 @@ class TestSchemaCheck(JitTestCase):
         self.assertEqual(e_expected, e_actual)
 
     # Tests that SchemaCheckMode wraps Torch.tensor with aliasing outputs due to aliasing inputs
-    @unittest.skipIf(HAS_XPU, "Not supported on XPU yet")
     def test_schema_check_mode_functionality_with_multiple_outputs_aliasing(self):
         x = torch.rand((3, 3))
         actual = torch.zeros(3)
@@ -320,7 +318,6 @@ class TestSchemaCheck(JitTestCase):
         self.assertEqual(x + x, y)
 
     # Tests that SchemaCheckMode wraps Torch.tensor in special training op edge case
-    @unittest.skipIf(HAS_XPU, "Not supported on XPU yet")
     def test_schema_check_mode_functionality_training_op(self):
         x = torch.rand((3, 3), requires_grad=True)
         batch = torch.nn.BatchNorm1d(3, track_running_stats=True)
@@ -330,7 +327,6 @@ class TestSchemaCheck(JitTestCase):
         self.assertEqual(expected, actual)
 
     # Tests that SchemaCheckMode wraps Torch.tensor with nested training op edge case
-    @unittest.skipIf(HAS_XPU, "Not supported on XPU yet")
     def test_schema_check_mode_functionality_nested_training_op(self):
         actual = torch.rand((3, 3))
         batch = torch.nn.BatchNorm1d(3, track_running_stats=True)
@@ -379,7 +375,6 @@ class TestSchemaCheck(JitTestCase):
                 IncorrectAliasTensor(x).add(IncorrectAliasTensor(y), alpha=2)
 
     # Tests that an exception is raised for a mismatching alias over multiple ops
-    @unittest.skipIf(HAS_XPU, "Not supported on XPU yet")
     def test_alias_check_fail_multiple_operators(self):
         with self.assertRaisesRegex(RuntimeError, "Argument input is not defined to alias output but was aliasing"):
             x = torch.rand((3, 3), requires_grad=True)
@@ -396,7 +391,6 @@ class TestSchemaCheck(JitTestCase):
                 IncorrectAliasTensor(x).sin().add(IncorrectAliasTensor(y), alpha=2).relu()
 
     # Tests that an exception is raised for a centered mismatching alias over multiple ops
-    @unittest.skipIf(HAS_XPU, "Not supported on XPU yet")
     def test_alias_check_fail_outputs_unexpectedly_aliasing(self):
         with self.assertRaisesRegex(RuntimeError, "Outputs 0 and 1 alias unexpectedly"):
             x = torch.rand((3, 3))
@@ -502,7 +496,51 @@ class TestSchemaCheck(JitTestCase):
         with SchemaInfoBindTestMode(self) as schemaInfoCheck:
             x.add(x)
 
+
 class TestSchemaCheckModeOpInfo(JitTestCase):
+    _xpu_not_supported_cases: ('test_schema_correctness_amax_xpu_uint16',
+     'test_schema_correctness_amax_xpu_uint32',
+     'test_schema_correctness_amax_xpu_uint64',
+     'test_schema_correctness_amin_xpu_uint16',
+     'test_schema_correctness_amin_xpu_uint32',
+     'test_schema_correctness_amin_xpu_uint64',
+     'test_schema_correctness_aminmax_xpu_uint16',
+     'test_schema_correctness_aminmax_xpu_uint32',
+     'test_schema_correctness_aminmax_xpu_uint64',
+     'test_schema_correctness_max_reduction_no_dim_xpu_uint16',
+     'test_schema_correctness_max_reduction_no_dim_xpu_uint32',
+     'test_schema_correctness_max_reduction_no_dim_xpu_uint64',
+     'test_schema_correctness_max_reduction_with_dim_xpu_uint16',
+     'test_schema_correctness_max_reduction_with_dim_xpu_uint32',
+     'test_schema_correctness_max_reduction_with_dim_xpu_uint64',
+     'test_schema_correctness_min_reduction_no_dim_xpu_uint16',
+     'test_schema_correctness_min_reduction_no_dim_xpu_uint32',
+     'test_schema_correctness_min_reduction_no_dim_xpu_uint64',
+     'test_schema_correctness_min_reduction_with_dim_xpu_uint16',
+     'test_schema_correctness_min_reduction_with_dim_xpu_uint32',
+     'test_schema_correctness_min_reduction_with_dim_xpu_uint64',
+     'test_schema_correctness_nn_functional_conv_transpose2d_xpu_bfloat16',
+     'test_schema_correctness_nn_functional_conv_transpose2d_xpu_complex128',
+     'test_schema_correctness_nn_functional_conv_transpose2d_xpu_complex64',
+     'test_schema_correctness_nn_functional_conv_transpose2d_xpu_float16',
+     'test_schema_correctness_nn_functional_conv_transpose2d_xpu_float32',
+     'test_schema_correctness_nn_functional_conv_transpose2d_xpu_float64',
+     'test_schema_correctness_nn_functional_conv_transpose3d_xpu_bfloat16',
+     'test_schema_correctness_nn_functional_conv_transpose3d_xpu_complex128',
+     'test_schema_correctness_nn_functional_conv_transpose3d_xpu_complex64',
+     'test_schema_correctness_nn_functional_conv_transpose3d_xpu_float16',
+     'test_schema_correctness_nn_functional_conv_transpose3d_xpu_float32',
+     'test_schema_correctness_nn_functional_conv_transpose3d_xpu_float64',
+     'test_schema_correctness_torch_ops_aten__flash_attention_forward_xpu_float16')
+
+    def _is_xpu_and_supported(self, op):
+        if torch.xpu.is_available():
+            for case in TestSchemaCheckModeOpInfo._xpu_not_supported_cases:
+                if op and op.formatted_name and case in op.formatted_name:
+                    return False
+
+        return True
+
     @ops(op_db, dtypes=OpDTypes.supported)
     @slowTestIf(IS_WINDOWS)
     def test_schema_correctness(self, device, dtype, op):
@@ -510,6 +548,10 @@ class TestSchemaCheckModeOpInfo(JitTestCase):
         # There's also errors with complex64 and complex128
         if (dtype == torch.complex32):
             return
+
+        if not self._is_xpu_and_supported(op):
+            self.skipTest("Not supported on XPU yet")
+
         for sample in op.sample_inputs(device, dtype, requires_grad=False):
             with SchemaCheckMode():
                 op(sample.input, *sample.args, **sample.kwargs)
