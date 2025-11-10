@@ -126,6 +126,17 @@ def regenerate_type_stubs():
     _regenerate_type_stubs()
 
 
+@click.command()
+def regenerate_clangtidy_files():
+    """Regenerate clang-tidy files."""
+    cmd = [
+        sys.executable,
+        "-m",
+        "tools.linter.clang_tidy.generate_build_files",
+    ]
+    spin.util.run(cmd)
+
+
 LINTRUNNER_CACHE_INFO = (
     Path(".lintbin/.lintrunner.sha256"),
     [
