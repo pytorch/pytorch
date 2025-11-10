@@ -357,7 +357,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             else (torch.float, torch.double, torch.half)
         )
     )
-    @dtypesIfXPU(torch.float, torch.double, torch.half)
+    @dtypesIfXPU(torch.float32, torch.double, torch.half)
     @dtypes(torch.float32)
     def test_embedding_max_norm_backward(self, device, dtype):
         # can't use gradcheck since in place renorm makes analytical gradients different from produced ones
@@ -382,7 +382,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             else (torch.float, torch.double, torch.half)
         )
     )
-    @dtypesIfXPU(torch.float, torch.double, torch.half)
+    @dtypesIfXPU(torch.float32, torch.double, torch.half)
     @dtypes(torch.float32)
     def test_embedding_max_norm_fwd_AD(self, device, dtype):
         if torch.device(device).type == "xla":
@@ -407,7 +407,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             else (torch.float, torch.double, torch.half)
         )
     )
-    @dtypesIfXPU(torch.float, torch.double, torch.half)
+    @dtypesIfXPU(torch.float32, torch.double, torch.half)
     @dtypes(torch.float32)
     def test_embedding_padding_idx(self, device, dtype):
         embedding = nn.Embedding(10, 20, padding_idx=0).to(device, dtype)
@@ -1086,7 +1086,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         *itertools.product(
             (torch.int, torch.long),
             (torch.int, torch.long),
-            (torch.float, torch.double, torch.half),
+            (torch.float32, torch.double, torch.half),
         )
     )
     def test_EmbeddingBag_empty_per_sample_weights_and_offsets(self, device, dtypes):
@@ -1159,7 +1159,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         *itertools.product(
             (torch.int, torch.long),
             (torch.int, torch.long),
-            (torch.float, torch.double, torch.half),
+            (torch.float32, torch.double, torch.half),
         )
     )
     def test_EmbeddingBag_per_sample_weights_and_offsets(self, device, dtypes):
@@ -1227,7 +1227,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         *itertools.product(
             (torch.int, torch.long),
             (torch.int, torch.long),
-            (torch.float, torch.double, torch.half),
+            (torch.float32, torch.double, torch.half),
         )
     )
     def test_EmbeddingBag_per_sample_weights_and_new_offsets(self, device, dtypes):
@@ -1396,7 +1396,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     )
     @dtypesIfXPU(
         *itertools.product(
-            (torch.int, torch.long), (torch.half, torch.float, torch.double)
+            (torch.int, torch.long), (torch.half, torch.float32, torch.double)
         )
     )
     @dtypes(*itertools.product((torch.int, torch.long), (torch.float, torch.double)))
@@ -1598,13 +1598,13 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         *itertools.product(
             (torch.int, torch.long),
             (torch.int, torch.long),
-            (torch.float, torch.double, torch.half),
+            (torch.float32, torch.double, torch.half),
         )
     )
     def test_embedding_bag_device(self, device, dtypes):
         if IS_JETSON and torch.bfloat16 in dtypes and device == "cpu":
             self.skipTest("bfloat16 not supported with Jetson cpu")
-        if dtypes == (torch.int32, torch.int32, torch.float64) and "xpu" in device:
+        if dtypes[0] == torch.int32 and dtypes[2] == torch.float64 and "xpu" in device:
             self.skipTest("https://github.com/intel/torch-xpu-ops/issues/2295")
         with set_default_dtype(torch.double):
             self._test_EmbeddingBag(
@@ -1681,7 +1681,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         *itertools.product(
             (torch.int, torch.long),
             (torch.int, torch.long),
-            (torch.float, torch.double, torch.half),
+            (torch.float32, torch.double, torch.half),
         )
     )
     def test_embedding_bag_non_contiguous_weight(self, device, dtypes):
