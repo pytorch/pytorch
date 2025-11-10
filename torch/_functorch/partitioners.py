@@ -10,6 +10,7 @@ import operator
 import os
 import os.path
 import re
+import sympy
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -160,10 +161,16 @@ def has_recomputable_rng_ops(fx_g: fx.GraphModule) -> bool:
 
 
 def sym_node_size(node: fx.Node) -> int:
-    if isinstance(node.meta["val"], (torch.SymInt, torch.SymBool)):
+    val = node.meta["val"]
+
+    if not isinstance(val._sympy_(), sympy.Expr):
+        return math.inf
+    elif isinstance(val, (torch.SymInt, torch.SymBool)):
         return 1
-    assert isinstance(node.meta["val"], torch.SymFloat)
-    return 4
+    elif isinstance(val, torch.SymFloat):
+        return 4
+    else:
+        raise ValueError(f"Unsupported sym node type: {type(val)}")
 
 
 class InvalidNodeBase:
