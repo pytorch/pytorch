@@ -9465,7 +9465,7 @@ class TestSDPA(TestCaseMPS):
         torch.manual_seed(1729)
         causal_mask = torch.tril(torch.ones(S, S, dtype=torch.bool, device='mps'))
         with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
-            i = 42
+            i = 42 if S > 42 else S // 2
 
             q = torch.randn([1, NH, L, HS], dtype=dtype, device="mps")
             k = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
