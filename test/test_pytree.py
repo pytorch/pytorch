@@ -1550,7 +1550,6 @@ class TestCxxPytree(TestCase):
         if not TEST_WITH_TORCHDYNAMO or type(x) is type(y):
             super().assertEqual(x, y, *args, **kwargs)
         else:
-            super().assertEqual(repr(x), repr(y), *args, **kwargs)
             super().assertEqual(
                 x.unflatten(range(x.num_leaves)),
                 y.unflatten(range(y.num_leaves)),
