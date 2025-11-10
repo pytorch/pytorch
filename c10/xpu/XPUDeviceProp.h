@@ -1,8 +1,9 @@
 #pragma once
 
 #include <c10/xpu/XPUMacros.h>
-// NOLINTNEXTLINE(clang-diagnostic-error)
+#ifdef USE_XPU
 #include <sycl/sycl.hpp>
+#endif
 
 namespace c10::xpu {
 
