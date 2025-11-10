@@ -21,80 +21,6 @@ using torch::headeronly::DefaultPtrTraits;
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
 using TensorAccessorBase = torch::headeronly::TensorAccessorBaseDetail<c10::IntArrayRef, T, N, PtrTraits, index_t>;
 
-template <
-    class ArrayRefCls,
-    typename T,
-    size_t N,
-    template <typename U> class PtrTraits,
-    typename index_t>
-class TensorAccessorDetail
-    : public torch::headeronly::TensorAccessorBaseDetail<ArrayRefCls, T, N, PtrTraits, index_t> {
- public:
-  typedef typename PtrTraits<T>::PtrType PtrType;
-
-  C10_HOST_DEVICE TensorAccessorDetail(
-      PtrType data_,
-      const index_t* sizes_,
-      const index_t* strides_)
-      : torch::headeronly::TensorAccessorBaseDetail<ArrayRefCls, T, N, PtrTraits, index_t>(
-            data_,
-            sizes_,
-            strides_) {}
-
-  C10_HOST_DEVICE TensorAccessorDetail<
-      ArrayRefCls,
-      T,
-      N - 1,
-      PtrTraits,
-      index_t>
-  operator[](index_t i) {
-    return TensorAccessorDetail<ArrayRefCls, T, N - 1, PtrTraits, index_t>(
-        this->data_ + this->strides_[0] * i,
-        this->sizes_ + 1,
-        this->strides_ + 1);
-  }
-
-  C10_HOST_DEVICE const TensorAccessorDetail<
-      ArrayRefCls,
-      T,
-      N - 1,
-      PtrTraits,
-      index_t>
-  operator[](index_t i) const {
-    return TensorAccessorDetail<ArrayRefCls, T, N - 1, PtrTraits, index_t>(
-        this->data_ + this->strides_[0] * i,
-        this->sizes_ + 1,
-        this->strides_ + 1);
-  }
-};
-
-template <
-    class ArrayRefCls,
-    typename T,
-    template <typename U> class PtrTraits,
-    typename index_t>
-class TensorAccessorDetail<ArrayRefCls, T, 1, PtrTraits, index_t>
-    : public torch::headeronly::TensorAccessorBaseDetail<ArrayRefCls, T, 1, PtrTraits, index_t> {
- public:
-  typedef typename PtrTraits<T>::PtrType PtrType;
-
-  C10_HOST_DEVICE TensorAccessorDetail(
-      PtrType data_,
-      const index_t* sizes_,
-      const index_t* strides_)
-    : torch::headeronly::TensorAccessorBaseDetail<ArrayRefCls, T, 1, PtrTraits, index_t>(
-            data_,
-            sizes_,
-            strides_) {}
-  C10_HOST_DEVICE T& operator[](index_t i) {
-    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
-    return this->data_[this->strides_[0] * i];
-  }
-  C10_HOST_DEVICE const T& operator[](index_t i) const {
-    return this->data_[this->strides_[0] * i];
-  }
-};
-
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
 using TensorAccessor = torch::headeronly::TensorAccessorDetail<c10::IntArrayRef, T, N, PtrTraits, index_t>;
 
@@ -117,7 +43,7 @@ template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPt
 using GenericPackedTensorAccessorBase = torch::headeronly::detail::GenericPackedTensorAccessorBase<IndexBoundsCheck<N, index_t>, T, N, PtrTraits, index_t>;
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using GenericPackedTensorAccessor = torch::headeronly::detail::GenericPackedTensorAccessor<TensorAccessor, IndexBoundsCheck<N, index_t>, T, N, PtrTraits, index_t>;
+using GenericPackedTensorAccessor = torch::headeronly::detail::GenericPackedTensorAccessor<TensorAccessor<T, N-1, PtrTraits, index_t>, IndexBoundsCheck<N, index_t>, T, N, PtrTraits, index_t>;
 
 // Can't put this directly into the macro function args because of commas
 #define AT_X GenericPackedTensorAccessor<T, N, PtrTraits, index_t>
