@@ -1,11 +1,11 @@
 #pragma once
 
+#include <torch/headeronly/core/TensorAccessor.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <torch/headeronly/core/TensorAccessor.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -96,7 +96,7 @@ class TensorAccessorDetail<ArrayRefCls, T, 1, PtrTraits, index_t>
 };
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using TensorAccessor = TensorAccessorDetail<c10::IntArrayRef, T, N, PtrTraits, index_t>;
+using TensorAccessor = torch::headeronly::TensorAccessorDetail<c10::IntArrayRef, T, N, PtrTraits, index_t>;
 
 namespace {
 
