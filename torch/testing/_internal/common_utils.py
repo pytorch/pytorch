@@ -17,6 +17,7 @@ import gc
 import hashlib
 import inspect
 import io
+import itertools
 import json
 import logging
 import math
@@ -37,6 +38,7 @@ import time
 import types
 import unittest
 import warnings
+from collections import namedtuple
 from collections.abc import Mapping, Sequence
 from contextlib import closing, contextmanager
 from copy import deepcopy
@@ -70,6 +72,8 @@ from torch import Tensor
 from torch._C import ScriptDict, ScriptList  # type: ignore[attr-defined]
 from torch._utils_internal import get_writable_path
 from torch._logging.scribe import open_source_signpost
+from torch.distributed.tensor import DTensor, Replicate, Shard, distribute_tensor as native_distribute_tensor
+from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.nn import (
     ModuleDict,
     ModuleList,
@@ -5879,17 +5883,14 @@ def patch_test_members(updates: dict[str, Any]):
     return decorator
 
 
-from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
-from torch.distributed.tensor import DTensor, Replicate, Shard, distribute_tensor as native_distribute_tensor
-from torch.distributed.tensor._redistribute import redistribute_local_tensor
-import itertools
 def _convert_shard_order_dict_to_ShardOrder(shard_order):
     """Convert shard_order dict to ShardOrder"""
+    # For some reason, the macos build will error out if we import ShardOrderEntry.
+    ShardOrderEntry = namedtuple('ShardOrderEntry', ['tensor_dim', 'mesh_dims'])
     return tuple(
         ShardOrderEntry(tensor_dim=tensor_dim, mesh_dims=tuple(mesh_dims))
         for tensor_dim, mesh_dims in shard_order.items()
     )
-
 
 # TODO(zpcore): remove once the native redistribute supports shard_order arg
 def redistribute(
