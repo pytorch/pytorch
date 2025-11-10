@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import base64
-import contextlib
 import io
 import json
 import operator
@@ -11,6 +10,7 @@ import sys
 import warnings
 from functools import lru_cache
 from itertools import groupby
+from pathlib import Path
 from typing import Any
 
 
@@ -752,11 +752,9 @@ if __name__ == "__main__":
 
     def _read(name):
         if name == "-":
-            f_context = contextlib.closing(sys.stdin.buffer)
+            data = pickle.load(sys.stdin.buffer)
         else:
-            f_context = open(name, "rb")
-        with f_context as f:
-            data = pickle.load(f)
+            data = pickle.load(Path(name).read_bytes())
         if isinstance(data, list):  # segments only...
             data = {"segments": data, "traces": []}
         return data
