@@ -116,19 +116,6 @@ __host__ __device__ c10::complex<scalar_t> _log_add_exp_helper(const c10::comple
   }
 }
 
-// logaddexp jiterator string
-const auto logaddexp_string = jiterator_stringify(
-    template <typename T>
-    T logaddexp(T a, T b) {
-        if (isinf(a) && a == b) {
-            return a;
-        } else {
-            const T m = max(a, b);
-            return m + log(T(1) + exp(-abs(a - b)));
-        }
-    }
-);
-
 // Complex logaddexp jiterator string
 const auto logaddexp_complex_string = jiterator_stringify(
     template <typename T>
@@ -252,16 +239,6 @@ void logaddexp_kernel_cuda(TensorIteratorBase& iter) {
     });
 #endif
   } else {
-#if AT_USE_JITERATOR()
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-      ScalarType::BFloat16, ScalarType::Half,
-      iter.dtype(), "logaddexp_cuda",
-      [&]() {
-        opmath_jitted_gpu_kernel_with_scalars</*name=*/logaddexp_name,
-                                        /*return_dtype=*/ scalar_t,
-                                        /*f_inputs_dtype=*/ scalar_t>(iter, logaddexp_string);
-      });
-#else
     AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::BFloat16, ScalarType::Half,
       iter.dtype(), "logaddexp_cuda",
@@ -278,7 +255,6 @@ void logaddexp_kernel_cuda(TensorIteratorBase& iter) {
           }
         });
       });
-#endif
   }
 }
 
