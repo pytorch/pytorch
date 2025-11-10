@@ -3597,8 +3597,7 @@ def _worker_task_halide(lockfile: str, jobs: list[partial[Any]]) -> None:
             cmd: list[Any]
             python, script, *cmd = getattr(e, "cmd", ("", "", ""))
             if os.path.basename(python).startswith("python"):
-                with open(script) as f:
-                    code = f.read()
+                code = Path(script).read_text()
                 main = "    hl.main()"
                 assert code.count(main) == 1
 
