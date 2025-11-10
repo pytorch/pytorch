@@ -23,7 +23,13 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.utils._debug_mode import _OpCall, _RedistributeCall, DebugMode, hash_tensor_fn, norm_hash_fn
+from torch.utils._debug_mode import (
+  _OpCall,
+  _RedistributeCall,
+  DebugMode,
+  hash_tensor_fn,
+  norm_hash_fn,
+)
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -107,12 +113,15 @@ class TestDTensorDebugMode(TestCase):
         )
 
         # check tuple hash functions
-        with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_fn=["norm", "hash_tensor"]):
+        with (
+            DebugMode() as debug_mode,
+            DebugMode.log_tensor_hashes(hash_fn=["norm", "hash_tensor"]),
+        ):
             mm(x_dtensor, y_dtensor)
 
         output_hash = debug_mode.operators[-1].log["hash"]
-        norm_ = lambda x: norm_hash_fn(x, use_scalar=True)
-        hash_ = lambda x: hash_tensor_fn(x, use_scalar=True)
+        norm_ = lambda x: norm_hash_fn(x, use_scalar=True)  # noqa: E731
+        hash_ = lambda x: hash_tensor_fn(x, use_scalar=True)  # noqa: E731
 
         self.assertEqual(output_hash[0], norm_(eager_out))
         self.assertEqual(output_hash[1], hash_(eager_out))

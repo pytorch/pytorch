@@ -109,7 +109,9 @@ def _arg_to_str(arg, attributes, tensor_memo=None) -> str:
     return str(arg)
 
 
-def norm_hash_fn(t: torch.Tensor, use_scalar: bool = False) -> Union[torch.Tensor, float]:
+def norm_hash_fn(
+    t: torch.Tensor, use_scalar: bool = False
+) -> Union[torch.Tensor, float]:
     """
     from Observer. Computes a hash for a tensor by converting it to float (if needed), making it contiguous,
     replacing NaN/inf values with fixed numbers, and then computing the L1 norm in float64 or complex128.
@@ -130,7 +132,9 @@ def norm_hash_fn(t: torch.Tensor, use_scalar: bool = False) -> Union[torch.Tenso
     return out
 
 
-def hash_tensor_fn(t: torch.Tensor, use_scalar: bool = False) -> Union[torch.Tensor, int]:
+def hash_tensor_fn(
+    t: torch.Tensor, use_scalar: bool = False
+) -> Union[torch.Tensor, int]:
     """
     wrapper over torch.hash_tensor
     """
@@ -679,7 +683,9 @@ class DebugMode(TorchDispatchMode):
 
     @staticmethod
     @contextlib.contextmanager
-    def log_tensor_hashes(hash_fn: Union[Callable, str, list[str]] = "norm", hash_inputs: bool = False):
+    def log_tensor_hashes(
+        hash_fn: Union[Callable, str, list[str]] = "norm", hash_inputs: bool = False
+    ):
         """
         Installs hook for tensor hash logging.
 
@@ -692,6 +698,7 @@ class DebugMode(TorchDispatchMode):
         hash_inputs: if True, also hashes tensors in (args, kwargs), storing them in "input_hash".
         NOTE: this is currently a post-hook, so e.g. inplace ops will log the "output" hashes.
         """
+
         def hash_fn_option(hash_type):
             assert isinstance(hash_type, str) and hash_type in ["norm", "hash_tensor"]
             if hash_type == "norm":
@@ -708,7 +715,9 @@ class DebugMode(TorchDispatchMode):
                 fns = [hash_fn_option(fn) for fn in hash_fn]
                 fn = lambda x: tuple(fn(x) for fn in fns)  # noqa: E731
             else:
-                raise NotImplementedError(f"log_tensor_hashes() expected hash_fn to be callable, str, or list[str], but found {type(hash_fn)}")
+                raise NotImplementedError(
+                    f"log_tensor_hashes() expected hash_fn to be callable, str, or list[str], but found {type(hash_fn)}"
+                )
 
             with torch._C._DisablePythonDispatcher():
                 return tree_map(
