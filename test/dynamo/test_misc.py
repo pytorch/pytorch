@@ -5515,6 +5515,147 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             ):
                 _ = opt_fn_without_replay(x, lst_without_replay)
 
+    def test_replay_inside_local_mutation(self):
+        def fn(x):
+            lst = []
+            cos = x.cos()
+            lst.append(cos + 1)
+            return lst
+
+        # This mutation should still exist
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy=2
+        ):
+            inp = torch.randn(4, 4)
+            res = torch.compile(fn, fullgraph=True)(inp)
+            self.assertTrue(len(res) == 1)
+
+    def test_nested_local_mutation(self):
+        def fn(x):
+            lst = []
+            d = {}
+            d["result"] = x.cos()
+            lst.append(d)
+            return lst, d
+
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy=2
+        ):
+            inp = torch.randn(4, 4)
+            lst, d = torch.compile(fn, fullgraph=True)(inp)
+            # Both local mutations should exist
+            self.assertEqual(len(lst), 1)
+            self.assertIn("result", d)
+            self.assertEqual(lst[0], d)  # Same dict reference
+            same(d["result"], inp.cos())
+
+    def test_local_mutation_with_conditional(self):
+        """Test side effects in conditional branches"""
+
+        def fn(x, flag):
+            lst = []
+            if flag:
+                lst.append(x.cos())
+            else:
+                lst.append(x.sin())
+            return lst
+
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy=2
+        ):
+            inp = torch.randn(4, 4)
+            # Test true branch
+            lst_true = torch.compile(fn, fullgraph=True)(inp, True)
+            self.assertEqual(len(lst_true), 1)
+            same(lst_true[0], inp.cos())
+
+            # Test false branch
+            lst_false = torch.compile(fn, fullgraph=True)(inp, False)
+            self.assertEqual(len(lst_false), 1)
+            same(lst_false[0], inp.sin())
+
+    def test_multiple_mutations_same_local_object(self):
+        """Test multiple mutations to the same local object"""
+
+        def fn(x):
+            lst = []
+            lst.append(x.cos())
+            lst.append(x.sin())
+            lst.extend([x.tan()])
+            return lst
+
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy=2
+        ):
+            inp = torch.randn(4, 4)
+            lst = torch.compile(fn, fullgraph=True)(inp)
+            # All mutations should exist
+            self.assertEqual(len(lst), 3)
+            same(lst[0], inp.cos())
+            same(lst[1], inp.sin())
+            same(lst[2], inp.tan())
+
+    def test_local_vs_external_mutation_mix(self):
+        def fn(x, external_lst):
+            local_lst = []
+            local_lst.append(x.cos())  # Should exist
+            external_lst.append(x.sin())  # Should NOT exist with policy=2
+            return local_lst, external_lst
+
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy=2
+        ):
+            inp = torch.randn(4, 4)
+            external_lst = []
+            local_lst, returned_external = torch.compile(fn, fullgraph=True)(
+                inp, external_lst
+            )
+
+            # Local mutation should exist
+            self.assertEqual(len(local_lst), 1)
+            same(local_lst[0], inp.cos())
+
+            # External mutation should NOT be replayed
+            self.assertEqual(len(external_lst), 0)
+            # But the returned reference should be the same
+            self.assertIs(returned_external, external_lst)
+
+    def test_local_mutation_with_inplace_ops(self):
+        """Test local mutations with in-place tensor operations"""
+
+        def fn(x):
+            lst = []
+            y = x.clone()
+            y.add_(1)  # In-place operation
+            lst.append(y)
+            return lst
+
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy=2
+        ):
+            inp = torch.randn(4, 4)
+            lst = torch.compile(fn, fullgraph=True)(inp)
+            self.assertEqual(len(lst), 1)
+            same(lst[0], inp + 1)
+
+    def test_local_mutation_with_loop(self):
+        """Test local mutations inside a loop"""
+
+        def fn(x):
+            lst = []
+            for i in range(3):
+                lst.append(x + i)
+            return lst
+
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy=2
+        ):
+            inp = torch.randn(4, 4)
+            lst = torch.compile(fn, fullgraph=True)(inp)
+            self.assertEqual(len(lst), 3)
+            for i in range(3):
+                same(lst[i], inp + i)
+
     def test_replay_side_effects_model_attr(self):
         class Bar(torch.nn.Module):
             def __init__(self):
@@ -5555,7 +5696,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             foo_v2_compile = Foo()
             foo_v2_eager = Foo()
             inp = torch.randn(4, 4)
-            res = torch.compile(foo_v2_compile, fullgraph=True)(torch.randn(4, 4))
+            res = torch.compile(foo_v2_compile, fullgraph=True)(inp)
             self.assertEqual(foo_v2_compile.tensor, None)
             self.assertEqual(foo_v2_compile.const, 4)
             self.assertEqual(foo_v2_compile.bar.const, 4)
