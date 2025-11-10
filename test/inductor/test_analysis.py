@@ -398,7 +398,7 @@ class TestAnalysis(TestCase):
 
         verify_triton(comp_omni)
 
-   @skipIf(
+    @skipIf(
         (not torch.xpu.is_available()) and (not SM80OrLater),
         "Requires XPU or CUDA SM80",
     )
