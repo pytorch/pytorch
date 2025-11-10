@@ -123,10 +123,13 @@ static bool isGloballyDisabledAddmmCudaLt(const at::Device& device) {
   static const std::vector<std::string> archs = {
         "gfx90a", "gfx942",
     #if ROCM_VERSION >= 60300
-        "gfx1100", "gfx1101", "gfx1200", "gfx1201", "gfx908",
+        "gfx1100", "gfx1101","gfx1102", "gfx1200", "gfx1201", "gfx908",
     #endif
-    #if ROCM_VERSION >= 70000
-        "gfx950", "gfx1150", "gfx1151"
+    #if ROCM_VERSION >= 60402
+        "gfx1150", "gfx1151",
+    #endif
+    #if ROCM_VERSION >= 60500
+    "gfx950",
     #endif
   };
   const auto is_hipblas_lt_arch_supported = at::detail::getCUDAHooks().isGPUArch(archs, device.index());
@@ -144,6 +147,7 @@ static bool isGloballyDisabledAddmmCudaLt(const at::Device& device) {
   return false;
 }
 
+<<<<<<< HEAD
 /*
  * Check whether for the given input we want to enable the Lt interface
  */
@@ -250,6 +254,23 @@ static bool isInputCompliesAddmmCudaLt(
 
   // no compliance by default
   return false;
+=======
+#ifdef USE_ROCM
+static bool isSupportedHipLtROCmArch(int index) {
+    static const std::vector<std::string> archs = {
+        "gfx90a", "gfx942",
+#if ROCM_VERSION >= 60300
+        "gfx1100", "gfx1101", "gfx1102", "gfx1200", "gfx1201", "gfx908",
+#endif
+#if ROCM_VERSION >= 60402
+          "gfx1150", "gfx1151",
+#endif
+#if ROCM_VERSION >= 60500
+        "gfx950"
+#endif
+    };
+    return at::detail::getCUDAHooks().isGPUArch(archs, index);
+>>>>>>> b2f5d534d95 ([release/2.9] Add gfx110X and gfx115X to prefered hipBLASLt list (#2742))
 }
 
 template <typename scalar_t>
