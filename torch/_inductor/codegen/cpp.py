@@ -3690,6 +3690,8 @@ class CppTile2DKernel(CppVecKernel):
             if self.tail_size or V.graph.get_dtype(name) in DTYPE_LOWP_FP + [
                 torch.uint8,
                 torch.int8,
+                torch.float8_e4m3fn,
+                torch.float8_e5m2,
             ]:
                 line = f"{value}.store({storebuf}, {cexpr_index(self.num_elems)});"
             else:
