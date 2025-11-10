@@ -773,6 +773,48 @@ class TestUnaryUfuncs(TestCase):
                     with self.assertRaises(AttributeError):
                         torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
 
+    @onlyCUDA
+    @dtypes(torch.complex64)
+    def test_tan_complex_cuda_matches_numpy(self, device, dtype):
+        # Focused accuracy check for complex tan on CUDA against NumPy reference
+        # Includes values near tan singularities on the real axis
+        eps = 1e-3
+        specials = torch.tensor(
+            [
+                math.pi / 2 - eps,
+                math.pi / 2 + eps,
+                -math.pi / 2 - eps,
+                -math.pi / 2 + eps,
+            ],
+            device=device,
+            dtype=torch.float32,
+        )
+        real = torch.randn(1024, device=device, dtype=torch.float32) * (2 * math.pi)
+        imag = torch.randn(1024, device=device, dtype=torch.float32) * 5.0
+        real = torch.cat([real, specials])
+        imag = torch.cat(
+            [
+                imag,
+                torch.linspace(
+                    -3,
+                    3,
+                    steps=specials.numel(),
+                    device=device,
+                ),
+            ]
+        )
+        z = torch.complex(real, imag).to(dtype)
+        self.compare_with_numpy(torch.tan, np.tan, z)
+
+    @onlyCUDA
+    @dtypes(torch.complex64)
+    def test_tanh_complex_cuda_matches_numpy(self, device, dtype):
+        # Focused accuracy check for complex tanh on CUDA against NumPy reference
+        real = torch.randn(2048, device=device, dtype=torch.float32) * (2 * math.pi)
+        imag = torch.randn(2048, device=device, dtype=torch.float32) * 5.0
+        z = torch.complex(real, imag).to(dtype)
+        self.compare_with_numpy(torch.tanh, np.tanh, z)
+
     def check_internal_mem_overlap(
         self, inplace_op, num_inputs, dtype, device, expected_failure=False
     ):

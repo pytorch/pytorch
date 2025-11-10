@@ -115,7 +115,7 @@ def parallel_apply(
                 target=_worker, args=(i, module, input, kwargs, device, stream)
             )
             for i, (module, input, kwargs, device, stream) in enumerate(
-                zip(modules, inputs, kwargs_tup, devices, streams)
+                zip(modules, inputs, kwargs_tup, devices, streams, strict=True)
             )
         ]
 

@@ -587,9 +587,7 @@ class TestFSDPStateDict(FSDPTest):
                     model, cpu_offload.offload_params, fp16
                 )
 
-            ignore_keys = [
-                k for k in fsdp_state_dict.keys() if NON_ROOT_FSDP_PREFIX in k
-            ]
+            ignore_keys = [k for k in fsdp_state_dict if NON_ROOT_FSDP_PREFIX in k]
 
             self._validate_state_dict_contents(
                 model,
@@ -910,7 +908,7 @@ class TestFSDPStateDict(FSDPTest):
         with sd_mgr:
             fsdp_state_dict = model.state_dict()
 
-        ignore_keys = [k for k in fsdp_state_dict.keys() if NON_ROOT_FSDP_PREFIX in k]
+        ignore_keys = [k for k in fsdp_state_dict if NON_ROOT_FSDP_PREFIX in k]
         self._validate_state_dict_contents(
             model,
             fsdp_state_dict,
@@ -959,9 +957,7 @@ class TestFSDPStateDict(FSDPTest):
                 # Full name of linear_skip param tensors in SkipModel, as would be
                 # stored in checkpoint.
                 linear_skip_tensor_names = [
-                    k
-                    for k in dict(module.named_parameters()).keys()
-                    if LINEAR_SKIP in k
+                    k for k in dict(module.named_parameters()) if LINEAR_SKIP in k
                 ]
                 # skip SkipModule
                 linear_skip = getattr(module, LINEAR_SKIP)

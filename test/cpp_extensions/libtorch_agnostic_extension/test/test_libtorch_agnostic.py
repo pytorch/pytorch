@@ -367,6 +367,57 @@ if not IS_WINDOWS:
             self.assertNotEqual(result.data_ptr(), expected.data_ptr())
             self.assertEqual(result.stride(), expected.stride())
 
+        def test_my__foreach_mul_(self, device):
+            import libtorch_agnostic
+
+            N = 5
+            tensors = [torch.rand(32, 16, device=device) for _ in range(N)]
+            tensors_c = [t.clone() for t in tensors]
+            others = [torch.rand(32, 16, device=device) for _ in range(N)]
+
+            libtorch_agnostic.ops.my__foreach_mul_(tensors, others)
+            expected_values = torch._foreach_mul(tensors_c, others)
+
+            for tensor_t, expected_t in zip(tensors, expected_values):
+                self.assertEqual(tensor_t, expected_t)
+
+        def test_my__foreach_mul(self, device):
+            import libtorch_agnostic
+
+            N = 5
+            tensors = [torch.rand(32, 16, device=device) for _ in range(N)]
+            others = [torch.rand(32, 16, device=device) for _ in range(N)]
+
+            result = libtorch_agnostic.ops.my__foreach_mul(tensors, others)
+            expected = torch._foreach_mul(tensors, others)
+
+            for result_t, expected_t in zip(result, expected):
+                self.assertEqual(result_t, expected_t)
+
+            def _make_cuda_tensors(prior_mem):
+                cuda_res = libtorch_agnostic.ops.my__foreach_mul(tensors, others)
+                self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
+
+                expected = torch._foreach_mul(tensors, others)
+                for result_t, expected_t in zip(cuda_res, expected):
+                    self.assertEqual(result_t, expected_t)
+
+            if tensors[0].is_cuda:
+                init_mem = torch.cuda.memory_allocated(device)
+                for _ in range(3):
+                    _make_cuda_tensors(init_mem)
+                    curr_mem = torch.cuda.memory_allocated(device)
+                    self.assertEqual(curr_mem, init_mem)
+
+        def test_make_tensor_clones_and_call_foreach(self, device):
+            import libtorch_agnostic
+
+            t1 = torch.rand(2, 5, device=device)
+            t2 = torch.rand(3, 4, device=device)
+            result = libtorch_agnostic.ops.make_tensor_clones_and_call_foreach(t1, t2)
+            self.assertEqual(result[0], t1 * t1)
+            self.assertEqual(result[1], t2 * t2)
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":

@@ -65,7 +65,8 @@ could not be completed because the input matrix is singular.",
           "Exception raised when device is out of memory",
           PyExc_RuntimeError,
           nullptr));
-  PyTypeObject* type = (PyTypeObject*)THPException_OutOfMemoryError;
+  PyTypeObject* type =
+      reinterpret_cast<PyTypeObject*>(THPException_OutOfMemoryError);
   type->tp_name = "torch.OutOfMemoryError";
   ASSERT_TRUE(
       PyModule_AddObject(
@@ -133,7 +134,7 @@ could not be completed because the input matrix is singular.",
           "Exception raised while executing on device",
           PyExc_RuntimeError,
           nullptr));
-  type = (PyTypeObject*)THPException_AcceleratorError;
+  type = reinterpret_cast<PyTypeObject*>(THPException_AcceleratorError);
   ASSERT_TRUE(
       PyModule_AddObject(
           module, "AcceleratorError", THPException_AcceleratorError) == 0);
@@ -252,10 +253,10 @@ PyWarningHandler::PyWarningHandler() noexcept(true)
 // Get the Python warning type for a warning
 static PyObject* map_warning_to_python_type(const c10::Warning& warning) {
   struct Visitor {
-    PyObject* operator()(const c10::UserWarning&) const {
+    PyObject* operator()(const c10::UserWarning& /*unused*/) const {
       return PyExc_UserWarning;
     }
-    PyObject* operator()(const c10::DeprecationWarning&) const {
+    PyObject* operator()(const c10::DeprecationWarning& /*unused*/) const {
       return PyExc_DeprecationWarning;
     }
   };

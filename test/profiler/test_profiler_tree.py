@@ -624,8 +624,7 @@ class TestProfilerTree(TestCase):
                           torch/nn/modules/module.py(...): __getattr__
                           <built-in function linear>
                             aten::linear
-                              aten::reshape
-                                aten::view
+                              aten::view
                               aten::t
                                 aten::transpose
                                   aten::as_strided
@@ -671,8 +670,7 @@ class TestProfilerTree(TestCase):
                           torch/nn/modules/module.py(...): __getattr__
                           <built-in function linear>
                             aten::linear
-                              aten::reshape
-                                aten::view
+                              aten::view
                               aten::t
                                 aten::transpose
                                   aten::as_strided

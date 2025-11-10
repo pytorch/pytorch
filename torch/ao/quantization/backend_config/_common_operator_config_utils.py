@@ -678,7 +678,7 @@ def _get_bn_configs(dtype_configs: list[DTypeConfig]) -> list[BackendPatternConf
         torch.nn.BatchNorm2d: nni.BNReLU2d,
         torch.nn.BatchNorm3d: nni.BNReLU3d,
     }
-    for bn in bn_to_fused_bn.keys():
+    for bn in bn_to_fused_bn:
         fused_bn = bn_to_fused_bn[bn]
         # bn module + relu module fusion config
         bn_configs.append(

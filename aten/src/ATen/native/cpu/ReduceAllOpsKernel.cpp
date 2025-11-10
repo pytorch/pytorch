@@ -5,6 +5,7 @@
 #include <ATen/native/ReduceOpsUtils.h>
 
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/OpMathType.h>
@@ -62,7 +63,7 @@ inline void reduce_all_impl(
   output.fill_(result);
 }
 
-static void min_all_kernel_impl(Tensor& result, const Tensor& input) {
+void min_all_kernel_impl(Tensor& result, const Tensor& input) {
   if (input.scalar_type() == ScalarType::Bool) {
     TensorIterator iter = TensorIteratorConfig()
       .add_input(input)
@@ -78,16 +79,16 @@ static void min_all_kernel_impl(Tensor& result, const Tensor& input) {
     reduce_all_impl<int64_t>(result, input, upper_bound<int64_t>(),
       [=](int64_t a, int64_t b) -> int64_t { return min_impl(a, b); });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "min_all", [&] {
+    AT_DISPATCH_V2(input.scalar_type(), "min_all", AT_WRAP([&] {
       using Vec = Vectorized<opmath_type<scalar_t>>;
       reduce_all_impl_vec<scalar_t>(result, input, upper_bound<scalar_t>(),
         [=] (scalar_t a , scalar_t b) -> scalar_t { return min_impl(a, b); },
         [=](Vec a, Vec b) -> Vec { return minimum(a, b); });
-    });
+    }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kHalf, kBFloat16);
   }
 }
 
-static void max_all_kernel_impl(Tensor& result, const Tensor& input) {
+void max_all_kernel_impl(Tensor& result, const Tensor& input) {
   if (input.scalar_type() == ScalarType::Bool) {
     TensorIterator iter = TensorIteratorConfig()
       .add_input(input)
@@ -103,12 +104,12 @@ static void max_all_kernel_impl(Tensor& result, const Tensor& input) {
     reduce_all_impl<int64_t>(result, input, lower_bound<int64_t>(),
       [=](int64_t a, int64_t b) -> int64_t { return max_impl(a, b); });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "max_all", [&] {
+    AT_DISPATCH_V2(input.scalar_type(), "max_all", AT_WRAP([&] {
       using Vec = Vectorized<opmath_type<scalar_t>>;
       reduce_all_impl_vec<scalar_t>(result, input, lower_bound<scalar_t>(),
         [=] (scalar_t a , scalar_t b) -> scalar_t { return max_impl(a, b); },
         [=](Vec a, Vec b) -> Vec { return maximum(a, b); });
-    });
+    }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kHalf, kBFloat16);
   }
 }
 
@@ -167,7 +168,7 @@ inline void reduce_all_impl_vec_two_outputs(
   output2.fill_(result.second);
 }
 
-static void aminmax_allreduce_kernel(
+void aminmax_allreduce_kernel(
     const Tensor& input,
     Tensor& min_result,
     Tensor& max_result) {
@@ -199,7 +200,7 @@ static void aminmax_allreduce_kernel(
       }
     );
   } else {
-    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, input.scalar_type(), "aminmax_cpu", [&] {
+    AT_DISPATCH_V2(input.scalar_type(), "aminmax_cpu", AT_WRAP([&] {
       using Vec = Vectorized<opmath_type<scalar_t>>;
       using scalar_t_pair = std::pair<scalar_t, scalar_t>;
       reduce_all_impl_vec_two_outputs<scalar_t>(
@@ -214,7 +215,7 @@ static void aminmax_allreduce_kernel(
         [=](Vec a, Vec b) -> Vec { return minimum(a, b); },
         [=](Vec a, Vec b) -> Vec { return maximum(a, b); }
       );
-    });
+    }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf);
   }
 }
 

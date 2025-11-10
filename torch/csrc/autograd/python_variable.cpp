@@ -22,6 +22,7 @@
 #include <torch/csrc/autograd/utils/error_messages.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/distributed/Placement.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/tensor/python_tensor.h>
@@ -29,6 +30,7 @@
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/pyobject_preservation.h>
 #include <torch/csrc/utils/python_arg_parser.h>
+#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_new.h>
@@ -49,6 +51,150 @@ using namespace at;
 using namespace torch;
 using namespace torch::autograd;
 
+namespace {
+class OperatorArgsKwargsView {
+ public:
+  OperatorArgsKwargsView(
+      const c10::OperatorHandle& op,
+      const std::vector<c10::IValue>& arguments);
+  using args_iterator = const c10::IValue*;
+
+  args_iterator args_begin() const {
+    return arguments_.data();
+  }
+
+  args_iterator args_end() const {
+    return arguments_.data() + positional_default_start_;
+  }
+
+  auto num_positional_args() const {
+    return positional_default_start_;
+  }
+
+  auto kwarg_start_index() const {
+    return first_non_default_kwarg_;
+  }
+
+  struct kwargs_iterator {
+    kwargs_iterator() = default;
+    kwargs_iterator(const OperatorArgsKwargsView* parent, size_t current)
+        : parent_(parent), current_(current) {}
+
+    kwargs_iterator(const kwargs_iterator&) = default;
+    kwargs_iterator& operator=(const kwargs_iterator&) = default;
+
+    kwargs_iterator& operator++() {
+      do {
+        current_++;
+      } while (current_ < parent_->arguments_.size() &&
+               parent_->is_default(current_));
+      return *this;
+    }
+
+    kwargs_iterator operator++(int) {
+      auto copy = *this;
+      ++(*this);
+      return copy;
+    }
+
+    const c10::IValue& operator*() const {
+      return parent_->arguments_[current_];
+    }
+
+    const c10::IValue* operator->() const {
+      return &operator*();
+    }
+
+    int64_t underlying_index() const {
+      return current_;
+    }
+
+    bool operator==(const kwargs_iterator& rhs) const {
+      return parent_ == rhs.parent_ && current_ == rhs.current_;
+    }
+
+    bool operator!=(const kwargs_iterator& rhs) {
+      return !(*this == rhs);
+    }
+
+   private:
+    const OperatorArgsKwargsView* parent_ = nullptr;
+    size_t current_ = 0;
+  };
+
+  kwargs_iterator kwargs_begin() const {
+    return kwargs_iterator(this, first_non_default_kwarg_);
+  }
+
+  kwargs_iterator kwargs_end() const {
+    return kwargs_iterator(this, arguments_.size());
+  }
+
+ private:
+  bool is_default(size_t idx) const {
+    const auto& arg = op_.schema().arguments()[idx];
+    if (!arg.default_value().has_value()) {
+      return false;
+    }
+    const auto& default_ivalue = *arg.default_value();
+    const auto& ivalue = arguments_[idx];
+    if (default_ivalue != ivalue) {
+      return false;
+    }
+    return true;
+  }
+
+  const c10::OperatorHandle& op_;
+  c10::ArrayRef<c10::IValue> arguments_;
+  // About all the pointers:
+  //
+  // f(int x, int y = 0, *, int z = 0)
+  //                                  ^- arguments.size()
+  //                        ^- kwarg_only_start
+  //          ^- positional_default_start
+  //   ^- 0
+  int64_t positional_default_start_;
+  int64_t first_non_default_kwarg_;
+};
+
+OperatorArgsKwargsView::OperatorArgsKwargsView(
+    const c10::OperatorHandle& op,
+    const std::vector<c10::IValue>& arguments)
+    : op_(op), arguments_(arguments) {
+  // Find the split point between kwarg-only and regular.  Since most functions
+  // don't have kwarg-only arguments, it is more efficient to scan from the
+  // right (but ideally, this would just be precomputed in FunctionSchema
+  // itself).  (NB: minus one in the loop is because we're testing if the
+  // *next* argument is kwarg-only before we advance the starting index)
+  const int64_t signed_arguments_size = static_cast<int64_t>(arguments.size());
+  int64_t kwarg_only_start = signed_arguments_size;
+  for (; kwarg_only_start > 0; kwarg_only_start--) {
+    const auto& arg = op.schema().arguments()[kwarg_only_start - 1];
+    if (!arg.kwarg_only()) {
+      break;
+    }
+  }
+
+  // Find the first positional argument that isn't defaulted
+  positional_default_start_ = kwarg_only_start;
+  for (; positional_default_start_ > 0; positional_default_start_--) {
+    if (!is_default(positional_default_start_ - 1)) {
+      break;
+    }
+  }
+
+  // kwargs_iterator will skip default kwargs when incremented, but we
+  // need to skip any initial run of default kwargs ourselves.
+  first_non_default_kwarg_ = kwarg_only_start;
+  for (; first_non_default_kwarg_ < signed_arguments_size;
+       ++first_non_default_kwarg_) {
+    if (!is_default(first_non_default_kwarg_)) {
+      break;
+    }
+  }
+}
+} // namespace
+
 std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
     const c10::OperatorHandle& op,
     const std::vector<c10::IValue>& arguments) {
@@ -57,52 +203,13 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
       "GIL must be held before you call parseIValuesToPyArgsKwargs");
   const auto& schema = op.schema();
   py::dict kwargs;
-  // About all the pointers:
-  //
-  // f(int x, int y = 0, *, int z = 0)
-  //                                  ^- arguments.size()
-  //                        ^- kwarg_only_start
-  //          ^- positional_default_start
-  //   ^- 0
 
-  // Find the split point between kwarg-only and regular.  Since most functions
-  // don't have kwarg-only arguments, it is more efficient to scan from the
-  // right (but ideally, this would just be precomputed in FunctionSchema
-  // itself).  (NB: minus one in the loop is because we're testing if the
-  // *next* argument is kwarg-only before we advance the starting index)
-  int64_t kwarg_only_start = static_cast<int64_t>(arguments.size());
-  for (; kwarg_only_start > 0; kwarg_only_start--) {
-    const auto& arg = schema.arguments()[kwarg_only_start - 1];
-    if (!arg.kwarg_only()) {
-      break;
-    }
-  }
+  OperatorArgsKwargsView args_kwargs(op, arguments);
+  auto args = py::reinterpret_steal<py::object>(
+      PyTuple_New(args_kwargs.num_positional_args()));
 
-  // Find the first positional argument that isn't defaulted
-  auto is_default = [&](size_t idx) -> bool {
-    const auto& arg = schema.arguments()[idx];
-    if (!arg.default_value().has_value()) {
-      return false;
-    }
-    const auto& default_ivalue = *arg.default_value();
-    const auto& ivalue = arguments[idx];
-    if (default_ivalue != ivalue) {
-      return false;
-    }
-    return true;
-  };
-
-  int64_t positional_default_start = kwarg_only_start;
-  for (; positional_default_start > 0; positional_default_start--) {
-    if (!is_default(positional_default_start - 1)) {
-      break;
-    }
-  }
-
-  auto args =
-      py::reinterpret_steal<py::object>(PyTuple_New(positional_default_start));
-
-  auto schemaAwareToPyObject = [&](size_t idx) -> py::object {
+  auto schemaAwareToPyObject =
+      [&schema](size_t idx, const c10::IValue& argument) -> py::object {
     const auto& arg = schema.arguments()[idx];
     auto match = [&](c10::TypeKind kind) {
       const auto& t = arg.real_type();
@@ -114,38 +221,42 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
       }
       return false;
     };
-    if (arguments[idx].isNone()) {
+    if (argument.isNone()) {
       return py::none();
     } else if (match(c10::ScalarTypeType::Kind)) {
-      auto* obj =
-          getTHPDtype(static_cast<c10::ScalarType>(arguments[idx].toInt()));
+      auto* obj = getTHPDtype(static_cast<c10::ScalarType>(argument.toInt()));
       return py::reinterpret_borrow<py::object>(
           reinterpret_cast<PyObject*>(obj));
     } else if (match(c10::LayoutType::Kind)) {
-      auto* obj =
-          getTHPLayout(static_cast<c10::Layout>(arguments[idx].toInt()));
+      auto* obj = getTHPLayout(static_cast<c10::Layout>(argument.toInt()));
       return py::reinterpret_borrow<py::object>(
           reinterpret_cast<PyObject*>(obj));
     } else if (match(c10::MemoryFormatType::Kind)) {
-      return py::cast(static_cast<c10::MemoryFormat>(arguments[idx].toInt()));
+      return py::cast(static_cast<c10::MemoryFormat>(argument.toInt()));
     } else {
-      return torch::jit::toPyObject(arguments[idx]);
+      return torch::jit::toPyObject(argument);
     }
   };
 
   // Populate positional arguments
-  for (const auto idx : c10::irange(positional_default_start)) {
+  size_t idx = 0;
+  for (auto argument_it = args_kwargs.args_begin();
+       argument_it != args_kwargs.args_end();
+       ++argument_it) {
     PyTuple_SET_ITEM(
-        args.ptr(), idx, schemaAwareToPyObject(idx).release().ptr());
+        args.ptr(),
+        idx,
+        schemaAwareToPyObject(idx, *argument_it).release().ptr());
+    idx++;
   }
 
   // Populate keyword arguments
-  for (const auto idx : c10::irange(kwarg_only_start, arguments.size())) {
-    // But don't populate default keyword arguments
-    if (is_default(idx))
-      continue;
-    const auto& arg = schema.arguments()[idx];
-    kwargs[py::cast(arg.name())] = schemaAwareToPyObject(idx);
+  for (auto argument_it = args_kwargs.kwargs_begin();
+       argument_it != args_kwargs.kwargs_end();
+       ++argument_it) {
+    const auto& arg = schema.arguments()[argument_it.underlying_index()];
+    kwargs[py::cast(arg.name())] =
+        schemaAwareToPyObject(argument_it.underlying_index(), *argument_it);
   }
   return std::make_pair(std::move(args), std::move(kwargs));
 }
@@ -213,7 +324,7 @@ static PyObject* THPVariable_NewWithVar(
     std::optional<bool> has_torch_dispatch_if_known = std::nullopt);
 
 // clang-tidy gets confused by static const
-static const char* VOLATILE_WARNING =
+static constexpr const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
     "`with torch.no_grad():` instead.";
 
@@ -686,7 +797,7 @@ static Tensor make_tensor_for_subclass_helper(
 }
 
 static PyObject* THPVariable_make_wrapper_subclass(
-    PyObject*,
+    PyObject* /*unused*/,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
@@ -828,19 +939,26 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   return true;
 }
 
-#define FOR_EACH_DTENSOR_INTERNED_STRING(_) \
-  _(_comparison_key)                        \
-  _(_local_tensor)                          \
-  _(_spec)                                  \
-  _(args_schema)                            \
-  _(has_symints)                            \
-  _(kwargs_schema)                          \
-  _(op)                                     \
-  _(schema_info)                            \
-  _(shape)                                  \
-  _(static_argnum)                          \
-  _(static_kwargkey)                        \
-  _(stride)                                 \
+#if IS_PYTHON_3_11_PLUS
+#define MAYBE_FOR_EACH_PYTHON_3_10_MINUS_DTENSOR_INTERNED_STRING(_)
+#else
+#define MAYBE_FOR_EACH_PYTHON_3_10_MINUS_DTENSOR_INTERNED_STRING(_) _(__name__)
+#endif
+
+#define FOR_EACH_DTENSOR_INTERNED_STRING(_)                   \
+  MAYBE_FOR_EACH_PYTHON_3_10_MINUS_DTENSOR_INTERNED_STRING(_) \
+  _(_comparison_key)                                          \
+  _(_local_tensor)                                            \
+  _(_spec)                                                    \
+  _(args_schema)                                              \
+  _(kwargs_schema)                                            \
+  _(op)                                                       \
+  _(schema_info)                                              \
+  _(shape)                                                    \
+  _(size)                                                     \
+  _(static_argnum)                                            \
+  _(static_kwargkey)                                          \
+  _(stride)                                                   \
   _(tensor_meta)
 
 struct DTensorInternedStrings {
@@ -895,7 +1013,7 @@ static c10::SymDimVector tuple_to_symintlist(PyObject* obj) {
 // DTensor-specific variant of make_wrapper_subclass to minimize DTensor
 // overhead.
 static PyObject* THPVariable_dtensor_new(
-    PyObject*,
+    PyObject* /*unused*/,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
@@ -1094,41 +1212,133 @@ static PyObject* DTensor_OpSchema_post_init(PyObject* mod, PyObject* self) {
     return nullptr;
   }
 
-  const auto dtensor_spec_class = get_dtensor_spec_class();
-  bool has_symints = false;
-  for (const auto& a : args_schema) {
-    if (Py_TYPE(a.ptr()) != (PyTypeObject*)(dtensor_spec_class.ptr()) &&
-        !py::isinstance(a, dtensor_spec_class)) {
-      continue;
-    }
-    const py::handle tensor_meta = a.attr(dtensor_interned_strings.tensor_meta);
-    if (tensor_meta.is_none()) {
-      continue;
-    }
-    const auto contains_any_symint = [](const py::tuple& sequence) {
-      for (const auto& s : sequence) {
-        if (THPUtils_checkLong(s.ptr())) {
-          continue;
-        }
-        if (torch::is_symint(s)) {
-          return true;
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static py::list symint_array_to_list(SymIntArrayRef arr) {
+  py::list result(arr.size());
+  for (const auto idx : c10::irange(arr.size())) {
+    result[idx] = py::cast(arr[idx]);
+  }
+  return result;
+}
+
+static PyObject* DTensor_compute_global_tensor_info_impl(
+    const Tensor& tensor,
+    py::handle mesh,
+    const py::sequence& placements) {
+  Py_ssize_t idx = 0;
+  c10::SymDimVector tensor_shape(
+      tensor.sym_sizes().begin(), tensor.sym_sizes().end());
+  c10::SymDimVector tensor_strides(
+      tensor.sym_strides().begin(), tensor.sym_strides().end());
+  // NOTE: if this is a py::handle then this code stops working;
+  // apparently we can't rely on the bound method to stick around.
+  py::object mesh_size;
+  for (const auto& placement : placements) {
+    // TODO: C++ify DeviceMesh somehow; profiling seems
+    // to say that nearly all our remaining time spent is spent
+    // calling back into Python.
+    const auto& cpp_placement = placement.cast<const distributed::Placement&>();
+    if (const auto* cpp_shard =
+            dynamic_cast<const distributed::Shard*>(&cpp_placement)) {
+      const auto shard_dim = cpp_shard->dim;
+      TORCH_CHECK(
+          shard_dim >= 0,
+          "Shard placements should have negative dims normalized in the user-facing APIs: ",
+          py::cast<std::string>(py::str(placement)));
+      const auto tensor_ndim = tensor.dim();
+      TORCH_CHECK(
+          shard_dim < tensor_ndim,
+          "Sharding dim ",
+          shard_dim,
+          " greater than tensor ndim ",
+          tensor_ndim,
+          " for placement number ",
+          idx);
+
+      if (!mesh_size) {
+        mesh_size = mesh.attr(dtensor_interned_strings.size);
+      }
+      const auto mesh_dim_size = py::cast<int64_t>(mesh_size(idx));
+      tensor_shape[shard_dim] *= mesh_dim_size;
+      // recover tensor stride by modifying the strides that are
+      // larger than the current stride on the shard_dim.
+      for (const auto i : c10::irange(tensor_strides.size())) {
+        if (static_cast<int64_t>(i) != shard_dim &&
+            tensor_strides[i] >= tensor_strides[shard_dim]) {
+          tensor_strides[i] *= mesh_dim_size;
         }
       }
-      return false;
-    };
-    // Specifically it's supposed to be torch.Size.
-    py::object raw_shape = tensor_meta.attr(dtensor_interned_strings.shape);
-    if (!PyTuple_Check(raw_shape.ptr())) {
-      PyErr_SetString(PyExc_TypeError, "OpSchema.shape must be a tuple!");
-      return nullptr;
+    } else if (!cpp_placement.is_replicate() && !cpp_placement.is_partial()) {
+#if IS_PYTHON_3_11_PLUS
+      const auto placement_type_name =
+          py::str(py::handle(PyType_GetName(Py_TYPE(placement.ptr()))));
+#else
+      const auto placement_type_name =
+          py::str(py::handle((PyObject*)Py_TYPE(placement.ptr()))
+                      .attr(dtensor_interned_strings.__name__));
+#endif
+      return PyErr_Format(
+          PyExc_RuntimeError,
+          "placement type %s not supported!",
+          py::cast<std::string>(placement_type_name).c_str());
     }
-    const auto shape = py::reinterpret_steal<py::tuple>(raw_shape.release());
-    if (contains_any_symint(shape)) {
-      has_symints = true;
-    }
+    idx++;
   }
-  self_handle.attr(dtensor_interned_strings.has_symints) = has_symints;
-  Py_RETURN_NONE;
+  return py::make_tuple(
+             symint_array_to_list(tensor_shape),
+             symint_array_to_list(tensor_strides))
+      .release()
+      .ptr();
+}
+
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+static constexpr const char compute_global_tensor_info_doc[] =
+    "Compute the global size and stride of a DTensor from the given local tensor.\n"
+    "The local size is multiplied by `world_size` per Sharding dim.\n"
+    "The local stride is multiplied by `world_size` per Sharding dim, as long as the\n"
+    "dimension is outside sharding dim.\n"
+    "\n"
+    "For example, if we have a local tensor with size (4, 8, 2) and stride (16, 1, 8).\n"
+    "If the DTensor placements are [Shard(2)] and world_size is 2;\n"
+    "then the global size is (4, 8, 4) and stride is (16 * 2, 1, 8).\n"
+    "\n"
+    "Args:\n"
+    "    tensor (:class:`torch.Tensor`):\n"
+    "        Local tensor which DTensor will be constructed from.\n"
+    "    mesh (:class:`DeviceMesh`):\n"
+    "        Object which describes the mesh topology\n"
+    "        of devices for the DTensor.\n"
+    "    placements (Sequence[:class:`Placement`]]):\n"
+    "        The attribute of the DTensor that describes its layout\n"
+    "        on the mesh topology.\n"
+    "\n"
+    "Return:\n"
+    "    tensor_shape: A List of int which specifies the size of DTensor which build\n"
+    "        on top of the local tensor.\n"
+    "    tensor_stride: A List of int which specifies the stride of DTensor.\n";
+
+static PyObject* DTensor_compute_global_tensor_info(
+    PyObject* self,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK_VALUE(
+      nargs == 3,
+      "compute_global_tensor_info expects 3 arguments, got ",
+      nargs);
+  TORCH_CHECK_TYPE(
+      THPVariable_Check(args[0]),
+      "compute_global_tensor_info 1st argument must be Tensor!");
+  const auto& tensor = THPVariable_Unpack(args[0]);
+  const py::handle mesh = args[1];
+  TORCH_CHECK_TYPE(
+      PySequence_Check(args[2]),
+      "compute_global_tensor_info 3rd argument must be sequence!");
+  const py::sequence placements = py::reinterpret_borrow<py::sequence>(args[2]);
+  return DTensor_compute_global_tensor_info_impl(tensor, mesh, placements);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1319,13 +1529,18 @@ static int THPVariable_set_grad(
       self != (THPVariable*)py_grad, "can't assign Variable as its own grad");
 
   const auto& grad = THPVariable_Unpack(py_grad);
-  TORCH_CHECK(
-      var.dtype() == grad.dtype(),
-      "attempting to assign a gradient with dtype '",
-      grad.dtype(),
-      "' to a tensor with dtype '",
-      var.dtype(),
-      "'. Please ensure that the gradient and the tensor have the same dtype");
+  if (var.grad_dtype().has_value()) {
+    TORCH_CHECK(
+        grad.dtype() == var.grad_dtype().value(),
+        "attempting to assign a gradient with dtype '",
+        grad.dtype(),
+        "' to a tensor with grad_dtype '",
+        var.grad_dtype().value(),
+        "'. The gradient must match the tensor's grad_dtype (defaults to the tensor's "
+        "dtype). You can set the tensor's grad_dtype attribute with a specific dtype, or "
+        "None to allow any dtype. Set grad_dtype with caution. Diverging the dtypes of "
+        "a tensor and its gradient may break downstream systems that assume they match.");
+  }
   TORCH_CHECK(
       var.device().type() == grad.device().type(),
       "attempting to assign a gradient with device type '",
@@ -1334,8 +1549,11 @@ static int THPVariable_set_grad(
       var.device().type(),
       "'. Please ensure that the gradient and the tensor are on the same device");
   if (grad.layout() != kSparse) {
+    auto expected_options = var.options().dtype(
+        var.grad_dtype().has_value() ? var.grad_dtype().value()
+                                     : grad.scalar_type());
     TORCH_CHECK(
-        grad.options().type_equal(var.options()),
+        grad.options().type_equal(expected_options),
         "attempting to assign a gradient to a tensor that has data of a different type");
   }
   TORCH_CHECK(
@@ -1841,6 +2059,56 @@ static PyObject* THPVariable_get_nbytes(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable_get_grad_dtype(THPVariable* self, void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "grad_dtype");
+  }
+  const auto& var = THPVariable_Unpack(self);
+  TORCH_CHECK(
+      !var.grad_fn(), "grad_dtype can only be accessed on leaf tensors.");
+  if (!var.grad_dtype().has_value()) {
+    Py_RETURN_NONE;
+  } else {
+    return torch::autograd::utils::wrap(var.grad_dtype().value());
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static int THPVariable_set_grad_dtype(
+    THPVariable* self,
+    PyObject* obj,
+    void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_setter(self, "grad_dtype", obj);
+  }
+  const auto& var = THPVariable_Unpack(self);
+  TORCH_CHECK(
+      THPDtype_Check(obj) || obj == Py_None,
+      "grad_dtype must be a torch.dtype or None, but got ",
+      Py_TYPE(obj)->tp_name);
+  if (var.grad().defined() && obj != Py_None) {
+    auto new_dtype = reinterpret_cast<THPDtype*>(obj);
+    TORCH_CHECK(
+        var.grad().dtype() == new_dtype->scalar_type,
+        "Cannot set grad_dtype to '",
+        new_dtype->scalar_type,
+        "' because there is already a gradient with dtype '",
+        var.grad().dtype(),
+        "'. Please clear the gradient (.grad = None) before changing grad_dtype, "
+        "or ensure the new grad_dtype matches the existing gradient's dtype.");
+  }
+  std::optional<at::ScalarType> new_dtype;
+  if (obj != Py_None) {
+    auto* dtype = reinterpret_cast<THPDtype*>(obj);
+    new_dtype = dtype->scalar_type;
+  }
+  var.set_grad_dtype(new_dtype);
+  return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
+}
+
 static PyObject* THPVariable_get_itemsize(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
@@ -1999,6 +2267,11 @@ static struct PyGetSetDef THPVariable_properties[] = {
      (setter)THPVariable_set_imag,
      nullptr,
      nullptr},
+    {"grad_dtype",
+     (getter)THPVariable_get_grad_dtype,
+     (setter)THPVariable_set_grad_dtype,
+     nullptr,
+     nullptr},
     {nullptr}};
 
 static PyMappingMethods THPVariable_as_mapping = {
@@ -2051,6 +2324,10 @@ static PyMethodDef extra_functions[] = {
      DTensor_OpSchema_recompute_comparison_key,
      METH_O,
      nullptr},
+    {"_DTensor_compute_global_tensor_info",
+     castPyCFunctionFast(DTensor_compute_global_tensor_info),
+     METH_FASTCALL,
+     compute_global_tensor_info_doc},
     {nullptr}};
 
 struct THPVariableMeta {

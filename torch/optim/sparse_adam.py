@@ -19,7 +19,7 @@ class SparseAdam(Optimizer):
         betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         maximize: bool = False,
-    ):
+    ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 < lr:
@@ -42,9 +42,10 @@ class SparseAdam(Optimizer):
         sparse_params = []
         complex_params = []
         for index, param_group in enumerate(self.param_groups):
-            assert isinstance(param_group, dict), (
-                f"param_groups must be a list of dicts, but got {type(param_group)}"
-            )
+            if not isinstance(param_group, dict):
+                raise AssertionError(
+                    f"param_groups must be a list of dicts, but got {type(param_group)}"
+                )
             # given param group, convert given params to a list first before iterating
             for d_index, d_param in enumerate(param_group["params"]):
                 if d_param.is_sparse:

@@ -548,6 +548,7 @@ class PrepareModuleInput(ParallelStyle):
         assert self.desired_input_layouts is not None, (
             "desired module inputs should not be None!"
         )
+
         for inp, input_layout, desired_layout in zip(
             inputs, self.input_layouts, self.desired_input_layouts
         ):
@@ -559,7 +560,7 @@ class PrepareModuleInput(ParallelStyle):
     def _prepare_input_kwarg_fn(self, inputs, kwarg_inputs, device_mesh):
         prepared_arg_inputs = self._prepare_input_fn(inputs, device_mesh)
         prepared_kwarg_inputs = {}
-        for kwarg_key in kwarg_inputs.keys():
+        for kwarg_key in kwarg_inputs:
             kwarg_val = kwarg_inputs[kwarg_key]
             input_layout = self.input_kwarg_layouts.get(kwarg_key)
             desired_input_layout = self.desired_input_kwarg_layouts.get(kwarg_key)
@@ -663,6 +664,7 @@ class PrepareModuleOutput(ParallelStyle):
             raise ValueError(
                 "module outputs and output_layouts should have same length!"
             )
+
         for out, out_layout, desired_out_layout in zip(
             outputs, self.output_layouts, self.desired_output_layouts
         ):

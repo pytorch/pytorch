@@ -25,11 +25,11 @@
 namespace at::native {
 
 void _backward(const Tensor& self, TensorList inputs, const std::optional<Tensor>& gradient_opt, std::optional<bool> keep_graph, bool create_graph) {
-  return self._backward(inputs, gradient_opt, keep_graph, create_graph);
+  self._backward(inputs, gradient_opt, keep_graph, create_graph);
 }
 
 void set_data(Tensor& self, const Tensor& new_data) {
-  return self.set_data(new_data);
+  self.set_data(new_data);
 }
 
 Tensor data(const Tensor& self) {
@@ -54,7 +54,7 @@ Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
 }
 
 void retain_grad(Tensor& self) {
-  return self.retain_grad();
+  self.retain_grad();
 }
 
 bool retains_grad(const Tensor& self) {

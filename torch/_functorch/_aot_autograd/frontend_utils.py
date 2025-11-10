@@ -14,6 +14,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
+from .descriptors import BufferAOTInput, DifferentiableAOTInput, ParamAOTInput
 from .schemas import AOTConfig, FakifiedFlatArgs
 
 
@@ -41,7 +42,7 @@ def process_inputs(
                         return x
                     source = ConstantSource(f"sym_{idx}")
                     return shape_env.create_symintnode(
-                        shape_env.create_symbol(x, source),
+                        shape_env.create_symbol(x, source, positive=x >= 0),
                         hint=x,
                         source=source,
                     )
@@ -107,7 +108,10 @@ def construct_fake_mode(
 
 
 def _try_get_metadata_from_dynamo(
-    mod: torch.nn.Module, param_keys: KeysView[str], full_args_num: int
+    mod: torch.nn.Module,
+    param_keys: KeysView[str],
+    full_args_num: int,
+    full_args_descs: list[DifferentiableAOTInput],
 ) -> tuple[Optional[list[torch._guards.Source]], list[int]]:
     """
     Metadata is forwarded from Dynamo to AOTDispatch via special fields on GraphModule.
@@ -130,7 +134,12 @@ def _try_get_metadata_from_dynamo(
 
     if not hasattr(mod, "_param_name_to_source"):
         # is from export
-        return None, []
+        static_input_indices = [
+            i
+            for i, node in enumerate(full_args_descs)
+            if isinstance(node, (ParamAOTInput, BufferAOTInput))
+        ]
+        return None, static_input_indices
 
     # We now know this came from dynamo, and (1) we care about guards,
     # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
@@ -321,5 +330,6 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
             warnings.warn(
                 f"The tensor {noun} {', '.join(assigned_tensor_attributes)} {verb} assigned during export. "
                 "Such attributes must be registered as buffers using the `register_buffer` API "
-                "(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
+                "(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer).",
+                stacklevel=2,
             )

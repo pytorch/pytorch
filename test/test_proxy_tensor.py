@@ -1987,7 +1987,6 @@ only_real_tensor_failures = {
 }
 
 only_fake_tensor_failures = {
-    xfail('narrow'),
     xfail('tensor_split'),
 }
 

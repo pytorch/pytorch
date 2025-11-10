@@ -10,6 +10,7 @@ git clone https://github.com/OpenMathLib/OpenBLAS.git -b "${OPENBLAS_VERSION}" -
 
 OPENBLAS_CHECKOUT_DIR="OpenBLAS"
 OPENBLAS_BUILD_FLAGS="
+CC=gcc
 NUM_THREADS=128
 USE_OPENMP=1
 NO_SHARED=0
