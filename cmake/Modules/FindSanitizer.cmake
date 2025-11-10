@@ -172,9 +172,15 @@ foreach(lang IN LISTS languages)
     endforeach()
 
     if(CMAKE_${lang}_COMPILER_ID STREQUAL "Clang")
-      target_compile_options(
-        Sanitizer::${sanitizer_name}_${lang}
-        INTERFACE $<$<COMPILE_LANGUAGE:${lang}>:-shared-libsan>)
+      if(sanitizer_name STREQUAL "address")
+        target_compile_options(
+          Sanitizer::${sanitizer_name}_${lang}
+          INTERFACE $<$<COMPILE_LANGUAGE:${lang}>:-shared-libsan>)
+      else()
+        target_compile_options(
+          Sanitizer::${sanitizer_name}_${lang}
+          INTERFACE $<$<COMPILE_LANGUAGE:${lang}>:-static-libsan>)
+      endif()
     endif()
 
     if(sanitizer_name STREQUAL "address" AND lang STREQUAL CXX)
