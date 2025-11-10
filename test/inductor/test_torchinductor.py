@@ -2130,10 +2130,6 @@ class CommonTemplate:
         Test that reductions correctly use ReductionHint.INNER when reducing
         over the innermost dimension with large outer dimensions.
 
-        Previously, num_splits() would return DEFAULT for large numel_hint,
-        even when tiling_scores indicated an inner reduction pattern.
-        This test ensures the hint is corrected based on tiling_scores.
-
         """
 
         def check_inner_reduction(x, dim=-1):
