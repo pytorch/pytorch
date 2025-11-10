@@ -224,7 +224,7 @@ auto tuple_map(std::tuple<Args...>&& tuple, const Mapper& mapper) {
 
 } // namespace c10::guts
 
-HIDDEN_NAMESPACE_BEGIN(torch, headeronly, guts);
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly, guts)
 
 using c10::guts::function_traits;
 using c10::guts::infer_function_traits_t;
@@ -234,4 +234,4 @@ using c10::guts::tuple_map;
 using c10::guts::tuple_slice;
 using c10::guts::tuple_take;
 
-HIDDEN_NAMESPACE_END(torch, headeronl, guts);
+HIDDEN_NAMESPACE_END(torch, headeronl, guts)

@@ -152,7 +152,7 @@ template <class T>
 struct is_fundamental : std::is_fundamental<T> {};
 } // namespace c10::guts
 
-HIDDEN_NAMESPACE_BEGIN(torch, headeronly, guts);
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly, guts)
 
 using c10::guts::is_equality_comparable;
 using c10::guts::is_function_type;
@@ -161,4 +161,4 @@ using c10::guts::is_instantiation_of;
 using c10::guts::is_stateless_lambda;
 using c10::guts::is_type_condition;
 
-HIDDEN_NAMESPACE_END(torch, headeronly, guts);
+HIDDEN_NAMESPACE_END(torch, headeronly, guts)

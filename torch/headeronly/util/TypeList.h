@@ -515,7 +515,7 @@ auto map_types_to_values(Func&& func) {
 } // namespace typelist
 } // namespace c10::guts
 
-HIDDEN_NAMESPACE_BEGIN(torch, headeronly);
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 
 namespace guts {
 using c10::guts::false_t;
@@ -545,4 +545,4 @@ using c10::guts::typelist::typelist;
 
 } // namespace guts
 
-HIDDEN_NAMESPACE_END(torch, headeronly);
+HIDDEN_NAMESPACE_END(torch, headeronly)
