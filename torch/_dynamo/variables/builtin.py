@@ -1621,7 +1621,7 @@ class BuiltinVariable(VariableTracker):
                 # Custom repr - inline the method for tracing
                 bound_method = repr_method.__func__
                 fn_vt = VariableTracker.build(tx, bound_method)
-                return tx.inline_user_function_return(fn_vt, [arg], {})
+                return fn_vt.call_function(tx, [arg], {})
 
     def call_str(
         self, tx: "InstructionTranslator", arg: VariableTracker
