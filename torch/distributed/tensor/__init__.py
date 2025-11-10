@@ -14,6 +14,7 @@ from torch.distributed.tensor._api import (
     randn,
     zeros,
 )
+from torch.distributed.tensor._redistribute import disable_graph_based_transform
 from torch.distributed.tensor.placement_types import (
     Partial,
     Placement,
@@ -43,6 +44,7 @@ __all__ = [
     "rand",
     "randn",
     "zeros",
+    "disable_graph_based_transform",
 ]
 
 # For weights_only torch.load
