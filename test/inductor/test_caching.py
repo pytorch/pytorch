@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 
 
 if TYPE_CHECKING:
@@ -691,6 +692,80 @@ class ImplementationsTest(TestMixin, TestCase):
                 self.assert_key_not_in(key, impl)
                 self.assert_key_value_inserted_in(key, value, impl)
                 self.assert_key_has_value_in(key, value, impl)
+
+
+class IntegrationTest(TestMixin, TestCase):
+    @classmethod
+    def sub_dir(cls) -> str:
+        return f"testing-integration-instance-{cls.cls_id}"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        rmtree(impls._OnDiskCacheImpl()._base_dir / cls.sub_dir(), ignore_errors=True)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        rmtree(impls._OnDiskCacheImpl()._base_dir / cls.sub_dir(), ignore_errors=True)
+
+    @requires_gpu()
+    @set_caching_module_enabled(True)
+    @set_deterministic_caching_enabled(True)
+    @set_strictly_pre_populated_determinism(False)
+    @set_strictly_cached_determinism(False)
+    @patch_on_disk_cache_base_dir
+    @patch_remote_cache_with_on_disk_cache
+    @patch_deterministic_cache_intf_no_dump_on_exit
+    def test_matmul_padding(self) -> None:
+        from torch._inductor.fx_passes import pad_mm
+
+        def foo() -> torch.Tensor:
+            mat1: torch.Tensor = torch.randn(
+                2048, 1737, dtype=torch.float16, device=GPU_TYPE
+            )
+            mat2: torch.Tensor = torch.randn(
+                1737, 2048, dtype=torch.float16, device=GPU_TYPE
+            )
+            return torch.matmul(mat1, mat2)
+
+        # these are in pairs, with non-padded benchmarked first
+        # meaning on the first execution, pad mm should see that
+        # the orig time is 0.1 and the pad time is 0.2 (i.e. no pad)
+        # and on the second run the orig time is 0.4 and the pad time
+        # is 0.3 (i.e. pad)
+        do_bench_iter = iter([0.1, 0.2, 0.4, 0.3])
+
+        def fake_do_bench(*args, **kwargs) -> float:
+            nonlocal do_bench_iter
+            return next(do_bench_iter)
+
+        class FakePadCache:
+            def lookup(self, *args, **kwargs) -> None:
+                return None
+
+            def set_value(self, *args, **kwargs) -> None:
+                return None
+
+        was_padded = None
+
+        def fake_set_cached_should_pad(_, padded: bool) -> None:
+            nonlocal was_padded
+            was_padded = padded
+            return None
+
+        with (
+            patch.object(pad_mm, "get_do_bench", lambda: fake_do_bench),
+            patch.object(pad_mm, "get_pad_cache", lambda: FakePadCache()),
+            patch.object(pad_mm, "set_cached_should_pad", fake_set_cached_should_pad),
+        ):
+            cfoo = torch.compile(foo)
+            cfoo()
+            # based on the fake do bench values, the cold run should not pad
+            self.assertFalse(was_padded)
+            torch._dynamo.reset()
+            cfoo()
+            # based on the fake do bench values, the subsequent run would usually pad
+            # but with the deterministic cache it should reuse the prior result
+            self.assertFalse(was_padded)
 
 
 @instantiate_parametrized_tests

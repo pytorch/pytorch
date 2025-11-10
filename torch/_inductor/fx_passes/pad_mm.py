@@ -21,6 +21,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
     pad_mm_operations,
     pad_mm_precondition,
 )
+from torch._inductor.runtime.caching import icache
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
@@ -405,6 +406,21 @@ def get_do_bench() -> Callable[[Callable[[], Any]], float]:
         )
 
 
+def _should_pad_bench_params_encoder(
+    match: Match,
+    mat1: Tensor,
+    mat2: Tensor,
+    op: torch._ops.OpOverloadPacket,
+    input: Tensor | None = None,
+) -> dict[str, Any]:
+    return {
+        "key": should_pad_bench_key(
+            match, mat1, mat2, op, input, is_base_time_key=False
+        )
+    }
+
+
+@icache.record(custom_params_encoder=_should_pad_bench_params_encoder)
 def _should_pad_bench(
     match: Match,
     mat1: Tensor,
