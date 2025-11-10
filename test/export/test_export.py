@@ -2354,10 +2354,10 @@ class GraphModule(torch.nn.Module):
 
         ge_1: "Sym(u0 >= 0)" = getitem_1 >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
-        le_1: "Sym(u0 <= 1)" = getitem_1 <= 1;  getitem_1 = None
+        le_1: "Sym(u0 <= 1)" = getitem_1 <= 1
         _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le_1, "Runtime assertion failed for expression u0 <= 1 on node 'le_1'");  le_1 = _assert_scalar_default_1 = None
 
-        select: "f32[3]" = torch.ops.aten.select.int(x, 0, 0);  x = None
+        select: "f32[3]" = torch.ops.aten.select.int(x, 0, getitem_1);  x = getitem_1 = None
         return pytree.tree_unflatten((select,), self._out_spec)
 
     class true_graph_0(torch.nn.Module):

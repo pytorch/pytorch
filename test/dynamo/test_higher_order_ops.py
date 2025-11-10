@@ -1872,8 +1872,8 @@ def forward(self, L_x_ : torch.Tensor):
     getitem_3 = map_impl[3]
     getitem_4 = map_impl[4]
     getitem_5 = map_impl[5]
-    getitem_6 = map_impl[6];  map_impl = None
-    return (getitem, getitem_1, getitem_2, getitem_3, getitem_4, getitem_5, getitem_6)""",
+    value = map_impl[6];  map_impl = None
+    return (getitem, getitem_1, getitem_2, getitem_3, getitem_4, getitem_5, value)""",
             )
             self.assertExpectedInline(
                 body_graph,
