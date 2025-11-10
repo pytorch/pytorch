@@ -1628,9 +1628,22 @@ class GraphLowering(torch.fx.Interpreter):
                     or CompilerBisector.disable_subsystem(
                         "inductor", "lowerings", lambda: repr(n)
                     )
-                    or should_fallback_by_default(n)
                 )
             ):
+                debug("fallback_handler")
+                result = fallback_handler(n.target, add_to_fallback_set=False)(
+                    *args,  # type: ignore[possibly-undefined]
+                    **kwargs,  # type: ignore[possibly-undefined]
+                )
+            elif (
+                n.op == "call_function"
+                and isinstance(
+                    n.target, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+                )
+                and should_fallback_by_default(n)
+            ):
+                # this path supports fallback of both OpOverload and HOPs
+                # (e.g., triton_kernel_wrapper_functional)
                 debug("fallback_handler")
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
                     *args,  # type: ignore[possibly-undefined]
