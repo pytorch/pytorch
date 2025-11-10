@@ -215,8 +215,6 @@ exclude_patterns = [
     'aten/src/ATen/cpu/vml.h',
     'aten/src/ATen/CPUFixedAllocator.h',
     'aten/src/ATen/Parallel*.h',
-    'c10/xpu/**/*.h',
-    'c10/xpu/**/*.cpp',
     'c10/benchmark/intrusive_ptr_benchmark.cpp',
     'c10/cuda/CUDAAlgorithm.h',
     'c10/util/complex_math.h',
