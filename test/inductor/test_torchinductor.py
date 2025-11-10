@@ -13678,6 +13678,46 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
         self.assertEqual(len(codes), 2)
 
+    @skip_if_cpu
+    @unittest.skipIf(
+        config.cpp_wrapper,
+        "codegen triton_kernel_wrapper_functional is not implemented for cpp wrapper",
+    )
+    def test_lite_triton_kernel_wrapper_functional(self):
+        import torch
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            kernel_side_table,
+            triton_kernel_wrapper_functional,
+        )
+        from torch.testing._internal.triton_utils import mul2_kernel
+
+        kernel_side_table.reset_table()
+
+        def f(x, output):
+            out = triton_kernel_wrapper_functional(
+                kernel_idx=kernel_side_table.add_kernel(mul2_kernel),
+                constant_args_idx=kernel_side_table.add_constant_args(
+                    {"n_elements": output.numel(), "BLOCK_SIZE": 16}
+                ),
+                grid=[(x.numel(),)],
+                tma_descriptor_metadata={},
+                kwargs={
+                    "in_ptr0": x,
+                    "out_ptr": output,
+                },
+                tensors_to_clone=["in_ptr0", "out_ptr"],
+            )
+            return out["out_ptr"]
+
+        t1 = torch.rand(5, device=self.device)
+        t2 = torch.rand(5, device=self.device)
+
+        compiled_f = torch.compile(f, mode="lite")
+        out = compiled_f(t1, t2)
+
+        # Make sure t2 was not modified
+        self.assertNotEqual(out, t2)
+
     def test_lite_regional_compile_repeated_blocks(self):
         def fn(x, y):
             sin = torch.sin(x)

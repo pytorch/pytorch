@@ -3963,6 +3963,13 @@ def load_template(name: str, template_dir: Path) -> str:
 
 
 def should_fallback_by_default(node: torch.fx.Node) -> bool:
+    """Decide whether fallback for a node. This is only used in inductor lite mode."""
+    target = node.target
+
+    assert isinstance(
+        target, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+    ), f"Expected OpOverload or HigherOrderOperator, but found {type(target)}"
+
     if not config.fallback_by_default:
         return False
 
@@ -3975,7 +3982,18 @@ def should_fallback_by_default(node: torch.fx.Node) -> bool:
         ]
     )
 
-    if node.target in skip_fallback_due_to_dynamic_shape:
+    if target in skip_fallback_due_to_dynamic_shape:
         return False
+
+    # Most hops have registered lowering. We should follow the lowering and not fallback.
+    # However, in rare cases, hops may not register lowering, such as
+    # torch.ops.higher_order.triton_kernel_wrapper_functional. We should fallback for
+    # these hops.
+    fallback_hops = OrderedSet(
+        [torch.ops.higher_order.triton_kernel_wrapper_functional]
+    )
+
+    if isinstance(target, torch._ops.HigherOrderOperator):
+        return target in fallback_hops
 
     return not _needs_inductor_compile(node)
