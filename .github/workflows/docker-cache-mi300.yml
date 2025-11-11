@@ -32,7 +32,7 @@ jobs:
         with:
           # TODO: Uncomment before merging
           # run_id: ${{ github.event.workflow_run.id }}
-          run_id: 19270530895
+          run-id: 19270530895
           path: ./docker-builds-artifacts
           merge-multiple: true
 
