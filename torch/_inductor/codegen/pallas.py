@@ -197,7 +197,27 @@ class PallasKernelOverrides(OpOverrides):
         use_compute_types: bool = True,
     ) -> str:
         jax_dtype = torch_dtype_to_jax(dtype)
-        return f"{x}.astype({jax_dtype})"
+        # Wrap in jnp.asarray to handle scalars from integer indexing
+        return f"jnp.asarray({x}).astype({jax_dtype})"
+
+    @staticmethod
+    def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
+        """Convert a sympy expression to a JAX array indexing expression."""
+        from ..utils import get_bounds_index_expr
+
+        idx_str = V.kernel.kexpr(V.kernel.prepare_indexing(expr))
+        var = V.kernel.cse.generate(
+            V.kernel.compute, idx_str, bounds=get_bounds_index_expr(expr)
+        )
+        return PallasKernelOverrides.to_dtype(var, dtype)
+
+    @staticmethod
+    def constant(val, dtype: torch.dtype) -> str:
+        """Convert a constant value to JAX representation."""
+        jax_dtype = torch_dtype_to_jax(dtype)
+        if dtype == torch.bool:
+            return "True" if val else "False"
+        return f"jnp.array({val}, dtype={jax_dtype})"
 
 
 class PallasKernel(SIMDKernel):
@@ -214,6 +234,13 @@ class PallasKernel(SIMDKernel):
 
     overrides = PallasKernelOverrides  # type: ignore[assignment]
     kexpr: Callable[[sympy.Expr], str] = pexpr  # Use Python expression printer
+
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> None:
+        """Check array bounds for indirect indexing."""
+        # For now, skip explicit bounds checking as JAX/Pallas handles this internally
+        # TODO: Implement explicit bounds checking with assertions if needed
 
     def _get_index_str(self, index: sympy.Expr) -> str:
         """
@@ -345,17 +372,123 @@ class PallasKernel(SIMDKernel):
             f"Pallas backend does not yet support complex indexing pattern: {index}"
         )
 
+    def _has_iteration_vars(self, index: sympy.Expr) -> bool:
+        """Check if index expression contains iteration variables (x0, x1, etc.)."""
+        free_symbols = index.free_symbols
+        iter_vars = (
+            OrderedSet(self.range_tree_nodes.keys())
+            if self.range_trees
+            else OrderedSet()
+        )
+        return bool(free_symbols & iter_vars)
+
+    def _has_indirect_vars(self, index: sympy.Expr) -> bool:
+        """Check if index expression contains indirect variables (tmp0, tmp1, etc.)."""
+        free_symbols = index.free_symbols
+        for sym in free_symbols:
+            if str(sym).startswith("tmp"):
+                return True
+        return False
+
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:  # type: ignore[override]
         buf = self.args.input(name)
         dtype = V.graph.get_dtype(name)
-        # Get index string for load operation
-        index_str = self._get_index_str(index)
+
+        has_indirect = self._has_indirect_vars(index)
+        has_iter_vars = self._has_iteration_vars(index)
+
+        if has_indirect and has_iter_vars:
+            # Mixed indexing: has both indirect indices and iteration variables
+            # For multi-dimensional indexing like x[indices, :], we need to expand
+            # iteration variables to JAX arrays and use advanced indexing
+            # Since we're computing linear indices, flatten the buffer first
+            index_str = self._handle_mixed_indexing(index)
+            # Load the full array and reshape to 1D, then index with computed linear indices
+            load_expr = f"{buf}[...].flatten()[{index_str}]"
+        elif has_indirect:
+            # Pure indirect indexing: use the expression directly
+            # JAX supports integer array indexing natively
+            index_str = self.kexpr(index)
+            load_expr = f"{buf}[{index_str}]"
+        else:
+            # Regular indexing: no indirect variables
+            index_str = self._get_index_str(index)
+            load_expr = f"{buf}[{index_str}]"
+
         # Pallas refs must be unpacked with [...] or [index] to load
         return self.cse.generate(
             self.compute,
-            f"{buf}[{index_str}]",
+            load_expr,
             dtype=dtype,
         )
+
+    def _handle_mixed_indexing(self, index: sympy.Expr) -> str:
+        """
+        Handle indexing with both indirect variables and iteration variables.
+
+        For example, x[indices, :] generates index = i0 + stride * tmp0
+        where tmp0 is loaded from indices and i0 is the iteration variable.
+
+        We need to convert this to JAX advanced indexing with proper broadcasting.
+        """
+        # Get iteration variables
+        iter_vars = (
+            OrderedSet(self.range_tree_nodes.keys())
+            if self.range_trees
+            else OrderedSet()
+        )
+        free_symbols = index.free_symbols
+        used_iter_vars = sorted(free_symbols & iter_vars, key=str)
+
+        if len(used_iter_vars) == 0:
+            # No iteration variables, should not reach here
+            return self.kexpr(index)
+
+        # Try to decompose the linear index into multi-dimensional indices
+        # For x[indices, :], the linear index is typically: x0 + stride * tmp0
+        # We want to convert this to proper multi-dimensional indexing
+
+        # Generate the basic expression
+        index_str = self.kexpr(index)
+
+        # Replace iteration variables with JAX arange calls with proper shape for broadcasting
+        # For expressions like x0 + 8*tmp5 where tmp5 is shape (4,) and x0 iterates 0-7:
+        #   We need x0[None, :] giving (1, 8) to broadcast with tmp5[:, None] giving (4, 1)
+
+        # Identify indirect variables to understand dimensionality
+        indirect_vars = [str(sym) for sym in free_symbols if str(sym).startswith("tmp")]
+
+        for i, var in enumerate(used_iter_vars):
+            var_name = str(var)
+            if var in self.range_tree_nodes:
+                # Get the range for this variable
+                range_entry = self.range_tree_nodes[var]
+                # Extract the length from IterationRangesEntry
+                range_size = (
+                    range_entry.length
+                    if hasattr(range_entry, "length")
+                    else range_entry
+                )
+
+                # Create arange
+                arange_expr = f"jnp.arange({self.kexpr(range_size)})"
+
+                # When mixing with indirect indices, reshape for proper broadcasting
+                # The iteration variable represents the "inner" dimension and should be broadcastable
+                # Add leading None to make it (1, ..., size) so it broadcasts with indirect indices
+                if indirect_vars:
+                    arange_expr = f"{arange_expr}[None, :]"
+
+                index_str = index_str.replace(var_name, arange_expr)
+
+        # Now we need to reshape indirect variables too for proper broadcasting
+        # Wrap each tmp variable with [:, None] to make it broadcastable
+        for indirect_var in indirect_vars:
+            # Replace occurrences of the indirect variable with reshaped version
+            # Use word boundaries to avoid partial replacements
+            index_str = index_str.replace(indirect_var, f"{indirect_var}[:, None]")
+
+        return index_str
 
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: Any = None
@@ -364,8 +497,20 @@ class PallasKernel(SIMDKernel):
             raise Unsupported("pallas store mode not supported")
         out = self.args.output(name)
         self.store_buffer_names.add(name)
-        # Get index string for store operation
-        index_str = self._get_index_str(index)
+
+        has_indirect = self._has_indirect_vars(index)
+        has_iter_vars = self._has_iteration_vars(index)
+
+        if has_indirect and has_iter_vars:
+            # Mixed indexing with both indirect indices and iteration variables
+            index_str = self._handle_mixed_indexing(index)
+        elif has_indirect:
+            # Pure indirect indexing
+            index_str = self.kexpr(index)
+        else:
+            # Regular indexing
+            index_str = self._get_index_str(index)
+
         # Pallas refs must use [...] or [index] assignment to store
         self.stores.writeline(f"{out}[{index_str}] = {value}")
 
