@@ -1298,6 +1298,10 @@ void cleanup_thread_local_native_sharding_propagator_caches() {
 
 static void replace_dtensors_with_local_tensor(torch::jit::Stack& stack);
 
+static bool is_default_overload(const std::string& overload_name) {
+  return overload_name.empty() || overload_name == "default";
+}
+
 static bool is_random_op(const c10::OperatorHandle& op) {
   // NOTE: must stay in sync with _random_ops in
   // torch/distributed/tensor/_dispatch.py
@@ -1322,7 +1326,7 @@ static bool is_random_op(const c10::OperatorHandle& op) {
     return op_name.overload_name == "float";
   }
   if (name_without_namespace == "randint_like") {
-    return op_name.overload_name == "default" ||
+    return is_default_overload(op_name.overload_name) ||
         op_name.overload_name == "low_dtype" ||
         op_name.overload_name == "low_dtype_out";
   }
@@ -1331,7 +1335,7 @@ static bool is_random_op(const c10::OperatorHandle& op) {
   if (it == random_names.end()) {
     return false;
   }
-  return op_name.overload_name == "default";
+  return is_default_overload(op_name.overload_name);
 }
 
 // Puts local results on the stack. Return true for success, false for bailout
