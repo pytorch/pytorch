@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import importlib
+from dataclasses import dataclass
 from functools import cache
 from typing import Any, TYPE_CHECKING
 from typing_extensions import TypeVarTuple, Unpack
+
+from . import _registry
 
 
 if TYPE_CHECKING:
@@ -22,7 +25,14 @@ __all__ = [
 
 
 _FA4_MODULE_PATH: str | None = None
-_FA4_LIBRARY: Library | None = None
+
+
+@dataclass
+class _FA4Handle:
+    library: Library | None
+
+    def remove(self) -> None:
+        self.library = None
 
 
 @cache
@@ -31,17 +41,11 @@ def _get_device_major(device: torch.device) -> int:
     return major
 
 
-@cache
 def register_flash_attention_fa4(
     module_path: str = "flash_attn.cute.interface",
-) -> None:
+) -> _FA4Handle:
     """
     Register FA4 flash attention kernels with the PyTorch dispatcher.
-
-    This function is cached and will only register once per unique module_path.
-    Calling with the same module_path multiple times is a no-op. Implementation
-    switching support (unregistering one impl and registering another)
-    is not currently implemented.
 
     Args:
         module_path: Python module path to the FA4 implementation.
@@ -49,7 +53,7 @@ def register_flash_attention_fa4(
     global _FA4_MODULE_PATH
     _ = _fa4_import_module(module_path)
     _FA4_MODULE_PATH = module_path
-    _fa4_register_kernels()
+    return _FA4Handle(_fa4_register_kernels())
 
 
 @cache
@@ -60,8 +64,7 @@ def _fa4_import_module(module_path: str) -> ModuleType:
     return module
 
 
-def _fa4_register_kernels() -> None:
-    global _FA4_LIBRARY
+def _fa4_register_kernels() -> Library:
     lib = Library("aten", "IMPL", "CUDA")  # noqa: TOR901
     lib.impl("_flash_attention_forward", _fa4_flash_attention_forward_impl, "CUDA")
     lib.impl("_flash_attention_backward", _fa4_flash_attention_backward_impl, "CUDA")
@@ -75,8 +78,7 @@ def _fa4_register_kernels() -> None:
         _fa4_scaled_dot_product_flash_attention_backward_impl,
         "CUDA",
     )
-    # If we dont store the library, it will be garbage collected and the kernels will be unregistered
-    _FA4_LIBRARY = lib
+    return lib
 
 
 def _fa4_common_support_error(
@@ -437,3 +439,6 @@ def _fa4_scaled_dot_product_flash_attention_backward_impl(
     )
     dq, dk, dv = _transpose_dense(dq, dk, dv)
     return dq, dk, dv
+
+
+_registry.register_flash_attention_impl("FA4", register_fn=register_flash_attention_fa4)
