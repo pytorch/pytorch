@@ -911,6 +911,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   enableNanCheck_ = getCvarBool(TORCH_NCCL_NAN_CHECK, false);
   cudaEventCacheEnabled_.store(getCvarBool(TORCH_NCCL_CUDA_EVENT_CACHE, true));
   traceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 2000);
+  // Read again with default=0 to detect if env var was explicitly set (for DumpPipe)
+  traceBufferSizeDumpPipeDefault_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
   enableCollectiveHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
   // across different ProcessGroupNCCL(PG) instances. We need to get the
@@ -919,6 +921,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   PrefixStore* prefixStore = dynamic_cast<PrefixStore*>(store_.get());
   globalStore_ =
       prefixStore ? prefixStore->getUnderlyingNonPrefixStore() : store_;
+  debugInfoPipeFile_ = getCvarString({"TORCH_NCCL_DEBUG_INFO_PIPE_FILE"}, "");
   auto desyncDebug = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -1754,7 +1757,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     // DumpPipe is one per-trainer process, and its convenient to name them
     // after 'global' ranks in the system, So we assume processgroup (uid)==0 is
     // the global PG and has globally unique rank ids across trainers.
-    dumpPipe.emplace(pg_->globalRank());
+    dumpPipe.emplace(pg_->globalRank(), pg_->debugInfoPipeFile_, pg_->traceBufferSizeDumpPipeDefault_);
   }
   while (true) {
     // This won't have any lock since this lock is only used here.
