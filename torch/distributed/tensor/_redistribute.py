@@ -46,11 +46,6 @@ def disable_graph_based_transform(disabled: bool = True):
         enabled (bool): If True, force graph-based transform generation.
                        If False, use the default behavior (greedy for default device order,
                        graph-based for non-default device order).
-
-    Example:
-        >>> with disable_graph_based_transform(True):
-        ...     # redistribution will use graph-based transform
-        ...     dtensor = dtensor.redistribute(mesh, placements)
     """
     global _DISABLE_GRAPH_BASED_TRANSFORM
     old_value = _DISABLE_GRAPH_BASED_TRANSFORM
