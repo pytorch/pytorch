@@ -11,10 +11,11 @@ import os
 import os.path
 import re
 import sympy
+
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch._inductor.inductor_prims
@@ -55,10 +56,6 @@ from ._aot_autograd.descriptors import AOTOutput, SavedForBackwardsAOTOutput
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from ._aot_autograd.utils import get_cuda_generator_meta_val, is_with_effects
 from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
-
-
-if TYPE_CHECKING:
-    import sympy
 
 
 AOT_PARTITIONER_DEBUG: bool = config.debug_partitioner
@@ -160,15 +157,15 @@ def has_recomputable_rng_ops(fx_g: fx.GraphModule) -> bool:
     return False
 
 
-def sym_node_size(node: fx.Node) -> int:
+def sym_node_size(node: fx.Node) -> float:
     val = node.meta["val"]
 
     if not isinstance(val._sympy_(), sympy.Expr):
         return math.inf
     elif isinstance(val, (torch.SymInt, torch.SymBool)):
-        return 1
+        return 1.0
     elif isinstance(val, torch.SymFloat):
-        return 4
+        return 4.0
     else:
         raise ValueError(f"Unsupported sym node type: {type(val)}")
 
@@ -1913,7 +1910,7 @@ def solve_min_cut(
         ) or ("val" in node.meta and not isinstance(node.meta["val"], torch.Tensor))
 
         if is_sym_node(node):
-            weight = float(sym_node_size(node))
+            weight = sym_node_size(node)
         elif is_non_tensor_node:
             weight = (
                 0.0 if isinstance(node.meta.get("val"), BackwardState) else math.inf
