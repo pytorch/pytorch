@@ -351,6 +351,8 @@ def _preload_cuda_deps(err: _Optional[OSError] = None) -> None:
 
     # libnvToolsExt is Optional Dependency
     _preload_cuda_lib("nvtx", "libnvToolsExt.so.*[0-9]", required=False)
+    # libnvrtc-builtins.so is not Optional Dependency
+    _preload_cuda_lib("cuda_nvrtc", "libnvrtc-builtins.so.*[0-9]", required=True)
 
 
 # See Note [Global dependencies]
