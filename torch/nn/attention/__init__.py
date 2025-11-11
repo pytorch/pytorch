@@ -21,10 +21,10 @@ __all__: list[str] = [
     "SDPBackend",
     "sdpa_kernel",
     "WARN_FOR_UNFUSED_KERNELS",
-    "register_flash_attention_backend",
-    "install_flash_attention_impl",
-    "list_flash_attention_backends",
-    "current_flash_attention_backend",
+    "register_flash_attention_impl",
+    "activate_flash_attention_impl",
+    "list_flash_attention_impls",
+    "current_flash_attention_impl",
 ]
 
 
@@ -171,80 +171,80 @@ def _get_flash_version() -> str:
     return "2.5.7"
 
 
-_FlashAttentionBackend = Literal["FA4"]
-_FLASH_BACKEND_FA4: _FlashAttentionBackend = "FA4"
+_FlashAttentionImpl = Literal["FA4"]
+_FLASH_IMPL_FA4: _FlashAttentionImpl = "FA4"
 
 _RegisterFn = Callable[..., None]
-_FLASH_ATTENTION_BACKENDS: dict[str, _RegisterFn] = {}
+_FLASH_ATTENTION_IMPLS: dict[str, _RegisterFn] = {}
 _FLASH_ATTENTION_ACTIVE: str | None = None
 
 
-def register_flash_attention_backend(
-    backend: str | _FlashAttentionBackend,
+def register_flash_attention_impl(
+    impl: str | _FlashAttentionImpl,
     *,
     register_fn: _RegisterFn,
 ) -> None:
     """
-    Register the callable that installs a flash attention backend.
+    Register the callable that activates a flash attention impl.
 
     Args:
-        backend: Backend identifier (e.g., ``"FA4"``).
+        impl: Implementation identifier (e.g., ``"FA4"``).
         register_fn: Callable that performs the actual dispatcher registration.
-            This function will be invoked by :func:`install_flash_attention_impl`
+            This function will be invoked by :func:`activate_flash_attention_impl`
             and should register custom kernels with the PyTorch dispatcher.
             The callable may accept optional keyword arguments such as
-            ``module_path`` for configuring the backend implementation.
+            ``module_path`` for configuring the implementation.
 
     Example:
-        >>> def my_backend_register(module_path: str = "my_flash_impl"):
+        >>> def my_impl_register(module_path: str = "my_flash_impl"):
         ...     # Register custom kernels with torch dispatcher
         ...     pass  # doctest: +SKIP
-        >>> register_flash_attention_backend(
-        ...     "MyBackend", register_fn=my_backend_register
+        >>> register_flash_attention_impl(
+        ...     "MyImpl", register_fn=my_impl_register
         ... )  # doctest: +SKIP
     """
-    _FLASH_ATTENTION_BACKENDS[backend] = register_fn
+    _FLASH_ATTENTION_IMPLS[impl] = register_fn
 
 
-def install_flash_attention_impl(
-    backend: str | _FlashAttentionBackend,
+def activate_flash_attention_impl(
+    impl: str | _FlashAttentionImpl,
 ) -> None:
     """
-    Install into the dispatcher a previously registered flash attention backend.
+    Activate into the dispatcher a previously registered flash attention impl.
 
     Args:
-        backend: Backend identifier to activate. See
-            :func:`~torch.nn.attention.list_flash_attention_backends` for available
-            backends.
+        impl: Implementation identifier to activate. See
+            :func:`~torch.nn.attention.list_flash_attention_impls` for available
+            implementations.
 
     Example:
-        >>> install_flash_attention_impl("FA4")  # doctest: +SKIP
+        >>> activate_flash_attention_impl("FA4")  # doctest: +SKIP
     """
-    register_fn = _FLASH_ATTENTION_BACKENDS.get(backend)
+    register_fn = _FLASH_ATTENTION_IMPLS.get(impl)
     if register_fn is None:
-        raise ValueError(f"Unknown flash attention backend '{backend}'")
+        raise ValueError(f"Unknown flash attention impl '{impl}'")
     register_fn()
     global _FLASH_ATTENTION_ACTIVE
-    _FLASH_ATTENTION_ACTIVE = backend
+    _FLASH_ATTENTION_ACTIVE = impl
 
 
-def list_flash_attention_backends() -> list[str]:
-    """Return the names of all registered flash attention backends."""
-    return sorted(_FLASH_ATTENTION_BACKENDS.keys())
+def list_flash_attention_impls() -> list[str]:
+    """Return the names of all registered flash attention implementations."""
+    return sorted(_FLASH_ATTENTION_IMPLS.keys())
 
 
-def current_flash_attention_backend() -> str | None:
+def current_flash_attention_impl() -> str | None:
     """
-    Return the currently installed flash attention backend name, if any.
+    Return the currently installed flash attention impl name, if any.
 
-    ``None`` indicates that no custom backend has been installed.
+    ``None`` indicates that no custom impl has been installed.
     """
     return _FLASH_ATTENTION_ACTIVE
 
 
-# We are registering FA4 as a possible hot swap, but it is not actually installed in the dispatcher
-# until a user calls install_flash_attention_impl("FA4")
-register_flash_attention_backend(
-    _FLASH_BACKEND_FA4,
+# We are registering FA4 as a possible hot swap, but it is not actually activated in the dispatcher
+# until a user calls activate_flash_attention_impl("FA4")
+register_flash_attention_impl(
+    _FLASH_IMPL_FA4,
     register_fn=_fa4.register_flash_attention_fa4,
 )
