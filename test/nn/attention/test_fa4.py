@@ -8,7 +8,7 @@ from contextlib import contextmanager
 import torch
 import torch.nn.functional as F
 from torch.backends.cuda import SDPBackend
-from torch.nn.attention import install_flash_attention_impl, sdpa_kernel
+from torch.nn.attention import activate_flash_attention_impl, sdpa_kernel
 from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
@@ -118,7 +118,7 @@ class TestFlashAttentionFA4(TestCase):
         if not _fa4_dependencies_available():
             return
         # This might pollute tests.. TODO
-        install_flash_attention_impl("FA4")
+        activate_flash_attention_impl("FA4")
 
     @unittest.skipUnless(_fa4_dependencies_available(), "FA4 backend unavailable")
     def _assert_flash_matches_math(
