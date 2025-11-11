@@ -155,4 +155,7 @@ class TORCH_API MPSStreamImpl {
   MPSStreamImpl();
 };
 
+#ifdef __OBJC__
+void dispatch_sync_with_rethrow(dispatch_queue_t queue, void (^block)());
+#endif
 } // namespace at::mps
