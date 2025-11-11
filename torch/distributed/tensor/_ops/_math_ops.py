@@ -1403,20 +1403,21 @@ def logsumexp_strategy(op_schema: OpSchema) -> OpStrategy:
         reduction_linear=False,
     )
 
+
 @register_op_strategy(
-    [aten.var_mean.correction],
-    schema_info=RuntimeSchemaInfo(1,["keepdim"])
+    [aten.var_mean.correction], schema_info=RuntimeSchemaInfo(1, ["keepdim"])
 )
 def var_mean_strategy(op_schema: OpSchema) -> OpStrategy:
+    """Implements the sharding propagation strategy for var_mean."""
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
     if not isinstance(input_strategy, OpStrategy):
         raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
-    
+
     dims = None
     if len(op_schema.args_schema) > 1:
         dims = _infer_reduction_dims(args_schema[1], input_strategy.ndim)
-    
+
     reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
     keep_dim = cast(bool, op_schema.kwargs_schema.get("keepdim", False))
 
@@ -1428,7 +1429,7 @@ def var_mean_strategy(op_schema: OpSchema) -> OpStrategy:
     for op_spec in reduction_strategy.strategies:
         output_strategy.strategies.append(
             OpSpec(
-                output_specs=(op_spec.output_spec, op_spec.output_spec), 
+                output_specs=(op_spec.output_spec, op_spec.output_spec),
                 input_specs=op_spec.input_specs,
                 redistribute_cost=op_spec.redistribute_cost,
             )
