@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import requires_cuda, run_tests, TestC
 
 class TestDefaultStager(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         # Create a test state dictionary with various data types
         self.state_dict = {
             "model": torch.nn.Linear(10, 5).state_dict(),
@@ -206,7 +207,7 @@ class TestDefaultStager(TestCase):
         for i, result in enumerate(staged_results):
             self.assertIsInstance(result, dict)
             # Verify the result contains the expected keys
-            for key in state_dicts[i].keys():
+            for key in state_dicts[i]:
                 self.assertIn(key, result)
 
         stager.close()

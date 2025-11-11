@@ -2,7 +2,7 @@
 import operator
 import warnings
 from collections import namedtuple
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -340,7 +340,7 @@ def is_equalization_observer(observer: nn.Module) -> bool:
 
 def get_op_node_and_weight_eq_obs(
     input_eq_obs_node: Node, model: GraphModule, modules: dict[str, nn.Module]
-) -> tuple[Optional[Node], Optional[_WeightEqualizationObserver]]:
+) -> tuple[Node | None, _WeightEqualizationObserver | None]:
     """Gets the following weight equalization observer. There should always
     exist a weight equalization observer after an input equalization observer.
 
@@ -401,7 +401,7 @@ def get_op_node_and_weight_eq_obs(
 
 def maybe_get_weight_eq_obs_node(
     op_node: Node, modules: dict[str, nn.Module]
-) -> Optional[Node]:
+) -> Node | None:
     """Gets the weight equalization observer node if it exists."""
     if op_node.op != "call_function":
         raise AssertionError(
@@ -422,7 +422,7 @@ def maybe_get_weight_eq_obs_node(
 
 def maybe_get_next_input_eq_obs(
     node: Node, modules: dict[str, nn.Module]
-) -> Optional[_InputEqualizationObserver]:
+) -> _InputEqualizationObserver | None:
     """Gets the following input equalization observer if it exists.
 
     For example, in the case of connecting linear layers:
@@ -476,7 +476,7 @@ def maybe_get_next_input_eq_obs(
 
 def maybe_get_next_equalization_scale(
     node: Node, modules: dict[str, nn.Module]
-) -> Optional[torch.Tensor]:
+) -> torch.Tensor | None:
     """If the next next node is an InputEqualizationObserver then we want to
     return its equalization scale, else we return 1
 
@@ -528,7 +528,7 @@ def scale_weight_node(
     node: Node,
     modules: dict[str, nn.Module],
     equalization_scale: torch.Tensor,
-    next_equalization_scale: Optional[torch.Tensor],
+    next_equalization_scale: torch.Tensor | None,
 ) -> None:
     """Scale the weights for input-weight equalization by multiplying the
     weight by 1/equalization_scale and next_equalization_scale
@@ -594,7 +594,7 @@ def scale_weight_functional(
     model: GraphModule,
     modules: dict[str, nn.Module],
     equalization_scale: torch.Tensor,
-    next_equalization_scale: Optional[torch.Tensor],
+    next_equalization_scale: torch.Tensor | None,
 ) -> None:
     """Scales the weight value for functional layers"""
     if equalization_scale is None:
