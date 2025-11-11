@@ -453,7 +453,7 @@ class TestFullyShardCommunication(FSDPTest):
                 fully_shard(module, reshard_after_forward=False, mesh=mesh)
         model = fully_shard(model, reshard_after_forward=False, mesh=mesh)
         optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
-        model.set_reduce_scatter_divide_factor(divide_factor)
+        model.set_gradient_divide_factor(divide_factor)
 
         # Get ref_model params which should have the specific division factor applied
         block_params = set()
@@ -500,7 +500,7 @@ class TestFullyShardCommunication(FSDPTest):
             fully_shard(mlp, mp_policy=mp_policy)
         model = fully_shard(model, mp_policy=mp_policy)
         optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
-        model.set_reduce_scatter_divide_factor(divide_factor)
+        model.set_gradient_divide_factor(divide_factor)
 
         torch.manual_seed(42 + self.rank)
         inp = torch.randn((4, 16), device=device_type.type, dtype=param_dtype)
