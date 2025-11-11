@@ -46,7 +46,7 @@ def cuda_kernel_profiler(kernel_pattern="flash_attncute"):
     result["found"] = any(kernel_pattern in name for name in kernel_names)
 
 
-def flash_vs_math(q, k, v, is_causal=False, rtol=2):
+def flash_vs_math(test_case, q, k, v, is_causal=False, rtol=2):
     """
     Compare flash-attention backend against math backend in fp32 and low precision.
 
@@ -57,6 +57,7 @@ def flash_vs_math(q, k, v, is_causal=False, rtol=2):
     - Math backend in low precision (fp16/bf16)
 
     Args:
+        test_case: TestCase instance for assertions
         q, k, v: Input tensors in low precision (fp16/bf16) with requires_grad=True
         is_causal: Whether to use causal masking
         rtol: Relative tolerance multiplier for error comparison
@@ -88,13 +89,14 @@ def flash_vs_math(q, k, v, is_causal=False, rtol=2):
         )
 
     # sanity checks
-    assert out_flash.shape == out_math_fp32.shape == out_math_low.shape
-    assert not torch.isnan(out_flash).any()
-    assert not torch.isnan(out_math_low).any()
-    assert not torch.isnan(out_math_fp32).any()
-    assert torch.isfinite(out_flash).all()
-    assert torch.isfinite(out_math_low).all()
-    assert torch.isfinite(out_math_fp32).all()
+    test_case.assertEqual(out_flash.shape, out_math_fp32.shape)
+    test_case.assertEqual(out_flash.shape, out_math_low.shape)
+    test_case.assertFalse(torch.isnan(out_flash).any())
+    test_case.assertFalse(torch.isnan(out_math_low).any())
+    test_case.assertFalse(torch.isnan(out_math_fp32).any())
+    test_case.assertTrue(torch.isfinite(out_flash).all())
+    test_case.assertTrue(torch.isfinite(out_math_low).all())
+    test_case.assertTrue(torch.isfinite(out_math_fp32).all())
 
     # Calculate forward tolerance based on fp32 reference
     fwd_atol = 2 * (out_math_fp32 + 0.3 - 0.3 - out_math_fp32).abs().max().item()
@@ -104,8 +106,10 @@ def flash_vs_math(q, k, v, is_causal=False, rtol=2):
     flash_error = (out_flash - out_math_fp32).abs().max().item()
 
     # Assert flash error is within tolerance of math low precision error
-    assert flash_error <= rtol * math_low_error + fwd_atol, (
-        f"Flash error {flash_error:.2e} exceeds {rtol}x Math-low error {math_low_error:.2e} + {fwd_atol:.2e}"
+    test_case.assertLessEqual(
+        flash_error,
+        rtol * math_low_error + fwd_atol,
+        f"Flash error {flash_error:.2e} exceeds {rtol}x Math-low error {math_low_error:.2e} + {fwd_atol:.2e}",
     )
 
     return out_flash, out_math_low, out_math_fp32
@@ -136,7 +140,7 @@ class TestFlashAttentionFA4(TestCase):
 
         # Forward pass comparison
         out_flash, out_math_low, out_math_fp32 = flash_vs_math(
-            q, k, v, is_causal=is_causal, rtol=rtol
+            self, q, k, v, is_causal=is_causal, rtol=rtol
         )
 
         if test_backward:
@@ -166,20 +170,26 @@ class TestFlashAttentionFA4(TestCase):
             # Check flash gradients are within tolerance of math low precision
             dq_math_low_error = (dq_math_low - dq_math_fp32).abs().max().item()
             dq_flash_error = (dq_flash - dq_math_fp32).abs().max().item()
-            assert dq_flash_error <= rtol * dq_math_low_error + dq_atol, (
-                f"dQ: Flash error {dq_flash_error:.2e} exceeds {rtol}x Math-low error {dq_math_low_error:.2e} + {dq_atol:.2e}"
+            self.assertLessEqual(
+                dq_flash_error,
+                rtol * dq_math_low_error + dq_atol,
+                f"dQ: Flash error {dq_flash_error:.2e} exceeds {rtol}x Math-low error {dq_math_low_error:.2e} + {dq_atol:.2e}",
             )
 
             dk_math_low_error = (dk_math_low - dk_math_fp32).abs().max().item()
             dk_flash_error = (dk_flash - dk_math_fp32).abs().max().item()
-            assert dk_flash_error <= rtol * dk_math_low_error + dk_atol, (
-                f"dK: Flash error {dk_flash_error:.2e} exceeds {rtol}x Math-low error {dk_math_low_error:.2e} + {dk_atol:.2e}"
+            self.assertLessEqual(
+                dk_flash_error,
+                rtol * dk_math_low_error + dk_atol,
+                f"dK: Flash error {dk_flash_error:.2e} exceeds {rtol}x Math-low error {dk_math_low_error:.2e} + {dk_atol:.2e}",
             )
 
             dv_math_low_error = (dv_math_low - dv_math_fp32).abs().max().item()
             dv_flash_error = (dv_flash - dv_math_fp32).abs().max().item()
-            assert dv_flash_error <= rtol * (dv_math_low_error + dv_atol), (
-                f"dV: Flash error {dv_flash_error:.2e} exceeds {rtol}x (Math-low error {dv_math_low_error:.2e} + {dv_atol:.2e})"
+            self.assertLessEqual(
+                dv_flash_error,
+                rtol * (dv_math_low_error + dv_atol),
+                f"dV: Flash error {dv_flash_error:.2e} exceeds {rtol}x (Math-low error {dv_math_low_error:.2e} + {dv_atol:.2e})",
             )
 
     @unittest.skipUnless(_fa4_dependencies_available(), "FA4 backend unavailable")
