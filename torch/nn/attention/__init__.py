@@ -180,5 +180,10 @@ activate_flash_attention_impl = _registry.activate_flash_attention_impl
 list_flash_attention_impls = _registry.list_flash_attention_impls
 current_flash_attention_impl = _registry.current_flash_attention_impl
 
+register_flash_attention_impl.__module__ = __name__
+activate_flash_attention_impl.__module__ = __name__
+list_flash_attention_impls.__module__ = __name__
+current_flash_attention_impl.__module__ = __name__
+
 # Import built-in implementations to trigger self-registration
 from . import _fa4  # noqa: F401
