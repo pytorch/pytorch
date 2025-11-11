@@ -190,6 +190,8 @@ def complex_to_real_dtype(dtype: torch.dtype) -> torch.dtype:
 
 def _get_op_name(op: OpType) -> str:
     """Get the op name from the op."""
+    if isinstance(op, OpOverload):
+        op = op.overloadpacket
     return str(op).split(".", 1)[1]
 
 
