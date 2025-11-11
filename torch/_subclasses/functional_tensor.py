@@ -471,7 +471,7 @@ class FunctionalTensorMode(TorchDispatchMode):
 
         from torch._higher_order_ops.effects import handle_effects, has_effects
 
-        if has_effects(func, args, kwargs):
+        if has_effects(func):
             assert not torch._C._dispatch_has_kernel_for_dispatch_key(
                 func.name(), torch._C.DispatchKey.Functionalize
             )
