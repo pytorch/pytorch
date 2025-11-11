@@ -152,7 +152,8 @@ class MetalShaderLibrary {
   virtual MTLLibrary_t getLibrary();
   virtual MTLLibrary_t getLibrary(
       const std::initializer_list<std::string>& params);
-  MTLLibrary_t library = nullptr;
+  std::mutex library_mutex_;
+  MTLLibrary_t library_ = nullptr;
 
  private:
   std::pair<MTLComputePipelineState_t, MTLFunction_t> getLibraryPipelineState(

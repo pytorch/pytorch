@@ -805,11 +805,12 @@ MetalShaderLibrary::~MetalShaderLibrary() {
 }
 
 id<MTLLibrary> MetalShaderLibrary::getLibrary() {
-  if (C10_UNLIKELY(!library)) {
+  std::lock_guard guard(library_mutex_);
+  if (C10_UNLIKELY(!library_)) {
     TORCH_INTERNAL_ASSERT(nparams == 0);
-    library = compileLibrary(shaderSource);
+    library_ = compileLibrary(shaderSource);
   }
-  return library;
+  return library_;
 }
 
 id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::string>& params) {
@@ -869,16 +870,17 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
     }
   }
 
+  std::lock_guard guard(library_mutex_);
   const auto str = [NSString stringWithCString:src.c_str() encoding:NSASCIIStringEncoding];
   auto device = MPSDevice::getInstance()->device();
-  library = [device newLibraryWithSource:str options:options error:&error];
-  if (library == nil) {
+  library_ = [device newLibraryWithSource:str options:options error:&error];
+  if (library_ == nil) {
     if ([error domain] == MTLLibraryErrorDomain && [error code] == MTLLibraryErrorCompileFailure) {
       throw c10::SyntaxError([[error localizedDescription] UTF8String]);
     }
     TORCH_CHECK(false, "Failed to create metal library, error: ", [[error description] UTF8String]);
   }
-  return library;
+  return library_;
 }
 
 std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getLibraryPipelineState(
@@ -903,7 +905,8 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
 }
 
 std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
-  if (C10_UNLIKELY(!library && nparams > 0)) {
+  std::lock_guard guard(library_mutex_);
+  if (C10_UNLIKELY(!library_ && nparams > 0)) {
     throw std::runtime_error("Library must be initialized first");
   }
   std::vector<std::string> rc;
@@ -944,13 +947,14 @@ class BundledShaderLibary : public MetalShaderLibrary {
 
  protected:
   id<MTLLibrary> getLibrary() override {
-    if (C10_UNLIKELY(!library)) {
+    std::lock_guard guard(library_mutex_);
+    if (C10_UNLIKELY(!library_)) {
       auto device = MPSDevice::getInstance()->device();
       NSError* error = nil;
-      library = [device newLibraryWithData:getSectionData("metal_basic") error:&error];
-      TORCH_CHECK(library, "Failed to create metal library, error: ", [[error description] UTF8String]);
+      library_ = [device newLibraryWithData:getSectionData("metal_basic") error:&error];
+      TORCH_CHECK(library_, "Failed to create metal library, error: ", [[error description] UTF8String]);
     }
-    return library;
+    return library_;
   }
 
   id<MTLLibrary> getLibrary(const std::initializer_list<std::string>& params) override {
@@ -1140,7 +1144,7 @@ MetalShaderLibrary& MetalShaderLibrary::getBundledLibrary() {
 
 // DynamicMetalShaderLibrary implementation
 DynamicMetalShaderLibrary::~DynamicMetalShaderLibrary() {
-  [library release];
+  [library_ release];
 }
 
 // MetalKernelFunction implementation
