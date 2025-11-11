@@ -24,9 +24,9 @@ jobs:
     name: download-docker-builds-artifacts
     runs-on: ubuntu-latest
     outputs:
-      docker-pytorch-linux-jammy-rocm-n-py3: ${{ steps.process-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}
-      docker-pytorch-linux-noble-rocm-n-py3: ${{ steps.process-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}
-      docker-pytorch-linux-jammy-rocm-n-py3-benchmarks: ${{ steps.process-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}
+      pytorch-linux-jammy-rocm-n-py3: ${{ steps.process-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}
+      pytorch-linux-noble-rocm-n-py3: ${{ steps.process-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}
+      pytorch-linux-jammy-rocm-n-py3-benchmarks: ${{ steps.process-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4.1.7
@@ -61,8 +61,8 @@ jobs:
     steps:
       - name: debug
         run: |
-          JSON_STRINGIFIED=${{ toJSON(needs.download-docker-builds-artifacts.outputs) }}
-          echo "Outputs of jdownload-docker-builds-artifacts job: ${JSON_STRINGIFIED}"
+          JSON_STRINGIFIED="${{ toJSON(needs.download-docker-builds-artifacts.outputs) }}"
+          echo "Outputs of download-docker-builds-artifacts job: ${JSON_STRINGIFIED}"
 
       - name: configure aws credentials
         id: aws_creds
