@@ -375,11 +375,7 @@ class PallasKernel(SIMDKernel):
     def _has_iteration_vars(self, index: sympy.Expr) -> bool:
         """Check if index expression contains iteration variables (x0, x1, etc.)."""
         free_symbols = index.free_symbols
-        iter_vars = (
-            OrderedSet(self.range_tree_nodes.keys())
-            if self.range_trees
-            else OrderedSet()
-        )
+        iter_vars = OrderedSet(self.range_tree_nodes.keys())
         return bool(free_symbols & iter_vars)
 
     def _has_indirect_vars(self, index: sympy.Expr) -> bool:
@@ -434,11 +430,7 @@ class PallasKernel(SIMDKernel):
         We need to convert this to JAX advanced indexing with proper broadcasting.
         """
         # Get iteration variables
-        iter_vars = (
-            OrderedSet(self.range_tree_nodes.keys())
-            if self.range_trees
-            else OrderedSet()
-        )
+        iter_vars = OrderedSet(self.range_tree_nodes.keys())
         free_symbols = index.free_symbols
         used_iter_vars = sorted(free_symbols & iter_vars, key=str)
 
@@ -452,11 +444,7 @@ class PallasKernel(SIMDKernel):
             var_name = str(var)
             if var in self.range_tree_nodes:
                 range_entry = self.range_tree_nodes[var]
-                range_size = (
-                    range_entry.length
-                    if hasattr(range_entry, "length")
-                    else range_entry
-                )
+                range_size = range_entry.length
 
                 arange_expr = f"jnp.arange({self.kexpr(range_size)})"
                 if indirect_vars:
