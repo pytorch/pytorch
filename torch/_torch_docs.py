@@ -221,7 +221,7 @@ add_docstr(
     r"""
 pi -> float
 
-Returns pi(π).
+Returns pi(:math:`\pi`).
 
 Example::
 
