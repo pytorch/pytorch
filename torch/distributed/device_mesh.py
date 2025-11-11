@@ -195,7 +195,9 @@ else:
             _root_mesh: Optional["DeviceMesh"] = None,
         ) -> None:
             # no-op in OSS, logs API usage metrics in meta-internal runs
-            torch._C._log_api_usage_once("torch.distributed.device_mesh.DeviceMesh.__init__")
+            torch._C._log_api_usage_once(
+                "torch.distributed.device_mesh.DeviceMesh.__init__"
+            )
             if mesh is not None:
                 if _layout is not None or _rank_map is not None:
                     raise TypeError(
