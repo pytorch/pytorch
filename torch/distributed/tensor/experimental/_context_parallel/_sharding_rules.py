@@ -1,5 +1,11 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-# Context Parallelism sharding rules for scaled_dot_product attention ops
+"""
+Context Parallelism sharding rules for scaled_dot_product attention operators.
+
+Why cannot we embed the sharding rules for CP by default? Because Shard(2) is not
+a valid sharding for SDPA without CP enabled. As a result, this module provides utilities to
+dynamically install Shard(2) sharding rules.
+"""
 
 from contextlib import contextmanager
 
@@ -18,6 +24,8 @@ from torch.distributed.tensor.placement_types import Replicate, Shard
 
 
 aten = torch.ops.aten
+
+SEQ_DIM = 2
 
 
 @contextmanager
@@ -66,6 +74,9 @@ def _op_strategy_context(op_overload, strategy_func, schema_info=None):
         propagator.propagate_op_sharding.cache.cache_clear()
 
 
+# ==================== Flash Attention Strategies ====================
+
+
 def _scaled_dot_product_flash_attention_cp_strategy(op_schema: OpSchema) -> OpStrategy:
     """
     Strategy for flash attention forward with Context Parallelism support.
@@ -84,11 +95,11 @@ def _scaled_dot_product_flash_attention_cp_strategy(op_schema: OpSchema) -> OpSt
 
     # Add Context Parallelism strategy: shards on the sequence dim
     return_debug_mask = len(op_schema.args_schema) >= 6 and op_schema.args_schema[5]
-    debug_attn_mask_sharding = Shard(2) if return_debug_mask else Replicate()
+    debug_attn_mask_sharding = Shard(SEQ_DIM) if return_debug_mask else Replicate()
 
-    cp_strategy_placements: PlacementList = [
-        Shard(2),  # output
-        Shard(2),  # logsumexp
+    cp_strategy: PlacementList = [
+        Shard(SEQ_DIM),  # output
+        Shard(SEQ_DIM),  # logsumexp
         None,  # cum_seq_q
         None,  # cum_seq_k
         None,  # max_q
@@ -96,11 +107,11 @@ def _scaled_dot_product_flash_attention_cp_strategy(op_schema: OpSchema) -> OpSt
         Replicate(),  # rng_state
         None,  # unused
         debug_attn_mask_sharding,  # debugattn
-        Shard(2),  # q
-        Shard(2),  # k
-        Shard(2),  # v
+        Shard(SEQ_DIM),  # q
+        Shard(SEQ_DIM),  # k
+        Shard(SEQ_DIM),  # v
     ]
-    single_mesh_dim_strategies.append(cp_strategy_placements)
+    single_mesh_dim_strategies.append(cp_strategy)
 
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=9
@@ -113,7 +124,6 @@ def _scaled_dot_product_flash_attention_backward_cp_strategy(
     """
     Strategy for flash attention backward with Context Parallelism support.
     """
-    from torch.distributed.tensor._op_schema import OpStrategy as OpStrat
     from torch.distributed.tensor._ops._matrix_ops import (
         _scaled_dot_product_flash_attention_backward_base_strategies,
     )
@@ -126,28 +136,31 @@ def _scaled_dot_product_flash_attention_backward_cp_strategy(
     tensor_input_indices = [
         i
         for i, arg_spec in enumerate(op_schema.args_schema)
-        if isinstance(arg_spec, OpStrat)
+        if isinstance(arg_spec, OpStrategy)
     ]
     num_tensor_inputs = len(tensor_input_indices)
 
     # Context Parallelism: shards on the sequence dim
-    seq_dim_sharding: PlacementList = [
-        Shard(2),  # grad_q
-        Shard(2),  # grad_k
-        Shard(2),  # grad_v
-        Shard(2),  # grad_output
-        Shard(2),  # q
-        Shard(2),  # k
-        Shard(2),  # v
-        Shard(2),  # output
-        Shard(2),  # logsumexp
+    cp_strategy: PlacementList = [
+        Shard(SEQ_DIM),  # grad_q
+        Shard(SEQ_DIM),  # grad_k
+        Shard(SEQ_DIM),  # grad_v
+        Shard(SEQ_DIM),  # grad_output
+        Shard(SEQ_DIM),  # q
+        Shard(SEQ_DIM),  # k
+        Shard(SEQ_DIM),  # v
+        Shard(SEQ_DIM),  # output
+        Shard(SEQ_DIM),  # logsumexp
     ]
-    seq_dim_sharding.extend([Replicate()] * (num_tensor_inputs - 6))
-    single_mesh_dim_strategies.append(seq_dim_sharding)
+    cp_strategy.extend([Replicate()] * (num_tensor_inputs - 6))
+    single_mesh_dim_strategies.append(cp_strategy)
 
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=3
     )
+
+
+# ==================== Efficient Attention Strategies ====================
 
 
 def _scaled_dot_product_efficient_attention_cp_strategy(
@@ -168,18 +181,18 @@ def _scaled_dot_product_efficient_attention_cp_strategy(
     # Add Context Parallelism strategy
     has_attn_bias = op_schema.args_schema[3] is not None
 
-    cp_strategy_placements: PlacementList = [
-        Shard(2),  # output
-        Shard(2),  # logsumexp
+    cp_strategy: PlacementList = [
+        Shard(SEQ_DIM),  # output
+        Shard(SEQ_DIM),  # logsumexp
         None,  # philox_seed
         None,  # philox_offset
-        Shard(2),  # q
-        Shard(2),  # k
-        Shard(2),  # v
+        Shard(SEQ_DIM),  # q
+        Shard(SEQ_DIM),  # k
+        Shard(SEQ_DIM),  # v
     ]
     if has_attn_bias:
-        cp_strategy_placements.append(Replicate())  # attn bias - not sharded for CP
-    single_mesh_dim_strategies.append(cp_strategy_placements)
+        cp_strategy.append(Replicate())  # attn bias - not sharded for CP
+    single_mesh_dim_strategies.append(cp_strategy)
 
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=4
@@ -204,26 +217,29 @@ def _scaled_dot_product_efficient_attention_backward_cp_strategy(
     has_attn_bias = op_schema.args_schema[4] is not None
 
     # Context Parallelism: shards on the sequence dim
-    seq_dim_sharding: PlacementList = [
-        Shard(2),  # grad_q
-        Shard(2),  # grad_k
-        Shard(2),  # grad_v
+    cp_strategy: PlacementList = [
+        Shard(SEQ_DIM),  # grad_q
+        Shard(SEQ_DIM),  # grad_k
+        Shard(SEQ_DIM),  # grad_v
         Shard(1) if has_attn_bias else None,  # grad_bias
-        Shard(2),  # grad_output
-        Shard(2),  # q
-        Shard(2),  # k
-        Shard(2),  # v
-        Shard(2),  # output
-        Shard(2),  # logsumexp
+        Shard(SEQ_DIM),  # grad_output
+        Shard(SEQ_DIM),  # q
+        Shard(SEQ_DIM),  # k
+        Shard(SEQ_DIM),  # v
+        Shard(SEQ_DIM),  # output
+        Shard(SEQ_DIM),  # logsumexp
     ]
     if has_attn_bias:
-        seq_dim_sharding.insert(8, Shard(1))  # attn_bias input
-    seq_dim_sharding.extend([Replicate(), Replicate()])
-    single_mesh_dim_strategies.append(seq_dim_sharding)
+        cp_strategy.insert(8, Shard(1))  # attn_bias input
+    cp_strategy.extend([Replicate(), Replicate()])
+    single_mesh_dim_strategies.append(cp_strategy)
 
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=4
     )
+
+
+# ==================== cuDNN Attention Strategies ====================
 
 
 def _scaled_dot_product_cudnn_attention_cp_strategy(op_schema: OpSchema) -> OpStrategy:
@@ -251,12 +267,11 @@ def _scaled_dot_product_cudnn_attention_cp_strategy(op_schema: OpSchema) -> OpSt
     has_attn_bias = attn_bias_strategy is not None
 
     # Context Parallelism: shards on the sequence dim
-    cp_sharding = Shard(2)
-    logsumexp_sharding = cp_sharding if compute_log_sumexp else Replicate()
-    debug_attn_mask_sharding = cp_sharding if return_debug_mask else None
+    logsumexp_sharding = Shard(SEQ_DIM) if compute_log_sumexp else Replicate()
+    debug_attn_mask_sharding = Shard(SEQ_DIM) if return_debug_mask else None
 
-    cp_strategy_placements: PlacementList = [
-        cp_sharding,  # output
+    cp_strategy: PlacementList = [
+        Shard(SEQ_DIM),  # output
         logsumexp_sharding,  # logsumexp
         None,  # cum_seq_q
         None,  # cum_seq_k
@@ -265,13 +280,13 @@ def _scaled_dot_product_cudnn_attention_cp_strategy(op_schema: OpSchema) -> OpSt
         None,  # philox_seed
         None,  # philox_offset
         debug_attn_mask_sharding,  # debug_attn_mask
-        cp_sharding,  # q
-        cp_sharding,  # k
-        cp_sharding,  # v
+        Shard(SEQ_DIM),  # q
+        Shard(SEQ_DIM),  # k
+        Shard(SEQ_DIM),  # v
     ]
     if has_attn_bias:
-        cp_strategy_placements.append(Replicate())  # attn_bias - not sharded for CP
-    single_mesh_dim_strategies.append(cp_strategy_placements)
+        cp_strategy.append(Replicate())  # attn_bias - not sharded for CP
+    single_mesh_dim_strategies.append(cp_strategy)
 
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=9
@@ -285,30 +300,32 @@ def _scaled_dot_product_cudnn_attention_backward_cp_strategy(
     Strategy for cudnn attention backward with Context Parallelism support.
     """
     from torch.distributed.tensor._ops._matrix_ops import (
-        _scaled_scaled_dot_product_cudnn_attention_backward_base_strategies,
+        _scaled_dot_product_cudnn_attention_backward_base_strategies,
     )
 
     mesh = op_schema.get_mesh_from_args(validate=False)
     single_mesh_dim_strategies = (
-        _scaled_scaled_dot_product_cudnn_attention_backward_base_strategies(op_schema)
+        _scaled_dot_product_cudnn_attention_backward_base_strategies(op_schema)
     )
 
     has_attn_bias = op_schema.args_schema[8] is not None
     has_scale = len(op_schema.args_schema) >= 16 and False
 
     # Context Parallelism: shards on the sequence dim
-    context_parallel_sharding_out: PlacementList = [Shard(2)] * 3
-    context_parallel_sharding_inp: PlacementList = [Shard(2)] * 6
-    context_parallel_sharding_inp += [Replicate()] * 2  # philox_seed, philox_offset
-    context_parallel_sharding_inp += [Shard(2) if has_attn_bias else None]
-    context_parallel_sharding_inp += [None] * 6
+    cp_sharding_gout: PlacementList = [Shard(SEQ_DIM)] * 3  # grad_q, grad_k, grad_v
+    cp_sharding_ginp: PlacementList = [
+        Shard(SEQ_DIM)
+    ] * 6  # grad_output, q, k, v, output, logsumexp
+    cp_sharding_ginp += [Replicate()] * 2  # philox_seed, philox_offset
+    cp_sharding_ginp += [Shard(SEQ_DIM) if has_attn_bias else None]  # attn_bias
+    cp_sharding_ginp += [
+        None
+    ] * 6  # cum_seq_q, cum_seq_k, max_q, max_k, dropout_p, is_causal
     if has_scale:
-        context_parallel_sharding_inp.append(None)
+        cp_sharding_ginp.append(None)
 
-    context_parallel_sharding = (
-        context_parallel_sharding_out + context_parallel_sharding_inp
-    )
-    single_mesh_dim_strategies.append(context_parallel_sharding)
+    cp_sharding = cp_sharding_gout + cp_sharding_ginp
+    single_mesh_dim_strategies.append(cp_sharding)
 
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=3
