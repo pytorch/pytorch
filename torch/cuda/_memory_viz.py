@@ -10,7 +10,6 @@ import sys
 import warnings
 from functools import lru_cache
 from itertools import groupby
-from pathlib import Path
 from typing import Any
 
 
@@ -754,7 +753,8 @@ if __name__ == "__main__":
         if name == "-":
             data = pickle.load(sys.stdin.buffer)
         else:
-            data = pickle.loads(Path(name).read_bytes())
+            with open(name, "rb") as f:
+                data = pickle.load(f)
         if isinstance(data, list):  # segments only...
             data = {"segments": data, "traces": []}
         return data
