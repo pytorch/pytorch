@@ -399,50 +399,34 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         groups,
         n_spatial_dimensions,
     ):
-        template = CKGroupedConvFwdTemplate(
-            input_nodes,
-            layout,
-            stride=stride,
-            padding=padding,
-            dilation=dilation,
-            groups=groups,
+        ops = ck_conv_template.gen_ops(
+            input_nodes=input_nodes,
+            layout=layout,
             n_spatial_dimensions=n_spatial_dimensions,
         )
-        ops = template.gen_ops()
         for op in ops:
-            template.maybe_append_choice(
+            ck_conv_template.maybe_append_choice(
                 choices,
+                input_nodes=input_nodes,
+                layout=layout,
                 op=op,
+                stride=stride,
+                padding=padding,
+                dilation=dilation,
+                groups=groups,
+                n_spatial_dimensions=n_spatial_dimensions,
             )
 
-    def __init__(
+    def filter_op(
         self,
-        input_nodes,
+        op: "CKGroupedConvFwdOp",  # type: ignore[name-defined]
+        input_nodes: list,
         layout,
-        *,
-        stride,
-        padding,
-        dilation,
-        groups,
-        n_spatial_dimensions,
+        n_spatial_dimensions: int,
     ):
-        super().__init__(
-            "ck_conv_template",
-            input_nodes,
-            layout,
-        )
-        self.stride = stride
-        self.padding = padding
-        self.dilation = dilation
-        self.groups = groups
-        self.n_spatial_dimensions = n_spatial_dimensions
-
-    def filter_op(self, op: "CKGroupedConvFwdOp"):  # type: ignore[name-defined]
-        metas = [
-            T.get_layout()
-            for T in [*self.input_nodes, self.output_node]
-            if T is not None
-        ]
+        """Filter CK conv operations based on dtype, layout, and dimension compatibility."""
+        output_node = self._make_output_node(layout)
+        metas = [T.get_layout() for T in [*input_nodes, output_node]]
         X_meta = metas[0]
         W_meta = metas[1]
         Y_meta = metas[-1]
@@ -461,18 +445,24 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         if op.e_layout != torch_layout_to_ck_output_layout(Y_meta):
             return None
         # disable the instance if number of spatial dimensions doesn't match
-        if op.n_dim_spatial != self.n_spatial_dimensions:
+        if op.n_dim_spatial != n_spatial_dimensions:
             return None
         # disable 1x1 and odd-channels conv specializations for now
         if "Default" not in op.conv_forward_specialization:
             return None
         return op
 
-    def gen_ops(self):
+    def gen_ops(self, input_nodes: list, layout, n_spatial_dimensions: int):
+        """Generate filtered CK conv operation instances suitable for the current problem."""
         unfiltered_instances = gen_conv_ops_library()
 
         filtered_instances = list(
-            filter(lambda op: self.filter_op(op), unfiltered_instances)
+            filter(
+                lambda op: self.filter_op(
+                    op, input_nodes, layout, n_spatial_dimensions
+                ),
+                unfiltered_instances,
+            )
         )
         # NB: when using a fixed list order, most likely we will pick the subset of instances
         # which are very similar to each other. Randomizing the choice seems to solve this.
@@ -527,15 +517,19 @@ class CKGroupedConvFwdTemplate(CKTemplate):
     def render(  # type: ignore[override]
         self,
         kernel: ROCmTemplateKernel,
+        input_nodes: list,
+        output_node,
         op: "CKGroupedConvFwdOp",  # type: ignore[name-defined]
+        n_spatial_dimensions: int,
         **kwargs,
     ) -> str:
+        """Generate kernel code for the CK convolution operation."""
         template_buffer_node = kwargs.get("template_buffer_node")
         if template_buffer_node is not None:
-            self.output_node = template_buffer_node
-        X, W = self.input_nodes[0], self.input_nodes[1]
-        Y = self.output_node
-        Bias = self.input_nodes[2] if 3 == len(self.input_nodes) else None
+            output_node = template_buffer_node
+        X, W = input_nodes[0], input_nodes[1]
+        Y = output_node
+        Bias = input_nodes[2] if 3 == len(input_nodes) else None
 
         op = copy.deepcopy(op)
 
@@ -574,27 +568,32 @@ class CKGroupedConvFwdTemplate(CKTemplate):
                 size_args=[f"int32_t {arg}" for arg in size_arg_strs],
             ),
             n_d_tensors=1 if Bias is not None else 0,
-            n_dim_spatial=self.n_spatial_dimensions,
+            n_dim_spatial=n_spatial_dimensions,
             input_layout=op.a_layout,
             weight_layout=op.b_layout,
             output_layout=op.e_layout,
         )
 
-    def size_args(self):
-        x, w = self.input_nodes[0], self.input_nodes[1]
-        y = self.output_node
+    def size_args(self, input_nodes: list, layout, **kwargs):
+        """Compute size arguments for the convolution kernel call."""
+        stride = kwargs["stride"]
+        padding = kwargs["padding"]
+        dilation = kwargs["dilation"]
+        groups = kwargs["groups"]
+        x, w = input_nodes[0], input_nodes[1]
+        y = self._make_output_node(layout)
 
-        group_count = self.groups
+        group_count = groups
         n_batch = x.shape[0]  # type: ignore[index]
         n_out_channels = y.shape[1]  # type: ignore[index]
         n_in_channels = x.shape[1]  # type: ignore[index]
 
         filter_size_0, filter_size_1 = w.shape[2:4]  # type: ignore[index]
         input_size_0, input_size_1 = x.shape[2:4]  # type: ignore[index]
-        convolution_strides_0, convolution_strides_1 = self.stride
-        dilations_0, dilations_1 = self.dilation
-        left_pads_0, left_pads_1 = self.padding
-        right_pads_0, right_pads_1 = self.padding
+        convolution_strides_0, convolution_strides_1 = stride
+        dilations_0, dilations_1 = dilation
+        left_pads_0, left_pads_1 = padding
+        right_pads_0, right_pads_1 = padding
 
         return (
             group_count,
@@ -615,13 +614,42 @@ class CKGroupedConvFwdTemplate(CKTemplate):
             right_pads_1,
         )
 
+    def generate(  # type: ignore[override]
+        self,
+        input_nodes: list,
+        layout,
+        *,
+        stride,
+        padding,
+        dilation,
+        groups,
+        n_spatial_dimensions,
+        op: "CKGroupedConvFwdOp",  # type: ignore[name-defined]
+        **kwargs,
+    ):
+        kwargs_with_conv = {
+            **kwargs,
+            "op": op,
+            "stride": stride,
+            "padding": padding,
+            "dilation": dilation,
+            "groups": groups,
+            "n_spatial_dimensions": n_spatial_dimensions,
+        }
+        return super().generate(
+            input_nodes=input_nodes,
+            layout=layout,
+            **kwargs_with_conv,
+        )
+
     @override
     def get_runtime_arg_info(self) -> list[ArgInfo]:
         return []
 
     @override
     def get_runtime_arg_values(self, **kwargs: Any) -> list[Any]:
-        """
-        Helper method to retrieve runtime args from generate kwargs
-        """
         return []
+
+
+# Module-level template instance
+ck_conv_template = CKGroupedConvFwdTemplate("ck_conv")

@@ -8,7 +8,10 @@ from typing import Any
 import torch
 from torch._inductor import config
 from torch._inductor.codegen.rocm.ck_tile_template import CKTileTemplate
-from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
+from torch._inductor.codegen.rocm.rocm_kernel import (
+    ROCmTemplateCaller,
+    ROCmTemplateKernel,
+)
 from torch._inductor.codegen.rocm.rocm_template import ArgInfo
 from torch._inductor.ir import Buffer, Layout
 from torch.utils._ordered_set import OrderedSet
@@ -295,17 +298,6 @@ class CKTileGemmTemplate(CKTileTemplate):
     } // extern C
     """
 
-    def __init__(
-        self,
-        input_nodes: list[Buffer],
-        layout: Layout,
-    ) -> None:
-        super().__init__(
-            "ck_tile_gemm_template",
-            input_nodes=input_nodes,
-            layout=layout,
-        )
-
     def header(self) -> IndentedBuffer:
         res = super().header()
         res.splice(
@@ -394,9 +386,12 @@ class CKTileGemmTemplate(CKTileTemplate):
         )
         return res
 
-    def check_dtypes(self, op: "CKTileGemmOperation"):
+    def check_dtypes(
+        self, op: "CKTileGemmOperation", input_nodes: list[Buffer], layout: Layout
+    ):
+        output_node = Buffer(name="buf_out", layout=layout)
         X_dtype, W_dtype, out_dtype = [
-            T.get_layout().dtype for T in [*self.input_nodes, self.output_node]
+            T.get_layout().dtype for T in [*input_nodes, output_node]
         ]
         if op.datatype_a != self._TORCH_DTYPE_TO_CK[X_dtype]:
             return False
@@ -406,10 +401,13 @@ class CKTileGemmTemplate(CKTileTemplate):
             return False
         return True
 
-    def check_layouts(self, op: "CKTileGemmOperation"):
+    def check_layouts(
+        self, op: "CKTileGemmOperation", input_nodes: list[Buffer], layout: Layout
+    ):
+        output_node = Buffer(name="buf_out", layout=layout)
         X_layout, W_layout, out_layout = [
             torch_layout_to_ck_layout(T.get_layout())
-            for T in [*self.input_nodes, self.output_node]
+            for T in [*input_nodes, output_node]
         ]
         if op.layout_a != X_layout:
             return False
@@ -419,20 +417,20 @@ class CKTileGemmTemplate(CKTileTemplate):
             return False
         return True
 
-    def get_gemm_problem_size(self):
-        X_size, W_size = [T.get_layout().size for T in [*self.input_nodes]]
+    def get_gemm_problem_size(self, input_nodes: list[Buffer]):
+        X_size, W_size = [T.get_layout().size for T in input_nodes]
 
         M, K = X_size
         _, N = W_size
 
         return M, N, K
 
-    def check_block_tiles(self, op: "CKTileGemmOperation"):
+    def check_block_tiles(self, op: "CKTileGemmOperation", input_nodes: list[Buffer]):
         """
         The contiguous dimension of a tensor must be divisible by the block tile size
         This helper function enforces it for the inputs and the output.
         """
-        M, N, K = self.get_gemm_problem_size()
+        M, N, K = self.get_gemm_problem_size(input_nodes)
 
         def check(dim_size, tile_size, is_padded):
             if (
@@ -472,11 +470,11 @@ class CKTileGemmTemplate(CKTileTemplate):
 
         return True
 
-    def check_alignments(self, op: "CKTileGemmOperation"):
+    def check_alignments(self, op: "CKTileGemmOperation", input_nodes: list[Buffer]):
         """
         The contiguous dimension of a tensor must be divisible by the vector load size.
         """
-        M, N, K = self.get_gemm_problem_size()
+        M, N, K = self.get_gemm_problem_size(input_nodes)
 
         def max_alignment(contiguous_elements_per_tile, elements_per_thread, ck_dtype):
             for vector_load_bytes in (16, 8, 4, 2, 1):
@@ -566,7 +564,9 @@ class CKTileGemmTemplate(CKTileTemplate):
             return False
         return True
 
-    def filter_op(self, op: "CKTileGemmOperation"):
+    def filter_op(
+        self, op: "CKTileGemmOperation", input_nodes: list[Buffer], layout: Layout
+    ):
         """
         Determines whether a given op definition is suitable for the current
         input / output of the operation that this template implements.
@@ -575,13 +575,13 @@ class CKTileGemmTemplate(CKTileTemplate):
 
         Returns None if the op is not suitable, otherwise returns the op to be used.
         """
-        if not self.check_dtypes(op):
+        if not self.check_dtypes(op, input_nodes, layout):
             return None
-        if not self.check_layouts(op):
+        if not self.check_layouts(op, input_nodes, layout):
             return None
-        if not self.check_block_tiles(op):
+        if not self.check_block_tiles(op, input_nodes):
             return None
-        if not self.check_alignments(op):
+        if not self.check_alignments(op, input_nodes):
             return None
 
         return op
@@ -745,19 +745,25 @@ class CKTileGemmTemplate(CKTileTemplate):
         return rendered_definition
 
     def render(  # type: ignore[override]
-        self, kernel: ROCmTemplateKernel, op: "CKTileGemmOperation", **kwargs
+        self,
+        kernel: ROCmTemplateKernel,
+        input_nodes: list[Buffer],
+        output_node: Buffer,
+        op: "CKTileGemmOperation",
+        **kwargs,
     ) -> str:
         """
-        The primary entry point for the code rendering process used in this template.
+        Generate kernel code for the CK Tile GEMM operation.
+        Primary entry point for rendering the C++ kernel from the operation description.
         """
         epilogue_nodes = kwargs.get("epilogue_nodes")
         assert epilogue_nodes is None or 0 == len(epilogue_nodes)
         template_buffer_node = kwargs.get("template_buffer_node")
         if template_buffer_node is not None:
-            self.output_node = template_buffer_node
-        assert 2 == len(self.input_nodes)
-        X, W = self.input_nodes
-        Y = self.output_node
+            output_node = template_buffer_node
+        assert 2 == len(input_nodes)
+        X, W = input_nodes
+        Y = output_node
 
         instance_definition = self.emit_ck_instance(op)
 
@@ -863,7 +869,7 @@ class CKTileGemmTemplate(CKTileTemplate):
             rendered_dispatch=render_dispatch(op.pipeline, op.name()),
         )
 
-    def gen_ops(self):
+    def gen_ops(self, input_nodes: list[Buffer], layout: Layout):
         """
         Creates a list of `CKTileGemmOperation` instances that match the GEMM operation this template represents.
         The instances are guaranteed to have the correct layout, dtype and dimension padding for the GEMM input arguments.
@@ -877,7 +883,9 @@ class CKTileGemmTemplate(CKTileTemplate):
                 "No Composable Kernel Universal GEMM instances found. "
                 "Please check if the library is installed."
             )
-        filtered_instances = list(filter(self.filter_op, instances))
+        filtered_instances = list(
+            filter(lambda op: self.filter_op(op, input_nodes, layout), instances)
+        )
         # NB: when using a fixed list order, most likely we will pick the subset of instances
         # which are very similar to each other. Randomizing the choice seems to solve this.
         random.seed(-11)
@@ -896,6 +904,23 @@ class CKTileGemmTemplate(CKTileTemplate):
         )
         return chosen_instances
 
+    def generate(  # type: ignore[override]
+        self,
+        input_nodes: list[Buffer],
+        layout: Layout,
+        op: "CKTileGemmOperation",
+        kBatch: int,
+        **kwargs,
+    ) -> ROCmTemplateCaller:
+        kwargs_with_runtime = {**kwargs, "op": op, "kBatch": kBatch}
+        return super().generate(
+            input_nodes=input_nodes,
+            layout=layout,
+            # TODO: implement input_reorder support for CKTILE
+            input_reorder=None,
+            **kwargs_with_runtime,
+        )
+
     @staticmethod
     def add_choices(
         choices,
@@ -903,22 +928,30 @@ class CKTileGemmTemplate(CKTileTemplate):
         input_nodes,
     ):
         """
-        Add Composable Kernel Universal GEMM instance choices to the auto-tuning list.
+        Add Composable Kernel Tile GEMM instance choices to the auto-tuning list.
+
+        This is a legacy interface that generates all suitable CK Tile GEMM configurations
+        for the given input and adds them to the choice list for auto-tuning.
+
+        NOTE: This method is kept for backward compatibility but will eventually be
+        replaced by the heuristic-based interface (get_template_configs).
         """
-        template = CKTileGemmTemplate(
-            input_nodes,
-            layout,
-        )
-        ops = template.gen_ops()
+        template = ck_tile_gemm_template
+        ops = template.gen_ops(input_nodes, layout)
+
         for op in ops:
-            for k_batch in template.k_batch_choices(op):
+            for k_batch in template.k_batch_choices(op, input_nodes, layout):
                 template.maybe_append_choice(
                     choices,
+                    input_nodes=input_nodes,
+                    layout=layout,
                     op=op,
                     kBatch=k_batch,
                 )
 
-    def k_batch_choices(self, op: "CKTileGemmOperation") -> tuple[int, ...]:
+    def k_batch_choices(
+        self, op: "CKTileGemmOperation", input_nodes: list[Buffer], layout: Layout
+    ) -> tuple[int, ...]:
         """
         Returns a list of k_batch choices for the template.
         """
@@ -933,7 +966,7 @@ class CKTileGemmTemplate(CKTileTemplate):
                 return False
             return True
 
-        _, _, K, _, _, _ = self.size_args()
+        _, _, K, _, _, _ = self.size_args(input_nodes, layout)
         if op.layout_a == "Row" or op.layout_b == "Col":
             choices = tuple(
                 filter(
@@ -949,13 +982,14 @@ class CKTileGemmTemplate(CKTileTemplate):
 
         return choices
 
-    def size_args(self):
+    def size_args(self, input_nodes: list[Buffer], layout: Layout, **kwargs):
         """
-        Sizes and strides to be used for the kernel call
+        Compute size and stride arguments for the GEMM kernel call.
+        Returns M, N, K dimensions and strides for input, weight, and output tensors.
         """
-        X = self.input_nodes[0]
-        W = self.input_nodes[1]
-        Y = self.output_node
+        X = input_nodes[0]
+        W = input_nodes[1]
+        Y = Buffer(name="buf_out", layout=layout)
 
         M = X.get_size()[0]
         K = X.get_size()[1]
@@ -977,3 +1011,7 @@ class CKTileGemmTemplate(CKTileTemplate):
                 "Missing runtime arguments: " + ", ".join(arg_names - kwargs.keys())
             )
         return [kwargs[k] for k in arg_names]
+
+
+# Module-level template instance
+ck_tile_gemm_template = CKTileGemmTemplate("ck_tile_gemm")
