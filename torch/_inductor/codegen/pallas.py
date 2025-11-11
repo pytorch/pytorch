@@ -390,25 +390,34 @@ class PallasKernel(SIMDKernel):
                 return True
         return False
 
-    def load(self, name: str, index: sympy.Expr) -> CSEVariable:  # type: ignore[override]
-        buf = self.args.input(name)
-        dtype = V.graph.get_dtype(name)
+    def _get_index_expr(self, index: sympy.Expr) -> tuple[str, bool]:
+        """
+        Get the index expression string and whether it needs flattening.
 
+        Returns:
+            Tuple of (index_str, needs_flatten) where needs_flatten indicates
+            if the buffer should be flattened before indexing (for mixed indexing).
+        """
         has_indirect = self._has_indirect_vars(index)
         has_iter_vars = self._has_iteration_vars(index)
 
         if has_indirect and has_iter_vars:
-            # Mixed indexing with indirect and iteration vars
-            index_str = self._handle_mixed_indexing(index)
-            load_expr = f"{buf}[...].flatten()[{index_str}]"
+            return self._handle_mixed_indexing(index), True
         elif has_indirect:
-            # Pure indirect indexing
-            index_str = self.kexpr(index)
-            load_expr = f"{buf}[{index_str}]"
+            return self.kexpr(index), False
         else:
-            # Regular indexing
-            index_str = self._get_index_str(index)
+            return self._get_index_str(index), False
+
+    def load(self, name: str, index: sympy.Expr) -> CSEVariable:  # type: ignore[override]
+        buf = self.args.input(name)
+        dtype = V.graph.get_dtype(name)
+
+        index_str, needs_flatten = self._get_index_expr(index)
+        if needs_flatten:
+            load_expr = f"{buf}[...].flatten()[{index_str}]"
+        else:
             load_expr = f"{buf}[{index_str}]"
+
         return self.cse.generate(
             self.compute,
             load_expr,
@@ -469,16 +478,7 @@ class PallasKernel(SIMDKernel):
         out = self.args.output(name)
         self.store_buffer_names.add(name)
 
-        has_indirect = self._has_indirect_vars(index)
-        has_iter_vars = self._has_iteration_vars(index)
-
-        if has_indirect and has_iter_vars:
-            index_str = self._handle_mixed_indexing(index)
-        elif has_indirect:
-            index_str = self.kexpr(index)
-        else:
-            index_str = self._get_index_str(index)
-
+        index_str, _ = self._get_index_expr(index)
         self.stores.writeline(f"{out}[{index_str}] = {value}")
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:  # type: ignore[override]
