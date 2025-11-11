@@ -13684,7 +13684,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         "codegen triton_kernel_wrapper_functional is not implemented for cpp wrapper",
     )
     def test_lite_triton_kernel_wrapper_functional(self):
-        import torch
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
         from torch._higher_order_ops.triton_kernel_wrap import (
             kernel_side_table,
             triton_kernel_wrapper_functional,
