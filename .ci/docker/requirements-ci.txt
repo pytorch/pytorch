@@ -369,7 +369,7 @@ pwlf==2.2.1
 pyyaml==6.0.3
 pyzstd
 setuptools==78.1.1
-packaging==23.1
+packaging==24.0
 six
 
 scons==4.5.2 ; platform_machine == "aarch64"
