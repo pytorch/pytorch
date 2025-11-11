@@ -1719,9 +1719,17 @@ def tuned_scaled_mm(
     ):
         overriders = dict(USE_FAST_ACCUM=use_fast_accum)
 
+        # scaled_mm requires N and K to be 16-byte aligned
+        # TODO (jananisriram): investigate restriction on M to be divisible by 16
+        is_16_byte_aligned = m % 16 == 0 and n % 16 == 0 and k % 16 == 0
+
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exist
-        if use_triton_tma_template(mat_a, mat_b, output_layout=layout) and not bias:
+        if (
+            use_triton_tma_template(mat_a, mat_b, output_layout=layout)
+            and not bias
+            and is_16_byte_aligned
+        ):
             scale_a_size, scale_b_size = scale_a_real.shape, scale_b_real.shape
 
             scale_option_a, scale_option_b = get_scaling_options(
