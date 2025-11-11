@@ -135,7 +135,7 @@ jobs:
       - uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
         name: Push to https://ghcr.io/
         id: push-to-ghcr-io
-        #if: ${{ github.event_name == 'push' }}
+        if: ${{ github.event_name == 'push' }}
         env:
           ECR_DOCKER_IMAGE: ${{ steps.build-docker-image.outputs.docker-image }}
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
@@ -148,9 +148,9 @@ jobs:
             ghcr_image="ghcr.io/pytorch/ci-image"
             tag=${ECR_DOCKER_IMAGE##*:}
             # Push docker image to the ghcr.io
-            # echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
+            echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
             docker tag "${ECR_DOCKER_IMAGE}" "${ghcr_image}:${tag}"
-            #docker push "${ghcr_image}:${tag}"
+            docker push "${ghcr_image}:${tag}"
 
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
