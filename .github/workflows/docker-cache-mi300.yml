@@ -61,8 +61,8 @@ jobs:
     steps:
       - name: debug
         run: |
-          JSON_STRINGIFIED=${{ toJSON(needs.download-docker-builds-artifacts.outputs.docker-tags) }}
-          echo "Outputs of docker-build job: ${JSON_STRINGIFIED}"
+          JSON_STRINGIFIED=${{ needs.download-docker-builds-artifacts.outputs }}
+          echo "Outputs of jdownload-docker-builds-artifacts job: ${JSON_STRINGIFIED}"
 
       - name: configure aws credentials
         id: aws_creds
