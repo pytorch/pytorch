@@ -1631,7 +1631,7 @@ py::object dispatchDTensorOp(
         }
         if (sets_intersect(
                 arg_alias_info->beforeSets(), ret_alias_info->beforeSets())) {
-          py::handle ret;
+          py::object ret;
           if (wrapped_result_tuple.has_value()) {
             ret = wrapped_result_tuple.value()[ret_idx];
           } else {
