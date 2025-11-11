@@ -318,7 +318,7 @@ def check_aoti_shim_symbols(install_root: Path) -> None:
     include_dir = install_root / "include"
     assert include_dir.exists(), f"Expected {include_dir} to be present"
 
-    # There are no constexpr symbols, so we need to actually use functions
+    # There are no constexpr symbols etc., so we need to actually use functions
     # so that some symbols are found.
     test_shim_content = """
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
@@ -347,6 +347,50 @@ int main() {
     assert num_symbols_shim == 2, (
         f"Expected shim headers to expose symbols with TORCH_STABLE_ONLY, "
         f"but found {num_symbols_shim} symbols"
+    )
+
+
+def check_stable_c_shim_symbols(install_root: Path) -> None:
+    """
+    Test that stable C shim headers still expose symbols with TORCH_STABLE_ONLY.
+    """
+    include_dir = install_root / "include"
+    assert include_dir.exists(), f"Expected {include_dir} to be present"
+
+    # Check if the stable C shim exists
+    stable_shim = include_dir / "torch" / "csrc" / "stable" / "c" / "shim.h"
+    if not stable_shim.exists():
+        # Skip test if stable C shim doesn't exist
+        return
+
+    test_stable_shim_content = """
+#include <torch/csrc/stable/c/shim.h>
+int main() {
+    // Reference stable C API functions to create undefined symbols
+    AOTITorchError (*fp1)(const char*, uint32_t*, int32_t*) = &torch_parse_device_string;
+    AOTITorchError (*fp2)(uint32_t*) = &torch_get_num_threads;
+    (void)fp1; (void)fp2;
+    return 0;
+}
+"""
+
+    compile_flags = [
+        "g++",
+        "-std=c++17",
+        f"-I{include_dir}",
+        f"-I{include_dir}/torch/csrc/api/include",
+        "-c",
+        "-DTORCH_STABLE_ONLY",
+    ]
+
+    symbols_stable_shim = _compile_and_extract_symbols(
+        cpp_content=test_stable_shim_content,
+        compile_flags=compile_flags,
+    )
+    num_symbols_stable_shim = len(symbols_stable_shim)
+    assert num_symbols_stable_shim == 2, (
+        f"Expected stable C shim headers to expose symbols with TORCH_STABLE_ONLY, "
+        f"but found {num_symbols_stable_shim} symbols"
     )
 
 
@@ -384,6 +428,7 @@ def main() -> None:
     check_stable_api_symbols(install_root)
     check_headeronly_symbols(install_root)
     check_aoti_shim_symbols(install_root)
+    check_stable_c_shim_symbols(install_root)
 
 
 if __name__ == "__main__":
