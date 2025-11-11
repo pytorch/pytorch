@@ -5346,6 +5346,507 @@ class TestBlockStateAbsorption(TestCase):
         self.assertEqual(rc, "False", "Triton was imported when importing torch!")
 
 
+@contextlib.contextmanager
+def caching_host_allocator_use_host_register(use_cuda_host_register: bool):
+    if use_cuda_host_register:
+        torch.cuda.memory._set_allocator_settings(
+            "pinned_use_cuda_host_register:True,pinned_num_register_threads:8"
+        )
+    try:
+        yield
+    finally:
+        if use_cuda_host_register:
+            torch.cuda.memory._set_allocator_settings(
+                "pinned_use_cuda_host_register:False"
+            )
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
+class TestCachingHostAllocatorCudaGraph(TestCase):
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_two_graphs(self, use_cuda_host_register):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph, capture_error_mode="thread_local"):
+                data = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data, non_blocking=True)
+                old_data_ptr = data.data_ptr()
+                del data
+                data2 = torch.randn(8).pin_memory()
+            assert data2.data_ptr() != old_data_ptr
+
+            old_data2_ptr = data2.data_ptr()
+
+            del data2
+
+            graph2 = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(
+                graph2, capture_error_mode="thread_local", pool=graph.pool()
+            ):
+                data3 = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data3, non_blocking=True)
+                old_data3_ptr = data3.data_ptr()
+                del data3
+                data4 = torch.randn(8).pin_memory()
+            assert data4.data_ptr() != old_data3_ptr
+            old_data4_ptr = data4.data_ptr()
+
+            assert old_data_ptr != old_data2_ptr == old_data3_ptr != old_data4_ptr, (
+                old_data_ptr,
+                old_data2_ptr,
+                old_data3_ptr,
+                old_data4_ptr,
+            )
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_two_graphs_use(self, use_cuda_host_register):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph, capture_error_mode="thread_local"):
+                data = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data, non_blocking=True)
+                old_data_ptr = data.data_ptr()
+                del data
+                data2 = torch.randn(8).pin_memory()
+                data_gpu.copy_(data2, non_blocking=True)
+            assert data2.data_ptr() != old_data_ptr
+
+            old_data2_ptr = data2.data_ptr()
+
+            del data2
+
+            graph2 = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(
+                graph2, capture_error_mode="thread_local", pool=graph.pool()
+            ):
+                data3 = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data3, non_blocking=True)
+                old_data3_ptr = data3.data_ptr()
+                del data3
+                data4 = torch.randn(8).pin_memory()
+                data_gpu.copy_(data4, non_blocking=True)
+            assert data4.data_ptr() != old_data3_ptr
+            old_data4_ptr = data4.data_ptr()
+
+            assert old_data_ptr != old_data2_ptr != old_data3_ptr != old_data4_ptr
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_pin_memory_no_use(self, use_cuda_host_register):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph, capture_error_mode="thread_local"):
+                data = torch.empty(8, pin_memory=True)
+                data2 = torch.empty(8, pin_memory=True)
+            assert data.data_ptr() != data2.data_ptr()
+            del data2
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_pin_memory_no_use2(self, use_cuda_host_register):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph, capture_error_mode="thread_local"):
+                data = torch.randn(8).pin_memory()
+                data_ptr = data.data_ptr()
+                del data
+                data2 = torch.randn(8).pin_memory()
+                assert data2.data_ptr() == data_ptr
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_pin_memory_use(self, use_cuda_host_register):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph, capture_error_mode="thread_local"):
+                data = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data, non_blocking=True)
+                old_data_ptr = data.data_ptr()
+                del data
+                data2 = torch.randn(8).pin_memory()
+            assert data2.data_ptr() != old_data_ptr
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_pin_memory_joined_stream(self, use_cuda_host_register):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            graph = torch.cuda.CUDAGraph()
+
+            with torch.cuda.graph(graph, capture_error_mode="thread_local"):
+                data = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+
+                s2 = torch.cuda.Stream()
+                s2.wait_stream(torch.cuda.current_stream())
+                with torch.cuda.stream(s2):
+                    data_gpu.copy_(data, non_blocking=True)
+                torch.cuda.current_stream().wait_stream(s2)
+                # This *should* free my allocation!
+                old_data_ptr = data.data_ptr()
+                del data
+                data2 = torch.randn(8).pin_memory()
+
+            # Right now, we fail to recycle memory blocks that are used on
+            # a different stream than they are originally allocated
+            # on. This is fixable. See the algorithm in PR #146924.
+            with self.assertRaises(AssertionError):
+                assert data2.data_ptr() == old_data_ptr
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_pin_memory_unjoined_stream(self, use_cuda_host_register):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            graph = torch.cuda.CUDAGraph()
+
+            with torch.cuda.graph(graph, capture_error_mode="global"):
+                data = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+
+                s2 = torch.cuda.Stream()
+                s2.wait_stream(torch.cuda.current_stream())
+                with torch.cuda.stream(s2):
+                    data_gpu.copy_(data, non_blocking=True)
+                # This should *not* free my allocation!
+                old_data_ptr = data.data_ptr()
+                del data
+                data2 = torch.randn(8).pin_memory()
+                torch.cuda.current_stream().wait_stream(s2)
+            assert data2.data_ptr() != old_data_ptr
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_pin_memory_multiple_graphs_same_mem_pool_no_live_output(
+        self, use_cuda_host_register
+    ):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            shared_pool = torch.cuda.graph_pool_handle()
+            graph1 = torch.cuda.CUDAGraph()
+            graph2 = torch.cuda.CUDAGraph()
+
+            with torch.cuda.graph(
+                graph1, pool=shared_pool, capture_error_mode="thread_local"
+            ):
+                data = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data, non_blocking=True)
+
+                old_data_ptr = data.data_ptr()
+                del data
+
+            with torch.cuda.graph(
+                graph2, pool=shared_pool, capture_error_mode="thread_local"
+            ):
+                data2 = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data2, non_blocking=True)
+
+                new_data_ptr = data2.data_ptr()
+                del data2
+
+            assert new_data_ptr != old_data_ptr
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_pin_memory_multiple_graphs_same_mem_pool_live_output(
+        self, use_cuda_host_register
+    ):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            shared_pool = torch.cuda.graph_pool_handle()
+            graph1 = torch.cuda.CUDAGraph()
+            graph2 = torch.cuda.CUDAGraph()
+
+            with torch.cuda.graph(
+                graph1, pool=shared_pool, capture_error_mode="thread_local"
+            ):
+                data = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data, non_blocking=True)
+
+                old_data_ptr = data.data_ptr()
+
+            with torch.cuda.graph(
+                graph2, pool=shared_pool, capture_error_mode="thread_local"
+            ):
+                data2 = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data2, non_blocking=True)
+
+                new_data_ptr = data2.data_ptr()
+
+            assert new_data_ptr != old_data_ptr
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
+class TestCachingHostAllocatorMemoryPool(TestCase):
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_eager_followed_by_graph_capture_shared_pool_cudagraph_trees_method(
+        self, use_cuda_host_register
+    ):
+        # You can reuse host memory during normal execution, but not
+        # during stream capture to a cuda graph
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            pool_id = torch.cuda.graph_pool_handle()
+            dummy_graph = torch.cuda.CUDAGraph()
+
+            with torch.cuda.graph(
+                dummy_graph, pool=pool_id, capture_error_mode="thread_local"
+            ):
+                pass
+
+            from torch._inductor.cudagraph_trees import _use_cuda_memory_pool_manager
+
+            stream = torch.cuda.Stream()
+            with _use_cuda_memory_pool_manager(0, pool_id, stream):
+                data = torch.empty(8, device="cpu", pin_memory=True)
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data, non_blocking=True)
+                old_data_ptr = data.data_ptr()
+                del data
+                # necessary to make sure that event query during pin_memory() will always succeed
+                torch.cuda.current_stream().synchronize()
+                data2 = torch.empty(8, device="cpu", pin_memory=True)
+                data_gpu.copy_(data2, non_blocking=True)
+                old_data2_ptr = data2.data_ptr()
+            assert old_data2_ptr == old_data_ptr
+
+            del data2
+            torch.cuda.current_stream().synchronize()
+
+            graph = torch.cuda.CUDAGraph()
+
+            with torch.cuda.graph(
+                graph, pool=pool_id, capture_error_mode="thread_local"
+            ):
+                data3 = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data3, non_blocking=True)
+                old_data3_ptr = data3.data_ptr()
+                del data3
+                data4 = torch.randn(8).pin_memory()
+            assert data4.data_ptr() != old_data3_ptr
+            old_data4_ptr = data4.data_ptr()
+
+            assert old_data2_ptr == old_data3_ptr
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_eager_followed_by_graph_capture_shared_pool(self, use_cuda_host_register):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            pool = torch.cuda.MemPool()
+            stream = torch.cuda.Stream()
+            with torch.cuda.memory.use_mem_pool(pool):
+                data = torch.empty(8, pin_memory=True)
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data, non_blocking=True)
+                old_data_ptr = data.data_ptr()
+                del data
+                # necessary to make sure that event query during pin_memory() will always succeed
+                torch.cuda.current_stream().synchronize()
+                data2 = torch.empty(8, pin_memory=True)
+                data_gpu.copy_(data2, non_blocking=True)
+                old_data2_ptr = data2.data_ptr()
+            assert old_data2_ptr == old_data_ptr
+
+            del data2
+            torch.cuda.current_stream().synchronize()
+
+            graph = torch.cuda.CUDAGraph()
+
+            with torch.cuda.graph(
+                graph, pool=pool.id, capture_error_mode="thread_local"
+            ):
+                data3 = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data3, non_blocking=True)
+                old_data3_ptr = data3.data_ptr()
+                del data3
+                data4 = torch.randn(8).pin_memory()
+            assert data4.data_ptr() != old_data3_ptr
+            old_data4_ptr = data4.data_ptr()
+
+            assert old_data2_ptr == old_data3_ptr, (
+                old_data_ptr,
+                old_data2_ptr,
+                old_data3_ptr,
+                old_data4_ptr,
+            )
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_basic(self, use_cuda_host_register):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            pool1 = torch.cuda.MemPool()
+            with torch.cuda.memory.use_mem_pool(pool1):
+                data = torch.randn(8).pin_memory()
+            del data
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_basic2(self, use_cuda_host_register):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            pool1 = torch.cuda.MemPool()
+            with torch.cuda.memory.use_mem_pool(pool1):
+                data = torch.randn(8).pin_memory()
+                del data
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_empty_allocation(self, use_cuda_host_register):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            pool1 = torch.cuda.MemPool()
+            with torch.cuda.memory.use_mem_pool(pool1):
+                data = torch.empty(()).pin_memory()
+            del data
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_two_pools(self, use_cuda_host_register):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            pool1 = torch.cuda.MemPool()
+            with torch.cuda.memory.use_mem_pool(pool1):
+                data = torch.empty(8, pin_memory=True)
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data, non_blocking=True)
+                old_data_ptr = data.data_ptr()
+                del data
+                # necessary to make sure that event query during pin_memory() will always succeed
+                torch.cuda.current_stream().synchronize()
+                data2 = torch.empty(8, pin_memory=True)
+                old_data2_ptr = data2.data_ptr()
+                del data2
+            assert old_data2_ptr == old_data_ptr
+
+            pool2 = torch.cuda.MemPool()
+            with torch.cuda.memory.use_mem_pool(pool1):
+                data3 = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data3, non_blocking=True)
+                old_data3_ptr = data3.data_ptr()
+                del data3
+                # necessary to make sure that event query during pin_memory() will always succeed
+                torch.cuda.current_stream().synchronize()
+                data4 = torch.randn(8).pin_memory()
+            assert data4.data_ptr() == old_data3_ptr
+            old_data4_ptr = data4.data_ptr()
+
+            assert old_data_ptr == old_data2_ptr == old_data3_ptr == old_data4_ptr
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_pin_memory_no_use(self, use_cuda_host_register):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            pool = torch.cuda.MemPool()
+            with torch.cuda.memory.use_mem_pool(pool):
+                data = torch.empty(8, pin_memory=True)
+                data2 = torch.empty(8, pin_memory=True)
+            assert data.data_ptr() != data2.data_ptr()
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_pin_memory_use1(self, use_cuda_host_register):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            pool = torch.cuda.MemPool()
+            with torch.cuda.memory.use_mem_pool(pool):
+                data = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data, non_blocking=True)
+                old_data_ptr = data.data_ptr()
+                del data
+                # necessary to make sure that event query during pin_memory() will always succeed
+                torch.cuda.current_stream().synchronize()
+                data2 = torch.randn(8).pin_memory()
+            assert data2.data_ptr() == old_data_ptr
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_pin_memory_use2(self, use_cuda_host_register):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            pool = torch.cuda.MemPool()
+            with torch.cuda.memory.use_mem_pool(pool):
+                data = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data, non_blocking=True)
+                del data
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_pin_memory_joined_stream(self, use_cuda_host_register):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            pool = torch.cuda.MemPool()
+            with torch.cuda.memory.use_mem_pool(pool):
+                data = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+
+                s2 = torch.cuda.Stream()
+                s2.wait_stream(torch.cuda.current_stream())
+                with torch.cuda.stream(s2):
+                    data_gpu.copy_(data, non_blocking=True)
+                    # necessary to make sure that event query during pin_memory() will always succeed
+                    torch.cuda.current_stream().synchronize()
+                old_data_ptr = data.data_ptr()
+                del data
+                data2 = torch.randn(8).pin_memory()
+            assert data2.data_ptr() == old_data_ptr
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_pin_memory_multiple_context_same_mem_pool_no_live_output(
+        self, use_cuda_host_register
+    ):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            shared_pool = torch.cuda.MemPool()
+
+            with torch.cuda.memory.use_mem_pool(shared_pool):
+                data = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data, non_blocking=True)
+
+                old_data_ptr = data.data_ptr()
+                del data
+
+            # necessary to make sure that event query during pin_memory() will always succeed
+            torch.cuda.current_stream().synchronize()
+
+            with torch.cuda.memory.use_mem_pool(shared_pool):
+                data2 = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data2, non_blocking=True)
+
+                new_data_ptr = data2.data_ptr()
+                del data2
+
+            assert new_data_ptr == old_data_ptr
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_pin_memory_multiple_graphs_same_mem_pool_live_output(
+        self, use_cuda_host_register
+    ):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            shared_pool = torch.cuda.MemPool()
+
+            with torch.cuda.memory.use_mem_pool(shared_pool):
+                data = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data, non_blocking=True)
+
+                old_data_ptr = data.data_ptr()
+
+            with torch.cuda.memory.use_mem_pool(shared_pool):
+                data2 = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data2, non_blocking=True)
+
+                new_data_ptr = data2.data_ptr()
+
+            assert new_data_ptr != old_data_ptr
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_pin_memory_nested_pools(self, use_cuda_host_register):
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            # When nesting `with torch.cuda.memory.use_mem_pool`, I would
+            # like to guarantee that allocations go to the right pool.
+            pool1 = torch.cuda.MemPool()
+            pool2 = torch.cuda.MemPool()
+            with torch.cuda.memory.use_mem_pool(pool1):
+                data1 = torch.randn(8).pin_memory()
+                with torch.cuda.memory.use_mem_pool(pool2):
+                    data2 = torch.randn(8).pin_memory()
+            # these API's don't exist right now
+            # pool1_segments = torch.cuda.memory.host_memory_snapshot(pool1.id)
+            # pool2_segments = torch.cuda.memory.host_memory_snapshot(pool2.id)
+
+            # assert len(pool1_segments) == 1
+            # assert len(pool2_segments) == 1
+
+
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestMemPool(TestCase):
     def _setup_mempool_limited_memory_test(self, additional_allowed_memory_in_mb):
@@ -7415,6 +7916,8 @@ class TestCudaDeviceParametrized(TestCase):
 instantiate_parametrized_tests(TestCuda)
 instantiate_parametrized_tests(TestCudaMallocAsync)
 instantiate_parametrized_tests(TestCompileKernel)
+instantiate_parametrized_tests(TestCachingHostAllocatorCudaGraph)
+instantiate_parametrized_tests(TestCachingHostAllocatorMemoryPool)
 instantiate_device_type_tests(TestCudaOptims, globals())
 instantiate_device_type_tests(TestCudaDeviceParametrized, globals())
 
