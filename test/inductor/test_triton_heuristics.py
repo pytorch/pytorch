@@ -272,7 +272,7 @@ class TestTritonHeuristics(TestCase):
         res = torch.compile(fn)(x)
         self.assertEqual(ref, res)
 
-    @skipIfXpu(msg="AssertionError: Scalars are not equal!")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2331")
     @skipIfRocm
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize("do_pruning", [False, True])

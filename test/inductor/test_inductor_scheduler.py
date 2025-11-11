@@ -96,7 +96,10 @@ class TestScheduler(TestCase):
             metrics.reset()
         torch._logging.set_logs()
 
-    @skipIfXpu(msg="InvalidModule: Invalid SPIR-V module")
+    @skipIfXpu(
+        msg="InvalidModule: Invalid SPIR-V module, "
+        "https://github.com/intel/torch-xpu-ops/issues/2329"
+    )
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @parametrize(

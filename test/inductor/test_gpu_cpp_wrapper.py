@@ -308,7 +308,7 @@ if RUN_GPU:
 
     from torch._inductor.utils import is_big_gpu
 
-    if GPU_TYPE in ["cuda", "xpu"] and is_big_gpu():
+    if GPU_TYPE in ("cuda", "xpu") and is_big_gpu():
         skip_list = ["test_addmm", "test_linear_relu"]
         # need to skip instead of omit, otherwise fbcode ci can be flaky
         for test_name in skip_list:

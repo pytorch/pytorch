@@ -2542,7 +2542,10 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(actual, expected)
 
     @requires_gpu
-    @skipIfXpu(msg="XPU Triton result in nan")
+    @skipIfXpu(
+        msg="XPU Triton result in nan, "
+        "https://github.com/intel/torch-xpu-ops/issues/2330"
+    )
     @skipIfRocm
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
@@ -3672,7 +3675,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         self.assertNotIn(libname, code)
         self.assertNotIn(opname, code)
 
-    @skipIfXpu(msg="AssertionError: Tensor-likes are not close!")
     @requires_gpu
     def test_subclass(self):
         libname = "my_cool_namespace"

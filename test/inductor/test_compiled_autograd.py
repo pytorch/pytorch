@@ -3054,7 +3054,7 @@ main()
 
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
-    @skipIfXpu(msg="AssertionError: Scalars are not equal!")
+    @skipIfXpu(msg="cudagraphs not supported on xpu for now!")
     @requires_gpu_and_triton
     def test_cudagraphs_sdpa(self):
         query = torch.rand(
