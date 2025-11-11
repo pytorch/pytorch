@@ -16,6 +16,7 @@ import time
 import warnings
 from collections import namedtuple
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import deprecated
@@ -748,6 +749,11 @@ class GroupMember(metaclass=_WorldMeta):
     """Group member class."""
 
     NON_GROUP_MEMBER = -100
+
+
+@dataclass
+class _NonGroupMember:
+    group_name: _GroupName
 
 
 def _get_default_timeout(backend: Backend) -> timedelta:
@@ -5474,6 +5480,10 @@ def _new_group_with_tag(
         device_id=device_id,
         group_desc=group_desc,
     )
+
+    if pg == GroupMember.NON_GROUP_MEMBER:
+        # TODO: Add a config for this new behavior?
+        return _NonGroupMember(group_name)
 
     # Create the global rank to group rank mapping
     _world.pg_group_ranks[pg] = {

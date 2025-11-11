@@ -4056,7 +4056,10 @@ such as `dist.all_reduce(tensor, async_op=True)`.
 
   module.def(
       "_set_global_rank",
-      [](int64_t rank) { c10::SetGlobalRank(rank); },
+      [](int64_t rank) {
+        c10::SetGlobalRank(rank);
+        ::c10d::set_global_rank(rank);
+      },
       py::arg("rank"),
       R"(
         Arguments:

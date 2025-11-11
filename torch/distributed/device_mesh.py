@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import collections
 import logging
 import os
 import threading
@@ -450,6 +451,10 @@ else:
             # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
             # along with appending information to the `dim_group_names` list whenever necessary.
             pg_name = None
+            pg_rank_by_name: dict[_GroupName, list[int]] = collections.defaultdict(list)
+
+            rank = get_rank()
+
             for dim_mesh in pg_ranks_by_dim:
                 subgroup_ranks = dim_mesh.tolist()
                 dim_group = new_group(
@@ -461,14 +466,44 @@ else:
                 )
 
                 # only add to dim_groups if the current rank in the subgroup
-                if get_rank() in subgroup_ranks:
+                if rank in subgroup_ranks:
                     if pg_name is not None:
                         raise RuntimeError(
-                            f"Each device mesh dimension should get only one process group, but got {get_rank()} "
+                            f"Each device mesh dimension should get only one process group, but got {rank} "
                             f"in {subgroup_ranks}!"
                         )
                     pg_name = dim_group.group_name
-            return pg_name
+                else:
+                    # This rank is not a member of the subgroup.
+                    assert isinstance(
+                        dim_group, torch.distributed.distributed_c10d._NonGroupMember
+                    )
+
+                pg_rank_by_name[dim_group.group_name].extend(subgroup_ranks)
+
+            if len(pg_rank_by_name) <= 1:
+                # All ranks return the same group - no need for a rank_map.
+                return pg_name
+
+            else:
+                # The different ranks use different groups. We could just return
+                # the group for OUR rank - but then different ranks would
+                # produce slightly different code. So instead use a rank_map
+                # which is the same for all ranks and resolves to the correct
+                # group at runtime.
+                #
+                # The format is "rank_map:0:group1,1:group2,2:group3"
+                #
+                # This would be better if we could just send the dim_name but
+                # unfortunately this has to be decoded in c10d where we don't
+                # have access to the DeviceMesh.
+                pg_name_by_rank = "rank_map:" + ",".join(
+                    f"{k}:{v}"
+                    for k, v in sorted(
+                        (n, k) for k, v in pg_rank_by_name.items() for n in v
+                    )
+                )
+                return pg_name_by_rank
 
         @staticmethod
         def _init_process_groups(
