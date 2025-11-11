@@ -41,6 +41,16 @@ def new_event(*args: Any, **kwargs: Any) -> int:
     )
 
 
+def new_stream(*args: tuple[Any], **kwargs: Any) -> int:
+    stream = torch.Stream(*args, **kwargs)  # type: ignore[no-matching-overload,call-overload]
+    return register_graph_created_object(
+        stream,
+        StreamVariable.make_construct_in_graph_stream_fn(
+            TupleVariable([]), ConstDictVariable({})
+        ),
+    )
+
+
 def _get_stream_by_index(index: int) -> torch.Stream:
     stream = get_external_object_by_index(index)
     assert isinstance(stream, torch.Stream), (
