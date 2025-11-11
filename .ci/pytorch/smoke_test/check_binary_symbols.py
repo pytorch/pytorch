@@ -360,9 +360,10 @@ def check_stable_c_shim_symbols(install_root: Path) -> None:
     # Check if the stable C shim exists
     stable_shim = include_dir / "torch" / "csrc" / "stable" / "c" / "shim.h"
     if not stable_shim.exists():
-        # Skip test if stable C shim doesn't exist
-        return
+        raise RuntimeError("Could not find stable c shim")
 
+    # There are no constexpr symbols etc., so we need to actually use functions
+    # so that some symbols are found.
     test_stable_shim_content = """
 #include <torch/csrc/stable/c/shim.h>
 int main() {
