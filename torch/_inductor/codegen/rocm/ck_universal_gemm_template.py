@@ -13,7 +13,10 @@ from torch._inductor import config
 from torch._inductor.codegen.cpp_utils import DTYPE_TO_CPP
 from torch._inductor.codegen.rocm.ck_template import CKTemplate
 from torch._inductor.codegen.rocm.compile_command import rocm_compile_command
-from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
+from torch._inductor.codegen.rocm.rocm_kernel import (
+    ROCmTemplateCaller,
+    ROCmTemplateKernel,
+)
 from torch._inductor.ir import Buffer, Layout
 from torch._inductor.runtime.runtime_utils import next_power_of_2
 
@@ -311,28 +314,37 @@ class CKGemmTemplate(CKTemplate):
     #endif // GENERATE_CK_STANDALONE_RUNNER
     """
 
-    def __init__(
-        self,
-        input_nodes: list[Buffer],
-        layout: Layout,
-        alpha: float,
-        beta: float,
-        input_reorder: Optional[list[int]] = None,
-    ) -> None:
-        is_batched = len(layout.size) == 3
-        name = "ck_batched_gemm_template" if is_batched else "ck_gemm_template"
-        super().__init__(
-            name=name,
-            input_nodes=input_nodes,
-            layout=layout,
-            input_reorder=input_reorder,
-        )
-        self.alpha = alpha
-        self.beta = beta
+    def __init__(self, name: str, is_batched: bool = False) -> None:
+        super().__init__(name)
         self.is_batched = is_batched
 
     def header(self) -> IndentedBuffer:
-        res = super().header()
+        res = IndentedBuffer()
+        res.splice(
+            """
+                #include <exception>
+                #include <iostream>
+                #include <memory>
+                #include <random>
+                #include <vector>
+            """
+        )
+        res.splice(
+            """
+                // We compile all models with -fvisibility=hidden. Any symbols that need to be
+                // exposed in the final shared library must be declared with PT_EXPORT to make
+                // them visible.
+                #ifdef __GNUC__ // Applies to any compiler with GNU extensions (clang and g++)
+                #define PT_EXPORT __attribute__((__visibility__("default")))
+                #else
+                #ifdef _WIN32
+                #define PT_EXPORT __declspec(dllexport)
+                #else
+                #define PT_EXPORT
+                #endif
+                #endif
+            """
+        )
         if self.is_batched:
             res.splice(
                 """
@@ -352,7 +364,7 @@ class CKGemmTemplate(CKTemplate):
         return res
 
     def globals(self) -> IndentedBuffer:
-        res = super().globals()
+        res = IndentedBuffer()
         res.splice(
             """
                 // CK GEMM globals
@@ -397,17 +409,13 @@ class CKGemmTemplate(CKTemplate):
         # Check if the specialization is in the dimension's padding map
         return dimension_padding.get(gemm_specialization, False)
 
-    def filter_op(self, op_info: InductorROCmOp):
-        """
-        Determines whether a given op definition is suitable for the current
-        input / output of the operation that this template implements.
-
-        Filter is based on inputs' dtype, layout and statically inferred size.
-
-        Returns None if the op is not suitable, otherwise returns the op to be used.
-        """
+    def filter_op(
+        self, op_info: InductorROCmOp, input_nodes: list[Buffer], layout: Layout
+    ):
+        """Filter CK operations based on dtype, layout, and size compatibility."""
         op, kBatch = op_info.op, op_info.kBatch
-        metas = [T.get_layout() for T in [*self.input_nodes, self.output_node]]
+        output_node = Buffer(name="buf_out", layout=layout)
+        metas = [T.get_layout() for T in [*input_nodes, output_node]]
         X_meta = metas[0]
         W_meta = metas[1]
         Y_meta = metas[-1]
@@ -487,16 +495,16 @@ class CKGemmTemplate(CKTemplate):
             != 0
         ):
             return None
-        if not self._check_num_k_loops(op, kBatch):
+        if not self._check_num_k_loops(op, kBatch, input_nodes):
             return None
         # TBD disable instances with invalid number of pipeline prefetch stages
         # It will avoid compiling a small percentage of unrunnable instances which fail the gemm argument check
 
         return op
 
-    def _check_num_k_loops(self, op, kBatch):
+    def _check_num_k_loops(self, op, kBatch, input_nodes: list[Buffer]):
         # Additional splitK scenario check
-        metas = [T.get_layout() for T in [*self.input_nodes]]
+        metas = [T.get_layout() for T in input_nodes]
         X_meta = metas[0]
         W_meta = metas[1]
         K = X_meta.size[-1]
@@ -565,7 +573,6 @@ class CKGemmTemplate(CKTemplate):
         return stages
 
     def emit_ck_instance(self, op: "CKGemmOperation"):
-        # The Jinja template for generating a C++ type alias *definition* for a Universal GEMM instance
         struct_name = (
             "DeviceBatchedGemmMultiD_Xdl_CShuffle_V3"
             if self.is_batched
@@ -608,33 +615,39 @@ class CKGemmTemplate(CKTemplate):
     def render(  # type: ignore[override]
         self,
         kernel: ROCmTemplateKernel,
+        input_nodes: list[Buffer],
+        output_node: Buffer,
         op: "CKGemmOperation",
+        alpha: float,
+        beta: float,
+        input_reorder: Optional[list[int]] = None,
         **kwargs,
     ) -> str:
         """
-        The primary entry point for the code rendering process used in this template.
+        Generate kernel code for the CK Universal GEMM operation.
+        Handles matmul, addmm, scaled_mm and their variations with bias.
         """
         epilogue_nodes = kwargs.get("epilogue_nodes")
         assert epilogue_nodes is None or 0 == len(epilogue_nodes)
         template_buffer_node = kwargs.get("template_buffer_node")
         if template_buffer_node is not None:
-            self.output_node = template_buffer_node
+            output_node = template_buffer_node
         # input nodes:
         # * X, W for matmul
         # * X, W, Bias for addmm
         # * X, W, inv_scale_x, inv_scale_w for scaled_mm
         # * X, W, inv_scale_x, inv_scale_w, Bias for scaled_mm with bias
-        X, W = self.input_nodes[0], self.input_nodes[1]
-        Y = self.output_node
+        X, W = input_nodes[0], input_nodes[1]
+        Y = output_node
         Bias = (
-            self.input_nodes[2]
-            if 3 == len(self.input_nodes)
-            else self.input_nodes[4]
-            if 5 == len(self.input_nodes)
+            input_nodes[2]
+            if 3 == len(input_nodes)
+            else input_nodes[4]
+            if 5 == len(input_nodes)
             else None
         )
         has_bias = Bias is not None
-        has_scale = len(self.input_nodes) in (4, 5)
+        has_scale = len(input_nodes) in (4, 5)
         op = copy.deepcopy(op)
 
         # This parameter is converted into tuple because of change
@@ -648,8 +661,8 @@ class CKGemmTemplate(CKTemplate):
             )
 
         if has_scale:
-            scale_x = self.input_nodes[2]
-            scale_w = self.input_nodes[3]
+            scale_x = input_nodes[2]
+            scale_w = input_nodes[3]
             if 1 == scale_x.get_numel() and 1 == scale_w.get_numel():
                 # tensorwise scale for both X, W
                 if has_bias:
@@ -720,7 +733,7 @@ class CKGemmTemplate(CKTemplate):
         epilogue = None
 
         if op.c_elementwise_op == "Bilinear" and scale_w is None:
-            epilogue = f"Bilinear {{ {self.alpha}, {self.beta} }}"
+            epilogue = f"Bilinear {{ {alpha}, {beta} }}"
 
         elif op.c_elementwise_op == "Scale":
             epilogue = "Scale { (inv_scale_w && inv_scale_x) ? (*inv_scale_w * *inv_scale_x) : 1.0f }"
@@ -752,7 +765,7 @@ class CKGemmTemplate(CKTemplate):
                 inputs=[X, W, scale_x, scale_w, Bias],  # type: ignore[list-item]
                 outputs=[Y],
                 names_str="X, W, inv_scale_x, inv_scale_w, Bias, Y",
-                input_reorder=self.input_reorder,
+                input_reorder=input_reorder,
                 size_args=[f"int32_t {arg}" for arg in size_arg_strs],
             ),
             instance_type=instance_type,
@@ -760,8 +773,8 @@ class CKGemmTemplate(CKTemplate):
             b_element_dtype=op.b_element_dtype,
             c_element_dtype=op.c_element_dtype,
             bias_element_dtype=bias_dtype,
-            alpha=self.alpha,
-            beta=self.beta,
+            alpha=alpha,
+            beta=beta,
             a_elementwise_op="PassThrough {}",
             b_elementwise_op="PassThrough {}",
             epilogue=epilogue,
@@ -797,13 +810,15 @@ class CKGemmTemplate(CKTemplate):
         )
 
         if config.rocm.generate_test_runner:
-            is_static_problem = all(is_static_int(arg) for arg in self.size_args())
+            layout = output_node.get_layout()
+            size_args_result = self.size_args(input_nodes, layout)
+            is_static_problem = all(is_static_int(arg) for arg in size_args_result)
             # NOTE: size_arg_strs is defined above
             size_arg_vals = (
-                self.size_args()
+                size_args_result
                 if is_static_problem
                 else (
-                    f"std::stoi(argv[{k}])" for k, _ in enumerate(self.size_args(), 1)
+                    f"std::stoi(argv[{k}])" for k, _ in enumerate(size_args_result, 1)
                 )
             )
             size_args = dict(zip(size_arg_strs, size_arg_vals, strict=True))
@@ -859,10 +874,34 @@ class CKGemmTemplate(CKTemplate):
 
         return res
 
-    def _is_rcr_f16(self):
-        X_meta, W_meta, Y_meta = (
-            T.get_layout() for T in [*self.input_nodes, self.output_node]
+    def generate(  # type: ignore[override]
+        self,
+        input_nodes: list[Buffer],
+        layout: Layout,
+        op: "CKGemmOperation",
+        kBatch: int,
+        alpha: float = 1,
+        beta: float = 0,
+        input_reorder: Optional[list[int]] = None,
+        **kwargs,
+    ) -> ROCmTemplateCaller:
+        kwargs_with_runtime = {
+            **kwargs,
+            "op": op,
+            "kBatch": kBatch,
+            "alpha": alpha,
+            "beta": beta,
+        }
+        return super().generate(
+            input_nodes=input_nodes,
+            layout=layout,
+            input_reorder=input_reorder,
+            **kwargs_with_runtime,
         )
+
+    def _is_rcr_f16(self, input_nodes: list[Buffer], layout: Layout):
+        output_node = Buffer(name="buf_out", layout=layout)
+        X_meta, W_meta, Y_meta = (T.get_layout() for T in [*input_nodes, output_node])
         X_dtype, W_dtype, Y_dtype = (
             self._TORCH_DTYPE_TO_CK[m.dtype] for m in (X_meta, W_meta, Y_meta)
         )
@@ -880,16 +919,16 @@ class CKGemmTemplate(CKTemplate):
         )
 
     # helper to calculate a potentially optimal kBatch(es) for a problem
-    def _get_kBatch(self, op):
+    def _get_kBatch(self, op, input_nodes: list[Buffer]):
         # we only set a higher kBatch if K > 16 * the larger of M and N
         # this is a hand-tuned heuristic to start
-        metas = [T.get_layout() for T in [*self.input_nodes]]
+        metas = [T.get_layout() for T in input_nodes]
         X_meta = metas[0]
         W_meta = metas[1]
         M = X_meta.size[-2]
         K = X_meta.size[-1]
         N = W_meta.size[-1]
-        if is_dynamic(*self.input_nodes):
+        if is_dynamic(*input_nodes):
             return [1]
         if K // max(M, N) < config.rocm.split_k_threshold:
             return [1]
@@ -905,14 +944,15 @@ class CKGemmTemplate(CKTemplate):
         kBatch = min(max(next_power_of_2(total_k_blocks // cus), 1), 128)
         return [kBatch]
 
-    def gen_ops(self) -> list[InductorROCmOp]:
-        """
-        Creates a list of `CKGemmOperation` instances that match the GEMM operation this template represents.
-        The instances are guaranteed to have the correct layout, dtype and dimension padding for the GEMM input arguments.
-
-        An instance may invalidate the GEMM configuration at runtime.
-        Such instances will be assigned +inf runtime by the autotune process.
-        """
+    def gen_ops(
+        self,
+        input_nodes: list[Buffer],
+        layout: Layout,
+        alpha: float = 1,
+        beta: float = 0,
+        input_reorder: Optional[list[int]] = None,
+    ) -> list[InductorROCmOp]:
+        """Generate list of CK GEMM operations matching problem parameters."""
         try:
             from ck4inductor.batched_universal_gemm.gen_instances import (  # type: ignore[import]
                 gen_ops_library as gen_batched_gemm_ops_library,
@@ -924,12 +964,16 @@ class CKGemmTemplate(CKTemplate):
         except ImportError:
             return []
 
+        is_batched = len(layout.size) == 3
+
         generator = None
-        if self.is_batched:
+        if is_batched:
             generator = gen_batched_gemm_ops_library
         else:
             generator = gen_gemm_ops_library
-        if config.rocm.use_preselected_instances and self._is_rcr_f16():
+        if config.rocm.use_preselected_instances and self._is_rcr_f16(
+            input_nodes, layout
+        ):
             generator = gen_gemm_ops_preselected
 
         assert generator is not None
@@ -937,12 +981,14 @@ class CKGemmTemplate(CKTemplate):
         rops = generator()
         ops = []
         for o in rops:
-            kBatches = self._get_kBatch(o)
+            kBatches = self._get_kBatch(o, input_nodes)
             for kBatch in kBatches:
                 # pyrefly: ignore [bad-argument-type]
                 ops.append(InductorROCmOp(op=o, kBatch=kBatch))
 
-        filtered_instances = list(filter(lambda op: self.filter_op(op), ops))
+        filtered_instances = list(
+            filter(lambda op: self.filter_op(op, input_nodes, layout), ops)
+        )
 
         # NB: when using a fixed list order, most likely we will pick the subset of instances
         # which are very similar to each other. Randomizing the choice seems to solve this.
@@ -971,35 +1017,46 @@ class CKGemmTemplate(CKTemplate):
         beta=0,
         input_reorder=None,
     ):
-        """
-        Add Composable Kernel Universal GEMM instance choices to the auto-tuning list.
-        """
-        template = CKGemmTemplate(
-            input_nodes,
-            layout,
+        """Add CK GEMM choices to autotuning list (kept for backward compatibility)."""
+        is_batched = len(layout.size) == 3
+        template = ck_batched_gemm_template if is_batched else ck_gemm_template
+
+        ops = template.gen_ops(
+            input_nodes=input_nodes,
+            layout=layout,
             alpha=alpha,
             beta=beta,
             input_reorder=input_reorder,
         )
-        ops = template.gen_ops()
+
         for op in ops:
             template.maybe_append_choice(
                 choices,
+                input_nodes=input_nodes,
+                layout=layout,
                 op=op.op,
                 kBatch=op.kBatch,
+                alpha=alpha,
+                beta=beta,
+                input_reorder=input_reorder,
             )
 
-    def size_args(self):
-        X = self.input_nodes[0]
-        W = self.input_nodes[1]
+    def size_args(
+        self, input_nodes: list[Buffer], layout: Layout, **kwargs
+    ) -> tuple[int]:
+        """Compute size and stride arguments for the GEMM kernel call."""
+        output_node = Buffer(name="buf_out", layout=layout)
+        is_batched = len(layout.size) == 3
+        X = input_nodes[0]
+        W = input_nodes[1]
         Bias = (
-            self.input_nodes[2]
-            if len(self.input_nodes) == 3
-            else self.input_nodes[4]
-            if len(self.input_nodes) == 5
+            input_nodes[2]
+            if len(input_nodes) == 3
+            else input_nodes[4]
+            if len(input_nodes) == 5
             else None
         )
-        Y = self.output_node
+        Y = output_node
 
         M = X.get_size()[-2]
         K = X.get_size()[-1]
@@ -1012,8 +1069,13 @@ class CKGemmTemplate(CKTemplate):
             if (Bias is None or len(Bias.get_size()) == 1)
             else Bias.get_stride()[-2 if Bias.get_stride()[-1] == 1 else -1]
         )
-        if self.is_batched:
+        if is_batched:
             B = X.get_size()[0]
-            return B, M, N, K, LDA, LDB, LDC, LDD
+            return B, M, N, K, LDA, LDB, LDC, LDD  # pyrefly: ignore [bad-return]
         else:
-            return M, N, K, LDA, LDB, LDC, LDD
+            return M, N, K, LDA, LDB, LDC, LDD  # pyrefly: ignore [bad-return]
+
+
+# Module-level template instances
+ck_gemm_template = CKGemmTemplate("ck_gemm", is_batched=False)
+ck_batched_gemm_template = CKGemmTemplate("ck_batched_gemm", is_batched=True)

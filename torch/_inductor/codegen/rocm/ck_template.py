@@ -98,6 +98,12 @@ class CKTemplate(ROCmTemplate):
         else:
             return f"({self._TORCH_DTYPE_TO_CK.get(node.get_dtype())}*)({ptr})"
 
+    def _make_output_node(self, layout):
+        """Helper to create output buffer on-the-fly."""
+        from torch._inductor.ir import Buffer
+
+        return Buffer(name="buf_out", layout=layout)
+
     @override
     def get_runtime_arg_info(self) -> list[ArgInfo]:
         return [ArgInfo("kBatch", "int32_t")]
