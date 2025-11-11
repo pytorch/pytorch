@@ -2005,6 +2005,10 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 report = json.load(f)
                 self._validate_basic_json(report["traceEvents"], with_cuda)
 
+    @unittest.skipIf(
+        torch.xpu.is_available(),
+        "XPU Trace event ends too late! Refer https://github.com/intel/torch-xpu-ops/issues/2263",
+    )
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_basic_chrome_trace(self):
@@ -2158,7 +2162,10 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_basic_profile(self):
         # test a really basic profile to make sure no erroneous aten ops are run
-        x = torch.randn(4, device="cuda")
+        acc = torch.accelerator.current_accelerator()
+        self.assertIsNotNone(acc)
+        device = acc.type
+        x = torch.randn(4, device=device)
         with torch.profiler.profile(with_stack=True) as p:
             x *= 2
         names = [e.name for e in p.events()]
@@ -2225,6 +2232,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
     @unittest.skipIf(
         torch.cuda.is_available(), "CUDA complains about forking after init"
     )
+    @unittest.skipIf(torch.xpu.is_available(), "XPU complains about forking after init")
     @unittest.skipIf(IS_WINDOWS, "can't use os.fork() on Windows")
     def test_forked_process(self):
         # Induce a pid cache by running the profiler with payload

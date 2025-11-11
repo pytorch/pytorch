@@ -1,8 +1,8 @@
-#include <c10/util/TypeList.h>
 #include <gtest/gtest.h>
+#include <torch/headeronly/util/TypeList.h>
 #include <memory>
 
-using namespace c10::guts::typelist;
+using namespace torch::headeronly::guts::typelist;
 // NOLINTBEGIN(modernize-unary-static-assert)
 namespace test_size {
 class MyClass {};
