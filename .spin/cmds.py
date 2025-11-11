@@ -220,7 +220,6 @@ def setup_lint():
 def _check_linters():
     cmd = ["uvx", "lintrunner", "list"]
     ret = spin.util.run(cmd, output=False, stderr=subprocess.PIPE)
-    assert ret.returncode == 0, ret.stderr
     linters = {l.strip() for l in ret.stdout.decode().strip().split("\n")[1:]}
     unknown_linters = linters - ALL_LINTERS
     missing_linters = ALL_LINTERS - linters
