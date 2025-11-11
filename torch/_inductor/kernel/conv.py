@@ -79,7 +79,7 @@ LOOP_BODY_2D = """
             & (idx_x_h < IN_H)[:, None]
             & (idx_x_w >= 0)[:, None]
             & (idx_x_w < IN_W)[:, None]
-            & (idx_x_c < GROUP_IN_C)[None, :]
+            & (idx_x_c < GROUP_IN_C)[None, :
         )
         matrix_x = tl.load(x_ptrs, mask=mask_x, other=0.0)
 
@@ -590,7 +590,6 @@ def convolution(
         # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
         and V.graph.sizevars.statically_known_equals(in_chan * groups, x.get_size()[1])  # type: ignore[arg-type]
     ):
-        # 1x1 conv via mm
         if (
             is_ones(kernel_shape)
             and is_ones(stride)

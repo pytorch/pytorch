@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import Any, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.config
@@ -413,25 +413,18 @@ class ConvKernelInputs(KernelInputs):
         weight = self._input_nodes[self._weight_idx]
         bias = self._input_nodes[self._bias_idx] if self._bias_idx is not None else None
 
-        # Extract conv params from scalars
-        stride = cast(tuple[int, ...], self._scalars["stride"])
-        padding = cast(tuple[int, ...], self._scalars["padding"])
-        dilation = cast(tuple[int, ...], self._scalars["dilation"])
-        transposed = cast(bool, self._scalars["transposed"])
-        output_padding = cast(tuple[int, ...], self._scalars["output_padding"])
-        groups = cast(int, self._scalars["groups"])
-
         # Use existing conv_layout function
+        # We know the types here because conv requires these specific scalar types
         layout = conv_layout(
             x,
             weight,
             bias,
-            stride,
-            padding,
-            dilation,
-            transposed,
-            output_padding,
-            groups,
+            self._scalars["stride"],  # type: ignore[arg-type]
+            self._scalars["padding"],  # type: ignore[arg-type]
+            self._scalars["dilation"],  # type: ignore[arg-type]
+            self._scalars["transposed"],  # type: ignore[arg-type]
+            self._scalars["output_padding"],  # type: ignore[arg-type]
+            self._scalars["groups"],  # type: ignore[arg-type]
         )
 
         # TODO: Handle flexible vs fixed based on config if needed

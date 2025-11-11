@@ -2,7 +2,7 @@
 import re
 import unittest
 from functools import partial
-from typing import Any, Optional, Union
+from typing import Any, Optional
 from unittest.mock import patch
 
 import torch
@@ -151,32 +151,6 @@ class BaseLookupTableTest(TestCase):
             tensors.append(tensor)
 
         return MockMMKernelInputs(tensors, scalars)
-
-    def create_mock_conv_kernel_inputs(
-        self,
-        x_shape: tuple[int, ...] = (1, 3, 32, 32),  # NCHW
-        weight_shape: tuple[int, ...] = (64, 3, 3, 3),  # out_chan, in_chan, H, W
-        device: torch.device = torch.device("cuda"),
-        dtype: torch.dtype = torch.float16,
-        stride: tuple[Union[float, int], ...] = (1, 1),
-        padding: tuple[Union[float, int], ...] = (1, 1),
-        dilation: tuple[Union[float, int], ...] = (1, 1),
-        groups: Union[float, int] = 1,
-    ) -> MockConvKernelInputs:
-        """Create MockConvKernelInputs for conv with real tensors"""
-        x = torch.randn(x_shape, device=device, dtype=dtype)
-        weight = torch.randn(weight_shape, device=device, dtype=dtype)
-
-        scalars = {
-            "stride": stride,
-            "padding": padding,
-            "dilation": dilation,
-            "transposed": False,
-            "output_padding": (0, 0),
-            "groups": groups,
-        }
-
-        return MockConvKernelInputs([x, weight], scalars)
 
     def create_lookup_key(self, method, kernel_inputs):
         """Create a lookup key using LookupTableChoices"""
@@ -1173,17 +1147,13 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
         # Setup lookup table
         inductor_config.lookup_table.table = {lookup_key: [conv2d_config]}
 
-        # Validation function to ensure our config is selected
         def validate_conv_choice(choices):
-            # Should have exactly 1 choice (our lookup table entry)
             assert len(choices) == 1, (
                 f"Expected 1 choice from lookup table, got {len(choices)}"
             )
-            # Should be a TritonTemplateCaller
             assert isinstance(choices[0], TritonTemplateCaller), (
                 f"Expected TritonTemplateCaller, got {type(choices[0])}"
             )
-            # Name should contain "convolution2d" (from conv2d_template.name)
             assert "convolution2d" in choices[0].name, (
                 f"Expected 'convolution2d' in name, got {choices[0].name}"
             )
@@ -1195,7 +1165,6 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
         class SimpleConv2d(nn.Module):
             def __init__(self, weight):
                 super().__init__()
-                # Register weight as buffer to use exact weight tensor
                 self.register_buffer("weight", weight)
 
             def forward(self, x):
@@ -1215,7 +1184,6 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             compiled_model = torch.compile(model)
             result = compiled_model(x)  # Use the SAME x tensor
 
-        # Verify result shape is correct
         # Output shape: [batch=2, out_channels=64, out_h=32, out_w=32]
         # (same spatial dims due to padding=1, stride=1, kernel=3)
         expected_shape = (2, 64, 32, 32)
@@ -1225,13 +1193,11 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             f"Expected shape {expected_shape}, got {result.shape}",
         )
 
-        # Verify no NaNs in output
         self.assertFalse(
             torch.isnan(result).any().item(),
             "Output contains NaN values",
         )
 
-        # Verify no Infs in output
         self.assertFalse(
             torch.isinf(result).any().item(),
             "Output contains Inf values",
