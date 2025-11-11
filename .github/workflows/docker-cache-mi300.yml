@@ -35,7 +35,7 @@ jobs:
           run-id: 19270530895
           path: ./docker-builds-artifacts
           merge-multiple: true
-          github-token: $${{ secrets.GITHUB_TOKEN }}
+          github-token: $${{ github.token }}
 
       - name: Process artifacts
         id: process-artifacts
