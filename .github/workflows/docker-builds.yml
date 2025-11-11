@@ -155,7 +155,7 @@ jobs:
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4.4.0
-        if: always()
+        if: contains(matrix.docker-image-name, 'rocm')
         with:
           name: docker-builds-artifacts-${{ matrix.docker-image-name }}
           retention-days: 14
