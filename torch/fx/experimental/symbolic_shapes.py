@@ -1362,7 +1362,6 @@ def compute_unbacked_bindings(
             if isinstance(example_value, torch.Tensor)
             else ""
         )
-        breakpoint()
         raise PendingUnbackedSymbolNotFound(
             f"Pending unbacked symbols {pending} not in returned outputs {example_value} {extra}.\n"
             "Did you accidentally call new_dynamic_size() or item() more times "
@@ -4938,8 +4937,6 @@ class ShapeEnv:
         self._log_create_unbacked_symbol(
             "create_unbacked_symint", symbol, vr, source, sym_node=sym_node
         )
-        if str(symbol) == "u10":
-            breakpoint()
         return SymInt(sym_node)
 
     def is_unbacked_symint(self, symbol: sympy.Symbol) -> bool:
