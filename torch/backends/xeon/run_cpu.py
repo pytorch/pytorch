@@ -1,6 +1,6 @@
-# mypy: allow-untyped-defs
+﻿# mypy: allow-untyped-defs
 """
-This is a script for launching PyTorch inference on Intel(R) Xeon(R) Scalable Processors with optimal configurations.
+This is a script for launching PyTorch inference on Intel® Xeon® Scalable Processors with optimal configurations.
 
 Single instance inference, multi-instance inference are enabled.
 
@@ -27,7 +27,7 @@ Illustrated as below:
     |                             |             thread 1 |  M+1  |
     +-----------------------------+----------------------+-------+
 
-To get the peak performance on Intel(R) Xeon(R) Scalable Processors, the script optimizes the configuration of thread and memory
+To get the peak performance on Intel® Xeon® Scalable Processors, the script optimizes the configuration of thread and memory
 management. For thread management, the script configures thread affinity and the preload of Intel OMP library.
 For memory management, it configures NUMA binding and preload optimized memory allocation library (e.g. tcmalloc, jemalloc).
 
@@ -81,7 +81,7 @@ Multi-instance inference
 
    python -m torch.backends.xeon.run_cpu -- python_script args
 
-   eg: on an Intel(R) Xeon(R) Scalable Processor with 14 instance, 4 cores per instance
+   eg: on an Intel® Xeon® Scalable Processor with 14 instance, 4 cores per instance
 
 ::
 
@@ -90,19 +90,19 @@ Multi-instance inference
 2. Run single-instance inference among multiple instances.
    By default, runs all ninstances. If you want to independently run a single instance among ninstances, specify rank.
 
-   eg: run 0th instance on an Intel(R) Xeon(R) Scalable Processor with 2 instance (i.e., numactl -C 0-27)
+   eg: run 0th instance on an Intel® Xeon® Scalable Processor with 2 instance (i.e., numactl -C 0-27)
 
 ::
 
    python -m torch.backends.xeon.run_cpu --ninstances 2 --rank 0 python_script args
 
-   eg: run 1st instance on an Intel(R) Xeon(R) Scalable Processor with 2 instance (i.e., numactl -C 28-55)
+   eg: run 1st instance on an Intel® Xeon® Scalable Processor with 2 instance (i.e., numactl -C 28-55)
 
 ::
 
    python -m torch.backends.xeon.run_cpu --ninstances 2 --rank 1 python_script args
 
-   eg: run 0th instance on an Intel(R) Xeon(R) Scalable Processor with 2 instance, 2 cores per instance,
+   eg: run 0th instance on an Intel® Xeon® Scalable Processor with 2 instance, 2 cores per instance,
    first four cores (i.e., numactl -C 0-1)
 
 ::
@@ -178,7 +178,7 @@ class _CPUinfo:
                     self.cpuinfo.append(regex_out.group(1).strip().split(","))
 
             # physical cores := core column in lscpu output
-            #  logical cores :=  cPU column in lscpu output
+            #  logical cores :=  CPU column in lscpu output
             self.node_nums = int(max(line[3] for line in self.cpuinfo)) + 1
             self.node_physical_cores: list[list[int]] = []  # node_id is index
             self.node_logical_cores: list[list[int]] = []  # node_id is index
@@ -285,6 +285,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             "/usr/local/lib64",
             "/usr/lib",
             "/usr/lib64",
+            "/usr/lib/x86_64-linux-gnu/",
         ]
 
         lib_find = False
@@ -438,25 +439,36 @@ Value applied: %s. Value ignored: %s",
         cores = []
         set_kmp_affinity = True
         enable_taskset = False
+        # ncores_per_instance param check and expand for multi-instance
+        if not isinstance(args.ncores_per_instance, list):
+            args.ncores_per_instance = [args.ncores_per_instance]
+        args.ncores_per_instance = [int(x) for x in args.ncores_per_instance]
+        if args.ncores_per_instance != [-1]:
+            if args.ninstances > 0:
+                if len(args.ncores_per_instance) == 1:
+                    args.ncores_per_instance = args.ncores_per_instance * args.ninstances
+                assert len(args.ncores_per_instance) == args.ninstances, (
+                    'Mismatch for \"--ninstances\" and \"--ncores-per-instance\" settings.'
+                )
+            elif len(args.ncores_per_instance) > 1:
+                args.ninstances = len(args.ncores_per_instance)
+
         if args.core_list:  # user specify what cores will be used by params
             cores = [int(x) for x in args.core_list.split(",")]
-            if args.ncores_per_instance == -1:
+            if args.ncores_per_instance == [-1]:
                 raise RuntimeError(
                     'please specify the "--ncores-per-instance" if you have pass the --core-list params'
                 )
-            elif (
-                args.ninstances > 1
-                and args.ncores_per_instance * args.ninstances < len(cores)
+            if (
+                args.ninstances > 0
+                and sum(args.ncores_per_instance) < len(cores)
             ):
                 logger.warning(
                     "only first %s cores will be used, \
 but you specify %s cores in core_list",
-                    args.ncores_per_instance * args.ninstances,
+                    sum(args.ncores_per_instance),
                     len(cores),
                 )
-            else:
-                args.ninstances = len(cores) // args.ncores_per_instance
-
         else:
             if args.use_logical_core:
                 if args.node_id != -1:
@@ -474,80 +486,92 @@ but you specify %s cores in core_list",
             if (
                 not args.multi_instance
                 and args.ninstances == -1
-                and args.ncores_per_instance == -1
+                and args.ncores_per_instance == [-1]
             ):
                 args.ninstances = 1
-                args.ncores_per_instance = len(cores)
+                args.ncores_per_instance = [len(cores)]
             elif (
                 args.multi_instance
                 and args.ninstances == -1
-                and args.ncores_per_instance == -1
+                and args.ncores_per_instance == [-1]
             ):
                 args.throughput_mode = True
-            elif args.ncores_per_instance == -1 and args.ninstances != -1:
+            elif args.ncores_per_instance == [-1] and args.ninstances != -1:
                 if args.ninstances > len(cores):
                     raise RuntimeError(
                         f"there are {len(cores)} total cores but you specify {args.ninstances} ninstances; \
 please make sure ninstances <= total_cores)"
                     )
                 else:
-                    args.ncores_per_instance = len(cores) // args.ninstances
-            elif args.ncores_per_instance != -1 and args.ninstances == -1:
+                    args.ncores_per_instance = [len(cores) // args.ninstances] * args.ninstances
+            elif args.ncores_per_instance != [-1] and args.ninstances == -1:
                 if not args.skip_cross_node_cores:
-                    args.ninstances = len(cores) // args.ncores_per_instance
+                    args.ninstances = len(args.ncores_per_instance)
                 else:
-                    ncore_per_node = len(self.cpuinfo.node_physical_cores[0])
-                    num_leftover_cores = ncore_per_node % args.ncores_per_instance
-                    if args.ncores_per_instance > ncore_per_node:
+                    utilized_node_cores = self.cpuinfo.node_logical_cores if args.use_logical_core else self.cpuinfo.node_physical_cores
+                    ncore_per_node = [len(c) for c in utilized_node_cores]
+                    if len(args.ncores_per_instance) > len(ncore_per_node):
                         # too many ncores_per_instance to skip cross-node cores
                         logger.warning(
-                            "there are %s core(s) per socket, but you specify %s ncores_per_instance and \
-skip_cross_node_cores. Please make sure --ncores-per-instance < core(s) per \
-socket",
-                            ncore_per_node,
-                            args.ncores_per_instance,
+                            "there are %s nodes, but %s ncores_per_instance elements and \
+skip_cross_node_cores are specified.",
+                            len(ncore_per_node),
+                            len(args.ncores_per_instance),
                         )
                         sys.exit(-1)
-                    elif num_leftover_cores == 0:
-                        # aren't any cross-node cores
-                        logger.info(
-                            "--skip-cross-node-cores is set, but there are no cross-node cores."
-                        )
-                        args.ninstances = len(cores) // args.ncores_per_instance
+                    leftover_cores = list()
+                    for i, core_num in enumerate(args.ncores_per_instance):
+                        leftover_num = core_num - ncore_per_node[i]
+                        if leftover_num > 0:
+                            # too many ncores_per_instance for a node
+                            logger.warning(
+                                "there are %s core(s) in node %s, but specified %s cores for \
+this node and skip_cross_node_cores. ",
+                                ncore_per_node[i],
+                                i,
+                                core_num,
+                            )
+                            sys.exit(-1)
+                        elif leftover_num < 0:
+                            # Exclude excessive cores from largest core IDs
+                            leftover_cores.extend(utilized_node_cores[i][leftover_num:])
+                    # used node num < total node num, mark the rest node cores as unused
+                    while i < len(ncore_per_node):
+                        leftover_cores.extend(utilized_node_cores[i][:])
+                        i += 1
+                    if len(leftover_cores) == 0:
+                        args.ninstances = len(args.ncores_per_instance)
                     else:
                         # skip cross-node cores
-                        if args.ninstances != -1:
+                        if args.ninstances != -1 and args.ninstances != len(args.ncores_per_instance):
                             logger.warning(
                                 "--skip-cross-node-cores is exclusive to --ninstances. --ninstances \
 won't take effect even if it is set explicitly."
                             )
 
-                        i = 1
-                        leftover_cores = set()
-                        while ncore_per_node * i <= len(cores):
-                            leftover_cores.update(
-                                cores[
-                                    ncore_per_node * i
-                                    - num_leftover_cores : ncore_per_node * i
-                                ]
-                            )
-                            i += 1
-                        cores = list(set(cores) - leftover_cores)
-                        assert len(cores) % args.ncores_per_instance == 0
-                        args.ninstances = len(cores) // args.ncores_per_instance
+                        for core_rm in leftover_cores:
+                            if core_rm in cores:
+                                cores.remove(core_rm)
+                        args.ninstances = len(args.ncores_per_instance)
             else:
-                if args.ninstances * args.ncores_per_instance > len(cores):
+                if sum(args.ncores_per_instance) > len(cores):
                     raise RuntimeError(
-                        "Please make sure ninstances * ncores_per_instance <= total_cores"
+                        "Please make sure the sum up of ncores_per_instance <= total_cores"
                     )
             if args.latency_mode:
                 logger.warning(
                     "--latency-mode is exclusive to --ninstances, --ncores-per-instance, --node-id and \
 --use-logical-core. They won't take effect even they are set explicitly."
                 )
-                args.ncores_per_instance = 4
-                cores = self.cpuinfo.get_all_physical_cores()
-                args.ninstances = len(cores) // args.ncores_per_instance
+                core_num_per_instance = 4
+                cores = list()
+                args.ninstances = 0
+                for node_core_list in self.cpuinfo.node_physical_cores:
+                    node_core_num = len(node_core_list)
+                    for i in range(core_num_per_instance, node_core_num + 1, core_num_per_instance):
+                        args.ninstances += 1
+                        cores.extend(node_core_list[i - core_num_per_instance: i])
+                args.ncores_per_instance = [core_num_per_instance] * args.ninstances
 
             if args.throughput_mode:
                 logger.warning(
@@ -556,12 +580,14 @@ won't take effect even if it is set explicitly."
                 )
                 args.ninstances = self.cpuinfo.node_nums
                 cores = self.cpuinfo.get_all_physical_cores()
-                args.ncores_per_instance = len(cores) // args.ninstances
+                args.ncores_per_instance.clear()
+                for node_core_list in self.cpuinfo.node_physical_cores:
+                    args.ncores_per_instance.append(len(node_core_list))
 
         if args.ninstances > 1 and args.rank != -1:
             logger.info(
                 "assigning %s cores for instance %s",
-                args.ncores_per_instance,
+                args.ncores_per_instance[args.rank],
                 args.rank,
             )
 
@@ -609,17 +635,20 @@ won't take effect even if it is set explicitly."
                 elif enable_taskset:
                     cmd = ["taskset"]
                 cores = sorted(cores)
+                core_index_start = 0
                 if (
                     args.rank == -1
                 ):  # sequentially assign ncores_per_instance to ninstances
+                    for j in range(i):
+                        core_index_start += args.ncores_per_instance[j]
                     core_list = cores[
-                        i * args.ncores_per_instance : (i + 1)
-                        * args.ncores_per_instance
+                        core_index_start : args.ncores_per_instance[i]
                     ]
                 else:  # assign ncores_per_instance from rank
+                    for j in range(args.rank):
+                        core_index_start += args.ncores_per_instance[j]
                     core_list = cores[
-                        args.rank * args.ncores_per_instance : (args.rank + 1)
-                        * args.ncores_per_instance
+                        core_index_start : args.ncores_per_instance[args.rank]
                     ]
 
                 core_ranges: list[dict] = []
@@ -723,6 +752,7 @@ def _add_multi_instance_params(parser):
         metavar="\b",
         default=-1,
         type=int,
+        nargs='+',
         help="Cores per instance",
     )
     group.add_argument(
@@ -926,10 +956,10 @@ def main(args):
 
 if __name__ == "__main__":
     parser = ArgumentParser(
-        description="This is a script for launching PyTorch inference on Intel(R) Xeon(R) Scalable "
+        description="This is a script for launching PyTorch inference on Intel® Xeon® Scalable "
         "Processors with optimal configurations. Single instance inference, "
-        "multi-instance inference are enable. To get the peak performance on Intel(R) "
-        "Xeon(R) Scalable Processors, the script optimizes the configuration "
+        "multi-instance inference are enable. To get the peak performance on Intel® "
+        "Xeon® Scalable Processors, the script optimizes the configuration "
         "of thread and memory management. For thread management, the script configures thread "
         "affinity and the preload of Intel OMP library. For memory management, it configures "
         "NUMA binding and preload optimized memory allocation library (e.g. tcmalloc, jemalloc) "
