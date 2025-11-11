@@ -580,7 +580,7 @@ std::ofstream& TuningContext::GetUntunedFile(){
       filename.append(device);
     }
 
-    untuned_file_ = std::ofstream(filename, std::ios::out | std::ios::trunc);
+    untuned_file_ = std::ofstream(filename, std::ios::out | std::ios::app);
   }
   return untuned_file_;
 }
