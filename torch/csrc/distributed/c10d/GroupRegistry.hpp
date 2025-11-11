@@ -4,6 +4,8 @@
 
 namespace c10d {
 
+C10_EXPORT void set_global_rank(int rank);
+
 C10_EXPORT void set_thread_isolation_mode(bool enable);
 
 bool get_thread_isolation_mode();
