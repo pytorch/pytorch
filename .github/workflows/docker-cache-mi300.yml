@@ -1,10 +1,11 @@
 name: docker-cache-mi300
 
 on:
-  # run every 6 hours
-  schedule:
-    - cron: 0 0,6,12,18 * * *
-  workflow_dispatch:
+  workflow_run:
+    workflows: [docker-builds]
+    #branches: [main, release]
+    types:
+      - completed
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name }}
@@ -17,7 +18,7 @@ permissions:
 jobs:
   docker-cache:
     if: github.repository_owner == 'pytorch'
-    runs-on: rocm-docker
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
