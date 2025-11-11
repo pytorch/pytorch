@@ -11,6 +11,7 @@ from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed.distributed_c10d import (
     _check_op,
     _get_default_group,
+    _GroupName,
     _resolve_process_group,
     ProcessGroup,
     ReduceOp,
@@ -104,7 +105,7 @@ def _prepare_collective_groups(
 # work object). Functional collectives expect the implementation to allocate outputs, accept
 # process group name that must be resolved and do not support async ops (return output).
 def _local_functional_all_gather_into_tensor(
-    tensor: torch.Tensor, group_size: int, group_name: str
+    tensor: torch.Tensor, group_size: int, group_name: _GroupName
 ) -> torch.Tensor:
     # "all_gather_into_tensor(Tensor input, int group_size, str group_name) -> Tensor"
     from . import LocalTensor
@@ -135,7 +136,7 @@ def _local_functional_all_gather_into_tensor(
 
 
 def _local_functional_reduce_scatter_tensor(
-    tensor: torch.Tensor, reduce_op: str, group_size: int, group_name: str
+    tensor: torch.Tensor, reduce_op: str, group_size: int, group_name: _GroupName
 ) -> torch.Tensor:
     #  "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, str group_name) -> Tensor"
     from . import _zero_sized_like, LocalTensor
@@ -175,7 +176,7 @@ def _local_functional_reduce_scatter_tensor(
 
 
 def _local_functional_shard_dim_alltoall(
-    tensor: torch.Tensor, gather_dim: int, shard_dim: int, group_name: str
+    tensor: torch.Tensor, gather_dim: int, shard_dim: int, group_name: _GroupName
 ) -> torch.Tensor:
     # "shard_dim_alltoall(Tensor input, int gather_dim, int shard_dim, str group_name) -> Tensor"
     from . import _zero_sized_like, LocalTensor
