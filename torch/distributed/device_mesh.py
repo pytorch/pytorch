@@ -255,7 +255,7 @@ else:
                 )
 
             # private field to pre-generate DeviceMesh's hash
-            self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
+            self._flatten_rank_map = tuple(self._rank_map.tolist())
             self._thread_id = None
             # Initialize instance-specific flatten mapping
             self._flatten_mapping = {}
@@ -292,11 +292,6 @@ else:
                 self._coordinate_on_dim: Optional[list[int]] = (
                     rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
                 )
-
-            # private field to pre-generate DeviceMesh's hash
-            self._flatten_rank_map = tuple(self._rank_map.tolist())
-            # Initialize instance-specific flatten mapping
-            self._flatten_mapping = {}
 
         @property
         def device_type(self) -> str:
