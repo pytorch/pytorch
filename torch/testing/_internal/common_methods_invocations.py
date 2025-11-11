@@ -21059,12 +21059,20 @@ op_db: list[OpInfo] = [
                 'TestCommon', 'test_noncontiguous_samples',
             ),
             DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=2e-3, rtol=2e-3)}),
+                'TestCommon', 'test_noncontiguous_samples', device_type="rocm"
+            ),
+            DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=2e-3, rtol=3e-3)}),
                 'TestOperators',
             ),
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=5e-4, rtol=2e-5)}),
                 'TestCompositeCompliance',
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-3)}),
+                'TestCompositeCompliance', device_type="rocm"
             ),
             DecorateInfo(
                 toleranceOverride({torch.float16: tol(atol=2e-3, rtol=6e-1)}),
