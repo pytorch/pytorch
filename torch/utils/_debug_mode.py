@@ -430,13 +430,13 @@ class _TritonKernelCall(_DebugCall):
         super().__init__(call_depth)
         self.kernel_name = kernel_name
         self.kwargs = kwargs
-        self.kwargs_str: Optional[str] = None
+        self.kwargs_str: str | None = None
 
-        self.pre_hashes: Optional[dict[str, Any]] = None
-        self.post_hashes: Optional[dict[str, Any]] = None
+        self.pre_hashes: dict[str, Any] | None = None
+        self.post_hashes: dict[str, Any] | None = None
 
     def stringify_args(
-        self, attributes: list[str], tensor_memo: Optional[TensorIdTracker] = None
+        self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
     ) -> None:
         # Optionally hash kernel inputs before launch
         global _TRITON_INPUT_HASH_FN
