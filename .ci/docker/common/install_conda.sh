@@ -101,6 +101,14 @@ fi
     conda_install_through_forge libstdcxx-ng=14
   fi
 
+  if [[ "$ANACONDA_PYTHON_VERSION" == "3.13" ]] && [[ "$PYTHON_FREETHREADED" == "1" ]]; then
+    # needed for the 3.13t build to build lxml from source
+    conda_install_through_forge libxslt libxml2-devel
+
+    # pygithub depends on pynacl, which depends on cffi, which doesn't support 3.13t
+    sed '/^PyGithub/d' -i /opt/conda/requirements-ci.txt
+  fi
+
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt
 
