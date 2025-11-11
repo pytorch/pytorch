@@ -473,8 +473,9 @@ class CustomOpDef:
         return fn
 
     def register_effect(self, effect: Optional[EffectType]) -> None:
-        entry = torch._library.simple_registry.singleton.find(self._qualname)
-        entry.effect = effect
+        from torch._higher_order_ops.effects import _register_effectful_op
+
+        _register_effectful_op(self._qualname, effect)
 
     def register_torch_dispatch(
         self, torch_dispatch_class: Any, fn: Optional[Callable] = None, /
