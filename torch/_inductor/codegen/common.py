@@ -578,7 +578,7 @@ def init_backend_registration() -> None:
     if get_scheduling_for_device("xla") is None:
         from .xla.pallas_scheduling import PallasScheduling
         from .xla.pallas_wrapper import PallasWrapperCodegen
-        from .xla.pallas_device_op_overrides import PallasDeviceOpOverrides
+        
         register_backend_for_device(
             "xla",
             PallasScheduling,
