@@ -60,6 +60,7 @@ class TensorMeta(NamedTuple):
     shape: torch.Size
     stride: tuple[int, ...]
     dtype: torch.dtype
+    storage_offset: int
 
 
 # used internally to propagate the placements

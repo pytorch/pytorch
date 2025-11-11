@@ -103,6 +103,7 @@ class _ToTorchTensor(torch.autograd.Function):
                 shape=dtensor_meta.shape,
                 stride=tensor_stride,
                 dtype=dtensor_meta.dtype,
+                storage_offset=grad_output.storage_offset(),
             ),
         )
 
@@ -174,6 +175,7 @@ class _FromTorchTensor(torch.autograd.Function):
                 tensor_shape,
                 tensor_stride,
                 input.dtype,
+                storage_offset=input.storage_offset(),
             ),
         )
 
@@ -304,6 +306,9 @@ class DTensor(torch.Tensor):
             shape=outer_size,
             stride=outer_stride,
             dtype=spec.tensor_meta.dtype,
+            # Use the local tensor's storage_offset, which reflects any view operations
+            # performed on it (e.g., select, narrow, etc.)
+            storage_offset=local_tensor.storage_offset(),
         )
         unflatten_spec = DTensorSpec(
             spec.mesh,
@@ -448,7 +453,7 @@ class DTensor(torch.Tensor):
         its current rank.
 
         Keyword args:
-            grad_placements (List[:class:`Placement`], optional): the placements describes
+             (List[:class:`Placement`], optional): the placements describes
                 the future layout of any gradient layout of the Tensor returned from this
                 function.
                 `to_local` converts DTensor to local tensor and the returned local tensor
@@ -827,6 +832,7 @@ def distribute_tensor(
             shape=tensor.size(),
             stride=tensor.stride(),
             dtype=tensor.dtype,
+            storage_offset=tensor.storage_offset(),
         ),
     )
     # pyrefly: ignore [bad-argument-type]
@@ -1067,7 +1073,8 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
         # this tensor meta is not used except `shape`
         dtype = kwargs.get("dtype", torch.get_default_dtype())
 
-        tensor_meta = TensorMeta(size, (0,), dtype)
+        # TODO: determine correct storage_offset
+        tensor_meta = TensorMeta(size, (0,), dtype, storage_offset=0)
         spec = DTensorSpec(device_mesh, tuple(placements), tensor_meta=tensor_meta)
 
         if random.is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
@@ -1086,6 +1093,7 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
             size,
             torch_stride,
             local_tensor.dtype,
+            storage_offset=0,
         ),
     )
 

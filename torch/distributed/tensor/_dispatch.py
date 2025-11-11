@@ -94,6 +94,7 @@ def found_inf_reduce_handler(
             shape=target_tensor.size(),
             stride=target_tensor.stride(),
             dtype=target_tensor.dtype,
+            storage_offset=target_tensor.storage_offset(),
         ),
     )
     # pyrefly: ignore [bad-argument-type]
@@ -545,6 +546,7 @@ class OpDispatcher:
                     shape=tensor_arg.shape,
                     stride=tensor_arg.stride(),
                     dtype=tensor_arg.dtype,
+                    storage_offset=tensor_arg.storage_offset(),
                 ),
             )
         else:

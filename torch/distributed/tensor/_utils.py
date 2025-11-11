@@ -220,6 +220,8 @@ def _compute_local_shape_and_global_offset(
     return tuple(local_shape), tuple(global_offset)
 
 
+# NB: The local and global storage offsets are always the same, so you don't
+# have to go through this function for that!
 compute_global_tensor_info = torch._C._DTensor_compute_global_tensor_info
 
 

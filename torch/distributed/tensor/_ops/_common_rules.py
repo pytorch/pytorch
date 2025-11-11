@@ -208,10 +208,12 @@ def einop_rule(
     # to pass in the shape here. We should remove this once sharding decomp works
     # for ops like addmm
     assert input_specs[0].tensor_meta is not None
+    # TODO: determine correct storage_offset (currently reusing from input but shape differs)
     tensor_meta = TensorMeta(
         torch.Size(output_shape),
         input_specs[0].tensor_meta.stride,
         input_specs[0].tensor_meta.dtype,
+        storage_offset=input_specs[0].tensor_meta.storage_offset,
     )
     return OutputSharding(
         DTensorSpec.from_dim_map(

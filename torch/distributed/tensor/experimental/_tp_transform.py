@@ -301,6 +301,7 @@ def _populate_tensor_meta(node: Node, output_spec: OutputSpecType) -> None:
                 shape=fake_tensor.shape,
                 stride=fake_tensor.stride(),
                 dtype=fake_tensor.dtype,
+                storage_offset=fake_tensor.storage_offset(),
             )
     else:
         assert isinstance(output_spec, DTensorSpec)
@@ -308,6 +309,7 @@ def _populate_tensor_meta(node: Node, output_spec: OutputSpecType) -> None:
             shape=node.meta["val"].shape,
             stride=node.meta["val"].stride(),
             dtype=node.meta["val"].dtype,
+            storage_offset=node.meta["val"].storage_offset(),
         )
 
 
@@ -343,6 +345,7 @@ def _generate_default_output_sharding(
                 shape=tensor.shape,
                 stride=tensor.stride(),
                 dtype=tensor.dtype,
+                storage_offset=tensor.storage_offset(),
             ),
         )
 

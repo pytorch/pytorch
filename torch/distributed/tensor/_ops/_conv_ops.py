@@ -51,6 +51,7 @@ def convolution_rules(op_schema: OpSchema) -> OutputSharding:
         torch.Size(output_shape),
         tuple(output_stride),
         input_spec.tensor_meta.dtype,
+        storage_offset=0,
     )
     return OutputSharding(
         DTensorSpec.from_dim_map(
@@ -89,6 +90,7 @@ def convolution_backward_rules(op_schema: OpSchema) -> OutputSharding:
         torch.Size(bias_shape_opt),
         (1,),
         input_spec.tensor_meta.dtype,
+        storage_offset=0,
     )
 
     grad_input_spec = input_spec

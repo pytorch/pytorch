@@ -1092,7 +1092,8 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
             local_shape, _ = compute_local_shape_and_global_offset(
                 meta.shape, mesh, placements
             )
-            return TensorMeta(torch.Size(local_shape), local_stride, meta.dtype)
+            # TODO: compute correct local storage_offset from global meta
+            return TensorMeta(torch.Size(local_shape), local_stride, meta.dtype, storage_offset=0)
 
         # pyrefly: ignore [missing-attribute]
         mat1_meta = local_meta(mat1_strategy.strategies[0], input_specs[0].placements)

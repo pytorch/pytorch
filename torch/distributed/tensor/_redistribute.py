@@ -862,6 +862,7 @@ class Redistribute(torch.autograd.Function):
                     shape=input.shape,
                     stride=input.stride(),
                     dtype=forward_dtype,
+                    storage_offset=input.storage_offset(),
                 ),
             )
         else:
@@ -907,6 +908,7 @@ class Redistribute(torch.autograd.Function):
                     shape=grad_output.shape,
                     stride=grad_output.stride(),
                     dtype=backward_dtype,
+                    storage_offset=grad_output.storage_offset(),
                 ),
             )
             previous_spec = DTensorSpec(
@@ -945,6 +947,7 @@ class Redistribute(torch.autograd.Function):
                 shape=grad_output.shape,
                 stride=grad_output.stride(),
                 dtype=output.dtype,
+                storage_offset=grad_output.storage_offset(),
             ),
         )
         # pyrefly: ignore [bad-argument-type]

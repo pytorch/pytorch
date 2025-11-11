@@ -176,7 +176,10 @@ class ShardingPropagator:
 
         if isinstance(fake_out, torch.Tensor):
             return TensorMeta(
-                shape=fake_out.shape, stride=fake_out.stride(), dtype=fake_out.dtype
+                shape=fake_out.shape,
+                stride=fake_out.stride(),
+                dtype=fake_out.dtype,
+                storage_offset=fake_out.storage_offset(),
             )
 
         elif isinstance(fake_out, (tuple, list)):
@@ -188,6 +191,7 @@ class ShardingPropagator:
                             shape=fake_out_item.shape,
                             stride=fake_out_item.stride(),
                             dtype=fake_out_item.dtype,
+                            storage_offset=fake_out_item.storage_offset(),
                         )
                     )
                 else:
