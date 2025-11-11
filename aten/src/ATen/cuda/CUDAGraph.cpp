@@ -1,3 +1,4 @@
+#include <ATen/core/CachingHostAllocator.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/Exceptions.h>
@@ -105,6 +106,13 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
       return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
   });
 
+  at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, [this](c10::Stream stream) {
+    cudaStreamCaptureStatus status{};
+    CaptureId_t stream_capture_id = 0;
+    AT_CUDA_CHECK(cudaStreamGetCaptureInfo(CUDAStream(CUDAStream::UNCHECKED, stream), &status, &stream_capture_id));
+    return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
+  });
+
   // cudaStreamCaptureModeGlobal is the most conservative option to
   // prevent potentially unsafe CUDA API calls during capture.  See
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
@@ -125,6 +133,7 @@ void CUDAGraph::capture_end() {
   AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
+  at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
 
@@ -279,6 +288,7 @@ void CUDAGraph::reset() {
   if (capture_ended_) {
     // notifyCaptureDestroy may throw. How should we handle this?
     c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
+    at::getHostAllocator(at::kCUDA)->release_pool(mempool_id_);
     capture_ended_ = false;
   }
   if (has_graph_) {
