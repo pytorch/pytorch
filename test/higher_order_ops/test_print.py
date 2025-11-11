@@ -3,6 +3,7 @@ import io
 from unittest.mock import patch
 
 import torch
+from torch._dynamo.testing import same
 from torch._dynamo.utils import counters
 from torch._functorch.aot_autograd import aot_export_module
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -174,6 +175,28 @@ x = add_1, y = add_2);  getitem = None
         self.assertEqual(
             printed_output, f"moo {orig_inp} 2\nmoo {new_inp} {new_inp * 2}"
         )
+
+    def test_reorder_print(self):
+        def f(x):
+            x1 = x + x
+            torch._higher_order_ops.print("moo {x}", x=x1)
+            x2 = x1 * x1
+            torch._higher_order_ops.print("moo {x}", x=x2)
+            x3 = x2 + x2
+            return (x1, x3)
+
+        x = torch.ones(3, 3)
+        opt_f = torch.compile(backend="eager")(f)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            opt_out = opt_f(x)
+            printed_output = mock_stdout.getvalue().strip()
+            orig_out = f(x)
+
+        self.assertEqual(
+            printed_output,
+            f"moo {torch.ones(3, 3) * 2}\nmoo {torch.ones(3, 3) * 2 * torch.ones(3, 3) * 2}",
+        )
+        self.assertTrue(same(orig_out, opt_out))
 
 
 if __name__ == "__main__":
