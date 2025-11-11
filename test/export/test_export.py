@@ -17746,6 +17746,76 @@ def forward(self, x, y):
             str(ep.graph)
         )
 
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_module_to_with_shared_weights(self):
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
+
+            def forward(self, x):
+                token_ids = torch.ones((4,), device=x.device, dtype=torch.int64)
+                embedded = self.embedding(token_ids).sum()
+                return x.sum() + embedded.sum()
+
+        class Container(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = Model()
+
+            def forward(self, x):
+                if "cuda" in str(x.device):
+                    mod = self.mod.to(x.device)
+                    return mod(x)
+                else:
+                    return x.sum()
+
+        with torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False):
+            torch.manual_seed(0)
+            container = Container()
+            container_eager = copy.deepcopy(container)
+            gm = dynamo_graph_capture_for_export(container)(
+                torch.randn(4, 4, 4, device="cuda")
+            )
+
+            self.assertExpectedInline(
+                str(gm.code).strip(),
+                """\
+def forward(self, args_0):
+    _tree_leaf_0, _tree_leaf_1, = pytree.tree_leaves((self, args_0,))
+    L_x_ , L_self_modules_mod_modules_embedding_parameters_weight_ , SYNTHETIC_LOCAL_tmp_0_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1)
+    l_x_ = L_x_
+    l_self_modules_mod_modules_embedding_parameters_weight_ = L_self_modules_mod_modules_embedding_parameters_weight_
+    synthetic_local_tmp_0_ = SYNTHETIC_LOCAL_tmp_0_
+    _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+    param_applied = l_self_modules_mod_modules_embedding_parameters_weight_.to(device(type='cuda', index=0), None, False)
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+    getattr_1 = l_self_modules_mod_modules_embedding_parameters_weight_.is_leaf;  l_self_modules_mod_modules_embedding_parameters_weight_ = getattr_1 = None
+    out_param = torch__dynamo_create_parameter_op_tracable_create_parameter(param_applied, synthetic_local_tmp_0_);  param_applied = synthetic_local_tmp_0_ = None
+    token_ids = torch.ones((4,), device = device(type='cuda', index=0), dtype = torch.int64)
+    embedding = torch.nn.functional.embedding(token_ids, out_param, None, None, 2.0, False, False);  token_ids = out_param = None
+    embedded = embedding.sum();  embedding = None
+    sum_2 = l_x_.sum();  l_x_ = None
+    sum_3 = embedded.sum();  embedded = None
+    add = sum_2 + sum_3;  sum_2 = sum_3 = None
+    return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, add), self._out_spec)""",
+            )
+
+            inp = torch.randn(4, 4, 4, device="cuda")
+
+            # Call container first to move shared weights to CUDA
+            export_out = container(inp)
+            eager_out = container_eager(inp)
+            self.assertEqual(export_out, eager_out)
+
+            # This should not fail even though weights are now on CUDA
+            # and .to(cuda) returns the same parameter with requires_grad=True
+            export_out_v2 = gm(inp)
+            eager_out_v2 = container_eager(inp)
+            self.assertEqual(export_out_v2, eager_out_v2)
+
 
 if __name__ == "__main__":
     run_tests()
