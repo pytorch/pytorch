@@ -217,6 +217,36 @@ sparse_support_notes = {
 }
 
 add_docstr(
+    torch.nan,
+    r"""
+nan -> float
+
+Returns `nan`.
+
+Example::
+
+    >>> torch.nan
+    nan
+
+""",
+)
+
+add_docstr(
+    torch.inf,
+    r"""
+inf -> float
+
+Returns `inf`.
+
+Example::
+
+    >>> torch.inf
+    inf
+
+""",
+)
+
+add_docstr(
     torch.abs,
     r"""
 abs(input: Tensor, *, out: Optional[Tensor]) -> Tensor
