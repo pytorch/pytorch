@@ -594,7 +594,7 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
             tensor, self.split_factor, with_padding=False, contiguous=False
         )
         second_split = [
-            super()._split_tensor(
+            super(_StridedShard, self)._split_tensor(
                 s, num_chunks=num_chunks, with_padding=False, contiguous=False
             )[0]
             for s in first_split
