@@ -207,8 +207,6 @@ OpenRegStream getStreamFromPool(const int priority, DeviceIndex device_index) {
   if (device_index == -1) {
     device_index = current_device();
   }
-  c10::call_once(
-      device_flags[device_index], initDeviceStreamState, device_index);
   auto pri_idx =
       std::clamp(priority, 0, max_compile_time_stream_priorities - 1);
   const auto idx = get_idx(priority_counters[device_index][pri_idx]);
