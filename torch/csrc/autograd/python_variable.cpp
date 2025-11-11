@@ -1410,14 +1410,16 @@ static bool get_local_results(
       }
     };
     auto handle_sequence = [&default_tensor, &op, stack](auto sequence) {
+      c10::List<c10::IValue> result(op.schema().returns().at(0).type());
       for (const auto& item : sequence) {
         TORCH_CHECK(
             !item.is_none(),
             "return type ",
             op.schema().returns().at(0).type(),
             " in DTensor op is not supported");
-        stack->push_back(default_tensor(item));
+        result.push_back(default_tensor(item));
       }
+      stack->push_back(std::move(result));
     };
 
     if (py::isinstance(spec, get_dtensor_spec_class())) {
@@ -2061,11 +2063,11 @@ static std::pair<TensorFlavor, py::object> check_for_dtensor_or_tensor(
   return check_for_dtensor_or_tensor(iv.toTensor());
 }
 
-static c10::List<at::Tensor> replace_dtensors_with_local_tensor(
-    const c10::List<at::Tensor>& tl) {
-  c10::List<at::Tensor> local_list;
+static c10::List<c10::IValue> replace_dtensors_with_local_tensor(
+    const c10::List<c10::IValue>& tl) {
+  c10::List<c10::IValue> local_list(tl.elementType());
   local_list.reserve(tl.size());
-  for (const at::Tensor& elt : tl) {
+  for (const auto& elt : tl) {
     const auto [tensor_flavor, py_tensor] = check_for_dtensor_or_tensor(elt);
     if (tensor_flavor == TensorFlavor::EXACTLY_DTENSOR ||
         tensor_flavor == TensorFlavor::DTENSOR_SUBCLASS) {
@@ -2080,8 +2082,8 @@ static c10::List<at::Tensor> replace_dtensors_with_local_tensor(
 
 static void replace_dtensors_with_local_tensor(torch::jit::Stack& stack) {
   for (auto& arg : stack) {
-    if (arg.isTensorList()) {
-      arg = replace_dtensors_with_local_tensor(arg.toTensorList());
+    if (arg.isList()) {
+      arg = replace_dtensors_with_local_tensor(arg.toList());
       continue;
     }
     const auto [tensor_flavor, py_tensor] = check_for_dtensor_or_tensor(arg);
