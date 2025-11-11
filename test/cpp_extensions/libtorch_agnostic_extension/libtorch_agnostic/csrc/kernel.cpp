@@ -343,14 +343,6 @@ std::vector<Tensor> my__foreach_mul(torch::headeronly::HeaderOnlyArrayRef<Tensor
   return torch::stable::detail::to<std::vector<Tensor>>(stack[0]);
 }
 
-// void boxed_my__foreach_mul(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-//   // Why is the following NOT torch::stable::detail::to<HeaderOnlyArrayRef<Tensor>>(stack[0])? Because calling `to`
-//   // on a StableIValue means that the result is owning its underlying data now! HeaderOnlyArrayRef
-//   // is not owning, so it cannot safely steward the result of the torch::stable::detail::to<>.
-//   auto res = my__foreach_mul(torch::stable::detail::to<std::vector<Tensor>>(stack[0]), torch::stable::detail::to<std::vector<Tensor>>(stack[1]));
-//   stack[0] = torch::stable::detail::from(res);
-// }
-
 void my__foreach_mul_(torch::headeronly::HeaderOnlyArrayRef<Tensor> self, torch::headeronly::HeaderOnlyArrayRef<Tensor> other) {
   std::array<StableIValue, 2> stack = {torch::stable::detail::from(self), torch::stable::detail::from(other)};
   aoti_torch_call_dispatcher("aten::_foreach_mul_", "List", stack.data());
