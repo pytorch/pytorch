@@ -398,24 +398,17 @@ class PallasKernel(SIMDKernel):
         has_iter_vars = self._has_iteration_vars(index)
 
         if has_indirect and has_iter_vars:
-            # Mixed indexing: has both indirect indices and iteration variables
-            # For multi-dimensional indexing like x[indices, :], we need to expand
-            # iteration variables to JAX arrays and use advanced indexing
-            # Since we're computing linear indices, flatten the buffer first
+            # Mixed indexing with indirect and iteration vars
             index_str = self._handle_mixed_indexing(index)
-            # Load the full array and reshape to 1D, then index with computed linear indices
             load_expr = f"{buf}[...].flatten()[{index_str}]"
         elif has_indirect:
-            # Pure indirect indexing: use the expression directly
-            # JAX supports integer array indexing natively
+            # Pure indirect indexing
             index_str = self.kexpr(index)
             load_expr = f"{buf}[{index_str}]"
         else:
-            # Regular indexing: no indirect variables
+            # Regular indexing
             index_str = self._get_index_str(index)
             load_expr = f"{buf}[{index_str}]"
-
-        # Pallas refs must be unpacked with [...] or [index] to load
         return self.cse.generate(
             self.compute,
             load_expr,
@@ -441,51 +434,29 @@ class PallasKernel(SIMDKernel):
         used_iter_vars = sorted(free_symbols & iter_vars, key=str)
 
         if len(used_iter_vars) == 0:
-            # No iteration variables, should not reach here
             return self.kexpr(index)
 
-        # Try to decompose the linear index into multi-dimensional indices
-        # For x[indices, :], the linear index is typically: x0 + stride * tmp0
-        # We want to convert this to proper multi-dimensional indexing
-
-        # Generate the basic expression
         index_str = self.kexpr(index)
-
-        # Replace iteration variables with JAX arange calls with proper shape for broadcasting
-        # For expressions like x0 + 8*tmp5 where tmp5 is shape (4,) and x0 iterates 0-7:
-        #   We need x0[None, :] giving (1, 8) to broadcast with tmp5[:, None] giving (4, 1)
-
-        # Identify indirect variables to understand dimensionality
         indirect_vars = [str(sym) for sym in free_symbols if str(sym).startswith("tmp")]
 
         for i, var in enumerate(used_iter_vars):
             var_name = str(var)
             if var in self.range_tree_nodes:
-                # Get the range for this variable
                 range_entry = self.range_tree_nodes[var]
-                # Extract the length from IterationRangesEntry
                 range_size = (
                     range_entry.length
                     if hasattr(range_entry, "length")
                     else range_entry
                 )
 
-                # Create arange
                 arange_expr = f"jnp.arange({self.kexpr(range_size)})"
-
-                # When mixing with indirect indices, reshape for proper broadcasting
-                # The iteration variable represents the "inner" dimension and should be broadcastable
-                # Add leading None to make it (1, ..., size) so it broadcasts with indirect indices
                 if indirect_vars:
                     arange_expr = f"{arange_expr}[None, :]"
 
                 index_str = index_str.replace(var_name, arange_expr)
 
-        # Now we need to reshape indirect variables too for proper broadcasting
-        # Wrap each tmp variable with [:, None] to make it broadcastable
+        # Reshape indirect variables for proper broadcasting
         for indirect_var in indirect_vars:
-            # Replace occurrences of the indirect variable with reshaped version
-            # Use word boundaries to avoid partial replacements
             index_str = index_str.replace(indirect_var, f"{indirect_var}[:, None]")
 
         return index_str
@@ -502,16 +473,12 @@ class PallasKernel(SIMDKernel):
         has_iter_vars = self._has_iteration_vars(index)
 
         if has_indirect and has_iter_vars:
-            # Mixed indexing with both indirect indices and iteration variables
             index_str = self._handle_mixed_indexing(index)
         elif has_indirect:
-            # Pure indirect indexing
             index_str = self.kexpr(index)
         else:
-            # Regular indexing
             index_str = self._get_index_str(index)
 
-        # Pallas refs must use [...] or [index] assignment to store
         self.stores.writeline(f"{out}[{index_str}] = {value}")
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:  # type: ignore[override]
