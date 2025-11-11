@@ -16,6 +16,7 @@ concurrency:
 permissions:
   id-token: write
   contents: read
+  actions: read
 
 jobs:
   download-docker-builds-artifacts:
