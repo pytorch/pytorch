@@ -1488,6 +1488,7 @@ py::object dispatchDTensorOp(
     }
   }
 
+  torch::jit::Stack saved_args = *stack;
   NativeShardingPropagatorCache* native_sharding_propagator_cache = nullptr;
   auto opt_native_op_schema = create_native_op_schema(op, py_op, stack);
   if (opt_native_op_schema.has_value()) {
@@ -1617,7 +1618,7 @@ py::object dispatchDTensorOp(
       // need to port the mutable output aliases portion of
       // return_and_correct_aliasing at all.
       const c10::IValue& arg_iv =
-          (*stack)[stack->size() - num_arguments + arg_idx];
+          saved_args.at(saved_args.size() - num_arguments + arg_idx);
       if (!arg_iv.isTensor()) {
         continue;
       }
