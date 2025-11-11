@@ -125,6 +125,13 @@ jobs:
       #  with:
       #    docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
 
+      - name: Generate output
+        id: generate_output
+        run: |
+          docker_image_name="${{ matrix.docker-image-name }}"
+          docker_image_tag="${{ steps.build-docker-image.outputs.docker-image }}"
+          echo "${docker_image_name}=${docker_image_tag}" >> docker-builds-output-${docker_image_name}.txt
+
       - uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
         name: Push to https://ghcr.io/
         id: push-to-ghcr-io
