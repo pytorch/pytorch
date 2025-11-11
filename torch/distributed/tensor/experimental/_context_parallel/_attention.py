@@ -1004,10 +1004,15 @@ def _disable_cp_dtensor_dispatcher() -> None:
     """Disables DTensor dispatcher to dispatch SDPA to CP."""
     # Restore original custom op handlers
     DTensor._op_dispatcher._custom_op_handlers = exitsing_custom_ops
-    # Unregister CP-specific sharding rules
-    from ._sharding_rules import unregister_cp_sharding_rules
 
-    unregister_cp_sharding_rules()
+    # TODO: unregister_cp_sharding_rules() will cause all DTensor sharding
+    # propagation cache being invalidated. It is not easy to achieve
+    # selectively invalidating lru cache without rewriting the sharding
+    # propagation wrapper. Disable unregister_cp_sharding_rules() call
+    # for now.
+
+    # from ._sharding_rules import unregister_cp_sharding_rules
+    # unregister_cp_sharding_rules()
 
 
 def _enable_context_parallel_dispatcher_impl(seq_dim: int, mesh: DeviceMesh) -> None:
