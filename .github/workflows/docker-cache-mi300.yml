@@ -31,7 +31,7 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4.1.7
         with:
-          run_id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ github.event.workflow_run.id }}
           path: ./docker-builds-artifacts
           merge-multiple: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
