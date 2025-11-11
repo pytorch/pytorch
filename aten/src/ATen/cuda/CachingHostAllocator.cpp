@@ -137,7 +137,7 @@ struct CUDACachingHostAllocatorImpl
   void free_block_slowpath(Block* block) {
     auto start = std::chrono::steady_clock::now();
     // Users may change the allocator config at will. torch unit tests do this.
-    // However, allocations using cudaHostRegister should use corresonding
+    // However, allocations using cudaHostRegister should use corresponding
     // cudaHostUnregister and similarly for cudaHostAlloc / cudaFreeHost.
     void* ptr = block->ptr_;
     bool use_register = false;
@@ -183,11 +183,6 @@ struct CUDACachingHostAllocatorImpl
     return true;
   }
 
-  bool pinned_use_background_threads() override {
-    return c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
-        pinned_use_background_threads();
-  }
-
   EventPool::Event create_event_internal(DeviceIndex idx) {
     // Leak the event pool to avoid shutdown issue.
     static auto* event_pool = new EventPool();
@@ -222,15 +217,15 @@ struct CUDACachingHostAllocatorImpl
       size_t numThreads,
       size_t pageSize) {
     uintptr_t start = (uintptr_t)ptr + (size * i / numThreads);
-    uintptr_t end = (uintptr_t)start + (size / numThreads);
+    uintptr_t end = start + (size / numThreads);
     if (i == (numThreads - 1)) {
       end = (uintptr_t)ptr + size;
     }
 
     // pre-fault/map the pages by setting the first byte of the page
     uintptr_t alignedStart =
-        (((uintptr_t)start + pageSize - 1) & ~(pageSize - 1));
-    for (uintptr_t p = alignedStart; p < ((uintptr_t)end); p += pageSize) {
+        ((start + pageSize - 1) & ~(pageSize - 1));
+    for (uintptr_t p = alignedStart; p < (end); p += pageSize) {
       // NOLINTNEXTLINE(performance-no-int-to-ptr)
       memset((void*)p, 0, 1);
     }

@@ -316,30 +316,4 @@ const Variable& AutogradMeta::fw_grad(
   return direct_fw_grad;
 }
 
-std::optional<at::ScalarType> AutogradMeta::grad_dtype(
-    const at::TensorBase& self) const {
-  if (allow_grad_dtype_mismatch_) {
-    return std::nullopt;
-  } else if (grad_dtype_.has_value()) {
-    return grad_dtype_;
-  } else {
-    return std::optional<at::ScalarType>(self.scalar_type());
-  }
-}
-void AutogradMeta::set_grad_dtype(
-    const std::optional<at::ScalarType>& grad_dtype,
-    const at::TensorBase& self) {
-  TORCH_CHECK(!grad_fn_, "grad_dtype can only be set on leaf tensors.");
-  if (grad_dtype.has_value()) {
-    grad_dtype_ = grad_dtype;
-    allow_grad_dtype_mismatch_ = false;
-  } else {
-    allow_grad_dtype_mismatch_ = true;
-  }
-  auto grad_acc = impl::try_get_grad_accumulator(self);
-  if (grad_acc) {
-    grad_acc->mutable_input_metadata(0).set_grad_dtype(grad_dtype);
-  }
-}
-
 } // namespace torch::autograd

@@ -115,8 +115,8 @@ ViewInfo ViewInfo::chain(
         // view_func() AND as_strided() isn't supported; there's no obvious way
         // to chain the two views.
         auto error_msg =
-            ("Attempted to chain views when the parent view has no view_func() and "
-             "does not support as_strided(). This is not supported.");
+            "Attempted to chain views when the parent view has no view_func() and "
+            "does not support as_strided(). This is not supported.";
         view_func = std::make_unique<ErroringViewFunc>(error_msg);
         rev_view_func = [=](const at::Tensor& root_view) {
           TORCH_CHECK(false, error_msg);
@@ -927,6 +927,32 @@ void VariableHooks::set_grad_dtype(
     const std::optional<c10::ScalarType>& grad_dtype) const {
   auto* meta = impl::materialize_autograd_meta(self);
   meta->set_grad_dtype(grad_dtype, self);
+}
+
+std::optional<at::ScalarType> AutogradMeta::grad_dtype(
+    const at::TensorBase& self) const {
+  if (allow_grad_dtype_mismatch_) {
+    return std::nullopt;
+  } else if (grad_dtype_.has_value()) {
+    return grad_dtype_;
+  } else {
+    return std::optional<at::ScalarType>(self.scalar_type());
+  }
+}
+void AutogradMeta::set_grad_dtype(
+    const std::optional<at::ScalarType>& grad_dtype,
+    const at::TensorBase& self) {
+  TORCH_CHECK(!grad_fn_, "grad_dtype can only be set on leaf tensors.");
+  if (grad_dtype.has_value()) {
+    grad_dtype_ = grad_dtype;
+    allow_grad_dtype_mismatch_ = false;
+  } else {
+    allow_grad_dtype_mismatch_ = true;
+  }
+  auto grad_acc = impl::try_get_grad_accumulator(self);
+  if (grad_acc) {
+    grad_acc->mutable_input_metadata(0).set_grad_dtype(grad_dtype);
+  }
 }
 
 } // namespace torch::autograd

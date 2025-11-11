@@ -21,9 +21,6 @@
 #define THP_EXPECT(x, y) (x)
 #endif
 
-#define THPUtils_checkReal_FLOAT(object) \
-  (PyFloat_Check(object) || PyLong_Check(object))
-
 #define THPUtils_unpackReal_FLOAT(object)           \
   (PyFloat_Check(object) ? PyFloat_AsDouble(object) \
        : PyLong_Check(object)                       \
@@ -53,66 +50,11 @@
        : (throw std::runtime_error("Could not parse real"),                   \
           c10::complex<double>(0, 0)))
 
-#define THPUtils_checkReal_BOOL(object) PyBool_Check(object)
-
-#define THPUtils_checkReal_COMPLEX(object) \
-  PyComplex_Check(object) || PyFloat_Check(object) || PyLong_Check(object)
-
-#define THPUtils_newReal_FLOAT(value) PyFloat_FromDouble(value)
-
-#define THPUtils_newReal_BOOL(value) PyBool_FromLong(value)
-
-#define THPUtils_newReal_COMPLEX(value) \
-  PyComplex_FromDoubles(value.real(), value.imag())
-
-#define THPDoubleUtils_checkReal(object) THPUtils_checkReal_FLOAT(object)
-#define THPDoubleUtils_unpackReal(object) \
-  (double)THPUtils_unpackReal_FLOAT(object)
-#define THPDoubleUtils_newReal(value) THPUtils_newReal_FLOAT(value)
-#define THPFloatUtils_checkReal(object) THPUtils_checkReal_FLOAT(object)
-#define THPFloatUtils_unpackReal(object) \
-  (float)THPUtils_unpackReal_FLOAT(object)
-#define THPFloatUtils_newReal(value) THPUtils_newReal_FLOAT(value)
-#define THPHalfUtils_checkReal(object) THPUtils_checkReal_FLOAT(object)
-#define THPHalfUtils_unpackReal(object) \
-  (at::Half) THPUtils_unpackReal_FLOAT(object)
-#define THPHalfUtils_newReal(value) PyFloat_FromDouble(value)
-#define THPHalfUtils_newAccreal(value) THPUtils_newReal_FLOAT(value)
-#define THPComplexDoubleUtils_checkReal(object) \
-  THPUtils_checkReal_COMPLEX(object)
-#define THPComplexDoubleUtils_unpackReal(object) \
-  THPUtils_unpackReal_COMPLEX(object)
-#define THPComplexDoubleUtils_newReal(value) THPUtils_newReal_COMPLEX(value)
-#define THPComplexFloatUtils_checkReal(object) \
-  THPUtils_checkReal_COMPLEX(object)
-#define THPComplexFloatUtils_unpackReal(object) \
-  (c10::complex<float>)THPUtils_unpackReal_COMPLEX(object)
-#define THPComplexFloatUtils_newReal(value) THPUtils_newReal_COMPLEX(value)
-#define THPBFloat16Utils_checkReal(object) THPUtils_checkReal_FLOAT(object)
-#define THPBFloat16Utils_unpackReal(object) \
-  (at::BFloat16) THPUtils_unpackReal_FLOAT(object)
-#define THPBFloat16Utils_newReal(value) PyFloat_FromDouble(value)
-#define THPBFloat16Utils_newAccreal(value) THPUtils_newReal_FLOAT(value)
-
-#define THPBoolUtils_checkReal(object) THPUtils_checkReal_BOOL(object)
 #define THPBoolUtils_unpackReal(object) THPUtils_unpackReal_BOOL(object)
-#define THPBoolUtils_newReal(value) THPUtils_newReal_BOOL(value)
 #define THPBoolUtils_checkAccreal(object) THPUtils_checkReal_BOOL(object)
-#define THPBoolUtils_unpackAccreal(object) \
-  (int64_t)THPUtils_unpackReal_BOOL(object)
-#define THPBoolUtils_newAccreal(value) THPUtils_newReal_BOOL(value)
-#define THPLongUtils_checkReal(object) THPUtils_checkReal_INT(object)
-#define THPLongUtils_unpackReal(object) (int64_t)THPUtils_unpackReal_INT(object)
-#define THPIntUtils_checkReal(object) THPUtils_checkReal_INT(object)
-#define THPIntUtils_unpackReal(object) (int)THPUtils_unpackReal_INT(object)
-#define THPShortUtils_checkReal(object) THPUtils_checkReal_INT(object)
-#define THPShortUtils_unpackReal(object) (short)THPUtils_unpackReal_INT(object)
-#define THPCharUtils_checkReal(object) THPUtils_checkReal_INT(object)
-#define THPCharUtils_unpackReal(object) (char)THPUtils_unpackReal_INT(object)
 #define THPByteUtils_checkReal(object) THPUtils_checkReal_INT(object)
 #define THPByteUtils_unpackReal(object) \
   (unsigned char)THPUtils_unpackReal_INT(object)
-#define THPByteUtils_newReal(value) THPUtils_newReal_INT(value)
 
 /*
    From https://github.com/python/cpython/blob/v3.7.0/Modules/xxsubtype.c
