@@ -50,7 +50,9 @@ def _updated_hashes(hash_file, files_to_hash):
     return None
 
 
-def _regenerate_version():
+@click.command()
+def regenerate_version():
+    """Regenerate version.py."""
     cmd = [
         sys.executable,
         "-m",
@@ -58,12 +60,6 @@ def _regenerate_version():
         "--is-debug=false",
     ]
     spin.util.run(cmd)
-
-
-@click.command()
-def regenerate_version():
-    """Regenerate version.py."""
-    _regenerate_version()
 
 
 TYPE_STUBS = [
@@ -99,7 +95,9 @@ TYPE_STUBS = [
 ]
 
 
-def _regenerate_type_stubs():
+@click.command()
+def regenerate_type_stubs():
+    """Regenerate type stubs."""
     for name, hash_file, files_to_hash, cmd in TYPE_STUBS:
         if hash_file:
             if hashes := _updated_hashes(hash_file, files_to_hash):
@@ -121,12 +119,6 @@ def _regenerate_type_stubs():
 
 
 @click.command()
-def regenerate_type_stubs():
-    """Regenerate type stubs."""
-    _regenerate_type_stubs()
-
-
-@click.command()
 def regenerate_clangtidy_files():
     """Regenerate clang-tidy files."""
     cmd = [
@@ -135,6 +127,77 @@ def regenerate_clangtidy_files():
         "tools.linter.clang_tidy.generate_build_files",
     ]
     spin.util.run(cmd)
+
+
+#: These linters are expected to need less than 3s cpu time total
+VERY_FAST_LINTERS = {
+    "ATEN_CPU_GPU_AGNOSTIC",
+    "BAZEL_LINTER",
+    "C10_NODISCARD",
+    "C10_UNUSED",
+    "CALL_ONCE",
+    "CMAKE_MINIMUM_REQUIRED",
+    "CONTEXT_DECORATOR",
+    "COPYRIGHT",
+    "CUBINCLUDE",
+    "DEPLOY_DETECTION",
+    "ERROR_PRONE_ISINSTANCE",
+    "EXEC",
+    "HEADER_ONLY_LINTER",
+    "IMPORT_LINTER",
+    "INCLUDE",
+    "LINTRUNNER_VERSION",
+    "MERGE_CONFLICTLESS_CSV",
+    "META_NO_CREATE_UNBACKED",
+    "NEWLINE",
+    "NOQA",
+    "NO_WORKFLOWS_ON_FORK",
+    "ONCE_FLAG",
+    "PYBIND11_INCLUDE",
+    "PYBIND11_SPECIALIZATION",
+    "PYPIDEP",
+    "PYPROJECT",
+    "RAWCUDA",
+    "RAWCUDADEVICE",
+    "ROOT_LOGGING",
+    "TABS",
+    "TESTOWNERS",
+    "TYPEIGNORE",
+    "TYPENOSKIP",
+    "WORKFLOWSYNC",
+}
+
+
+#: These linters are expected to take a few seconds, but less than 10s cpu time total
+FAST_LINTERS = {
+    "CMAKE",
+    "DOCSTRING_LINTER",
+    "GHA",
+    "NATIVEFUNCTIONS",
+    "RUFF",
+    "SET_LINTER",
+    "SHELLCHECK",
+    "SPACES",
+}
+
+
+#: These linters are expected to take more than 10s cpu time total;
+#: some need more than 1 hour.
+SLOW_LINTERS = {
+    "ACTIONLINT",
+    "CLANGFORMAT",
+    "CLANGTIDY",
+    "CODESPELL",
+    "FLAKE8",
+    "GB_REGISTRY",
+    "PYFMT",
+    "PYREFLY",
+    "TEST_DEVICE_BIAS",
+    "TEST_HAS_MAIN",
+}
+
+
+ALL_LINTERS = VERY_FAST_LINTERS | FAST_LINTERS | SLOW_LINTERS
 
 
 LINTRUNNER_CACHE_INFO = (
@@ -154,6 +217,28 @@ def setup_lint():
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
+def _check_linters():
+    cmd = ["uvx", "lintrunner", "list"]
+    ret = spin.util.run(cmd, output=False, stderr=subprocess.PIPE)
+    assert ret.returncode == 0, ret.stderr
+    linters = {l.strip() for l in ret.stdout.decode().strip().split("\n")[1:]}
+    unknown_linters = linters - ALL_LINTERS
+    missing_linters = ALL_LINTERS - linters
+    if unknown_linters:
+        click.secho(
+            f"Unknown linters found; please add them to the correct category "
+            f"in .spin/cmds.py: {', '.join(unknown_linters)}",
+            fg="yellow",
+        )
+    if missing_linters:
+        click.secho(
+            f"Missing linters found; please update the corresponding category "
+            f"in .spin/cmds.py: {', '.join(missing_linters)}",
+            fg="yellow",
+        )
+    return unknown_linters, missing_linters
+
+
 @spin.util.extend_command(
     setup_lint,
     doc=f"""
@@ -165,7 +250,8 @@ def setup_lint():
         considered: {", ".join(LINTRUNNER_CACHE_INFO[1])}.
         """,
 )
-def lazy_setup_lint(*, parent_callback, **kwargs):
+@click.pass_context
+def lazy_setup_lint(ctx, parent_callback, **kwargs):
     if hashes := _updated_hashes(*LINTRUNNER_CACHE_INFO):
         click.echo(
             "Changes detected in lint configuration files. Setting up linting tools..."
@@ -180,39 +266,50 @@ def lazy_setup_lint(*, parent_callback, **kwargs):
     else:
         click.echo("No changes detected in lint configuration files. Skipping setup.")
     click.echo("Regenerating version...")
-    _regenerate_version()
+    ctx.invoke(regenerate_version)
     click.echo("Regenerating type stubs...")
-    _regenerate_type_stubs()
+    ctx.invoke(regenerate_type_stubs)
     click.echo("Done.")
+    _check_linters()
 
 
-@spin.util.extend_command(
-    lazy_setup_lint,
-    doc="Lint all files.",
-)
-def lint(*, parent_callback, **kwargs):
-    parent_callback(**kwargs)
-    cmd = ["uvx", "lintrunner", "--all-files"]
-    spin.util.run(cmd)
+@click.command()
+@click.pass_context
+def lint(ctx, **kwargs):
+    """Lint all files."""
+    ctx.invoke(lazy_setup_lint)
+    all_files_linters = VERY_FAST_LINTERS | FAST_LINTERS
+    changed_files_linters = SLOW_LINTERS
+    all_files_cmd = [
+        "uvx",
+        "lintrunner",
+        "--take",
+        ",".join(all_files_linters),
+        "--all-files",
+    ]
+    spin.util.run(all_files_cmd)
+    changed_files_cmd = [
+        "uvx",
+        "lintrunner",
+        "--take",
+        ",".join(changed_files_linters),
+    ]
+    spin.util.run(changed_files_cmd)
 
 
-@spin.util.extend_command(
-    lazy_setup_lint,
-    doc="Lint changed files.",
-)
-def quicklint(*, parent_callback, **kwargs):
-    """Run linting tools."""
-    parent_callback(**kwargs)
+@click.command()
+@click.pass_context
+def quicklint(ctx, **kwargs):
+    """Lint changed files."""
+    ctx.invoke(lazy_setup_lint)
     cmd = ["uvx", "lintrunner"]
     spin.util.run(cmd)
 
 
-@spin.util.extend_command(
-    lazy_setup_lint,
-    doc="Autofix changed files.",
-)
-def quickfix(*, parent_callback, **kwargs):
-    """Run linting tools."""
-    parent_callback(**kwargs)
+@click.command()
+@click.pass_context
+def quickfix(ctx, **kwargs):
+    """Autofix changed files."""
+    ctx.invoke(lazy_setup_lint)
     cmd = ["uvx", "lintrunner", "--apply-patches"]
     spin.util.run(cmd)
