@@ -718,15 +718,18 @@ def _get_gradient_divide_factors(
     # use NCCL's built-in division to avoid separate div kernels
     overflow_risk = reduce_dtype not in (torch.float32, torch.bfloat16)
 
+    if factor is None:
+        # Only need to compute data_parallel_size when factor is None
+        if reduce_scatter_group is not None:
+            data_parallel_size = reduce_scatter_group.size()
+        else:
+            data_parallel_size = 1
+
+        if all_reduce_group is not None:
+            data_parallel_size *= all_reduce_group.size()
+
     if not overflow_risk and not force_sum_reduction_for_comms:
         if factor is None:
-            if reduce_scatter_group is not None:
-                data_parallel_size = reduce_scatter_group.size()
-            else:
-                data_parallel_size = 1
-
-            if all_reduce_group is not None:
-                data_parallel_size *= all_reduce_group.size()
             # Warning: NCCL ReduceOp.AVG may produce incorrect results with
             # world size 1.
             if data_parallel_size == 1:
@@ -738,6 +741,8 @@ def _get_gradient_divide_factors(
             reduce_scatter_op = torch.distributed._make_nccl_premul_sum(1 / factor)
         return None, None, reduce_scatter_op, ReduceOp.SUM
 
+    if factor is None:
+        factor = float(data_parallel_size)
     pre_factor: Optional[float]
     if overflow_risk:
         # Since fp16 has smaller dynamic range than fp32/bf16, we want to avoid
