@@ -18,7 +18,8 @@ import collections
 import inspect
 import operator
 import sys
-from typing import Any, Optional, Sequence, TYPE_CHECKING
+from collections.abc import Sequence
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
