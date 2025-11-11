@@ -2,9 +2,9 @@
 """
 Context Parallelism sharding rules for scaled_dot_product attention operators.
 
-Why cannot we embed the sharding rules for CP by default? Because Shard(2) is not
-a valid sharding for SDPA without CP enabled. As a result, this module provides utilities to
-dynamically install Shard(2) sharding rules.
+The sharding rules for CP cannot be embedded by default because Shard(2) is not
+a valid sharding for SDPA without CP enabled. This module provides utilities to
+dynamically install Shard(2) sharding rules when CP is activated.
 """
 
 from contextlib import contextmanager

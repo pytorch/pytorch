@@ -765,7 +765,7 @@ def scaled_dot_product_cudnn_attention_strategy(op_schema: OpSchema) -> OpStrate
     )
 
 
-def _scaled_scaled_dot_product_cudnn_attention_backward_base_strategies(
+def _scaled_dot_product_cudnn_attention_backward_base_strategies(
     op_schema: OpSchema,
 ) -> list[PlacementList]:
     """Helper that returns list of base placement strategies (without CP)."""
@@ -874,7 +874,7 @@ def scaled_scaled_dot_product_cudnn_attention_backward_strategy(
     # backward op does not need to validate the mesh since forward op has already done it
     mesh = op_schema.get_mesh_from_args(validate=False)
     single_mesh_dim_strategies = (
-        _scaled_scaled_dot_product_cudnn_attention_backward_base_strategies(op_schema)
+        _scaled_dot_product_cudnn_attention_backward_base_strategies(op_schema)
     )
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=3
