@@ -2015,6 +2015,10 @@ except RuntimeError as e:
             self.assertEqual(12345, batch[0])
             self.assertEqual(12345, batch[1])
 
+    @unittest.skipIf(
+        IS_WINDOWS or IS_MACOS,
+        "`ValueError: cannot find context for 'forkserver'` in Windows",
+    )
     def test_worker_init_fn_forkserver(self):
         def local_init_fn(worker_id):
             torch.manual_seed(12345)
