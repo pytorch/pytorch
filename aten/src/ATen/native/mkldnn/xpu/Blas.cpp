@@ -19,7 +19,6 @@
 #endif
 
 namespace at::native {
-
 namespace xpu {
 
 // result = beta * self + alpha * (mat1 * mat2)
