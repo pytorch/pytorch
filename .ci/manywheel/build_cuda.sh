@@ -57,50 +57,133 @@ fi
 cuda_version_nodot=$(echo $CUDA_VERSION | tr -d '.')
 EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
 
-case ${CUDA_VERSION} in
-    #removing sm_50-sm_60 as these architectures are deprecated in CUDA 12.8/9 and will be removed in future releases
-    #however we would like to keep sm_70 architecture see: https://github.com/pytorch/pytorch/issues/157517
-    12.8)
-        if [[ "$ARCH" == "aarch64" ]]; then
-            TORCH_CUDA_ARCH_LIST="8.0;9.0;10.0;12.0"
-        else
-            TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0"
+# Function to remove architectures from a list
+remove_archs() {
+    local arch_list="$1"
+    shift  # Remove first argument, rest are archs to remove
+    local to_remove=("$@")
+    local result=""
+    
+    IFS=';' read -ra ARCHS <<< "$arch_list"
+    for arch in "${ARCHS[@]}"; do
+        local should_remove=false
+        for remove in "${to_remove[@]}"; do
+            if [[ "$arch" == "$remove" ]]; then
+                should_remove=true
+                break
+            fi
+        done
+        
+        if [[ "$should_remove" == false ]]; then
+            if [[ -n "$result" ]]; then
+                result="${result};${arch}"
+            else
+                result="$arch"
+            fi
         fi
+    done
+    
+    echo "$result"
+}
+
+# Function to add architectures to the beginning of a list
+prepend_archs() {
+    local arch_list="$1"
+    shift
+    local to_add=("$@")
+    local result=""
+    
+    for arch in "${to_add[@]}"; do
+        if [[ -n "$result" ]]; then
+            result="${result};${arch}"
+        else
+            result="$arch"
+        fi
+    done
+    
+    if [[ -n "$arch_list" ]]; then
+        result="${result};${arch_list}"
+    fi
+    
+    echo "$result"
+}
+
+# Function to append architectures to the end of a list
+append_archs() {
+    local arch_list="$1"
+    shift
+    local to_add=("$@")
+    local result="$arch_list"
+    
+    for arch in "${to_add[@]}"; do
+        if [[ -n "$result" ]]; then
+            result="${result};${arch}"
+        else
+            result="$arch"
+        fi
+    done
+    
+    echo "$result"
+}
+
+# Function to filter CUDA architectures for aarch64
+# aarch64 ARM GPUs only support certain compute capabilities
+# Keep: 8.0 (A100), 9.0+ (Hopper, Grace Hopper, newer)
+# Remove: < 8.0 (no ARM GPUs), 8.6 (x86_64 RTX 3090/A6000 only)
+filter_aarch64_archs() {
+    local arch_list="$1"
+    
+    # Explicitly remove architectures not needed on aarch64
+    arch_list=$(remove_archs "$arch_list" "5.0" "6.0" "7.0" "7.5" "8.6")
+    
+    echo "$arch_list"
+}
+
+# Base architecture list for common architectures
+# Includes Volta (7.0), Turing (7.5), Ampere (8.0, 8.6), Ada (9.0)
+TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0"
+
+case ${CUDA_VERSION} in
+    12.6)
+        #keeping sm_50-sm_60 in CUDA 12.6 only, these architectures are deprecated in CUDA 12.8/9 and will be removed in future releases
+        #however we would like to keep sm_70 architecture see: https://github.com/pytorch/pytorch/issues/157517
+        TORCH_CUDA_ARCH_LIST=$(prepend_archs "$TORCH_CUDA_ARCH_LIST" "5.0" "6.0")
+        ;;
+    12.8)
+        # Add Hopper and Blackwell support
+        TORCH_CUDA_ARCH_LIST=$(append_archs "$TORCH_CUDA_ARCH_LIST" "10.0" "12.0")
         ;;
     12.9)
-        if [[ "$ARCH" == "aarch64" ]]; then
-            TORCH_CUDA_ARCH_LIST="8.0;9.0;10.0;12.0"
-        else
-            TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0+PTX"
-            # WAR to resolve the ld error in libtorch build with CUDA 12.9
-            if [[ "$PACKAGE_TYPE" == "libtorch" ]]; then
-                TORCH_CUDA_ARCH_LIST="7.5;8.0;9.0;10.0;12.0+PTX"
-            fi
+        # Add Hopper and Blackwell support with PTX for forward compatibility
+        TORCH_CUDA_ARCH_LIST=$(append_archs "$TORCH_CUDA_ARCH_LIST" "10.0" "12.0+PTX")
+        # WAR to resolve the ld error in libtorch build with CUDA 12.9
+        if [[ "$PACKAGE_TYPE" == "libtorch" ]]; then
+            TORCH_CUDA_ARCH_LIST=$(remove_archs "$TORCH_CUDA_ARCH_LIST" "7.0")
         fi
         ;;
     13.0)
+        # Architecture support for Maxwell, Pascal, and Volta is considered feature-complete
+        TORCH_CUDA_ARCH_LIST=$(remove_archs "$TORCH_CUDA_ARCH_LIST" "7.0")
+        TORCH_CUDA_ARCH_LIST=$(append_archs "$TORCH_CUDA_ARCH_LIST" "10.0" "12.0+PTX")
+        # Add Blackwell (11.0) support for aarch64 only
         if [[ "$ARCH" == "aarch64" ]]; then
-            TORCH_CUDA_ARCH_LIST="8.0;9.0;10.0;11.0;12.0+PTX"
-            # ARM-specific CUDA 13 optimizations
-            echo "Enabling ARM-specific CUDA 13 optimizations"
-            export TORCH_NVCC_FLAGS="-compress-mode=size"
-            export BUILD_BUNDLE_PTXAS=1
-        else
-            TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0+PTX"
+            TORCH_CUDA_ARCH_LIST=$(remove_archs "$TORCH_CUDA_ARCH_LIST" "12.0+PTX")
+            TORCH_CUDA_ARCH_LIST=$(append_archs "$TORCH_CUDA_ARCH_LIST" "11.0" "12.0+PTX")
         fi
-        ;;
-    12.6)
-        if [[ "$ARCH" == "aarch64" ]]; then
-            TORCH_CUDA_ARCH_LIST="8.0;9.0"
-        else
-            TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6;9.0"
-        fi
+        echo "Enable --compress-mode=size for CUDA 13 optimizations"
+        export TORCH_NVCC_FLAGS="-compress-mode=size"
+        export BUILD_BUNDLE_PTXAS=1
         ;;
     *)
         echo "unknown cuda version $CUDA_VERSION"
         exit 1
         ;;
 esac
+
+# Filter architectures for aarch64 (>= 8.0, excluding 8.6)
+if [[ "$ARCH" == "aarch64" ]]; then
+    TORCH_CUDA_ARCH_LIST=$(filter_aarch64_archs "$TORCH_CUDA_ARCH_LIST")
+fi
 
 echo "TORCH_CUDA_ARCH_LIST set to: $TORCH_CUDA_ARCH_LIST"
 
@@ -111,17 +194,20 @@ echo "${TORCH_CUDA_ARCH_LIST}"
 if [[ "$ARCH" == "aarch64" ]]; then
     echo "Disabling MAGMA for aarch64 architecture"
     export USE_MAGMA=0
-
+    
     # Enable MKLDNN with ARM Compute Library for ARM builds
     export USE_MKLDNN=1
-    # Only enable ACL if it's installed
-    if [[ -d "/acl" ]]; then
-        export USE_MKLDNN_ACL=1
-        export ACL_ROOT_DIR=/acl
-        echo "ARM Compute Library enabled for MKLDNN: ACL_ROOT_DIR=/acl"
-    else
-        echo "Warning: ARM Compute Library not found at /acl, building without ACL optimization"
+    
+    # ACL is required for official aarch64 binary builds
+    if [[ ! -d "/acl" ]]; then
+        echo "ERROR: ARM Compute Library not found at /acl"
+        echo "ACL is required for aarch64 builds. Check Docker image setup."
+        exit 1
     fi
+    
+    export USE_MKLDNN_ACL=1
+    export ACL_ROOT_DIR=/acl
+    echo "ARM Compute Library enabled for MKLDNN: ACL_ROOT_DIR=/acl"
 fi
 
 # Package directories
