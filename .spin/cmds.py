@@ -332,3 +332,10 @@ def clean():
                     os.remove(filename)
                 except OSError:
                     shutil.rmtree(filename, ignore_errors=True)
+
+
+@click.command()
+def regenerate_github_workflows():
+    """Regenerate GitHub workflows from templates."""
+    cmd = [sys.executable, "scripts/generate_ci_workflows.py"]
+    spin.util.run(cmd, cwd="./.github")
