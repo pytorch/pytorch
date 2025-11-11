@@ -36,7 +36,8 @@ void kai_pack_rhs_groupwise_int4(
     AT_ERROR("kai_pack_rhs_channelwise_int4: Scales data pointer is null");
   }
 
-  float* bias_ptr = bias.has_value() ? bias.value().to(kFloat).data_ptr<float>() : NULL;
+  float* bias_ptr =
+      bias.has_value() ? bias.value().to(kFloat).data_ptr<float>() : NULL;
   auto& params = kernel.rhs_pack_params;
 
   kernel.kai_run_rhs_pack(
@@ -84,7 +85,8 @@ void kai_pack_rhs_channelwise_int4(
     AT_ERROR("kai_pack_rhs_channelwise_int4: Scales data pointer is null");
   }
 
-  float* bias_ptr = bias.has_value() ? bias.value().to(kFloat).data_ptr<float>() : NULL;
+  float* bias_ptr =
+      bias.has_value() ? bias.value().to(kFloat).data_ptr<float>() : NULL;
   auto& params = kernel.rhs_pack_params;
 
   kernel.kai_run_rhs_pack(

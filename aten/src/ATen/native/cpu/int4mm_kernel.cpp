@@ -795,7 +795,9 @@ bool can_use_kleidiai(
 #endif
 
 static void ref_dyn_quant_matmul_4bit_channelwise_kernel_bf16(
-    size_t m, size_t n, size_t k,
+    size_t m,
+    size_t n,
+    size_t k,
     const uint16_t* lhs_bf16,
     const uint8_t* rhs_qs4cx,
     const float* rhs_scales,
@@ -803,112 +805,127 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel_bf16(
     float scalar_min,
     float scalar_max,
     const float* bias) {
+  // Roundup lambda for internal stride calculations
+  auto roundup = [](size_t a, size_t b) { return ((a + b - 1) / b) * b; };
 
-    // Roundup lambda for internal stride calculations
-    auto roundup = [](size_t a, size_t b) {
-        return ((a + b - 1) / b) * b;
-    };
+  // Cast bfloat16 to float32 inline
+  auto cast_bf16_to_f32 = [](uint16_t bf16_val) {
+    uint32_t tmp = static_cast<uint32_t>(bf16_val) << 16;
+    float f;
+    std::memcpy(&f, &tmp, sizeof(f));
+    return f;
+  };
 
-    // Cast bfloat16 to float32 inline
-    auto cast_bf16_to_f32 = [](uint16_t bf16_val) {
-        uint32_t tmp = static_cast<uint32_t>(bf16_val) << 16;
-        float f;
-        std::memcpy(&f, &tmp, sizeof(f));
-        return f;
-    };
+  // Cast float32 to bfloat16 inline
+  auto cast_f32_to_bf16 = [](float f) {
+    uint32_t bits;
+    std::memcpy(&bits, &f, sizeof(bits));
+    return static_cast<uint16_t>(bits >> 16);
+  };
 
-    // Cast float32 to bfloat16 inline
-    auto cast_f32_to_bf16 = [](float f) {
-        uint32_t bits;
-        std::memcpy(&bits, &f, sizeof(bits));
-        return static_cast<uint16_t>(bits >> 16);
-    };
+  // Quantization pack lambda (channelwise QA8DX)
+  auto quant_pack_8bit_channelwise =
+      [&](size_t M, size_t K, const uint16_t* src_bf16, int8_t* dst_qa8dx) {
+        constexpr int8_t kI8Min = std::numeric_limits<std::int8_t>::lowest();
+        constexpr int8_t kI8Max = std::numeric_limits<std::int8_t>::max();
 
-    // Quantization pack lambda (channelwise QA8DX)
-    auto quant_pack_8bit_channelwise = [&](size_t M, size_t K, const uint16_t* src_bf16, int8_t* dst_qa8dx) {
-        const size_t dst_stride = K * sizeof(int8_t) + sizeof(float) + sizeof(int32_t);
+        const size_t dst_stride =
+            K * sizeof(int8_t) + sizeof(float) + sizeof(int32_t);
         for (size_t i = 0; i < M; ++i) {
-            const uint16_t* row_ptr = src_bf16 + i * K;
-            // find min/max
-            float mn = FLT_MAX, mx = -FLT_MAX;
-            for (size_t j = 0; j < K; ++j) {
-                float v = cast_bf16_to_f32(row_ptr[j]);
-                mn = std::min(mn, v);
-                mx = std::max(mx, v);
-            }
-            float rmin = std::min(0.0f, mn);
-            float rmax = std::max(0.0f, mx);
-            const float qmin = static_cast<float>(INT8_MIN);
-            const float qmax = static_cast<float>(INT8_MAX);
-            float scale = (rmin == rmax) ? 1.f : (qmax - qmin) / (rmax - rmin);
-            float recip = scale ? 1.0f / scale : 0.0f;
-            int32_t zp;
-            {
-                float des_min = rmin * scale;
-                float des_max = rmax * scale;
-                float err_min = qmin + des_min;
-                float err_max = qmax + des_max;
-                float zp_f = (err_min + err_max) > 0
-                             ? qmin - des_min
-                             : qmax - des_max;
-                zp_f = std::clamp(zp_f, qmin, qmax);
-                zp = lrintf(zp_f);
-            }
-            int8_t* out_ptr = dst_qa8dx + i * dst_stride;
-            // store header
-            *reinterpret_cast<float*>(out_ptr)     = recip;
-            *reinterpret_cast<int32_t*>(out_ptr + sizeof(float)) = -zp;
-            out_ptr += sizeof(float) + sizeof(int32_t);
-            // quantize
-            for (size_t j = 0; j < K; ++j) {
-                float v = cast_bf16_to_f32(row_ptr[j]);
-                int32_t q = static_cast<int32_t>(std::round(v * scale)) + zp;
-                q = std::clamp(q, static_cast<int32_t>(INT8_MIN), static_cast<int32_t>(INT8_MAX));
-                *out_ptr++ = static_cast<int8_t>(q);
-            }
+          const uint16_t* row_ptr = src_bf16 + i * K;
+          // find min/max
+          float mn = FLT_MAX, mx = -FLT_MAX;
+          for (size_t j = 0; j < K; ++j) {
+            float v = cast_bf16_to_f32(row_ptr[j]);
+            mn = std::min(mn, v);
+            mx = std::max(mx, v);
+          }
+          float rmin = std::min(0.0f, mn);
+          float rmax = std::max(0.0f, mx);
+          constexpr float qmin = static_cast<float>(kI8Min);
+          constexpr float qmax = static_cast<float>(kI8Max);
+          float scale = (rmin == rmax) ? 1.f : (qmax - qmin) / (rmax - rmin);
+          float recip = scale ? 1.0f / scale : 0.0f;
+          int32_t zp;
+          float des_min = rmin * scale;
+          float des_max = rmax * scale;
+          float err_min = qmin + des_min;
+          float err_max = qmax + des_max;
+          float zp_f =
+              (err_min + err_max) > 0 ? qmin - des_min : qmax - des_max;
+          zp_f = std::clamp(zp_f, qmin, qmax);
+          zp = std::lrintf(zp_f);
+          int8_t* out_ptr = dst_qa8dx + i * dst_stride;
+          // store header
+          *reinterpret_cast<float*>(out_ptr) = recip;
+          *reinterpret_cast<int32_t*>(out_ptr + sizeof(float)) = -zp;
+          out_ptr += sizeof(float) + sizeof(int32_t);
+          // quantize
+          for (size_t j = 0; j < K; ++j) {
+            float v = cast_bf16_to_f32(row_ptr[j]);
+            int32_t q = static_cast<int32_t>(std::round(v * scale)) + zp;
+            q = std::clamp(
+                q, static_cast<int32_t>(kI8Min), static_cast<int32_t>(kI8Max));
+            *out_ptr++ = static_cast<int8_t>(q);
+          }
         }
-    };
+      };
 
-    // MatMul lambda (MXN x MXK -> MNXK BF16)
-    auto matmul_kernel = [&](size_t M, size_t N, size_t K,
-                               const int8_t* lhs, const uint8_t* rhs,
-                               const float* scales, uint16_t* dst,
-                               float lo, float hi) {
-        const size_t lhs_stride = K * sizeof(int8_t) + sizeof(float) + sizeof(int32_t);
-        const size_t rhs_stride = roundup(K, 2) / 2;
-        for (size_t i = 0; i < M; ++i) {
-            const int8_t* lhs_row = lhs + i * lhs_stride;
-            for (size_t j = 0; j < N; ++j) {
-                int32_t acc = 0;
-                const int8_t* lptr = lhs_row;
-                const uint8_t* rptr = rhs + j * rhs_stride;
-                float lhs_scale = *reinterpret_cast<const float*>(lptr);
-                int32_t lhs_off  = *reinterpret_cast<const int32_t*>(lptr + sizeof(float));
-                lptr += sizeof(float) + sizeof(int32_t);
-                for (size_t t = 0; t < K; ++t) {
-                    int32_t lv = static_cast<int32_t>(lptr[t]);
-                    uint8_t bv = rptr[t/2];
-                    int32_t rv = ((t & 1) == 0)
-                                 ? (static_cast<int32_t>(bv & 0xF) - 8)
-                                 : (static_cast<int32_t>(bv >> 4)   - 8);
-                    acc += lv * rv + lhs_off * rv;
-                }
-                float res = static_cast<float>(acc) * scales[j] * lhs_scale;
-                if (bias) {
-                    res += bias[j];
-                }
-                res = std::clamp(res, lo, hi);
-                *dst++ = cast_f32_to_bf16(res);
-            }
+  // MatMul lambda (MXN x MXK -> MNXK BF16)
+  auto matmul_kernel = [&](size_t M,
+                           size_t N,
+                           size_t K,
+                           const int8_t* lhs,
+                           const uint8_t* rhs,
+                           const float* scales,
+                           uint16_t* dst,
+                           float lo,
+                           float hi) {
+    const size_t lhs_stride =
+        K * sizeof(int8_t) + sizeof(float) + sizeof(int32_t);
+    const size_t rhs_stride = roundup(K, 2) / 2;
+    for (size_t i = 0; i < M; ++i) {
+      const int8_t* lhs_row = lhs + i * lhs_stride;
+      for (size_t j = 0; j < N; ++j) {
+        int32_t acc = 0;
+        const int8_t* lptr = lhs_row;
+        const uint8_t* rptr = rhs + j * rhs_stride;
+        float lhs_scale = *reinterpret_cast<const float*>(lptr);
+        int32_t lhs_off =
+            *reinterpret_cast<const int32_t*>(lptr + sizeof(float));
+        lptr += sizeof(float) + sizeof(int32_t);
+        for (size_t t = 0; t < K; ++t) {
+          int32_t lv = static_cast<int32_t>(lptr[t]);
+          uint8_t bv = rptr[t / 2];
+          int32_t rv = ((t & 1) == 0) ? (static_cast<int32_t>(bv & 0xF) - 8)
+                                      : (static_cast<int32_t>(bv >> 4) - 8);
+          acc += lv * rv + lhs_off * rv;
         }
-    };
+        float res = static_cast<float>(acc) * scales[j] * lhs_scale;
+        if (bias) {
+          res += bias[j];
+        }
+        res = std::clamp(res, lo, hi);
+        *dst++ = cast_f32_to_bf16(res);
+      }
+    }
+  };
 
-    // allocate and run
-    std::unique_ptr<int8_t[]> packed(new int8_t[m * (k * sizeof(int8_t) + sizeof(float) + sizeof(int32_t))]);
-    quant_pack_8bit_channelwise(m, k, lhs_bf16, packed.get());
-    matmul_kernel(m, n, k, packed.get(), rhs_qs4cx, rhs_scales, dst_bf16, scalar_min, scalar_max);
+  // allocate and run
+  std::unique_ptr<int8_t[]> packed(
+      new int8_t[m * (k * sizeof(int8_t) + sizeof(float) + sizeof(int32_t))]);
+  quant_pack_8bit_channelwise(m, k, lhs_bf16, packed.get());
+  matmul_kernel(
+      m,
+      n,
+      k,
+      packed.get(),
+      rhs_qs4cx,
+      rhs_scales,
+      dst_bf16,
+      scalar_min,
+      scalar_max);
 }
-
 
 /**
  * The Int4 quantized weights must be represented as a uint8 tensor
@@ -975,6 +992,9 @@ void ref_dyn_quant_matmul_4bit_channelwise_kernel(
   // required format for matmul
   auto input_quant_pack_8bit_channelwise =
       [&](size_t m, size_t k, const float* lhs_f32, int8_t* lhs_qa8dx) {
+        constexpr int8_t kI8Min = std::numeric_limits<std::int8_t>::lowest();
+        constexpr int8_t kI8Max = std::numeric_limits<std::int8_t>::max();
+
         const size_t dst_stride =
             (k * sizeof(int8_t) + sizeof(float) + sizeof(int32_t));
 
@@ -995,8 +1015,8 @@ void ref_dyn_quant_matmul_4bit_channelwise_kernel(
           }
 
           // Maximum/minimum int8 values
-          const float qmin = (float)INT8_MIN;
-          const float qmax = (float)INT8_MAX;
+          constexpr float qmin = static_cast<float>(kI8Min);
+          constexpr float qmax = static_cast<float>(kI8Max);
 
           const float rmin0 = std::min(0.0f, min0);
           const float rmax0 = std::max(0.0f, max0);
@@ -1022,7 +1042,7 @@ void ref_dyn_quant_matmul_4bit_channelwise_kernel(
           zero_point0 = std::min(zero_point0, qmax);
 
           // Round to nearest integer
-          const int32_t nudged_zero_point0 = lrintf(zero_point0);
+          const int32_t nudged_zero_point0 = std::lrintf(zero_point0);
 
           int8_t* dst_ptr = lhs_qa8dx + m_idx * dst_stride;
 
@@ -1040,8 +1060,8 @@ void ref_dyn_quant_matmul_4bit_channelwise_kernel(
             int32_t v0_s32 = (int32_t)(std::round(src0_0 * scale0));
 
             v0_s32 = v0_s32 + nudged_zero_point0;
-            v0_s32 = std::max(v0_s32, static_cast<int32_t>(INT8_MIN));
-            v0_s32 = std::min(v0_s32, static_cast<int32_t>(INT8_MAX));
+            v0_s32 = std::max(v0_s32, static_cast<int32_t>(kI8Min));
+            v0_s32 = std::min(v0_s32, static_cast<int32_t>(kI8Max));
             dst_ptr[0] = (int8_t)v0_s32;
             dst_ptr += sizeof(int8_t);
           }
@@ -1136,6 +1156,9 @@ void ref_dyn_quant_matmul_4bit_groupwise_kernel(
                             size_t k,
                             const float* lhs_f32,
                             int8_t* lhs_qa8dx) {
+    constexpr int8_t kI8Min = std::numeric_limits<std::int8_t>::lowest();
+    constexpr int8_t kI8Max = std::numeric_limits<std::int8_t>::max();
+
     const size_t dst_stride =
         (k * sizeof(int8_t) + sizeof(float) + sizeof(int32_t));
 
@@ -1151,8 +1174,8 @@ void ref_dyn_quant_matmul_4bit_groupwise_kernel(
         min0 = std::min(src0_0, min0);
       }
 
-      const float qmin = (float)INT8_MIN;
-      const float qmax = (float)INT8_MAX;
+      constexpr float qmin = static_cast<float>(kI8Min);
+      constexpr float qmax = static_cast<float>(kI8Max);
 
       const float rmin0 = std::min(0.0f, min0);
       const float rmax0 = std::max(0.0f, max0);
@@ -1169,7 +1192,7 @@ void ref_dyn_quant_matmul_4bit_groupwise_kernel(
 
       zero_point0 = std::max(zero_point0, qmin);
       zero_point0 = std::min(zero_point0, qmax);
-      const int32_t nudged_zero_point0 = lrintf(zero_point0);
+      const int32_t nudged_zero_point0 = std::lrintf(zero_point0);
 
       int8_t* dst_ptr = lhs_qa8dx + row_idx * dst_stride;
 
@@ -1182,9 +1205,8 @@ void ref_dyn_quant_matmul_4bit_groupwise_kernel(
         const float src0_0 = src_ptr[k_idx];
         int32_t v0_s32 = (int32_t)(std::round(src0_0 * scale0));
         v0_s32 = std::max(
-            std::min(
-                v0_s32 + nudged_zero_point0, static_cast<int32_t>(INT8_MAX)),
-            static_cast<int32_t>(INT8_MIN));
+            std::min(v0_s32 + nudged_zero_point0, static_cast<int32_t>(kI8Max)),
+            static_cast<int32_t>(kI8Min));
         dst_ptr[0] = (int8_t)v0_s32;
         dst_ptr += sizeof(int8_t);
       }

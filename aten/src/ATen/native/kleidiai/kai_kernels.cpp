@@ -20,13 +20,13 @@ void kai_pack_int4_rhs(
     const std::optional<Tensor>& bias,
     const int64_t n,
     const int64_t k,
-    const int64_t bl)
-{
+    const int64_t bl) {
   if (bl == k) {
     // Channelwise
     if (weight.scalar_type() == at::kBFloat16) {
       auto kernel_packet = kai_select_bf16_channelwise_matmul_ukernel(
-          kai_kernel_id::matmul_clamp_bf16_qai8dxp1x8_qsi4cxp8x8_1x8_neon_dotprod);
+          kai_kernel_id::
+              matmul_clamp_bf16_qai8dxp1x8_qsi4cxp8x8_1x8_neon_dotprod);
       auto& params = kernel_packet.rhs_pack_params;
       params.lhs_zero_point = 1;
       params.rhs_zero_point = 8;
@@ -34,7 +34,8 @@ void kai_pack_int4_rhs(
           kernel_packet, weight_packed, weight, scales, bias, n, k);
     } else {
       auto kernel_packet = kai_select_channelwise_matmul_ukernel(
-          kai_kernel_id::matmul_clamp_f32_qai8dxp1x8_qsi4cxp8x8_1x8x32_neon_dotprod);
+          kai_kernel_id::
+              matmul_clamp_f32_qai8dxp1x8_qsi4cxp8x8_1x8x32_neon_dotprod);
       auto& params = kernel_packet.rhs_pack_params;
       params.lhs_zero_point = 1;
       params.rhs_zero_point = 8;
@@ -72,13 +73,13 @@ size_t kai_pack_rhs_int4_size(
     const int64_t n,
     const int64_t k,
     const int64_t bl,
-    at::ScalarType tensor_dtype)
-{
+    at::ScalarType tensor_dtype) {
   size_t packed_size = n * k;
   if (bl == k) {
     if (tensor_dtype == at::kBFloat16) {
       auto kernel_packet = kai_select_bf16_channelwise_matmul_ukernel(
-          kai_kernel_id::matmul_clamp_bf16_qai8dxp1x8_qsi4cxp8x8_1x8_neon_dotprod);
+          kai_kernel_id::
+              matmul_clamp_bf16_qai8dxp1x8_qsi4cxp8x8_1x8_neon_dotprod);
       const auto& ukernel = kernel_packet.ukernel;
       const size_t nr = ukernel.get_nr();
       const size_t kr = ukernel.get_kr();
@@ -86,7 +87,8 @@ size_t kai_pack_rhs_int4_size(
       packed_size = kernel_packet.kai_get_rhs_packed_size(n, k, nr, kr, sr);
     } else {
       auto kernel_packet = kai_select_channelwise_matmul_ukernel(
-          kai_kernel_id::matmul_clamp_f32_qai8dxp1x8_qsi4cxp8x8_1x8x32_neon_dotprod);
+          kai_kernel_id::
+              matmul_clamp_f32_qai8dxp1x8_qsi4cxp8x8_1x8x32_neon_dotprod);
       const auto& ukernel = kernel_packet.ukernel;
       const size_t nr = ukernel.get_nr();
       const size_t kr = ukernel.get_kr();
@@ -450,32 +452,32 @@ void kai_quant_pack_lhs_int4_mm(
     const int64_t m,
     const int64_t n,
     const int64_t k,
-    const int64_t bl)
-{
-    // Prefer Channelwise kernel over Groupwise kernel for conflicting cases
-    if (bl == k) {
-        const auto input_dtype = input.dtype();
+    const int64_t bl) {
+  // Prefer Channelwise kernel over Groupwise kernel for conflicting cases
+  if (bl == k) {
+    const auto input_dtype = input.dtype();
 
-        if (input_dtype == at::kBFloat16) {
-            if (cpuinfo_has_arm_bf16()){
-                kleidiai::kai_quant_pack_lhs_int4_mm_bf16_channelwise(
-                    output, input, weight, m, n, k);
-            } else {
-                TORCH_CHECK(
-                false, "BF16 Unsupported: CPU does not support BF16. Please use a CPU with BF16 support.");
-            }
-        } else if (input_dtype == at::kFloat) {
-            kleidiai::kai_quant_pack_lhs_int4_mm_channelwise(
-                output, input, weight, m, n, k);
-        } else {
-            TORCH_CHECK(
-                false,
-                "Unsupported input data type: Only Bfloat16 and Float inputs are supported for Kleidiai int4 channelwise matrix multiplication");
-        }
-    } else if ((bl % 32 == 0) && (k % bl == 0)) {
-        kleidiai::kai_quant_pack_lhs_int4_mm_groupwise(
-            output, input, weight, m, n, k, bl);
+    if (input_dtype == at::kBFloat16) {
+      if (cpuinfo_has_arm_bf16()) {
+        kleidiai::kai_quant_pack_lhs_int4_mm_bf16_channelwise(
+            output, input, weight, m, n, k);
+      } else {
+        TORCH_CHECK(
+            false,
+            "BF16 Unsupported: CPU does not support BF16. Please use a CPU with BF16 support.");
+      }
+    } else if (input_dtype == at::kFloat) {
+      kleidiai::kai_quant_pack_lhs_int4_mm_channelwise(
+          output, input, weight, m, n, k);
+    } else {
+      TORCH_CHECK(
+          false,
+          "Unsupported input data type: Only Bfloat16 and Float inputs are supported.");
     }
+  } else if ((bl % 32 == 0) && (k % bl == 0)) {
+    kleidiai::kai_quant_pack_lhs_int4_mm_groupwise(
+        output, input, weight, m, n, k, bl);
+  }
 }
 } // namespace at::native::kleidiai
 #endif
