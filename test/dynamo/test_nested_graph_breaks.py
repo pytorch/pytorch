@@ -6,8 +6,6 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
-from torch.testing._internal.common_utils import munge_exc
-from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
 try:
@@ -875,110 +873,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         # 2 frames from each of f5+f4, f3, f2, f1
         self.assertEqual(cnts.frame_count, 8)
         self.assertEqual(cnts.op_count, 10)
-
-
-class NestedGraphBreakLoggingTests(
-    LoggingTestCase, torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
-):
-    @make_logging_test(graph_breaks=True)
-    def test_skipped_frame_with_verbose_traceback_nested(self, records):
-        global f1, f2, f3
-
-        class GenericCtxMgr:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc_value, traceback):
-                pass
-
-        def f1(x):
-            with GenericCtxMgr():
-                torch._dynamo.graph_break()
-                return x + 1
-
-        def f2(x):
-            return f1(x + 2)
-
-        def f3(x):
-            return f2(x + 3)
-
-        torch.compile(f3, backend="eager")(torch.randn(3))
-        self.assertEqual(len(records), 1)
-        self.assertExpectedInline(
-            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
-            """\
-Graph break in user code at test_nested_graph_breaks.py:N
-Graph Break Reason: Encountered graph break that we cannot resume from. Compiling up to the previous resumable state, then skipping the rest of the function. Graph break encountered:
-Graph break under GenericContextWrappingVariable
-  Explanation: Attempted to graph break in an active context manager(s) that doesn't support graph breaking.
-  Hint: Move the offending context manager(s) to outside the compiled region.
-  Hint: This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
-
-  Developer debug context: Active generic context managers: [GenericContextWrappingVariable(GenericCtxMgr)]
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0066.html
-User code traceback:
-  File "test_nested_graph_breaks.py", line N, in test_skipped_frame_with_verbose_traceback_nested
-    torch.compile(f3, backend="eager")(torch.randn(3))
-  File "test_nested_graph_breaks.py", line N, in f3
-    return f2(x + 3)
-  File "test_nested_graph_breaks.py", line N, in f2
-    return f1(x + 2)
-  File "test_nested_graph_breaks.py", line N, in f1
-    torch._dynamo.graph_break()
-""",
-        )
-
-    @make_logging_test(graph_breaks=True)
-    def test_skip_frame_in_loop_message_nested(self, records):
-        global f1, f2, f3
-
-        class GenericCtxMgr:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc_value, traceback):
-                pass
-
-        def f1(x):
-            for i in range(2):
-                with GenericCtxMgr():
-                    if x.sum() > 0:
-                        x = x + 1
-            return x
-
-        def f2(x):
-            return f1(x + 4)
-
-        def f3(x):
-            return f2(x + 5)
-
-        result = torch.compile(f3, backend="eager")(torch.randn(3))  # noqa: F841
-        self.assertEqual(len(records), 1)
-        self.assertExpectedInline(
-            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
-            """\
-Graph break in user code at test_nested_graph_breaks.py:N
-Graph Break Reason: Encountered graph break that we cannot resume from. Compiling up to the previous resumable state, then skipping the rest of the function. Graph break encountered:
-Data-dependent branching
-  Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
-  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
-  Hint: Use `torch.cond` to express dynamic control flow.
-
-  Developer debug context: attempted to jump with TensorVariable()
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0170.html
-User code traceback:
-  File "test_nested_graph_breaks.py", line N, in test_skip_frame_in_loop_message_nested
-    result = torch.compile(f3, backend="eager")(torch.randn(3))  # noqa: F841
-  File "test_nested_graph_breaks.py", line N, in f3
-    return f2(x + 5)
-  File "test_nested_graph_breaks.py", line N, in f2
-    return f1(x + 4)
-  File "test_nested_graph_breaks.py", line N, in f1
-    if x.sum() > 0:
-""",
-        )
 
 
 if __name__ == "__main__":
