@@ -45,14 +45,6 @@ class BenchmarkDetach(BenchmarkDTensorDispatch):
         self.a.detach()
 
 
-class BenchmarkAdd(BenchmarkDTensorDispatch):
-    def __init__(self, world_size) -> None:
-        super().__init__(operator="add", world_size=world_size)
-
-    def _work(self) -> None:
-        return self.a + self.b
-
-
 def main():
     world_size = 256
     fake_store = FakeStore()
@@ -61,9 +53,6 @@ def main():
     )
     result_path = sys.argv[1]
     BenchmarkDetach(world_size).enable_instruction_count().collect_all().append_results(
-        result_path
-    )
-    BenchmarkAdd(world_size).enable_instruction_count().collect_all().append_results(
         result_path
     )
     torch.distributed.destroy_process_group()
