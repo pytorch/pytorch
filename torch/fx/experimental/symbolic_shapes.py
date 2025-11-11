@@ -1180,35 +1180,13 @@ def _free_unbacked_symbols_with_path(
     if pending is None:
         pending = set()
     r = {}
-    if isinstance(a, (tuple, list)):
-        # NB: real is apparently not always a tuple/list here
-        # python test/inductor/test_torchinductor.py CpuTests.test_index_propagation_nested_indirect_indexing_cpu
-        for i in range(len(a)):
-            r.update(
-                go(
-                    a[i],
-                    path + (pytree.SequenceKey(i),),
-                    real=real[i] if real is not None else None,  # type: ignore[index]
-                )
-            )
-    elif is_traceable_wrapper_subclass(a):
-        # TODO: Determine if this is correct
-        attrs, _ = a.__tensor_flatten__()
-        for attr in attrs:
-            sub = getattr(a, attr)
-            r.update(go(sub, path + (InnerTensorKey(attr),)))
-    elif isinstance(a, torch.Tensor) and is_batchedtensor(a):
-        unwrapped_tensor = get_unwrapped(a)
-        r.update(go(unwrapped_tensor, path))
-    elif isinstance(a, torch.Tensor) and not is_batchedtensor(a):
-        from torch._subclasses.fake_tensor import FakeTensor
 
-        assert isinstance(a, FakeTensor)
+    def match_tensor(a: torch.Tensor, real_tensor: Optional[torch.Tensor] = None):
         r.update(
             go(
                 a.size(),
                 path + (CallMethodKey("size"),),
-                real=a.real_tensor.size() if a.real_tensor is not None else None,
+                real=real_tensor.size() if real_tensor is not None else None,
             )
         )
         if a.layout not in [
@@ -1221,21 +1199,47 @@ def _free_unbacked_symbols_with_path(
                 go(
                     a.stride(),
                     path + (CallMethodKey("stride"),),
-                    real=a.real_tensor.stride() if a.real_tensor is not None else None,
+                    real=real_tensor.stride() if real_tensor is not None else None,
                 )
             )
         r.update(
             go(
                 a.storage_offset(),
                 path + (CallMethodKey("storage_offset"),),
-                real=(
-                    a.real_tensor.storage_offset()
-                    if a.real_tensor is not None
-                    else None
-                ),
+                real=real_tensor.storage_offset() if real_tensor is not None else None,
             )
         )
 
+    if isinstance(a, (tuple, list)):
+        # NB: real is apparently not always a tuple/list here
+        # python test/inductor/test_torchinductor.py CpuTests.test_index_propagation_nested_indirect_indexing_cpu
+        for i in range(len(a)):
+            r.update(
+                go(
+                    a[i],
+                    path + (pytree.SequenceKey(i),),
+                    real=real[i] if real is not None else None,  # type: ignore[index]
+                )
+            )
+    elif is_traceable_wrapper_subclass(a):
+        from torch.distributed.tensor import DTensor
+
+        # TODO: Determine if this is correct
+        attrs, _ = a.__tensor_flatten__()
+        for attr in attrs:
+            sub = getattr(a, attr)
+            r.update(go(sub, path + (InnerTensorKey(attr),)))
+
+        if isinstance(a, DTensor):
+            match_tensor(a)
+    elif isinstance(a, torch.Tensor) and is_batchedtensor(a):
+        unwrapped_tensor = get_unwrapped(a)
+        r.update(go(unwrapped_tensor, path))
+    elif isinstance(a, torch.Tensor) and not is_batchedtensor(a):
+        from torch._subclasses.fake_tensor import FakeTensor
+
+        assert isinstance(a, FakeTensor)
+        match_tensor(a, a.real_tensor)
     elif (
         isinstance(a, (torch.SymInt, torch.SymFloat))
         and isinstance(s := expr(a), sympy.Symbol)
@@ -1358,6 +1362,7 @@ def compute_unbacked_bindings(
             if isinstance(example_value, torch.Tensor)
             else ""
         )
+        breakpoint()
         raise PendingUnbackedSymbolNotFound(
             f"Pending unbacked symbols {pending} not in returned outputs {example_value} {extra}.\n"
             "Did you accidentally call new_dynamic_size() or item() more times "
@@ -4933,6 +4938,8 @@ class ShapeEnv:
         self._log_create_unbacked_symbol(
             "create_unbacked_symint", symbol, vr, source, sym_node=sym_node
         )
+        if str(symbol) == "u10":
+            breakpoint()
         return SymInt(sym_node)
 
     def is_unbacked_symint(self, symbol: sympy.Symbol) -> bool:

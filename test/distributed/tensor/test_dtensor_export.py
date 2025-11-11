@@ -546,7 +546,17 @@ class DTensorExportTest(TestCase):
         y = torch.randint(1, (10,)).bool()
         x_dt = distribute_tensor(x, device_mesh, placements=[Replicate()])
         y_dt = distribute_tensor(y, device_mesh, placements=[Replicate()])
-        _dynamo_graph_capture_for_export(Foo())(x_dt, y_dt)
+        gm = _dynamo_graph_capture_for_export(Foo())(x_dt, y_dt)
+        aot_gm = graph_capture_and_aot_export_joint_with_descriptors(Foo(), (x_dt, y_dt))
+
+        # dynamo gm should have 2 bindings: outer & inner tensor
+        dt_out = [node for node in gm.graph.nodes][-1].args[0][0]
+        self.assertTrue(isinstance(dt_out.meta["example_value"], DTensor))
+        self.assertEqual(len(dt_out.meta.get("unbacked_bindings", {})), 2)
+        # aot gm 1 (only for inner)
+        ft_out = [node for node in aot_gm.graph.nodes][-1].args[0][0]
+        self.assertTrue(isinstance(ft_out.meta["val"], torch._subclasses.fake_tensor.FakeTensor))
+        self.assertEqual(len(ft_out.meta.get("unbacked_bindings", {})), 1)
 
 
 instantiate_parametrized_tests(DTensorExportTest)
