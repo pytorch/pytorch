@@ -197,7 +197,27 @@ class PallasKernelOverrides(OpOverrides):
         use_compute_types: bool = True,
     ) -> str:
         jax_dtype = torch_dtype_to_jax(dtype)
-        return f"{x}.astype({jax_dtype})"
+        # Wrap in jnp.asarray to handle scalars from integer indexing
+        return f"jnp.asarray({x}).astype({jax_dtype})"
+
+    @staticmethod
+    def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
+        """Convert a sympy expression to a JAX array indexing expression."""
+        from ..utils import get_bounds_index_expr
+
+        idx_str = V.kernel.kexpr(V.kernel.prepare_indexing(expr))
+        var = V.kernel.cse.generate(
+            V.kernel.compute, idx_str, bounds=get_bounds_index_expr(expr)
+        )
+        return PallasKernelOverrides.to_dtype(var, dtype)
+
+    @staticmethod
+    def constant(val, dtype: torch.dtype) -> str:
+        """Convert a constant value to JAX representation."""
+        jax_dtype = torch_dtype_to_jax(dtype)
+        if dtype == torch.bool:
+            return "True" if val else "False"
+        return f"jnp.array({val}, dtype={jax_dtype})"
 
 
 class PallasKernel(SIMDKernel):
@@ -214,6 +234,13 @@ class PallasKernel(SIMDKernel):
 
     overrides = PallasKernelOverrides  # type: ignore[assignment]
     kexpr: Callable[[sympy.Expr], str] = pexpr  # Use Python expression printer
+
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> None:
+        """Check array bounds for indirect indexing."""
+        # For now, skip explicit bounds checking as JAX/Pallas handles this internally
+        # TODO: Implement explicit bounds checking with assertions if needed
 
     def _get_index_str(self, index: sympy.Expr) -> str:
         """
@@ -345,17 +372,91 @@ class PallasKernel(SIMDKernel):
             f"Pallas backend does not yet support complex indexing pattern: {index}"
         )
 
+    def _has_iteration_vars(self, index: sympy.Expr) -> bool:
+        """Check if index expression contains iteration variables (x0, x1, etc.)."""
+        free_symbols = index.free_symbols
+        iter_vars = OrderedSet(self.range_tree_nodes.keys())
+        return bool(free_symbols & iter_vars)
+
+    def _has_indirect_vars(self, index: sympy.Expr) -> bool:
+        """Check if index expression contains indirect variables (tmp0, tmp1, etc.)."""
+        free_symbols = index.free_symbols
+        for sym in free_symbols:
+            if str(sym).startswith("tmp"):
+                return True
+        return False
+
+    def _get_index_expr(self, index: sympy.Expr) -> tuple[str, bool]:
+        """
+        Get the index expression string and whether it needs flattening.
+
+        Returns:
+            Tuple of (index_str, needs_flatten) where needs_flatten indicates
+            if the buffer should be flattened before indexing (for mixed indexing).
+        """
+        has_indirect = self._has_indirect_vars(index)
+        has_iter_vars = self._has_iteration_vars(index)
+
+        if has_indirect and has_iter_vars:
+            return self._handle_mixed_indexing(index), True
+        elif has_indirect:
+            return self.kexpr(index), False
+        else:
+            return self._get_index_str(index), False
+
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:  # type: ignore[override]
         buf = self.args.input(name)
         dtype = V.graph.get_dtype(name)
-        # Get index string for load operation
-        index_str = self._get_index_str(index)
-        # Pallas refs must be unpacked with [...] or [index] to load
+
+        index_str, needs_flatten = self._get_index_expr(index)
+        if needs_flatten:
+            load_expr = f"{buf}[...].flatten()[{index_str}]"
+        else:
+            load_expr = f"{buf}[{index_str}]"
+
         return self.cse.generate(
             self.compute,
-            f"{buf}[{index_str}]",
+            load_expr,
             dtype=dtype,
         )
+
+    def _handle_mixed_indexing(self, index: sympy.Expr) -> str:
+        """
+        Handle indexing with both indirect variables and iteration variables.
+
+        For example, x[indices, :] generates index = i0 + stride * tmp0
+        where tmp0 is loaded from indices and i0 is the iteration variable.
+
+        We need to convert this to JAX advanced indexing with proper broadcasting.
+        """
+        # Get iteration variables
+        iter_vars = OrderedSet(self.range_tree_nodes.keys())
+        free_symbols = index.free_symbols
+        used_iter_vars = sorted(free_symbols & iter_vars, key=str)
+
+        if len(used_iter_vars) == 0:
+            return self.kexpr(index)
+
+        index_str = self.kexpr(index)
+        indirect_vars = [str(sym) for sym in free_symbols if str(sym).startswith("tmp")]
+
+        for i, var in enumerate(used_iter_vars):
+            var_name = str(var)
+            if var in self.range_tree_nodes:
+                range_entry = self.range_tree_nodes[var]
+                range_size = range_entry.length
+
+                arange_expr = f"jnp.arange({self.kexpr(range_size)})"
+                if indirect_vars:
+                    arange_expr = f"{arange_expr}[None, :]"
+
+                index_str = index_str.replace(var_name, arange_expr)
+
+        # Reshape indirect variables for proper broadcasting
+        for indirect_var in indirect_vars:
+            index_str = index_str.replace(indirect_var, f"{indirect_var}[:, None]")
+
+        return index_str
 
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: Any = None
@@ -364,9 +465,8 @@ class PallasKernel(SIMDKernel):
             raise Unsupported("pallas store mode not supported")
         out = self.args.output(name)
         self.store_buffer_names.add(name)
-        # Get index string for store operation
-        index_str = self._get_index_str(index)
-        # Pallas refs must use [...] or [index] assignment to store
+
+        index_str, _ = self._get_index_expr(index)
         self.stores.writeline(f"{out}[{index_str}] = {value}")
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:  # type: ignore[override]
