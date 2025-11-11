@@ -3657,13 +3657,5 @@
       "Explanation": "Encountered triton kernel unsupported feature: {msg}",
       "Hints": []
     }
-  ],
-  "GB0362": [
-    {
-      "Gb_type": "Print: format printed with non string input not supported",
-      "Context": "args: {args}",
-      "Explanation": "torch._higher_order_ops.print only supports non string input in kwargs",
-      "Hints": []
-    }
   ]
 }

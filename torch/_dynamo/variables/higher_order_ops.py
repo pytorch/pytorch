@@ -2321,13 +2321,6 @@ class PrintHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        if not isinstance(args[0], str):
-            unimplemented(
-                gb_type="Print: format printed with non string input not supported",
-                context=f"args: {args}",
-                explanation="torch._higher_order_ops.print only supports non string input in kwargs",
-                hints=[],
-            )
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
         args_proxy = [arg.as_proxy() for arg in args]
@@ -2337,9 +2330,7 @@ class PrintHigherOrderVariable(TorchHigherOrderOperatorVariable):
             proxy=tx.output.create_proxy(
                 "call_function",
                 self.value,
-                args=tuple(
-                    [self.script_obj_var.as_proxy(), self.method_name] + args_proxy
-                ),
+                args=tuple(args[0]),
                 kwargs=kwargs_proxy,
             ),
         )
@@ -4206,6 +4197,7 @@ _hop_name_to_variable_class = {
     "associative_scan": AssociativeScanHigherOrderVariable,
     "scan": ScanHigherOrderVariable,
     "call_torchbind": CallTorchbindHigherOrderVariable,
+    "hop_print": PrintHigherOrderVariable,
     "wrap_with_set_grad_enabled": WrapWithSetGradEnabledHigherOrderVariable,
     "wrap_with_autocast": WrapWithAutocastHigherOrderVariable,
     "dynamo_bypassing_wrapper": DynamoBypassingWrapperHigherOrderVariable,

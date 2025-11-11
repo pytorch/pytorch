@@ -224,6 +224,15 @@ class TestHopPrintInDynamo(TestCase):
         self.assertEqual(printed_output, "moo tensor([2])\nmoo tensor([1])")
         self.assertTrue(same(orig_out, opt_out))
 
+    def test_print_full_graph(self):
+        def fn(a, b):
+            torch._higher_order_ops.print("print hop")
+            return torch.sin(a, out=b)
+
+        inp = [torch.randn(3, 3), torch.ones(3, 3)]
+        ref_out = fn(*inp)
+        out = torch.compile(fn, fullgraph=True)(*inp)
+        self.assertEqual(ref_out, out)
 
 if __name__ == "__main__":
     run_tests()
