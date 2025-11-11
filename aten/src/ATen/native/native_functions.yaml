@@ -14231,6 +14231,7 @@
   structured: True
   dispatch:
     CPU, CUDA: linalg_lu_out
+    MPS: linalg_lu_out_mps
 
 # linalg.lu_solve
 - func: linalg_lu_solve(Tensor LU, Tensor pivots, Tensor B, *, bool left=True, bool adjoint=False) -> Tensor
