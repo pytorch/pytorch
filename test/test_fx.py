@@ -72,8 +72,15 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
+    skipIfRocm,
 )
 from torch.testing._internal.jit_utils import JitTestCase
+
+import json
+import tempfile
+from torch.profiler import profile, ProfilerActivity
+from torch.profiler._utils import map_recorded_events_to_aten_ops_with_stack_trace
+from torch.autograd.profiler_util import _canonicalize_profiler_events
 
 try:
     from torchvision import models as torchvision_models
@@ -201,10 +208,40 @@ def side_effect_func(x: torch.Tensor):
     print(x)
 
 
+def _enrich_profiler_traces(prof):
+    """
+    Helper function to extract and augment profiler events with stack traces.
+
+    Args:
+        prof: A torch.profiler.profile object
+
+    Returns:
+        A string representing enriched events
+    """
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json') as f:
+        trace_file = f.name
+        prof.export_chrome_trace(trace_file)
+
+        with open(trace_file) as f:
+            trace_data = json.load(f)
+
+        map_recorded_events_to_aten_ops_with_stack_trace(
+            trace_data
+        )
+
+        events = []
+        for event in trace_data["traceEvents"]:
+            if "args" in event and "stack_trace" in event["args"]:
+                events.append(event)
+
+        actual_traces = _canonicalize_profiler_events(events)
+        return actual_traces
+
+
 class TestFX(JitTestCase):
     def setUp(self):
         super().setUp()
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations
@@ -771,6 +808,7 @@ class TestFX(JitTestCase):
         gm = GraphModule(tracer.root, graph)
         expected = {1: 2, 2: 3, 3: 4, 4: 5}
         self.assertTrue(set(expected.items()).issubset(set(gm._lineno_map.items())))
+        self.assertEqual(gm._prologue_start, 4)
 
         # test custom codegen
         def transform_code(code):
@@ -780,6 +818,7 @@ class TestFX(JitTestCase):
         gm.recompile()
         expected = {2: 2, 3: 3, 4: 4, 5: 5}
         self.assertTrue(set(expected.items()).issubset(set(gm._lineno_map.items())))
+        self.assertEqual(gm._prologue_start, 4)
 
     def test_graph_unique_names_manual(self):
         graph: torch.fx.Graph = torch.fx.Graph()
@@ -2032,6 +2071,31 @@ class TestFX(JitTestCase):
         self.assertEqual(interpreter.run(input), gm(input))
         self.assertEqual(interpreter.run(input), m(input))
 
+    def test_interpreter_boxed_run_argument_validation(self):
+        class AddModule(torch.nn.Module):
+            def forward(self, lhs, rhs):
+                return lhs + rhs
+
+        gm = torch.fx.symbolic_trace(AddModule())
+        interpreter = Interpreter(gm)
+
+        lhs = torch.tensor(1.0)
+        rhs = torch.tensor(2.0)
+        good_args = [lhs.clone(), rhs.clone()]
+        result = interpreter.boxed_run(good_args)
+        torch.testing.assert_close(result, lhs + rhs)
+        self.assertEqual(good_args, [])
+
+        extra_args = [lhs.clone(), rhs.clone(), torch.tensor(3.0)]
+        with self.assertRaisesRegex(RuntimeError, "extra arguments"):
+            interpreter.boxed_run(extra_args)
+        self.assertEqual(len(extra_args), 3)
+
+        missing_args = [lhs.clone()]
+        with self.assertRaisesRegex(RuntimeError, "missing arguments"):
+            interpreter.boxed_run(missing_args)
+        self.assertEqual(len(missing_args), 1)
+
     def test_interpreter_other_graph(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -2145,7 +2209,7 @@ class TestFX(JitTestCase):
         interp = Interpreter(symbolic_trace(rn18))
         inp = torch.rand(5, 3, 224, 224)
         out = interp.run(inp)
-        env_key_names = {n.name for n in interp.env.keys()}
+        env_key_names = {n.name for n in interp.env}
         self.assertEqual(env_key_names, {"output"})
 
     def test_interpreter_default_args(self):
@@ -2365,7 +2429,7 @@ class TestFX(JitTestCase):
 
         g = torch.fx.Graph()
         x = g.placeholder("x")
-        for i in range(depth):
+        for _ in range(depth):
             x = g.call_function(torch.relu, (x,))
         g.output(x)
 
@@ -3407,12 +3471,12 @@ class TestFX(JitTestCase):
 
         def parameter_exists(gm: GraphModule, path: str) -> bool:
             return any(path == name for name, _ in gm.named_parameters()) and any(
-                path == name for name in gm.state_dict().keys()
+                path == name for name in gm.state_dict()
             )
 
         def buffer_exists(gm: GraphModule, path: str) -> bool:
             return any(path == name for name, _ in gm.named_buffers()) and any(
-                path == name for name in gm.state_dict().keys()
+                path == name for name in gm.state_dict()
             )
 
         # Test that we added the "dropout" submodule
@@ -4185,6 +4249,153 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         # recorver mutable checking flag
         torch.fx.proxy.TracerBase.check_mutable_operations = orig_tracer_mutable_flag
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @skipIfRocm
+    @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
+    def test_profiler_stack_trace_augmentation(self):
+        """
+        Test that map_recorded_events_to_aten_ops_with_stack_trace correctly
+        augments profiler events with stack traces from FX metadata registry.
+        """
+
+        # Simple test model
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(10, 16)
+                self.relu = torch.nn.ReLU()
+                self.linear2 = torch.nn.Linear(16, 10)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.relu(x)
+                x = self.linear2(x)
+                return x
+
+        model = TestModel().cuda()
+
+        # Compile the model
+        compiled_model = torch.compile(model, backend="aot_eager", fullgraph=True)
+
+        # Warmup
+        for _ in range(3):
+            _ = compiled_model(torch.randn(10, 10, device="cuda"))
+
+        # Profile with the compiled model
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        ) as prof:
+            result = compiled_model(torch.randn(10, 10, device="cuda"))
+
+        actual_traces = _enrich_profiler_traces(prof)
+
+        self.assertExpectedInline(actual_traces, """\
+event=aten::t node=t stack_trace=x = self.linear1(x)
+event=aten::transpose node=t stack_trace=x = self.linear1(x)
+event=aten::as_strided node=t stack_trace=x = self.linear1(x)
+event=aten::addmm node=addmm stack_trace=x = self.linear1(x)
+event=cudaLaunchKernel node=addmm stack_trace=x = self.linear1(x)
+event=aten::relu node=relu stack_trace=x = self.relu(x)
+event=aten::clamp_min node=relu stack_trace=x = self.relu(x)
+event=cudaLaunchKernel node=relu stack_trace=x = self.relu(x)
+event=aten::t node=t_1 stack_trace=x = self.linear2(x)
+event=aten::transpose node=t_1 stack_trace=x = self.linear2(x)
+event=aten::as_strided node=t_1 stack_trace=x = self.linear2(x)
+event=aten::addmm node=addmm_1 stack_trace=x = self.linear2(x)
+event=cudaLaunchKernel node=addmm_1 stack_trace=x = self.linear2(x)"""
+            )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @skipIfRocm
+    @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
+    def test_profiler_multiple_modules(self):
+        """
+        Test that multiple compiled modules under the same profiler session
+        have their events correctly augmented with stack traces.
+        """
+
+        class ModelA(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class ModelB(torch.nn.Module):
+            def forward(self, x):
+                return x - 1
+
+        model_a = ModelA().cuda()
+        model_b = ModelB().cuda()
+
+        # Compile both models
+        compiled_a = torch.compile(model_a, backend="aot_eager", fullgraph=True)
+        compiled_b = torch.compile(model_b, backend="aot_eager", fullgraph=True)
+
+        # Warmup
+        for _ in range(3):
+            _ = compiled_a(torch.randn(10, 10, device="cuda"))
+            _ = compiled_b(torch.randn(1, 3, 8, 8, device="cuda"))
+
+        # Profile both models in the same session
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        ) as prof:
+            result_a = compiled_a(torch.randn(10, 10, device="cuda"))
+            result_b = compiled_b(torch.randn(1, 3, 8, 8, device="cuda"))
+
+        actual_traces = _enrich_profiler_traces(prof)
+        self.assertExpectedInline(actual_traces, """\
+event=aten::add node=add stack_trace=return x + 1
+event=cudaLaunchKernel node=add stack_trace=return x + 1
+event=aten::sub node=sub stack_trace=return x - 1
+event=cudaLaunchKernel node=sub stack_trace=return x - 1"""
+            )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @skipIfRocm
+    @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
+    def test_profiler_nested_graph_modules(self):
+        """
+        Test that nested graph modules (e.g., graph modules calling subgraphs)
+        have their events correctly augmented with stack traces.
+        """
+
+        # Model with nested structure
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c = 5
+
+            @torch.compiler.nested_compile_region
+            def forward(self, x, y):
+                m = torch.mul(x, y)
+                s = m.sin()
+                a = s + self.c
+                return a
+
+        model = Mod().cuda()
+
+        # Compile the model (this may create nested graph modules)
+        compiled_model = torch.compile(model, backend="aot_eager", fullgraph=True)
+
+        # Warmup
+        for _ in range(3):
+            _ = compiled_model(torch.randn(10, 10, device="cuda"), torch.randn(10, 10, device="cuda"))
+
+        # Profile
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        ) as prof:
+            result = compiled_model(torch.randn(10, 10, device="cuda"), torch.randn(10, 10, device="cuda"))
+
+        actual_traces = _enrich_profiler_traces(prof)
+        self.assertExpectedInline(actual_traces, """\
+event=aten::mul node=mul stack_trace=m = torch.mul(x, y)
+event=cudaLaunchKernel node=mul stack_trace=m = torch.mul(x, y)
+event=aten::sin node=sin stack_trace=s = m.sin()
+event=cudaLaunchKernel node=sin stack_trace=s = m.sin()
+event=aten::add node=add stack_trace=a = s + self.c
+event=cudaLaunchKernel node=add stack_trace=a = s + self.c"""
+            )
+
 
 def run_getitem_target():
     from torch.fx._symbolic_trace import _wrapped_methods_to_patch
@@ -4198,7 +4409,7 @@ def run_getitem_target():
 
 class TestOperatorSignatures(JitTestCase):
     def setUp(self):
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations
@@ -4241,7 +4452,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         super().setUp()
         self.maxDiff = None
 
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations
@@ -4535,7 +4746,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         check_symbols_have_bc_designation(torch.fx.passes, set())
 
         non_back_compat_strs = [
-            torch.typename(obj) for obj in non_back_compat_objects.keys()
+            torch.typename(obj) for obj in non_back_compat_objects
         ]
         # Only want objects in torch.fx
         non_back_compat_strs = [
@@ -4597,7 +4808,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 class TestFunctionalTracing(JitTestCase):
     def setUp(self):
         super().setUp()
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations
@@ -4849,13 +5060,13 @@ class TestFunctionalTracing(JitTestCase):
         def no(*args, **kwargs):
             return False
 
-        for name in cls.TO_PATCH.keys():
+        for name in cls.TO_PATCH:
             cls.TO_PATCH[name] = getattr(torch.nn.functional, name)
             setattr(torch.nn.functional, name, no)
 
     @classmethod
     def tearDownClass(cls):
-        for name in cls.TO_PATCH.keys():
+        for name in cls.TO_PATCH:
             setattr(torch.nn.functional, name, cls.TO_PATCH[name])
 
 

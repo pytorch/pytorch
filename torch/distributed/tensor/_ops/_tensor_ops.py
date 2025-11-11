@@ -17,7 +17,7 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._common_rules import pointwise_rule
-from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
+from torch.distributed.tensor._ops._embedding_ops import MaskPartial
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
@@ -36,6 +36,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.fx.experimental.symbolic_shapes import statically_known_true
 
 
 aten = torch.ops.aten
@@ -84,6 +85,7 @@ register_op_strategy(
         aten.clone.default,
         aten.contiguous.default,
         aten.detach.default,
+        aten.alias.default,
         aten.fill_.Scalar,
         aten.view.dtype,
         aten.zero_.default,
@@ -380,7 +382,7 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
         raise AssertionError(f"Expected int, got {type(dim)}")
     if start is None:
         start = 0
-    if end is None or end > input_shape[dim]:
+    if end is None or statically_known_true(end > input_shape[dim]):
         end = input_shape[dim]
     if not isinstance(start, IntLike):
         raise AssertionError(f"Expected IntLike, got {type(start)}")
@@ -394,13 +396,20 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
     start = normalize_dim(start, input_shape[dim])  # type: ignore[arg-type]
     end = normalize_dim(end, input_shape[dim])  # type: ignore[arg-type]
 
-    redundant_slice = start == 0 and end == input_shape[dim] and step == 1
+    statically_redundant_slice = (
+        statically_known_true(start == 0)
+        and statically_known_true(end == input_shape[dim])
+        and statically_known_true(step == 1)
+    )
 
     slice_strategy = OpStrategy([])
 
     for arg_strategy in input_strategy.strategies:
         arg_spec = arg_strategy.output_spec
-        if not is_tensor_dim_sharded(arg_spec, dim=slice_dim) or redundant_slice:
+        if (
+            not is_tensor_dim_sharded(arg_spec, dim=slice_dim)
+            or statically_redundant_slice
+        ):
             # only add the strategy if the slice dim is not sharded
             out_spec = DTensorSpec(mesh, arg_spec.placements)
             slice_strategy.strategies.append(
@@ -484,7 +493,7 @@ def replicate_tensor_dim(
 def gen_slice_scatter_strategy(op_schema: OpSchema) -> StrategyType:
     # 1. number of dimensions in input and src need to match.
     # 2. number of elements on all non-dim need to match between input and src.
-    # 3. numer of elements in src in dim need to match the slice size.
+    # 3. number of elements in src in dim need to match the slice size.
     # Given the above:
     # - We suggest for src to follow the sharding of input, except on the scatter dimension,
     #   where our best bet for now is to make them replicated as a fall-back.
@@ -646,7 +655,7 @@ def gather_strategy(op_schema: OpSchema) -> StrategyType:
     # this only works when the input is sharded on the gather dimension, and
     # index has size 1 on the gather dimension
     if dim < len(index_shape) and index_shape[dim] == 1:
-        index_partial_placement = _MaskPartial(offset_shape=input_shape, offset_dim=dim)
+        index_partial_placement = MaskPartial(offset_shape=input_shape, offset_dim=dim)
         input_sharding: PlacementList = [
             index_partial_placement,
             Shard(dim),

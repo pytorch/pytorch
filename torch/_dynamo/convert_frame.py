@@ -114,7 +114,7 @@ from .exc import (
     SkipCodeRecursiveException,
     TorchRuntimeError,
     UncapturedHigherOrderOpError,
-    unimplemented_v2,
+    unimplemented,
     Unsupported,
 )
 from .graph_bytecode_inputs import reset_user_object_tracking
@@ -646,7 +646,7 @@ class ConvertFrameAssert:
             return ConvertFrameReturn()
 
         if is_generator(code):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Attempt to trace generator",
                 context="",
                 explanation="Generators cannot be compiled directly with `torch.compile`.",
@@ -828,6 +828,7 @@ def trace_frame(
             raise
         finally:
             tracer.output.call_cleanup_hooks()
+            tracer.f_locals = {}
 
     try:
         run_tracer()
@@ -882,7 +883,9 @@ class DynamoOutput:
             strict_error=strict_error,
         )
 
-    def graph_capture_output(self) -> GraphCaptureOutput:
+    def graph_capture_output(
+        self, argdefs: Optional[tuple[Any, ...]] = None
+    ) -> GraphCaptureOutput:
         output_graph = self.tracer_output.output_graph
         assert output_graph is not None
         return GraphCaptureOutput(
@@ -896,6 +899,8 @@ class DynamoOutput:
             output_graph.import_sources,
             output_graph.traced_code,
             self.bytecode,
+            self.tracer_output.closure,
+            argdefs,
         )
 
 
@@ -927,6 +932,8 @@ class GraphCaptureOutput:
     import_sources: dict[str, str]
     traced_code: list[CodeType]
     bytecode: CodeType
+    closure: Optional[tuple[Any, ...]]
+    argdefs: Optional[tuple[Any, ...]]
 
     def build_guards(
         self,
@@ -981,7 +988,8 @@ class CaptureOutput:
         return types.FunctionType(
             self.graph_capture_output.bytecode,
             f_globals,
-            closure=(),
+            closure=self.graph_capture_output.closure,
+            argdefs=self.graph_capture_output.argdefs,
         )
 
 
@@ -993,7 +1001,10 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
     import inspect
 
     if isinstance(mod, torch.nn.Module):
-        mod = mod.forward
+        if len(mod._forward_pre_hooks) == 0 and len(mod._forward_hooks) == 0:
+            mod = mod.forward
+        else:
+            mod = mod.__call__
     if hasattr(mod, "__self__"):
         # pyrefly: ignore [missing-attribute]
         return mod.__func__, mod.__self__
@@ -1042,6 +1053,7 @@ def _get_frame(
         f_locals,
         builtins.__dict__,
         closure=fn.__closure__ or (),  # type: ignore[arg-type]
+        argdefs=fn.__defaults__,
     )
 
 
@@ -1091,6 +1103,7 @@ class FrameInfo:
     locals: dict[str, object]
     builtins: dict[str, object]
     closure: tuple[CellType]
+    argdefs: Optional[tuple[Any, ...]]
 
 
 def _fullgraph_capture_frame(
@@ -1144,7 +1157,7 @@ def _fullgraph_capture_frame(
         raise e.with_traceback(None) from e.__cause__  # User compiler error
 
     return CaptureOutput(
-        dynamo_output.graph_capture_output(),
+        dynamo_output.graph_capture_output(frame.argdefs),
         backend_input,
     )
 
@@ -1228,7 +1241,7 @@ def compile_frame(  # type: ignore[return]
             # We now have a new "last attempt", reset the clock
             last_attempt_start_time = time.time()
             if attempt > 100:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Excessive RestartAnalysis() calls",
                     context="",
                     explanation="Dynamo attempted to trace the same frame 100+ times. "
@@ -1273,7 +1286,6 @@ def _compile(
     # in the case of normal and exception code paths
     convert_frame_box: Optional[ConvertFrameBox] = None,
 ) -> ConvertFrameReturn:
-    from torch._inductor.async_compile import async_compile_pool_manager
     from torch.fx.experimental.validator import (
         BisectValidationException,
         ValidationException,
@@ -1467,7 +1479,6 @@ def _compile(
     with (
         _use_lazy_graph_module(config.use_lazy_graph_module),
         compile_context(CompileContext(compile_id)),
-        async_compile_pool_manager(),
         chromium_event_timed(
             "dynamo", reset_event_log_on_exit=True, log_pt2_compile_event=True
         ),
@@ -1565,7 +1576,7 @@ def _compile(
                 raise RecompileLimitExceeded(f"{limit_type} reached")
             else:
                 # do not recursively skip frames
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Dynamo cache limit exceeded",
                     context=f"Limit type: {limit_type}",
                     explanation="Dynamo attempted to recompile the code object too many times, "
