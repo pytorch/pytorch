@@ -7,6 +7,7 @@ on:
     #branches: [main, release]
     types:
       - completed
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name }}
