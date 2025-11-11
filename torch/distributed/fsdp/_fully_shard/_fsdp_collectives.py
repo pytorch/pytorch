@@ -717,16 +717,14 @@ def _get_gradient_divide_factors(
     # For fp32/bf16, we do not need to worry about overflow/underflow, so we
     # use NCCL's built-in division to avoid separate div kernels
     overflow_risk = reduce_dtype not in (torch.float32, torch.bfloat16)
+    if reduce_scatter_group is not None:
+        data_parallel_size = reduce_scatter_group.size()
+    else:
+        data_parallel_size = 1
 
-    if factor is None:
-        # Only need to compute data_parallel_size when factor is None
-        if reduce_scatter_group is not None:
-            data_parallel_size = reduce_scatter_group.size()
-        else:
-            data_parallel_size = 1
+    if all_reduce_group is not None:
+        data_parallel_size *= all_reduce_group.size()
 
-        if all_reduce_group is not None:
-            data_parallel_size *= all_reduce_group.size()
 
     if not overflow_risk and not force_sum_reduction_for_comms:
         if factor is None:
