@@ -314,14 +314,16 @@ class TuningProcessPool:
         except TimeoutError:
             warnings.warn(
                 f"Timed out benchmarking choice '{choice}'. It will be ignored. "
-                "Please debug the root cause in case the choice can bring perf gains."
+                "Please debug the root cause in case the choice can bring perf gains.",
+                stacklevel=2,
             )
             # Set to INF so this choice will be ignored
             return float("inf")
         except Exception as process_exception:
             warnings.warn(
                 f"Failed to benchmark choice '{choice}'. It will be ignored. "
-                "Please debug the root cause in case the choice can bring perf gains."
+                "Please debug the root cause in case the choice can bring perf gains.",
+                stacklevel=2,
             )
             # An unspecified launch failure (cudaErrorLaunchFailure) corrupts the
             # CUDA context, making it unrecoverable. All subsequent CUDA calls will

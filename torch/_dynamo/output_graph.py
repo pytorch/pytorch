@@ -1883,7 +1883,8 @@ class OutputGraph(OutputGraphCommon):
             if side_effect_refs:
                 warnings.warn(
                     f"While exporting, we found certain side effects happened in the model.forward. "
-                    f"Here are the list of potential sources you can double check: {side_effect_refs}"
+                    f"Here are the list of potential sources you can double check: {side_effect_refs}",
+                    stacklevel=2,
                 )
 
         return all_stack_locals_metas
