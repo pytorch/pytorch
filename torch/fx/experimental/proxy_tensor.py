@@ -530,6 +530,13 @@ def _build_proxy_for_sym_expr(
         assert not out
         return value.value
 
+    if isinstance(expr, (int, float, bool)):
+        return expr
+    if expr.is_Integer:
+        return int(expr)
+    if expr.is_Float:
+        return float(expr)
+
     args = []
     for arg in expr.args:
         if (arg_value := _build_proxy_for_sym_expr(tracer, arg)) is None:
