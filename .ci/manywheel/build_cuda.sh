@@ -57,75 +57,6 @@ fi
 cuda_version_nodot=$(echo $CUDA_VERSION | tr -d '.')
 EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
 
-# Function to remove architectures from a list
-remove_archs() {
-    local arch_list="$1"
-    shift  # Remove first argument, rest are archs to remove
-    local to_remove=("$@")
-    local result=""
-    
-    IFS=';' read -ra ARCHS <<< "$arch_list"
-    for arch in "${ARCHS[@]}"; do
-        local should_remove=false
-        for remove in "${to_remove[@]}"; do
-            if [[ "$arch" == "$remove" ]]; then
-                should_remove=true
-                break
-            fi
-        done
-        
-        if [[ "$should_remove" == false ]]; then
-            if [[ -n "$result" ]]; then
-                result="${result};${arch}"
-            else
-                result="$arch"
-            fi
-        fi
-    done
-    
-    echo "$result"
-}
-
-# Function to add architectures to the beginning of a list
-prepend_archs() {
-    local arch_list="$1"
-    shift
-    local to_add=("$@")
-    local result=""
-    
-    for arch in "${to_add[@]}"; do
-        if [[ -n "$result" ]]; then
-            result="${result};${arch}"
-        else
-            result="$arch"
-        fi
-    done
-    
-    if [[ -n "$arch_list" ]]; then
-        result="${result};${arch_list}"
-    fi
-    
-    echo "$result"
-}
-
-# Function to append architectures to the end of a list
-append_archs() {
-    local arch_list="$1"
-    shift
-    local to_add=("$@")
-    local result="$arch_list"
-    
-    for arch in "${to_add[@]}"; do
-        if [[ -n "$result" ]]; then
-            result="${result};${arch}"
-        else
-            result="$arch"
-        fi
-    done
-    
-    echo "$result"
-}
-
 # Function to filter CUDA architectures for aarch64
 # aarch64 ARM GPUs only support certain compute capabilities
 # Keep: 8.0 (A100), 9.0+ (Hopper, Grace Hopper, newer)
@@ -147,7 +78,10 @@ case ${CUDA_VERSION} in
     12.8) TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};10.0;12.0" ;;  # +Hopper/Blackwell support
     12.9) 
         TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};10.0;12.0+PTX" # +Hopper/Blackwell support + PTX for forward compatibility
-        [[ "$PACKAGE_TYPE" == "libtorch" ]] && TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST//7.0;/}"  # Remove 7.0 to resolve the ld error in libtorch build with CUDA 12.9
+        if [[ "$PACKAGE_TYPE" == "libtorch" ]]; then
+            TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST//7.0;/}"  # Remove 7.0 to resolve the ld error
+            TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST//8.6;/}"  # Remove 8.6 for libtorch
+        fi
         ;;
     13.0)
         TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;$([[ "$ARCH" == "aarch64" ]] && echo "11.0;" || echo "")12.0+PTX"
