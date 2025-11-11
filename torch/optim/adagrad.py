@@ -84,7 +84,7 @@ class Adagrad(Optimizer):
                         device=p.device,
                     )
                     if group["fused"]
-                    else torch.tensor(0.0, dtype=_get_scalar_dtype())
+                    else torch.tensor(0.0, dtype=_get_scalar_dtype(), device=p.device)
                 )
                 init_value = (
                     complex(initial_accumulator_value, initial_accumulator_value)

@@ -95,7 +95,9 @@ class Adafactor(Optimizer):
             if len(state) == 0:
                 # note(crcrpar): Deliberately host `step` on CPU if both capturable and fused are off.
                 # This is because kernel launches are costly on CUDA and XLA.
-                state["step"] = torch.tensor(0.0, dtype=_get_scalar_dtype())
+                state["step"] = torch.tensor(
+                    0.0, dtype=_get_scalar_dtype(), device=p.device
+                )
 
                 if p.grad.dim() > 1:
                     row_shape = list(p.grad.shape)

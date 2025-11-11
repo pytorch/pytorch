@@ -107,7 +107,9 @@ class RAdam(Optimizer):  # noqa: D101
                     state["step"] = (
                         torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
                         if group["capturable"]
-                        else torch.tensor(0.0, dtype=_get_scalar_dtype())
+                        else torch.tensor(
+                            0.0, dtype=_get_scalar_dtype(), device=p.device
+                        )
                     )
                     # Exponential moving average of gradient values
                     state["exp_avg"] = torch.zeros_like(

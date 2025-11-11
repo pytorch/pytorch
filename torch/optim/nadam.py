@@ -131,7 +131,9 @@ class NAdam(Optimizer):  # noqa: D101
                     state["step"] = (
                         torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
                         if group["capturable"]
-                        else torch.tensor(0.0, dtype=_get_scalar_dtype())
+                        else torch.tensor(
+                            0.0, dtype=_get_scalar_dtype(), device=p.device
+                        )
                     )
                     state["mu_product"] = (
                         torch.ones((), dtype=_get_scalar_dtype(), device=p.device)
