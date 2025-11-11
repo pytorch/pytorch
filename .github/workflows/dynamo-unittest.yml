@@ -94,7 +94,7 @@ jobs:
   inductor-core-test:
     name: inductor-cpu-core-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: [get-label-type, inductor-build]
+    needs: [get-label-type, inductor-cpu-core-build]
     strategy:
       matrix:
         python-version: ['3.10', '3.11', '3.12', '3.13']
