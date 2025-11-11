@@ -33,11 +33,11 @@ from torch.utils._debug_mode import get_active_debug_mode
 logger = logging.getLogger(__name__)
 
 # Global config to force using graph-based transform_info generation
-_DISABLE_GRAPH_BASED_TRANSFORM = True
+_DISABLE_GRAPH_BASED_TRANSFORM = False
 
 
 @contextlib.contextmanager
-def disable_graph_based_transform(disabled: bool = True):
+def disable_graph_based_transform(disabled: bool = False):
     """
     Context manager to control whether to use graph-based or greedy transform_info
     generation for DTensor redistribution.
