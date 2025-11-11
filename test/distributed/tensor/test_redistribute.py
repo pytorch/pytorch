@@ -23,7 +23,7 @@ from torch.distributed.tensor._collective_utils import shard_dim_alltoall
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.distributed.tensor._redistribute import (
     _gen_transform_infos,
-    disable_graph_based_transform,
+    use_graph_based_transform,
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard, MaskPartial
@@ -909,8 +909,8 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             ),  # Device order: 0→1→2
         )
 
-        # Test both graph-based (disable_graph=False) and greedy (disable_graph=True) algorithms
-        for idx, disable_graph in enumerate([False, True]):
+        # Test both graph-based (enable_graph=True) and greedy (enable_graph=False) algorithms
+        for idx, enable_graph in enumerate([True, False]):
             sharded_dt = _distribute_tensor(
                 input_data.clone(), mesh, src_placement, shard_order=src_order
             )
@@ -921,7 +921,7 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             #    - disabled=True (idx=1): Force greedy (simpler but longer paths)
             # 2. DebugMode: Captures redistribution trace for validation
             with (
-                disable_graph_based_transform(disabled=disable_graph),
+                use_graph_based_transform(enabled=enable_graph),
                 DebugMode(record_torchfunction=False) as debug_mode,
             ):
                 sharded_dt = redistribute(sharded_dt, mesh, dst_placement, dst_order)

@@ -33,27 +33,27 @@ from torch.utils._debug_mode import get_active_debug_mode
 logger = logging.getLogger(__name__)
 
 # Global config to force using graph-based transform_info generation
-_DISABLE_GRAPH_BASED_TRANSFORM = False
+_ENABLE_GRAPH_BASED_TRANSFORM = True
 
 
 @contextlib.contextmanager
-def disable_graph_based_transform(disabled: bool = False):
+def use_graph_based_transform(enabled: bool = True):
     """
     Context manager to control whether to use graph-based or greedy transform_info
     generation for DTensor redistribution.
 
     Args:
-        enabled (bool): If True, force graph-based transform generation.
-                       If False, use the default behavior (greedy for default device order,
+        enabled (bool): If True, use the default behavior (greedy for default device order,
                        graph-based for non-default device order).
+                       If False, force graph-based transform generation.
     """
-    global _DISABLE_GRAPH_BASED_TRANSFORM
-    old_value = _DISABLE_GRAPH_BASED_TRANSFORM
-    _DISABLE_GRAPH_BASED_TRANSFORM = disabled
+    global _ENABLE_GRAPH_BASED_TRANSFORM
+    old_value = _ENABLE_GRAPH_BASED_TRANSFORM
+    _ENABLE_GRAPH_BASED_TRANSFORM = enabled
     try:
         yield
     finally:
-        _DISABLE_GRAPH_BASED_TRANSFORM = old_value
+        _ENABLE_GRAPH_BASED_TRANSFORM = old_value
 
 
 class _TransformInfo(NamedTuple):
@@ -682,7 +682,7 @@ def _gen_transform_infos_non_cached(
     # 1. Global disable flag takes highest priority
     # 2. Explicit parameter value if provided
     # 3. Auto-detect based on device order (default for standard order, graph for non-standard)
-    if _DISABLE_GRAPH_BASED_TRANSFORM:
+    if _ENABLE_GRAPH_BASED_TRANSFORM is False:
         use_graph_based_transform = False
     elif use_graph_based_transform is None:
         # Auto-detect: use greedy for default device order, graph-based otherwise
