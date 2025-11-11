@@ -131,7 +131,7 @@ jobs:
           docker_image_name="${{ matrix.docker-image-name }}"
           docker_image_tag="${{ steps.build-docker-image.outputs.docker-image }}"
           #echo "${docker_image_name}=${docker_image_tag}" >> "$GITHUB_OUTPUT"
-          echo "${docker_image_name}=${docker_image_tag}" >> docker-builds-output.txt
+          echo "${docker_image_name}=${docker_image_tag}" >> docker-builds-output-${docker_image_name}.txt
 
       - uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
         name: Push to https://ghcr.io/
@@ -160,7 +160,7 @@ jobs:
           name: docker-builds-artifacts
           retention-days: 14
           if-no-files-found: error
-          path: ./docker-builds-output.txt
+          path: ./docker-builds-output-${{ matrix.docker-image-name }}.txt
 
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
