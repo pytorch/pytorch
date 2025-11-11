@@ -96,16 +96,21 @@ class _ToTorchTensor(torch.autograd.Function):
         )
         tensor_stride = tuple(tensor_stride)
         grad_placements = grad_placements or dtensor_spec.placements
-        grad_spec = DTensorSpec(
-            mesh,
-            grad_placements,
-            tensor_meta=TensorMeta(
-                shape=dtensor_meta.shape,
-                stride=tensor_stride,
-                dtype=dtensor_meta.dtype,
-            ),
-        )
-
+        if (
+            tensor_stride == dtensor_meta.stride
+            and grad_placements == dtensor_spec.placements
+        ):
+            grad_spec = dtensor_spec
+        else:
+            grad_spec = DTensorSpec(
+                mesh,
+                grad_placements,
+                tensor_meta=TensorMeta(
+                    shape=dtensor_meta.shape,
+                    stride=tensor_stride,
+                    dtype=dtensor_meta.dtype,
+                ),
+            )
         return (
             # pyrefly: ignore [bad-argument-type]
             DTensor(
