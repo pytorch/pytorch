@@ -24,7 +24,6 @@ from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.distributed.tensor._redistribute import (
     _gen_transform_infos,
     disable_graph_based_transform,
-    redistribute_local_tensor,
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard, MaskPartial
