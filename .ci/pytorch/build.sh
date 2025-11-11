@@ -87,8 +87,7 @@ else
 fi
 
 # Enable MKLDNN with ARM Compute Library for ARM builds
-ARCH=$(uname -m)
-if [[ "$ARCH" == "aarch64" ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
   export USE_MKLDNN=1
   
   # ACL is required for aarch64 builds
