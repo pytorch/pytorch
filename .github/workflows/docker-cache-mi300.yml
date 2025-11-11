@@ -40,8 +40,8 @@ jobs:
         id: process-artifacts
         run: |
           ls -R ./docker-builds-artifacts
-          cat ./docker-builds-artifacts/*txt >> $GITHUB_OUTPUT
-          cat $GITHUB_OUTPUT
+          cat ./docker-builds-artifacts/*txt >> "${GITHUB_OUTPUT}"
+          cat "${GITHUB_OUTPUT}"
 
   docker-cache:
     if: github.repository_owner == 'pytorch'
