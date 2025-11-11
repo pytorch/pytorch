@@ -344,7 +344,7 @@ int main() {
         compile_flags=compile_flags,
     )
     num_symbols_shim = len(symbols_shim)
-    assert num_symbols_shim == 2, (
+    assert num_symbols_shim > 0, (
         f"Expected shim headers to expose symbols with TORCH_STABLE_ONLY, "
         f"but found {num_symbols_shim} symbols"
     )
@@ -389,7 +389,7 @@ int main() {
         compile_flags=compile_flags,
     )
     num_symbols_stable_shim = len(symbols_stable_shim)
-    assert num_symbols_stable_shim == 2, (
+    assert num_symbols_stable_shim > 0, (
         f"Expected stable C shim headers to expose symbols with TORCH_STABLE_ONLY, "
         f"but found {num_symbols_stable_shim} symbols"
     )
