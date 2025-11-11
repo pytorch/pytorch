@@ -73,7 +73,7 @@ jobs:
         ]}
     secrets: inherit
 
-  inductor-core-build:
+  inductor-cpu-core-build:
     name: inductor-cpu-core-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -91,7 +91,7 @@ jobs:
         ]}
     secrets: inherit
 
-  inductor-core-test:
+  inductor-cpu-core-test:
     name: inductor-cpu-core-test
     uses: ./.github/workflows/_linux-test.yml
     needs: [get-label-type, inductor-cpu-core-build]
