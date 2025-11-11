@@ -15,7 +15,6 @@ variable tracking system.
 """
 
 import collections
-import inspect
 import operator
 import sys
 from collections.abc import Sequence
@@ -29,18 +28,15 @@ from ..bytecode_transformation import (
     create_build_tuple,
     create_call_function,
     create_instruction,
-    create_rot_n,
 )
 from ..exc import raise_observed_exception, unimplemented
-from ..source import AttrSource, NamedTupleFieldsSource
+from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
     cmp_name_to_op_str_mapping,
     get_fake_value,
     guard_if_dyn,
     iter_contains,
-    Lit,
-    namedtuple_fields,
     odict_values,
     raise_args_mismatch,
     range_iterator,
@@ -48,7 +44,6 @@ from ..utils import (
 )
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
-from .functions import UserFunctionVariable, UserMethodVariable
 from .iter import IteratorVariable
 
 

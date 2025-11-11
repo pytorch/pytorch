@@ -2386,22 +2386,17 @@ class BuiltinVariable(VariableTracker):
                 "attributes; intentionally graph breaking.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        # handle __instancecheck__ defined in user class
-        if (
-            isinstance(arg, variables.UserDefinedObjectVariable)
-            and "__instancecheck__" in isinstance_type.__class__.__dict__
-        ):
+        if isinstance(arg, variables.UserDefinedObjectVariable):
             # Check if the variable has a custom isinstance check method
             if hasattr(arg, "call_isinstance_check"):
                 return arg.call_isinstance_check(tx, isinstance_type)
-            return variables.ConstantVariable.create(
-                isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value)
-            )
-
-        # Check if variable has custom isinstance handling (e.g., NamedTupleVariable)
-        if isinstance(arg, variables.UserDefinedObjectVariable):
-            if hasattr(arg, "call_isinstance_check"):
-                return arg.call_isinstance_check(tx, isinstance_type)
+            # Fall back to __instancecheck__ if defined in the class
+            if "__instancecheck__" in isinstance_type.__class__.__dict__:
+                return variables.ConstantVariable.create(
+                    isinstance_type.__class__.__instancecheck__(
+                        isinstance_type, arg.value
+                    )
+                )
 
         if isinstance(arg, variables.UserDefinedExceptionClassVariable):
             # pyrefly: ignore [unbound-name]

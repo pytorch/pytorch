@@ -3250,13 +3250,13 @@ def handle_traced_output(
         elif istype(example_value, (list, immutable_list)):
             return ListVariable(unpacked, **options)
         else:
-            # Only real namedtuples should use NamedTupleVariable
-            assert hasattr(example_value, "_fields"), (
-                f"expected named tuple but got {type(example_value)}"
+            assert (
+                example_value.__class__.__module__ == "torch.return_types"
+                or hasattr(example_value, "_fields")
+            ), (
+                f"expected {example_value.__class__.__module__} == torch.return_types or named tuple but got {type(example_value)}"
             )
-            return NamedTupleVariable(
-                unpacked, example_value.__class__, **options
-            )
+            return NamedTupleVariable(unpacked, example_value.__class__, **options)
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable.create(None, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
@@ -4056,15 +4056,6 @@ class SourcelessBuilder:
         elif isinstance(value, (types.GenericAlias, types.UnionType)):
             return TypingVariable(value)
         elif is_namedtuple(value):
-            # Check if it's a structseq (torch.return_types.*) - treat as standard tuple
-            if type(value).__module__ == "torch.return_types":
-                # Structseq objects are just tuples - use TupleVariable
-                output = [
-                    SourcelessBuilder.create(tx, getattr(value, i))
-                    for i in range(len(value))
-                ]
-                return TupleVariable(output)
-            # Real namedtuples - use NamedTupleVariable
             output = [
                 SourcelessBuilder.create(tx, getattr(value, name))
                 for name in namedtuple_fields(type(value))
