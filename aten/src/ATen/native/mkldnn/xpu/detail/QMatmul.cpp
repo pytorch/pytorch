@@ -390,7 +390,7 @@ struct ScaleSpec {
 // The returned value will be used in
 // `set_scales(arg, mask, groups, data_type)`.
 inline ScaleSpec make_scale_spec(
-    ScalingType scaling_type,
+    at::blas::ScalingType scaling_type,
     int64_t M,
     int64_t K,
     int64_t N,
@@ -404,12 +404,12 @@ inline ScaleSpec make_scale_spec(
   int64_t dim = K; // Currently only K is used for grouping
   bool is_src = (arg_type == "src");
   switch (scaling_type) {
-    case ScalingType::TensorWise:
+    case at::blas::ScalingType::TensorWise:
       // Scale tensorwise. The same as `--attr-scales=common`.
       // mask=0 : scale whole tensor
       // groups={1, 1}: indicates that there is only one group for scaling
       return {0, {1, 1}, dnnl::memory::data_type::f32};
-    case ScalingType::RowWise:
+    case at::blas::ScalingType::RowWise:
       // Scale RowWise. The same as `--attr-scales=per_dim_01`.
       // mask={(1 << 0) | (1 << 1)}: Scale on both dim0 and dim1
       // SRC: groups={1, K}, WEIGHTS: groups={K, 1}
@@ -431,8 +431,8 @@ sycl::event scaled_matmul(
     Tensor& result,
     const Tensor& scale_a,
     const Tensor& scale_b,
-    ScalingType scaling_choice_a,
-    ScalingType scaling_choice_b,
+    at::blas::ScalingType scaling_choice_a,
+    at::blas::ScalingType scaling_choice_b,
     const std::optional<at::Tensor>& bias,
     const std::optional<at::Tensor>& scale_result,
     bool use_fast_accum) {

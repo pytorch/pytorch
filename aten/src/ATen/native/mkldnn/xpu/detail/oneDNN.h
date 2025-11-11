@@ -209,8 +209,8 @@ sycl::event scaled_matmul(
     Tensor& result,
     const Tensor& scale_a,
     const Tensor& scale_b,
-    ScalingType scaling_choice_a,
-    ScalingType scaling_choice_b,
+    at::blas::ScalingType scaling_choice_a,
+    at::blas::ScalingType scaling_choice_b,
     const std::optional<at::Tensor>& bias,
     const std::optional<at::Tensor>& scale_result,
     bool use_fast_accum);
