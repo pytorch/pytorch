@@ -1863,7 +1863,7 @@ def cat(inputs, dim=0):
     def count_input_buffers(x, counted_buffers=None):
         """Count the number of unique input buffers that would be read after fusion."""
         if counted_buffers is None:
-            counted_buffers = set()
+            counted_buffers = OrderedSet()
 
         if isinstance(x, (TensorBox, ir.StorageBox)):
             return count_input_buffers(unwrap_tensor(x), counted_buffers)
@@ -1887,7 +1887,7 @@ def cat(inputs, dim=0):
 
     def total_input_buffers_after_cat_fusion(inputs):
         """Calculate total number of unique input buffers after fusing a cat operation."""
-        counted_buffers = set()
+        counted_buffers = OrderedSet()
         total = 0
         for inp in inputs:
             total += count_input_buffers(inp, counted_buffers)
