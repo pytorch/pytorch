@@ -436,9 +436,8 @@ if test_torchinductor.HAS_CPU and HAS_PALLAS:
 
 
 if test_torchinductor.HAS_GPU and HAS_PALLAS:
-    # make_pallas(test_torchinductor.SweepInputsGPUTest)
+    make_pallas(test_torchinductor.SweepInputsGPUTest)
     # make_pallas(test_torchinductor.GPUTests)
-    pass
 
 
 if __name__ == "__main__":
