@@ -911,7 +911,7 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
 
         # Test both graph-based (disable_graph=False) and greedy (disable_graph=True) algorithms
         for idx, disable_graph in enumerate([False, True]):
-            sharded_dt = self.distribute_tensor(
+            sharded_dt = _distribute_tensor(
                 input_data.clone(), mesh, src_placement, shard_order=src_order
             )
 
@@ -924,9 +924,7 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                 disable_graph_based_transform(disabled=disable_graph),
                 DebugMode(record_torchfunction=False) as debug_mode,
             ):
-                sharded_dt = self.redistribute(
-                    sharded_dt, mesh, dst_placement, dst_order
-                )
+                sharded_dt = redistribute(sharded_dt, mesh, dst_placement, dst_order)
             trace_str = self._extract_redistribute_trace_from_debug_mode(
                 debug_mode.debug_string()
             )
@@ -951,7 +949,7 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                     trace_str,
                     """S(0)[0]S(0)[1]S(0)[2]->S(0)[0]S(0)[1]R->S(0)RR->S(1)RR->S(1)[0]S(1)[1]R->S(1)[0]S(1)[1]S(1)[2]""",
                 )
-            expected_dt = self.distribute_tensor(
+            expected_dt = _distribute_tensor(
                 input_data.clone(), mesh, dst_placement, shard_order=dst_order
             )
             self.assertEqual(sharded_dt.to_local(), expected_dt.to_local())
