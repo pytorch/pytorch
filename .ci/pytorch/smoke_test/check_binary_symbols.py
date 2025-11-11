@@ -100,6 +100,275 @@ def check_lib_statically_linked_libstdc_cxx_abi_symbols(lib: str) -> None:
         )
 
 
+def _compile_and_extract_symbols(
+    cpp_content: str, compile_flags: list[str], exclude_list: list[str] | None = None
+) -> list[str]:
+    """
+    Helper to compile a C++ file and extract all symbols.
+
+    Args:
+        cpp_content: C++ source code to compile
+        compile_flags: Compilation flags
+        exclude_list: List of symbol names to exclude. Defaults to ["main"].
+
+    Returns:
+        List of all symbols found in the object file (excluding those in exclude_list).
+    """
+    import subprocess
+    import tempfile
+
+    if exclude_list is None:
+        exclude_list = ["main"]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmppath = Path(tmpdir)
+        cpp_file = tmppath / "test.cpp"
+        obj_file = tmppath / "test.o"
+
+        cpp_file.write_text(cpp_content)
+
+        result = subprocess.run(
+            compile_flags + [str(cpp_file), "-o", str(obj_file)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError(f"Compilation failed: {result.stderr}")
+
+        symbols = get_symbols(str(obj_file))
+
+        # Return all symbol names, excluding those in the exclude list
+        return [name for _addr, _stype, name in symbols if name not in exclude_list]
+
+
+def check_stable_only_symbols(install_root: Path) -> None:
+    """
+    Test TORCH_STABLE_ONLY by compiling test code and comparing symbol counts.
+
+    This approach tests:
+    1. WITHOUT macro -> many torch symbols exposed
+    2. WITH macro -> zero torch symbols (all hidden)
+    """
+    include_dir = install_root / "include"
+    assert include_dir.exists(), f"Expected {include_dir} to be present"
+
+    # Test the main public headers that users typically include
+    test_cpp_content = """
+// Main torch C++ API headers
+#include <torch/torch.h>
+#include <torch/all.h>
+
+// ATen tensor library
+#include <ATen/ATen.h>
+
+// Core c10 headers (commonly used)
+#include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/ScalarType.h>
+#include <c10/core/TensorOptions.h>
+#include <c10/util/Optional.h>
+
+int main() { return 0; }
+"""
+
+    base_compile_flags = [
+        "g++",
+        "-std=c++17",
+        f"-I{include_dir}",
+        f"-I{include_dir}/torch/csrc/api/include",
+        "-c",  # Compile only, don't link
+    ]
+
+    # Test 1: Compile WITHOUT TORCH_STABLE_ONLY (baseline)
+    symbols_without = _compile_and_extract_symbols(
+        cpp_content=test_cpp_content,
+        compile_flags=base_compile_flags,
+    )
+
+    num_symbols_without = len(symbols_without)
+    assert num_symbols_without != 0, (
+        "Expected a non-zero number of symbols without TORCH_STABLE_ONLY macro"
+    )
+
+    # Test 2: Compile WITH TORCH_STABLE_ONLY (regular headers should be hidden)
+    compile_flags_with_macro = base_compile_flags + ["-DTORCH_STABLE_ONLY"]
+
+    symbols_with = _compile_and_extract_symbols(
+        cpp_content=test_cpp_content,
+        compile_flags=compile_flags_with_macro,
+    )
+
+    num_symbols_with = len(symbols_with)
+    assert num_symbols_with == 0, "Expected no symbols with TORCH_STABLE_ONLY macro"
+
+
+def check_stable_api_symbols(install_root: Path) -> None:
+    """
+    Test that stable API headers still expose symbols with TORCH_STABLE_ONLY.
+    """
+    include_dir = install_root / "include"
+    assert include_dir.exists(), f"Expected {include_dir} to be present"
+
+    # Find all headers in torch/csrc/stable
+    stable_dir = include_dir / "torch" / "csrc" / "stable"
+    if not stable_dir.exists():
+        # Skip test if stable directory doesn't exist
+        return
+
+    stable_headers = list(stable_dir.rglob("*.h"))
+    if not stable_headers:
+        raise RuntimeError("Could not find any stable headers")
+
+    # Generate include statements for all stable headers
+    includes = []
+    for header in stable_headers:
+        rel_path = header.relative_to(include_dir)
+        includes.append(f"#include <{rel_path.as_posix()}>")
+
+    includes_str = "\n".join(includes)
+    test_stable_content = f"""
+{includes_str}
+int main() {{ return 0; }}
+"""
+
+    compile_flags = [
+        "g++",
+        "-std=c++17",
+        f"-I{include_dir}",
+        f"-I{include_dir}/torch/csrc/api/include",
+        "-c",
+        "-DTORCH_STABLE_ONLY",
+    ]
+
+    symbols_stable = _compile_and_extract_symbols(
+        cpp_content=test_stable_content,
+        compile_flags=compile_flags,
+    )
+    num_symbols_stable = len(symbols_stable)
+    assert num_symbols_stable > 0, (
+        f"Expected stable headers to expose symbols with TORCH_STABLE_ONLY, "
+        f"but found {num_symbols_stable} symbols"
+    )
+
+
+def check_headeronly_symbols(install_root: Path) -> None:
+    """
+    Test that header-only utility headers still expose symbols with TORCH_STABLE_ONLY.
+    """
+    include_dir = install_root / "include"
+    assert include_dir.exists(), f"Expected {include_dir} to be present"
+
+    # Find all headers in torch/headeronly
+    headeronly_dir = include_dir / "torch" / "headeronly"
+    if not headeronly_dir.exists():
+        # Skip test if headeronly directory doesn't exist
+        return
+
+    headeronly_headers = list(headeronly_dir.rglob("*.h"))
+    if not headeronly_headers:
+        # Skip test if no headers found
+        return
+
+    # Filter out platform-specific headers that may not compile everywhere
+    platform_specific_keywords = [
+        "neon",
+        "avx",
+        "avx2",
+        "avx512",
+        "sse",
+        "vsx",
+        "cuda",
+        "hip",
+        "mps",
+        "xpu",
+        "cpu/vec",  # Skip all vectorization headers
+    ]
+
+    filtered_headers = []
+    for header in headeronly_headers:
+        rel_path = header.relative_to(include_dir).as_posix()
+        # Skip if path contains any platform-specific keyword
+        if not any(
+            keyword in rel_path.lower() for keyword in platform_specific_keywords
+        ):
+            filtered_headers.append(header)
+
+    if not filtered_headers:
+        # Skip test if all headers were filtered out
+        return
+
+    # Generate include statements for all headeronly headers
+    includes = []
+    for header in filtered_headers:
+        rel_path = header.relative_to(include_dir)
+        includes.append(f"#include <{rel_path.as_posix()}>")
+
+    includes_str = "\n".join(includes)
+    test_headeronly_content = f"""
+{includes_str}
+int main() {{ return 0; }}
+"""
+
+    compile_flags = [
+        "g++",
+        "-std=c++17",
+        f"-I{include_dir}",
+        f"-I{include_dir}/torch/csrc/api/include",
+        "-c",
+        "-DTORCH_STABLE_ONLY",
+    ]
+
+    symbols_headeronly = _compile_and_extract_symbols(
+        cpp_content=test_headeronly_content,
+        compile_flags=compile_flags,
+    )
+    num_symbols_headeronly = len(symbols_headeronly)
+    assert num_symbols_headeronly > 0, (
+        f"Expected headeronly headers to expose symbols with TORCH_STABLE_ONLY, "
+        f"but found {num_symbols_headeronly} symbols"
+    )
+
+
+def check_aoti_shim_symbols(install_root: Path) -> None:
+    """
+    Test that AOTI shim headers still expose symbols with TORCH_STABLE_ONLY.
+    """
+    include_dir = install_root / "include"
+    assert include_dir.exists(), f"Expected {include_dir} to be present"
+
+    test_shim_content = """
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
+int main() {
+    // Reference AOTI functions to create undefined symbols
+    int32_t (*fp1)() = &aoti_torch_device_type_cpu;
+    int32_t (*fp2)() = &aoti_torch_dtype_float32;
+    (void)fp1; (void)fp2;
+    return 0;
+}
+"""
+
+    compile_flags = [
+        "g++",
+        "-std=c++17",
+        f"-I{include_dir}",
+        f"-I{include_dir}/torch/csrc/api/include",
+        "-c",
+        "-DTORCH_STABLE_ONLY",
+    ]
+
+    symbols_shim = _compile_and_extract_symbols(
+        cpp_content=test_shim_content,
+        compile_flags=compile_flags,
+    )
+    num_symbols_shim = len(symbols_shim)
+    assert num_symbols_shim > 0, (
+        f"Expected shim headers to expose symbols with TORCH_STABLE_ONLY, "
+        f"but found {num_symbols_shim} symbols"
+    )
+
+
 def check_lib_symbols_for_abi_correctness(lib: str) -> None:
     print(f"lib: {lib}")
     cxx11_symbols = grep_symbols(lib, LIBTORCH_CXX11_PATTERNS)
@@ -128,6 +397,12 @@ def main() -> None:
     libtorch_cpu_path = str(install_root / "lib" / "libtorch_cpu.so")
     check_lib_symbols_for_abi_correctness(libtorch_cpu_path)
     check_lib_statically_linked_libstdc_cxx_abi_symbols(libtorch_cpu_path)
+
+    # Check symbols when TORCH_STABLE_ONLY is defined
+    check_stable_only_symbols(install_root)
+    check_stable_api_symbols(install_root)
+    check_headeronly_symbols(install_root)
+    check_aoti_shim_symbols(install_root)
 
 
 if __name__ == "__main__":
