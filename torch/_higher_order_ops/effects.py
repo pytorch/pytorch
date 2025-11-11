@@ -213,7 +213,7 @@ def _get_schema(op, args) -> torch.FunctionSchema:
     elif op == call_torchbind:
         return getattr(args[0], args[1]).schema
     elif op == print:
-        return op.schema()
+        return op.gen_schema(args)
     else:
         raise RuntimeError(f"Unable to get schema for op {op}")
 

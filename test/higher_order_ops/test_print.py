@@ -132,7 +132,7 @@ getitem = None
                 super().__init__()
 
             def forward(self, x):
-                torch._higher_order_ops.print("moo {x} {y}", x=1, y=2)
+                torch._higher_order_ops.print("moo {x} {y}", x=x, y=2)
                 res = x + x
                 x.add_(res)
                 res = x + x
@@ -146,6 +146,34 @@ getitem = None
         self.assertEqual(len(gs.input_tokens), 1)
         self.assertEqual(len(gs.output_tokens), 1)
         self.assertEqual(len(gs.user_inputs_to_mutate), 1)
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops.higher_order.print, 'moo {x} {y}', \
+x = arg1_1, y = 2);  arg0_1 = None
+    getitem = with_effects[0];  with_effects = None
+    add = torch.ops.aten.add.Tensor(arg1_1, arg1_1)
+    add_1 = torch.ops.aten.add.Tensor(arg1_1, add);  arg1_1 = add = None
+    add_2 = torch.ops.aten.add.Tensor(add_1, add_1)
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, 'moo {x} {y}', \
+x = add_1, y = add_2);  getitem = None
+    getitem_2 = with_effects_1[0];  with_effects_1 = None
+    return (getitem_2, add_1, add_2)""",
+        )
+
+        gm = make_fx(M(), tracing_mode="symbolic")(*inputs)
+        new_inp = torch.randn(3)
+        orig_inp = new_inp.clone()
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            gm(
+                new_inp,
+            )
+            printed_output = mock_stdout.getvalue().strip()
+
+        self.assertEqual(
+            printed_output, f"moo {orig_inp} 2\nmoo {new_inp} {new_inp * 2}"
+        )
 
 
 if __name__ == "__main__":

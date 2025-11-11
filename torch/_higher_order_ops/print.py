@@ -20,19 +20,19 @@ class Print(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("print")
 
-    def __call__(self, format_str: str, **kwargs: object) -> object:
+    def __call__(self, format_str: str, **kwargs: object) -> None:
         assert isinstance(format_str, str)
         return super().__call__(format_str, **kwargs)
 
-    @staticmethod
-    # pyre-ignore
-    def schema() -> torch.FunctionSchema:
-        """
-        Returns the schema of ``Print.__call__``.
-        """
-        # print(str format_str, ...) -> ()
-        schema_str = "print(str format_str, ...) -> ()"
-        return torch._C.parse_schema(schema_str)
+    # pyrefly: ignore [bad-override]
+    def gen_schema(self, format_str: str, **kwargs: object) -> torch.FunctionSchema:
+        from torch._higher_order_ops.schema import HopSchemaGenerator
+
+        schema_gen = HopSchemaGenerator(self)
+        schema_gen.add_output(None)
+        schema_gen.add_schema_tree_spec(format_str, **kwargs)
+
+        return schema_gen.gen_schema()
 
 
 print = Print()
