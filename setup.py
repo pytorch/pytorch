@@ -1648,6 +1648,8 @@ def main() -> None:
         build_deps()
         mirror_inductor_external_kernels()
 
+    mirror_inductor_external_kernels()
+
     (
         ext_modules,
         cmdclass,
