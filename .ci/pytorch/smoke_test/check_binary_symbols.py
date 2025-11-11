@@ -244,6 +244,7 @@ int main() { return 0; }
 def check_stable_api_symbols(install_root: Path) -> None:
     """
     Test that stable API headers still expose symbols with TORCH_STABLE_ONLY.
+    The torch/csrc/stable/c/shim.h header is tested in check_stable_c_shim_symbols
     """
     include_dir = install_root / "include"
     assert include_dir.exists(), f"Expected {include_dir} to be present"
