@@ -1,21 +1,22 @@
 # Owner(s): ["module: sdpa"]
 
 import torch.nn.attention as attention
+from torch.nn.attention import _registry
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestFlashAttentionRegistry(TestCase):
     def setUp(self):
         super().setUp()
-        self._saved_impls = dict(attention._FLASH_ATTENTION_IMPLS)
+        self._saved_impls = dict(_registry._FLASH_ATTENTION_IMPLS)
         self._saved_active = attention.current_flash_attention_impl()
-        attention._FLASH_ATTENTION_IMPLS.clear()
-        attention._FLASH_ATTENTION_ACTIVE = None
+        _registry._FLASH_ATTENTION_IMPLS.clear()
+        _registry._FLASH_ATTENTION_ACTIVE = None
 
     def tearDown(self):
-        attention._FLASH_ATTENTION_IMPLS.clear()
-        attention._FLASH_ATTENTION_IMPLS.update(self._saved_impls)
-        attention._FLASH_ATTENTION_ACTIVE = self._saved_active
+        _registry._FLASH_ATTENTION_IMPLS.clear()
+        _registry._FLASH_ATTENTION_IMPLS.update(self._saved_impls)
+        _registry._FLASH_ATTENTION_ACTIVE = self._saved_active
         super().tearDown()
 
     def test_register_and_activate_impl(self):
