@@ -354,35 +354,24 @@ struct ScaleSpec {
         arg_type,
         "'");
 
-    bool is_src = (arg_type == "src");
     // For rowwise: SRC groups={1, K}, WEI groups={K, 1}
-    if (is_src) {
-      if (groups == dnnl::memory::dims{1, inner_dim})
-        return outer_dim;
-    } else {
-      if (groups == dnnl::memory::dims{inner_dim, 1})
-        return outer_dim;
-    }
-
-    TORCH_CHECK(
-        false,
-        "Expected groups to be one of: {1, 1} (tensorwise), ",
-        is_src ? "{1, K} (rowwise)" : "{K, 1} (rowwise)",
-        "; but got groups={",
-        groups[0],
-        ", ",
-        groups[1],
-        "}");
+    TORCH_INTERNAL_ASSERT(
+        (groups == dnnl::memory::dims{1, inner_dim} ||
+         groups == dnnl::memory::dims{inner_dim, 1}),
+        "The groups must be either {1, inner_dim} or {inner_dim, 1}. But got ",
+        groups,
+        ".");
+    return outer_dim;
   }
 
   // Normalize an incoming scale tensor to contiguous storage and appropriate
   // dtype/view
   at::Tensor normalize(const at::Tensor& scale) const {
-    if (dtype == dnnl::memory::data_type::f32) {
-      return scale.to(at::kFloat).contiguous();
-    }
-
-    TORCH_CHECK(false, "Unsupported scale dtype; got ", scale.scalar_type());
+    TORCH_INTERNAL_ASSERT(
+        dtype == dnnl::memory::data_type::f32,
+        "tensor scale currently must be f32, but got scale dtype: ",
+        scale.scalar_type());
+    return scale.to(at::kFloat).contiguous();
   }
 };
 
@@ -401,29 +390,27 @@ inline ScaleSpec make_scale_spec(
       "Expected arg_type to be 'src' or 'wei', but got '",
       arg_type,
       "'");
-
+  TORCH_INTERNAL_ASSERT(
+      (scaling_type == at::blas::ScalingType::TensorWise ||
+       scaling_type == at::blas::ScalingType::RowWise),
+      "Currently only support scaling_type for TensorWise or RowWise");
   int64_t dim = K; // Currently only K is used for grouping
   bool is_src = (arg_type == "src");
-  switch (scaling_type) {
-    case at::blas::ScalingType::TensorWise:
-      // Scale tensorwise. The same as `--attr-scales=common`.
-      // mask=0 : scale whole tensor
-      // groups={1, 1}: indicates that there is only one group for scaling
-      return {0, {1, 1}, dnnl::memory::data_type::f32};
-    case at::blas::ScalingType::RowWise:
-      // Scale RowWise. The same as `--attr-scales=per_dim_01`.
-      // mask={(1 << 0) | (1 << 1)}: Scale on both dim0 and dim1
-      // SRC: groups={1, K}, WEIGHTS: groups={K, 1}
-      return {
-          (1 << 0) | (1 << 1),
-          is_src ? dnnl::memory::dims{1, dim} : dnnl::memory::dims{dim, 1},
-          dnnl::memory::data_type::f32};
+  if (scaling_type == at::blas::ScalingType::TensorWise) {
+    // Scale tensorwise. The same as `--attr-scales=common`.
+    // mask=0 : scale whole tensor
+    // groups={1, 1}: indicates that there is only one group for scaling
+    return {0, {1, 1}, dnnl::memory::data_type::f32};
+  } else {
+    // (scaling_type == at::blas::ScalingType::RowWise)
+    // Scale RowWise. The same as `--attr-scales=per_dim_01`.
+    // mask={(1 << 0) | (1 << 1)}: Scale on both dim0 and dim1
+    // SRC: groups={1, K}, WEIGHTS: groups={K, 1}
+    return {
+        (1 << 0) | (1 << 1),
+        is_src ? dnnl::memory::dims{1, dim} : dnnl::memory::dims{dim, 1},
+        dnnl::memory::data_type::f32};
   }
-  TORCH_CHECK(
-      false,
-      "Expected scaling_type to be one of: TensorWise, RowWise; ",
-      "but got scaling_type=",
-      static_cast<int>(scaling_type));
 }
 
 sycl::event scaled_matmul(
