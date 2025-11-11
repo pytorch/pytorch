@@ -114,10 +114,12 @@ def forward(self, arg0_1):
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1, arg1_1):
-    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops.higher_order.print, 'moo {x} {y}', x = 1, y = 2);  arg0_1 = None
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops.higher_order.print, 'moo {x} {y}', x = 1, y = 2);  \
+arg0_1 = None
     getitem = with_effects[0];  with_effects = None
     add = torch.ops.aten.add.Tensor(arg1_1, arg1_1);  arg1_1 = None
-    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, 'moo {x} {y}', x = 1, y = 2);  getitem = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, 'moo {x} {y}', x = 1, y = 2);  \
+getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
     return (getitem_2, add)""",
         )
