@@ -145,11 +145,13 @@ def _compile_and_extract_symbols(
 
 def check_stable_only_symbols(install_root: Path) -> None:
     """
-    Test TORCH_STABLE_ONLY by compiling test code and comparing symbol counts.
+    Test TORCH_STABLE_ONLY and TORCH_TARGET_VERSION by compiling test code and comparing symbol counts.
 
     This approach tests:
-    1. WITHOUT macro -> many torch symbols exposed
-    2. WITH macro -> zero torch symbols (all hidden)
+    1. WITHOUT macros -> many torch symbols exposed
+    2. WITH TORCH_STABLE_ONLY -> zero torch symbols (all hidden)
+    3. WITH TORCH_TARGET_VERSION -> zero torch symbols (all hidden)
+    4. WITH both macros -> zero torch symbols (all hidden)
     """
     include_dir = install_root / "include"
     assert include_dir.exists(), f"Expected {include_dir} to be present"
@@ -180,7 +182,7 @@ int main() { return 0; }
         "-c",  # Compile only, don't link
     ]
 
-    # Compile WITHOUT TORCH_STABLE_ONLY
+    # Compile WITHOUT any macros
     symbols_without = _compile_and_extract_symbols(
         cpp_content=test_cpp_content,
         compile_flags=base_compile_flags,
@@ -189,21 +191,54 @@ int main() { return 0; }
     # We expect constexpr symbols, inline functions used by other headers etc.
     # to produce symbols
     num_symbols_without = len(symbols_without)
-    print(f"Found {num_symbols_without} symbols without TORCH_STABLE_ONLY defined")
+    print(f"Found {num_symbols_without} symbols without any macros defined")
     assert num_symbols_without != 0, (
-        "Expected a non-zero number of symbols without TORCH_STABLE_ONLY macro"
+        "Expected a non-zero number of symbols without any macros"
     )
 
     # Compile WITH TORCH_STABLE_ONLY (expect 0 symbols)
-    compile_flags_with_macro = base_compile_flags + ["-DTORCH_STABLE_ONLY"]
+    compile_flags_with_stable_only = base_compile_flags + ["-DTORCH_STABLE_ONLY"]
 
-    symbols_with = _compile_and_extract_symbols(
+    symbols_with_stable_only = _compile_and_extract_symbols(
         cpp_content=test_cpp_content,
-        compile_flags=compile_flags_with_macro,
+        compile_flags=compile_flags_with_stable_only,
     )
 
-    num_symbols_with = len(symbols_with)
-    assert num_symbols_with == 0, "Expected no symbols with TORCH_STABLE_ONLY macro"
+    num_symbols_with_stable_only = len(symbols_with_stable_only)
+    assert num_symbols_with_stable_only == 0, (
+        f"Expected no symbols with TORCH_STABLE_ONLY macro, but found {num_symbols_with_stable_only}"
+    )
+
+    # Compile WITH TORCH_TARGET_VERSION (expect 0 symbols)
+    compile_flags_with_target_version = base_compile_flags + [
+        "-DTORCH_TARGET_VERSION=1"
+    ]
+
+    symbols_with_target_version = _compile_and_extract_symbols(
+        cpp_content=test_cpp_content,
+        compile_flags=compile_flags_with_target_version,
+    )
+
+    num_symbols_with_target_version = len(symbols_with_target_version)
+    assert num_symbols_with_target_version == 0, (
+        f"Expected no symbols with TORCH_TARGET_VERSION macro, but found {num_symbols_with_target_version}"
+    )
+
+    # Compile WITH both macros (expect 0 symbols)
+    compile_flags_with_both = base_compile_flags + [
+        "-DTORCH_STABLE_ONLY",
+        "-DTORCH_TARGET_VERSION=1",
+    ]
+
+    symbols_with_both = _compile_and_extract_symbols(
+        cpp_content=test_cpp_content,
+        compile_flags=compile_flags_with_both,
+    )
+
+    num_symbols_with_both = len(symbols_with_both)
+    assert num_symbols_with_both == 0, (
+        f"Expected no symbols with both macros, but found {num_symbols_with_both}"
+    )
 
 
 def check_stable_api_symbols(install_root: Path) -> None:

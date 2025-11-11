@@ -1365,6 +1365,7 @@ class bdist_wheel(setuptools.command.bdist_wheel.bdist_wheel):
         - torch/include/torch/headeronly/*
         - torch/include/torch/csrc/stable/*
         - torch/include/torch/csrc/inductor/aoti_torch/c/ (only shim headers)
+        - torch/include/torch/csrc/inductor/aoti_torch/generated/
         """
         header_extensions = (".h", ".hpp", ".cuh")
         header_files = [
@@ -1388,9 +1389,9 @@ class bdist_wheel(setuptools.command.bdist_wheel.bdist_wheel):
 
             original_content = header_file.read_text(encoding="utf-8")
             wrapped_content = (
-                "#ifndef TORCH_STABLE_ONLY\n"
+                "#if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
                 f"{original_content}"
-                "\n#endif  // TORCH_STABLE_ONLY\n"
+                "\n#endif  // !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
             )
 
             header_file.write_text(wrapped_content, encoding="utf-8")
@@ -1421,7 +1422,9 @@ class bdist_wheel(setuptools.command.bdist_wheel.bdist_wheel):
         # Wrap all header files with TORCH_STABLE_ONLY macro
         assert self.bdist_dir is not None, "bdist_dir should be set during wheel build"
         bdist_dir = Path(self.bdist_dir)
-        report("-- Wrapping header files with TORCH_STABLE_ONLY macro")
+        report(
+            "-- Wrapping header files with if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)"
+        )
         self._wrap_headers_with_macro(bdist_dir)
 
 
