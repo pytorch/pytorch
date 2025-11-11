@@ -67,7 +67,7 @@ jobs:
           pytorch-linux-jammy-py3.10-gcc11,
           pytorch-linux-jammy-py3-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-py3.12-halide,
-          pytorch-linux-jammy-cuda13.0-py3.12-pallas,
+          pytorch-linux-jammy-cuda12.8-py3.12-pallas,
           pytorch-linux-jammy-xpu-n-1-py3,
           pytorch-linux-noble-xpu-n-py3,
           pytorch-linux-noble-xpu-n-py3-inductor-benchmarks,
