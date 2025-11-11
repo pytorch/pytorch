@@ -177,6 +177,7 @@ x = add_1, y = add_2);  getitem = None
         )
 
     def test_reorder_print(self):
+        counters.clear()
         def f(x):
             x1 = x + x
             torch._higher_order_ops.print("moo {x}", x=x1)
@@ -187,6 +188,7 @@ x = add_1, y = add_2);  getitem = None
 
         x = torch.ones(3, 3)
         opt_f = torch.compile(backend="eager")(f)
+        self.assertEqual(len(counters["graph_break"]), 0)
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             opt_out = opt_f(x)
             printed_output = mock_stdout.getvalue().strip()
@@ -197,7 +199,6 @@ x = add_1, y = add_2);  getitem = None
             f"moo {torch.ones(3, 3) * 2}\nmoo {torch.ones(3, 3) * 2 * torch.ones(3, 3) * 2}",
         )
         self.assertTrue(same(orig_out, opt_out))
-
 
 if __name__ == "__main__":
     run_tests()
