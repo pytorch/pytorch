@@ -3,6 +3,7 @@
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSStream.h>
+#include <c10/metal/error.h>
 
 @interface MPSGraphExecutionDescriptor ()
 @property(readwrite, atomic) BOOL enableCommitAndContinue;
@@ -29,6 +30,10 @@ MPSStream::MPSStream(Stream stream) : _stream(stream) {
   // Choose level which optimizes for GPU
   _compilationDescriptor.optimizationLevel = MPSGraphOptimizationLevel0;
   _executionDescriptor.compilationDescriptor = _compilationDescriptor;
+
+  _errorBuffer = [MPSDevice::getInstance()->device() newBufferWithLength:sizeof(c10::metal::ErrorMessages)
+                                                                 options:MTLResourceStorageModeShared];
+  std::memset([_errorBuffer contents], 0, 1024);
 }
 
 MPSStream::~MPSStream() {
@@ -37,6 +42,8 @@ MPSStream::~MPSStream() {
   [_executionDescriptor release];
   [_compilationDescriptor release];
   _executionDescriptor = nil;
+  [_errorBuffer release];
+  _errorBuffer = nil;
   _compilationDescriptor = nil;
 
   assert(_commandBuffer == nil);
@@ -103,6 +110,7 @@ void MPSStream::commitAndWait() {
     [_prevCommandBuffer waitUntilCompleted];
     [_prevCommandBuffer release];
     _prevCommandBuffer = nil;
+    checkLastError();
   }
 
   if (_commandBuffer) {
@@ -110,6 +118,7 @@ void MPSStream::commitAndWait() {
     [_commandBuffer waitUntilCompleted];
     [_commandBuffer release];
     _commandBuffer = nil;
+    checkLastError();
   }
 }
 
@@ -263,6 +272,24 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
       synchronize(_syncType);
     }
   });
+}
+
+id<MTLBuffer> MPSStream::getErrorBuffer() {
+  return _errorBuffer;
+}
+
+void MPSStream::checkLastError() {
+  auto msgs = reinterpret_cast<c10::metal::ErrorMessages*>([_errorBuffer contents]);
+  const auto& msg = msgs->msg[0];
+  if (!msgs) {
+    return;
+  }
+  unsigned int count = 0;
+  std::swap(count, msgs->count);
+  if (!count) {
+    return;
+  }
+  throw c10::AcceleratorError({msg.func, msg.file, msg.line}, 1, msg.message);
 }
 
 //-----------------------------------------------------------------
