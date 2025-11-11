@@ -1,4 +1,4 @@
-name: docker-cache-mi300
+name: docker-cache-rocm
 
 on:
   workflow_run:
