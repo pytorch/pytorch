@@ -19,19 +19,17 @@ class TestFlashAttentionRegistry(TestCase):
         super().tearDown()
 
     def test_register_and_install_backend(self):
-        calls: dict[str, object] = {}
+        calls: dict[str, bool] = {}
 
-        def fake_register(*, module_path=None):
-            calls["module_path"] = module_path
+        def fake_register():
+            calls["called"] = True
 
         attention.register_flash_attention_backend("TEST_FA", register_fn=fake_register)
         self.assertIn("TEST_FA", attention.list_flash_attention_backends())
 
-        attention.install_flash_attention_impl(
-            "TEST_FA", module_path="custom.flash.module"
-        )
+        attention.install_flash_attention_impl("TEST_FA")
 
-        self.assertEqual("custom.flash.module", calls["module_path"])
+        self.assertTrue(calls.get("called", False))
         self.assertEqual("TEST_FA", attention.current_flash_attention_backend())
 
     def test_install_unknown_backend_errors(self):
