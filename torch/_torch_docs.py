@@ -217,11 +217,41 @@ sparse_support_notes = {
 }
 
 add_docstr(
+    torch.pi,
+    r"""
+pi -> float
+
+Returns pi(π).
+
+Example::
+
+    >>> torch.pi
+    3.141592653589793
+
+""",
+)
+
+add_docstr(
+    torch.e,
+    r"""
+e -> float
+
+Returns e(Euler's number).
+
+Example::
+
+    >>> torch.e
+    2.718281828459045
+
+""",
+)
+
+add_docstr(
     torch.nan,
     r"""
 nan -> float
 
-Returns `nan`.
+Returns NaN(Not a Number).
 
 Example::
 
@@ -236,7 +266,7 @@ add_docstr(
     r"""
 inf -> float
 
-Returns `inf`.
+Returns (positive) infinity.
 
 Example::
 
