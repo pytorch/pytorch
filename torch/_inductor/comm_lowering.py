@@ -4,6 +4,7 @@ import logging
 import torch
 import torch.utils._pytree as pytree
 from torch._inductor.utils import is_symbolic
+from torch.distributed.distributed_c10d import _GroupName
 from torch.utils._ordered_set import OrderedSet
 
 from . import config, ir
@@ -75,7 +76,7 @@ def can_realize_as_comm_buffer(
 
 
 def realize_as_comm_buffer(
-    x: ir.TensorBox, comm_buffer_type: ir.CommBufferType, group_name: str
+    x: ir.TensorBox, comm_buffer_type: ir.CommBufferType, group_name: _GroupName
 ) -> None:
     """
     Realize an input as a comm buffer of the specified `comm_buffer_type`.
@@ -142,7 +143,7 @@ def should_skip_wait(x: ir.IRNode) -> bool:
 
 
 def _should_lower_as_one_shot_all_reduce(
-    inp: ir.TensorBox, reduce_op: str, group_name: str
+    inp: ir.TensorBox, reduce_op: str, group_name: _GroupName
 ):
     from torch.distributed._symmetric_memory import is_symm_mem_enabled_for_group
 
@@ -194,7 +195,9 @@ def register_comm_lowerings():
     c10d = torch.ops._c10d_functional
 
     @register_comm_lowering(c10d.all_reduce)  # type: ignore[misc]
-    def _all_reduce(inp: ir.TensorBox, reduce_op: str, group_name: str) -> ir.TensorBox:
+    def _all_reduce(
+        inp: ir.TensorBox, reduce_op: str, group_name: _GroupName
+    ) -> ir.TensorBox:
         if _should_lower_as_one_shot_all_reduce(inp, reduce_op, group_name):
             return _one_shot_all_reduce(inp, reduce_op, group_name)
 
@@ -222,7 +225,7 @@ def register_comm_lowerings():
 
     @register_comm_lowering(c10d.all_reduce_)  # type: ignore[misc]
     def _all_reduce_(
-        inp: ir.TensorBox, reduce_op: str, group_name: str
+        inp: ir.TensorBox, reduce_op: str, group_name: _GroupName
     ) -> ir.TensorBox:
         if _should_lower_as_one_shot_all_reduce(inp, reduce_op, group_name):
             ret = copy_(

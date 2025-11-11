@@ -42,6 +42,7 @@ else:
     from torch._C._distributed_c10d import Backend as C10dBackend
     from torch.distributed.distributed_c10d import (
         _get_default_group,
+        _GroupName,
         _resolve_process_group,
         get_backend,
         get_process_group_ranks,
@@ -475,10 +476,10 @@ else:
             rank_map: torch.Tensor,
             mesh_dim_names: Optional[tuple[str, ...]],
             backend_override: tuple[BackendConfig, ...],
-        ) -> list[str]:
+        ) -> list[_GroupName]:
             # group_name associated with each mesh dimension, each
             # mesh dimension should have one sub-group per rank
-            dim_group_names: list[str] = []
+            dim_group_names: list[_GroupName] = []
             # create sub pgs base on the mesh argument specified
             for dim in range(len(layout)):
                 dim_name = mesh_dim_names[dim] if mesh_dim_names else f"dim_{dim}"
@@ -1209,7 +1210,7 @@ else:
             concat_dim_names: list[str] = []
             concat_sizes: list[IntTuple] = []
             concat_strides: list[IntTuple] = []
-            concat_dim_group_name: list[str] = []
+            concat_dim_group_name: list[_GroupName] = []
             flatten_rank_map = device_mesh_list[0]._flatten_rank_map
             for dm in device_mesh_list:
                 for i in range(len(dm._layout)):

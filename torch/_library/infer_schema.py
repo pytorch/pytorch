@@ -7,6 +7,7 @@ from typing import Optional, Union
 
 import torch
 from torch import device, dtype, Tensor, types
+from torch.distributed.distributed_c10d import _GroupName
 from torch.utils._exposed_in import exposed_in
 
 from .opaque_object import _OPAQUE_TYPES, is_opaque_type, OpaqueType, OpaqueTypeStr
@@ -264,6 +265,7 @@ def get_supported_param_types():
         (dtype, "ScalarType", False, False, False),
         (device, "Device", False, False, False),
         (OpaqueType, OpaqueTypeStr, False, False, False),
+        (_GroupName, "str", False, False, False),
     ]
     result = []
     for line in data:
