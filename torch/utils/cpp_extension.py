@@ -1836,7 +1836,7 @@ def _check_and_build_extension_h_precompiler_headers(
 
     def build_precompile_header(pch_cmd) -> None:
         try:
-            subprocess.check_output(pch_cmd, shell=True, stderr=subprocess.STDOUT)
+            subprocess.check_output(shlex.split(pch_cmd), stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Compile PreCompile Header fail, command: {pch_cmd}") from e
 
