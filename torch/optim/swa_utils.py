@@ -43,14 +43,16 @@ def get_ema_multi_avg_fn(decay=0.999):
         )
 
     @torch.no_grad()
-    def ema_update(ema_param_list: PARAM_LIST, current_param_list: PARAM_LIST, _):
+    def ema_update(
+        ema_param_list: PARAM_LIST, current_param_list: PARAM_LIST, _
+    ) -> None:
         # foreach lerp only handles float and complex
         if torch.is_floating_point(ema_param_list[0]) or torch.is_complex(
             ema_param_list[0]
         ):
             torch._foreach_lerp_(ema_param_list, current_param_list, 1 - decay)
         else:
-            for p_ema, p_model in zip(ema_param_list, current_param_list):
+            for p_ema, p_model in zip(ema_param_list, current_param_list, strict=True):
                 p_ema.copy_(p_ema * decay + p_model * (1 - decay))
 
     return ema_update
@@ -64,7 +66,7 @@ def get_swa_multi_avg_fn():
         averaged_param_list: PARAM_LIST,
         current_param_list: PARAM_LIST,
         num_averaged: Union[Tensor, int],
-    ):
+    ) -> None:
         # foreach lerp only handles float and complex
         if torch.is_floating_point(averaged_param_list[0]) or torch.is_complex(
             averaged_param_list[0]
@@ -227,7 +229,7 @@ class AveragedModel(Module):
             Callable[[PARAM_LIST, PARAM_LIST, Union[Tensor, int]], None]
         ] = None,
         use_buffers=False,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         super().__init__()
         if avg_fn is not None and multi_avg_fn is not None:
             raise AssertionError(
@@ -247,16 +249,16 @@ class AveragedModel(Module):
         """Forward pass."""
         return self.module(*args, **kwargs)
 
-    def update_parameters(self, model: Module):
+    def update_parameters(self, model: Module) -> None:
         """Update model parameters."""
         self_param = (
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             itertools.chain(self.module.parameters(), self.module.buffers())
             if self.use_buffers
             else self.parameters()
         )
         model_param = (
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             itertools.chain(model.parameters(), model.buffers())
             if self.use_buffers
             else model.parameters()
@@ -264,7 +266,7 @@ class AveragedModel(Module):
         self_param_detached: list[Optional[Tensor]] = []
         model_param_detached: list[Optional[Tensor]] = []
         copy_param = bool(self.n_averaged == 0)
-        for p_averaged, p_model in zip(self_param, model_param):
+        for p_averaged, p_model in zip(self_param, model_param, strict=False):
             p_model_ = p_model.detach().to(p_averaged.device)
             self_param_detached.append(p_averaged.detach())
             model_param_detached.append(p_model_)
@@ -297,25 +299,29 @@ class AveragedModel(Module):
                     else:
                         avg_fn = get_swa_avg_fn()
                         n_averaged = self.n_averaged.to(device)
-                        for p_averaged, p_model in zip(self_params, model_params):  # type: ignore[assignment]
-                            # pyrefly: ignore  # missing-attribute
+                        for p_averaged, p_model in zip(  # type: ignore[assignment]
+                            self_params, model_params, strict=True
+                        ):
+                            # pyrefly: ignore [missing-attribute]
                             p_averaged.copy_(avg_fn(p_averaged, p_model, n_averaged))
             else:
                 for p_averaged, p_model in zip(  # type: ignore[assignment]
-                    self_param_detached, model_param_detached
+                    self_param_detached, model_param_detached, strict=True
                 ):
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     n_averaged = self.n_averaged.to(p_averaged.device)
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     p_averaged.detach().copy_(
-                        # pyrefly: ignore  # missing-attribute, bad-argument-type
+                        # pyrefly: ignore [missing-attribute, bad-argument-type]
                         self.avg_fn(p_averaged.detach(), p_model, n_averaged)
                     )
 
         if not self.use_buffers:
             # If not apply running averages to the buffers,
             # keep the buffers in sync with the source model.
-            for b_swa, b_model in zip(self.module.buffers(), model.buffers()):
+            for b_swa, b_model in zip(
+                self.module.buffers(), model.buffers(), strict=True
+            ):
                 b_swa.detach().copy_(b_model.detach().to(b_swa.device))
         self.n_averaged += 1
 
@@ -325,7 +331,7 @@ def update_bn(
     loader: Iterable[Any],
     model: Module,
     device: Optional[Union[int, torch.device]] = None,
-):
+) -> None:
     r"""Update BatchNorm running_mean, running_var buffers in the model.
 
     It performs one pass over data in `loader` to estimate the activation
@@ -363,7 +369,7 @@ def update_bn(
 
     was_training = model.training
     model.train()
-    for module in momenta.keys():
+    for module in momenta:
         module.momentum = None
 
     for input in loader:
@@ -374,7 +380,7 @@ def update_bn(
 
         model(input)
 
-    for bn_module in momenta.keys():
+    for bn_module in momenta:
         bn_module.momentum = momenta[bn_module]
     model.train(was_training)
 
@@ -430,9 +436,9 @@ class SWALR(LRScheduler):
         anneal_epochs=10,
         anneal_strategy: Literal["cos", "linear"] = "cos",
         last_epoch=-1,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         swa_lrs = _format_param("swa_lr", optimizer, swa_lr)
-        for swa_lr, group in zip(swa_lrs, optimizer.param_groups):
+        for swa_lr, group in zip(swa_lrs, optimizer.param_groups, strict=True):
             group["swa_lr"] = swa_lr
         if anneal_strategy not in ["cos", "linear"]:
             raise ValueError(
@@ -497,22 +503,22 @@ class SWALR(LRScheduler):
         step = self._step_count - 1
         if self.anneal_epochs == 0:
             step = max(1, step)
-        # pyrefly: ignore  # no-matching-overload
+        # pyrefly: ignore [no-matching-overload]
         prev_t = max(0, min(1, (step - 1) / max(1, self.anneal_epochs)))
         prev_alpha = self.anneal_func(prev_t)
         prev_lrs = [
             self._get_initial_lr(group["lr"], group["swa_lr"], prev_alpha)
             for group in self.optimizer.param_groups
         ]
-        # pyrefly: ignore  # no-matching-overload
+        # pyrefly: ignore [no-matching-overload]
         t = max(0, min(1, step / max(1, self.anneal_epochs)))
         alpha = self.anneal_func(t)
         return [
             group["swa_lr"] * alpha + lr * (1 - alpha)
-            for group, lr in zip(self.optimizer.param_groups, prev_lrs)
+            for group, lr in zip(self.optimizer.param_groups, prev_lrs, strict=True)
         ]
 
-    def _set_anneal_func(self, anneal_strategy: Literal["cos", "linear"]):
+    def _set_anneal_func(self, anneal_strategy: Literal["cos", "linear"]) -> None:
         self._anneal_strategy = anneal_strategy
         if anneal_strategy == "cos":
             self.anneal_func = self._cosine_anneal

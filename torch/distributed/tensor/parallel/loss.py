@@ -11,7 +11,7 @@ from torch import Tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
+from torch.distributed.tensor._ops._embedding_ops import MaskPartial
 from torch.distributed.tensor._ops._math_ops import (
     _skip_dim,
     Reduction,
@@ -236,7 +236,7 @@ def _nll_loss_forward(
 
     # The following code block is a distributed version of
     # result = -torch.gather(self, channel_dim, safe_target_).squeeze(channel_dim)
-    partial_placement = _MaskPartial(offset_shape=input_shape, offset_dim=channel_dim)
+    partial_placement = MaskPartial(offset_shape=input_shape, offset_dim=channel_dim)
     safe_target_partial_ = partial_placement._partition_value(
         safe_target_, mesh, mesh_dim
     )
@@ -375,7 +375,7 @@ def _nll_loss_and_log_softmax_backward(
 
     # The following code block is a distributed version of
     # grad_input = torch.scatter(grad_input, channel_dim, safe_target, -1.0)
-    partial_placement = _MaskPartial(offset_shape=input_shape, offset_dim=channel_dim)
+    partial_placement = MaskPartial(offset_shape=input_shape, offset_dim=channel_dim)
     safe_target = safe_target.squeeze(channel_dim).flatten()
     masked_safe_target = partial_placement._partition_value(safe_target, mesh, mesh_dim)
     # only update grad_input to -1 if not masked

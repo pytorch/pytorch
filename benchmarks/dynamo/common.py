@@ -952,7 +952,7 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
         first_fields.append(kwargs["tag"])
     headers = first_headers + ["speedup", "abs_latency"]
     row = first_fields + [float(speedup), median[1] * 1000]
-    msg = f"{speedup:.3f}x"
+    msg = f"{median[0] * 1000} ms, {median[1] * 1000} ms, {speedup:.3f}x"
     if args.baseline:
         headers.extend(
             [
@@ -1010,7 +1010,7 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
     # Hypothetically you can use this from other places, but it's currently
     # inaccessible, and when this assert fails you need to update the
     # event_name here to account for the other cases you are using this
-    assert args.quantization is not None
+    assert any([args.quantization, args.optimus])
     output_signpost(
         dict(zip(headers, row)),
         args,
@@ -1838,6 +1838,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_for_xpu(self):
+        return set()
+
+    @property
     def skip_models_for_cpu(self):
         return set()
 
@@ -2583,6 +2587,9 @@ class BenchmarkRunner:
                 **experiment_kwargs,
             )
 
+            # reset dynamo
+            torch._dynamo.reset()
+
             if self.args.export_aot_inductor:
                 optimized_model_iter_fn = optimize_ctx
             else:
@@ -2946,7 +2953,7 @@ class BenchmarkRunner:
             status = self.check_tolerance(name, model, example_inputs, optimize_ctx)
             print(status)
         elif self.args.performance:
-            if self.args.backend == "torchao":
+            if self.args.backend in ["torchao", "optimus"]:
                 status = self.run_performance_test_non_alternate(
                     name, model, example_inputs, optimize_ctx, experiment, tag
                 )
@@ -3523,6 +3530,12 @@ def parse_args(args=None):
         help="Measure speedup with TorchInductor",
     )
     group.add_argument(
+        "--optimus",
+        choices=["vertical_opt", "horizontal_opt", "all"],
+        default=None,
+        help="Measure speedup of Optimus with TorchInductor baseline",
+    )
+    group.add_argument(
         "--quantization",
         choices=[
             "int8dynamic",
@@ -3779,6 +3792,9 @@ def run(runner, args, original_dir=None):
     if args.inductor:
         assert args.backend is None
         args.backend = "inductor"
+    if args.optimus:
+        assert args.backend is None
+        args.backend = "optimus"
     if args.quantization:
         assert args.backend is None
         args.backend = "torchao"
@@ -3927,6 +3943,8 @@ def run(runner, args, original_dir=None):
             runner.skip_models.update(runner.skip_models_for_cpu_aarch64)
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
+    elif args.devices == ["xpu"]:
+        runner.skip_models.update(runner.skip_models_for_xpu)
 
     if not args.multiprocess:
         runner.skip_models.update(runner.skip_multiprocess_models)
@@ -4061,10 +4079,22 @@ def run(runner, args, original_dir=None):
 
             runner.model_iter_fn = model_iter_fn_and_mark_step
             optimize_ctx = torchao_optimize_ctx(args.quantization)
+        elif args.backend == "optimus":
+            from .optimus import get_baseline_ctx, get_optimus_optimize_ctx
+
+            baseline_ctx = get_baseline_ctx(
+                nopython=args.nopython, inductor_compile_mode=args.inductor_compile_mode
+            )
+            runner.model_iter_fn = baseline_ctx(runner.model_iter_fn)
+            optimize_ctx = get_optimus_optimize_ctx(
+                args.optimus, args.nopython, args.inductor_compile_mode
+            )
         else:
             optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = (
-            speedup_experiment if args.backend != "torchao" else latency_experiment
+            speedup_experiment
+            if args.backend not in ["torchao", "optimus"]
+            else latency_experiment
         )
         if args.accuracy:
             output_filename = f"accuracy_{args.backend}.csv"
@@ -4085,7 +4115,12 @@ def run(runner, args, original_dir=None):
     if args.only in runner.disable_cudagraph_models:
         args.disable_cudagraphs = True
 
-    if args.inductor or args.backend == "inductor" or args.export_aot_inductor:
+    if (
+        args.inductor
+        or args.backend == "inductor"
+        or args.export_aot_inductor
+        or args.backend == "optimus"
+    ):
         inductor_config.triton.cudagraphs = not args.disable_cudagraphs
         inductor_config.triton.persistent_reductions = (
             not args.disable_persistent_reductions

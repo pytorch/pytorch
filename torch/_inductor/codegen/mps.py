@@ -141,6 +141,15 @@ class MetalExprPrinter(ExprPrinter_):
         x = self.doprint(expr.args[0])
         return f"static_cast<float>({x})"
 
+    def _print_Float(self, expr: sympy.Expr) -> str:
+        if expr.is_integer:
+            # sympy considers 0.0 to be integer, but Metal doesn't.
+            # this workaround prints the float as an integer
+            # xref: https://github.com/sympy/sympy/issues/26620
+            return str(int(expr))
+        else:
+            return str(expr)
+
     def _print_FloorToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
         x = self.doprint(expr.args[0])
@@ -895,7 +904,7 @@ class MetalKernel(SIMDKernel):
                     else:
                         dtype_str = self.dtype_to_str(dtype)
                     code.writeline(f"constant {dtype_str}* {inner},")
-                for outer, inner in self.args.sizevars.items():
+                for inner in self.args.sizevars.values():
                     code.writeline(f"constant long& {inner},")
 
                 # Write dynamic values as inputs
@@ -938,13 +947,15 @@ class MetalKernel(SIMDKernel):
 
         return code.getvalue()
 
-    def call_kernel(self, name: str, node: Any = None) -> None:
+    def call_kernel(
+        self, name: str, node: Any = None, deallocate_ws: bool = True
+    ) -> None:
         """
         Codegens a call to this kernel
         """
         wrapper = V.graph.wrapper_code
         # Make sure sizevars has been computed
-        for v in self.args.sizevars.keys():
+        for v in self.args.sizevars:
             wrapper.ensure_size_computed(v)
 
         _, call_args, _, arg_types = self.args.python_argdefs()
@@ -954,7 +965,7 @@ class MetalKernel(SIMDKernel):
 
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         args = [arg for arg in args if arg not in self.removed_buffers]
-        args += [str(v) for v in self.args.sizevars.keys()]
+        args += [str(v) for v in self.args.sizevars]
         arg_types = [arg_name_to_type[arg] for arg in args]
 
         # Add any dynamic ints as inputs

@@ -2979,7 +2979,7 @@ class TestScriptList(JitTestCase):
                 self.col2 = "b"
 
             def forward(self):
-                if self.col1 in self.segments_groupby_col.keys():
+                if self.col1 in self.segments_groupby_col:
                     return 1
                 else:
                     return 2
@@ -2989,7 +2989,7 @@ class TestScriptList(JitTestCase):
         test_script.segments_groupby_col
 
         # Smoketest for flakiness. Takes around 2s.
-        for i in range(300):
+        for _ in range(300):
             test = Test()
             test_script = torch.jit.script(test)
 

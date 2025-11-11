@@ -80,7 +80,7 @@ class BroadcastingTorchSaveReader(StorageReader):
         planner = cast(DefaultLoadPlanner, planner)
 
         # data is read in on the coordinator rank, and broadcast afterwards
-        # this incurrs a communication cost, but it avoids having to load
+        # this incurs a communication cost, but it avoids having to load
         # the entire checkpoint on each rank, hopefully preventing OOM issues
         # TODO: read on each host, instead of only the coordinator
         if self.is_coordinator:

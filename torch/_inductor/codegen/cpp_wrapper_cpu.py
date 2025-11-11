@@ -8,7 +8,7 @@ import os
 import sys
 import textwrap
 from itertools import chain, count
-from typing import Any, Callable, Optional, Protocol, TYPE_CHECKING, Union
+from typing import Any, Optional, Protocol, TYPE_CHECKING, Union
 
 import sympy
 
@@ -22,6 +22,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, cpp_builder, ir
+from ..ir import ExternKernel
 from ..utils import _align, DeferredLineBase, LineContext, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
@@ -36,12 +37,14 @@ from .wrapper import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from ..graph import GraphLowering
 
     # At most, the list nesting can go one layer deep.
     _OUTPUT_ARGS_TYPE = list[Union[Optional[str], list[Optional[str]]]]
+
+    from ..scheduler import BaseSchedulerNode
 
 
 class HasWriteLine(Protocol):
@@ -218,7 +221,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 """
             )
 
-        self.add_device_include(self.device)
+        for device in V.graph.device_types:
+            if device != "meta":
+                self.add_device_include(device)
 
         if V.graph.aot_mode:
             if config.aot_inductor.dynamic_linkage:
@@ -232,6 +237,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 # we produce a separate model header for each model in static linkage
                 self.header.splice(f"""#include \"{self.model_class_name_suffix}.h\"""")
             self.header.splice("\n")
+
+        if config.cpp.enable_kernel_profile:
+            self.header.splice(
+                "#include <torch/csrc/inductor/aoti_runtime/kernel_context_tls.h>"
+            )
+            self.header.splice(
+                """
+                namespace torch::aot_inductor {
+                thread_local KernelContext* tls_kernel_context = nullptr;
+                }
+                """
+            )
 
     def _include_extra_header(self, header: str):
         # This is needed for cpp to python dtype conversion
@@ -616,7 +633,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 debug_printer_manager.codegen_model_inputs_value_print(
                     input_args_to_print=[
                         input_key
-                        for input_key in V.graph.graph_inputs.keys()
+                        for input_key in V.graph.graph_inputs
                         if input_key.startswith("arg")
                     ]
                 )
@@ -796,7 +813,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
             all_cuda = all(
                 V.graph.get_original_value_of_constant(name).is_cuda
-                for name in V.graph.constants.keys()
+                for name in V.graph.constants
                 if name not in V.graph.folded_constants
             )
             for idx, name in enumerate(V.graph.constants.keys()):
@@ -1249,7 +1266,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         device: str,
         *,
         debug_args: Optional[list[str]] = None,
-        debug_handle: Optional[int] = None,
+        stack_traces: Optional[OrderedSet[str]] = None,
     ) -> None:
         """debug_args kwarg allows CppWrapperCpuArrayRef to pass in wrapped arguments in
         place of args while preserving debug printer output."""
@@ -1266,21 +1283,26 @@ class CppWrapperCpu(PythonWrapperCodegen):
         ]
         with debug_printer_manager:
             shim_fn = self.get_c_shim_func_name(kernel, device)
-            self.write_provenance_debug_handle(shim_fn, debug_handle)
-            shim_fn_codes = (
+            shim_fn_codes = [
                 f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));"
-            )
+            ]
             if enable_kernel_profile:
-                debug_handle_str = "" if debug_handle is None else f":{debug_handle}"
-                shim_fn_codes = textwrap.dedent(
-                    f"""
-                    {{
-                      RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}{debug_handle_str}", nullptr);
-                      {shim_fn_codes}
-                    }}
-                    """
-                )
-            self.writeline(shim_fn_codes)
+                stack_trace_str = 'R"('
+                if stack_traces:
+                    for stack_trace in stack_traces:
+                        for line in stack_trace.split("\n"):
+                            stack_trace_str += f"\n{line}"
+                        stack_trace_str += "\n"
+                stack_trace_str += ')"'
+
+                shim_fn_codes = [
+                    "{",
+                    f"""KernelContextGuard _ctx("{shim_fn}", {stack_trace_str});""",
+                    f"""RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr);""",
+                    shim_fn_codes[0],
+                    "}",
+                ]
+            self.writelines(shim_fn_codes)
 
     def generate_c_shim_extern_kernel_alloc(
         self, extern_kernel: ir.ExternKernelAlloc, args: list[str]
@@ -1373,7 +1395,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         out_view: Optional[str],
         args: list[str],
         device: str,
-        debug_handle: Optional[int] = None,
+        stack_traces: Optional[OrderedSet[str]] = None,
     ) -> None:
         if out_view:
             out_name = f"{out}_as_strided"
@@ -1383,7 +1405,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             args.insert(0, out)
 
         self.generate_c_shim_extern_kernel_call(
-            kernel, args, device, debug_handle=debug_handle
+            kernel, args, device, stack_traces=stack_traces
         )
 
     def _get_scatter_reduce_enum(self, reduce):
@@ -1403,11 +1425,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         src_is_tensor,
         reduce,
         kwargs,
+        device,
     ):
         reduce = self._get_scatter_reduce_enum(reduce)
 
         # call the ABI shim function instead of the ATen one
-        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, self.device)
+        self.add_device_include(device)
+        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, device)
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
         cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
         inputs_wrapped = [str(x) for x in inputs]
@@ -1551,7 +1575,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             step_str = f"{sym}_en_cl - {sym}_st_cl"
         else:
             step_str = (
-                f"({sym}_en_cl - {sym}_st_cl + {step_cpp_str} + 1) / {step_cpp_str}"
+                f"({sym}_en_cl - {sym}_st_cl + {step_cpp_str} - 1) / {step_cpp_str}"
             )
         self.writeline(f"int64_t {sym}_with_step = {step_str};")
         self.writeline(f"int64_t {sym} = {sym}_with_step < 0 ? 0 : {sym}_with_step;")
@@ -2897,3 +2921,54 @@ if (!custom_op_wrapper) {
             writer.writeline(call_str)
 
         return tmp_var_name
+
+    def write_kernel_context_guard_begin(
+        self,
+    ):
+        # Beginning of a kernel context guarded block.
+        # The block looks like this:
+        # {
+        # KernelContextGuard _ctx("{kernel_name}", {stack_trace_str});
+        # ... operations...
+        # }
+        self.writeline("{")
+
+    def write_kernel_context_guard_end(
+        self,
+    ):
+        # End of a kernel context guarded block.
+        self.writeline("}")
+
+    def write_kernel_context_guard(
+        self,
+        kernel_name: str,
+        node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
+    ):
+        def aggregate_stack_traces(
+            node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
+        ) -> OrderedSet[str]:
+            if isinstance(node_schedule, list):
+                return functools.reduce(
+                    lambda a, b: a | b,
+                    [
+                        # pyrefly: ignore [missing-attribute]
+                        node.node.get_stack_traces()
+                        for node in node_schedule
+                        if hasattr(node, "node") and node.node
+                    ],
+                    OrderedSet(),
+                )
+            elif isinstance(node_schedule, ExternKernel):
+                return node_schedule.get_stack_traces()
+            else:
+                return OrderedSet()
+
+        stack_trace_str = 'R"('
+        stack_traces = aggregate_stack_traces(node_schedule)
+
+        for stack_trace in stack_traces:
+            for line in stack_trace.split("\n"):
+                stack_trace_str += f"\n{line}"
+            stack_trace_str += "\n"
+        stack_trace_str += ')"'
+        self.writeline(f'KernelContextGuard _ctx("{kernel_name}", {stack_trace_str});')
