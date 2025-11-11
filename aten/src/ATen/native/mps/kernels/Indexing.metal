@@ -33,16 +33,25 @@ OffsetT index_apply_indices(
     constant int64_t* sizes,
     constant int64_t* strides,
     uint num_indices,
-    thread bool& error) {
+    thread bool& error,
+    device ErrorMessages* error_buf) {
   OffsetT rc = offs.x;
   for (uint i = 0; i < num_indices; i++) {
     auto idx = indices[i].indexArray[offs.y];
-    if (idx < 0) {
-      idx += sizes[i];
-    }
-    if (idx < 0 || idx >= sizes[i]) {
+    if (idx < -sizes[i] || idx >= sizes[i]) {
+      TORCH_REPORT_ERROR(
+          error_buf,
+          "index ",
+          idx,
+          " is out of bounds for dimension ",
+          i,
+          " with size ",
+          sizes[i]);
       error = true;
       break;
+    }
+    if (idx < 0) {
+      idx += sizes[i];
     }
     rc += idx * strides[i];
   }
@@ -74,10 +83,14 @@ kernel void index_select(
       thread_index);
   bool error = false;
   auto input_offs = index_apply_indices<OffsetT>(
-      offs.yz, indices, index_sizes, index_strides, num_indices, error);
+      offs.yz,
+      indices,
+      index_sizes,
+      index_strides,
+      num_indices,
+      error,
+      error_buffer);
   if (error) {
-    report_error(
-        error_buffer, __FILE__, __LINE__, __func__, "index out of range");
     output[offs.x / sizeof(T)] = 0;
     return;
   }
@@ -109,10 +122,14 @@ inline void index_put_impl(
       ndim,
       thread_index);
   auto output_offs = index_apply_indices<OffsetT>(
-      offs.xz, indices, index_sizes, index_strides, num_indices, error);
+      offs.xz,
+      indices,
+      index_sizes,
+      index_strides,
+      num_indices,
+      error,
+      error_buffer);
   if (error) {
-    report_error(
-        error_buffer, __FILE__, __LINE__, __func__, "index out of range");
     return;
   }
   output[output_offs / sizeof(T)] = input[offs.y / sizeof(T)];
@@ -204,10 +221,14 @@ kernel void index_put_accumulate(
       thread_index);
   bool error = false;
   auto output_offs = index_apply_indices<OffsetT>(
-      offs.xz, indices, index_sizes, index_strides, num_indices, error);
+      offs.xz,
+      indices,
+      index_sizes,
+      index_strides,
+      num_indices,
+      error,
+      error_buffer);
   if (error) {
-    report_error(
-        error_buffer, __FILE__, __LINE__, __func__, "index out of range");
     return;
   }
   AtomicType<T>::atomic_add(
