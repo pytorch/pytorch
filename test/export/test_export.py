@@ -11,7 +11,6 @@ import math
 import operator
 import os
 import re
-import sys
 import traceback
 import unittest
 import warnings
@@ -12237,15 +12236,8 @@ graph():
             def forward(self, x):
                 return x + 2
 
-        if sys.version_info >= (3, 14):
-            # functools.partial is now a method descriptor:
-            # https://docs.python.org/3/whatsnew/3.14.html#changes-in-the-python-api
-            def fancy_forward(self, x, y):
-                return x + 2 + y
-        else:
-
-            def fancy_forward(x, y):
-                return x + 2 + y
+        def fancy_forward(x, y):
+            return x + 2 + y
 
         Foo.forward = functools.partial(fancy_forward, y=torch.randn(4, 4))
         x = torch.randn(4, 4)
