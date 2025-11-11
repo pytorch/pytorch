@@ -139,7 +139,12 @@ static void initDeviceStreamState(DeviceIndex device_index) {
 
 static void initOpenRegStreamsOnce() {
   c10::call_once(init_flag, initGlobalStreamState);
-
+  
+  for (const auto i : c10::irange(num_devices)) {
+    c10::call_once(
+        device_flags[i], initDeviceStreamState, static_cast<DeviceIndex>(i));
+  }
+  
   if (current_streams) {
     return;
   }
