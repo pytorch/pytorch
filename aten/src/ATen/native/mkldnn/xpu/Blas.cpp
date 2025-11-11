@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/WrapDimUtilsMulti.h>
-#include <ATen/ceil_div.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/xpu/Blas.h>
