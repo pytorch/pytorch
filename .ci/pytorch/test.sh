@@ -451,7 +451,7 @@ test_inductor_distributed() {
 test_inductor_core() {
   time python test/run_test.py \
     --include-inductor-core-tests \
-    --exclude inductor/test_benchmark_fusion inductor/test_cutlass_backend inductor/test_flex_attention inductor/test_max_autotune
+    --exclude inductor/test_benchmark_fusion inductor/test_cutlass_backend inductor/test_flex_attention inductor/test_max_autotune \
     --verbose \
     --upload-artifacts-while-running
   assert_git_not_dirty
