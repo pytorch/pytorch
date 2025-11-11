@@ -155,13 +155,10 @@ ignore = [
     "E402",
     "C408", # C408 ignored because we like the dict keyword argument syntax
     "E501", # E501 is not flexible enough, we're using B950 instead
-    "E721",
     "E741",
     "EXE001",
     "F405",
     "FURB122", # writelines
-    # these ignores are from flake8-logging-format; please fix!
-    "G101",
     # these ignores are from ruff NPY; please fix!
     "NPY002",
     # these ignores are from ruff PERF; please fix!
@@ -175,19 +172,18 @@ ignore = [
     "SIM102", "SIM103", "SIM112", # flake8-simplify code styles
     "SIM105", # these ignores are from flake8-simplify. please fix or ignore with commented reason
     "SIM108", # SIM108 ignored because we prefer if-else-block instead of ternary expression
-    "SIM110",
+    "SIM110", # Checks for for loops that can be replaced with a builtin function, like any or all.
     "SIM114", # Combine `if` branches using logical `or` operator
-    "SIM115",
+    "SIM115", # Checks for cases where files are opened without using a context manager.
     "SIM116", # Disable Use a dictionary instead of consecutive `if` statements
     "SIM117",
     "SIM118",
+    "SIM300", # Yoda condition detected
     "UP007", # keep-runtime-typing
     "UP045", # keep-runtime-typing
     "TC006",
     # TODO: Remove Python-3.10 specific suppressions
     "B905",
-    "UP035",
-    "FURB161",
 ]
 select = [
     "B",
@@ -197,8 +193,7 @@ select = [
     "E",
     "EXE",
     "F",
-    "SIM1",
-    "SIM911",
+    "SIM",
     "W",
     # Not included in flake8
     "FURB",
@@ -206,21 +201,19 @@ select = [
     "NPY",
     "PERF",
     "PGH004",
-    "PIE790",
-    "PIE794",
-    "PIE800",
-    "PIE804",
-    "PIE807",
-    "PIE810",
+    "PIE",
     "PLC0131", # type bivariance
     "PLC0132", # type param mismatch
+    "PLC1802", # len({expression}) used as condition without comparison
     "PLC0205", # string as __slots__
     "PLC3002", # unnecessary-direct-lambda-call
+    "PLC0414", # Import alias does not rename original package
     "PLE",
     "PLR0133", # constant comparison
     "PLR0206", # property with params
     "PLR1722", # use sys exit
     "PLR1736", # unnecessary list index
+    "PLW0127", # Self-assignment of variable
     "PLW0129", # assert on string literal
     "PLW0131", # named expr without context
     "PLW0133", # useless exception statement
@@ -243,6 +236,7 @@ select = [
     "Q003",  # avoidable escaped quote
     "Q004",  # unnecessary escaped quote
     "RSE",
+    "RUF007", # pairwise over zip
     "RUF008", # mutable dataclass default
     "RUF013", # ban implicit optional
     "RUF015", # access first ele in constant time
@@ -266,6 +260,7 @@ select = [
     "TRY401", # verbose-log-message
     "UP",
     "YTT",
+    "S101",
 ]
 
 [tool.ruff.lint.pyupgrade]
@@ -344,6 +339,39 @@ keep-runtime-typing = true
 ]
 "tools/linter/**" = [
     "LOG015" # please fix
+]
+"benchmarks/**" = [
+    "S101"
+]
+"test/**" = [
+    "S101"
+]
+"torchgen/**" = [
+    "S101"
+]
+"torch/**" = [
+    "S101"
+]
+"tools/**" = [
+    "S101"
+]
+"setup.py" = [
+    "S101"
+]
+"functorch/**" = [
+    "S101"
+]
+"docs/**" = [
+    "S101"
+]
+"android/**" = [
+    "S101"
+]
+".github/**" = [
+    "S101"
+]
+".ci/**" = [
+    "S101"
 ]
 
 [tool.codespell]

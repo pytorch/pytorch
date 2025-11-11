@@ -65,7 +65,7 @@ class ConstantFolder(torch.fx.Interpreter):
 
     def is_impure(self, node: torch.fx.Node) -> bool:
         if (
-            node.target == torch.ops.prims.convert_element_type.default
+            node.target is torch.ops.prims.convert_element_type.default
             and node.args[0].op == "get_attr"  # type: ignore[union-attr]
             and node.args[0].meta["val"].dtype == torch.int8  # type: ignore[union-attr]
             and node.args[1] == torch.bfloat16
@@ -127,7 +127,7 @@ class ConstantFolder(torch.fx.Interpreter):
         # contains a ScriptObject, equality checking results in a type error if
         # the types are different.
         if any(
-            type(self.unknown_value) == type(input_) and self.unknown_value == input_
+            type(self.unknown_value) is type(input_) and self.unknown_value == input_
             for input_ in flattened_inputs
         ):
             return self.unknown_value
@@ -135,7 +135,7 @@ class ConstantFolder(torch.fx.Interpreter):
         # TODO - fix errors with this
         if (
             node.op == "call_function"
-            and node.target == aten._efficientzerotensor.default
+            and node.target is aten._efficientzerotensor.default
         ):
             return self.unknown_value
 

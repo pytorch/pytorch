@@ -82,6 +82,18 @@ def update_global(x):
     return x * _variable
 
 
+def pos_only_fn(*args, **kwargs):
+    return _pos_only_fn(*args, **kwargs)
+
+
+def _pos_only_fn(a, b=3, /, **kwargs):
+    return (
+        a * b + kwargs.get("a", -13) * kwargs.get("b", 42),
+        "a" in kwargs,
+        "b" in kwargs,
+    )
+
+
 @contextlib.contextmanager
 def update_global_ctx(x):
     try:
@@ -940,6 +952,19 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         input = torch.randn(4)
         self.assertEqual(fn(input, [1, 2, 3]), input + 1)
         self.assertEqual(fn(input, (1, 2, 3)), input + 1)
+
+    def test_pos_only_args_with_same_name_in_star_kwargs(self):
+        opt_fn = torch.compile(pos_only_fn, backend="eager", fullgraph=True)
+        a = torch.randn(4)
+        b = torch.randn(4)
+        x = torch.randn(4)
+        y = torch.randn(4)
+        self.assertEqual(pos_only_fn(a), opt_fn(a))
+        self.assertEqual(pos_only_fn(a, a=x), opt_fn(a, a=x))
+        self.assertEqual(pos_only_fn(a, b=y), opt_fn(a, b=y))
+        self.assertEqual(pos_only_fn(a, b=b, a=x), opt_fn(a, b=b, a=x))
+        self.assertEqual(pos_only_fn(a, a=x, b=y), opt_fn(a, a=x, b=y))
+        self.assertEqual(pos_only_fn(a, b, a=x, b=y), opt_fn(a, b, a=x, b=y))
 
     @make_test
     def test_len_constant_misc_iterables(x):
@@ -2302,30 +2327,27 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         return augment(x)
 
-    # # This is to test the new syntax for pattern matching
-    # # ("match ... case ...") added on python 3.10.
-    # # Uncomment these test cases if you run on 3.10+
-    # @make_test
-    # def test_match_sequence(a):
-    #     point = (5, 8)
-    #     match point:
-    #         case (0, 0):
-    #             return a
-    #         case (0, y):
-    #             return a - y
-    #         case (x, 0):
-    #             return a + x
-    #         case (x, y):
-    #             return a + x - y
+    @make_test
+    def test_match_sequence(a):
+        point = (5, 8)
+        match point:
+            case (0, 0):
+                return a
+            case (0, y):
+                return a - y
+            case (x, 0):
+                return a + x
+            case (x, y):
+                return a + x - y
 
-    # @make_test
-    # def test_match_mapping_and_match_keys(x):
-    #     param = {"a": 0.5}
-    #     match param:
-    #         case {"a": param}:
-    #             return x * param
-    #         case {"b": param}:
-    #             return x / param
+    @make_test
+    def test_match_mapping_and_match_keys(x):
+        param = {"a": 0.5}
+        match param:
+            case {"a": param}:
+                return x * param
+            case {"b": param}:
+                return x / param
 
     def test_math_radians(self):
         def func(x, a):
@@ -3627,7 +3649,7 @@ class GraphModule(torch.nn.Module):
                 )
 
         test(range(10), slice(1, 10, 2), expected=range(1, 10, 2))
-        test(range(10), slice(None, 10, None), expected=range(0, 10))
+        test(range(10), slice(None, 10, None), expected=range(10))
         test(range(10), slice(-1, 7, None), expected=range(9, 7))
         test(range(10), slice(-1, 7, 2), expected=range(9, 7, 2))
         test(range(1, 10, 2), slice(3, 7, 2), expected=range(7, 11, 4))
@@ -5172,6 +5194,109 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         ref = fn(x)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_property_class_transmute(self):
+        class PropertyGetter:
+            def __call__(self, obj):
+                return True
+
+        p = property(PropertyGetter())
+
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                if self.p:
+                    return x + 1
+                else:
+                    raise RuntimeError("whoops")
+
+        mod = Mod()
+        mod.__class__ = type(mod.__class__.__name__, (mod.__class__,), {"p": p})
+
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        x = torch.randn(1)
+        self.assertEqual(opt_mod(x), x + 1)
+
+    def test_property_functools_partial(self):
+        def p_getter(obj, *, delta: int):
+            # Use instance state + a bound constant
+            return (getattr(obj, "flag", 0) + delta) > 0
+
+        class Mod(torch.nn.Module):
+            def __init__(self, flag: int):
+                super().__init__()
+                self.flag = flag
+
+            # fget is a functools.partial object
+            p = property(functools.partial(p_getter, delta=1))
+
+            def forward(self, x):
+                if self.p:  # calls p_getter(self, delta=1)
+                    return x + 1
+                else:
+                    raise RuntimeError("whoops")
+
+        mod = Mod(flag=1)
+
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        x = torch.randn(1)
+        self.assertEqual(opt_mod(x), x + 1)
+
+    def test_full_with_tensor_fill_value(self):
+        """Test that torch.full works correctly with dynamic tensor fill_value"""
+
+        # Test with tensor fill_value (the bug case)
+        def func_tensor(x):
+            return torch.full((2,), x, dtype=torch.float64)
+
+        func_compiled = torch.compile(func_tensor)
+
+        # Test with different values
+        x1 = torch.tensor(5.0, dtype=torch.float64)
+        x2 = torch.tensor(10.0, dtype=torch.float64)
+
+        result1 = func_compiled(x1)
+        expected1 = torch.full((2,), x1, dtype=torch.float64)
+        self.assertEqual(result1, expected1)
+
+        # This is where the bug occurred - second call reused first value
+        result2 = func_compiled(x2)
+        expected2 = torch.full((2,), x2, dtype=torch.float64)
+        self.assertEqual(result2, expected2)
+
+        # Test with different dtypes
+        for dtype in [torch.float32, torch.float64, torch.int32, torch.int64]:
+
+            def func_typed(x):
+                return torch.full((3,), x, dtype=dtype)
+
+            func_typed_compiled = torch.compile(func_typed)
+            x_typed = torch.tensor(7, dtype=dtype)
+            result = func_typed_compiled(x_typed)
+            expected = torch.full((3,), x_typed, dtype=dtype)
+            self.assertEqual(result, expected)
+
+        # Test with non-tensor fill_value (scalar) to ensure we didn't break existing behavior
+        def func_scalar(size):
+            return torch.full((size,), 42.0, dtype=torch.float32)
+
+        func_scalar_compiled = torch.compile(func_scalar)
+
+        result_scalar = func_scalar_compiled(5)
+        expected_scalar = torch.full((5,), 42.0, dtype=torch.float32)
+        self.assertEqual(result_scalar, expected_scalar)
+
+        # Test with different scalar values
+        def func_scalar_param():
+            # Test multiple calls with different hardcoded scalar values
+            a = torch.full((2,), 3.14, dtype=torch.float32)
+            b = torch.full((2,), 2.71, dtype=torch.float32)
+            return a, b
+
+        func_scalar_param_compiled = torch.compile(func_scalar_param)
+        result_a, result_b = func_scalar_param_compiled()
+
+        self.assertEqual(result_a, torch.full((2,), 3.14, dtype=torch.float32))
+        self.assertEqual(result_b, torch.full((2,), 2.71, dtype=torch.float32))
 
 
 instantiate_parametrized_tests(FunctionTests)

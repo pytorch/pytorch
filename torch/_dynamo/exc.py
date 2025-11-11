@@ -28,7 +28,6 @@ Error Formatting:
 
 import json
 import logging
-import os
 import re
 import textwrap
 import typing
@@ -163,9 +162,17 @@ class BackendCompilerFailed(ShortenTraceback):
 
 
 class Unsupported(TorchDynamoException):
-    def __init__(self, msg: str, *, case_name: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        msg: str,
+        *,
+        case_name: Optional[str] = None,
+        real_stack: None | StackSummary = None,
+    ) -> None:
         super().__init__(msg)
-        self.real_stack = torch._guards.TracingContext.extract_stack()
+        if not real_stack:
+            real_stack = torch._guards.TracingContext.extract_stack()
+        self.real_stack = real_stack
         self.msg = msg
         self.category: Optional[str] = None
         self.add_to_stats()
@@ -263,6 +270,12 @@ class RecompileLimitExceeded(Unsupported):
     pass
 
 
+# debug exception thrown when tracing torch._dynamo.step_unsupported()
+class StepUnsupported(TorchDynamoException):
+    def __init__(self) -> None:
+        self.real_stack = torch._guards.TracingContext.extract_stack()
+
+
 class UnsafeScriptObjectError(TorchDynamoException):
     pass
 
@@ -295,7 +308,9 @@ class PackageError(TorchDynamoException):
 
 class ObservedException(TorchDynamoException):
     # An exception observed during the tracing. This exception is used by Dynamo to handle exceptions.
-    pass
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.real_stack: StackSummary = torch._guards.TracingContext.extract_stack()
 
 
 class ObservedUserStopIteration(ObservedException):
@@ -369,6 +384,7 @@ def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedExc
         observed_exception_map[exc_type] = type(  # type: ignore[assignment]
             f"Observed{name}Error", (ObservedException,), {}
         )
+    # pyrefly: ignore [index-error]
     return observed_exception_map[exc_type]
 
 
@@ -378,14 +394,22 @@ def raise_observed_exception(
     *,
     args: Optional[list[Any]] = None,
     kwargs: Optional[dict[str, Any]] = None,
+    msg: Optional[str] = None,
 ) -> NoReturn:
     from .variables import BuiltinVariable
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
+    # If a message is provided but no args, use the message as the first argument
+    if msg is not None and (args is None or len(args) == 0):
+        args = [msg]
     exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
     tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
-    raise get_dynamo_observed_exception(exc_type)
+    raised_exc = get_dynamo_observed_exception(exc_type)
+    # Store the original exception arguments for better error messages
+    if args:
+        raise raised_exc(*args)
+    raise raised_exc
 
 
 def handle_observed_exception(tx: Any) -> None:
@@ -427,44 +451,9 @@ exceptions_allowed_to_be_fallback = (
 
 
 def unimplemented_with_warning(
-    e: Exception, code: types.CodeType, msg: str
-) -> NoReturn:
-    # This function calls unimplemented internally and eventually graph breaks
-    # or falls to eager. unimplemented itself does not print any user warnings,
-    # i.e., its very silent. This helper function is intended when an error is
-    # encountered in the torch.compile stack which is worth showing as warning
-    # to the user. For example, if AOT Autograd backend fails with a fake tensor
-    # exception, its ok to fallback to eager but not silently. Here, we can use
-    # this function to log the message and the stack trace.
-    graph_break_msg = format_error_msg_verbose(e, code)
-    torch._logging.trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "dynamo_graph_break_reason",
-            "encoding": "string",
-        },
-        payload_fn=lambda: graph_break_msg,
-    )
-    graph_breaks_log.debug("%s", graph_break_msg)
-    log.warning(msg)
-    unimplemented(msg, from_exc=e)
-
-
-_NOTHING = object()
-
-
-def unimplemented(
-    msg: str, *, from_exc: Any = _NOTHING, case_name: Optional[str] = None
-) -> NoReturn:
-    assert msg != os.environ.get("BREAK", False)
-    if from_exc is not _NOTHING:
-        raise Unsupported(msg, case_name=case_name) from from_exc
-    raise Unsupported(msg, case_name=case_name)
-
-
-def unimplemented_v2_with_warning(
     e: Exception,
     code: types.CodeType,
+    *,
     gb_type: str,
     context: str,
     explanation: str,
@@ -487,7 +476,16 @@ def unimplemented_v2_with_warning(
         payload_fn=lambda: graph_break_msg,
     )
     graph_breaks_log.debug("%s", graph_break_msg)
-    unimplemented_v2(gb_type, context, explanation, hints, from_exc=e, log_warning=True)
+    _unimplemented = unimplemented
+    # to prevent a graph break registry entry
+    _unimplemented(
+        gb_type=gb_type,
+        context=context,
+        explanation=explanation,
+        hints=hints,
+        from_exc=e,
+        log_warning=True,
+    )
 
 
 def format_graph_break_message(
@@ -526,8 +524,8 @@ def _load_gb_type_to_gb_id_map() -> dict[str, Any]:
         )
         with open(registry_path) as f:
             registry = json.load(f)
-    except Exception as e:
-        log.error("Error accessing the registry file: %s", e)
+    except Exception:
+        log.exception("Error accessing the registry file")
         registry = {}
 
     mapping = {}
@@ -562,13 +560,15 @@ def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
     return None
 
 
-# TODO replace old unimplemented later
-def unimplemented_v2(
+_NOTHING = object()
+
+
+def unimplemented(
+    *,
     gb_type: str,
     context: str,
     explanation: str,
     hints: list[str],
-    *,
     from_exc: Any = _NOTHING,
     log_warning: bool = False,
 ) -> NoReturn:
@@ -592,7 +592,10 @@ def unimplemented_v2(
     if log_warning:
         log.warning(msg)
     if from_exc is not _NOTHING:
-        raise Unsupported(msg) from from_exc
+        past_real_stack = None
+        if hasattr(from_exc, "real_stack"):
+            past_real_stack = from_exc.real_stack
+        raise Unsupported(msg, real_stack=past_real_stack) from from_exc
     raise Unsupported(msg)
 
 
