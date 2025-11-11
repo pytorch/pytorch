@@ -218,7 +218,7 @@ class MultiKernel:
             # the multi call kernel.
             multi_call_args = call_args
             multi_call_arg_types = arg_types
-            for i, kernel in enumerate(self.kernels):
+            for kernel in self.kernels:
                 additional_call_args, additional_arg_types = (
                     kernel.additional_call_args_and_types()
                 )
@@ -381,7 +381,12 @@ class MultiKernelCall:
             return inner
 
         return [
-            benchmarker.benchmark_gpu(wrap_fn(kernel, index), rep=40)
+            benchmarker.benchmark(
+                wrap_fn(kernel, index),
+                # Currently the kernel type must be a CachingAutotuner
+                device=kernel.device_props.type,
+                rep=40,
+            )
             for index, kernel in enumerate(self.kernels)
         ]
 

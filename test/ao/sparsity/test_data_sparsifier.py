@@ -208,7 +208,7 @@ class _BaseDataSparsiferTestCase(TestCase):
         assert len(sparsifier1.data_groups) == len(sparsifier2.data_groups)
 
         state1 = state_dict1["state"]
-        for name in state1.keys():
+        for name in state1:
             # compare mask
             assert name in sparsifier2.state
             assert "mask" in sparsifier2.state[name]

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 
@@ -45,7 +45,7 @@ _MODULE_NAME_DICT_KEY = "module_name"
 _MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY = "module_name_object_type_order"
 
 # TODO: derive this map from the BackendConfig
-_FIXED_QPARAMS_OP_TO_OBSERVER: dict[Union[Callable, str], _PartialWrapper] = {
+_FIXED_QPARAMS_OP_TO_OBSERVER: dict[Callable | str, _PartialWrapper] = {
     torch.nn.Hardsigmoid: default_fixed_qparams_range_0to1_observer,
     torch.nn.functional.hardsigmoid: default_fixed_qparams_range_0to1_observer,
     "hardsigmoid": default_fixed_qparams_range_0to1_observer,
@@ -187,7 +187,7 @@ def _get_default_qconfig_mapping_with_default_qconfig(
     else:
         qconfig_mapping = get_default_qconfig_mapping(backend)
     qconfig_mapping.set_global(default_qconfig)
-    for pattern in qconfig_mapping.object_type_qconfigs.keys():
+    for pattern in qconfig_mapping.object_type_qconfigs:
         if pattern not in _FIXED_QPARAMS_OP_TO_OBSERVER:
             qconfig_mapping.set_object_type(pattern, default_qconfig)
     return qconfig_mapping
@@ -236,7 +236,7 @@ class QConfigMapping:
     def __init__(self) -> None:
         # In increasing match priority:
         self.global_qconfig: QConfigAny = None
-        self.object_type_qconfigs: OrderedDict[Union[Callable, str], QConfigAny] = (
+        self.object_type_qconfigs: OrderedDict[Callable | str, QConfigAny] = (
             OrderedDict()
         )
         self.module_name_regex_qconfigs: OrderedDict[str, QConfigAny] = OrderedDict()
@@ -253,7 +253,7 @@ class QConfigMapping:
         return self
 
     def set_object_type(
-        self, object_type: Union[Callable, str], qconfig: QConfigAny
+        self, object_type: Callable | str, qconfig: QConfigAny
     ) -> QConfigMapping:
         """
         Set the QConfig for a given module type, function, or method name.

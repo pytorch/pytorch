@@ -1217,6 +1217,43 @@ class TestPatternMatcher(TestCase):
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
+    def test_addmm_alpha_beta_with_pointwise(self):
+        # Test that addmm with alpha/beta != 1 is unfused correctly with pointwise ops
+        # See https://github.com/pytorch/pytorch/issues/167313
+        x = torch.rand(2, device=GPU_TYPE)
+        a = torch.rand(2, 3, device=GPU_TYPE)
+        b = torch.rand(3, 2, device=GPU_TYPE)
+
+        def f(x, a, b):
+            return torch.nn.functional.relu(torch.addmm(x, a, b, alpha=0.8, beta=0.2))
+
+        fc = torch.compile(f)
+
+        expected = f(x, a, b)
+        actual = fc(x, a, b)
+
+        # The compiled version should produce the same result as eager
+        torch.testing.assert_close(actual, expected)
+
+        # Verify that addmm is unfused (should not use extern_kernels.addmm)
+        # The pattern should be replaced with beta * x + alpha * (a @ b)
+        _, (code) = run_and_get_code(fc, x, a, b)
+        FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+        # Test with alpha=1, beta=1 (default) - should also unfuse
+        def f_default(x, a, b):
+            return torch.nn.functional.relu(torch.addmm(x, a, b))
+
+        fc_default = torch.compile(f_default)
+        expected_default = f_default(x, a, b)
+        actual_default = fc_default(x, a, b)
+
+        torch.testing.assert_close(actual_default, expected_default)
+
+        # Should unfuse and not use extern_kernels.addmm
+        _, (code) = run_and_get_code(fc_default, x, a, b)
+        FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
     def test_serialized_patterns_up_to_date(self):
         import torch.utils._pytree as pytree
         from torch._inductor.fx_passes import joint_graph

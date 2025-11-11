@@ -1,9 +1,8 @@
 # ${generated_comment}
 # mypy: allow-untyped-defs
 
-from collections.abc import Sequence
-from typing import Any, Callable, Literal, overload
-from typing_extensions import TypeAlias
+from collections.abc import Callable, Sequence
+from typing import Any, Literal, overload, TypeAlias
 
 from torch import Tensor
 from torch.types import _dtype, _int, _size

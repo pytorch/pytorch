@@ -2,6 +2,7 @@
 
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/CachingDeviceAllocator.h>
+#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
@@ -344,6 +345,13 @@ class CUDAAllocator : public DeviceAllocator {
       c10::DeviceIndex device,
       std::shared_ptr<AllocatorState> pps) = 0;
   virtual std::string name() = 0;
+  std::pair<size_t, size_t> getMemoryInfo(c10::DeviceIndex device) override {
+    c10::DeviceGuard device_guard({at::kCUDA, device});
+    size_t free = 0;
+    size_t total = 0;
+    C10_CUDA_CHECK(cudaMemGetInfo(&free, &total));
+    return {free, total};
+  }
 };
 
 // Allocator object, statically initialized

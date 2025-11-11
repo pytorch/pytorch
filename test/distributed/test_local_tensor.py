@@ -7,6 +7,8 @@ import torch
 import torch.distributed as dist
 from torch.distributed._local_tensor import (
     local_tensor_mode,
+    LocalIntNode,
+    LocalRunnerMode,
     LocalTensor,
     LocalTensorMode,
 )
@@ -17,8 +19,10 @@ from torch.distributed.tensor import (
     Partial,
     Replicate,
     Shard,
+    zeros,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.distributed._tensor.common_dtensor import reduce_local_int
 
 
 class LocalTensorTestBase(TestCase):
@@ -124,14 +128,14 @@ class TestLocalTensorWorld2(LocalTensorTestBase):
         self.assertEqual(len(result_add._local_tensors), 2)
 
         # Verify the operation was applied to each local tensor
-        for rank in identical_local_tensors.keys():
+        for rank in identical_local_tensors:
             expected = identical_local_tensors[rank] + identical_local_tensors[rank]
             self.assertEqual(result_add._local_tensors[rank], expected)
 
         # Test multiplication
         result_mul = lt1 * 2.0
         self.assertIsInstance(result_mul, LocalTensor)
-        for rank in identical_local_tensors.keys():
+        for rank in identical_local_tensors:
             expected = identical_local_tensors[rank] * 2.0
             self.assertEqual(result_mul._local_tensors[rank], expected)
 
@@ -159,7 +163,7 @@ class TestLocalTensorWorld2(LocalTensorTestBase):
         result = lt + regular_tensor
         self.assertIsInstance(result, LocalTensor)
 
-        for rank in identical_local_tensors.keys():
+        for rank in identical_local_tensors:
             expected = identical_local_tensors[rank] + regular_tensor
             self.assertEqual(result._local_tensors[rank], expected)
 
@@ -208,14 +212,14 @@ class TestLocalTensorWorld2(LocalTensorTestBase):
             dist.all_reduce(lt_sum, group=fake_pg)
 
             expected_sum = torch.tensor([[6.0, 8.0], [10.0, 12.0]])
-            for rank in test_tensors.keys():
+            for rank in test_tensors:
                 self.assertEqual(lt_sum._local_tensors[rank], expected_sum)
 
             # Test broadcast within mode
             lt_broadcast = LocalTensor({k: v.clone() for k, v in test_tensors.items()})
             dist.broadcast(lt_broadcast, src=0, group=fake_pg)
 
-            for rank in test_tensors.keys():
+            for rank in test_tensors:
                 self.assertEqual(lt_broadcast._local_tensors[rank], test_tensors[0])
 
             # Test that regular operations still work
@@ -289,21 +293,21 @@ class TestLocalTensorWorld3(LocalTensorTestBase):
         lt_sum = LocalTensor({k: v.clone() for k, v in test_tensors.items()})
         dist.all_reduce(lt_sum, op=dist.ReduceOp.SUM, group=fake_pg)
         expected_sum = torch.tensor([[6.0, 7.0], [6.0, 15.0]])  # Sum of all tensors
-        for rank in test_tensors.keys():
+        for rank in test_tensors:
             self.assertEqual(lt_sum._local_tensors[rank], expected_sum)
 
         # Test MAX reduction
         lt_max = LocalTensor({k: v.clone() for k, v in test_tensors.items()})
         dist.all_reduce(lt_max, op=dist.ReduceOp.MAX, group=fake_pg)
         expected_max = torch.tensor([[3.0, 4.0], [3.0, 6.0]])  # Max across all tensors
-        for rank in test_tensors.keys():
+        for rank in test_tensors:
             self.assertEqual(lt_max._local_tensors[rank], expected_max)
 
         # Test MIN reduction
         lt_min = LocalTensor({k: v.clone() for k, v in test_tensors.items()})
         dist.all_reduce(lt_min, op=dist.ReduceOp.MIN, group=fake_pg)
         expected_min = torch.tensor([[1.0, 1.0], [1.0, 4.0]])  # Min across all tensors
-        for rank in test_tensors.keys():
+        for rank in test_tensors:
             self.assertEqual(lt_min._local_tensors[rank], expected_min)
 
     def test_all_reduce_collective(self):
@@ -324,7 +328,7 @@ class TestLocalTensorWorld3(LocalTensorTestBase):
 
         # Verify all ranks have the sum of all tensors (after adding 1 to each)
         expected_sum = torch.tensor([[114.0, 225.0, 336.0], [447.0, 558.0, 669.0]])
-        for rank in different_tensors.keys():
+        for rank in different_tensors:
             self.assertEqual(lt_sum._local_tensors[rank], expected_sum)
 
     def test_broadcast_collective(self):
@@ -344,7 +348,7 @@ class TestLocalTensorWorld3(LocalTensorTestBase):
 
         # Verify all ranks have rank 1's original tensor
         expected_broadcast = different_tensors[1]
-        for rank in different_tensors.keys():
+        for rank in different_tensors:
             self.assertEqual(lt_broadcast._local_tensors[rank], expected_broadcast)
 
     def test_all_gather_collective(self):
@@ -409,6 +413,79 @@ class TestLocalTensorWorld8(LocalTensorTestBase):
             local_res = torch.addmm(input_tensor, tensor_to_shard, tensor_to_replicate)
             full_tensor = dist_res.full_tensor()
             self.assertEqual(full_tensor, local_res)
+
+
+from torch.distributed._local_tensor._c10d import local_p2p_op, wait_all
+
+
+class TestLocalRunner(LocalTensorTestBase):
+    world_size = 6
+
+    @staticmethod
+    def _get_pp_peer(pp_index, mesh, dim, dir):
+        pp_meshes = mesh._get_all_submeshes(dim)
+        pp_ret = {}
+        for pp_mesh in pp_meshes:
+            global_rank = pp_mesh.mesh[pp_index].item()
+            global_peer = pp_mesh.mesh[(pp_index + dir) % pp_mesh.size()].item()
+            pp_ret[global_rank] = global_peer
+
+        return torch.SymInt(LocalIntNode(pp_ret))
+
+    def _run_dp_pp(
+        self,
+        mesh: DeviceMesh,
+        pp_index: int,
+        actual: list[torch.Tensor | None],
+        expected: list[torch.Tensor | None],
+    ) -> None:
+        ltm = LocalTensorMode(mesh.size())
+        with ltm:
+            dp_mesh = mesh["dp"]
+            pp_mesh = mesh["pp"]
+
+            x = torch.rand(2, 4)
+            xd = distribute_tensor(x, dp_mesh, [Shard(0)])
+            xd = xd * 2
+            x = x * 2
+
+            yd = zeros(*xd.shape, device_mesh=dp_mesh, placements=[Shard(0)])
+
+            if pp_index != pp_mesh.size(0) - 1:
+                # Send to next pp rank
+                pp_next_rank = TestLocalRunner._get_pp_peer(pp_index, mesh, "pp", +1)
+                local_p2p_op(pp_next_rank, xd, dist.isend)
+                expected[pp_index + 1] = ltm.tensor_map(
+                    x,
+                    lambda r, t: t
+                    if reduce_local_int(pp_next_rank, lambda vals: r in vals.values())
+                    else torch.zeros_like(t),
+                )
+
+            if pp_index != 0:
+                # Receive from prev pp rank
+                pp_prev_rank = TestLocalRunner._get_pp_peer(pp_index, mesh, "pp", -1)
+                rw = local_p2p_op(pp_prev_rank, yd, dist.irecv)
+                wait_all(rw)
+
+                y = yd.full_tensor()
+                actual[pp_index] = y
+
+    def test_dp_pp(self):
+        pp_size = 3
+        mesh = init_device_mesh(
+            "cpu", (self.world_size // pp_size, pp_size), mesh_dim_names=("dp", "pp")
+        )
+        actual: list[torch.Tensor | None] = [None] * pp_size
+        expected: list[torch.Tensor | None] = [None] * pp_size
+        with LocalRunnerMode(
+            self.world_size,
+            pp_size,
+            lambda pp_index: self._run_dp_pp(mesh, pp_index, actual, expected),
+        ):
+            pass
+
+        self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":

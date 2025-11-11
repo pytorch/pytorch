@@ -217,6 +217,9 @@ skip:
 
     cuda: []
 
+    xpu:
+      - *DETECTRON2_MODELS
+
   test:
     training:
       - *DETECTRON2_MODELS

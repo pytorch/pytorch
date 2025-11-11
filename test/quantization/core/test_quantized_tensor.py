@@ -1062,8 +1062,8 @@ class TestQuantizedTensor(TestCase):
         mask = torch.randint(0, 2, (numel, ), device=device)
         mask = mask.bool()
         x = torch.rand(numel, device=device)
-        qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point, dtype=qtype)
         for qtype, fill_with in itertools.product(types, fills):
+            qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point, dtype=qtype)
             q_masked_fill = qx.clone()
             q_masked_fill.masked_fill_(mask, fill_with)
             ref = qx.clone()

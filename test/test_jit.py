@@ -2337,9 +2337,9 @@ graph(%Ra, %Rb):
                 print("stays")
             while False:
                 print("removed")
-            for _i in range(0):
+            for _ in range(0):
                 print("removed")
-            for _i in range(-4):
+            for _ in range(-4):
                 print("removed")
             return b
 
@@ -3138,7 +3138,7 @@ class TestScript(JitTestCase):
         with enable_profiling_mode_for_profiling_tests():
 
             def fct_loop(x):
-                for i in range(3):
+                for _ in range(3):
                     x = torch.cat((x, x), 0)
                 return x
 
@@ -3245,7 +3245,7 @@ class TestScript(JitTestCase):
     def test_nested_bailouts(self):
         @torch.jit.script
         def fct_loop(x):
-            for i in range(3):
+            for _ in range(3):
                 x = torch.cat((x, x), 0)
             return x
 
@@ -3907,7 +3907,7 @@ def foo(x):
                 else:
                     return f'v{idx - len(exprs)}'
 
-            for i in range(50):
+            for _ in range(50):
                 n = None
                 while n is None or n > len(exprs) + n_variables:
                     template = random.choice(templates)
@@ -3922,7 +3922,7 @@ def foo(x):
             src_lines.append('  return ({})\n'.format(''.join(f'v{i},' for i in range(n_variables))))
             return '\n'.join(src_lines)
 
-        for i in range(100):
+        for _ in range(100):
             g = {'torch': torch}
             code = gen_code()
             builtins.exec(code, g, None)
@@ -4602,7 +4602,7 @@ def foo(xyz):
         y = torch.randn(3, 3, requires_grad=True)
 
         def grad_in_loop(x, y):
-            for i in range(100):
+            for _ in range(100):
                 x = y @ x
             return x
 
@@ -5559,7 +5559,7 @@ a")
             @torch.jit.script
             def test(x):
                 after_resize_alias = torch.zeros([2])
-                for _i in range(5):
+                for _ in range(5):
                     b = x + 1
                     f = [1]
                     before_resize_alias = b.sub_(1)
@@ -5950,7 +5950,7 @@ a")
             # type: (int) -> int
             prev = 1
             v = 1
-            for i in range(x):
+            for _ in range(x):
                 save = v
                 v = v + prev
                 prev = save
@@ -7785,7 +7785,7 @@ dedent """
             while int(tensor.add_(1)) < 4:
                 if y == 1:
                     continue
-                for i in range(y):
+                for _ in range(y):
                     continue
                     ret += 1
                 ret += 1
@@ -7896,7 +7896,7 @@ dedent """
         def assign_after_break_nested(y):
             # type: (int)
             x = 0
-            for i in range(y):
+            for _ in range(y):
                 if y == 1:
                     x = 5
                     break
@@ -7916,7 +7916,7 @@ dedent """
         def may_break(y):
             # type: (int)
             x = 0
-            for i in range(y):
+            for _ in range(y):
                 if y == 1:
                     x = 5
                 else:
@@ -7988,7 +7988,7 @@ dedent """
         def test_varexit(cond):
             # type: (int)
             m = 0
-            for i in range(3):
+            for _ in range(3):
                 if cond == 2:
                     if cond == 2:
                         m = 2
@@ -8376,7 +8376,7 @@ dedent """
                 # find the last output, then all subsequent uses
                 fc.check(out_name[-1] + " : ")
                 # skip past node body
-                for i in range(contained_blocks(node)):
+                for _ in range(contained_blocks(node)):
                     fc.check("->")
                 if (node.kind() == "prim::If"):
                     fc.check("->").check("->").check("\n")
@@ -8429,7 +8429,7 @@ dedent """
             a = 1
             b = 2
             c = 3
-            for i in range(iter):
+            for _ in range(iter):
                 a = 4
                 b = 5
                 c = 6
@@ -8445,7 +8445,7 @@ dedent """
             a = 1
             b = 2
             c = 3
-            for i in range(iter):
+            for _ in range(iter):
                 c = c + 1
                 b = b + 1
                 a = a + 1
@@ -9459,7 +9459,7 @@ dedent """
                 return self.mods(input)
 
         m = M()
-        self.assertTrue('mods.conv.weight' in m.state_dict().keys())
+        self.assertTrue('mods.conv.weight' in m.state_dict())
 
     def test_script_sequential_multi_output_fail(self):
         class Sub(torch.jit.ScriptModule):
@@ -10938,7 +10938,7 @@ dedent """
 
             # Test symbolic differentiation
             # Run Forward and Backward thrice to trigger autodiff graph
-            for i in range(3):
+            for _ in range(3):
                 y = jit_module(x)
                 y.backward(grad)
             x.grad.zero_()
@@ -11030,7 +11030,7 @@ dedent """
         W.data /= 4
 
         with enable_profiling_mode_for_profiling_tests():
-            for i in range(4):
+            for _ in range(4):
                 self.assertTrue((foo(x, y, W).grad_fn is None) == (jitted_foo(x, y, W).grad_fn is None))
 
 
@@ -11822,7 +11822,7 @@ dedent """
     def test_for_in_tensors(self):
         def test_sizes(x):
             sumz = 0
-            for s in x:
+            for _ in x:
                 sumz += 1
             return sumz
         self.checkScript(test_sizes, (torch.rand(5, 4, 3, 2, 1),))
@@ -11834,7 +11834,7 @@ dedent """
             @torch.jit.script
             def test_sizes(x):
                 sumz = 0
-                for s in x:
+                for _ in x:
                     sumz += 1
                 return sumz
 
@@ -11846,7 +11846,7 @@ dedent """
             def test_sizes(x):
                 # type: (float) -> int
                 sumz = 0
-                for s in x:
+                for _ in x:
                     sumz += 1
                 return sumz
 
@@ -11856,7 +11856,7 @@ dedent """
         def test_sizes(x):
             sumz = 0
             for n in x:
-                for t in n:
+                for _ in n:
                     sumz += 1
             return sumz
 
@@ -11954,7 +11954,7 @@ dedent """
             # type: (Dict[str, int]) -> Tuple[str, int]
             key_str = ""
             sum = 0
-            for key in x.keys():
+            for key in x:
                 key_str += key
             for val in x.values():
                 sum += val
@@ -12316,7 +12316,7 @@ dedent """
 
                 @torch.jit.script_method
                 def forward(self, x):
-                    for _i in range(4):
+                    for _ in range(4):
                         x += self.param
                     return x
 
@@ -12840,7 +12840,7 @@ dedent """
 
         # Load from filename
         tracemalloc.start()
-        for i in range(num_iters):
+        for _ in range(num_iters):
             torch._C.PyTorchFileReader(filename)
         _, peak_from_string = tracemalloc.get_traced_memory()
         tracemalloc.stop()
@@ -12848,7 +12848,7 @@ dedent """
         # Load from stream
         tracemalloc.start()
         with open(filename, 'rb') as f:
-            for i in range(num_iters):
+            for _ in range(num_iters):
                 f.seek(0)
                 torch._C.PyTorchFileReader(f)
         _, peak_from_file = tracemalloc.get_traced_memory()
@@ -13287,7 +13287,7 @@ dedent """
     def test_pass(self):
         def foo(x):
             # type: (bool) -> int
-            for _i in range(3):
+            for _ in range(3):
                 pass
             if x:
                 pass
@@ -13903,7 +13903,7 @@ dedent """
         def test_loop_no_escape(x):
             # type: (int)
             if x >= 0:
-                for i in range(x):
+                for _ in range(x):
                     raise RuntimeError("hi")
             else:
                 return 5
@@ -14116,7 +14116,7 @@ dedent """
 
         def test_will_ret(y):
             # type: (int) -> int
-            for i in range(y):
+            for _ in range(y):
                 return 2
             return 1
 
@@ -14125,8 +14125,8 @@ dedent """
 
         def test_loop_nest_ret(y):
             # type: (int) -> int
-            for i in range(y):
-                for i in range(y - 2):
+            for _ in range(y):
+                for _ in range(y - 2):
                     return 10
                 return 5
             return 0
@@ -15387,7 +15387,7 @@ dedent """
                 if isinstance(item, list):
                     return is_tensor_value(item[0])
                 return False
-            for name, value, the_type in self.get_pickle_values():
+            for name, value, _the_type in self.get_pickle_values():
                 if is_tensor_value(value):
                     continue
                 self.assertEqual(value, getattr(loaded, "_" + name))
@@ -15768,7 +15768,7 @@ dedent """
     def test_for_else(self):
         def fn():
             c = 0
-            for i in range(4):
+            for _ in range(4):
                 c += 10
             else:
                 print("In else block of for...else")

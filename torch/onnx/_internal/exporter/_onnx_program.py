@@ -211,7 +211,7 @@ class ONNXProgram:
 
     def __init__(
         self, model: ir.Model, exported_program: torch.export.ExportedProgram | None
-    ):
+    ) -> None:
         """Initialize the ONNX program with the specified model and exported program.
         Args:
             model: The ONNX model.
@@ -327,7 +327,7 @@ ONNXProgram(
         include_initializers: bool = True,
         keep_initializers_as_inputs: bool = False,
         external_data: bool | None = None,
-    ):
+    ) -> None:
         """Save the ONNX model to the specified destination.
 
         When ``external_data`` is ``True`` or the model is larger than 2GB,

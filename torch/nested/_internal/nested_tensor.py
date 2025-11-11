@@ -131,7 +131,7 @@ class NestedTensor(torch.Tensor):
 
         return r
 
-    def __init__(self, values, offsets, *, lengths=None, **kwargs):
+    def __init__(self, values, offsets, *, lengths=None, **kwargs) -> None:
         super().__init__()
 
         self._values = values
@@ -243,7 +243,7 @@ class NestedTensor(torch.Tensor):
             self._values, memory_format=torch.contiguous_format
         )
 
-    def __repr__(self):  # type: ignore[override]
+    def __repr__(self) -> str:  # type: ignore[override]
         # We should implement this in torch/_tensor_str.py instead
         grad_fn_str = (
             f", requires_grad={self.requires_grad}" if self.requires_grad else ""

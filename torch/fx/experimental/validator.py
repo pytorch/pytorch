@@ -181,6 +181,7 @@ try:
             return x if x.is_int() else z3.ToInt(x)
 
         def sym_sum(self, args: z3.ArithRef) -> z3.ArithRef:
+            # pyrefly: ignore
             return sum(args)
 
         # Implements Python division semantics.
@@ -357,7 +358,7 @@ try:
         def call_function(
             self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
         ) -> Any:
-            if target != torch._assert:
+            if target is not torch._assert:
                 # Lift and runs the node target function
                 return super().call_function(z3op(target, self.validator), args, kwargs)  # type: ignore[arg-type]
             # Adds the Z3 expression corresponding to the first argument
@@ -814,7 +815,7 @@ def bisect(shape_env):
     # Bisection happens on the assertion nodes of the recorded FX graph for
     # dynamic shapes.
     assert_nodes = [
-        node for node in shape_env.graph.nodes if node.target == torch._assert
+        node for node in shape_env.graph.nodes if node.target is torch._assert
     ]
 
     # Preparing the indices for binary search.

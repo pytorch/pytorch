@@ -2,8 +2,8 @@ import functools
 import itertools
 import operator
 import typing
-from collections.abc import Sequence
-from typing import Any, Callable
+from collections.abc import Callable, Sequence
+from typing import Any
 
 import torch
 import torch._inductor.runtime.runtime_utils
@@ -305,7 +305,7 @@ def should_pad_bench_key(
 
 
 def get_non_view_def(node: torch.fx.Node) -> torch.fx.Node:
-    if node.op == operator.getitem:
+    if node.op is operator.getitem:
         return get_non_view_def(node.args[0])  # type: ignore[arg-type]
 
     if (
@@ -344,7 +344,7 @@ def should_exclude_padding_time(match: Match, arg_name: str) -> bool:
         return False
 
     if (
-        node_def.target == aten.cat.default
+        node_def.target is aten.cat.default
         and len(node_def.all_input_nodes)
         > torch._inductor.config.max_pointwise_cat_inputs
     ):

@@ -491,9 +491,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             def ins_dense():
                 return torch.tensor([1.0, 2.0, 3.0]), torch.tensor([4.0, 5.0, 6.0])
 
-            for i, (ins_fn, expected_fw_count) in enumerate(
-                zip([ins_sc, ins_dense], [2, 1])
-            ):
+            for ins_fn, expected_fw_count in zip([ins_sc, ins_dense], [2, 1]):
                 reset_counter()
                 ref_out = fn(*ins_fn())
                 assert_counter(expected_fw_count, 0)
@@ -524,16 +522,14 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                     ),
                 )
 
-            for i, (
+            for (
                 ins_fn_req_grad,
                 (
                     expected_fw_count,
                     expected_fw_count_after_bw,
                     expected_bw_count_after_bw,
                 ),
-            ) in enumerate(
-                zip([ins_dense_req_grad, ins_sc_req_grad], [(1, 1, 1), (2, 2, 2)])
-            ):
+            ) in zip([ins_dense_req_grad, ins_sc_req_grad], [(1, 1, 1), (2, 2, 2)]):
                 ref_ins = ins_fn_req_grad()
                 reset_counter()
                 ref_out = fn(*ref_ins)

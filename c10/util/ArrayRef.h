@@ -18,6 +18,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
+#include <torch/headeronly/util/HeaderOnlyArrayRef.h>
 
 #include <array>
 #include <cstddef>
@@ -40,200 +41,99 @@ namespace c10 {
 ///
 /// This is intended to be trivially copyable, so it should be passed by
 /// value.
+///
+/// NOTE: We have refactored out the headeronly parts of the ArrayRef struct
+/// into HeaderOnlyArrayRef. As adding `virtual` would change the performance of
+/// the underlying constexpr calls, we rely on apparent-type dispatch for
+/// inheritance. This should be fine because their memory format is the same,
+/// and it is never incorrect for ArrayRef to call HeaderOnlyArrayRef methods.
+/// However, you should prefer to use ArrayRef when possible, because its use
+/// of TORCH_CHECK will lead to better user-facing error messages.
 template <typename T>
-class ArrayRef final {
+class ArrayRef final : public HeaderOnlyArrayRef<T> {
  public:
-  using iterator = const T*;
-  using const_iterator = const T*;
-  using size_type = size_t;
-  using value_type = T;
-
-  using reverse_iterator = std::reverse_iterator<iterator>;
-
- private:
-  /// The start of the array, in an external buffer.
-  const T* Data;
-
-  /// The number of elements.
-  size_type Length;
-
-  void debugCheckNullptrInvariant() {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        Data != nullptr || Length == 0,
-        "created ArrayRef with nullptr and non-zero length! std::optional relies on this being illegal");
-  }
-
- public:
-  /// @name Constructors
+  /// @name Constructors, all inherited from HeaderOnlyArrayRef except for
+  /// SmallVector. As inherited constructors won't work with class template
+  /// argument deduction (CTAD) until C++23, we add deduction guides after
+  /// the class definition to enable CTAD.
   /// @{
 
-  /// Construct an empty ArrayRef.
-  /* implicit */ constexpr ArrayRef() : Data(nullptr), Length(0) {}
-
-  /// Construct an ArrayRef from a single element.
-  // TODO Make this explicit
-  constexpr ArrayRef(const T& OneElt) : Data(&OneElt), Length(1) {}
-
-  /// Construct an ArrayRef from a pointer and length.
-  constexpr ArrayRef(const T* data, size_t length)
-      : Data(data), Length(length) {
-    debugCheckNullptrInvariant();
-  }
-
-  /// Construct an ArrayRef from a range.
-  constexpr ArrayRef(const T* begin, const T* end)
-      : Data(begin), Length(end - begin) {
-    debugCheckNullptrInvariant();
-  }
+  using HeaderOnlyArrayRef<T>::HeaderOnlyArrayRef;
 
   /// Construct an ArrayRef from a SmallVector. This is templated in order to
   /// avoid instantiating SmallVectorTemplateCommon<T> whenever we
   /// copy-construct an ArrayRef.
+  /// NOTE: this is the only constructor that is not inherited from
+  /// HeaderOnlyArrayRef.
   template <typename U>
   /* implicit */ ArrayRef(const SmallVectorTemplateCommon<T, U>& Vec)
-      : Data(Vec.data()), Length(Vec.size()) {
-    debugCheckNullptrInvariant();
-  }
-
-  template <
-      typename Container,
-      typename U = decltype(std::declval<Container>().data()),
-      typename = std::enable_if_t<
-          (std::is_same_v<U, T*> || std::is_same_v<U, T const*>)>>
-  /* implicit */ ArrayRef(const Container& container)
-      : Data(container.data()), Length(container.size()) {
-    debugCheckNullptrInvariant();
-  }
-
-  /// Construct an ArrayRef from a std::vector.
-  // The enable_if stuff here makes sure that this isn't used for
-  // std::vector<bool>, because ArrayRef can't work on a std::vector<bool>
-  // bitfield.
-  template <typename A>
-  /* implicit */ ArrayRef(const std::vector<T, A>& Vec)
-      : Data(Vec.data()), Length(Vec.size()) {
-    static_assert(
-        !std::is_same_v<T, bool>,
-        "ArrayRef<bool> cannot be constructed from a std::vector<bool> bitfield.");
-  }
-
-  /// Construct an ArrayRef from a std::array
-  template <size_t N>
-  /* implicit */ constexpr ArrayRef(const std::array<T, N>& Arr)
-      : Data(Arr.data()), Length(N) {}
-
-  /// Construct an ArrayRef from a C array.
-  template <size_t N>
-  // NOLINTNEXTLINE(*c-arrays*)
-  /* implicit */ constexpr ArrayRef(const T (&Arr)[N]) : Data(Arr), Length(N) {}
-
-  /// Construct an ArrayRef from a std::initializer_list.
-  /* implicit */ constexpr ArrayRef(const std::initializer_list<T>& Vec)
-      : Data(
-            std::begin(Vec) == std::end(Vec) ? static_cast<T*>(nullptr)
-                                             : std::begin(Vec)),
-        Length(Vec.size()) {}
+      : HeaderOnlyArrayRef<T>(Vec.data(), Vec.size()) {}
 
   /// @}
-  /// @name Simple Operations
+  /// @name Simple Operations, mostly inherited from HeaderOnlyArrayRef
   /// @{
 
-  constexpr iterator begin() const {
-    return Data;
-  }
-  constexpr iterator end() const {
-    return Data + Length;
-  }
-
-  // These are actually the same as iterator, since ArrayRef only
-  // gives you const iterators.
-  constexpr const_iterator cbegin() const {
-    return Data;
-  }
-  constexpr const_iterator cend() const {
-    return Data + Length;
-  }
-
-  constexpr reverse_iterator rbegin() const {
-    return reverse_iterator(end());
-  }
-  constexpr reverse_iterator rend() const {
-    return reverse_iterator(begin());
-  }
-
-  /// Check if all elements in the array satisfy the given expression
-  constexpr bool allMatch(const std::function<bool(const T&)>& pred) const {
-    return std::all_of(cbegin(), cend(), pred);
-  }
-
-  /// empty - Check if the array is empty.
-  constexpr bool empty() const {
-    return Length == 0;
-  }
-
-  constexpr const T* data() const {
-    return Data;
-  }
-
-  /// size - Get the array size.
-  constexpr size_t size() const {
-    return Length;
-  }
-
   /// front - Get the first element.
+  /// We deviate from HeaderOnlyArrayRef by using TORCH_CHECK instead of
+  /// STD_TORCH_CHECK
   constexpr const T& front() const {
     TORCH_CHECK(
-        !empty(), "ArrayRef: attempted to access front() of empty list");
-    return Data[0];
+        !this->empty(), "ArrayRef: attempted to access front() of empty list");
+    return this->Data[0];
   }
 
   /// back - Get the last element.
+  /// We deviate from HeaderOnlyArrayRef by using TORCH_CHECK instead of
+  /// STD_TORCH_CHECK
   constexpr const T& back() const {
-    TORCH_CHECK(!empty(), "ArrayRef: attempted to access back() of empty list");
-    return Data[Length - 1];
-  }
-
-  /// equals - Check for element-wise equality.
-  constexpr bool equals(ArrayRef RHS) const {
-    return Length == RHS.Length && std::equal(begin(), end(), RHS.begin());
+    TORCH_CHECK(
+        !this->empty(), "ArrayRef: attempted to access back() of empty list");
+    return this->Data[this->Length - 1];
   }
 
   /// slice(n, m) - Take M elements of the array starting at element N
+  /// We deviate from HeaderOnlyArrayRef by using TORCH_CHECK instead of
+  /// STD_TORCH_CHECK
   constexpr ArrayRef<T> slice(size_t N, size_t M) const {
     TORCH_CHECK(
-        N + M <= size(),
+        N + M <= this->size(),
         "ArrayRef: invalid slice, N = ",
         N,
         "; M = ",
         M,
         "; size = ",
-        size());
-    return ArrayRef<T>(data() + N, M);
+        this->size());
+    return ArrayRef<T>(this->data() + N, M);
   }
 
   /// slice(n) - Chop off the first N elements of the array.
+  /// We deviate from HeaderOnlyArrayRef by using TORCH_CHECK instead of
+  /// STD_TORCH_CHECK
   constexpr ArrayRef<T> slice(size_t N) const {
     TORCH_CHECK(
-        N <= size(), "ArrayRef: invalid slice, N = ", N, "; size = ", size());
-    return slice(N, size() - N);
+        N <= this->size(),
+        "ArrayRef: invalid slice, N = ",
+        N,
+        "; size = ",
+        this->size());
+    return slice(N, this->size() - N); // should this slice be this->slice?
   }
 
   /// @}
   /// @name Operator Overloads
   /// @{
-  constexpr const T& operator[](size_t Index) const {
-    return Data[Index];
-  }
 
   /// Vector compatibility
+  /// We deviate from HeaderOnlyArrayRef by using TORCH_CHECK instead of
+  /// STD_TORCH_CHECK
   constexpr const T& at(size_t Index) const {
     TORCH_CHECK(
-        Index < Length,
+        Index < this->Length,
         "ArrayRef: invalid index Index = ",
         Index,
         "; Length = ",
-        Length);
-    return Data[Index];
+        this->Length);
+    return this->Data[Index];
   }
 
   /// Disallow accidental assignment from a temporary.
@@ -254,14 +154,46 @@ class ArrayRef final {
       std::initializer_list<U>) = delete;
 
   /// @}
-  /// @name Expensive Operations
-  /// @{
-  std::vector<T> vec() const {
-    return std::vector<T>(Data, Data + Length);
-  }
-
-  /// @}
 };
+
+/// Deduction guides for ArrayRef to support CTAD with inherited constructors
+/// These mirror the constructors inherited from HeaderOnlyArrayRef
+/// @{
+
+// Single element constructor
+template <typename T>
+ArrayRef(const T&) -> ArrayRef<T>;
+
+// Pointer and length constructor
+template <typename T>
+ArrayRef(const T*, size_t) -> ArrayRef<T>;
+
+// Range constructor (begin, end)
+template <typename T>
+ArrayRef(const T*, const T*) -> ArrayRef<T>;
+
+// Generic container constructor (anything with .data() and .size())
+template <typename Container>
+ArrayRef(const Container&) -> ArrayRef<
+    std::remove_pointer_t<decltype(std::declval<Container>().data())>>;
+
+// std::vector constructor
+template <typename T, typename A>
+ArrayRef(const std::vector<T, A>&) -> ArrayRef<T>;
+
+// std::array constructor
+template <typename T, size_t N>
+ArrayRef(const std::array<T, N>&) -> ArrayRef<T>;
+
+// C array constructor
+template <typename T, size_t N>
+ArrayRef(const T (&)[N]) -> ArrayRef<T>;
+
+// std::initializer_list constructor
+template <typename T>
+ArrayRef(const std::initializer_list<T>&) -> ArrayRef<T>;
+
+/// @}
 
 template <typename T>
 std::ostream& operator<<(std::ostream& out, ArrayRef<T> list) {

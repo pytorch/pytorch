@@ -22,4 +22,15 @@ inline ScalarType Tensor::scalar_type() const {
       torch::stable::detail::from(dtype));
 }
 
+inline Device Tensor::device() const {
+  int32_t device_type;
+  int32_t device_index;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type(ath_.get(), &device_type));
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_get_device_index(ath_.get(), &device_index));
+  DeviceType extension_device_type = torch::stable::detail::to<DeviceType>(
+      torch::stable::detail::from(device_type));
+  return Device(extension_device_type, static_cast<DeviceIndex>(device_index));
+}
+
 HIDDEN_NAMESPACE_END(torch, stable)

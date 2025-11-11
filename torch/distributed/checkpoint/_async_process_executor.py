@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import torch.distributed as dist
 import torch.multiprocessing as mp
+from torch.distributed import PrefixStore, TCPStore
 from torch.distributed.checkpoint._async_executor import _AsyncCheckpointExecutor
 from torch.distributed.checkpoint.logger import _dcp_method_logger, _init_logger
 from torch.distributed.checkpoint.metadata import Metadata, STATE_DICT_TYPE
@@ -55,15 +56,17 @@ class _ProcessGroupInitInfo:
     world_size: int
     tcp_store_master_addr: str
     tcp_store_master_port: int
+    use_prefix_store: bool
 
     def __init__(self, process_group: Optional[dist.ProcessGroup] = None):
         self.local_rank = dist.get_node_local_rank(fallback_rank=0)
         self.global_rank = dist.get_rank(process_group)
         self.world_size = dist.get_world_size(process_group)
+        self.use_prefix_store = os.environ.get("DCP_USE_PREFIX_STORE", "0") == "1"
 
-        # Let coordinator rank find a free port on the localhost.
-        # Broadcast the (master_addr, free_port) to all ranks; each rank in the
-        # checkpoint daemon process will use TCPStore (master_addr, master_port)
+        # Let coordinator rank find a port on the localhost.
+        # Broadcast the (master_addr, port) to all ranks; each rank in the
+        # checkpoint daemon process will use TCPStore (master_addr, port)
         # for collective communication.
         dist_wrapper: _DistWrapper = _DistWrapper(
             group=process_group,
@@ -72,10 +75,23 @@ class _ProcessGroupInitInfo:
         )
 
         def get_master_addr_and_port() -> tuple[str, int]:
-            master_addr = os.environ.get("MASTER_ADDR")
-            if master_addr is None:
-                master_addr = _get_fq_hostname()
-            return master_addr, get_free_port()
+            if self.use_prefix_store:
+                master_addr = os.environ.get("MASTER_ADDR")
+                master_port = os.environ.get("MASTER_PORT")
+                assert master_addr is not None, (
+                    "DCP needs MASTER_ADDR to use prefix store"
+                )
+                assert master_port is not None, (
+                    "DCP needs MASTER_PORT to use prefix store"
+                )
+                master_port = int(master_port)
+            else:
+                master_addr = os.environ.get("MASTER_ADDR")
+                if master_addr is None:
+                    master_addr = _get_fq_hostname()
+                master_port = get_free_port()
+
+            return master_addr, master_port
 
         self.tcp_store_master_addr, self.tcp_store_master_port = dist_wrapper.broadcast(
             step="get_master_addr_and_port",
@@ -221,10 +237,29 @@ class _AsyncCheckpointProcess:
             os.environ["WORLD_SIZE"] = str(pg_init_info.world_size)
 
             logger.info(
-                "Initializing dist.ProcessGroup in checkpoint background process"
+                "Initializing dist.ProcessGroup in checkpoint background process on port %s",
+                pg_init_info.tcp_store_master_port,
             )
             # NOTE: GLOO backend is enforced here.
-            dist.init_process_group(backend=dist.Backend.GLOO)
+            if pg_init_info.use_prefix_store:
+                logger.info(
+                    "Initializing dist.ProcessGroup in checkpoint background process with prefix store"
+                )
+                store = PrefixStore(
+                    "AsyncCheckpointProcess/",
+                    TCPStore(
+                        pg_init_info.tcp_store_master_addr,
+                        pg_init_info.tcp_store_master_port,
+                    ),
+                )
+                dist.init_process_group(
+                    backend=dist.Backend.GLOO,
+                    store=store,
+                    world_size=pg_init_info.world_size,
+                    rank=pg_init_info.global_rank,
+                )
+            else:
+                dist.init_process_group(backend=dist.Backend.GLOO)
             dist.barrier()
 
             logger.info("Checkpoint background process is running...")
@@ -365,7 +400,7 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
         global _CHECKPOINT_PROCESS
         pg_init_info: Optional[_ProcessGroupInitInfo] = None
         if _CHECKPOINT_PROCESS is None:
-            # Find a free port on coordinator rank and broadcast
+            # Find a port on coordinator rank and broadcast
             # to all ranks.
             pg_init_info = _ProcessGroupInitInfo(process_group)
 

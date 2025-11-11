@@ -124,7 +124,7 @@ std::string selectScalarOverloadName(const Node& node) {
   for (const auto& variant :
        {"Scalar_mode", "Scalar", "Scalar_Tensor", "Tensor_Scalar"}) {
     if (auto schema = c10::Dispatcher::singleton().findSchema(
-            {fmt::format("{}::{}", ns, opName.c_str()).c_str(), variant})) {
+            {fmt::format("{}::{}", ns, opName.c_str()), variant})) {
       if (schemaTypeMatch(schema->schema(), node)) {
         return variant;
       }

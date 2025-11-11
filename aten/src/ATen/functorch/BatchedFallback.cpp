@@ -191,7 +191,7 @@ static void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, t
       // simplicity. When that is not the case, this code should be updated.
       const auto& argument = (*stack)[arguments_begin + arg_idx];
       if (batched_tensor_inputs_pos_iter == batched_tensor_inputs_position.end()
-          || (int64_t)arg_idx != *batched_tensor_inputs_pos_iter) {
+          || static_cast<int64_t>(arg_idx) != *batched_tensor_inputs_pos_iter) {
         // argument isn't a BatchedTensor
         torch::jit::push(stack, argument);
         continue;
@@ -345,7 +345,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
       // simplicity. When that is not the case, this code should be updated.
       const auto& argument = (*stack)[arguments_begin + arg_idx];
       if (batched_tensor_inputs_pos_iter == batched_tensor_inputs_position.end()
-          || (int64_t)arg_idx != *batched_tensor_inputs_pos_iter) {
+          || static_cast<int64_t>(arg_idx) != *batched_tensor_inputs_pos_iter) {
         // argument isn't a BatchedTensor
         torch::jit::push(stack, argument);
         continue;
@@ -473,7 +473,7 @@ void batchedNestedTensorForLoopFallback(const c10::OperatorHandle& op, torch::ji
       // simplicity. When that is not the case, this code should be updated.
       const auto& argument = (*stack)[arguments_begin + arg_idx];
       if (batched_tensor_inputs_pos_iter == batched_tensor_inputs_position.end()
-          || (int64_t)arg_idx != *batched_tensor_inputs_pos_iter) {
+          || static_cast<int64_t>(arg_idx) != *batched_tensor_inputs_pos_iter) {
         // argument isn't a BatchedTensor
         torch::jit::push(stack, argument);
         continue;

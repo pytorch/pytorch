@@ -469,7 +469,7 @@ C10_API std::string GetExceptionString(const std::exception& e);
 
 namespace c10::detail {
 template <typename... Args>
-decltype(auto) torchCheckMsgImpl(const char* /*msg*/, const Args&... args) {
+auto torchCheckMsgImpl(const char* /*msg*/, const Args&... args) {
   return ::c10::str(args...);
 }
 inline C10_API const char* torchCheckMsgImpl(const char* msg) {
@@ -701,6 +701,98 @@ namespace c10::detail {
 // NOTE: using the argument name in TORCH_CHECK's message is preferred
 #define TORCH_CHECK_ARG(cond, argN, ...) \
   TORCH_CHECK(cond, "invalid argument ", argN, ": ", __VA_ARGS__)
+
+#ifndef FATAL_IF
+#ifdef C10_USE_GLOG
+#define FATAL_IF(condition)                                              \
+  condition ? (void)0                                                    \
+            : ::c10::LoggerVoidify() &                                   \
+          ::c10::MessageLogger(__FILE__, __LINE__, ::google::GLOG_FATAL) \
+              .stream()
+#else
+#define FATAL_IF(condition)            \
+  condition ? (void)0                  \
+            : ::c10::LoggerVoidify() & \
+          ::c10::MessageLogger(__FILE__, __LINE__, ::c10::GLOG_FATAL).stream()
+#endif
+#endif
+
+#ifndef NON_FATAL_IF
+#ifdef C10_USE_GLOG
+#define NON_FATAL_IF(condition)                                \
+  condition ? (void)0                                          \
+            : ::c10::LoggerVoidify() &                         \
+          ::c10::MessageLogger(                                \
+              __FILE__, __LINE__, ::google::GLOG_FATAL, false) \
+              .stream()
+#else
+#define NON_FATAL_IF(condition)                                              \
+  condition ? (void)0                                                        \
+            : ::c10::LoggerVoidify() &                                       \
+          ::c10::MessageLogger(__FILE__, __LINE__, ::c10::GLOG_FATAL, false) \
+              .stream()
+#endif
+#endif
+
+// Binary comparison check macros
+#define TORCH_CHECK_OP(val1, val2, op)                                      \
+  NON_FATAL_IF(((val1)op(val2)))                                            \
+      << "Check failed: " #val1 " " #op " " #val2 " (" << (val1) << " vs. " \
+      << (val2) << "). "
+
+#define TORCH_DCHECK_OP(val1, val2, op)                                       \
+  FATAL_IF(((val1)op(val2))) << "Check failed: " #val1 " " #op " " #val2 " (" \
+                             << (val1) << " vs. " << (val2) << "). "
+
+#define TORCH_CHECK_EQ(val1, val2) TORCH_CHECK_OP(val1, val2, ==)
+#define TORCH_CHECK_NE(val1, val2) TORCH_CHECK_OP(val1, val2, !=)
+#define TORCH_CHECK_LE(val1, val2) TORCH_CHECK_OP(val1, val2, <=)
+#define TORCH_CHECK_LT(val1, val2) TORCH_CHECK_OP(val1, val2, <)
+#define TORCH_CHECK_GE(val1, val2) TORCH_CHECK_OP(val1, val2, >=)
+#define TORCH_CHECK_GT(val1, val2) TORCH_CHECK_OP(val1, val2, >)
+
+// Debug versions of TORCH_CHECK_OP macros
+#ifndef NDEBUG
+#define TORCH_DCHECK_EQ(val1, val2) TORCH_DCHECK_OP(val1, val2, ==)
+#define TORCH_DCHECK_NE(val1, val2) TORCH_DCHECK_OP(val1, val2, !=)
+#define TORCH_DCHECK_LE(val1, val2) TORCH_DCHECK_OP(val1, val2, <=)
+#define TORCH_DCHECK_LT(val1, val2) TORCH_DCHECK_OP(val1, val2, <)
+#define TORCH_DCHECK_GE(val1, val2) TORCH_DCHECK_OP(val1, val2, >=)
+#define TORCH_DCHECK_GT(val1, val2) TORCH_DCHECK_OP(val1, val2, >)
+#else // !NDEBUG
+// Optimized versions - generate no code
+#define TORCH_DCHECK_EQ(val1, val2) \
+  while (false)                     \
+  TORCH_DCHECK_OP(val1, val2, ==)
+#define TORCH_DCHECK_NE(val1, val2) \
+  while (false)                     \
+  TORCH_DCHECK_OP(val1, val2, !=)
+#define TORCH_DCHECK_LE(val1, val2) \
+  while (false)                     \
+  TORCH_DCHECK_OP(val1, val2, <=)
+#define TORCH_DCHECK_LT(val1, val2) \
+  while (false)                     \
+  TORCH_DCHECK_OP(val1, val2, <)
+#define TORCH_DCHECK_GE(val1, val2) \
+  while (false)                     \
+  TORCH_DCHECK_OP(val1, val2, >=)
+#define TORCH_DCHECK_GT(val1, val2) \
+  while (false)                     \
+  TORCH_DCHECK_OP(val1, val2, >)
+#endif // NDEBUG
+
+// Null pointer check macro
+#define TORCH_CHECK_NOTNULL(val) \
+  ::c10::CheckNotNull(__FILE__, __LINE__, #val, (val), false)
+
+#ifndef NDEBUG
+#define TORCH_DCHECK_NOTNULL(val) \
+  ::c10::CheckNotNull(__FILE__, __LINE__, #val, (val), true)
+#else // !NDEBUG
+#define TORCH_DCHECK_NOTNULL(val) \
+  while (false)                   \
+  TORCH_CHECK_NOTNULL(val)
+#endif // NDEBUG
 
 // ----------------------------------------------------------------------------
 // Deprecated macros

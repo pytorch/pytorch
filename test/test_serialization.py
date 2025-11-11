@@ -295,7 +295,7 @@ class SerializationMixin:
             5,
             6
         ]
-        for i in range(100):
+        for _ in range(100):
             data.append(0)
         t = torch.tensor(data, dtype=torch.uint8)
 
@@ -313,15 +313,17 @@ class SerializationMixin:
     def test_serialization_gzip(self):
         # Test serialization with gzip file
         b = self._test_serialization_data()
-        f1 = tempfile.NamedTemporaryFile(delete=False)
-        f2 = tempfile.NamedTemporaryFile(delete=False)
-        torch.save(b, f1)
-        with open(f1.name, 'rb') as f_in, gzip.open(f2.name, 'wb') as f_out:
-            shutil.copyfileobj(f_in, f_out)
+        with tempfile.NamedTemporaryFile() as f1, tempfile.NamedTemporaryFile(delete=False) as f2:
+            torch.save(b, f1)
+            f1.seek(0)
+            with gzip.open(f2.name, 'wb') as f_out:
+                shutil.copyfileobj(f1, f_out)
 
-        with gzip.open(f2.name, 'rb') as f:
-            c = torch.load(f)
-        self._test_serialization_assert(b, c)
+            with gzip.open(f2.name, 'rb') as f:
+                c = torch.load(f)
+                self._test_serialization_assert(b, c)
+            f2.close()
+            os.unlink(f2.name)
 
     @unittest.skipIf(
         not TEST_DILL or HAS_DILL_AT_LEAST_0_3_1,
@@ -382,19 +384,19 @@ class SerializationMixin:
     def test_serialization_offset_gzip(self):
         a = torch.randn(5, 5)
         i = 41
-        f1 = tempfile.NamedTemporaryFile(delete=False)
         f2 = tempfile.NamedTemporaryFile(delete=False)
-        with open(f1.name, 'wb') as f:
-            pickle.dump(i, f)
-            torch.save(a, f)
-        with open(f1.name, 'rb') as f_in, gzip.open(f2.name, 'wb') as f_out:
-            shutil.copyfileobj(f_in, f_out)
+        with tempfile.NamedTemporaryFile() as f1:
+            pickle.dump(i, f1)
+            torch.save(a, f1)
+            f1.seek(0)
+            with gzip.open(f2.name, 'wb') as f_out:
+                shutil.copyfileobj(f1, f_out)
 
-        with gzip.open(f2.name, 'rb') as f:
-            j = pickle.load(f)
-            b = torch.load(f)
-        self.assertTrue(torch.equal(a, b))
-        self.assertEqual(i, j)
+            with gzip.open(f2.name, 'rb') as f:
+                j = pickle.load(f)
+                b = torch.load(f)
+                self.assertTrue(torch.equal(a, b))
+                self.assertEqual(i, j)
 
     def _test_serialization_sparse(self, weights_only):
         def _test_serialization(conversion):
@@ -948,7 +950,7 @@ class SerializationMixin:
             with safe_globals([TwoTensor]), skip_data():
                 sd_loaded = torch.load(f)
             self.assertNotEqual(sd_loaded, sd)
-            for k in sd_loaded.keys():
+            for k in sd_loaded:
                 sd_loaded[k] = sd_loaded[k].zero_()
             self.assertEqual(sd_loaded, sd_zeroed)
 
@@ -1281,7 +1283,7 @@ class TestSerialization(TestCase, SerializationMixin):
             torch.save(p, f)
             f.seek(0)
             with self.assertRaisesRegex(pickle.UnpicklingError,
-                                        "GLOBAL __main__.Point was not an allowed global by default"):
+                                        f"GLOBAL {__name__}.Point was not an allowed global by default"):
                 torch.load(f, weights_only=True)
             f.seek(0)
             with torch.serialization.safe_globals([Point]):
@@ -1300,7 +1302,7 @@ class TestSerialization(TestCase, SerializationMixin):
             torch.save(c, f)
             f.seek(0)
             with self.assertRaisesRegex(pickle.UnpicklingError,
-                                        "GLOBAL __main__.ClassThatUsesBuildInstruction was not an allowed global by default"):
+                                        f"GLOBAL {__name__}.ClassThatUsesBuildInstruction was not an allowed global by default"):
                 torch.load(f, weights_only=True)
             try:
                 with torch.serialization.safe_globals([ClassThatUsesBuildInstruction]):
@@ -1330,7 +1332,7 @@ class TestSerialization(TestCase, SerializationMixin):
             torch.save(obj, f)
             f.seek(0)
             with self.assertRaisesRegex(pickle.UnpicklingError,
-                                        f"GLOBAL __main__.{obj_cls.__name__} was not an allowed global by default"):
+                                        f"GLOBAL {__name__}.{obj_cls.__name__} was not an allowed global by default"):
                 torch.load(f, weights_only=True)
 
             f.seek(0)
@@ -4501,9 +4503,10 @@ class TestSerialization(TestCase, SerializationMixin):
         # Test that without materialize_fake_tensor, behavior for fake_tensors is not altered by ctx
         if not materialize_fake:
             ft = converter.from_real_tensor(mode, torch.randn(2, device=t_device))
+            exc = pickle.PicklingError if sys.version_info >= (3, 14) else AttributeError
             with self.assertRaisesRegex(
-                AttributeError,
-                "Can't (get|pickle) local object 'WeakValueDictionary.__init__.<locals>.remove'"
+                exc,
+                "Can't (get|pickle) local object (<function |')WeakValueDictionary.__init__.<locals>.remove"
             ):
                 with skip_data(), BytesIOContext() as f:
                     torch.save(ft, f)

@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Callable
+from collections.abc import Callable
 
 
 """
@@ -20,7 +20,7 @@ from torch.utils._config_module import Config, install_config_module
 
 # [@compile_ignored: debug]
 _save_config_ignore = [
-    # callable not serializeable
+    # callable not serializable
     "joint_custom_pass",
 ]
 

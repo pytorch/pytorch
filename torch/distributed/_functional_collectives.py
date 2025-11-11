@@ -194,7 +194,8 @@ def all_gather_tensor(
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    assert self.is_contiguous()
+    if not self.is_contiguous():
+        raise AssertionError("Tensor must be contiguous for all_gather_tensor")
     group_name = _resolve_group_name(group, tag)
     group_size = c10d._get_group_size_by_name(group_name)
     tensor = torch.ops._c10d_functional.all_gather_into_tensor(
@@ -269,9 +270,10 @@ def reduce_scatter_tensor(
     group_name = _resolve_group_name(group, tag)
     group_size = c10d._get_group_size_by_name(group_name)
 
-    assert self.size(scatter_dim) % group_size == 0, (
-        f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size})"
-    )
+    if self.size(scatter_dim) % group_size != 0:
+        raise AssertionError(
+            f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size})"
+        )
     if scatter_dim != 0:
         tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
         self = torch.cat(tensor_list)
@@ -308,9 +310,10 @@ def reduce_scatter_tensor_autograd(
     group_name = _resolve_group_name(group, tag)
     group_size = c10d._get_group_size_by_name(group_name)
 
-    assert self.size(scatter_dim) % group_size == 0, (
-        f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
-    )
+    if self.size(scatter_dim) % group_size != 0:
+        raise AssertionError(
+            f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
+        )
     if scatter_dim != 0:
         tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
         self = torch.cat(tensor_list)
@@ -407,11 +410,15 @@ def reduce_scatter_tensor_coalesced(
     group_name = _resolve_group_name(group, tag)
     group_size = c10d._get_group_size_by_name(group_name)
 
-    assert len(scatter_dim) == len(inputs)
-    for idx, (dim, tensor) in enumerate(zip(scatter_dim, inputs)):
-        assert tensor.size(dim) % group_size == 0, (
-            f"input dimension {dim} ({tensor.size(dim)} must be a multiple of group_size {group_size} for tensor at index {idx}"
+    if len(scatter_dim) != len(inputs):
+        raise AssertionError(
+            f"Length of scatter_dim ({len(scatter_dim)}) must equal length of inputs ({len(inputs)})"
         )
+    for idx, (dim, tensor) in enumerate(zip(scatter_dim, inputs)):
+        if tensor.size(dim) % group_size != 0:
+            raise AssertionError(
+                f"input dimension {dim} ({tensor.size(dim)} must be a multiple of group_size {group_size} for tensor at index {idx}"
+            )
         if dim != 0:
             tensor_list = torch.chunk(tensor, group_size, dim=dim)
             inputs[idx] = torch.cat(tensor_list)
@@ -429,7 +436,8 @@ def reduce_scatter_tensor_coalesced(
 # This is a bit unsafe: it checks if the first argument in the schema reports as a non-mutable alias.
 # Today, this maps 1:1 with "aten ops that are views".
 def _is_view_op(tgt):
-    assert isinstance(tgt, torch._ops.OpOverload)
+    if not isinstance(tgt, torch._ops.OpOverload):
+        raise AssertionError(f"Expected torch._ops.OpOverload, got {type(tgt)}")
     # Don't apply the view optimization to any `CompositeImplicitAutograd` ops.
     # See issue: https://github.com/pytorch/pytorch/issues/133421
     if torch._C._dispatch_has_kernel_for_dispatch_key(
@@ -466,20 +474,25 @@ def all_to_all_single(
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     if output_split_sizes is not None:
-        assert all(
+        if not all(
             isinstance(size, (int, torch.SymInt)) for size in output_split_sizes
-        ), output_split_sizes
+        ):
+            raise AssertionError(
+                f"All output_split_sizes must be int or SymInt, got {output_split_sizes}"
+            )
     if input_split_sizes is not None:
-        assert all(
-            isinstance(size, (int, torch.SymInt)) for size in input_split_sizes
-        ), input_split_sizes
+        if not all(isinstance(size, (int, torch.SymInt)) for size in input_split_sizes):
+            raise AssertionError(
+                f"All input_split_sizes must be int or SymInt, got {input_split_sizes}"
+            )
     group_name = _resolve_group_name(group, tag)
     group_size = c10d._get_group_size_by_name(group_name)
     if output_split_sizes is None or input_split_sizes is None:
-        assert output_split_sizes is None and input_split_sizes is None, (
-            "output_split_sizes and input_split_sizes must either be "
-            "specified together or both set to None"
-        )
+        if not (output_split_sizes is None and input_split_sizes is None):
+            raise AssertionError(
+                "output_split_sizes and input_split_sizes must either be "
+                "specified together or both set to None"
+            )
         output_split_sizes = [self.shape[0] // group_size] * group_size
         input_split_sizes = output_split_sizes
     tensor = torch.ops._c10d_functional.all_to_all_single(  # type: ignore[attr-defined]
@@ -502,21 +515,26 @@ def all_to_all_single_autograd(
     Same as all_to_all_single but supports autograd.
     """
     if output_split_sizes is not None:
-        assert all(
+        if not all(
             isinstance(size, (int, torch.SymInt)) for size in output_split_sizes
-        ), output_split_sizes
+        ):
+            raise AssertionError(
+                f"All output_split_sizes must be int or SymInt, got {output_split_sizes}"
+            )
     if input_split_sizes is not None:
-        assert all(
-            isinstance(size, (int, torch.SymInt)) for size in input_split_sizes
-        ), input_split_sizes
+        if not all(isinstance(size, (int, torch.SymInt)) for size in input_split_sizes):
+            raise AssertionError(
+                f"All input_split_sizes must be int or SymInt, got {input_split_sizes}"
+            )
 
     group_name = _resolve_group_name(group, tag)
     group_size = c10d._get_group_size_by_name(group_name)
     if output_split_sizes is None or input_split_sizes is None:
-        assert output_split_sizes is None and input_split_sizes is None, (
-            "output_split_sizes and input_split_sizes must either be "
-            "specified together or both set to None"
-        )
+        if not (output_split_sizes is None and input_split_sizes is None):
+            raise AssertionError(
+                "output_split_sizes and input_split_sizes must either be "
+                "specified together or both set to None"
+            )
         output_split_sizes = [self.shape[0] // group_size] * group_size
         input_split_sizes = output_split_sizes
     tensor = torch.ops._c10d_functional_autograd.all_to_all_single(  # type: ignore[attr-defined]
@@ -599,7 +617,10 @@ class AsyncCollectiveTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-        assert meta is None
+        if meta is not None:
+            raise AssertionError(
+                "meta must be None for AsyncCollectiveTensor unflatten"
+            )
         elem = inner_tensors["elem"]
         return AsyncCollectiveTensor(elem)
 
@@ -631,7 +652,7 @@ class AsyncCollectiveTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
-        if func == torch.ops.aten.view.default:
+        if func is torch.ops.aten.view.default:
             # Fast handle aten.view as a lot of view related op goes to aten.view
             # eventually, this avoids pytree slowdown
             # pyrefly: ignore [index-error]
@@ -649,7 +670,10 @@ class AsyncCollectiveTensor(torch.Tensor):
 
         def wrap(e: torch.Tensor):
             # wait_tensor is idepotent and will do stream sync only once
-            assert not isinstance(e, AsyncCollectiveTensor)
+            if isinstance(e, AsyncCollectiveTensor):
+                raise AssertionError(
+                    "Cannot wrap an AsyncCollectiveTensor inside another AsyncCollectiveTensor"
+                )
             res = AsyncCollectiveTensor(e)
             return res
 
@@ -723,9 +747,10 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int
         group_size = len(rankset)
         tag = tag or c10d._get_group_tag(group)
     elif isinstance(group, DeviceMesh):
-        assert group.ndim == 1, (
-            "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
-        )
+        if group.ndim != 1:
+            raise AssertionError(
+                "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
+            )
         # TODO: it should run collective in the whole mesh instead of dim 0
         pg = group.get_group()
         rankset = dist.get_process_group_ranks(pg)
@@ -764,9 +789,10 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
     elif isinstance(group, str):
         return group
     elif isinstance(group, DeviceMesh):
-        assert group.ndim == 1, (
-            "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
-        )
+        if group.ndim != 1:
+            raise AssertionError(
+                "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
+            )
         return group._dim_group_names[0]
     elif isinstance(group, tuple):
         if (
@@ -1056,12 +1082,14 @@ def all_gather_tensor_inplace(
     tag: str = "",
     gather_dim: int = 0,
 ):
-    assert not async_op, (
-        "Can't remap async version of inplace op to functional collective"
-    )
+    if async_op:
+        raise AssertionError(
+            "Can't remap async version of inplace op to functional collective"
+        )
 
     group = group or dist.group.WORLD
-    assert group is not None
+    if group is None:
+        raise AssertionError("group cannot be None")
 
     return output_tensor.copy_(all_gather_tensor(input_tensor, gather_dim, group, tag))
 
@@ -1075,12 +1103,14 @@ def reduce_scatter_tensor_inplace(
     scatter_dim: int = 0,
     tag: str = "",
 ):
-    assert not async_op, (
-        "Can't remap async version of inplace op to functional collective"
-    )
+    if async_op:
+        raise AssertionError(
+            "Can't remap async version of inplace op to functional collective"
+        )
 
     group = group or dist.group.WORLD
-    assert group is not None
+    if group is None:
+        raise AssertionError("group cannot be None")
 
     return output.copy_(reduce_scatter_tensor(input, op, scatter_dim, group, tag))
 
@@ -1104,12 +1134,14 @@ def all_reduce_inplace(
     async_op: bool = False,
     tag: str = "",
 ):
-    assert not async_op, (
-        "Can't remap async version of inplace op to functional collective"
-    )
+    if async_op:
+        raise AssertionError(
+            "Can't remap async version of inplace op to functional collective"
+        )
 
     group = group or dist.group.WORLD
-    assert group is not None
+    if group is None:
+        raise AssertionError("group cannot be None")
 
     return tensor.copy_(all_reduce(tensor, op, group, tag))
 
@@ -1123,12 +1155,14 @@ def all_to_all_inplace(
     async_op=False,
     tag: str = "",
 ):
-    assert not async_op, (
-        "Can't remap async version of inplace op to functional collective"
-    )
+    if async_op:
+        raise AssertionError(
+            "Can't remap async version of inplace op to functional collective"
+        )
 
     group = group or dist.group.WORLD
-    assert group is not None
+    if group is None:
+        raise AssertionError("group cannot be None")
 
     return output.copy_(
         all_to_all_single(
@@ -1148,15 +1182,16 @@ def all_gather_inplace(
     async_op=False,
     tag: str = "",
 ):
-    assert not async_op, (
-        "Can't remap async version of inplace op to functional collective"
-    )
-    assert tensor.dim() == 0 or all(t.size(0) == tensor.size(0) for t in tensor_list), (
-        "Remapping variable size all_gather is not yet supported"
-    )
+    if async_op:
+        raise AssertionError(
+            "Can't remap async version of inplace op to functional collective"
+        )
+    if tensor.dim() != 0 and not all(t.size(0) == tensor.size(0) for t in tensor_list):
+        raise AssertionError("Remapping variable size all_gather is not yet supported")
 
     group = group or dist.group.WORLD
-    assert group is not None
+    if group is None:
+        raise AssertionError("group cannot be None")
 
     output = all_gather_tensor(tensor, 0, group, tag)
 
@@ -1177,7 +1212,7 @@ def all_gather_inplace(
     return tensor_list
 
 
-from torch.distributed.distributed_c10d import (  # pyrefly: ignore  # deprecated
+from torch.distributed.distributed_c10d import (  # pyrefly: ignore  # deprecated; pyrefly: ignore [deprecated]
     _all_gather_base as legacy_all_gather_base,
     _reduce_scatter_base as legacy_reduce_scatter_base,
     all_gather as legacy_all_gather,

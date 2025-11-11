@@ -87,6 +87,12 @@ def extract_graph_and_tracker(fn, *args, **kwargs):  # type: ignore[no-untyped-d
     return gm.graph, region_tracker  # type: ignore[union-attr]
 
 
+def extract_graph(fn, *args, **kwargs):  # type: ignore[no-untyped-def]
+    backend = AotEagerAndRecordGraphs()
+    result = torch.compile(backend=backend)(fn)(*args, **kwargs)
+    return result, backend.graphs, backend.fw_graphs, backend.bw_graphs
+
+
 def collect_results(
     model: torch.nn.Module, prediction: Any, loss: Any, example_inputs: Any
 ) -> list[Any]:

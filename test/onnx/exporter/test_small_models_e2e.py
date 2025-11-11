@@ -17,6 +17,8 @@ from torch.utils import _pytree as torch_pytree
 
 class _WithExport:
     def export(self, model, args=(), kwargs=None, **options) -> torch.onnx.ONNXProgram:
+        if isinstance(model, torch.nn.Module):
+            model = model.eval()
         onnx_program = torch.onnx.export(
             model,
             args,
@@ -751,7 +753,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
         x = torch.randn(2, 5, 3)
         onnx_program = self.export(RMSNormModel(), (x,), opset_version=23)
-        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
+        onnx_testing.assert_onnx_program(onnx_program)
 
         # Test with multi-dimensional normalized_shape
         class RMSNormModel2D(torch.nn.Module):
@@ -760,7 +762,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
         x = torch.randn(2, 5, 7, 3)
         onnx_program = self.export(RMSNormModel2D(), (x,), opset_version=23)
-        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
+        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_rms_norm_with_weight(self):
         """Test RMS normalization with weight parameter."""
@@ -790,7 +792,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
         onnx_program = self.export(RMSNormWithEps(), (x,), opset_version=23)
 
-        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
+        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_enable_gqa_in_attention_23_with_dropout(self):
         class Model(torch.nn.Module):

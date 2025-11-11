@@ -53,6 +53,7 @@ import atexit
 import contextlib
 import functools
 import itertools
+import json
 import logging
 import os
 import re
@@ -128,47 +129,19 @@ class PipSource(NamedTuple):
     accelerator: str
 
 
-PYTORCH_NIGHTLY_PIP_INDEX_URL = "https://download.pytorch.org/whl/nightly"
-PIP_SOURCES = {
-    "cpu": PipSource(
-        name="cpu",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cpu",
-        supported_platforms={"Linux", "macOS", "Windows"},
-        accelerator="cpu",
-    ),
-    # NOTE: Sync with CUDA_ARCHES in .github/scripts/generate_binary_build_matrix.py
-    "cuda-12.6": PipSource(
-        name="cuda-12.6",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu126",
-        supported_platforms={"Linux", "Windows"},
-        accelerator="cuda",
-    ),
-    "cuda-12.8": PipSource(
-        name="cuda-12.8",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu128",
-        supported_platforms={"Linux", "Windows"},
-        accelerator="cuda",
-    ),
-    "cuda-13.0": PipSource(
-        name="cuda-13.0",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu130",
-        supported_platforms={"Linux", "Windows"},
-        accelerator="cuda",
-    ),
-    # NOTE: Sync with ROCM_ARCHES in .github/scripts/generate_binary_build_matrix.py
-    "rocm-6.4": PipSource(
-        name="rocm-6.4",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm6.4",
-        supported_platforms={"Linux"},
-        accelerator="rocm",
-    ),
-    "rocm-7.0": PipSource(
-        name="rocm-7.0",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm7.0",
-        supported_platforms={"Linux"},
-        accelerator="rocm",
-    ),
-}
+# Generate: .github/scripts/nightly_source_matrix.json
+GENERATE_MATRIX_SCRIPT = (
+    REPO_ROOT / ".github" / "scripts" / "generate_binary_build_matrix.py"
+)
+subprocess.check_call(
+    [sys.executable, str(GENERATE_MATRIX_SCRIPT)],
+    cwd=GENERATE_MATRIX_SCRIPT.parent,
+)
+
+# See: .github/scripts/nightly_source_matrix.json
+NIGHTLY_SOURCE_FILE = GENERATE_MATRIX_SCRIPT.with_name("nightly_source_matrix.json")
+NIGHTLY_SOURCE_MATRIX = json.loads(NIGHTLY_SOURCE_FILE.read_text(encoding="utf-8"))
+PIP_SOURCES = {name: PipSource(**data) for name, data in NIGHTLY_SOURCE_MATRIX.items()}
 
 
 class Formatter(logging.Formatter):

@@ -851,7 +851,7 @@ void sigmoid_backward_kernel(TensorIteratorBase& iter) {
           });
     });
   } else if (iter.dtype() == kBFloat16) {
-    auto one_vec = Vectorized<float>((float)(1));
+    auto one_vec = Vectorized<float>((float)1);
     cpu_kernel_vec(
         iter,
         [=](BFloat16 a, BFloat16 b) -> BFloat16 {

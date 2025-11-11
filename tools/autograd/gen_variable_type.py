@@ -763,6 +763,12 @@ auto ${inp_name}_t = (${inp_name}_t_raw.defined() || !${inp_name}_tensor.defined
 """
 )
 
+FW_DERIVATIVE_UPDATE_WRAPPED_NUM_TEMPLATE = CodeTemplate(
+    """\
+update_wrapped_number(${inp_name}_tensor, ${inp_name}_t);
+"""
+)
+
 FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE = CodeTemplate(
     """\
 auto ${inp_name}_p = toNonOptPrimal(${inp});
@@ -1911,6 +1917,13 @@ def emit_body(
                             zeros_fn=zeros_fn,
                         )
                     )
+                    if zeros_fn == "_efficientzerotensor_symint":
+                        unpacked_arguments += (
+                            FW_DERIVATIVE_UPDATE_WRAPPED_NUM_TEMPLATE.substitute(
+                                inp_name=inp.name
+                            )
+                        )
+
                 if inp.name in (derivative.required_inputs_primal or []):
                     unpacked_arguments += (
                         FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(

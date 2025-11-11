@@ -27,6 +27,7 @@ OpType = Union[torch._ops.HigherOrderOperator, torch._ops.OpOverload]
 SIDE_EFFECTS = WeakKeyDictionary[OpType, _EffectType](
     [
         (torch.ops.aten._print.default, _EffectType.ORDERED),
+        (torch.ops.aten._async_error.default, _EffectType.ORDERED),
         (call_torchbind, _EffectType.ORDERED),
     ]
 )

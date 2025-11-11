@@ -75,6 +75,10 @@ class LaunchConfig:
                                 that match _any_ of the filter strings.
         duplicate_stderr_filters: If non-empty, duplicates stderr to a file containing only lines
                                 that match _any_ of the filter strings.
+        virtual_local_rank: Enable virtual local rank mode for workers (defaults to False).
+                           When enabled, LOCAL_RANK is set to 0 for all workers and
+                           CUDA_VISIBLE_DEVICES is adjusted so each worker accesses its
+                           assigned GPU at device index 0.
 
 
     .. note::
@@ -104,6 +108,7 @@ class LaunchConfig:
     signals_to_handle: str = "SIGTERM,SIGINT,SIGHUP,SIGQUIT"
     duplicate_stdout_filters: Optional[list[str]] = None
     duplicate_stderr_filters: Optional[list[str]] = None
+    virtual_local_rank: bool = False
 
     def __post_init__(self):
         default_timeout = 900
@@ -233,8 +238,9 @@ def launch_agent(
         "  log_dir                  : %(log_dir)s\n"
         "  metrics_cfg              : %(metrics_cfg)s\n"
         "  event_log_handler        : %(event_log_handler)s\n"
-        "  numa_options             : %(numa_options)s\n",
-        "  duplicate_stdout_filters : %(duplicate_stdout_filters)s\n",
+        "  numa_options             : %(numa_options)s\n"
+        "  signals_to_handle        : %(signals_to_handle)s\n"
+        "  duplicate_stdout_filters : %(duplicate_stdout_filters)s\n"
         "  duplicate_stderr_filters : %(duplicate_stderr_filters)s\n",
         {
             "entrypoint": entrypoint_name,
@@ -287,6 +293,7 @@ def launch_agent(
         numa_options=config.numa_options,
         duplicate_stdout_filters=config.duplicate_stdout_filters,
         duplicate_stderr_filters=config.duplicate_stderr_filters,
+        virtual_local_rank=config.virtual_local_rank,
     )
 
     agent = LocalElasticAgent(

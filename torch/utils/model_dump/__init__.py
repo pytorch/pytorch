@@ -428,7 +428,7 @@ def get_info_and_burn_skeleton(path_or_bytesio, **kwargs):
     return page
 
 
-def main(argv, *, stdout=None):
+def main(argv, *, stdout=None) -> None:
     warnings.warn("torch.utils.model_dump is deprecated and will be removed in a future PyTorch release.", stacklevel=2)
     parser = argparse.ArgumentParser()
     parser.add_argument("--style", choices=["json", "html"])

@@ -1228,7 +1228,7 @@ def _get_pynvml_handler(device: "Device" = None):
             "nvidia-ml-py does not seem to be installed or it can't be imported."
             # pyrefly: ignore [invalid-inheritance]
         ) from _PYNVML_ERR
-    # pyrefly: ignore [import-error]
+    # pyrefly: ignore [import-error,missing-module-attribute]
     from pynvml import NVMLError_DriverNotLoaded
 
     try:

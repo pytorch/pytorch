@@ -388,7 +388,7 @@ def weight_norm(module: Module, name: str = "weight", dim: int = 0):
         missing_keys,
         unexpected_keys,
         error_msgs,
-    ):
+    ) -> None:
         g_key = f"{prefix}{name}_g"
         v_key = f"{prefix}{name}_v"
         if g_key in state_dict and v_key in state_dict:

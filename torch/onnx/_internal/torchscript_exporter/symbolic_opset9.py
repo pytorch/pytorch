@@ -810,7 +810,7 @@ def _reduce_with_dtype(onnx_op: str, name: str, allow_multi_dim_support: bool = 
 
 @_onnx_symbolic("aten::cumsum")
 @symbolic_helper.parse_args("v", "i", "none")
-def cumsum(g: jit_utils.GraphContext, input, dim, dtype):
+def cumsum(g: jit_utils.GraphContext, input, dim, dtype) -> None:
     symbolic_helper._onnx_opset_unsupported("cumsum", 9, 11, input)
 
 
@@ -3332,7 +3332,9 @@ def _unique(g: jit_utils.GraphContext, input, sorted, return_inverse):
 
 @_onnx_symbolic("aten::_unique2")
 @symbolic_helper.parse_args("v", "i", "i", "i")
-def _unique2(g: jit_utils.GraphContext, input, sorted, return_inverse, return_counts):
+def _unique2(
+    g: jit_utils.GraphContext, input, sorted, return_inverse, return_counts
+) -> None:
     symbolic_helper._onnx_opset_unsupported("_unique2", 9, 11, input)
 
 
@@ -6099,7 +6101,7 @@ def index_add(g: jit_utils.GraphContext, self, dim, index, other, alpha=None):
 
     if other_dim_rank != self_dim_rank:
         delta = self_dim_rank - other_dim_rank
-        for i in range(delta):
+        for _ in range(delta):
             other = symbolic_helper._unsqueeze_helper(
                 g, other, [symbolic_helper._get_tensor_rank(other)]
             )
@@ -6126,10 +6128,10 @@ def index_add(g: jit_utils.GraphContext, self, dim, index, other, alpha=None):
     )
     other = expand_as(g, other, new_shape)
 
-    for i in range(dim):
+    for _ in range(dim):
         index = symbolic_helper._unsqueeze_helper(g, index, [0])
 
-    for i in range(self_dim_rank - dim - 1):
+    for _ in range(self_dim_rank - dim - 1):
         index = symbolic_helper._unsqueeze_helper(
             g, index, [symbolic_helper._get_tensor_rank(index)]
         )
@@ -6289,7 +6291,7 @@ def broadcast_tensors(g: jit_utils.GraphContext, self):
 
 
 @_onnx_symbolic("aten::is_pinned")
-def is_pinned(g: jit_utils.GraphContext, self, device=None):
+def is_pinned(g: jit_utils.GraphContext, self, device=None) -> None:
     # Unused by ONNX.
     return None
 
@@ -6357,7 +6359,7 @@ def prim_layout(g: jit_utils.GraphContext, self):
 
 
 @_onnx_symbolic("prim::ListConstruct")
-def prim_list_construct(g: jit_utils.GraphContext, *inputs, **kwargs):
+def prim_list_construct(g: jit_utils.GraphContext, *inputs, **kwargs) -> None:
     return None
 
 
@@ -6374,12 +6376,12 @@ def prim_list_unpack(
 
 
 @_onnx_symbolic("prim::TupleConstruct")
-def prim_tuple_construct(g: jit_utils.GraphContext, *inputs, **kwargs):
+def prim_tuple_construct(g: jit_utils.GraphContext, *inputs, **kwargs) -> None:
     return None
 
 
 @_onnx_symbolic("prim::Uninitialized")
-def prim_uninitialized(g: jit_utils.GraphContext, *inputs, **kwargs):
+def prim_uninitialized(g: jit_utils.GraphContext, *inputs, **kwargs) -> None:
     return None
 
 

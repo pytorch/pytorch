@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import random
 from collections.abc import Iterator, Sized
-from typing import Optional, TypeVar
+from typing import TypeVar
 
 import torch
 from torch.utils.data.datapipes._decorator import functional_datapipe
@@ -35,8 +35,8 @@ class SamplerIterDataPipe(IterDataPipe[_T_co]):
         self,
         datapipe: IterDataPipe,
         sampler: type[Sampler] = SequentialSampler,
-        sampler_args: Optional[tuple] = None,
-        sampler_kwargs: Optional[dict] = None,
+        sampler_args: tuple | None = None,
+        sampler_kwargs: dict | None = None,
     ) -> None:
         if not isinstance(datapipe, Sized):
             raise AssertionError(
@@ -99,7 +99,7 @@ class ShufflerIterDataPipe(IterDataPipe[_T_co]):
     buffer_size: int
     _buffer: list[_T_co]
     _enabled: bool
-    _seed: Optional[int]
+    _seed: int | None
     _rng: random.Random
 
     def __init__(
@@ -189,5 +189,5 @@ class ShufflerIterDataPipe(IterDataPipe[_T_co]):
         self._rng = random.Random()
         self._rng.setstate(rng_state)
 
-    def __del__(self):
+    def __del__(self) -> None:
         self._buffer.clear()

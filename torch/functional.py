@@ -1829,7 +1829,7 @@ def norm(  # noqa: F811
             return _VF.norm(input, p, dim=_dim, keepdim=keepdim)  # type: ignore[attr-defined]
 
     # TODO: when https://github.com/pytorch/pytorch/issues/33782 is fixed
-    # remove the overloads where dim is an int and replace with BraodcastingList1
+    # remove the overloads where dim is an int and replace with BroadcastingList1
     # and remove next four lines, replace _dim with dim
     if dim is not None:
         if isinstance(dim, (int, torch.SymInt)):

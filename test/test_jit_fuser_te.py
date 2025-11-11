@@ -94,7 +94,7 @@ def strip_profiling_nodes(nodes):
 
 
 def warmup_forward(f, *args, profiling_count=2):
-    for i in range(profiling_count):
+    for _ in range(profiling_count):
         results = f(*args)
 
     return results
@@ -1682,11 +1682,8 @@ class TestTEFuser(JitTestCase):
         ]
         dtypes = ["int", "float", "bool"]
         values = {"int": [10, 3], "float": [12.34, 2.78], "bool": [True, False]}
-        devices = self.devices
-        for dtype_x, dtype_y, op, device in product(
-            dtypes, dtypes, binary_ops, devices
-        ):
-            code = ir_template.format(**locals())
+        for dtype_x, dtype_y, op in product(dtypes, dtypes, binary_ops):
+            code = ir_template.format(dtype_x=dtype_x, dtype_y=dtype_y, op=op)
 
             # Interpret the graph
             try:
@@ -1701,9 +1698,7 @@ class TestTEFuser(JitTestCase):
             try:
                 k = torch._C._te.TensorExprKernel(graph)
             except Exception as e:
-                raise RuntimeError(
-                    " ".join(["Compilation failed:", device, str(code)])
-                ) from e
+                raise RuntimeError(" ".join(["Compilation failed:", str(code)])) from e
 
             # Run the graph
             for x, y in product(values[dtype_x], values[dtype_y]):
@@ -1713,9 +1708,7 @@ class TestTEFuser(JitTestCase):
                     self.assertEqual(ref, res)
                 except Exception as e:
                     raise RuntimeError(
-                        " ".join(
-                            ["Failed at runtime:", device, str(x), str(y), str(code)]
-                        )
+                        " ".join(["Failed at runtime:", str(x), str(y), str(code)])
                     ) from e
 
     def test_matmul(self):
@@ -2284,7 +2277,7 @@ class TestTEFuser(JitTestCase):
         x = torch.arange(-10, 10, dtype=torch.float32, requires_grad=True)
         xs = torch.arange(-10, 10, dtype=torch.float32, requires_grad=True)
         script = torch.jit.script(fn)
-        for i in range(11):
+        for _ in range(11):
             y = fn(x)
             g0 = torch.rand_like(y)
             y.backward(g0)
@@ -2514,7 +2507,7 @@ class TestTEFuser(JitTestCase):
                                 x, y, z = gen(n), gen(n), gen(n)
                                 func_s(x, y, z)
 
-                            for incr in range(3):
+                            for _incr in range(3):
                                 func_s(*[gen(n + 1) for _ in range(3)])
 
                             g = torch.jit.last_executed_optimized_graph()
@@ -2678,7 +2671,7 @@ class TestTEFuser(JitTestCase):
 
             f_traced = torch.jit.trace(f, (x, y))
 
-            for i in range(4):
+            for _ in range(4):
                 # make sure this doesn't error out
                 res = f_traced(x, y)
 
@@ -2697,7 +2690,7 @@ class TestTEFuser(JitTestCase):
         ref = fn(x)
 
         script_fn = torch.jit.script(fn)
-        for i in range(4):
+        for _ in range(4):
             res = script_fn(x)
 
         self.assertEqual(ref, res)

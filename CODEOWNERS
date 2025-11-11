@@ -210,8 +210,12 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 /test/inductor/test_flex_attention.py @drisspg
 /test/inductor/test_flex_decoding.py @drisspg
 
-# Low Precision GEMMs
+# Low Precision & Grouped GEMMs
 /aten/src/ATen/native/cuda/Blas.cpp @drisspg @slayton58
+/aten/src/ATen/native/cuda/GroupedBlas.cpp @drisspg @slayton58
+/aten/src/ATen/native/cuda/ScaledBlas.cpp @drisspg @slayton58
 /aten/src/ATen/cuda/CUDABlas.cpp @drisspg @slayton58
 /aten/src/ATen/cuda/CUDABlas.h @drisspg @slayton58
+/aten/src/ATen/cuda/CUDAScaledBlas.cpp @drisspg @slayton58
+/aten/src/ATen/cuda/CUDAScaledBlas.h @drisspg @slayton58
 /test/test_scaled_matmul_cuda.py @drisspg @slayton58

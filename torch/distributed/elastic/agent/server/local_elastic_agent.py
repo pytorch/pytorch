@@ -303,7 +303,6 @@ class LocalElasticAgent(SimpleElasticAgent):
         for worker in worker_group.workers:
             local_rank = worker.local_rank
             worker_env = {
-                "LOCAL_RANK": str(local_rank),
                 "RANK": str(worker.global_rank),
                 "GROUP_RANK": str(worker_group.group_rank),
                 "ROLE_RANK": str(worker.role_rank),
@@ -322,6 +321,7 @@ class LocalElasticAgent(SimpleElasticAgent):
                     "TORCH_NCCL_ASYNC_ERROR_HANDLING", str(1)
                 ),
             }
+            self._set_local_rank_env(worker_env, local_rank, spec)
             if "OMP_NUM_THREADS" in os.environ:
                 worker_env["OMP_NUM_THREADS"] = os.environ["OMP_NUM_THREADS"]
 
@@ -361,6 +361,46 @@ class LocalElasticAgent(SimpleElasticAgent):
         )
 
         return self._pcontext.pids()
+
+    def _set_local_rank_env(
+        self, worker_env: dict[str, str | None], local_rank: int, spec: WorkerSpec
+    ) -> None:
+        # Set CUDA_VISIBLE_DEVICES and LOCAL_RANK based on virtual_local_rank mode.
+        # Virtual mode: Each worker sees only its assigned GPU as device 0, LOCAL_RANK=0
+        # Traditional mode: Workers see all GPUs, LOCAL_RANK matches actual local rank
+
+        if spec.virtual_local_rank:
+            # Set LOCAL_RANK=0 and use CUDA_VISIBLE_DEVICES to control the actual GPU access.
+
+            worker_env["LOCAL_RANK"] = "0"
+
+            # Map local_rank through existing CUDA_VISIBLE_DEVICES
+            # HIP uses CUDA_VISIBLE_DEVICES as a compatibility hack:
+            # https://rocm.docs.amd.com/en/latest/conceptual/gpu-isolation.html#cuda-visible-devices
+            parent_visible_devices = os.getenv("CUDA_VISIBLE_DEVICES")
+            if parent_visible_devices is not None:
+                # Parse comma-separated list of GPU IDs
+                available_gpus = parent_visible_devices.split(",")
+                if local_rank >= len(available_gpus):
+                    raise ValueError(
+                        f"local_rank {local_rank} exceeds available GPUs in "
+                        f"CUDA_VISIBLE_DEVICES={parent_visible_devices}"
+                    )
+
+                visible_gpu = available_gpus[local_rank].strip()
+            else:
+                # No restriction, use local_rank directly
+                visible_gpu = str(local_rank)
+
+            worker_env["CUDA_VISIBLE_DEVICES"] = visible_gpu
+            return
+
+        # In traditional mode, don't override CUDA_VISIBLE_DEVICES
+        # (inherit from parent environment)
+        worker_env["LOCAL_RANK"] = str(local_rank)
+
+        if "CUDA_VISIBLE_DEVICES" in os.environ:
+            worker_env["CUDA_VISIBLE_DEVICES"] = os.environ["CUDA_VISIBLE_DEVICES"]
 
     def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM) -> None:
         if self._worker_watchdog is not None:

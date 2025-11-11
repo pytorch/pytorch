@@ -1,13 +1,15 @@
 import functools
 import math
 import operator
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from datetime import timedelta
 
 import torch
 from torch._C import ScriptObject
-from torch._C._distributed_c10d import FakeWork
+from torch._C._distributed_c10d import FakeWork, PythonCallbackWork
 from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed.distributed_c10d import (
+    _check_op,
     _get_default_group,
     _resolve_process_group,
     ProcessGroup,
@@ -765,10 +767,19 @@ def _local_send(
     # "send(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, "
     # "int dst, int tag) -> __torch__.torch.classes.c10d.Work";
 
-    raise NotImplementedError(
-        "LocalTensor does not support MPMD operations like send. "
-        "Use SPMD collective operations instead."
-    )
+    from . import LocalRunnerMode, LocalTensor
+
+    assert len(tensors) == 1
+    tensor = tensors[0]
+
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
+    src = int(tensor.__src_rank__)
+
+    LocalRunnerMode.current()._signal_send(src, dst, tensor._local_tensors[src])
+
+    work = FakeWork()
+    work_so = Work.boxed(work)
+    return work_so
 
 
 def _local_recv_(
@@ -779,11 +790,26 @@ def _local_recv_(
 ) -> ScriptObject:
     # "recv_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, "
     # "int src, int tag) -> __torch__.torch.classes.c10d.Work";
+    from . import LocalRunnerMode, LocalTensor
 
-    raise NotImplementedError(
-        "LocalTensor does not support MPMD operations like recv. "
-        "Use SPMD collective operations instead."
-    )
+    assert len(tensors) == 1
+    tensor = tensors[0]
+
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
+    dst = int(tensor.__src_rank__)
+
+    def _recv_and_store(timeout: timedelta) -> bool:
+        def _wait_and_store(obj: object) -> None:
+            assert isinstance(obj, torch.Tensor), "Expected to receive a Tensor"
+            assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
+            tensor._local_tensors[dst] = obj
+
+        LocalRunnerMode.current()._wait_recv(src, dst, _wait_and_store)
+        return True
+
+    work = PythonCallbackWork(_recv_and_store)
+    work_so = Work.boxed(work)
+    return work_so
 
 
 def _local_recv_any_source_(
@@ -792,7 +818,60 @@ def _local_recv_any_source_(
     # "recv_any_source_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, "
     # "int tag) -> __torch__.torch.classes.c10d.Work";
 
-    raise NotImplementedError(
-        "LocalTensor does not support MPMD operations like recv_any_source. "
-        "Use SPMD collective operations instead."
+    return _local_recv_(tensors, process_group_so, -1, tag)
+
+
+def _attach_rank(tensor: torch.Tensor, rank: int) -> torch.Tensor:
+    """
+    Attaches rank as an attribute to given tensor so that the send or recv implementation
+    knows which rank initiates the operation (note under local tensor mode ).
+    """
+    from torch.distributed.tensor import DTensor
+
+    if isinstance(tensor, DTensor):
+        tensor = tensor._local_tensor
+
+    tensor.__src_rank__ = rank  # type: ignore[attr-defined]
+    return tensor
+
+
+def local_p2p_op(
+    dst: torch.SymInt,
+    tensor: torch.Tensor,
+    op: Callable[[torch.Tensor, int], Work | None],
+) -> Work | None | list[Work | None]:
+    """
+    Runs a point-to-point (P2P) operation for all combinations of source and destination ranks.
+    """
+    _check_op(op)
+
+    from . import LocalIntNode
+
+    assert isinstance(dst.node, LocalIntNode), (
+        "Expected 'dst' to be a LocalIntNode where the value is the destination rank and key is the source rank"
     )
+
+    w = []
+    for s, d in dst.node._local_ints.items():
+        tensor = _attach_rank(tensor, s)
+        w.append(op(tensor, d))
+    return w
+
+
+def wait_all(work: Work | None | list[Work | None]) -> None:
+    """
+    Waits for all work objects in the input to complete.
+
+    A single Work object, None, or a list of Work objects (possibly containing None).
+    If None, does nothing. If a single Work, waits for it to complete. If a list, waits
+    for each non-None Work in the list to complete.
+    """
+
+    if work is None:
+        return
+    if isinstance(work, Work):
+        work = [work]
+    for w in work:
+        if w is None:
+            continue
+        w.wait()

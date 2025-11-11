@@ -116,7 +116,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
 
         return True
 
-    def visit_Assign(self, node):
+    def visit_Assign(self, node) -> None:
         """Store assignment state when assigning to a Call Node.
 
         If we're visiting a Call Node (the right-hand side of an
@@ -139,7 +139,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         self.generic_visit(node)
         self.visiting_class_level_ann = False
 
-    def visit_AnnAssign(self, node):
+    def visit_AnnAssign(self, node) -> None:
         """Visit an AnnAssign node in an ``nn.Module``'s ``__init__`` method.
 
         It checks if it conforms to our attribute annotation rules."""
@@ -194,7 +194,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
             stacklevel=2,
         )
 
-    def visit_Call(self, node):
+    def visit_Call(self, node) -> None:
         """Determine if a Call node is 'torch.jit.annotate' in __init__.
 
         Visit a Call node in an ``nn.Module``'s ``__init__``

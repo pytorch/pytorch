@@ -102,6 +102,7 @@ def maybe_wrap_command_args_with_numa_binding(
         )
         return wrapped_command_args
     except Exception:
+        # pyrefly: ignore [bad-argument-type]
         _handle_exception(numa_options=numa_options, logger_kwargs=kwargs)
         return command_args
 
@@ -140,6 +141,7 @@ def maybe_wrap_with_numa_binding(
     def wrapped(*args: _TParams.args, **kwargs: _TParams.kwargs) -> _TReturn:
         _maybe_apply_numa_binding_to_current_process(
             gpu_index=gpu_index,
+            # pyrefly: ignore [bad-argument-type]
             numa_options=numa_options,
         )
         return func(*args, **kwargs)
@@ -174,6 +176,7 @@ def _maybe_apply_numa_binding_to_current_process(
             },
         )
     except Exception:
+        # pyrefly: ignore [bad-argument-type]
         _handle_exception(numa_options=numa_options, logger_kwargs=kwargs)
 
 
@@ -237,24 +240,24 @@ def _bind_all_threads_in_current_process_to_logical_cpus(
     *, logical_cpu_indices: set[int]
 ) -> None:
     # Save the original affinity of the main thread before changing it
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     original_main_thread_affinity = os.sched_getaffinity(0)  # type: ignore[attr-defined]
 
     # 0 represents the current thread.
     # This is outside the try/except because the main thread should always bind successfully.
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     os.sched_setaffinity(0, logical_cpu_indices)  # type: ignore[attr-defined]
 
     for tid_str in os.listdir("/proc/self/task"):
         try:
             tid = int(tid_str)
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             tid_affinity = os.sched_getaffinity(tid)  # type: ignore[attr-defined]
 
             # Defensive check to ensure we do not overwrite affinity on any threads
             # that have already had their affinity set elsewhere.
             if tid_affinity == original_main_thread_affinity:
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 os.sched_setaffinity(tid, logical_cpu_indices)  # type: ignore[attr-defined]
         except Exception:
             # Thread may have exited or otherwise become invalid
