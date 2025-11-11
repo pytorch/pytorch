@@ -12703,6 +12703,12 @@ class TestErrorInputs(TestCase):
             with self.assertRaisesRegex(error_type, error_regex):
                 op(*mps_args, **mps_kwargs)
 
+    def test_index_put_out_of_bounds(self, device):
+        x = torch.rand(10, 1, 10, device=device)
+        with self.assertRaises(torch.AcceleratorError):
+            y = x[:, [1]]
+            torch.mps.synchronize()
+
 class TestComplex(TestCase):
     def test_tensor_scalar_binops(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/119088
