@@ -69,10 +69,10 @@ void bernoulli_scalar_kernel(const TensorBase &self, double p, std::optional<Gen
     // Get a local copy of the global stream and immediately advance the global
     // state before the generation step to avoid multiple threads using the same state.
     {
-    // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(mklGenerator->mutex_);
-    mklGenerator->get_stream_copy(main_stream);
-    mklGenerator->skip_ahead(n);
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(mklGenerator->mutex_);
+      mklGenerator->get_stream_copy(main_stream);
+      mklGenerator->skip_ahead(n);
     }
 
     auto sample = [&](int64_t begin, int64_t end) {
