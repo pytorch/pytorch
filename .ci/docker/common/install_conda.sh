@@ -101,6 +101,9 @@ fi
     conda_install_through_forge libstdcxx-ng=14
   fi
 
+  # needed for the 3.13t build to build lxml from source
+  conda_install_through_forge libxslt libxml2-devel
+
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt
 
