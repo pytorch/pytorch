@@ -560,7 +560,7 @@ class PrepareModuleInput(ParallelStyle):
     def _prepare_input_kwarg_fn(self, inputs, kwarg_inputs, device_mesh):
         prepared_arg_inputs = self._prepare_input_fn(inputs, device_mesh)
         prepared_kwarg_inputs = {}
-        for kwarg_key in kwarg_inputs.keys():
+        for kwarg_key in kwarg_inputs:
             kwarg_val = kwarg_inputs[kwarg_key]
             input_layout = self.input_kwarg_layouts.get(kwarg_key)
             desired_input_layout = self.desired_input_kwarg_layouts.get(kwarg_key)
