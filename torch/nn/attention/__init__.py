@@ -3,7 +3,7 @@
 
 import contextlib
 from collections.abc import Iterable
-from typing import Callable, Literal, Union
+from typing import Union
 from warnings import warn
 
 import torch.backends.cuda
@@ -13,8 +13,6 @@ from torch.backends.cuda import (
     can_use_flash_attention,
     SDPAParams,
 )
-
-from . import _fa4
 
 
 __all__: list[str] = [
@@ -171,80 +169,16 @@ def _get_flash_version() -> str:
     return "2.5.7"
 
 
-_FlashAttentionImpl = Literal["FA4"]
-_FLASH_IMPL_FA4: _FlashAttentionImpl = "FA4"
-
-_RegisterFn = Callable[..., None]
-_FLASH_ATTENTION_IMPLS: dict[str, _RegisterFn] = {}
-_FLASH_ATTENTION_ACTIVE: str | None = None
+from . import _registry
 
 
-def register_flash_attention_impl(
-    impl: str | _FlashAttentionImpl,
-    *,
-    register_fn: _RegisterFn,
-) -> None:
-    """
-    Register the callable that activates a flash attention impl.
+# Re-export registry types and functions for public API
+_FlashAttentionImpl = _registry._FlashAttentionImpl
+_RegisterFn = _registry._RegisterFn
+register_flash_attention_impl = _registry.register_flash_attention_impl
+activate_flash_attention_impl = _registry.activate_flash_attention_impl
+list_flash_attention_impls = _registry.list_flash_attention_impls
+current_flash_attention_impl = _registry.current_flash_attention_impl
 
-    Args:
-        impl: Implementation identifier (e.g., ``"FA4"``).
-        register_fn: Callable that performs the actual dispatcher registration.
-            This function will be invoked by :func:`activate_flash_attention_impl`
-            and should register custom kernels with the PyTorch dispatcher.
-            The callable may accept optional keyword arguments such as
-            ``module_path`` for configuring the implementation.
-
-    Example:
-        >>> def my_impl_register(module_path: str = "my_flash_impl"):
-        ...     # Register custom kernels with torch dispatcher
-        ...     pass  # doctest: +SKIP
-        >>> register_flash_attention_impl(
-        ...     "MyImpl", register_fn=my_impl_register
-        ... )  # doctest: +SKIP
-    """
-    _FLASH_ATTENTION_IMPLS[impl] = register_fn
-
-
-def activate_flash_attention_impl(
-    impl: str | _FlashAttentionImpl,
-) -> None:
-    """
-    Activate into the dispatcher a previously registered flash attention impl.
-
-    Args:
-        impl: Implementation identifier to activate. See
-            :func:`~torch.nn.attention.list_flash_attention_impls` for available
-            implementations.
-
-    Example:
-        >>> activate_flash_attention_impl("FA4")  # doctest: +SKIP
-    """
-    register_fn = _FLASH_ATTENTION_IMPLS.get(impl)
-    if register_fn is None:
-        raise ValueError(f"Unknown flash attention impl '{impl}'")
-    register_fn()
-    global _FLASH_ATTENTION_ACTIVE
-    _FLASH_ATTENTION_ACTIVE = impl
-
-
-def list_flash_attention_impls() -> list[str]:
-    """Return the names of all registered flash attention implementations."""
-    return sorted(_FLASH_ATTENTION_IMPLS.keys())
-
-
-def current_flash_attention_impl() -> str | None:
-    """
-    Return the currently installed flash attention impl name, if any.
-
-    ``None`` indicates that no custom impl has been installed.
-    """
-    return _FLASH_ATTENTION_ACTIVE
-
-
-# We are registering FA4 as a possible hot swap, but it is not actually activated in the dispatcher
-# until a user calls activate_flash_attention_impl("FA4")
-register_flash_attention_impl(
-    _FLASH_IMPL_FA4,
-    register_fn=_fa4.register_flash_attention_fa4,
-)
+# Import built-in implementations to trigger self-registration
+from . import _fa4  # noqa: F401
