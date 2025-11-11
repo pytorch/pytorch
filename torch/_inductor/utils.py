@@ -1974,9 +1974,6 @@ def use_blackwell_cutedsl_grouped_mm(
     if not can_use_tma(mat_a, mat_b, output_layout=layout):
         return False
 
-    if any(is_dynamic(x) for x in [mat_a, mat_b]):
-        return False
-
     if not a_is_2d or b_is_2d:
         return False
 
