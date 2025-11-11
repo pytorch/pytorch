@@ -78,7 +78,7 @@ class StridedShard : public Shard {
       return false;
     }
     const auto& rhs_strided = static_cast<const StridedShard&>(rhs);
-    return dim == rhs_strided.dim && split_factor == rhs_strided.split_factor;
+    return *this == rhs_strided;
   }
 
   bool operator==(const StridedShard& rhs) const {
