@@ -1,6 +1,9 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
+import inspect
+import os
+import re
 import traceback
 import weakref
 from collections.abc import Callable
@@ -138,6 +141,39 @@ def _get_stack_trace() -> str:
     ]
     summary = traceback.StackSummary.from_list(summary)
     return "".join(summary.format())
+
+
+def _get_user_stack_trace(stack_trace_str: str) -> str | None:
+    """Extract user code stack trace, filtering out torch internals.
+    Uses similar logic to _find_user_code_frame() from symbolic_shapes.py,
+    but operates on captured stack trace strings.
+    """
+    if not stack_trace_str:
+        return None
+
+    torch_dir = os.path.dirname(inspect.getfile(torch))
+    pattern = re.compile(r"^File \"(.+)\", line (\d+), in (.+)$")
+    lines = stack_trace_str.strip().split("\n")
+
+    # Find the first user code frame (not in torch internals)
+    # Iterate backwards like _parse_stack_trace does (innermost frame last)
+    for idx in range(len(lines) - 2, -1, -1):
+        line = lines[idx].strip()
+        matches = pattern.match(line)
+        if matches:
+            file = matches.group(1)
+            lineno = matches.group(2)
+            name = matches.group(3)
+
+            # Check if this is user code (same check as _find_user_code_frame)
+            if not file.startswith(torch_dir + os.path.sep):
+                # next line should be the code
+                if idx + 1 < len(lines):
+                    code = lines[idx + 1].strip()
+                    return f"File: {file}:{lineno} in {name}, code: {code}"
+
+    # No user code found
+    return None
 
 
 def _maybe_get_autograd_trace() -> str | None:
@@ -603,14 +639,49 @@ class DebugMode(TorchDispatchMode):
         finally:
             self.call_depth -= 1
 
-    def debug_string(self) -> str:
+    def debug_string(self, show_stack_trace: bool = False) -> str:
+        """
+        show_stack_trace: If True, display one-line stack trace summaries above groups
+                        of operations (similar to gm.print_readable() style).
+                        Requires record_stack_trace=True.
+        """
         with torch._C.DisableTorchFunction():
-            result = ""
-            result += "\n".join(
-                "  " + "  " * op.call_depth + op.render(self.record_tensor_attributes)
-                for op in self.operators
-            )
-        return result
+            if not show_stack_trace:
+                result = "\n".join(
+                    "  " + "  " * op.call_depth + op.render(self.record_tensor_attributes)
+                    for op in self.operators
+                )
+                return result
+
+            # Group operations by stack trace
+            lines = []
+            prev_stack_summary = None
+
+            for op in self.operators:
+                # Get the stack trace: prefer fwd_stack_trace, fallback to stack_trace
+                stack_trace = None
+                if hasattr(op, 'fwd_stack_trace') and op.fwd_stack_trace:
+                    stack_trace = op.fwd_stack_trace
+                elif hasattr(op, 'stack_trace') and op.stack_trace:
+                    stack_trace = op.stack_trace
+
+                stack_summary = None
+                if stack_trace:
+                    stack_summary = _get_user_stack_trace(stack_trace)
+
+                if stack_summary and stack_summary != prev_stack_summary:
+                    # add blank line before stack trace comment for readability
+                    if lines:  # don't add blank line at the very start
+                        lines.append("")
+                    indent = "  " * (op.call_depth + 1)
+                    lines.append(f"{indent}# {stack_summary}")
+                    prev_stack_summary = stack_summary
+
+                # Add the operation line
+                line = "  " + "  " * op.call_depth + op.render(self.record_tensor_attributes)
+                lines.append(line)
+
+            return "\n".join(lines)
 
     @staticmethod
     @contextlib.contextmanager
