@@ -13587,8 +13587,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertFalse(".run(" in code[0])
 
     # skip cpu test since rms norm is always decomposed on cpu
-    @skip_if_cpu
     def test_lite_mode_not_decompose(self):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
         def f(x, shape):
             y = x + 1
             z = torch.ops.aten._fused_rms_norm(y, shape, None, None)
@@ -13614,8 +13616,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(len(codes), 2)
             FileCheck().check("torch.ops.aten._fused_rms_norm.default(").run(code[0])
 
-    @skip_if_cpu
     def test_lite_regional_compile_flex_attention(self):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
         def _squared(score, b, h, m, n):
@@ -13678,7 +13682,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
         self.assertEqual(len(codes), 2)
 
-    @skip_if_cpu
     @unittest.skipIf(
         config.cpp_wrapper,
         "codegen triton_kernel_wrapper_functional is not implemented for cpp wrapper",
