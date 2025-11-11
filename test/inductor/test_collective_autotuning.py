@@ -1,3 +1,5 @@
+# Owner(s): ["module: inductor"]
+
 """
 Test collective op autotuning - Phase 1: Basic functionality with 2 ranks.
 
@@ -70,8 +72,8 @@ class TestCollectiveAutotuning(MultiProcessTestCase):
 
         # Register autotuning
         from torch._inductor.kernel.custom_op import (
-            register_custom_op_autotuning,
             CustomOpConfig,
+            register_custom_op_autotuning,
         )
 
         register_custom_op_autotuning(

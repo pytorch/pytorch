@@ -27,7 +27,6 @@ import sympy
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
-from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import (
     counters,
@@ -82,7 +81,6 @@ from .utils import (
     do_bench_using_profiling,
     FakeIndentedBuffer,
     get_dtype_size,
-    is_gpu,
     Placeholder,
     restore_stdout_stderr,
     sympy_dot,
@@ -103,17 +101,19 @@ PRINT_AUTOTUNE = True
 DEBUG = False
 
 # Collective operation names for specialized benchmarking
-COLLECTIVE_OPS = {
-    "torch.ops._c10d_functional.all_reduce.default",
-    "torch.ops._c10d_functional.all_reduce_.default",
-    "torch.ops._c10d_functional.all_gather_into_tensor.default",
-    "torch.ops._c10d_functional.reduce_scatter_tensor.default",
-    "torch.ops._c10d_functional.all_to_all_single.default",
-    "torch.ops._c10d_functional_autograd.all_reduce.default",
-    "torch.ops._c10d_functional_autograd.all_gather_into_tensor.default",
-    "torch.ops._c10d_functional_autograd.reduce_scatter_tensor.default",
-    "torch.ops._c10d_functional_autograd.all_to_all_single.default",
-}
+COLLECTIVE_OPS = OrderedSet(
+    [
+        "torch.ops._c10d_functional.all_reduce.default",
+        "torch.ops._c10d_functional.all_reduce_.default",
+        "torch.ops._c10d_functional.all_gather_into_tensor.default",
+        "torch.ops._c10d_functional.reduce_scatter_tensor.default",
+        "torch.ops._c10d_functional.all_to_all_single.default",
+        "torch.ops._c10d_functional_autograd.all_reduce.default",
+        "torch.ops._c10d_functional_autograd.all_gather_into_tensor.default",
+        "torch.ops._c10d_functional_autograd.reduce_scatter_tensor.default",
+        "torch.ops._c10d_functional_autograd.all_to_all_single.default",
+    ]
+)
 
 
 def is_collective_op(op_name: str) -> bool:
@@ -3373,10 +3373,8 @@ class AlgorithmSelectorCache(PersistentCache):
             dist.barrier(group=process_group)
             torch.cuda.synchronize()
 
-            # Benchmark with multiple runs
-            import torch._inductor.config as config
-
-            nruns = config.benchmark_kernel_nruns
+            # Benchmark with multiple runs (using a reasonable default)
+            nruns = 10
             total_time = 0.0
 
             for _ in range(nruns):
