@@ -1,12 +1,9 @@
 name: docker-cache-mi300
 
 on:
-  workflow_run:
-    workflows: [docker-builds]
-    # TODO: Uncomment before merging
-    #branches: [main, release]
-    types:
-      - completed
+  # run every 6 hours
+  schedule:
+    - cron: 0 0,6,12,18 * * *
   workflow_dispatch:
 
 concurrency:
@@ -16,51 +13,16 @@ concurrency:
 permissions:
   id-token: write
   contents: read
-  actions: read
 
 jobs:
-  download-docker-builds-artifacts:
-    if: github.repository_owner == 'pytorch'
-    name: download-docker-builds-artifacts
-    runs-on: ubuntu-latest
-    outputs:
-      pytorch-linux-jammy-rocm-n-py3: ${{ steps.process-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}
-      pytorch-linux-noble-rocm-n-py3: ${{ steps.process-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}
-      pytorch-linux-jammy-rocm-n-py3-benchmarks: ${{ steps.process-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4.1.7
-        with:
-          run_id: ${{ github.event.workflow_run.id }}
-          path: ./docker-builds-artifacts
-          merge-multiple: true
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Process artifacts
-        id: process-artifacts
-        run: |
-          ls -R ./docker-builds-artifacts
-          cat ./docker-builds-artifacts/*txt >> $GITHUB_OUTPUT
-          cat $GITHUB_OUTPUT
-
   docker-cache:
     if: github.repository_owner == 'pytorch'
-    needs: download-docker-builds-artifacts
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [linux.rocm.gfx942.docker-cache]
-        docker-image: [
-          "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}",
-          "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}",
-          "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}"
-        ]
-    runs-on: "${{ matrix.runner }}"
+    runs-on: rocm-docker
     steps:
-      - name: debug
-        run: |
-          JSON_STRINGIFIED="${{ toJSON(needs.download-docker-builds-artifacts.outputs) }}"
-          echo "Outputs of download-docker-builds-artifacts job: ${JSON_STRINGIFIED}"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: true
 
       - name: configure aws credentials
         id: aws_creds
@@ -75,34 +37,19 @@ jobs:
         continue-on-error: false
         uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
 
-      - name: Generate ghrc.io tag
-        id: ghcr-io-tag
-        run: |
-            ecr_image="${{ matrix.docker-image }}"
-            ghcr_image="ghcr.io/pytorch/ci-image:${ecr_image##*:}"
-            echo "ghcr_image=${ghcr_image}" >> "$GITHUB_OUTPUT"
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
+          push: false
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: ${{ steps.ghcr-io-tag.outputs.ghcr_image }}
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
-      - name: Save as tarball
+      - name: Tar and upload to S3 bucket
         run: |
-          docker_image_tag=${{ matrix.docker-image }}
-          docker_image_tag="${docker_image_tag#*:}" # Remove everything before and including first ":"
-          docker_image_tag="${docker_image_tag%-*}" # Remove everything after and including last "-"
-          ref_name=${{ github.event.workflow_run.head_branch }}
-          if [[ $ref_name =~ "release/" ]]; then
-            ref_suffix="release"
-          elif [[ $ref_name == "main" ]]; then
-            ref_suffix="main"
-          else
-            # TODO: Remove below
-            ref_suffix="main"
-            # echo "Unexpected branch in ref_name: ${ref_name}" && exit 1
-          fi
-          docker tag ${{ steps.ghcr-io-tag.outputs.ghcr_image }} ${{ matrix.docker-image }}
-          # mv is atomic operation, so we use intermediate tar.tmp file to prevent read-write contention
-          docker save -o ~/pytorch-data/docker/${docker_image_tag}.tar.tmp ${{ matrix.docker-image }}
-          mv ~/pytorch-data/docker/${docker_image_tag}.tar.tmp ~/pytorch-data/docker/${docker_image_tag}_${ref_suffix}.tar
+          sudo docker save -o ~/docker-data/pytorch/pytorch_docker_image.tar ${{ steps.calculate-docker-image.outputs.docker-image }}
+          sudo rclone copy -P --s3-upload-concurrency 64 --s3-chunk-size 200M --s3-upload-cutoff 300M ~/docker-data/pytorch/pytorch_docker_image.tar oci:pytorchbucket0002/pytorch_docker_image --progress
