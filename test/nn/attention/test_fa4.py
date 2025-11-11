@@ -3,11 +3,13 @@
 import importlib
 import unittest
 from collections import namedtuple
+from contextlib import contextmanager
 
 import torch
 import torch.nn.functional as F
 from torch.backends.cuda import SDPBackend
 from torch.nn.attention import install_flash_attention_impl, sdpa_kernel
+from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 
@@ -26,6 +28,22 @@ def _fa4_dependencies_available() -> bool:
     except ModuleNotFoundError:
         return False
     return True
+
+
+@contextmanager
+def cuda_kernel_profiler(kernel_pattern="flash_attncute"):
+    result = {"found": False, "kernel_names": []}
+
+    with profile(activities=[ProfilerActivity.CUDA]) as prof:
+        yield result
+
+    kernel_names = [
+        evt.name
+        for evt in prof.events()
+        if evt.device_type == torch.autograd.DeviceType.CUDA and evt.name
+    ]
+    result["kernel_names"] = kernel_names
+    result["found"] = any(kernel_pattern in name for name in kernel_names)
 
 
 def flash_vs_math(q, k, v, is_causal=False, rtol=2):
@@ -193,6 +211,42 @@ class TestFlashAttentionFA4(TestCase):
             is_causal=is_causal,
             # Bwd is consistently erroring
             test_backward=test_backward,
+        )
+
+    @unittest.skipUnless(_fa4_dependencies_available(), "FA4 backend unavailable")
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_fa4_kernel_called(self, device, dtype):
+        shape = SdpaShape(2, 4, 512, 128)
+        q = torch.randn(shape, dtype=dtype, device=device, requires_grad=True)
+        k = torch.randn(shape, dtype=dtype, device=device, requires_grad=True)
+        v = torch.randn(shape, dtype=dtype, device=device, requires_grad=True)
+
+        with cuda_kernel_profiler("flash_attncute") as prof_result:
+            with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+                out = F.scaled_dot_product_attention(
+                    q, k, v, attn_mask=None, dropout_p=0.0, is_causal=False
+                )
+                out.sum().backward()
+
+        self.assertTrue(
+            prof_result["found"],
+            f"FA4 CUTE kernel not found in forward/backward. Available kernels: {prof_result['kernel_names']}",
+        )
+
+        q.grad = None
+        k.grad = None
+        v.grad = None
+
+        with cuda_kernel_profiler("flash_attncute") as prof_result:
+            with sdpa_kernel(SDPBackend.MATH):
+                out = F.scaled_dot_product_attention(
+                    q, k, v, attn_mask=None, dropout_p=0.0, is_causal=False
+                )
+                out.sum().backward()
+
+        self.assertFalse(
+            prof_result["found"],
+            f"FA4 CUTE kernel unexpectedly found with MATH backend. Kernels: {prof_result['kernel_names']}",
         )
 
 
