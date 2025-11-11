@@ -213,7 +213,9 @@ def install_flash_attention_impl(
     Install into the dispatcher a previously registered flash attention backend.
 
     Args:
-        backend: Backend identifier to activate.
+        backend: Backend identifier to activate. See
+            :func:`~torch.nn.attention.list_flash_attention_backends` for available
+            backends.
 
     Example:
         >>> install_flash_attention_impl("FA4")  # doctest: +SKIP
