@@ -336,6 +336,34 @@ class <lambda>(torch.nn.Module):
         )
 
     @requires_cuda
+    @requires_multigpu()
+    def test_new_event_api(self) -> None:
+        from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
+        from torch._dynamo.variables.streams import new_event
+
+        def event_generation_backend(gm, *args, **kwargs):  # type: ignore[no-untyped-def]
+            e0_ind = new_event()
+            with torch.Stream(device="cuda:1"):
+                get_external_object_by_index(e0_ind).record()
+            e1_ind = new_event()
+            self.assertNotEqual(e0_ind, e1_ind)
+            self.assertNotEqual(
+                get_external_object_by_index(e0_ind),
+                get_external_object_by_index(e1_ind),
+            )
+            with gm.graph.inserting_after(next(iter(gm.graph.nodes))):
+                gm.graph.call_function(
+                    get_external_object_by_index, args=(1,), kwargs={}
+                )
+            return gm
+
+        @torch.compile(backend=event_generation_backend)
+        def fn(x):
+            return x + 1
+
+        fn(torch.ones(2, 2, device="cuda:0"))
+
+    @requires_cuda
     def test_stream_with_mutation(self):
         def fn(x, y):
             s2 = torch.Stream()
