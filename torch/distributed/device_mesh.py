@@ -262,7 +262,6 @@ else:
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
-            self._thread_id = None
             if device_type != "xla":
                 # always try to create default (world) pg, even if it is not initialized
                 # already. The world pg is used for device mesh identity (rank) on each
