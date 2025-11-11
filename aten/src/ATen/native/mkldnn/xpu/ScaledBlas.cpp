@@ -340,6 +340,34 @@ Tensor _scaled_mm_xpu(
       out);
 }
 
+Tensor& _scaled_gemm(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    const ScalingType scaling_choice_a,
+    const ScalingType scaling_choice_b,
+    const std::optional<Tensor>& bias,
+    const bool use_fast_accum,
+    Tensor& out,
+    const std::optional<Tensor>& alpha = std::nullopt) {
+  // TODO: scale_result and alpha is not defined or used!
+  std::optional<Tensor> scaled_result = std::nullopt;
+  at::native::onednn::scaled_matmul(
+      mat1,
+      mat2,
+      out,
+      scale_a,
+      scale_b,
+      scaling_choice_a,
+      scaling_choice_b,
+      bias,
+      scaled_result,
+      use_fast_accum);
+
+  return out;
+}
+
 using acceptance_fn = std::function<bool(
     c10::ScalarType,
     std::vector<ScalingType>&,
