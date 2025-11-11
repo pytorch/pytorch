@@ -6,7 +6,7 @@ import logging
 import operator
 from collections import Counter, defaultdict
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -14,6 +14,7 @@ import torch._inductor as inductor
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
+from torch._decomp.decompositions import _maybe_cast, _unsqueeze_to_dim, prod, utils
 from torch._dynamo.utils import counters
 from torch._inductor import comms
 from torch._inductor.virtualized import ops
@@ -1994,3 +1995,205 @@ def move_constructors_to_gpu(graph: fx.Graph) -> None:
         allow_inputs=allow_inputs_outputs,
         allow_outputs=allow_inputs_outputs,
     )(graph)
+
+
+def _fused_rms_norm_eager_decomp(input, normalized_shape, weight, eps):
+    from torch._inductor._numeric_utils import ordered_fma_sum
+
+    dims_to_reduce: list[int] = []
+    for i in range(len(normalized_shape)):
+        dims_to_reduce.append(input.dim() - i - 1)
+
+    # upcast is needed for fp16 and bf16
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+    upcasted_input = input.to(computation_dtype)
+
+    # computation_dtype would be one of [Double, Float, ComplexFloat, ComplexDouble]
+    if eps is None:
+        if computation_dtype in (torch.float32, torch.complex64):
+            eps_val = torch.finfo(torch.float32).eps
+        else:
+            eps_val = torch.finfo(torch.float64).eps
+    else:
+        eps_val = eps
+
+    rsqrt_input = ordered_fma_sum(
+        upcasted_input,
+        upcasted_input,
+        order=[(1, 2), 64, 32, 16, 8, 4, 128],
+        dim=dims_to_reduce,
+        keepdim=True,
+    )
+    rqrst_input = torch.rsqrt(
+        # NB: don't inplace here, will violate functional IR invariant
+        # NB: carefully use the Scalar overload of add to ensure compatibility with the C++ decomp
+        torch.ops.aten.add.Scalar(rsqrt_input / prod(normalized_shape), eps_val)
+    )
+
+    upcasted_result = upcasted_input.mul(rqrst_input)
+
+    if weight is not None:
+        upcasted_result = upcasted_result.mul(weight)
+
+    # NB: nested should be dead here, just here for fidelity
+    is_nested = input.is_nested or (weight is not None and weight.is_nested)
+    memory_format = utils.suggest_memory_format(input)
+    is_channels_last = memory_format in (
+        torch.channels_last,
+        torch.channels_last_3d,
+    )
+
+    if not is_nested and not is_channels_last:
+        upcasted_result = upcasted_result.contiguous()
+        rqrst_input = rqrst_input.contiguous()
+
+    # Cast normalized result back to original input type
+    result = upcasted_result.type_as(input)
+
+    return result, rqrst_input
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten._fused_rms_norm.default,
+        KeywordArg("input"),
+        KeywordArg("normalized_shape"),
+        KeywordArg("weight"),
+        KeywordArg("eps"),
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[1],
+    extra_check=lambda *_: config.triton.match_eager_rms_norm,
+)
+def _fused_rms_norm_eager_replacement_pattern(
+    match: Match, input, normalized_shape, weight, eps
+):
+    match.replace_by_example(
+        _fused_rms_norm_eager_decomp, [input, normalized_shape, weight, eps]
+    )
+
+
+def _fused_rms_norm_backward_eager_decomp(
+    grad_out: torch.Tensor,
+    input: torch.Tensor,
+    normalized_shape: list[int],
+    rstd: torch.Tensor,
+    weight: Optional[torch.Tensor],
+    output_mask: list[bool],
+):
+    input_shape = input.shape
+    input_ndim = input.dim()
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+
+    grad_out_cast = grad_out.to(
+        computation_dtype, memory_format=torch.contiguous_format
+    )
+    input_cast = input.to(computation_dtype, memory_format=torch.contiguous_format)
+    weight_cast = (
+        weight.to(computation_dtype, memory_format=torch.contiguous_format)
+        if weight is not None
+        else None
+    )
+    assert grad_out_cast is not None
+
+    axis = input_ndim - len(normalized_shape)
+    inner_dims = input_shape[axis:]
+    outer_dims = input_shape[:axis]
+    inner_dim_indices: list[int] = []
+    outer_dim_indices: list[int] = []
+    for i in range(input_ndim):
+        if i >= axis:
+            inner_dim_indices.append(i)
+        else:
+            outer_dim_indices.append(i)
+
+    N = prod(inner_dims)  # type: ignore[arg-type]
+    M = prod(outer_dims)  # type: ignore[arg-type]
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(M == 0) or guard_or_false(N == 0):
+        return (
+            input.new_zeros(input_shape) if output_mask[0] else None,
+            input.new_zeros(input_shape[axis:]) if output_mask[1] else None,
+        )
+
+    rstd = _unsqueeze_to_dim(rstd, input_cast.dim())  # type: ignore[union-attr]
+    if weight_cast is not None:
+        grad_x_hat = grad_out_cast * weight_cast
+    else:
+        grad_x_hat = grad_out_cast
+
+    d_input: Optional[Tensor] = None
+    d_weight: Optional[Tensor] = None
+
+    x_hat = input_cast * rstd
+
+    if output_mask[0]:
+        from torch._inductor._numeric_utils import fma, ordered_fma_sum
+
+        sum_val = ordered_fma_sum(
+            (weight_cast * grad_out_cast) * input_cast,
+            rstd,
+            order=[(1, 2), 64, 32, 16, 8, 4, 128],
+            dim=-1,
+            keepdim=True,
+        )
+        sum_val = sum_val.reshape(
+            *sum_val.shape[:-1], *[1 for _ in range(len(normalized_shape))]
+        )
+        d_input = ((1 / N) * rstd) * fma(
+            -rstd * input_cast * sum_val, N * weight_cast, grad_out_cast
+        )
+
+    if output_mask[1] and weight_cast is not None:
+        if len(outer_dim_indices) > 0:
+            d_weight = ordered_fma_sum(
+                input_cast * grad_out_cast,
+                rstd,
+                order=[(1, 2, 4), 64, 32, 16, 8],
+                dim=0,
+                keepdim=False,
+            )
+        else:
+            d_weight = d_weight_full_shape
+
+    return (
+        _maybe_cast(d_input, input.dtype),
+        _maybe_cast(d_weight, input.dtype),
+    )
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten._fused_rms_norm_backward.default,
+        KeywordArg("grad_out"),
+        KeywordArg("input"),
+        KeywordArg("normalized_shape"),
+        KeywordArg("rstd"),
+        KeywordArg("weight"),
+        KeywordArg("output_mask"),
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[1],
+    extra_check=lambda *_: config.triton.match_eager_rms_norm,
+)
+def _fused_rms_norm_backward_eager_replacement_pattern(
+    match: Match,
+    grad_out: torch.Tensor,
+    input: torch.Tensor,
+    normalized_shape: list[int],
+    rstd: torch.Tensor,
+    weight: Optional[torch.Tensor],
+    output_mask: list[bool],
+):
+    match.replace_by_example(
+        _fused_rms_norm_backward_eager_decomp,
+        [
+            grad_out,
+            input,
+            normalized_shape,
+            rstd,
+            weight,
+            output_mask,
+        ],
+    )

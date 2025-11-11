@@ -1588,6 +1588,8 @@ class triton:
         == "1"
     )
 
+    match_eager_rms_norm = False
+
 
 class aot_inductor:
     """
