@@ -797,7 +797,7 @@ REGISTER_MPS_ALLOCATOR_CALLBACK("mps_graph_cache_callback", MPSGraphCacheCallbac
 
 // MetalShaderLibrary implementation
 MetalShaderLibrary::~MetalShaderLibrary() {
-  for (const auto& it : cplMap) {
+  for (const auto& it : cpl_map_) {
     auto [cpl, func] = it.second;
     [cpl release];
     [func release];
@@ -818,7 +818,9 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
   for (auto p : params) {
     key += ":" + p;
   }
-  auto lib = libMap[key];
+
+  std::lock_guard guard(maps_mutex_);
+  auto lib = lib_map_[key];
   if (lib) {
     return lib;
   }
@@ -843,7 +845,7 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
     default:
       TORCH_INTERNAL_ASSERT(false, "Unsupported number of paramaters ", nparams);
   }
-  return libMap[key] = lib;
+  return lib_map_[key] = lib;
 }
 
 id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
@@ -883,8 +885,10 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
     id<MTLLibrary> lib,
     const std::string& fname) {
   const auto key = fmt::format("{}:{}", reinterpret_cast<void*>(lib), fname);
-  auto found_cpl = cplMap.find(key);
-  if (found_cpl != cplMap.end()) {
+
+  std::lock_guard guard(maps_mutex_);
+  auto found_cpl = cpl_map_.find(key);
+  if (found_cpl != cpl_map_.end()) {
     return found_cpl->second;
   }
 
@@ -894,8 +898,8 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
   auto cpl = [[lib device] newComputePipelineStateWithFunction:func error:&error];
   TORCH_CHECK(cpl, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
 
-  cplMap[key] = std::make_pair(cpl, func);
-  return cplMap[key];
+  cpl_map_[key] = std::make_pair(cpl, func);
+  return cpl_map_[key];
 }
 
 std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
