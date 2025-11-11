@@ -20,7 +20,6 @@
 #include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addr_native.h>
-#include <ATen/ops/argsort.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/cholesky_native.h>
@@ -30,17 +29,12 @@
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
 #include <ATen/ops/linalg_lu_native.h>
-#include <ATen/ops/linalg_lu_solve_native.h>
-#include <ATen/ops/linalg_solve_triangular.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
-#include <ATen/ops/lu_unpack.h>
 #include <ATen/ops/lu_unpack_native.h>
-#include <ATen/ops/matmul.h>
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/orgqr_native.h>
 #include <ATen/ops/slice.h>
 #include <ATen/ops/stack.h>
-#include <ATen/ops/triangular_solve.h>
 #include <ATen/ops/triangular_solve_native.h>
 #endif
 
