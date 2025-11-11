@@ -110,17 +110,19 @@ class DeterministicTest(TestCase):
 
     @parametrize("model_name", ["GoogleFnet", "BertForMaskedLM", "DistillGPT2"])
     @parametrize("training_or_inference", ["training", "inference"])
-    def test_run2run_determinism(self, model_name, training_or_inference):
+    @parametrize("precision", ["float32", "bfloat16", "float16", "amp"])
+    def test_run2run_determinism(self, model_name, training_or_inference, precision):
         """
         Test run2run determinism for a few huggingface models.
 
-        The test assumes benchamarks/dynamo/huggingface.py can be found from
+        The test assumes benchmarks/dynamo/huggingface.py can be found from
         the current working directory.
         """
 
+        if not (model_name == "GoogleFnet" or precision == "float32"):
+            self.skipTest("Skip non-critical test to save CI resource")
+
         def _setup_env(env):
-            # distort benchmarking results
-            env["TORCHINDUCTOR_DISTORT_BENCHMARKING_RESULT"] = "inverse"
             env["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"  # disable autotune cache
             env["TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE"] = "0"
             env["TORCHINDUCTOR_FX_GRAPH_CACHE"] = "0"
@@ -134,7 +136,7 @@ class DeterministicTest(TestCase):
             saved_pkl = os.path.join(tmpdir, "saved.pkl")
             cmd = (
                 f"{sys.executable} benchmarks/dynamo/huggingface.py --backend inductor"
-                + f" --float32 --accuracy --only {model_name} --{training_or_inference}"
+                + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
                 + f" --disable-cudagraphs --save-model-outputs-to={saved_pkl}"
             )
             print("Command", cmd)
@@ -145,13 +147,13 @@ class DeterministicTest(TestCase):
 
             cmd = (
                 f"{sys.executable} benchmarks/dynamo/huggingface.py --backend inductor"
-                + f" --float32 --accuracy --only {model_name} --{training_or_inference}"
+                + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
                 + f" --disable-cudagraphs --compare-model-outputs-with={saved_pkl}"
             )
             print("Command", cmd)
-            env = os.environ.copy()
-            _setup_env(env)
 
+            # distort benchmarking results
+            env["TORCHINDUCTOR_DISTORT_BENCHMARKING_RESULT"] = "inverse"
             out = subprocess.run(cmd.split(), capture_output=True, env=env)
             self.assertTrue(
                 "pass" in out.stdout.decode(),
