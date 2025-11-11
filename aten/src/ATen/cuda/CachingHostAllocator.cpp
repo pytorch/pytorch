@@ -6,6 +6,8 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/core/thread_pool.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/util/hash.h>
 
 #include <cuda_runtime_api.h>
 #include <future>
@@ -72,6 +74,173 @@ struct CUDACachingHostAllocatorImpl
     : public CachingHostAllocatorImpl<CUDAStream, EventPool::Event> {
  private:
   ska::flat_hash_map<void*, bool> use_host_register;
+public:
+  bool record_event(void* ptr, void* ctx, c10::Stream s) override {
+    if (!CachingHostAllocatorImpl<CUDAStream, EventPool::Event>::record_event(ptr, ctx, s)) {
+      return false;
+    }
+
+    // Inspect the preceding captured node on stream s. If it's a
+    // memcpy from pinned host memory that reads from this block, hash
+    // the copied section and record it to detect accidental mutations
+    // during capture. The purpose is to identify cases where the CPU
+    // writes to host pinned memory after the GPU is scheduled to read
+    // from it during cuda graph replay. I am calling this a
+    // CPU-Write-After-GPU-Read hazard. Such a situation is almost
+    // certainly a bug, bcause it doesn't match the semantics of eager
+    // launch. That check happens in end_allocate_to_pool.
+
+    Block *block = nullptr;
+    if (block_exists(ctx)) {
+      block = reinterpret_cast<Block*>(ctx);
+    } else {
+      block = get_block_from_ptr(ptr);
+    }
+
+    assert(block != nullptr);
+
+    CUDAStream stream(CUDAStream::UNCHECKED, s);
+
+    std::optional<std::tuple<const cudaGraphNode_t*, size_t>> terminals_opt = c10::cuda::streamGetTerminalNodes(stream);
+
+    if (!terminals_opt.has_value()) {
+      // no stream capture is happening right now
+      return true;
+    }
+
+    auto&& [terminals, num_terminals] = *terminals_opt;
+
+    if (num_terminals == 0) {
+      TORCH_WARN(
+          "CachingHostAllocator: no nodes precede record_event() during stream capture; "
+          "this is probably a bug.");
+      return true;
+    }
+
+    if (num_terminals > 1) {
+      TORCH_WARN(
+          "CachingHostAllocator: multiple preceding nodes during capture; "
+          "skipping host read verification.");
+      return true;
+    }
+
+    cudaGraphNode_t node = terminals[0];
+    cudaGraphNodeType type{cudaGraphNodeTypeCount};
+    C10_CUDA_CHECK(cudaGraphNodeGetType(node, &type));
+    if (type != cudaGraphNodeTypeMemcpy) {
+      TORCH_WARN(
+          "CachingHostAllocator: preceding captured node is not a memcpy; "
+          "can only check for CPU-write-after-GPU-read errors for memcpy nodes.");
+      return true;
+    }
+
+    cudaMemcpy3DParms params{};
+    C10_CUDA_CHECK(cudaGraphMemcpyNodeGetParams(node, &params));
+
+    // Only handle Host->Device copies (source is host memory)
+    if (params.kind != cudaMemcpyHostToDevice && params.kind != cudaMemcpyDefault) {
+      // don't warn, since Device->Host copy is a valid node to precede record_event()
+      return true;
+    }
+
+    cudaPointerAttributes attr{};
+    cudaError_t attr_err = cudaPointerGetAttributes(&attr, params.srcPtr.ptr);
+    // TODO: Think about what to do if the memory type is
+    // cudaMemoryTypeUnregistered, which I believe refers to pageable
+    // host memory. (Meanwhile, cudaMemoryTypeHost represents pinned
+    // host memory.)
+    if (attr_err != cudaSuccess || attr.type != cudaMemoryTypeHost) {
+      // Clear error if any and return (not pinned host memory)
+      (void)cudaGetLastError();
+      TORCH_WARN("CachingHostAllocator: source of memcpy is not pinned host memory");
+      return true;
+    }
+
+    // Compute the start pointer and a conservative contiguous span size.
+    // For typical 1D host->device copies, height=depth=1 and srcPos.y/z=0.
+    if (params.extent.height > 1 || params.extent.depth > 1) {
+      TORCH_WARN("CachingHostAllocator: non-1D memcopies are not supported for CPU-write-after-GPU-read detection. File an issue if this is important to you.");
+      return true;
+    }
+    char* start_ptr = static_cast<char*>(params.srcPtr.ptr) + params.srcPos.x;
+    size_t n = params.extent.width;
+
+    if (n == 0) {
+      TORCH_WARN("CachingHostAllocator: cudaMemcpyAsync node is copying 0 bytes");
+      return true;
+    }
+
+    // Verify the memcpy source buffer is within this block's bounds
+    char *block_start, *block_end;
+    {
+      std::lock_guard<std::mutex> lg(block->mutex_);
+      block_start = static_cast<char*>(block->ptr_);
+      block_end = block_start + block->size_;
+    }
+    char* src_end = start_ptr + n;
+    if (start_ptr < block_start || src_end > block_end) {
+      TORCH_WARN("CachingHostAllocator: cudaMemcpyAsync node is copying memory outside this block's memory region, which shouldn't be possible.");
+      return true;
+    }
+
+    // Hash the source buffer and record the tuple (ptr, size, hash)
+    c10::sha1 hasher(start_ptr, n);
+    std::string hash_string = hasher.str();
+    {
+      std::lock_guard<std::mutex> lg(block->mutex_);
+      block->sections_read_under_stream_capture_.emplace_back(
+          static_cast<void*>(start_ptr), n, std::move(hash_string));
+    }
+    return true;
+  }
+
+  // See comment in the header: we need to validate that any pinned host
+  // memory regions read by captured memcpy nodes have not been modified during
+  // capture. Perform the validation at the end of allocation-to-pool.
+  void end_allocate_to_pool(c10::MempoolId_t pool_id) {
+    // Look up the private pool for this capture.
+    {
+      std::shared_lock<std::shared_mutex> lg(instance_mutex_);
+      auto it = graph_pools_.find(pool_id);
+      if (it != graph_pools_.end()) {
+        auto& pool = it->second->blocks;
+        // Lock blocks set while we iterate
+        std::lock_guard<std::mutex> gb(pool.blocks_mutex_);
+        for (auto* block : pool.blocks_) {
+          // Copy sections under block lock and clear them to avoid rechecking
+          std::vector<std::tuple<void*, size_t, std::string>> sections;
+          {
+            std::lock_guard<std::mutex> bl(block->mutex_);
+            sections = block->sections_read_under_stream_capture_;
+            block->sections_read_under_stream_capture_.clear();
+          }
+          for (const auto& tup : sections) {
+            void* start = nullptr;
+            size_t len = 0;
+            const std::string* expected_hash = nullptr;
+            // tie cannot bind to temporary from get<>, extract manually
+            start = std::get<0>(tup);
+            len = std::get<1>(tup);
+            expected_hash = &std::get<2>(tup);
+            c10::sha1 hasher(start, len);
+            std::string actual = hasher.str();
+            TORCH_CHECK(
+                actual == *expected_hash,
+                "CUDA graph replay will not match eager execution: a pinned host "
+                "memory buffer read by a memcpy during capture was modified after "
+                "it was recorded. To fix, never write to pinned host memory after "
+                "stream capture records a memcpy that reads from it.");
+          }
+        }
+      }
+    }
+
+    // Defer to base implementation to end allocation to this pool.
+    CachingHostAllocatorImpl<CUDAStream, EventPool::Event>::end_allocate_to_pool(
+        pool_id);
+  }
+
+ private:
 
   void allocate_host_memory(size_t size, void** ptr) override {
     // try allocating from reserve segment first before calling into expensive APIs
