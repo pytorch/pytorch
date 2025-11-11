@@ -140,7 +140,7 @@ class ExportDynamoConfig:
     capture_scalar_outputs: bool = True
     prefer_deferred_runtime_asserts_over_guards: bool = False
     replay_side_effects: bool = False
-    side_effect_replay_policy: str = "warn"
+    side_effect_replay_policy: int = 2
 
 
 @dataclasses.dataclass

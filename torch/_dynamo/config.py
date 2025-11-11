@@ -48,13 +48,15 @@ dead_code_elimination = True
 # replayed after the compiled graph runs. This can cause correctness issues
 # if your code depends on these mutations being visible. This should probably
 # never be False by default. At the moment, only export will need it.
+# [@compile_ignored: runtime_behaviour]
 replay_side_effects = True
 
 # Configure side effect warning level
-# If `silent`, we silently allow side effects
-# If `warn``, we warn side effects
-# If `error``, we error on side effects
-side_effect_replay_policy = "silent"
+# If 1, we silently allow side effects
+# If 2, we warn side effects
+# If 3, we error on side effects
+# [@compile_ignored: runtime_behaviour]
+side_effect_replay_policy = 1
 
 # disable (for a function) when cache reaches this size
 
