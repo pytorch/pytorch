@@ -20,6 +20,14 @@ from torch._C import (
     DispatchKey,
 )
 
+# Import the C++ TLS setter for mode visibility tracking
+try:
+    from torch._C._dynamo.guards import set_is_in_mode_without_ignore_compile_internals
+except ImportError:
+    # Fallback for when the function isn't available (shouldn't happen in practice)
+    def set_is_in_mode_without_ignore_compile_internals(value: bool) -> None:
+        pass
+
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -140,6 +148,10 @@ class TorchDispatchMode:
             _is_in_any_mode_without_ignore_compile_internals
             or not self.ignore_compile_internals()
         )
+        # Update the C++ TLS cache so LocalState doesn't need to call Python
+        set_is_in_mode_without_ignore_compile_internals(
+            _is_in_any_mode_without_ignore_compile_internals
+        )
         _push_mode(self)
         return self
 
@@ -158,6 +170,10 @@ class TorchDispatchMode:
         global _is_in_any_mode_without_ignore_compile_internals
         _is_in_any_mode_without_ignore_compile_internals = (
             self.old_without_ignore_compile_internals_dispatch_mode_flags.pop()
+        )
+        # Update the C++ TLS cache so LocalState doesn't need to call Python
+        set_is_in_mode_without_ignore_compile_internals(
+            _is_in_any_mode_without_ignore_compile_internals
         )
         _pop_mode(mb_dk_or_mode_key)
 
