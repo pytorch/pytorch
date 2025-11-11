@@ -108,7 +108,6 @@ NAVI_ARCH = ("gfx1030", "gfx1100", "gfx1101", "gfx1200", "gfx1201")
 NAVI3_ARCH = ("gfx1100", "gfx1101")
 NAVI4_ARCH = ("gfx1200", "gfx1201")
 
-
 class ProfilingMode(Enum):
     LEGACY = 1
     SIMPLE = 2

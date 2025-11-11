@@ -4,11 +4,10 @@
 import os
 import sys
 import torch
-
 from torch.utils._pytree import tree_map
 import unittest
 
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO, TEST_XPU
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
 from torch.fx.operator_schemas import normalize_function
 from torch._subclasses.schema_check_mode import SchemaCheckMode
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -18,6 +17,7 @@ from torch.testing._internal.common_device_type import ops, OpDTypes, instantiat
 from torch.testing._internal.common_utils import IS_WINDOWS, slowTestIf
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
+
 
 
 def secretly_aliasing(x):
@@ -496,51 +496,7 @@ class TestSchemaCheck(JitTestCase):
         with SchemaInfoBindTestMode(self) as schemaInfoCheck:
             x.add(x)
 
-
 class TestSchemaCheckModeOpInfo(JitTestCase):
-    _xpu_not_supported_cases = ('test_schema_correctness_amax_xpu_uint16',
-                                'test_schema_correctness_amax_xpu_uint32',
-                                'test_schema_correctness_amax_xpu_uint64',
-                                'test_schema_correctness_amin_xpu_uint16',
-                                'test_schema_correctness_amin_xpu_uint32',
-                                'test_schema_correctness_amin_xpu_uint64',
-                                'test_schema_correctness_aminmax_xpu_uint16',
-                                'test_schema_correctness_aminmax_xpu_uint32',
-                                'test_schema_correctness_aminmax_xpu_uint64',
-                                'test_schema_correctness_max_reduction_no_dim_xpu_uint16',
-                                'test_schema_correctness_max_reduction_no_dim_xpu_uint32',
-                                'test_schema_correctness_max_reduction_no_dim_xpu_uint64',
-                                'test_schema_correctness_max_reduction_with_dim_xpu_uint16',
-                                'test_schema_correctness_max_reduction_with_dim_xpu_uint32',
-                                'test_schema_correctness_max_reduction_with_dim_xpu_uint64',
-                                'test_schema_correctness_min_reduction_no_dim_xpu_uint16',
-                                'test_schema_correctness_min_reduction_no_dim_xpu_uint32',
-                                'test_schema_correctness_min_reduction_no_dim_xpu_uint64',
-                                'test_schema_correctness_min_reduction_with_dim_xpu_uint16',
-                                'test_schema_correctness_min_reduction_with_dim_xpu_uint32',
-                                'test_schema_correctness_min_reduction_with_dim_xpu_uint64',
-                                'test_schema_correctness_nn_functional_conv_transpose2d_xpu_bfloat16',
-                                'test_schema_correctness_nn_functional_conv_transpose2d_xpu_complex128',
-                                'test_schema_correctness_nn_functional_conv_transpose2d_xpu_complex64',
-                                'test_schema_correctness_nn_functional_conv_transpose2d_xpu_float16',
-                                'test_schema_correctness_nn_functional_conv_transpose2d_xpu_float32',
-                                'test_schema_correctness_nn_functional_conv_transpose2d_xpu_float64',
-                                'test_schema_correctness_nn_functional_conv_transpose3d_xpu_bfloat16',
-                                'test_schema_correctness_nn_functional_conv_transpose3d_xpu_complex128',
-                                'test_schema_correctness_nn_functional_conv_transpose3d_xpu_complex64',
-                                'test_schema_correctness_nn_functional_conv_transpose3d_xpu_float16',
-                                'test_schema_correctness_nn_functional_conv_transpose3d_xpu_float32',
-                                'test_schema_correctness_nn_functional_conv_transpose3d_xpu_float64',
-                                'test_schema_correctness_torch_ops_aten__flash_attention_forward_xpu_float16')
-
-    def _is_xpu_and_supported(self, op):
-        if TEST_XPU:
-            for case in TestSchemaCheckModeOpInfo._xpu_not_supported_cases:
-                if op and op.formatted_name and case in op.formatted_name:
-                    return False
-
-        return True
-
     @ops(op_db, dtypes=OpDTypes.supported)
     @slowTestIf(IS_WINDOWS)
     def test_schema_correctness(self, device, dtype, op):
@@ -548,15 +504,11 @@ class TestSchemaCheckModeOpInfo(JitTestCase):
         # There's also errors with complex64 and complex128
         if (dtype == torch.complex32):
             return
-
-        if not self._is_xpu_and_supported(op):
-            self.skipTest("Not supported on XPU yet")
-
         for sample in op.sample_inputs(device, dtype, requires_grad=False):
             with SchemaCheckMode():
                 op(sample.input, *sample.args, **sample.kwargs)
 
-instantiate_device_type_tests(TestSchemaCheckModeOpInfo, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True)
+instantiate_device_type_tests(TestSchemaCheckModeOpInfo, globals(), only_for=("cpu", "cuda"))
 
 if __name__ == '__main__':
     run_tests()
