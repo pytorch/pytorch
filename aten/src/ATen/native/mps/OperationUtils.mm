@@ -815,13 +815,13 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary() {
 
 id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::string>& params) {
   TORCH_INTERNAL_ASSERT(nparams == params.size());
-  std::string key = "";
-  for (auto p : params) {
+  std::string key;
+  for (auto const& p : params) {
     key += ":" + p;
   }
 
   std::lock_guard guard(maps_mutex_);
-  auto lib = lib_map_[key];
+  auto& lib = lib_map_[key];
   if (lib) {
     return lib;
   }
@@ -846,7 +846,7 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
     default:
       TORCH_INTERNAL_ASSERT(false, "Unsupported number of paramaters ", nparams);
   }
-  return lib_map_[key] = lib;
+  return lib;
 }
 
 id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
@@ -900,8 +900,7 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
   auto cpl = [[lib device] newComputePipelineStateWithFunction:func error:&error];
   TORCH_CHECK(cpl, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
 
-  cpl_map_[key] = std::make_pair(cpl, func);
-  return cpl_map_[key];
+  return cpl_map_[key] = std::make_pair(cpl, func);
 }
 
 std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
