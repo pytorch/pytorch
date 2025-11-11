@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import importlib
-from dataclasses import dataclass
 from functools import cache
 from typing import Any, TYPE_CHECKING
 from typing_extensions import TypeVarTuple, Unpack
@@ -22,14 +21,7 @@ __all__ = [
 ]
 
 
-@dataclass
-class _FA4FlashAttentionState:
-    module_path: str = "flash_attn.cute.interface"
-    module: ModuleType | None = None
-    registered: bool = False
-
-
-_FA4_STATE = _FA4FlashAttentionState()
+_FA4_MODULE_PATH: str | None = None
 _FA4_LIBRARY: Library | None = None
 
 
@@ -39,16 +31,25 @@ def _get_device_major(device: torch.device) -> int:
     return major
 
 
+@cache
 def register_flash_attention_fa4(
     module_path: str = "flash_attn.cute.interface",
 ) -> None:
-    module = _fa4_import_module(module_path)
-    _FA4_STATE.module_path = module_path
-    _FA4_STATE.module = module
-    if _FA4_STATE.registered:
-        return None
+    """
+    Register FA4 flash attention kernels with the PyTorch dispatcher.
+
+    This function is cached and will only register once per unique module_path.
+    Calling with the same module_path multiple times is a no-op. Backend
+    switching support (unregistering one backend and registering another)
+    is not currently implemented.
+
+    Args:
+        module_path: Python module path to the FA4 implementation.
+    """
+    global _FA4_MODULE_PATH
+    _ = _fa4_import_module(module_path)
+    _FA4_MODULE_PATH = module_path
     _fa4_register_kernels()
-    _FA4_STATE.registered = True
 
 
 @cache
@@ -183,9 +184,9 @@ def _fa4_run_forward(
     window_size_right: int | None,
     seqused_k: torch.Tensor | None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    module = _FA4_STATE.module
-    if module is None:
-        raise RuntimeError("FA4 module not loaded")
+    if _FA4_MODULE_PATH is None:
+        raise RuntimeError("FA4 not registered")
+    module = _fa4_import_module(_FA4_MODULE_PATH)
     kwargs: dict[str, Any] = {
         "softmax_scale": scale,
         "causal": is_causal,
@@ -212,9 +213,9 @@ def _fa4_run_backward(
     scale: float | None,
     is_causal: bool,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    module = _FA4_STATE.module
-    if module is None:
-        raise RuntimeError("FA4 module not loaded")
+    if _FA4_MODULE_PATH is None:
+        raise RuntimeError("FA4 not registered")
+    module = _fa4_import_module(_FA4_MODULE_PATH)
     dq, dk, dv = module._flash_attn_bwd(
         query,
         key,
