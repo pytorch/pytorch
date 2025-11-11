@@ -139,51 +139,25 @@ filter_aarch64_archs() {
     echo "$arch_list"
 }
 
-# Base architecture list for common architectures
-# Includes Volta (7.0), Turing (7.5), Ampere (8.0, 8.6), Ada (9.0)
+# Base: Common architectures across all modern CUDA versions
 TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0"
 
 case ${CUDA_VERSION} in
-    12.6)
-        #keeping sm_50-sm_60 in CUDA 12.6 only, these architectures are deprecated in CUDA 12.8/9 and will be removed in future releases
-        #however we would like to keep sm_70 architecture see: https://github.com/pytorch/pytorch/issues/157517
-        TORCH_CUDA_ARCH_LIST=$(prepend_archs "$TORCH_CUDA_ARCH_LIST" "5.0" "6.0")
-        ;;
-    12.8)
-        # Add Hopper and Blackwell support
-        TORCH_CUDA_ARCH_LIST=$(append_archs "$TORCH_CUDA_ARCH_LIST" "10.0" "12.0")
-        ;;
-    12.9)
-        # Add Hopper and Blackwell support with PTX for forward compatibility
-        TORCH_CUDA_ARCH_LIST=$(append_archs "$TORCH_CUDA_ARCH_LIST" "10.0" "12.0+PTX")
-        # WAR to resolve the ld error in libtorch build with CUDA 12.9
-        if [[ "$PACKAGE_TYPE" == "libtorch" ]]; then
-            TORCH_CUDA_ARCH_LIST=$(remove_archs "$TORCH_CUDA_ARCH_LIST" "7.0")
-        fi
+    12.6) TORCH_CUDA_ARCH_LIST="5.0;6.0;${TORCH_CUDA_ARCH_LIST}" ;;  # Only 12.6 includes Legacy Maxwell/Pascal that will be removed in future releases
+    12.8) TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};10.0;12.0" ;;  # +Hopper/Blackwell support
+    12.9) 
+        TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};10.0;12.0+PTX" # +Hopper/Blackwell support + PTX for forward compatibility
+        [[ "$PACKAGE_TYPE" == "libtorch" ]] && TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST//7.0;/}"  # Remove 7.0 to resolve the ld error in libtorch build with CUDA 12.9
         ;;
     13.0)
-        # Architecture support for Maxwell, Pascal, and Volta is considered feature-complete
-        TORCH_CUDA_ARCH_LIST=$(remove_archs "$TORCH_CUDA_ARCH_LIST" "7.0")
-        TORCH_CUDA_ARCH_LIST=$(append_archs "$TORCH_CUDA_ARCH_LIST" "10.0" "12.0+PTX")
-        # Add Blackwell (11.0) support for aarch64 only
-        if [[ "$ARCH" == "aarch64" ]]; then
-            TORCH_CUDA_ARCH_LIST=$(remove_archs "$TORCH_CUDA_ARCH_LIST" "12.0+PTX")
-            TORCH_CUDA_ARCH_LIST=$(append_archs "$TORCH_CUDA_ARCH_LIST" "11.0" "12.0+PTX")
-        fi
-        echo "Enable --compress-mode=size for CUDA 13 optimizations"
-        export TORCH_NVCC_FLAGS="-compress-mode=size"
-        export BUILD_BUNDLE_PTXAS=1
+        TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;$([[ "$ARCH" == "aarch64" ]] && echo "11.0;" || echo "")12.0+PTX"
+        export TORCH_NVCC_FLAGS="-compress-mode=size" BUILD_BUNDLE_PTXAS=1
         ;;
-    *)
-        echo "unknown cuda version $CUDA_VERSION"
-        exit 1
-        ;;
+    *) echo "unknown cuda version $CUDA_VERSION"; exit 1 ;;
 esac
 
-# Filter architectures for aarch64 (>= 8.0, excluding 8.6)
-if [[ "$ARCH" == "aarch64" ]]; then
-    TORCH_CUDA_ARCH_LIST=$(filter_aarch64_archs "$TORCH_CUDA_ARCH_LIST")
-fi
+# Filter for aarch64: Remove < 8.0 and 8.6
+[[ "$ARCH" == "aarch64" ]] && TORCH_CUDA_ARCH_LIST=$(filter_aarch64_archs "$TORCH_CUDA_ARCH_LIST")
 
 echo "TORCH_CUDA_ARCH_LIST set to: $TORCH_CUDA_ARCH_LIST"
 
@@ -194,20 +168,6 @@ echo "${TORCH_CUDA_ARCH_LIST}"
 if [[ "$ARCH" == "aarch64" ]]; then
     echo "Disabling MAGMA for aarch64 architecture"
     export USE_MAGMA=0
-    
-    # Enable MKLDNN with ARM Compute Library for ARM builds
-    export USE_MKLDNN=1
-    
-    # ACL is required for official aarch64 binary builds
-    if [[ ! -d "/acl" ]]; then
-        echo "ERROR: ARM Compute Library not found at /acl"
-        echo "ACL is required for aarch64 builds. Check Docker image setup."
-        exit 1
-    fi
-    
-    export USE_MKLDNN_ACL=1
-    export ACL_ROOT_DIR=/acl
-    echo "ARM Compute Library enabled for MKLDNN: ACL_ROOT_DIR=/acl"
 fi
 
 # Package directories

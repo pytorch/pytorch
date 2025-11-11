@@ -86,18 +86,21 @@ else
   fi
 fi
 
-# Enable ARM Compute Library for ARM builds
+# Enable MKLDNN with ARM Compute Library for ARM builds
 ARCH=$(uname -m)
 if [[ "$ARCH" == "aarch64" ]]; then
   export USE_MKLDNN=1
-  # Only enable ACL if it's installed
-  if [[ -d "/acl" ]]; then
-    export USE_MKLDNN_ACL=1
-    export ACL_ROOT_DIR=/acl
-    echo "ARM Compute Library enabled: ACL_ROOT_DIR=/acl"
-  else
-    echo "ARM Compute Library not found, building without ACL optimization"
+  
+  # ACL is required for aarch64 builds
+  if [[ ! -d "/acl" ]]; then
+    echo "ERROR: ARM Compute Library not found at /acl"
+    echo "ACL is required for aarch64 builds. Check Docker image setup."
+    exit 1
   fi
+  
+  export USE_MKLDNN_ACL=1
+  export ACL_ROOT_DIR=/acl
+  echo "ARM Compute Library enabled for MKLDNN: ACL_ROOT_DIR=/acl"
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
