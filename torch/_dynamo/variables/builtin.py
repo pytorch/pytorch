@@ -449,13 +449,13 @@ class BuiltinVariable(VariableTracker):
                 ["__rshift__", "__rrshift__", "__irshift__"],
                 operator.irshift,
             ),
+            operator.xor: (["__xor__", "__rxor__", "__ixor__"], operator.xor),
             # NB: The follow binary operators are not supported for now, since the
             # corresponding magic methods aren't defined on SymInt / SymFloat:
             # operator.matmul
             # divmod
             # operator.and_
             # operator.or_
-            # operator.xor
         }
         return fns
 
@@ -3066,7 +3066,24 @@ class BuiltinVariable(VariableTracker):
     def call_xor(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
+        # Rely on constant_handler
+        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
+            return None
+        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
+            b, (SymNodeVariable, ConstantVariable)
+        ):
+            return SymNodeVariable.create(
+                tx,
+                tx.output.create_proxy(
+                    "call_function", operator.xor, *proxy_args_kwargs([a, b], {})
+                ),
+                sym_num=None,
+            )
+
+        if isinstance(
+            a,
+            (DictKeysVariable, SetVariable, UserDefinedObjectVariable),
+        ):
             return a.call_method(tx, "__xor__", [b], {})
         return None
 
