@@ -2321,6 +2321,13 @@ class PrintHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
+        if not isinstance(args[0], str):
+            unimplemented(
+                gb_type="Print: format printed with non string input not supported",
+                context=f"args: {args}",
+                explanation="torch._higher_order_ops.print only supports non string input in kwargs",
+                hints=[],
+            )
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
         args_proxy = [arg.as_proxy() for arg in args]
