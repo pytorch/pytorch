@@ -304,12 +304,16 @@ class C10_API intrusive_ptr_target {
 };
 
 namespace detail {
+
+#ifndef C10_MOBILE
 template <>
 struct TargetTraits<c10::intrusive_ptr_target> {
   // A generic intrusive_ptr<intrusive_ptr_target> may actually be a TensorImpl
   // or StorageImpl, so we have to allow for PyObject support.
   static constexpr bool can_have_pyobject = true;
 };
+#endif
+
 } // namespace detail
 
 template <class TTarget, class NullType>

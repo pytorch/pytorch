@@ -377,6 +377,8 @@ C10_API c10::intrusive_ptr<c10::StorageImpl> make_storage_impl(
     std::optional<at::Device> device_opt);
 
 namespace detail {
+
+#ifndef C10_MOBILE
 template <class T>
 struct TargetTraits<
     T,
@@ -384,6 +386,8 @@ struct TargetTraits<
         std::is_base_of_v<c10::StorageImpl, std::remove_cv_t<T>>>> {
   static constexpr bool can_have_pyobject = true;
 };
+#endif
+
 } // namespace detail
 
 } // namespace c10

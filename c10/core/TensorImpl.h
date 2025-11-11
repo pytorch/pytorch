@@ -3085,12 +3085,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
 namespace detail {
 
+#ifndef C10_MOBILE
 template <class T>
 struct TargetTraits<
     T,
     std::enable_if_t<std::is_base_of_v<c10::TensorImpl, std::remove_cv_t<T>>>> {
   static constexpr bool can_have_pyobject = true;
 };
+#endif
 
 } // namespace detail
 
