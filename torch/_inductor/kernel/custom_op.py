@@ -326,7 +326,7 @@ def autotune_custom_op(
     process_group = None
 
     if op_overload:
-        from torch._inductor.runtime.collective_benchmarking import is_collective_op
+        from torch._inductor.select_algorithm import is_collective_op
 
         op_name = str(op_overload)
         is_collective = is_collective_op(op_name)

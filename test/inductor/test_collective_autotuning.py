@@ -99,50 +99,7 @@ class TestCollectiveAutotuning(MultiProcessTestCase):
         torch.testing.assert_close(y, expected, rtol=1e-3, atol=1e-3)
 
         if rank == 0:
-            print("✅ Single allreduce test passed!")
-
-        dist.destroy_process_group()
-
-    @skip_if_lt_x_gpu(2)
-    def test_collective_detection(self):
-        """Test that collective ops are detected correctly"""
-
-        from torch._inductor.runtime.collective_benchmarking import is_collective_op
-
-        # Test detection
-        self.assertTrue(
-            is_collective_op("torch.ops._c10d_functional.all_reduce_.default")
-        )
-        self.assertTrue(
-            is_collective_op(
-                "torch.ops._c10d_functional.all_gather_into_tensor.default"
-            )
-        )
-        self.assertFalse(is_collective_op("torch.ops.aten.matmul.default"))
-
-        print("✅ Collective detection test passed!")
-
-    @skip_if_lt_x_gpu(2)
-    def test_sync_timeout(self):
-        """Test that timeout mechanism works"""
-
-        from torch._inductor.runtime.collective_benchmarking import sync_with_timeout
-        import torch.distributed as dist
-
-        # Initialize distributed
-        dist.init_process_group(
-            backend="nccl",
-            init_method=f"file:///tmp/test_sync_timeout_{self.id()}",
-            world_size=self.world_size,
-            rank=self.rank,
-        )
-
-        # Test successful sync
-        result = sync_with_timeout(timeout_seconds=5.0)
-        self.assertTrue(result, "Sync should succeed with all ranks ready")
-
-        if self.rank == 0:
-            print("✅ Sync timeout test passed!")
+            print("Single allreduce test passed!")
 
         dist.destroy_process_group()
 

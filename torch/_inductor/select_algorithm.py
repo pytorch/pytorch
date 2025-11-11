@@ -102,6 +102,31 @@ VERIFY: dict[str, Any] = {}
 PRINT_AUTOTUNE = True
 DEBUG = False
 
+# Collective operation names for specialized benchmarking
+COLLECTIVE_OPS = {
+    "torch.ops._c10d_functional.all_reduce.default",
+    "torch.ops._c10d_functional.all_reduce_.default",
+    "torch.ops._c10d_functional.all_gather_into_tensor.default",
+    "torch.ops._c10d_functional.reduce_scatter_tensor.default",
+    "torch.ops._c10d_functional.all_to_all_single.default",
+    "torch.ops._c10d_functional_autograd.all_reduce.default",
+    "torch.ops._c10d_functional_autograd.all_gather_into_tensor.default",
+    "torch.ops._c10d_functional_autograd.reduce_scatter_tensor.default",
+    "torch.ops._c10d_functional_autograd.all_to_all_single.default",
+}
+
+
+def is_collective_op(op_name: str) -> bool:
+    """Check if an operation is a collective operation.
+
+    Args:
+        op_name: Name of the operation to check
+
+    Returns:
+        True if the operation is a collective op, False otherwise
+    """
+    return op_name in COLLECTIVE_OPS
+
 
 if TYPE_CHECKING:
     import concurrent
@@ -3396,17 +3421,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 rank,
             )
             return cls.benchmark_choice(choice, autotune_args)
-        device_type = next(
-            (tensor.device.type for tensor in inputs if is_gpu(tensor.device.type)),
-            "cuda",
-        )
-        device_interface = get_interface_for_device(device_type)
-        if device_interface.is_available():
-            device_interface.synchronize()  # shake out any CUDA errors
-
-        if VERIFY and autotune_args.expected is not None:
-            autotune_args.verify(**VERIFY)
-        return result
 
     @classmethod
     def benchmark_choices(
