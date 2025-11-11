@@ -19,7 +19,7 @@ permissions:
 jobs:
   download-docker-builds-artifacts:
     if: github.repository_owner == 'pytorch'
-    id: download-docker-builds-artifacts
+    name: download-docker-builds-artifacts
     runs-on: ubuntu-latest
     outputs:
       docker-pytorch-linux-jammy-rocm-n-py3: ${{ steps.process-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}
