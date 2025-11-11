@@ -1,9 +1,8 @@
-#include <c10/test/util/Macros.h>
-#include <c10/util/Metaprogramming.h>
 #include <gtest/gtest.h>
+#include <torch/headeronly/util/Metaprogramming.h>
 #include <cstdlib>
 
-using namespace c10::guts;
+using namespace torch::headeronly::guts;
 
 // NOLINTBEGIN(modernize*, cppcoreguidelines-special-member-functions)
 namespace {
@@ -64,6 +63,15 @@ static_assert(
         void(int, float),
         typename make_function_traits_t<void, typelist::typelist<int, float>>::
             func_type>::value,
+    "");
+
+struct Functor final {
+  std::string operator()(int64_t a, float b) const;
+};
+static_assert(
+    std::is_same<
+        std::string(int64_t, float),
+        typename infer_function_traits_t<Functor>::func_type>::value,
     "");
 } // namespace test_function_traits
 
