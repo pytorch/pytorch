@@ -4,7 +4,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections import deque
 from collections.abc import Callable, Iterator, Sized
-from typing import Any, Literal, Optional, TypeVar
+from typing import Any, Literal, TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
@@ -101,7 +101,7 @@ class ForkerIterDataPipe(IterDataPipe):
         datapipe: IterDataPipe,
         num_instances: int,
         buffer_size: int = 1000,
-        copy: Optional[Literal["shallow", "deep"]] = None,
+        copy: Literal["shallow", "deep"] | None = None,
     ):
         if num_instances < 1:
             raise ValueError(
@@ -147,10 +147,10 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
         datapipe: IterDataPipe,
         num_instances: int,
         buffer_size: int = 1000,
-        copy: Optional[Literal["shallow", "deep"]] = None,
+        copy: Literal["shallow", "deep"] | None = None,
     ) -> None:
         self.main_datapipe = datapipe
-        self._datapipe_iterator: Optional[Iterator[Any]] = None
+        self._datapipe_iterator: Iterator[Any] | None = None
         self.num_instances = num_instances
         self.buffer: deque = deque()
         self.buffer_size = buffer_size
@@ -177,7 +177,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
         ] * num_instances  # Indicate the indices of the next element to get
         self.slowest_ptr = 0  # The index to read by the slowest child
         self.leading_ptr = 0  # The index to read by the fastest child
-        self.end_ptr: Optional[int] = None  # The index to stop child
+        self.end_ptr: int | None = None  # The index to stop child
         self._child_stop: list[bool] = [True for _ in range(num_instances)]
 
     def __len__(self) -> int:
@@ -420,7 +420,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         cls,
         datapipe: IterDataPipe,
         num_instances: int,
-        classifier_fn: Callable[[_T_co], Optional[int]],
+        classifier_fn: Callable[[_T_co], int | None],
         drop_none: bool = False,
         buffer_size: int = 1000,
     ):
@@ -452,13 +452,13 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
         self,
         datapipe: IterDataPipe[_T_co],
         num_instances: int,
-        classifier_fn: Callable[[_T_co], Optional[int]],
+        classifier_fn: Callable[[_T_co], int | None],
         drop_none: bool,
         buffer_size: int,
     ) -> None:
         # pyrefly: ignore [invalid-type-var]
         self.main_datapipe = datapipe
-        self._datapipe_iterator: Optional[Iterator[Any]] = None
+        self._datapipe_iterator: Iterator[Any] | None = None
         self.num_instances = num_instances
         self.buffer_size = buffer_size
         if self.buffer_size < 0:
@@ -582,7 +582,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
         self._child_stop = [True for _ in range(self.num_instances)]
         self.main_datapipe_exhausted = False
 
-    def _cleanup(self, instance_id: Optional[int] = None) -> None:
+    def _cleanup(self, instance_id: int | None = None) -> None:
         ids = (
             range(self.num_instances)
             if instance_id is None
