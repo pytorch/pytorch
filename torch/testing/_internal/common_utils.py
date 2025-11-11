@@ -107,9 +107,7 @@ MI200_ARCH = ("gfx90a")
 NAVI_ARCH = ("gfx1030", "gfx1100", "gfx1101", "gfx1200", "gfx1201")
 NAVI3_ARCH = ("gfx1100", "gfx1101")
 NAVI4_ARCH = ("gfx1200", "gfx1201")
-HAS_XPU = torch.xpu.is_available()
-HAS_CUDA = torch.cuda.is_available()
-HAS_GPU = HAS_CUDA or HAS_XPU
+
 
 class ProfilingMode(Enum):
     LEGACY = 1

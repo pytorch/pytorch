@@ -8,7 +8,7 @@ import torch
 from torch.utils._pytree import tree_map
 import unittest
 
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO, HAS_XPU
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO, TEST_XPU
 from torch.fx.operator_schemas import normalize_function
 from torch._subclasses.schema_check_mode import SchemaCheckMode
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -534,7 +534,7 @@ class TestSchemaCheckModeOpInfo(JitTestCase):
                                'test_schema_correctness_torch_ops_aten__flash_attention_forward_xpu_float16')
 
     def _is_xpu_and_supported(self, op):
-        if HAS_XPU:
+        if TEST_XPU:
             for case in TestSchemaCheckModeOpInfo._xpu_not_supported_cases:
                 if op and op.formatted_name and case in op.formatted_name:
                     return False
