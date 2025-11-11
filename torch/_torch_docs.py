@@ -5347,6 +5347,21 @@ Example::
 )
 
 add_docstr(
+    torch.inf,
+    r"""
+inf -> float
+
+Returns `inf`.
+
+Example::
+
+    >>> torch.inf
+    inf
+
+""",
+)
+
+add_docstr(
     torch.inverse,
     r"""
 inverse(input, *, out=None) -> Tensor
