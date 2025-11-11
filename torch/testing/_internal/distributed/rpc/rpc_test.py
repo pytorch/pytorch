@@ -2093,17 +2093,15 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         dst = (self.rank + 1) % self.world_size
         if self.rank == 1:
             # Cases where we can double wrap messages with profiling information and autograd info.
-            with dist_autograd.context():
-                with _profile() as prof:
-                    self.run_profiling_workload(dst)
+            with dist_autograd.context(), _profile() as prof:
+                self.run_profiling_workload(dst)
 
             self.validate_profiling_workload(dst, prof)
 
             # Ensure that flipped order of ctx managers results in events being
             # recorded as expected.
-            with _profile() as prof:
-                with dist_autograd.context():
-                    self.run_profiling_workload(dst)
+            with _profile() as prof, dist_autograd.context():
+                self.run_profiling_workload(dst)
 
             self.validate_profiling_workload(dst, prof)
 
@@ -3282,10 +3280,10 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         expected.update(autograd_info)
         # NB: Key ordering is only preserved in python 3.6+. So here, we
         # manually check keys are equal.
-        for key in expected.keys():
+        for key in expected:
             self.assertIn(key, info.keys())
 
-        for key in info.keys():
+        for key in info:
             self.assertIn(key, expected.keys())
 
     @dist_init(setup_rpc=False)
@@ -3518,28 +3516,25 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     @dist_init
     def test_wait_all_timeout(self):
         expected_error = self.get_timeout_error_regex()
-        with self.assertRaisesRegex(RuntimeError, expected_error):
-            with _wait_all():
-                self.assertTrue(_thread_local_var.future_list == [])
-                dst = worker_name((self.rank + 1) % self.world_size)
-                timeout = 0.1  # 100 ms
-                rpc.rpc_async(dst, my_sleep_func, args=(1,), timeout=timeout)
+        with self.assertRaisesRegex(RuntimeError, expected_error), _wait_all():
+            self.assertTrue(_thread_local_var.future_list == [])
+            dst = worker_name((self.rank + 1) % self.world_size)
+            timeout = 0.1  # 100 ms
+            rpc.rpc_async(dst, my_sleep_func, args=(1,), timeout=timeout)
         self.assertFalse(hasattr(_thread_local_var, "future_list"))
 
     @dist_init
     def test_wait_all_raise_in_user_func(self):
-        with self.assertRaises(ValueError):
-            with _wait_all():
-                self.assertTrue(_thread_local_var.future_list == [])
-                dst = worker_name((self.rank + 1) % self.world_size)
-                rpc.rpc_async(dst, raise_func)
+        with self.assertRaises(ValueError), _wait_all():
+            self.assertTrue(_thread_local_var.future_list == [])
+            dst = worker_name((self.rank + 1) % self.world_size)
+            rpc.rpc_async(dst, raise_func)
         self.assertFalse(hasattr(_thread_local_var, "future_list"))
 
     @dist_init
     def test_wait_all_raise_in_body(self):
-        with self.assertRaises(ValueError):
-            with _wait_all():
-                raise_func()
+        with self.assertRaises(ValueError), _wait_all():
+            raise_func()
         self.assertFalse(hasattr(_thread_local_var, "future_list"))
 
     @dist_init
@@ -3739,11 +3734,13 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     @dist_init
     def test_rref_py_pickle_not_supported(self):
         local_rref = RRef(35)
-        with TemporaryFileName() as fname:
-            with self.assertRaisesRegex(
+        with (
+            TemporaryFileName() as fname,
+            self.assertRaisesRegex(
                 RuntimeError, "Can not pickle rref in python pickler"
-            ):
-                torch.save(local_rref, fname)
+            ),
+        ):
+            torch.save(local_rref, fname)
 
     @dist_init
     def test_remote_throw(self):
@@ -3959,17 +3956,14 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         errMsg = "Can not pickle torch.futures.Future"
 
         dst = worker_name((self.rank + 1) % self.world_size)
-        with TemporaryFileName():
-            with self.assertRaisesRegex(RuntimeError, errMsg):
-                rpc.rpc_sync(dst, fail_on_fut, args=(fut,))
+        with TemporaryFileName(), self.assertRaisesRegex(RuntimeError, errMsg):
+            rpc.rpc_sync(dst, fail_on_fut, args=(fut,))
 
-        with TemporaryFileName():
-            with self.assertRaisesRegex(RuntimeError, errMsg):
-                rpc.rpc_async(dst, fail_on_fut, args=(fut,))
+        with TemporaryFileName(), self.assertRaisesRegex(RuntimeError, errMsg):
+            rpc.rpc_async(dst, fail_on_fut, args=(fut,))
 
-        with TemporaryFileName():
-            with self.assertRaisesRegex(RuntimeError, errMsg):
-                rpc.remote(dst, fail_on_fut, args=(fut,))
+        with TemporaryFileName(), self.assertRaisesRegex(RuntimeError, errMsg):
+            rpc.remote(dst, fail_on_fut, args=(fut,))
 
     @dist_init
     def test_future_done(self):
