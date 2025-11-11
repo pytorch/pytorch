@@ -850,9 +850,7 @@ def redistribute(
     new_spec = copy.deepcopy(old_spec)
     new_spec.placements = placements
     if shard_order is not None:
-        new_spec.shard_order = shard_order
-    else:
-        new_spec.shard_order = ()
+        assert new_spec._maybe_update_placements_given_shard_order(shard_order)
     if old_spec == new_spec:
         return dtensor_input
     dtensor_input = DTensor.from_local(
