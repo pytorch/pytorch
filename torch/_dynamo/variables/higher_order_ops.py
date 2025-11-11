@@ -251,7 +251,7 @@ def _make_inlined(tx: "InstructionTranslator", f):
     return inline_call
 
 
-def _call_function_and_unflatten_output_wrap_semantics(
+def _call_function_with_auto_output_flattening(
     tx: "InstructionTranslator",
     fn: Any,
     args: tuple[Any, ...],
@@ -261,9 +261,9 @@ def _call_function_and_unflatten_output_wrap_semantics(
     graph_output_vts: VariableTracker | tuple[VariableTracker, ...],
 ) -> Optional[VariableTracker]:
     """
-    Create HOP call node and reproxify output VTs for HOPs with wrap semantics.
+    Create HOP call node and reproxify output VTs for HOPs with auto output semantics.
 
-    This function is used by HOPs with wrap semantics (see speculate_subgraph_with_wrap_semantics)
+    This function is used by HOPs with auto output semantics (see speculate_subgraph_with_auto_output_flattening)
     to create the actual HOP call in the FX graph and properly handle the output variable trackers.
 
     The key operation is "reproxifying" - updating the proxies of the original tensor VTs
@@ -1010,7 +1010,181 @@ def _merge_graph_inputs(
     return l_graph, r_graph, l_shared, r_shared, unique_l, unique_r
 
 
-def speculate_subgraph_with_wrap_semantics(
+# NOTE: [HigherOrderOperator subgraph input ordering]
+# The input ordering of the higher order ops is determined by the order of
+# the creation of the placeholder.
+# Manually created inputs are created in validate_args_and_maybe_create_graph_inputs before
+# speculating subgraph.
+# During subgraph speculation, we may lift closured tensors and free symbols as inputs,
+# their ordering is determined by the time they are lifted: earlier lifted ones precede later
+# lifted ones.
+#
+# Suppose the placeholders are
+# O1, O2, X1, O3, O4, X2, X3, O5 where Xs are lifted phs
+# The following code re-order the placeholders to
+# O1, O2, O3, O4, O5, X1, X2, X3
+def move_lifted_freevars_phs_to_end(
+    graph: torch.fx.Graph, lifted_freevars: tuple[torch.fx.Node]
+):
+    lifted_ph_set = {child_p.node for child_p in lifted_freevars.values()}
+
+    prev_phs = [n for n in graph.nodes if n.op == "placeholder"]
+
+    # No need to reorder when graph doesn't have args or doesn't
+    # have lifted freevars or all inputs are lifted freevars.
+    if (
+        len(prev_phs) == 0
+        or len(lifted_ph_set) == 0
+        or len(prev_phs) == len(lifted_ph_set)
+    ):
+        return
+
+    # Step 1: find first X1
+    for x1 in prev_phs:
+        if x1 in lifted_ph_set:
+            break
+
+    assert x1 is not None and x1.op == "placeholder"
+    # Step 2: starting from the X1, skip Xs and prepend Os before X1.
+    cand_x = x1.next
+    while cand_x is not None and cand_x.op == "placeholder":
+        if cand_x in lifted_ph_set:
+            cand_x = cand_x.next
+        else:
+            nxt = cand_x.next
+            cand_x._remove_from_list()
+            x1.prepend(cand_x)
+            cand_x = nxt
+
+    # Step 3: assert that all placeholders are in the correct order as .
+    # in lifted_freevars
+    after_phs = [node for node in graph.nodes if node.op == "placeholder"][
+        -len(lifted_freevars) :
+    ]
+    assert len(after_phs) == len(lifted_freevars)
+    for child_proxy, ph in zip(lifted_freevars.values(), after_phs):
+        assert child_proxy.node is ph, (
+            "The order of placeholders is different from the order of lifted_freevars"
+        )
+
+    graph.lint()
+
+
+def check_aliasing_and_input_mutation(
+    subtracer, graph, supports_input_mutation, supports_aliasing, source_target
+):
+    if not supports_input_mutation:
+        mutation_info = subtracer.has_input_mutation()
+        if mutation_info.has_mutation:
+            context = f"{mutation_info.msg} in\n {graph}"
+            unimplemented(
+                gb_type="Encountered input mutation during higher order op tracing",
+                context=context,
+                explanation=f"Higher order ops do not support input mutation. Found in {source_target.name()}",
+                hints=[
+                    "Consider using the debug context to change user code to avoid mutation.",
+                    "Please open an issue.",
+                ],
+            )
+
+    if not supports_aliasing:
+        aliasing_info = subtracer.has_aliasing()
+        if aliasing_info.has_aliasing:
+            context = f"{aliasing_info.msg} in\n {graph}"
+            unimplemented(
+                gb_type="Encountered aliasing during higher order op tracing",
+                context=context,
+                explanation=f"Higher order ops do not support aliasing. Found in {source_target.name()}",
+                hints=[
+                    "Replace `return input` with `return input.clone()` to avoid aliasing.",
+                    "Consider using the debug context to change user code to avoid aliasing.",
+                    "Please open an issue.",
+                ],
+            )
+
+
+def trace_hop_function(
+    f,
+    tx,
+    subtracer,
+    enable_grad,
+    under_activation_checkpoint,
+    restore_side_effects,
+    args,
+    sub_kwargs,
+):
+    autograd_ctx = (
+        dynamo_enable_grad(tx, enable_grad)
+        if enable_grad is not None
+        else contextlib.nullcontext()
+    )
+    checkpoint_ctx = (
+        dynamo_under_activation_checkpoint(tx)
+        if under_activation_checkpoint
+        else contextlib.nullcontext()
+    )
+
+    # For handling side effects, we can make an argument that we don't
+    # have to do anything here. The side effects infra does a good job
+    # of graph breaking if we mutate any nonlocal or global variable
+    # while subtracing. As a result if tracing succeeds, side effects
+    # data structure will only contain read-only data structures that
+    # are put there for tracking purposes.
+    # But on the other hand, there is an argument that if we ever write
+    # a new side effect in Dynamo which does not go through the side
+    # effect infra, we can end up in bad state.
+    # Therefore we restore the side effects after tracing. The catch is
+    # that we have to special handle tensor variables. If we have seen a
+    # nonlocal variable tensor during subtracing, we want to keep a
+    # track of that tensor, so that later subtracing or the root tracer
+    # itself does not create a new proxy for the already observed tensor
+    # variable.
+    if restore_side_effects:
+        prev_side_effects = tx.output.side_effects.clone()
+
+    with autograd_ctx, checkpoint_ctx:
+        output = f.call_function(tx, args, sub_kwargs)
+
+    if restore_side_effects:
+        new_side_effects = tx.output.side_effects.clone()
+        prev_side_effects.track_runahead_tensor_and_symvar_side_effects(
+            new_side_effects
+        )
+        tx.output.side_effects = prev_side_effects
+    return output
+
+
+def get_hop_args(
+    tx, f, subtracer, sub_args, sub_kwargs, set_subgraph_inputs, description
+):
+    sub_args_names = maybe_positional_arg_names(f)
+    # User mismatch in the number of args. Will eventually lead to an error.
+    if sub_args_names is not None and len(sub_args_names) < len(sub_args):
+        sub_args_names = None
+    args = validate_args_and_maybe_create_graph_inputs(
+        sub_args,
+        subtracer,
+        tx,
+        set_subgraph_inputs,
+        description,
+        sub_args_names,
+    )
+
+    validate_args_and_maybe_create_graph_inputs(
+        sub_kwargs.values(),
+        subtracer,
+        tx,
+        set_subgraph_inputs="automatic",
+        description=description,
+    )
+    return args
+
+
+# TODO - The eventual goal is to replace
+# speculate_subgraph_with_auto_output_flattening with speculate_subgraph or
+# merge them two into one. We are following a staged approach because of
+# existing implementation complexity for control flow ops.
+def speculate_subgraph_with_auto_output_flattening(
     tx: "InstructionTranslator",
     f: VariableTracker,
     sub_args: Sequence[VariableTracker],
@@ -1046,18 +1220,21 @@ def speculate_subgraph_with_wrap_semantics(
     ],  # graph_output_vts: Tensor/symint VTs that are actual FX graph outputs
 ]:
     """
-    Speculate subgraph for Higher-Order Operators (HOPs) with wrap semantics.
+    Speculate subgraph for Higher-Order Operators (HOPs) with automatic output flattening.
 
-    ## Wrap Semantics
+    ## Automatic output flattening
 
-    Some HOPs have "wrap semantics", meaning the HOP at runtime essentially just runs
-    the subgraph with the inputs. For example:
+    For many HOPs, the representation exists only as a container for the
+    subgraph. In later compiler stages or at runtime, the HOP is desugared and
+    simply executes the subgraph directly, as if it were inlined. For such hops,
+    we follow automatic output flattening.
+    For example:
     - invoke_subgraph
     - activation checkpointing (torch.utils.checkpoint.checkpoint)
     - autograd.Function
     - nested_compile_region
 
-    This is in contrast to control flow HOPs which do NOT follow wrap semantics:
+    This is in contrast to control flow HOPs which do not follow this desugaring:
     - torch.cond (conditional execution based on predicate)
     - torch.while_loop (iterative execution)
     - torch.map (parallel execution over batch dimension)
@@ -1067,7 +1244,7 @@ def speculate_subgraph_with_wrap_semantics(
 
     ## Key Advantage: Disentangling VTs from Graph Outputs
 
-    Wrap semantics simplify HOP processing by allowing us to disentangle the output
+    Desugaring simplify HOP processing by allowing us to disentangle the output
     variable trackers (VTs) from the HOP subgraph outputs. This mirrors typical
     Dynamo processing where:
     - VTs "run ahead" representing the program state for continued tracing
@@ -1135,65 +1312,21 @@ def speculate_subgraph_with_wrap_semantics(
         )
 
         with tx.output.subtracer(source_target, tracer) as subtracer:
-            sub_args_names = maybe_positional_arg_names(f)
-            # User mismatch in the number of args. Will eventually lead to an error.
-            if sub_args_names is not None and len(sub_args_names) < len(sub_args):
-                sub_args_names = None
-            args = validate_args_and_maybe_create_graph_inputs(
-                sub_args,
-                subtracer,
+            args = get_hop_args(
+                tx, f, subtracer, sub_args, sub_kwargs, set_subgraph_inputs, description
+            )
+
+            output = trace_hop_function(
+                f,
                 tx,
-                set_subgraph_inputs,
-                description,
-                sub_args_names,
-            )
-
-            validate_args_and_maybe_create_graph_inputs(
-                sub_kwargs.values(),
                 subtracer,
-                tx,
-                set_subgraph_inputs="automatic",
-                description=description,
+                enable_grad,
+                under_activation_checkpoint,
+                restore_side_effects,
+                args,
+                sub_kwargs,
             )
 
-            autograd_ctx = (
-                dynamo_enable_grad(tx, enable_grad)
-                if enable_grad is not None
-                else contextlib.nullcontext()
-            )
-            checkpoint_ctx = (
-                dynamo_under_activation_checkpoint(tx)
-                if under_activation_checkpoint
-                else contextlib.nullcontext()
-            )
-
-            # For handling side effects, we can make an argument that we don't
-            # have to do anything here. The side effects infra does a good job
-            # of graph breaking if we mutate any nonlocal or global variable
-            # while subtracing. As a result if tracing succeeds, side effects
-            # data structure will only contain read-only data structures that
-            # are put there for tracking purposes.
-            # But on the other hand, there is an argument that if we ever write
-            # a new side effect in Dynamo which does not go through the side
-            # effect infra, we can end up in bad state.
-            # Therefore we restore the side effects after tracing. The catch is
-            # that we have to special handle tensor variables. If we have seen a
-            # nonlocal variable tensor during subtracing, we want to keep a
-            # track of that tensor, so that later subtracing or the root tracer
-            # itself does not create a new proxy for the already observed tensor
-            # variable.
-            if restore_side_effects:
-                prev_side_effects = tx.output.side_effects.clone()
-
-            with autograd_ctx, checkpoint_ctx:
-                output = f.call_function(tx, args, sub_kwargs)
-
-            if restore_side_effects:
-                new_side_effects = tx.output.side_effects.clone()
-                prev_side_effects.track_runahead_tensor_and_symvar_side_effects(
-                    new_side_effects
-                )
-                tx.output.side_effects = prev_side_effects
             # NOTE: [Separation of graph outputs and output VTs]
             # In Dynamo (outside of speculate_subgraph), VTs and the graph are
             # separate concepts:
@@ -1302,97 +1435,16 @@ def speculate_subgraph_with_wrap_semantics(
             graph.lint()
             lifted_freevars = subtracer.lifted_freevars
 
-            # NOTE: [HigherOrderOperator subgraph input ordering]
-            # The input ordering of the higher order ops is determined by the order of
-            # the creation of the placeholder.
-            # Manually created inputs are created in validate_args_and_maybe_create_graph_inputs before
-            # speculating subgraph.
-            # During subgraph speculation, we may lift closured tensors and free symbols as inputs,
-            # their ordering is determined by the time they are lifted: earlier lifted ones precede later
-            # lifted ones.
-            #
-            # Suppose the placeholders are
-            # O1, O2, X1, O3, O4, X2, X3, O5 where Xs are lifted phs
-            # The following code re-order the placeholders to
-            # O1, O2, O3, O4, O5, X1, X2, X3
-            def move_lifted_freevars_phs_to_end(
-                graph: torch.fx.Graph, lifted_freevars: tuple[torch.fx.Node]
-            ):
-                lifted_ph_set = {child_p.node for child_p in lifted_freevars.values()}
-
-                prev_phs = [n for n in graph.nodes if n.op == "placeholder"]
-
-                # No need to reorder when graph doesn't have args or doesn't
-                # have lifted freevars or all inputs are lifted freevars.
-                if (
-                    len(prev_phs) == 0
-                    or len(lifted_ph_set) == 0
-                    or len(prev_phs) == len(lifted_ph_set)
-                ):
-                    return
-
-                # Step 1: find first X1
-                for x1 in prev_phs:
-                    if x1 in lifted_ph_set:
-                        break
-
-                assert x1 is not None and x1.op == "placeholder"
-                # Step 2: starting from the X1, skip Xs and prepend Os before X1.
-                cand_x = x1.next
-                while cand_x is not None and cand_x.op == "placeholder":
-                    if cand_x in lifted_ph_set:
-                        cand_x = cand_x.next
-                    else:
-                        nxt = cand_x.next
-                        cand_x._remove_from_list()
-                        x1.prepend(cand_x)
-                        cand_x = nxt
-
-                # Step 3: assert that all placeholders are in the correct order as .
-                # in lifted_freevars
-                after_phs = [node for node in graph.nodes if node.op == "placeholder"][
-                    -len(lifted_freevars) :
-                ]
-                assert len(after_phs) == len(lifted_freevars)
-                for child_proxy, ph in zip(lifted_freevars.values(), after_phs):
-                    assert child_proxy.node is ph, (
-                        "The order of placeholders is different from the order of lifted_freevars"
-                    )
-
-                graph.lint()
-
             if len(lifted_freevars) > 0:
                 move_lifted_freevars_phs_to_end(graph, lifted_freevars)
 
-            if not supports_input_mutation:
-                mutation_info = subtracer.has_input_mutation()
-                if mutation_info.has_mutation:
-                    context = f"{mutation_info.msg} in\n {graph}"
-                    unimplemented(
-                        gb_type="Encountered input mutation during higher order op tracing",
-                        context=context,
-                        explanation=f"Higher order ops do not support input mutation. Found in {source_target.name()}",
-                        hints=[
-                            "Consider using the debug context to change user code to avoid mutation.",
-                            "Please open an issue.",
-                        ],
-                    )
-
-            if not supports_aliasing:
-                aliasing_info = subtracer.has_aliasing()
-                if aliasing_info.has_aliasing:
-                    context = f"{aliasing_info.msg} in\n {graph}"
-                    unimplemented(
-                        gb_type="Encountered aliasing during higher order op tracing",
-                        context=context,
-                        explanation=f"Higher order ops do not support aliasing. Found in {source_target.name()}",
-                        hints=[
-                            "Replace `return input` with `return input.clone()` to avoid aliasing.",
-                            "Consider using the debug context to change user code to avoid aliasing.",
-                            "Please open an issue.",
-                        ],
-                    )
-
+            check_aliasing_and_input_mutation(
+                subtracer,
+                graph,
+                supports_input_mutation,
+                supports_aliasing,
+                source_target,
+            )
             # Return both the output VT and the graph output VTs separately:
             # - `output`: The VT that Dynamo continues tracing with (may be
             #   complex Python objects, tuples, dicts, etc.)
@@ -1486,65 +1538,20 @@ def speculate_subgraph(
         )
 
         with tx.output.subtracer(source_target, tracer) as subtracer:
-            sub_args_names = maybe_positional_arg_names(f)
-            # User mismatch in the number of args. Will eventually lead to an error.
-            if sub_args_names is not None and len(sub_args_names) < len(sub_args):
-                sub_args_names = None
-            args = validate_args_and_maybe_create_graph_inputs(
-                sub_args,
-                subtracer,
+            args = get_hop_args(
+                tx, f, subtracer, sub_args, sub_kwargs, set_subgraph_inputs, description
+            )
+
+            output = trace_hop_function(
+                f,
                 tx,
-                set_subgraph_inputs,
-                description,
-                sub_args_names,
-            )
-
-            validate_args_and_maybe_create_graph_inputs(
-                sub_kwargs.values(),
                 subtracer,
-                tx,
-                set_subgraph_inputs="automatic",
-                description=description,
+                enable_grad,
+                under_activation_checkpoint,
+                restore_side_effects,
+                args,
+                sub_kwargs,
             )
-
-            autograd_ctx = (
-                dynamo_enable_grad(tx, enable_grad)
-                if enable_grad is not None
-                else contextlib.nullcontext()
-            )
-            checkpoint_ctx = (
-                dynamo_under_activation_checkpoint(tx)
-                if under_activation_checkpoint
-                else contextlib.nullcontext()
-            )
-
-            # For handling side effects, we can make an argument that we don't
-            # have to do anything here. The side effects infra does a good job
-            # of graph breaking if we mutate any nonlocal or global variable
-            # while subtracing. As a result if tracing succeeds, side effects
-            # data structure will only contain read-only data structures that
-            # are put there for tracking purposes.
-            # But on the other hand, there is an argument that if we ever write
-            # a new side effect in Dynamo which does not go through the side
-            # effect infra, we can end up in bad state.
-            # Therefore we restore the side effects after tracing. The catch is
-            # that we have to special handle tensor variables. If we have seen a
-            # nonlocal variable tensor during subtracing, we want to keep a
-            # track of that tensor, so that later subtracing or the root tracer
-            # itself does not create a new proxy for the already observed tensor
-            # variable.
-            if restore_side_effects:
-                prev_side_effects = tx.output.side_effects.clone()
-
-            with autograd_ctx, checkpoint_ctx:
-                output = f.call_function(tx, args, sub_kwargs)
-
-            if restore_side_effects:
-                new_side_effects = tx.output.side_effects.clone()
-                prev_side_effects.track_runahead_tensor_and_symvar_side_effects(
-                    new_side_effects
-                )
-                tx.output.side_effects = prev_side_effects
 
             treespec = None
             masks_to_filter_const_values = None
@@ -1579,59 +1586,9 @@ def speculate_subgraph(
                         output, masks_to_filter_const_values
                     )
 
-            # NOTE - [Return subgraph intermediates as subgraph outputs]
-            # This helps HOPs which allow side effects. Consider the
-            # following example
-            #
-            # def gn(x, z):
-            #     o = torch.matmul(x, x) @ x
-            #     out = x.sin()
-            #     z.append(out)
-            #     return torch.cos(torch.sin(o))
-
-            # def fn(x):
-            #     z = []
-            #     out1 = torch.utils.checkpoint.checkpoint(
-            #         gn,
-            #         x,
-            #         z,
-            #         use_reentrant=False,
-            #     )
-            #     return out1, z[0]
-            #
-            # In this example, list `z` is in outer scope and gets appended
-            # in the subgraph with `out`. But `out` is not an output of the
-            # subgraph. This can cause issue because later on when the outer
-            # graph returns `z[0]` it needs to have access to the graph node
-            # `out`. To solve this problem, we just return all intermediates
-            # from the subgraph.
-
-            # TODO - Today this is supported only for AC. AC HOP gets
-            # desugared in AOTDispatcher so even though subgraph has extra
-            # unused outputs in Dynamo, its ok even if we don't DCE them in
-            # Dynamo. As AOTDispatcher desugars/inlines the subgraph, the
-            # subgraph boundary disappears. And even for AC, today this only
-            # works when the skip_fwd_side_effects_in_bwd_under_checkpoint
-            # flag is True, i.e., only when we allow side-effects. But, we
-            # want this to be supported for other Hops as well, specifically
-            # nested_compile_region and autograd.Function. Today, its safe
-            # because we error out on seeing a side-effect.
+            # TODO - clean up num_intermediate_nodes_as_outputs - we do not need
+            # after AC moved to auto_output_flattening
             num_intermediate_nodes_as_outputs = 0
-            if under_activation_checkpoint and should_flatten_outputs:
-                output_vts = {
-                    vt
-                    for vt in output.items
-                    if isinstance(
-                        vt, (variables.TensorVariable, variables.SymNodeVariable)
-                    )
-                }
-                extra_outputs = []
-                for out in subtracer.tracked_tensor_or_symint_vt:
-                    if out not in output_vts:
-                        extra_outputs.append(out)
-                output = TupleVariable(output.items + extra_outputs)
-                num_intermediate_nodes_as_outputs = len(extra_outputs)
-
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
             # TODO: support pytree output
@@ -1673,98 +1630,16 @@ def speculate_subgraph(
                 graph.lint()
                 lifted_freevars = subtracer.lifted_freevars
 
-                # NOTE: [HigherOrderOperator subgraph input ordering]
-                # The input ordering of the higher order ops is determined by the order of
-                # the creation of the placeholder.
-                # Manually created inputs are created in validate_args_and_maybe_create_graph_inputs before
-                # speculating subgraph.
-                # During subgraph speculation, we may lift closured tensors and free symbols as inputs,
-                # their ordering is determined by the time they are lifted: earlier lifted ones precede later
-                # lifted ones.
-                #
-                # Suppose the placeholders are
-                # O1, O2, X1, O3, O4, X2, X3, O5 where Xs are lifted phs
-                # The following code re-order the placeholders to
-                # O1, O2, O3, O4, O5, X1, X2, X3
-                def move_lifted_freevars_phs_to_end(
-                    graph: torch.fx.Graph, lifted_freevars: tuple[torch.fx.Node]
-                ):
-                    lifted_ph_set = {
-                        child_p.node for child_p in lifted_freevars.values()
-                    }
-
-                    prev_phs = [n for n in graph.nodes if n.op == "placeholder"]
-
-                    # No need to reorder when graph doesn't have args or doesn't
-                    # have lifted freevars or all inputs are lifted freevars.
-                    if (
-                        len(prev_phs) == 0
-                        or len(lifted_ph_set) == 0
-                        or len(prev_phs) == len(lifted_ph_set)
-                    ):
-                        return
-
-                    # Step 1: find first X1
-                    for x1 in prev_phs:
-                        if x1 in lifted_ph_set:
-                            break
-
-                    assert x1 is not None and x1.op == "placeholder"
-                    # Step 2: starting from the X1, skip Xs and prepend Os before X1.
-                    cand_x = x1.next
-                    while cand_x is not None and cand_x.op == "placeholder":
-                        if cand_x in lifted_ph_set:
-                            cand_x = cand_x.next
-                        else:
-                            nxt = cand_x.next
-                            cand_x._remove_from_list()
-                            x1.prepend(cand_x)
-                            cand_x = nxt
-
-                    # Step 3: assert that all placeholders are in the correct order as .
-                    # in lifted_freevars
-                    after_phs = [
-                        node for node in graph.nodes if node.op == "placeholder"
-                    ][-len(lifted_freevars) :]
-                    assert len(after_phs) == len(lifted_freevars)
-                    for child_proxy, ph in zip(lifted_freevars.values(), after_phs):
-                        assert child_proxy.node is ph, (
-                            "The order of placeholders is different from the order of lifted_freevars"
-                        )
-
-                    graph.lint()
-
                 if len(lifted_freevars) > 0:
                     move_lifted_freevars_phs_to_end(graph, lifted_freevars)
 
-                if not supports_input_mutation:
-                    mutation_info = subtracer.has_input_mutation()
-                    if mutation_info.has_mutation:
-                        context = f"{mutation_info.msg} in\n {graph}"
-                        unimplemented(
-                            gb_type="Encountered input mutation during higher order op tracing",
-                            context=context,
-                            explanation=f"Higher order ops do not support input mutation. Found in {source_target.name()}",
-                            hints=[
-                                "Consider using the debug context to change user code to avoid mutation.",
-                                "Please open an issue.",
-                            ],
-                        )
-
-                if not supports_aliasing:
-                    aliasing_info = subtracer.has_aliasing()
-                    if aliasing_info.has_aliasing:
-                        context = f"{aliasing_info.msg} in\n {graph}"
-                        unimplemented(
-                            gb_type="Encountered aliasing during higher order op tracing",
-                            context=context,
-                            explanation=f"Higher order ops do not support aliasing. Found in {source_target.name()}",
-                            hints=[
-                                "Replace `return input` with `return input.clone()` to avoid aliasing.",
-                                "Consider using the debug context to change user code to avoid aliasing.",
-                                "Please open an issue.",
-                            ],
-                        )
+                check_aliasing_and_input_mutation(
+                    subtracer,
+                    graph,
+                    supports_input_mutation,
+                    supports_aliasing,
+                    source_target,
+                )
 
                 return (
                     (
@@ -2929,7 +2804,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             body_graph,
             body_lifted_freevars,
             body_graph_output_vts,
-        ) = speculate_subgraph_with_wrap_semantics(
+        ) = speculate_subgraph_with_auto_output_flattening(
             tx,
             fn_vt,
             fn_args_vt,
@@ -3002,7 +2877,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 ],
             )
 
-        return _call_function_and_unflatten_output_wrap_semantics(
+        return _call_function_with_auto_output_flattening(
             tx,
             self.value,
             tuple(p_args),
@@ -3444,7 +3319,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
 
         _, checkpoint_kwargs = proxy_args_kwargs([], checkpoint_kwargs)
 
-        return _call_function_and_unflatten_output_wrap_semantics(
+        return _call_function_with_auto_output_flattening(
             tx,
             self.value,
             p_args,
@@ -3498,7 +3373,7 @@ class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
         gmod_meta_key = "_dynamo_bypassing_wrapper_fn"
         gmod.meta[gmod_meta_key] = func
 
-        return _call_function_and_unflatten_output_wrap_semantics(
+        return _call_function_with_auto_output_flattening(
             tx,
             self.value,
             (gmod_meta_key,) + tuple(p_args),
@@ -4243,7 +4118,7 @@ class BaseHOPVariable(WrapHigherOrderVariable):
         assert len(p_kwargs) == 0
 
         p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
-        return _call_function_and_unflatten_output_wrap_semantics(
+        return _call_function_with_auto_output_flattening(
             tx,
             self.value,
             p_args,
@@ -4353,7 +4228,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             body_name,
             *p_args[1:],
         )
-        return _call_function_and_unflatten_output_wrap_semantics(
+        return _call_function_with_auto_output_flattening(
             tx,
             torch._higher_order_ops.invoke_subgraph,
             tuple(p_args),
@@ -4577,7 +4452,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 
         # Step 5: Install local_map subgraph
         p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
-        out = _call_function_and_unflatten_output_wrap_semantics(
+        out = _call_function_with_auto_output_flattening(
             tx,
             self.value,
             p_args,
