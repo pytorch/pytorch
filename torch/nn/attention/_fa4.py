@@ -39,8 +39,8 @@ def register_flash_attention_fa4(
     Register FA4 flash attention kernels with the PyTorch dispatcher.
 
     This function is cached and will only register once per unique module_path.
-    Calling with the same module_path multiple times is a no-op. Backend
-    switching support (unregistering one backend and registering another)
+    Calling with the same module_path multiple times is a no-op. Implementation
+    switching support (unregistering one impl and registering another)
     is not currently implemented.
 
     Args:
