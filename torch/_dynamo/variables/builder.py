@@ -2227,25 +2227,70 @@ class VariableBuilder:
         if isinstance(source, GradSource) and is_from_optimizer_source(source):
             guard_type = GuardBuilder.NOT_NONE_MATCH
 
-        self.install_guards(
-            functools.partial(
-                guard_type,
-                value=(
-                    value
-                    if isinstance(source, NumpyTensorSource)
-                    else TensorWeakRef(value)
-                ),
-            )
+        is_dtensor = torch.distributed.is_available() and isinstance(
+            value, torch.distributed.tensor.DTensor
         )
+        if not is_dtensor:
+            # We guard on the _local_tensor and the _spec, and therefore we dont
+            # have to guard on the outer DTensor.
+            self.install_guards(
+                functools.partial(
+                    guard_type,
+                    value=(
+                        value
+                        if isinstance(source, NumpyTensorSource)
+                        else TensorWeakRef(value)
+                    ),
+                )
+            )
 
         # We install TYPE_MATCH guards for traceable wrapper subclass object,
         # and recursively install corresponding guard for each inner attribute.
         if is_traceable_wrapper_subclass(value):
-            self.install_guards(GuardBuilder.TENSOR_SUBCLASS_METADATA_MATCH)
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            install_guard(
-                SubclassAttrListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
-            )
+            # Tensor subclass guards are very expensive because they are
+            # implemented in Python. Since DTensor is PyTorch-maintained class,
+            # we can skip a lot of these guards.
+            if is_dtensor:
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+
+                # The inner tensor name is always _local_tensor. If its not, we
+                # raise assertion to update the check accordingly.
+                inner_tensor_name = value.__tensor_flatten__()[0][0]
+                if inner_tensor_name != "_local_tensor":
+                    raise RuntimeError(
+                        "Expecting Dtensor inner tensor name to be _local_tensor"
+                    )
+
+                # Now selectively guard on the flattening context
+                flattening_ctx = value.__tensor_flatten__()[1]
+                # This is supposed to be (self._spec, self.requires_grad)
+                if not (
+                    len(flattening_ctx) == 2
+                    and flattening_ctx[0] == value._spec
+                    and flattening_ctx[1] == value.requires_grad
+                ):
+                    # If not, raise an assertion to update to the new guards
+                    raise RuntimeError(
+                        "Expecting Dtensor flattening ctx to be _spec, requires_grad"
+                    )
+                # Guard on the dtensor spec
+                install_guard(
+                    AttrSource(self.source, "_spec").make_guard(
+                        GuardBuilder.DTENSOR_SPEC_MATCH
+                    )
+                )
+                # Move this to C++
+                install_guard(
+                    AttrSource(self.source, "requires_grad").make_guard(
+                        GuardBuilder.EQUALS_MATCH
+                    )
+                )
+            else:
+                self.install_guards(GuardBuilder.TENSOR_SUBCLASS_METADATA_MATCH)
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+                install_guard(
+                    SubclassAttrListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
+                )
 
             attrs, _ = value.__tensor_flatten__()
             for attr in attrs:
@@ -2784,20 +2829,33 @@ def wrap_fx_proxy_cls(
     target_cls, tx, proxy, example_value=None, subclass_type=None, **options
 ):
     if example_value is None:
-        return _wrap_fx_proxy(
+        out = _wrap_fx_proxy(
             target_cls, tx, proxy, example_value, subclass_type, **options
         )
     elif isinstance(example_value, torch.Tensor):
-        return _wrap_fx_preexisting_tensor(
+        out = _wrap_fx_preexisting_tensor(
             target_cls, tx, proxy, example_value, subclass_type, **options
         )
     else:
         # This will skip tracing an op and recursively reinvoke wrap_fx_proxy_cls on supported
         # data structures. In essence this just handles tracing some other value which may
         # contain Fake Tensors or is otherwise proxyable.
-        return handle_traced_output(
+        out = handle_traced_output(
             example_value, tx, proxy, options, subclass_type, target_cls
         )
+
+    if (
+        isinstance(
+            out,
+            (
+                torch._dynamo.variables.TensorVariable,
+                torch._dynamo.variables.SymNodeVariable,
+            ),
+        )
+        and proxy.node.op != "placeholder"
+    ):
+        tx.output.current_tracer.record_tensor_or_symint_vt(out)
+    return out
 
 
 # This is 1 above (wrapping a preexisting tensor)
