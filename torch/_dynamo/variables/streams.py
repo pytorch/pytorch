@@ -138,6 +138,24 @@ def _(
 has_side_effect(torch.ops.streams.wait_event.default)
 
 
+@custom_op("streams::wait_stream", mutates_args=())
+def wait_stream(waiting_stream_index: int, waited_on_stream_index: int) -> None:
+    waiting = _get_stream_by_index(waiting_stream_index)
+    waited_on = _get_stream_by_index(waited_on_stream_index)
+    waiting.wait_stream(waited_on)
+
+
+@wait_stream.register_fake
+def _(
+    event_index: int,
+    stream_index: int,
+) -> None:
+    pass
+
+
+has_side_effect(torch.ops.streams.wait_stream.default)
+
+
 class SymbolicStreamState:
     """Track the currently entered stream if any"""
 

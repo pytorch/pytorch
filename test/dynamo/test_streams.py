@@ -577,6 +577,23 @@ class <lambda>(torch.nn.Module):
             reset_user_object_tracking()
 
     @requires_cuda
+    def test_run_opcheck_wait_record_stream(self):
+        from torch._dynamo.variables.streams import wait_stream
+        from torch.library import opcheck
+
+        s0 = torch.Stream()
+        s1 = torch.Stream()
+        s2 = torch.Stream()
+        store_user_object_weakrefs(s0, s1, s2)
+
+        sample_inputs = [
+            (0, 1),
+            (2, 0),
+        ]
+        for args in sample_inputs:
+            opcheck(wait_stream, args)
+
+    @requires_cuda
     def test_inductor_lowering(self):
         with patch("torch._inductor.config.implicit_fallbacks", False):
 
