@@ -426,24 +426,23 @@ class TensorVariable(VariableTracker):
         )
 
     def call_obj_hasattr(self, tx: "InstructionTranslator", name):
-        from . import GetAttrVariable
-        from .builtin import BuiltinVariable
+        """Check if a tensor has the given attribute.
 
-        # TODO - This is not a good solution but solves an accuracy issue.
-        # Today, var_getattr returns GetAttrVariable for both non-existent
-        # attributes and existing attributes. This is a bug and requires more
-        # deep dive.
+        Args:
+            tx: The instruction translator.
+            name: The attribute name to check.
+
+        Returns:
+            ConstantVariable(True) if the attribute exists,
+            ConstantVariable(False) otherwise.
+        """
         if name in ("size", "stride", "__iter__"):
             return ConstantVariable(True)
 
         try:
-            var = BuiltinVariable(getattr).call_function(
-                tx, [self, ConstantVariable(name)], {}
-            )
-            # in the event that TensorVariable returns NotImplemented
-            # BuiltinVariable.call_getattr returns GetAttrVariable
-            ret_val = not isinstance(var, GetAttrVariable)
-        except AttributeError:
+            self.var_getattr(tx, name)
+            ret_val = True
+        except (NotImplementedError, AttributeError):
             ret_val = False
 
         if self.source:
