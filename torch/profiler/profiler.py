@@ -271,13 +271,11 @@ class _KinetoProfile:
                 "Profiler must be initialized before exporting chrome trace"
             )
         if path.endswith(".gz"):
-            with tempfile.NamedTemporaryFile("w+b", suffix=".json", delete=False) as fp:
-                fp.close()
+            with tempfile.NamedTemporaryFile("w+b", suffix=".json") as fp:
                 retvalue = self.profiler.export_chrome_trace(fp.name)
-                with open(fp.name, "rb") as fin:
-                    with gzip.open(path, "wb") as fout:
-                        fout.writelines(fin)
-                os.remove(fp.name)
+                fp.seek(0)
+                with gzip.open(path, "wb") as fout:
+                    fout.writelines(fp)
             return retvalue
         else:
             return self.profiler.export_chrome_trace(path)
@@ -448,15 +446,14 @@ class _KinetoProfile:
         if path.endswith(".html"):
             self.mem_tl.export_memory_timeline_html(path, device)
         elif path.endswith(".gz"):
-            fp = tempfile.NamedTemporaryFile("w+t", suffix=".json", delete=False)
-            fp.close()
-            if path.endswith("raw.json.gz"):
-                self.mem_tl.export_memory_timeline_raw(fp.name, device)
-            else:
-                self.mem_tl.export_memory_timeline(fp.name, device)
-            with open(fp.name) as fin, gzip.open(path, "wt") as fout:
-                fout.writelines(fin)
-            os.remove(fp.name)
+            with tempfile.NamedTemporaryFile("w+t", suffix=".json") as fp:
+                fp.close()
+                if path.endswith("raw.json.gz"):
+                    self.mem_tl.export_memory_timeline_raw(fp.name, device)
+                else:
+                    self.mem_tl.export_memory_timeline(fp.name, device)
+                with open(fp.name) as fin, gzip.open(path, "wt") as fout:
+                    fout.writelines(fin)
         else:
             self.mem_tl.export_memory_timeline(path, device)
 
@@ -946,7 +943,7 @@ class ExecutionTraceObserver(_ITraceObserver):
         """
         if os.environ.get("ENABLE_PYTORCH_EXECUTION_TRACE", "0") == "1":
             try:
-                fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+                fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)  # noqa:SIM115
             except Exception as e:
                 warn(
                     f"Execution trace will not be recorded. Exception on creating default temporary file: {e}",
