@@ -267,16 +267,10 @@ def scaled_mm_strategy(op_schema: OpSchema) -> OpStrategy:
     return _scaled_mm_like_strategy("mk,kn->mn", mesh, op_schema)
 
 
-@register_op_strategy(
-    aten._scaled_dot_product_flash_attention.default, schema_info=RuntimeSchemaInfo(5)
-)
-def scaled_dot_product_flash_attention_strategy(op_schema: OpSchema) -> OpStrategy:
-    # NOTE: currently we only support some simple strategies to support tensor parallelism
-    # TODO: sdpa might be a good candidate for us to explore decomposed sharding propagation
-    # as it involves: matmul, pointwise, reduction ops together.
-
-    mesh = op_schema.get_mesh_from_args()
-
+def _scaled_dot_product_flash_attention_base_strategies(
+    op_schema: OpSchema,
+) -> list[PlacementList]:
+    """Helper that returns list of base placement strategies (without CP)."""
     return_debug_mask = len(op_schema.args_schema) >= 6 and op_schema.args_schema[5]
     q_input_strategy = op_schema.args_schema[0]
     if not isinstance(q_input_strategy, OpStrategy):
@@ -349,18 +343,30 @@ def scaled_dot_product_flash_attention_strategy(op_schema: OpSchema) -> OpStrate
             Shard(0),  # v
         ]
     )
+    return single_mesh_dim_strategies
+
+
+@register_op_strategy(
+    aten._scaled_dot_product_flash_attention.default, schema_info=RuntimeSchemaInfo(5)
+)
+def scaled_dot_product_flash_attention_strategy(op_schema: OpSchema) -> OpStrategy:
+    # NOTE: currently we only support some simple strategies to support tensor parallelism
+    # TODO: sdpa might be a good candidate for us to explore decomposed sharding propagation
+    # as it involves: matmul, pointwise, reduction ops together.
+
+    mesh = op_schema.get_mesh_from_args()
+    single_mesh_dim_strategies = _scaled_dot_product_flash_attention_base_strategies(
+        op_schema
+    )
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=9
     )
 
 
-@register_op_strategy(aten._scaled_dot_product_flash_attention_backward.default)
-def scaled_dot_product_flash_attention_backward_strategy(
+def _scaled_dot_product_flash_attention_backward_base_strategies(
     op_schema: OpSchema,
-) -> OpStrategy:
-    # backward op does not need to validate the mesh since forward op has already done it
-    mesh = op_schema.get_mesh_from_args(validate=False)
-
+) -> list[PlacementList]:
+    """Helper that returns list of base placement strategies (without CP)."""
     q_input_strategy = op_schema.args_schema[1]
     if not isinstance(q_input_strategy, OpStrategy):
         raise AssertionError(f"Expected OpStrategy, got {type(q_input_strategy)}")
@@ -425,6 +431,18 @@ def scaled_dot_product_flash_attention_backward_strategy(
     batch_dim_sharding.extend([Replicate()] * (num_tensor_inputs - 6))
     single_mesh_dim_strategies.append(batch_dim_sharding)
 
+    return single_mesh_dim_strategies
+
+
+@register_op_strategy(aten._scaled_dot_product_flash_attention_backward.default)
+def scaled_dot_product_flash_attention_backward_strategy(
+    op_schema: OpSchema,
+) -> OpStrategy:
+    # backward op does not need to validate the mesh since forward op has already done it
+    mesh = op_schema.get_mesh_from_args(validate=False)
+    single_mesh_dim_strategies = (
+        _scaled_dot_product_flash_attention_backward_base_strategies(op_schema)
+    )
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=3
     )
@@ -449,13 +467,10 @@ def constant_pad_nd_strategy(op_schema: OpSchema) -> OpStrategy:
     )
 
 
-@register_op_strategy(
-    aten._scaled_dot_product_efficient_attention.default,
-    schema_info=RuntimeSchemaInfo(4),
-)
-def scaled_dot_product_efficient_attention_strategy(op_schema: OpSchema) -> OpStrategy:
-    # NOTE: currently we only support some simple strategies to support tensor parallelism
-    mesh = op_schema.get_mesh_from_args()
+def _scaled_dot_product_efficient_attention_base_strategies(
+    op_schema: OpSchema,
+) -> list[PlacementList]:
+    """Helper that returns list of base placement strategies (without CP)."""
     q_input_strategy = op_schema.args_schema[0]
     if not isinstance(q_input_strategy, OpStrategy):
         raise AssertionError(f"Expected OpStrategy, got {type(q_input_strategy)}")
@@ -526,6 +541,19 @@ def scaled_dot_product_efficient_attention_strategy(op_schema: OpSchema) -> OpSt
 
     single_mesh_dim_strategies.append(batch_sharding)
 
+    return single_mesh_dim_strategies
+
+
+@register_op_strategy(
+    aten._scaled_dot_product_efficient_attention.default,
+    schema_info=RuntimeSchemaInfo(4),
+)
+def scaled_dot_product_efficient_attention_strategy(op_schema: OpSchema) -> OpStrategy:
+    # NOTE: currently we only support some simple strategies to support tensor parallelism
+    mesh = op_schema.get_mesh_from_args()
+    single_mesh_dim_strategies = (
+        _scaled_dot_product_efficient_attention_base_strategies(op_schema)
+    )
     return expand_to_full_mesh_op_strategy(
         mesh,
         op_schema,
@@ -534,13 +562,10 @@ def scaled_dot_product_efficient_attention_strategy(op_schema: OpSchema) -> OpSt
     )
 
 
-@register_op_strategy(aten._scaled_dot_product_efficient_attention_backward.default)
-def scaled_dot_product_efficient_attention_backward_strategy(
+def _scaled_dot_product_efficient_attention_backward_base_strategies(
     op_schema: OpSchema,
-) -> OpStrategy:
-    # backward op does not need to validate the mesh since forward op has already done it
-    mesh = op_schema.get_mesh_from_args(validate=False)
-
+) -> list[PlacementList]:
+    """Helper that returns list of base placement strategies (without CP)."""
     q_input_strategy = op_schema.args_schema[1]
     if not isinstance(q_input_strategy, OpStrategy):
         raise AssertionError(f"Expected OpStrategy, got {type(q_input_strategy)}")
@@ -612,6 +637,18 @@ def scaled_dot_product_efficient_attention_backward_strategy(
     batch_dim_sharding.extend([Replicate(), Replicate()])
     single_mesh_dim_strategies.append(batch_dim_sharding)
 
+    return single_mesh_dim_strategies
+
+
+@register_op_strategy(aten._scaled_dot_product_efficient_attention_backward.default)
+def scaled_dot_product_efficient_attention_backward_strategy(
+    op_schema: OpSchema,
+) -> OpStrategy:
+    # backward op does not need to validate the mesh since forward op has already done it
+    mesh = op_schema.get_mesh_from_args(validate=False)
+    single_mesh_dim_strategies = (
+        _scaled_dot_product_efficient_attention_backward_base_strategies(op_schema)
+    )
     return expand_to_full_mesh_op_strategy(
         mesh,
         op_schema,
@@ -620,13 +657,10 @@ def scaled_dot_product_efficient_attention_backward_strategy(
     )
 
 
-@register_op_strategy(
-    aten._scaled_dot_product_cudnn_attention.default,
-    schema_info=RuntimeSchemaInfo(4),
-)
-def scaled_dot_product_cudnn_attention_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = op_schema.get_mesh_from_args()
-
+def _scaled_dot_product_cudnn_attention_base_strategies(
+    op_schema: OpSchema,
+) -> list[PlacementList]:
+    """Helper that returns list of base placement strategies (without CP)."""
     (
         query_strategy,  # query
         _,  # key
@@ -714,18 +748,27 @@ def scaled_dot_product_cudnn_attention_strategy(op_schema: OpSchema) -> OpStrate
     ]
     single_mesh_dim_strategies.append(batch_dim_sharding)
 
+    return single_mesh_dim_strategies
+
+
+@register_op_strategy(
+    aten._scaled_dot_product_cudnn_attention.default,
+    schema_info=RuntimeSchemaInfo(4),
+)
+def scaled_dot_product_cudnn_attention_strategy(op_schema: OpSchema) -> OpStrategy:
+    mesh = op_schema.get_mesh_from_args()
+    single_mesh_dim_strategies = _scaled_dot_product_cudnn_attention_base_strategies(
+        op_schema
+    )
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=9
     )
 
 
-@register_op_strategy(aten._scaled_dot_product_cudnn_attention_backward.default)
-def scaled_scaled_dot_product_cudnn_attention_backward_strategy(
+def _scaled_scaled_dot_product_cudnn_attention_backward_base_strategies(
     op_schema: OpSchema,
-) -> OpStrategy:
-    # backward op does not need to validate the mesh since forward op has already done it
-    mesh = op_schema.get_mesh_from_args(validate=False)
-
+) -> list[PlacementList]:
+    """Helper that returns list of base placement strategies (without CP)."""
     if len(op_schema.args_schema) < 15:
         raise AssertionError(
             f"Expected at least 15 args_schema, got {len(op_schema.args_schema)}"
@@ -821,6 +864,18 @@ def scaled_scaled_dot_product_cudnn_attention_backward_strategy(
     batch_dim_sharding = batch_dim_sharding_out + batch_dim_sharding_inp
     single_mesh_dim_strategies.append(batch_dim_sharding)
 
+    return single_mesh_dim_strategies
+
+
+@register_op_strategy(aten._scaled_dot_product_cudnn_attention_backward.default)
+def scaled_scaled_dot_product_cudnn_attention_backward_strategy(
+    op_schema: OpSchema,
+) -> OpStrategy:
+    # backward op does not need to validate the mesh since forward op has already done it
+    mesh = op_schema.get_mesh_from_args(validate=False)
+    single_mesh_dim_strategies = (
+        _scaled_scaled_dot_product_cudnn_attention_backward_base_strategies(op_schema)
+    )
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=3
     )

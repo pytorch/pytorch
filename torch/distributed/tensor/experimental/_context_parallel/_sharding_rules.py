@@ -21,7 +21,7 @@ aten = torch.ops.aten
 
 
 @contextmanager
-def op_strategy_context(op_overload, strategy_func, schema_info=None):
+def _op_strategy_context(op_overload, strategy_func, schema_info=None):
     """
     Context manager for setting and clearing op strategies for Context Parallelism.
 
@@ -66,21 +66,23 @@ def op_strategy_context(op_overload, strategy_func, schema_info=None):
         propagator.propagate_op_sharding.cache.cache_clear()
 
 
-def scaled_dot_product_flash_attention_cp_strategy(op_schema: OpSchema) -> OpStrategy:
+def _scaled_dot_product_flash_attention_cp_strategy(op_schema: OpSchema) -> OpStrategy:
     """
     Strategy for flash attention forward with Context Parallelism support.
     This includes the base strategies plus CP-specific sequence dimension sharding.
     """
     # Import here to avoid circular dependency
     from torch.distributed.tensor._ops._matrix_ops import (
-        scaled_dot_product_flash_attention_strategy,
+        _scaled_dot_product_flash_attention_base_strategies,
     )
 
-    # Get the base strategy (without CP modifications)
-    base_strategy = scaled_dot_product_flash_attention_strategy(op_schema)
+    # Get the base strategies (without CP modifications)
+    mesh = op_schema.get_mesh_from_args()
+    single_mesh_dim_strategies = _scaled_dot_product_flash_attention_base_strategies(
+        op_schema
+    )
 
     # Add Context Parallelism strategy: shards on the sequence dim
-    mesh = op_schema.get_mesh_from_args()
     return_debug_mask = len(op_schema.args_schema) >= 6 and op_schema.args_schema[5]
     debug_attn_mask_sharding = Shard(2) if return_debug_mask else Replicate()
 
@@ -98,19 +100,14 @@ def scaled_dot_product_flash_attention_cp_strategy(op_schema: OpSchema) -> OpStr
         Shard(2),  # k
         Shard(2),  # v
     ]
+    single_mesh_dim_strategies.append(cp_strategy_placements)
 
-    # Create CP strategies using the expand_to_full_mesh_op_strategy utility
-    cp_strategies = expand_to_full_mesh_op_strategy(
-        mesh, op_schema, [cp_strategy_placements], input_index=9
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=9
     )
 
-    # Append CP strategies to base strategies
-    base_strategy.strategies.extend(cp_strategies.strategies)
 
-    return base_strategy
-
-
-def scaled_dot_product_flash_attention_backward_cp_strategy(
+def _scaled_dot_product_flash_attention_backward_cp_strategy(
     op_schema: OpSchema,
 ) -> OpStrategy:
     """
@@ -118,12 +115,14 @@ def scaled_dot_product_flash_attention_backward_cp_strategy(
     """
     from torch.distributed.tensor._op_schema import OpStrategy as OpStrat
     from torch.distributed.tensor._ops._matrix_ops import (
-        scaled_dot_product_flash_attention_backward_strategy,
+        _scaled_dot_product_flash_attention_backward_base_strategies,
     )
 
-    base_strategy = scaled_dot_product_flash_attention_backward_strategy(op_schema)
-
     mesh = op_schema.get_mesh_from_args(validate=False)
+    single_mesh_dim_strategies = (
+        _scaled_dot_product_flash_attention_backward_base_strategies(op_schema)
+    )
+
     tensor_input_indices = [
         i
         for i, arg_spec in enumerate(op_schema.args_schema)
@@ -144,29 +143,29 @@ def scaled_dot_product_flash_attention_backward_cp_strategy(
         Shard(2),  # logsumexp
     ]
     seq_dim_sharding.extend([Replicate()] * (num_tensor_inputs - 6))
+    single_mesh_dim_strategies.append(seq_dim_sharding)
 
-    cp_strategies = expand_to_full_mesh_op_strategy(
-        mesh, op_schema, [seq_dim_sharding], input_index=3
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=3
     )
 
-    base_strategy.strategies.extend(cp_strategies.strategies)
-    return base_strategy
 
-
-def scaled_dot_product_efficient_attention_cp_strategy(
+def _scaled_dot_product_efficient_attention_cp_strategy(
     op_schema: OpSchema,
 ) -> OpStrategy:
     """
     Strategy for efficient attention forward with Context Parallelism support.
     """
     from torch.distributed.tensor._ops._matrix_ops import (
-        scaled_dot_product_efficient_attention_strategy,
+        _scaled_dot_product_efficient_attention_base_strategies,
     )
 
-    base_strategy = scaled_dot_product_efficient_attention_strategy(op_schema)
+    mesh = op_schema.get_mesh_from_args()
+    single_mesh_dim_strategies = (
+        _scaled_dot_product_efficient_attention_base_strategies(op_schema)
+    )
 
     # Add Context Parallelism strategy
-    mesh = op_schema.get_mesh_from_args()
     has_attn_bias = op_schema.args_schema[3] is not None
 
     cp_strategy_placements: PlacementList = [
@@ -180,28 +179,28 @@ def scaled_dot_product_efficient_attention_cp_strategy(
     ]
     if has_attn_bias:
         cp_strategy_placements.append(Replicate())  # attn bias - not sharded for CP
+    single_mesh_dim_strategies.append(cp_strategy_placements)
 
-    cp_strategies = expand_to_full_mesh_op_strategy(
-        mesh, op_schema, [cp_strategy_placements], input_index=4
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=4
     )
 
-    base_strategy.strategies.extend(cp_strategies.strategies)
-    return base_strategy
 
-
-def scaled_dot_product_efficient_attention_backward_cp_strategy(
+def _scaled_dot_product_efficient_attention_backward_cp_strategy(
     op_schema: OpSchema,
 ) -> OpStrategy:
     """
     Strategy for efficient attention backward with Context Parallelism support.
     """
     from torch.distributed.tensor._ops._matrix_ops import (
-        scaled_dot_product_efficient_attention_backward_strategy,
+        _scaled_dot_product_efficient_attention_backward_base_strategies,
     )
 
-    base_strategy = scaled_dot_product_efficient_attention_backward_strategy(op_schema)
-
     mesh = op_schema.get_mesh_from_args(validate=False)
+    single_mesh_dim_strategies = (
+        _scaled_dot_product_efficient_attention_backward_base_strategies(op_schema)
+    )
+
     has_attn_bias = op_schema.args_schema[4] is not None
 
     # Context Parallelism: shards on the sequence dim
@@ -220,26 +219,26 @@ def scaled_dot_product_efficient_attention_backward_cp_strategy(
     if has_attn_bias:
         seq_dim_sharding.insert(8, Shard(1))  # attn_bias input
     seq_dim_sharding.extend([Replicate(), Replicate()])
+    single_mesh_dim_strategies.append(seq_dim_sharding)
 
-    cp_strategies = expand_to_full_mesh_op_strategy(
-        mesh, op_schema, [seq_dim_sharding], input_index=4
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=4
     )
 
-    base_strategy.strategies.extend(cp_strategies.strategies)
-    return base_strategy
 
-
-def scaled_dot_product_cudnn_attention_cp_strategy(op_schema: OpSchema) -> OpStrategy:
+def _scaled_dot_product_cudnn_attention_cp_strategy(op_schema: OpSchema) -> OpStrategy:
     """
     Strategy for cudnn attention forward with Context Parallelism support.
     """
     from torch.distributed.tensor._ops._matrix_ops import (
-        scaled_dot_product_cudnn_attention_strategy,
+        _scaled_dot_product_cudnn_attention_base_strategies,
     )
 
-    base_strategy = scaled_dot_product_cudnn_attention_strategy(op_schema)
-
     mesh = op_schema.get_mesh_from_args()
+    single_mesh_dim_strategies = _scaled_dot_product_cudnn_attention_base_strategies(
+        op_schema
+    )
+
     (
         query_strategy,
         _,
@@ -272,30 +271,28 @@ def scaled_dot_product_cudnn_attention_cp_strategy(op_schema: OpSchema) -> OpStr
     ]
     if has_attn_bias:
         cp_strategy_placements.append(Replicate())  # attn_bias - not sharded for CP
+    single_mesh_dim_strategies.append(cp_strategy_placements)
 
-    cp_strategies = expand_to_full_mesh_op_strategy(
-        mesh, op_schema, [cp_strategy_placements], input_index=9
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=9
     )
 
-    base_strategy.strategies.extend(cp_strategies.strategies)
-    return base_strategy
 
-
-def scaled_dot_product_cudnn_attention_backward_cp_strategy(
+def _scaled_dot_product_cudnn_attention_backward_cp_strategy(
     op_schema: OpSchema,
 ) -> OpStrategy:
     """
     Strategy for cudnn attention backward with Context Parallelism support.
     """
     from torch.distributed.tensor._ops._matrix_ops import (
-        scaled_scaled_dot_product_cudnn_attention_backward_strategy,
-    )
-
-    base_strategy = scaled_scaled_dot_product_cudnn_attention_backward_strategy(
-        op_schema
+        _scaled_scaled_dot_product_cudnn_attention_backward_base_strategies,
     )
 
     mesh = op_schema.get_mesh_from_args(validate=False)
+    single_mesh_dim_strategies = (
+        _scaled_scaled_dot_product_cudnn_attention_backward_base_strategies(op_schema)
+    )
+
     has_attn_bias = op_schema.args_schema[8] is not None
     has_scale = len(op_schema.args_schema) >= 16 and False
 
@@ -311,13 +308,11 @@ def scaled_dot_product_cudnn_attention_backward_cp_strategy(
     context_parallel_sharding = (
         context_parallel_sharding_out + context_parallel_sharding_inp
     )
+    single_mesh_dim_strategies.append(context_parallel_sharding)
 
-    cp_strategies = expand_to_full_mesh_op_strategy(
-        mesh, op_schema, [context_parallel_sharding], input_index=3
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=3
     )
-
-    base_strategy.strategies.extend(cp_strategies.strategies)
-    return base_strategy
 
 
 # Store context managers and original strategies
@@ -337,39 +332,39 @@ def register_cp_sharding_rules():
     cp_strategies = [
         (
             aten._scaled_dot_product_flash_attention.default,
-            scaled_dot_product_flash_attention_cp_strategy,
+            _scaled_dot_product_flash_attention_cp_strategy,
             RuntimeSchemaInfo(5),
         ),
         (
             aten._scaled_dot_product_flash_attention_backward.default,
-            scaled_dot_product_flash_attention_backward_cp_strategy,
+            _scaled_dot_product_flash_attention_backward_cp_strategy,
             None,
         ),
         (
             aten._scaled_dot_product_efficient_attention.default,
-            scaled_dot_product_efficient_attention_cp_strategy,
+            _scaled_dot_product_efficient_attention_cp_strategy,
             RuntimeSchemaInfo(4),
         ),
         (
             aten._scaled_dot_product_efficient_attention_backward.default,
-            scaled_dot_product_efficient_attention_backward_cp_strategy,
+            _scaled_dot_product_efficient_attention_backward_cp_strategy,
             None,
         ),
         (
             aten._scaled_dot_product_cudnn_attention.default,
-            scaled_dot_product_cudnn_attention_cp_strategy,
+            _scaled_dot_product_cudnn_attention_cp_strategy,
             RuntimeSchemaInfo(4),
         ),
         (
             aten._scaled_dot_product_cudnn_attention_backward.default,
-            scaled_dot_product_cudnn_attention_backward_cp_strategy,
+            _scaled_dot_product_cudnn_attention_backward_cp_strategy,
             None,
         ),
     ]
 
     # Register each strategy
     for op_overload, strategy_func, schema_info in cp_strategies:
-        ctx = op_strategy_context(op_overload, strategy_func, schema_info)
+        ctx = _op_strategy_context(op_overload, strategy_func, schema_info)
         orig_funcs, orig_schema = ctx.__enter__()
         _cp_strategy_contexts[op_overload] = ctx
         _original_strategies[op_overload] = (orig_funcs, orig_schema)
