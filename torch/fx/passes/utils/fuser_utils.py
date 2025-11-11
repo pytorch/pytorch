@@ -7,7 +7,7 @@ from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
-from torch.fx.passes.tools_common import NodeList, NodeSet
+from torch.fx.passes.tools_common import legalize_graph, NodeList, NodeSet
 from torch.fx.passes.utils import lift_subgraph_as_module  # type: ignore[attr-defined]
 
 
@@ -220,12 +220,14 @@ def insert_subgm(
     submodule_name = sub_gm.__class__.__name__
     gm.add_submodule(submodule_name, sub_gm)
 
-    def last_node(target_nodes: tuple[Node, ...]) -> Node:
+    def last_node(target_nodes: tuple[Node, ...]) -> Node | None:
         for node in reversed(gm.graph.nodes):
             if node in target_nodes:
                 return node
+        return None
 
-    last_input_node: Node = last_node(orig_inputs)
+    last_input_node: Node | None = last_node(orig_inputs)
+    assert last_input_node is not None
 
     # Create a call_module node in main graph.
     with gm.graph.inserting_after(last_input_node):
@@ -281,6 +283,7 @@ def fuse_by_partitions(
 
         erase_nodes(gm, sorted_nodes)
 
+    legalize_graph(gm, stable_topo_sort=True)
     gm.graph.lint()
 
     return gm
