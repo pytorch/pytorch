@@ -228,7 +228,7 @@ def aot_stage1_graph_capture(
                 )
         else:
             graph, updated_flat_args, updated_flat_args_descs, maybe_subclass_meta = (
-                aot_dispatch_base_graph(  # type: ignore[assignment]
+                aot_dispatch_base_graph(
                     flat_fn,
                     aot_state.flat_args,
                     aot_state.flat_args_descs,

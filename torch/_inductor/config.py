@@ -551,17 +551,18 @@ max_autotune_flex_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
 ).upper()  # type: ignore[assignment]
 
 
-# Fall back to ATen for all ops by default, except for fx nodes with special
-# annotations. Different from default inductor mode that fuses all nodes,
-# this config enables an opt-in mode that only fuse for user-specified nodes.
-# The motivation is to provide guaranteed numeric correctness and better
-# control.
+# Fall back to ATen for all ops by default, except those nodes that users explicitly
+# annotated with regional inductor compile. Please read torch.fx.passes.regional_inductor
+# on to explicitly annotate. This is currently only used by inductor lite mode.
+# Different from default inductor mode that fuses all nodes, this config enables an
+# opt-in mode that only fuse for user-specified nodes. The motivation is to provide
+# guaranteed numeric correctness and give full control to users.
 fallback_by_default: bool = False
 
 
-# This config allows for selective decomposition of certain operators in the graph.
-# Currently the only use case is to patch the same-name config in functorch.
-# See more details in [Note: Selective Decomposition]
+# This config allows selective decomposition of certain operators in the graph.
+# Currently the only use case is to patch the same-name config in functorch, for
+# inductor lite mode. See more details in [Note: Selective Decomposition]
 selective_decompose: bool = False
 
 
