@@ -726,7 +726,8 @@ class CPUReproTests(TestCase):
             seq_len,
         )
 
-    _test_lstm_packed_change_input_sizes_cpu_params = list(
+    @parametrize(
+        "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
         itertools.product(
             *[
                 [False],
@@ -740,12 +741,7 @@ class CPUReproTests(TestCase):
                 [2],
                 [3],
             ]
-        )
-    )
-
-    @parametrize(
-        "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
-        _test_lstm_packed_change_input_sizes_cpu_params,
+        ),
     )
     def test_lstm_packed_change_input_sizes_cpu(
         self,
