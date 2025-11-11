@@ -291,9 +291,28 @@ environment using uv.
 |-|-|
 |`setup-lint`|update lintrunner and perform a fresh setup|
 |`lazy-setup-lint`|only perform setup if the lint configuration has changed|
-|`lint`|perform full lint on all files|
+|`lint`|perform default lint (see below)|
 |`quicklint`|perform lint on all files changed in the latest commit and the working directory|
 |`quickfix`|autofix issues on all files changed in the latest commit and the working directory|
+
+#### default lint
+
+Since some linters take a long time to run, we categorize all linters as either
+fast or slow. In the default lint, only the fast linters are run on all files;
+the slow linters are run on the changed files only.
+
+### Regenerating
+
+Pytorch makes use of a number of code generations, which range from the version
+information in `torch/version.py` over type stubs and other linter support to
+github workflows.
+With Spin, we offer a unified interface to these tasks.
+
+|command||
+|-|-|
+|`regenerate-version`|regenerate `torch/version.py`|
+|`regenerate-type-stubs`|regenerates type stubs for use by static type checkers|
+|`regenerate-clangtidy-files`|regenerates clang related files needed for linting|
 
 ## Unit testing
 
