@@ -157,7 +157,7 @@ jobs:
         uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
-          name: docker-builds-artifacts
+          name: docker-builds-artifacts-${{ matrix.docker-image-name }}
           retention-days: 14
           if-no-files-found: error
           path: ./docker-builds-output-${{ matrix.docker-image-name }}.txt
