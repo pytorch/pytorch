@@ -10,7 +10,10 @@ from torch.fx import has_side_effect, Proxy
 from .. import graph_break_hints
 from ..bytecode_transformation import create_call_function
 from ..exc import TYPE_CHECKING, unimplemented
-from ..graph_bytecode_inputs import get_external_object_by_index
+from ..graph_bytecode_inputs import (
+    get_external_object_by_index,
+    register_graph_created_object,
+)
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import FxTracebackAnnotateVariable
@@ -26,6 +29,16 @@ from torch._library.custom_ops import custom_op
 
 
 Tensor = torch.Tensor
+
+
+def new_event(*args: Any, **kwargs: Any) -> int:
+    event = torch.Event(*args, **kwargs)
+    return register_graph_created_object(
+        event,
+        EventVariable.make_construct_in_graph_event_fn(
+            TupleVariable([]), ConstDictVariable({})
+        ),
+    )
 
 
 def _get_stream_by_index(index: int) -> torch.Stream:
