@@ -471,7 +471,8 @@ class PadMMTest(TestCase):
         )
 
     @unittest.skipIf(
-        (not torch.cuda.is_available() or torch.cuda.get_device_capability() >= (9, 0)) and (not torch.xpu.is_available()),
+        (not torch.cuda.is_available() or torch.cuda.get_device_capability() >= (9, 0))
+        and (not torch.xpu.is_available()),
         "No perf regression on H100+ with BF16",
     )
     @skipIfRocm

@@ -280,7 +280,9 @@ def should_pad_bench_key(
         return (t.shape, t.stride(), t.dtype)
 
     tf32_key = (
-        None if mat1.dtype != torch.float32 else torch.backends.cuda.matmul.allow_tf32 or torch.backends.mkldnn.allow_tf32
+        None
+        if mat1.dtype != torch.float32
+        else torch.backends.cuda.matmul.allow_tf32 or torch.backends.mkldnn.allow_tf32
     )
 
     def fmt_pad(name: str) -> str | None:
@@ -382,7 +384,6 @@ def should_pad_mm_bf16(dtype: torch.dtype, M: int, N: int, K: int) -> bool:
         and N % 2 == 1
         and K >= large_k_threshold_to_pad
         and (torch.xpu.is_available() or torch.cuda.get_device_capability() < (9, 0))
-
     ):  # doesn't repro on h100s:
         return True
     return False
