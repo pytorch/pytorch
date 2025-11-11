@@ -79,4 +79,5 @@ jobs:
       build-environment: linux-jammy-rocm-py3.10-mi300
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
+      tests-to-include: distributed/test_distributed_spawn distributed/test_dynamo_distributed distributed/fsdp/test_fsdp_state_dict distributed/test_device_mesh distributed/_composable/fsdp/test_fully_shard_compile distributed/test_inductor_collectives distributed/test_aten_comm_compute_reordering distributed/tensor/test_dtensor distributed/_shard/sharded_tensor/test_sharded_tensor distributed/tensor/test_dtensor_compile
     secrets: inherit
