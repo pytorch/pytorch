@@ -1,5 +1,5 @@
 import sys
-from typing import Callable, Optional
+from typing import Callable, Optional  # noqa: UP035
 
 from torch.utils._config_module import install_config_module
 

@@ -2205,28 +2205,22 @@ class CppKernel(Kernel):
             reduction_size = functools.reduce(
                 operator.mul, self.call_ranges[self.reduction_depth :]
             )
-            if config.cpp.dynamic_threads:
-                # If dynamic threads, to be conservative,
-                # use reduction_size as the range size
-                rt_size = reduction_size
-            else:
-                rt_size = CeilDiv(reduction_size, parallel_num_threads())
 
             # chunk size to balance accuracy and performance
-            chunk_size = 2**20
+            chunk_size = 4096
 
             # use acc helper If cannot get size_hint
             try:
-                rt_size_hint = V.graph.sizevars.size_hint(rt_size)
+                reduction_size_hint = V.graph.sizevars.size_hint(reduction_size)
             except Exception:
                 return True
 
-            if rt_size_hint > chunk_size:
+            if reduction_size_hint > chunk_size:
                 # use helper if the reduction size is too large
-                V.graph.sizevars.check_lt(chunk_size, rt_size)
+                V.graph.sizevars.check_lt(chunk_size, reduction_size)
                 return True
             else:
-                V.graph.sizevars.check_leq(rt_size, chunk_size)
+                V.graph.sizevars.check_leq(reduction_size, chunk_size)
         return False
 
     def _acc_helper_init(
@@ -2243,7 +2237,7 @@ class CppKernel(Kernel):
         )
         num_range_thread_expr = cexpr_index(num_range_thread)
         assert reduction_type in ["welford_reduce", "sum"]
-        chunk_size = 4096 if reduction_type == "welford_reduce" else 2**20
+        chunk_size = 4096
         num_chunks = CeilDiv(num_range_thread, chunk_size)
         helper_type = (
             "WelfordHelper"
@@ -3690,6 +3684,8 @@ class CppTile2DKernel(CppVecKernel):
             if self.tail_size or V.graph.get_dtype(name) in DTYPE_LOWP_FP + [
                 torch.uint8,
                 torch.int8,
+                torch.float8_e4m3fn,
+                torch.float8_e5m2,
             ]:
                 line = f"{value}.store({storebuf}, {cexpr_index(self.num_elems)});"
             else:
