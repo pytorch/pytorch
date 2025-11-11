@@ -862,7 +862,7 @@ void sdpa(
   ADD_INPUT(key);
   inputs.emplace_back(dnnl::graph::tensor::make_scalar_tensor(l_inputs[i++], &softmax_scale));
   if (is_causal) {
-    float neg_inf_val = -std::numeric_limits<float>::infinity();
+    constexpr float neg_inf_val = -std::numeric_limits<float>::infinity();
     inputs.emplace_back(dnnl::graph::tensor::make_scalar_tensor(l_inputs[i++], &neg_inf_val));
   }
   if (attn_mask.has_value()) {
@@ -965,7 +965,7 @@ void sdpa_backward(
   ADD_INPUT(logsumexp);
   inputs.emplace_back(dnnl::graph::tensor::make_scalar_tensor(l_inputs[i++], &softmax_scale));
   if (is_causal) {
-    float neg_inf_val = -std::numeric_limits<float>::infinity();
+    constexpr float neg_inf_val = -std::numeric_limits<float>::infinity();
     inputs.emplace_back(dnnl::graph::tensor::make_scalar_tensor(l_inputs[i++], &neg_inf_val));
   }
   if (attn_mask.has_value()) {
