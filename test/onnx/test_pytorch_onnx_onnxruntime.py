@@ -7,6 +7,7 @@ import functools
 import io
 import itertools
 import os
+import tempfile
 import unittest
 from collections import OrderedDict
 from typing import Optional, Union
@@ -13925,6 +13926,83 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @common_utils.parametrize(**_parametrize_rnn_args("dropout"))
     def test_rnn(self, *args, **kwargs):
         self._dispatch_rnn_test(*args, **kwargs)
+
+    def test_invalid_dynamic_axes_raises_error(self):
+        """Test that invalid dynamic_axes keys raise ValueError instead of segfaulting.
+
+        This is a regression test for issue #163033.
+        When dynamic_axes contains keys that don't match actual input/output names,
+        the exporter should raise a clear Python exception before any C++ code runs.
+        """
+
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        model = SimpleModel()
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+
+        with tempfile.NamedTemporaryFile(suffix=".onnx", delete=True) as f:
+            # Test with invalid input key in dynamic_axes
+            with self.assertRaisesRegex(
+                ValueError,
+                r"Provided keys.*for dynamic_axes are not valid input/output names",
+            ):
+                torch.onnx.export(
+                    model,
+                    (x, y),
+                    f.name,
+                    opset_version=17,
+                    input_names=["x", "y"],
+                    output_names=["z"],
+                    dynamic_axes={"input": {0: "batch"}},
+                    dynamo=False,
+                )
+
+            # Test with invalid output key in dynamic_axes
+            with self.assertRaisesRegex(
+                ValueError,
+                r"Provided keys.*for dynamic_axes are not valid input/output names",
+            ):
+                torch.onnx.export(
+                    model,
+                    (x, y),
+                    f.name,
+                    opset_version=17,
+                    input_names=["x", "y"],
+                    output_names=["z"],
+                    dynamic_axes={"output": {0: "batch"}},
+                    dynamo=False,
+                )
+
+            # Test with multiple invalid keys
+            with self.assertRaisesRegex(
+                ValueError,
+                r"Provided keys.*for dynamic_axes are not valid input/output names",
+            ):
+                torch.onnx.export(
+                    model,
+                    (x, y),
+                    f.name,
+                    opset_version=17,
+                    input_names=["x", "y"],
+                    output_names=["z"],
+                    dynamic_axes={"input": {0: "batch"}, "output": {0: "batch"}},
+                    dynamo=False,
+                )
+
+            # Test that valid dynamic_axes still works
+            torch.onnx.export(
+                model,
+                (x, y),
+                f.name,
+                opset_version=17,
+                input_names=["x", "y"],
+                output_names=["z"],
+                dynamic_axes={"x": {0: "batch"}, "y": {0: "batch"}, "z": {0: "batch"}},
+                dynamo=False,
+            )
 
 
 if __name__ == "__main__":
