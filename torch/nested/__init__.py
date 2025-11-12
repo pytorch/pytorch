@@ -281,8 +281,8 @@ def nested_tensor(
 def narrow(
     tensor: Tensor,
     dim: int,
-    start: Union[int, Tensor],
-    length: Union[int, Tensor],
+    start: int | Tensor,
+    length: int | Tensor,
     layout=torch.strided,
 ) -> Tensor:
     r"""

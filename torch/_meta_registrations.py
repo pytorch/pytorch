@@ -39,8 +39,6 @@ from torch._prims_common.wrappers import (
 )
 from torch._refs import _broadcast_shapes, _maybe_broadcast
 from torch.fx.experimental import _config as exp_config
-
-# from torch._C import _ScalingType as ScalingType, _SwizzleType as SwizzleType
 from torch.nn.functional import ScalingType, SwizzleType
 from torch.utils import _pytree as pytree
 
@@ -6562,8 +6560,19 @@ def _check_scaled_mm_sizes_v2(
 
     scale_recipe_a = [ScalingType(si) for si in scale_recipe_a]
     scale_recipe_b = [ScalingType(si) for si in scale_recipe_b]
-    swizzle_a = [SwizzleType(si) for si in swizzle_a]
-    swizzle_b = [SwizzleType(si) for si in swizzle_b]
+
+    if swizzle_a:
+        swizzle_a = [SwizzleType(si) for si in swizzle_a]
+    else:
+        swizzle_a = [
+            SwizzleType.NO_SWIZZLE,
+        ]
+    if swizzle_b:
+        swizzle_b = [SwizzleType(si) for si in swizzle_b]
+    else:
+        swizzle_b = [
+            SwizzleType.NO_SWIZZLE,
+        ]
 
     if device_hint(self) == "cuda":
 
