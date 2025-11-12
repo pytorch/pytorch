@@ -12,6 +12,10 @@ import torch.utils.checkpoint
 from torch._dynamo.backends.common import aot_autograd
 from torch._functorch._aot_autograd.autograd_cache import BundledCompiledForward
 from torch._guards import detect_fake_mode
+from torch._higher_order_ops.invoke_subgraph import (
+    NestedCompileBackend,
+    NestedCompileRegionOptions,
+)
 from torch._inductor.output_code import RegionalOutputCode
 from torch._inductor.test_case import run_tests
 from torch._inductor.utils import run_fw_bw_and_get_code
@@ -551,6 +555,72 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
 
         fn(x).sum().backward()
         self.assertEqual(x.grad, x * 3)
+    @parametrize("serialize", [False])  # , True
+    def test_invoke_subgraph_regional_compile(self, serialize):
+        call_test_partitioner_ct = 0
+
+        def test_partitioner(*args, **kwargs):
+            nonlocal call_test_partitioner_ct
+            call_test_partitioner_ct += 1
+            return torch._functorch.partitioners.default_partition(*args, **kwargs)
+
+        backend = NestedCompileRegionOptions(
+            backend=NestedCompileBackend.INDUCTOR,
+            inductor_configs={
+                "max_autotune": True,
+                "triton.cudagraphs": False,
+            },
+            partitioner=test_partitioner,
+        )
+
+        @torch.compiler.nested_compile_region(backend_options=backend)
+        def gn_with_backend(x):
+            return torch.sin(x)
+
+        @torch.compiler.nested_compile_region
+        def gn_without_backend(x):
+            return torch.cos(x)
+
+        def fn(x):
+            return gn_with_backend(x) + gn_without_backend(x)
+
+        backend = aot_eager_regional_inductor(serialize=serialize)
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        import torch._inductor.config as inductor_config
+
+        # Hook to verify options
+        original_compile = torch._inductor.standalone_compile
+        captured_options = []
+
+        def verify_options(*args, **kwargs):
+            options = kwargs.get("options", {})
+            captured_options.append(options)
+
+            # Verify config is set as expected from explicit options
+            assert inductor_config.max_autotune, "max_autotune should be True"
+            assert not inductor_config.triton.cudagraphs, (
+                "triton.cudagraphs should be False"
+            )
+
+            return original_compile(*args, **kwargs)
+
+        torch._inductor.standalone_compile = verify_options
+
+        try:
+            x = torch.randn(8, 8, requires_grad=True)
+            # opt_fn(x)
+            res, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
+            self.assertEqual(len(codes), 2)
+            self.assertTrue("repeated_subgraph0" in codes[0])
+            self.assertTrue("repeated_subgraph1" not in codes[0])
+            self.assertTrue("repeated_subgraph0" in codes[1])
+            self.assertTrue("repeated_subgraph1" not in codes[1])
+            self.assertEqual(call_test_partitioner_ct, 1)
+            true_res = fn(x)
+            self.assertEqual(res, true_res)
+        finally:
+            torch._inductor.standalone_compile = original_compile
 
 
 @skipIfTorchDynamo("Not a suitable dynamo wrapped test")

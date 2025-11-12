@@ -786,8 +786,19 @@ def run_joint_graph_passes_on_hops(
         # TODO: invoke_subgraph should track which of its inputs static indices
         # so it can propagate them to the partitioner (and use in cudagraphs)
         static_lifetime_input_indices: list[int] = []
+
+        partition_fn = aot_config.partition_fn
+
+        # Use hop specific partitioner_fn
+        if (
+            fw_hop_node.target == torch._higher_order_ops.invoke_subgraph
+            and "custom" in fw_hop_node.meta
+            and "partitioner" in fw_hop_node.meta["custom"]
+        ):
+            partition_fn = fw_hop_node.meta["custom"]["partitioner"]
+
         # Step 2) and 3) - Run joint graph passes and partitioner
-        new_fw_hop_gm, new_bw_hop_gm = aot_config.partition_fn(
+        new_fw_hop_gm, new_bw_hop_gm = partition_fn(
             joint_hop_gm,
             [],
             num_fwd_outputs=num_fw_outputs,

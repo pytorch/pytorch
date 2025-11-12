@@ -1,9 +1,11 @@
 # mypy: allow-untyped-defs
 
 import contextlib
+import enum
+from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -36,10 +38,6 @@ from torch.fx.graph_module import GraphModule
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-
 invoke_subgraph_counter = 0
 
 
@@ -51,6 +49,27 @@ class OutputMetadata:
     num_fw_outs: Optional[int] = None
     indexes_with_symint: set[int] = field(default_factory=set)
     indexes_with_no_grad: set[int] = field(default_factory=set)
+
+
+class NestedCompileBackend(enum.Enum):
+    INDUCTOR = "inductor"
+    DEFAULT = "default"
+
+
+@dataclass
+class NestedCompileRegionOptions:
+    # If default, does nothing, inherient the torch.compile backend
+    # If "inductor", will add {"compile_with_inductor": {"inductor_configs":config}} to HOP node meta "custom"
+    # If "custom" already has "compile_with_inductor", this config will override
+    backend: NestedCompileBackend = NestedCompileBackend.DEFAULT
+
+    # If backend == "inductor", the configs
+    inductor_configs: Optional[dict[str, Any]] = None
+
+    # If not None, add "partitioner" to HOP node meta
+    partitioner: Optional[Callable] = None
+
+    # TODO: add decomposition function
 
 
 class InvokeSubgraphHOP(HigherOrderOperator):
@@ -154,7 +173,9 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
     return func(*args, **kwargs)
 
 
-def mark_compile_region(fn=None):
+def mark_compile_region(
+    fn=None, backend_options: Optional[NestedCompileRegionOptions] = None
+):
     """
     This wrapper instructs torch.compile to compile the wrapped region once and
     reuse the compiled artifact, instead of the usual way of aggressively
@@ -162,6 +183,10 @@ def mark_compile_region(fn=None):
 
     Under the hood, it tells TorchDynamo to use InvokeSubgraph HOP for the
     region. For PyTorch eager, this is a no-op.
+
+    Args:
+        fn: The function to wrap
+        backend: Optional backend to use for compiling the subgraph
     """
 
     def wrap(func):
@@ -173,6 +198,7 @@ def mark_compile_region(fn=None):
             return invoke_subgraph_placeholder(inner_func, *args, **kwargs)
 
         inner.__marked_compile_region_fn__ = func  # type: ignore[attr-defined]
+        func.__marked_compile_region_backend__ = backend_options  # type: ignore[attr-defined]
 
         return inner
 
