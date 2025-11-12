@@ -1773,16 +1773,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         inputs = [x, w, ar_0, ar_1]
         f(*inputs, **self.get_world_trs())
 
-        def _pass(g):
-            from torch._inductor.fx_passes.bucketing import bucket_all_reduce
-
-            bucket_all_reduce(g.owning_module, lambda _: 2000)
-
-        torch._inductor.config.post_grad_custom_post_pass = _pass
-
         with torch._inductor.config.patch(
             {
                 "reorder_for_compute_comm_overlap": False,
+                "bucket_all_reduces_fx": bucket_mode,
             }
         ):
             compiled = torch.compile(f)
