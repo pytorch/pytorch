@@ -288,6 +288,9 @@ if __name__ == "__main__":
         else:
             print("Configuring build for bundled NVIDIA libraries")
             # Keep existing static linking approach - already configured above
+    else:
+        # Disable CUDA build
+        build_vars += "USE_CUDA=0 "
 
     override_package_version = os.getenv("OVERRIDE_PACKAGE_VERSION")
     desired_cuda = os.getenv("DESIRED_CUDA")
