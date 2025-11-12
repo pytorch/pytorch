@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any, Union
+from typing import Any
 
 import torch
 from torch.ao.quantization.backend_config import BackendConfig
@@ -43,7 +43,7 @@ class FuseHandler(ABC):
         extra_inputs: list[Any],
         matched_node_pattern: NodePattern,
         fuse_custom_config: FuseCustomConfig,
-        fuser_method_mapping: dict[Pattern, Union[torch.nn.Sequential, Callable]],
+        fuser_method_mapping: dict[Pattern, torch.nn.Sequential | Callable],
         is_qat: bool,
     ) -> Node:
         pass
@@ -62,7 +62,7 @@ class DefaultFuseHandler(FuseHandler):
         extra_inputs: list[Any],
         matched_node_pattern: NodePattern,
         fuse_custom_config: FuseCustomConfig,
-        fuser_method_mapping: dict[Pattern, Union[torch.nn.Sequential, Callable]],
+        fuser_method_mapping: dict[Pattern, torch.nn.Sequential | Callable],
         is_qat: bool,
     ) -> Node:
         if root_node.op != "call_module":
@@ -84,7 +84,7 @@ class DefaultFuseHandler(FuseHandler):
                 n = pattern
                 if n.op == "call_module":
                     return named_modules[n.target]
-                elif n.op == "call_function" and n.target == torch.nn.functional.relu:
+                elif n.op == "call_function" and n.target is torch.nn.functional.relu:
                     relu = torch.nn.ReLU()
                     relu.training = root_module.training
                     return relu
