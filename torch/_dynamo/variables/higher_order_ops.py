@@ -252,6 +252,66 @@ def _make_inlined(tx: "InstructionTranslator", f):
     return inline_call
 
 
+def add_call_function(
+    tx: "InstructionTranslator",
+    fn: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    flat_example_value: Any,
+):
+    from .builder import wrap_fx_proxy
+
+    # Store the invocation as a call
+    flat_variable = wrap_fx_proxy(
+        tx=tx,
+        proxy=tx.output.create_proxy(
+            "call_function",
+            fn,
+            args=args,
+            kwargs=kwargs,
+        ),
+        example_value=flat_example_value,
+    )
+    return flat_variable
+
+
+def overwrite_tensor_vt_requires_grad(graph_output_vts, flat_variable):
+    # this is required for faithfully representing the autograd.Function forward
+    # outputs.
+    for orig_vt, subgraph_vt in zip(graph_output_vts, flat_variable.items):
+        if isinstance(orig_vt, (variables.SymNodeVariable, variables.TensorVariable)):
+            assert isinstance(
+                subgraph_vt, (variables.SymNodeVariable, variables.TensorVariable)
+            )
+            orig_vt.requires_grad = subgraph_vt.requires_grad
+            if orig_vt.requires_grad:
+                orig_vt.has_grad_fn = True
+
+
+def overwrite_tensor_vt_proxy(graph_output_vts, flat_variable):
+    # wrap_fx_proxy creates fresh variable trackers. However, the main program
+    # after the speculate subgraph can still use the original tensor vts that
+    # are still pointing to the nodes present in the subgraph. So, we reproxify
+    # the original tensor vts with the subgraph outputs. This way, whenever the
+    # outer graph uses an original vt, it uses the subgraph output.
+    #
+    # This is critical for maintaining the separation between:
+    # - `body_r`: The output VT structure that Dynamo continues tracing (may
+    #   contain non-proxyable objects, nested structures, etc.)
+    # - `graph_output_vts`: Only the tensor/symint VTs that were actual graph
+    #   outputs from speculate_subgraph
+    #
+    # By overwriting the proxies of VTs in `body_r` with the proxies from the
+    # HOP call, we ensure the outer graph correctly references the HOP outputs
+    # while still allowing `body_r` to contain arbitrary Python objects.
+    for orig_vt, subgraph_vt in zip(graph_output_vts, flat_variable.items):
+        if isinstance(orig_vt, (variables.SymNodeVariable, variables.TensorVariable)):
+            assert isinstance(
+                subgraph_vt, (variables.SymNodeVariable, variables.TensorVariable)
+            )
+            orig_vt.proxy = subgraph_vt.proxy
+
+
 def _call_function_with_auto_output_flattening(
     tx: "InstructionTranslator",
     fn: Any,
@@ -283,50 +343,10 @@ def _call_function_with_auto_output_flattening(
     Returns:
         The body_r VT (unchanged), which Dynamo will continue tracing with
     """
-    from .builder import wrap_fx_proxy
 
-    # Store the invocation as a call
-    flat_variable = wrap_fx_proxy(
-        tx=tx,
-        proxy=tx.output.create_proxy(
-            "call_function",
-            fn,
-            args=args,
-            kwargs=kwargs,
-        ),
-        example_value=flat_example_value,
-    )
-
-    # wrap_fx_proxy creates fresh variable trackers. However, the main program
-    # after the speculate subgraph can still use the original tensor vts that
-    # are still pointing to the nodes present in the subgraph. So, we reproxify
-    # the original tensor vts with the subgraph outputs. This way, whenever the
-    # outer graph uses an original vt, it uses the subgraph output.
-    #
-    # This is critical for maintaining the separation between:
-    # - `body_r`: The output VT structure that Dynamo continues tracing (may
-    #   contain non-proxyable objects, nested structures, etc.)
-    # - `graph_output_vts`: Only the tensor/symint VTs that were actual graph
-    #   outputs from speculate_subgraph
-    #
-    # By overwriting the proxies of VTs in `body_r` with the proxies from the
-    # HOP call, we ensure the outer graph correctly references the HOP outputs
-    # while still allowing `body_r` to contain arbitrary Python objects.
+    flat_variable = add_call_function(tx, fn, args, kwargs, flat_example_value)
     if body_r is not None:
-        for orig_vt, subgraph_vt in zip(graph_output_vts, flat_variable.items):
-            if isinstance(
-                orig_vt, (variables.SymNodeVariable, variables.TensorVariable)
-            ):
-                assert isinstance(
-                    subgraph_vt, (variables.SymNodeVariable, variables.TensorVariable)
-                )
-                orig_vt.proxy = subgraph_vt.proxy
-
-                # For autograd.Function, running the example we need to rewrite
-                # the requires_grad because the body_r is traced with grad
-                # disabled.
-                if isinstance(orig_vt, variables.TensorVariable):
-                    orig_vt.requires_grad = subgraph_vt.requires_grad
+        overwrite_tensor_vt_proxy(graph_output_vts, flat_variable)
     return body_r
 
 
@@ -3773,6 +3793,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 hints=[],
             )
 
+        from torch._functorch.autograd_function import autograd_function_trace_helper
+
+        fwd_fn = _make_inlined(tx, autograd_function_trace_helper)(fwd_fn)
         # Speculate subgraph on the fwd
         fwd_out, fwd_graph, fwd_freevars, fwd_graph_output_vts = (
             speculate_subgraph_with_auto_output_flattening(
@@ -3781,7 +3804,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 fwd_args,
                 kwargs,
                 "autograd.Function",
-                enable_grad=False,
+                enable_grad=None,
                 set_subgraph_inputs="automatic",
                 restore_side_effects=False,
                 tracer=fwd_tracer,
@@ -4047,15 +4070,12 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 )
                 example_value = autograd_function_apply(*fake_args, **kwargs)
 
-        return _call_function_with_auto_output_flattening(
-            tx,
-            autograd_function_apply,
-            p_args,
-            kwargs,
-            example_value,
-            fwd_out,
-            fwd_graph_output_vts,
+        flat_variable = add_call_function(
+            tx, autograd_function_apply, p_args, kwargs, example_value
         )
+        overwrite_tensor_vt_proxy(fwd_graph_output_vts, flat_variable)
+        overwrite_tensor_vt_requires_grad(fwd_graph_output_vts, flat_variable)
+        return fwd_out
 
     def rewired_bwd_graph_inputs(
         self,

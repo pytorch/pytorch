@@ -2056,10 +2056,10 @@ class GraphModule(torch.nn.Module):
             def forward(self, l_x_: "f32[8, 8]"):
                 _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
-                sin: "f32[8, 8]" = torch.sin(l_x_)
+                outs: "f32[8, 8]" = torch.sin(l_x_)
 
                 _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-                return ((sin,), (l_x_,))
+                return ((outs,), (l_x_,))
 
         class bwd_body_0(torch.nn.Module):
             def forward(self, grad_out: "f32[8, 8]", l_x_: "f32[8, 8]"):
