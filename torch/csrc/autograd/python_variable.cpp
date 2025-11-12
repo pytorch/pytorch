@@ -1127,6 +1127,10 @@ struct IValueOrDTensorSpec {
   }
 };
 
+// This corresponds to the Python OpSchema class in that it is the key
+// for the (native version of the) sharding propagator cache. It is
+// missing essentially everything else from the Python OpSchema
+// though.
 class NativeOpSchema {
  public:
   NativeOpSchema(
@@ -1174,6 +1178,8 @@ class NativeOpSchema {
   // make an algorithm change to be less brittle, such as including
   // None defaults for Tensor arguments in the comparison.
   std::size_t args_schema_len_;
+  // There is no particular justification for the choice of 8
+  // here. Feel free to change it.
   c10::SmallVector<IValueOrDTensorSpec, 8> comparison_key_;
 };
 
@@ -1855,8 +1861,7 @@ static std::optional<NativeOpSchema> create_native_op_schema(
                          .attr(dtensor_interned_strings.needs_pytree)
                          .ptr())) {
     // Punting on pytree flattening in the fast path on IValues for
-    // now since only a minority of ops need it. REVIEW: should we
-    // TORCH_WARN on this?
+    // now since only a minority of ops need it.
     return std::nullopt;
   }
 
