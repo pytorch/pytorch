@@ -1,4 +1,4 @@
-﻿# mypy: allow-untyped-defs 
+﻿# mypy: allow-untyped-defs
 """
 This is a script for launching PyTorch inference on Intel® Xeon® Scalable Processors with optimal configurations.
 
