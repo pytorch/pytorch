@@ -841,7 +841,7 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
       break;
     }
     default:
-      TORCH_INTERNAL_ASSERT(false, "Unsupported number of paramaters ", nparams);
+      TORCH_INTERNAL_ASSERT(false, "Unsupported number of parameters ", nparams);
   }
   return libMap[key] = lib;
 }
@@ -1169,9 +1169,9 @@ void MetalKernelFunction::dispatch(uint64_t length, std::optional<uint64_t> grou
 }
 
 void MetalKernelFunction::dispatch(c10::ArrayRef<uint64_t> length, c10::OptionalArrayRef<uint64_t> group_size) {
-  TORCH_CHECK(!length.empty() && length.size() < 4, "Dispatch dimentions must be less than 3 and non-empty");
+  TORCH_CHECK(!length.empty() && length.size() < 4, "Dispatch dimensions must be less than 3 and non-empty");
   TORCH_CHECK(!group_size.has_value() || group_size->size() == length.size(),
-              "size and group_size must have same number of dimentions");
+              "size and group_size must have same number of dimensions");
   const auto max_tg_size = getMaxThreadsPerThreadgroup();
   const auto group_size_length = group_size.has_value() ? group_size->size() : 0;
   auto tg_size = MTLSizeMake(group_size_length > 0 ? group_size->at(0) : max_tg_size,

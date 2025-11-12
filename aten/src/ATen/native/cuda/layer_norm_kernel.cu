@@ -1052,7 +1052,7 @@ void launch_vectorized_layer_norm_kernel(
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #ifdef USE_ROCM
-    // the blocks.x contains the max grid x dimention without invalid configuration error
+    // the blocks.x contains the max grid x dimension without invalid configuration error
     // Fix invalid configuration https://github.com/pytorch/pytorch/issues/136291
     // Ensure all elements are processed. Prepare for next round
     int64_t remaining = M - blocks.x;
