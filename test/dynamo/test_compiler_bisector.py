@@ -275,6 +275,59 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.backend, "eager")
         self.assertEqual(out.subsystem, None)
 
+    @config.patch(
+        {
+            "test_configs.bisect_pre_grad_graph": True,
+            "test_configs.bisect_keep_custom_backend_for_inductor": True,
+        }
+    )
+    def test_bisect_pre_grad_graph(self):
+        def f(x):
+            for _ in range(5):
+                x = x + 1
+            return x.relu()
+
+        class MyBackend:
+            def __call__(self, gm, example_inputs):
+                node_idx = 0
+
+                def node_to_graph_id(node):
+                    nonlocal node_idx
+                    out = 0 if node_idx < 3 else 1
+                    node_idx += 1
+                    return out
+
+                split_gm = torch.fx.passes.split_module.split_module(
+                    gm, None, node_to_graph_id, keep_original_order=True
+                )
+
+                for name, submod in split_gm.named_modules():
+                    if "submod_" in name:
+                        # the test case is simple enough that using
+                        # the original example_inputs works for sub
+                        # moule
+                        submod.forward = torch._inductor.standalone_compile(
+                            submod,
+                            example_inputs,
+                            dynamic_shapes="from_example_inputs",
+                            options={},
+                        )
+
+                return split_gm
+
+        def test_fn():
+            torch._dynamo.reset()
+
+            x = torch.randn(1024, device="cuda")
+            with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
+                opt_f = torch.compile(f, backend=MyBackend())
+                return torch.allclose(opt_f(x), f(x))
+
+        out = CompilerBisector.do_bisect(test_fn)
+        self.assertEqual(out.backend, "inductor")
+        self.assertEqual(out.subsystem, "pre_grad_graph")
+        self.assertEqual(out.bisect_number, 1)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

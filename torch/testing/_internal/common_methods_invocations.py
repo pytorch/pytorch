@@ -9763,6 +9763,7 @@ foreach_unary_op_db: list[OpInfo] = [
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
+        supports_sparse=True,
         decorators=(
             DecorateInfo(
                 unittest.expectedFailure,
@@ -20319,6 +20320,7 @@ op_db: list[OpInfo] = [
                                                   torch.float32: 1e-4}),),
                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   supports_sparse=True,
                    supports_sparse_csr=True,
                    supports_sparse_csc=True,
                    supports_sparse_bsr=True,

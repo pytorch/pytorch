@@ -33,6 +33,10 @@ from torch._inductor.utils import (
     OrderedSet,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.utils._helion import has_helion
+from torch.utils._pallas import has_pallas
+from torch.utils._triton import has_triton
+from torch.utils._config_module import ConfigModule
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
@@ -43,9 +47,6 @@ from torch.testing._internal.common_utils import (
     LazyVal,
     TestCase,
 )
-from torch.utils._config_module import ConfigModule
-from torch.utils._helion import has_helion
-from torch.utils._triton import has_triton
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -66,6 +67,8 @@ def test_cpu():
 HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
+
+HAS_PALLAS = has_pallas()
 
 HAS_HELION = has_helion()
 
