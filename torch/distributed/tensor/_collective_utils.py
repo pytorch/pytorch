@@ -173,7 +173,9 @@ def mesh_broadcast(
 
 @maybe_run_for_local_tensor
 def pad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
-    if pad_size == 0:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(pad_size == 0):
         return tensor
     pad = [0, 0] * (tensor.ndim - pad_dim)
     pad[-1] = pad_size
@@ -182,7 +184,9 @@ def pad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tenso
 
 @maybe_run_for_local_tensor
 def unpad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
-    if pad_size == 0:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(pad_size == 0):
         return tensor
     return tensor.narrow(
         pad_dim,
