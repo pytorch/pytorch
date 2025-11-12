@@ -2,7 +2,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from enum import auto, Enum
 from functools import partial, wraps
-from typing import Any, NamedTuple, Optional, TypeVar, Union
+from typing import Any, NamedTuple, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 
 import torch
@@ -16,6 +16,9 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map_only
 from torch.utils.weak import WeakIdKeyDictionary, weakref
 
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
 
 _TOTAL_KEY = "Total"
 
@@ -365,14 +368,28 @@ class FSDPMemTracker(MemTracker):
         # `FSDPParamGroup.post_forward` because during AC these won't be called.
         # TODO(@sanketpurandare): This will need to be modified after this PR (https://github.com/pytorch/pytorch/pull/127786)
         # lands. For backward we monkey-patch the `FSDPParamGroup.pre_backward` and `FSDPParamGroup.post_backward`.
-        # pyrefly: ignore [missing-attribute]
+
+        # get the unique _MultiHandlers/RemoveHandlers and store in dictionary
+        # the _MultiHandlers object will only need to be grabbed once.
+        unique_handlers: dict[RemovableHandle, bool] = {}
+        # pyrefly: ignore  # missing-attribute
+        for module in self._root_mod.modules():
+            if isinstance(module, FSDPModule):
+                fsdp_state = module._get_fsdp_state()
+                if fsdp_param_group := fsdp_state._fsdp_param_group:
+                    if not unique_handlers.get(fsdp_state._pre_forward_hook_handle):
+                        unique_handlers[fsdp_state._pre_forward_hook_handle] = True
+                    if not unique_handlers.get(fsdp_state._post_forward_hook_handle):
+                        unique_handlers[fsdp_state._post_forward_hook_handle] = True
+        # call remove on the handles once
+        for f_hook_handle in unique_handlers.keys():
+            f_hook_handle.remove()
+        # pyrefly: ignore  # missing-attribute
         for module in self._root_mod.modules():
             if isinstance(module, FSDPModule):
                 fsdp_state = module._get_fsdp_state()
                 if fsdp_param_group := fsdp_state._fsdp_param_group:
                     self._instrument_fsdp_sharded_params_grads(fsdp_param_group)
-                    fsdp_state._pre_forward_hook_handle.remove()
-                    fsdp_state._post_forward_hook_handle.remove()
                     fsdp_state._pre_forward_hook_handle = (
                         # pyrefly: ignore [missing-attribute]
                         module.register_forward_pre_hook(
