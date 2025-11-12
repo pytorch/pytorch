@@ -535,7 +535,7 @@ class DTensorExportTest(TestCase):
 
         self.assertEqual(fn(z), gm(z)[0])
 
-    def test_dtensor_data_dependent_index(self):
+    def test_dtensor_data_dependent_index_and_slice(self):
         device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
 
         class Foo(torch.nn.Module):
@@ -547,6 +547,35 @@ class DTensorExportTest(TestCase):
         x_dt = distribute_tensor(x, device_mesh, placements=[Replicate()])
         y_dt = distribute_tensor(y, device_mesh, placements=[Replicate()])
         _dynamo_graph_capture_for_export(Foo())(x_dt, y_dt)
+
+        class Bar(torch.nn.Module):
+            def forward(self, x):
+                val = torch.clamp(x.max(), min=1).item()
+                torch._check(val >= 1)
+                return x[:val]
+
+        x = torch.randint(1000, (4, 64, 16))
+        x_dt = distribute_tensor(x, device_mesh, placements=[Replicate()])
+        gm = _dynamo_graph_capture_for_export(Bar())(x_dt)
+        self.assertExpectedInline(
+            """\
+graph():
+    %l_flat_args_0_ : [num_users=2] = placeholder[target=arg_0]
+    %max_1 : [num_users=1] = call_method[target=max](args = (%l_flat_args_0_,), kwargs = {})
+    %clamp : [num_users=1] = call_function[target=torch.clamp](args = (%max_1,), kwargs = {min: 1})
+    %item : [num_users=2] = call_method[target=item](args = (%clamp,), kwargs = {})
+    %ge_1 : [num_users=1] = call_function[target=operator.ge](args = (%item, 1), kwargs = {})
+    %_assert_scalar_default : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge_1, Runtime assertion failed for expression u0 >= 1 on node 'ge_1'), kwargs = {})
+    %res : [num_users=2] = call_function[target=operator.getitem](args = (%l_flat_args_0_, slice(None, item, None)), kwargs = {})
+    %getattr_1 : [num_users=1] = call_function[target=builtins.getattr](args = (%res, _local_tensor), kwargs = {})
+    %sym_size_int : [num_users=2] = call_function[target=torch.ops.aten.sym_size.int](args = (%getattr_1, 0), kwargs = {})
+    %ge_2 : [num_users=1] = call_function[target=operator.ge](args = (%sym_size_int, 0), kwargs = {})
+    %_assert_scalar_default_1 : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge_2, Runtime assertion failed for expression u2 >= 0 on node 'ge_2'), kwargs = {})
+    %le : [num_users=1] = call_function[target=operator.le](args = (%sym_size_int, 4), kwargs = {})
+    %_assert_scalar_default_2 : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%le, Runtime assertion failed for expression u2 <= 4 on node 'le'), kwargs = {})
+    return (res,)""",  # noqa: B950
+            str(gm.graph).strip(),
+        )
 
 
 instantiate_parametrized_tests(DTensorExportTest)
