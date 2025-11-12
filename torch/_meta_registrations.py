@@ -9,10 +9,6 @@ from typing_extensions import ParamSpec
 import torch
 import torch._prims_common as utils
 from torch import SymBool, SymFloat, Tensor
-from torch._C import (
-    _ScalingType as ScalingType,
-    _SwizzleType as SwizzleType,
-)
 from torch._decomp import (
     _add_op_to_registry,
     _convert_out_params,
@@ -43,6 +39,9 @@ from torch._prims_common.wrappers import (
 )
 from torch._refs import _broadcast_shapes, _maybe_broadcast
 from torch.fx.experimental import _config as exp_config
+
+# from torch._C import _ScalingType as ScalingType, _SwizzleType as SwizzleType
+from torch.nn.functional import ScalingType, SwizzleType
 from torch.utils import _pytree as pytree
 
 
@@ -57,6 +56,7 @@ MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
 
 def ceil_div(a, b):
     return (a + b - 1) // b
+
 
 def round_up(x, y):
     """Rounds up x to nearest multiple of y"""
@@ -6510,14 +6510,7 @@ def meta_scaled_mm(
     use_fast_accum: bool = False,
 ):
     return _check_scaled_mm_sizes(
-        self,
-        mat2,
-        scale_a,
-        scale_b,
-        bias,
-        scale_result,
-        out_dtype,
-        use_fast_accum
+        self, mat2, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum
     )
 
 
@@ -6530,8 +6523,8 @@ def _check_scaled_mm_sizes_v2(
     scale_recipe_b: list[ScalingType],
     bias: Optional[torch.Tensor] = None,
     out_dtype: Optional[torch.dtype] = None,
-    swizzle_a: list[SwizzleType] = None,
-    swizzle_b: list[SwizzleType] = None,
+    swizzle_a: Optional[list[SwizzleType]] = None,
+    swizzle_b: Optional[list[SwizzleType]] = None,
     use_fast_accum: bool = False,
 ):
     def is_fp8_or_fp4_type(dtype):
@@ -6542,11 +6535,9 @@ def _check_scaled_mm_sizes_v2(
             torch.float8_e5m2fnuz,
             torch.float4_e2m1fn_x2,
         )
-    def is_fp4_type(dtype):
-        return dtype in (
-            torch.float4_e2m1fn_x2,
-        )
 
+    def is_fp4_type(dtype):
+        return dtype in (torch.float4_e2m1fn_x2,)
 
     torch._check(
         self.dim() == 2 and mat2.dim() == 2,
@@ -6569,11 +6560,10 @@ def _check_scaled_mm_sizes_v2(
         K_packed_multiplier = 2
         K *= K_packed_multiplier
 
-
-    scale_recipe_a = list(ScalingType(si) for si in scale_recipe_a)
-    scale_recipe_b = list(ScalingType(si) for si in scale_recipe_b)
-    swizzle_a = list(SwizzleType(si) for si in swizzle_a)
-    swizzle_b = list(SwizzleType(si) for si in swizzle_b)
+    scale_recipe_a = [ScalingType(si) for si in scale_recipe_a]
+    scale_recipe_b = [ScalingType(si) for si in scale_recipe_b]
+    swizzle_a = [SwizzleType(si) for si in swizzle_a]
+    swizzle_b = [SwizzleType(si) for si in swizzle_b]
 
     if device_hint(self) == "cuda":
 
@@ -6602,44 +6592,63 @@ def _check_scaled_mm_sizes_v2(
             mat2.size(0) % 16 == 0 and mat2.size(1) % 16 == 0,
             lambda: f"Expected both dimensions of mat2 to be divisible by 16 but got {mat2.shape}",
         )
+
         def is_tensorwise(recipe_a: list[ScalingType], recipe_b: list[ScalingType]):
             return (
-                len(recipe_a) == 1 and len(recipe_b) == 1 and
-                recipe_a[0] == ScalingType.TensorWise and recipe_b[0] == ScalingType.TensorWise
+                len(recipe_a) == 1
+                and len(recipe_b) == 1
+                and recipe_a[0] == ScalingType.TensorWise
+                and recipe_b[0] == ScalingType.TensorWise
             )
+
         def is_rowwise(recipe_a: list[ScalingType], recipe_b: list[ScalingType]):
             return (
-                len(recipe_a) == 1 and len(recipe_b) == 1 and
-                recipe_a[0] == ScalingType.RowWise and recipe_b[0] == ScalingType.RowWise
+                len(recipe_a) == 1
+                and len(recipe_b) == 1
+                and recipe_a[0] == ScalingType.RowWise
+                and recipe_b[0] == ScalingType.RowWise
             )
+
         def is_mx(recipe_a: list[ScalingType], recipe_b: list[ScalingType]):
             return (
-                len(recipe_a) == 1 and len(recipe_b) == 1 and
-                recipe_a[0] == ScalingType.BlockWise1x32 and recipe_b[0] == ScalingType.BlockWise1x32
+                len(recipe_a) == 1
+                and len(recipe_b) == 1
+                and recipe_a[0] == ScalingType.BlockWise1x32
+                and recipe_b[0] == ScalingType.BlockWise1x32
             )
+
         def is_nv(recipe_a: list[ScalingType], recipe_b: list[ScalingType]):
             return (
-                len(recipe_a) == 2 and len(recipe_b) == 2 and
-                recipe_a[0] == ScalingType.BlockWise1x16 and recipe_a[1] == ScalingType.TensorWise and
-                recipe_b[0] == ScalingType.BlockWise1x16 and recipe_b[1] == ScalingType.TensorWise
+                len(recipe_a) == 2
+                and len(recipe_b) == 2
+                and recipe_a[0] == ScalingType.BlockWise1x16
+                and recipe_a[1] == ScalingType.TensorWise
+                and recipe_b[0] == ScalingType.BlockWise1x16
+                and recipe_b[1] == ScalingType.TensorWise
             )
+
         def is_1x128_1x128(recipe_a: list[ScalingType], recipe_b: list[ScalingType]):
             return (
-                len(recipe_a) == 1 and len(recipe_b) == 1 and
-                recipe_a[0] == ScalingType.BlockWise1x128 and
-                recipe_b[0] == ScalingType.BlockWise1x128
+                len(recipe_a) == 1
+                and len(recipe_b) == 1
+                and recipe_a[0] == ScalingType.BlockWise1x128
+                and recipe_b[0] == ScalingType.BlockWise1x128
             )
+
         def is_1x128_128x128(recipe_a: list[ScalingType], recipe_b: list[ScalingType]):
             return (
-                len(recipe_a) == 1 and len(recipe_b) == 1 and
-                recipe_a[0] == ScalingType.BlockWise1x128 and
-                recipe_b[0] == ScalingType.BlockWise128x128
+                len(recipe_a) == 1
+                and len(recipe_b) == 1
+                and recipe_a[0] == ScalingType.BlockWise1x128
+                and recipe_b[0] == ScalingType.BlockWise128x128
             )
+
         def is_128x128_1x128(recipe_a: list[ScalingType], recipe_b: list[ScalingType]):
             return (
-                len(recipe_a) == 1 and len(recipe_b) == 1 and
-                recipe_a[0] == ScalingType.BlockWise128x128 and
-                recipe_b[0] == ScalingType.BlockWise1x128
+                len(recipe_a) == 1
+                and len(recipe_b) == 1
+                and recipe_a[0] == ScalingType.BlockWise128x128
+                and recipe_b[0] == ScalingType.BlockWise1x128
             )
 
         # Given scaling types, check input dimensions
@@ -6647,31 +6656,45 @@ def _check_scaled_mm_sizes_v2(
         if is_tensorwise(scale_recipe_a, scale_recipe_b):
             # TensorWise
             torch._check(
-                scale_a[0].numel() == 1 and scale_b[0].numel() == 1 and
-                scale_a[0].dtype == torch.float32 and scale_b[0].dtype == torch.float32,
-                lambda: "For Tensorwise scaling, both scale_a and scale_b must be single element float (fp32) tensors"
+                scale_a[0].numel() == 1
+                and scale_b[0].numel() == 1
+                and scale_a[0].dtype == torch.float32
+                and scale_b[0].dtype == torch.float32,
+                lambda: "For Tensorwise scaling, both scale_a and scale_b must be single element float (fp32) tensors",
             )
         elif is_rowwise(scale_recipe_a, scale_recipe_b):
             torch._check(
-                scale_a[0].shape[0] == M and
-                scale_a[0].numel() == M and scale_a[0].dtype == torch.float32 and
-                scale_b[0].numel() == N and scale_b[0].dtype == torch.float32,
+                scale_a[0].shape[0] == M
+                and scale_a[0].numel() == M
+                and scale_a[0].dtype == torch.float32
+                and scale_b[0].numel() == N
+                and scale_b[0].dtype == torch.float32,
                 lambda: (
-                    f"For Rowwise scaling, scale_a must have {self.shape[0]} elements (got: {scale_a.numel()})"
-                    f", and scale_b must have {mat_b.shape[1]} elements (got: {scale_b.numel})"
-                )
+                    f"For Rowwise scaling, scale_a must have {self.shape[0]} elements (got: {scale_a[0].numel()})"
+                    f", and scale_b must have {mat2.shape[1]} elements (got: {scale_b[0].numel()})"
+                ),
             )
         elif is_1x128_1x128(scale_recipe_a, scale_recipe_b):
             # A, B are fp8, scales are fp32
             # As: [M x K // 128], stride: [1, M]
             # Bs: [N x K // 128], stride: [1, N]
-            types_ok = scale_a[0].dtype == torch.float32 and scale_b[0].dtype == torch.float32
+            types_ok = (
+                scale_a[0].dtype == torch.float32 and scale_b[0].dtype == torch.float32
+            )
             sa = scale_a[0]
-            sb = scale_a[0]
-            scale_a_ok = sa.shape[0] == M and sa.shape[1] == K // 128 and \
-                         sa.stride[0] == 1 and (sa.stride[1] == M or (sa.shape[1] == 1 and sa.stride[1] == 1))
-            scale_b_ok = sb.shape[0] == N and sb.shape[1] == K // 128 and \
-                         sb.stride[0] == 1 and (sb.stride[1] == N or (sb.shape[1] == 1 and sb.stride[1] == 1))
+            scale_a_ok = (
+                sa.shape[0] == M
+                and sa.shape[1] == K // 128
+                and sa.stride(0) == 1
+                and (sa.stride(1) == M or (sa.shape[1] == 1 and sa.stride(1) == 1))
+            )
+            sb = scale_b[0]
+            scale_b_ok = (
+                sb.shape[0] == N
+                and sb.shape[1] == K // 128
+                and sb.stride(0) == 1
+                and (sb.stride(1) == N or (sb.shape[1] == 1 and sb.stride(1) == 1))
+            )
 
             torch._check(
                 types_ok and scale_a_ok and scale_b_ok,
@@ -6679,45 +6702,69 @@ def _check_scaled_mm_sizes_v2(
                     "For 1x128 x 1x128 blockwise scaling, "
                     f"scale a must have shape [{M}, {K // 128}] (got: {sa.shape}) and stride [1, {M}] (got: {sa.stride})"
                     f"scale b must have shape [{N}, {K // 128}] (got: {sb.shape}) and stride [1, {N}] (got: {sb.stride})"
-                )
+                ),
             )
         elif is_128x128_1x128(scale_recipe_a, scale_recipe_b):
             # A, B are fp8, scales are fp32
             # L4 = round_up(K // 128, 4)
             # As: [L4 x M // 128], stride: [1, L4]
             # Bs: [N x K // 128], stride: [1, N]
-            types_ok = scale_a[0].dtype == torch.float32 and scale_b[0].dtype == torch.float32
+            types_ok = (
+                scale_a[0].dtype == torch.float32 and scale_b[0].dtype == torch.float32
+            )
             L4 = round_up(K / 128, 4)
-            scale_a_ok = sa.shape[0] == L4 and sa.shape[1] == M // 128 and \
-                         sa.stride[0] == 1 and (sa.stride[1] == L4 or (sa.shape[1] == 1 and sa.stride[1] == 1))
-            scale_b_ok = sb.shape[0] == N and sb.shape[1] == K // 128 and \
-                         sb.stride[0] == 1 and (sb.stride[1] == N or (sb.shape[1] == 1 and sb.stride[1] == 1))
+            sa = scale_a[0]
+            scale_a_ok = (
+                sa.shape[0] == L4
+                and sa.shape[1] == M // 128
+                and sa.stride(0) == 1
+                and (sa.stride(1) == L4 or (sa.shape[1] == 1 and sa.stride(1) == 1))
+            )
+            sb = scale_b[0]
+            scale_b_ok = (
+                sb.shape[0] == N
+                and sb.shape[1] == K // 128
+                and sb.stride(0) == 1
+                and (sb.stride(1) == N or (sb.shape[1] == 1 and sb.stride(1) == 1))
+            )
             torch._check(
                 types_ok and scale_a_ok and scale_b_ok,
                 lambda: (
                     "For 128x128 x 1x128 blockwise scaling, L4 = {round_up(K / 128, 4)}, "
                     f"scale a must have shape [{L4}, {M // 128}] (got: {sa.shape}) and stride [1, {L4}] (got: {sa.stride})"
                     f"scale b must have shape [{N}, {K // 128}] (got: {sb.shape}) and stride [1, {N}] (got: {sb.stride})"
-                )
+                ),
             )
         elif is_1x128_128x128(scale_recipe_a, scale_recipe_b):
             # A, B are fp8, scales are fp32
             # L4 = round_up(K // 128, 4)
             # As: [M x K // 128], stride: [1, M]
             # Bs: [L4 x N // 128], stride: [1, L4]
-            types_ok = scale_a[0].dtype == torch.float32 and scale_b[0].dtype == torch.float32
+            types_ok = (
+                scale_a[0].dtype == torch.float32 and scale_b[0].dtype == torch.float32
+            )
             L4 = round_up(K / 128, 4)
-            scale_a_ok = sa.shape[0] == M and sa.shape[1] == K // 128 and \
-                         sa.stride[0] == 1 and (sa.stride[1] == M or (sa.shape[1] == 1 and sa.stride[1] == 1))
-            scale_b_ok = sb.shape[0] == L4 and sb.shape[1] == N // 128 and \
-                         sb.stride[0] == 1 and (sb.stride[1] == L4 or (sb.shape[1] == 1 and sb.stride[1] == 1))
+            sa = scale_a[0]
+            scale_a_ok = (
+                sa.shape[0] == M
+                and sa.shape[1] == K // 128
+                and sa.stride(0) == 1
+                and (sa.stride(1) == M or (sa.shape[1] == 1 and sa.stride(1) == 1))
+            )
+            sb = scale_b[0]
+            scale_b_ok = (
+                sb.shape[0] == L4
+                and sb.shape[1] == N // 128
+                and sb.stride(0) == 1
+                and (sb.stride(1) == L4 or (sb.shape[1] == 1 and sb.stride(1) == 1))
+            )
             torch._check(
                 types_ok and scale_a_ok and scale_b_ok,
                 lambda: (
                     "For 1x128 x 128x128 blockwise scaling, L4 = {round_up(K / 128, 4)}, "
                     f"scale a must have shape [{M}, {K // 128}] (got: {sa.shape}) and stride [1, {M}] (got: {sa.stride})"
                     f"scale b must have shape [{L4}, {N // 128}] (got: {sb.shape}) and stride [1, {L4}] (got: {sb.stride})"
-                )
+                ),
             )
         elif is_mx(scale_recipe_a, scale_recipe_b):
             if torch.version.hip:
@@ -6726,35 +6773,47 @@ def _check_scaled_mm_sizes_v2(
                 expected_scale_b_elems = ceil_div(self.shape[1], 32) * self.shape[0]
                 expected_swizzle = SwizzleType.NO_SWIZZLE
             else:
-                expected_scale_a_elems = round_up(self.shape[0], 128) * round_up(ceil_div(self.shape[1], 32), 4)
-                expected_scale_b_elems = round_up(mat2.shape[1], 128) * round_up(ceil_div(self.shape[1], 32), 4)
+                expected_scale_a_elems = round_up(self.shape[0], 128) * round_up(
+                    ceil_div(self.shape[1], 32), 4
+                )
+                expected_scale_b_elems = round_up(mat2.shape[1], 128) * round_up(
+                    ceil_div(self.shape[1], 32), 4
+                )
                 expected_swizzle = SwizzleType.SWIZZLE_32_4_4
             torch._check(
-                scale_a[0].numel() == expected_scale_a_elems and scale_a[0].dtype == torch.float8_e8m0fnu and
-                scale_b[0].numel() == expected_scale_b_elems and scale_b[0].dtype == torch.float8_e8m0fnu and
-                swizzle_a[0] == expected_swizzle and swizzle_b[0] == expected_swizzle,
+                scale_a[0].numel() == expected_scale_a_elems
+                and scale_a[0].dtype == torch.float8_e8m0fnu
+                and scale_b[0].numel() == expected_scale_b_elems
+                and scale_b[0].dtype == torch.float8_e8m0fnu
+                and swizzle_a[0] == expected_swizzle
+                and swizzle_b[0] == expected_swizzle,
                 lambda: (
                     f"for MX scaling scale_a must have {expected_scale_a_elems} (got: {scale_a[0].numel()}) "
                     f"and scale_b must have {expected_scale_b_elems} (got: {scale_b[0].numel()}). Scales must "
                     f"have types {torch.float8_e8m0fnu} (for self: {scale_a[0].dtype}, mat_b: {scale_b[0].dtype}) "
                     f"Must have swizzle type {expected_swizzle} (got self: {swizzle_a[0]}, mat_b: {swizzle_b[0]})"
-                )
+                ),
             )
         elif is_nv(scale_recipe_a, scale_recipe_b):
             expected_scale_a_elems = round_up(M, 128) * round_up(ceil_div(K, 16), 4)
             expected_scale_b_elems = round_up(N, 128) * round_up(ceil_div(K, 16), 4)
             expected_swizzle = SwizzleType.SWIZZLE_32_4_4
             torch._check(
-                scale_a[0].numel() == expected_scale_a_elems and scale_a[0].dtype == torch.float8_e4m3fn and
-                scale_a[1].numel() == 1 and scale_a[1].dtype == torch.float32 and
-                scale_b[0].numel() == expected_scale_b_elems and scale_b[0].dtype == torch.float8_e4m3fn and
-                scale_b[1].numel() == 1 and scale_b[1].dtype == torch.float32 and
-                swizzle_a[0] == expected_swizzle and swizzle_b[0] == expected_swizzle,
+                scale_a[0].numel() == expected_scale_a_elems
+                and scale_a[0].dtype == torch.float8_e4m3fn
+                and scale_a[1].numel() == 1
+                and scale_a[1].dtype == torch.float32
+                and scale_b[0].numel() == expected_scale_b_elems
+                and scale_b[0].dtype == torch.float8_e4m3fn
+                and scale_b[1].numel() == 1
+                and scale_b[1].dtype == torch.float32
+                and swizzle_a[0] == expected_swizzle
+                and swizzle_b[0] == expected_swizzle,
                 lambda: (
                     f"for NV scaling scale_a must have {expected_scale_a_elems} (got: {scale_a[0].numel()}) "
                     f"and scale_b must have {expected_scale_b_elems} (got: {scale_b[0].numel()}). Must have "
                     f"swizzle type {expected_swizzle} (got self: {swizzle_a[0]}, mat_b: {swizzle_b[0]})"
-                )
+                ),
             )
         else:
             torch._check(
@@ -6788,7 +6847,7 @@ def meta_scaled_mm_v2(
     swizzle_b: list[SwizzleType],
     bias: Optional[torch.Tensor] = None,
     output_dtype: Optional[torch.dtype] = None,
-    contraction_dims: list[int] = None,
+    contraction_dims: Optional[list[int]] = None,
     use_fast_accum: bool = False,
 ):
     return _check_scaled_mm_sizes_v2(
