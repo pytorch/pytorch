@@ -44,7 +44,13 @@ from ..runtime.hints import (
     TRITON_MAX_RSPLIT,
 )
 from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
-from ..scheduler import BaseSchedulerNode, FusedSchedulerNode, Scheduler, SchedulerNode
+from ..scheduler import (
+    BaseSchedulerNode,
+    FusedSchedulerNode,
+    NopKernelSchedulerNode,
+    Scheduler,
+    SchedulerNode,
+)
 from ..shape_propagation import get_broadcasted_shape
 from ..utils import (
     cache_on_self,
@@ -724,13 +730,6 @@ def triton_reshape(
             expand.append("None")
     assert idx == len(old_shape_str)
     return f"{value}[{', '.join(expand)}]"
-
-
-def enable_pdl_codegen():
-    if not torch._inductor.config.triton.enable_pdl:
-        return False
-    major, _ = torch.cuda.get_device_capability(torch.cuda.current_device())
-    return major >= 9
 
 
 # NB: Inheriting from PythonPrinter is somewhat dangerous, because there are a
@@ -2295,7 +2294,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.tma_min_block_sizes = dict[str, int]()
         self.hint_override = hint_override
         self._load_counts: collections.Counter[str] = collections.Counter()
-        self._load_index = 0
+        self._pdl_load_index = 0
+        self._pdl_has_wait = False
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints = OrderedSet[AutotuneHint]()
@@ -3093,60 +3093,86 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         else:
             return self.loads
 
+    def _enable_pdl_codegen(self):
+        if not torch._inductor.config.triton.enable_pdl:
+            return False
+        if isinstance(V.kernel, torch._inductor.select_algorithm.TritonTemplateKernel):
+            return False
+        major, _ = torch.cuda.get_device_capability(torch.cuda.current_device())
+        return major >= 9
+
     def _handle_pdl_before_access(
         self, wait_buffer, *dependencies, consider_reads=False
     ):
-        # we can find the previous scheduler node using V.graph.scheduler and V.current_node
-        current_node_idx, _ = next(
-            iter(
-                filter(
-                    lambda x: V.kernel.current_node in x[1].get_nodes(),
-                    enumerate(V.graph.scheduler.nodes),
-                )
-            )
-        )
+        if not self._enable_pdl_codegen():
+            return
+        current_node = V.kernel.current_node
         prev_node = (
-            V.graph.scheduler.nodes[current_node_idx - 1]
-            if current_node_idx > 0
-            else None
+            V.graph.scheduler.previous_node if V.graph.scheduler is not None else None
         )
 
         def matching_dep(dep):
             assert prev_node is not None
+            prev_deps = prev_node.read_writes.writes
             if consider_reads:
-                if any(dep == w.name for w in prev_node.read_writes.reads):
-                    return True
-            return any(dep == w.name for w in prev_node.read_writes.writes)
+                prev_deps = itertools.chain(prev_deps, prev_node.read_writes.reads)
+            return any(
+                dep == current_node.mutation_renames.get(w.name, w.name)
+                for w in prev_deps
+            )
 
-        # breakpoint()
+        assert dependencies
         need_wait = (
             prev_node is None
+            or isinstance(prev_node, NopKernelSchedulerNode)
             or any(matching_dep(d) for d in dependencies)
-            or not dependencies
         )
         if not need_wait:
             return
         GDC_WAIT = "tl.extra.cuda.gdc_wait()"
-        self._load_index += 1
-        if self.inside_reduction:
+        # hoist before the loop
+        if self.inside_reduction and self.range_trees[-1].is_loop:
             wait_buffer = self.body
-        if enable_pdl_codegen():
-            if self._load_index == 1:
-                wait_buffer.writeline(GDC_WAIT)
+        if self._pdl_has_wait:
+            return
+        self._pdl_has_wait = True
+        wait_buffer.writeline(GDC_WAIT)
 
     def _handle_pdl_after_load(self, launch_buffer, result_var):
-        # always gdc_wait before gdc_launch
-        self._handle_pdl_before_access(launch_buffer)
-        GDC_LAUNCH = "tl.extra.cuda.gdc_launch_dependents()"
-        if self.inside_reduction:
+        if not self._enable_pdl_codegen():
+            return
+        if result_var.use_count > 1:  # we already went through this
+            return
+        # hoist after the loop
+        if self.inside_reduction and self.range_trees[-1].is_loop:
             launch_buffer = self.post_loop_combine
-        if enable_pdl_codegen():
-            current_load_index = self._load_index
-            launch_if_last_load = DelayMaybeLine(
-                lambda: current_load_index == self._load_index,
-                f"0; {GDC_LAUNCH} # gdc launch for {result_var}",
-            )
-            self.cse.generate(launch_buffer, launch_if_last_load, dtype=torch.int32)
+
+        # always gdc_wait before gdc_launch
+        GDC_WAIT = "tl.extra.cuda.gdc_wait()"
+
+        def check_if_no_wait():
+            result = self._pdl_has_wait
+            self._pdl_has_wait = True
+            return not result
+
+        wait_if_no_load = DelayMaybeLine(
+            check_if_no_wait,
+            f"0; {GDC_WAIT} # gdc launch for {result_var}",
+        )
+        self.cse.generate(launch_buffer, wait_if_no_load, dtype=torch.int32)
+
+        self._pdl_load_index += 1
+        current_pdl_load_index = self._pdl_load_index
+
+        def check_if_last_load():
+            return self._pdl_load_index == current_pdl_load_index
+
+        GDC_LAUNCH = "tl.extra.cuda.gdc_launch_dependents()"
+        launch_if_last_load = DelayMaybeLine(
+            check_if_last_load,
+            f"0; {GDC_LAUNCH} # gdc launch for {result_var}",
+        )
+        self.cse.generate(launch_buffer, launch_if_last_load, dtype=torch.int32)
 
     def partial_accumulate(self, name: str, reduction_type, val):
         self.saved_partial_accumulate.append(
@@ -5190,8 +5216,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         triton_meta["configs"] = [config_of(signature)]
 
-        if enable_pdl_codegen():
-            triton_meta["launch_pdl"] = True
+        triton_meta["launch_pdl"] = self._enable_pdl_codegen()
 
         # Triton compiler includes equal_to_1 args into constants even
         # when they are not constexpr. otherwise there may be a segfault
