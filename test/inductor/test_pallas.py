@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: pt2"]
 import functools
+import re
 import sys
 import unittest
 
@@ -41,6 +42,7 @@ def make_pallas(cls):
         cls,
         cls_prefix,
         suffix,
+        (config, "cpu_backend", "pallas"),
         (config, "cuda_backend", "pallas"),
         xfail_prop="_expected_failure_pallas",
     )
@@ -230,6 +232,33 @@ class PallasTestsMixin:
         self.assertIn("import jax.numpy as jnp", code)
         self.assertIn("from jax.experimental import pallas as pl", code)
 
+    def test_jax_jit_wrapper_is_emitted(self):
+        """Ensure generated Pallas code wraps pl.pallas_call in jax.jit."""
+
+        key = "cuda_backend" if self.DEVICE == "cuda" else "cpu_backend"
+
+        @torch.compile(backend="inductor", options={key: "pallas"})
+        def pallas_fn(a, b):
+            return a + b
+
+        _, (code,) = run_and_get_code(
+            pallas_fn,
+            torch.randn(32, device=self.DEVICE),
+            torch.randn(32, device=self.DEVICE),
+        )
+
+        kernel_match = re.search(r"def (pallas_[A-Za-z0-9_]+)_kernel", code)
+        self.assertIsNotNone(kernel_match)
+        kernel_name = kernel_match.group(1)
+        wrapper_name = f"{kernel_name}_jit_wrapper"
+        self.assertIn(wrapper_name, code)
+        start = code.index(f"def {wrapper_name}")
+        end = code.index(f"def {kernel_name}_main", start)
+        wrapper_block = code[start:end]
+
+        self.assertIn("jax.jit", code)
+        self.assertNotIn("torch.", wrapper_block)
+
     def test_2d_tensor(self):
         """Test with 2D tensors (though current implementation flattens)."""
 
@@ -308,6 +337,88 @@ class PallasTestsMixin:
         expected = operate_on_tensor(x_t_contiguous)
         self.assertEqual(result, expected)
 
+    def test_strided_int_pallas(self):
+        """Test strided access patterns with the Pallas backend."""
+
+        def fn(x):
+            # Access every other element (strided access)
+            return x[::2] * 2.0
+
+        compiled = self._compile(fn)
+
+        x = torch.arange(16, dtype=torch.float32, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_strided_offset_pallas(self):
+        """Test strided access with offset."""
+
+        def fn(x):
+            # Access every other element starting from index 1
+            return x[1::2] + 1.0
+
+        compiled = self._compile(fn)
+
+        x = torch.arange(16, dtype=torch.float32, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_strided_2d_pallas(self):
+        """Test strided access on 2D tensors."""
+
+        def fn(x):
+            # Simple operation on 2D tensor
+            return x * 3.0
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(8, 16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_complex_indexing_gather(self):
+        """Test complex indexing with gather-like operations."""
+
+        def fn(x, indices):
+            # Use indices to gather elements from x
+            return x[indices]
+
+        compiled = self._compile(fn)
+
+        x = torch.arange(16, dtype=torch.float32, device=self.DEVICE)
+        # Use power-of-2 size for indices (Pallas Triton requirement)
+        indices = torch.tensor(
+            [0, 2, 5, 7, 11, 13, 14, 15], dtype=torch.int64, device=self.DEVICE
+        )
+        result = compiled(x, indices)
+        expected = fn(x, indices)
+        self.assertEqual(result, expected)
+
+    def test_complex_indexing_2d(self):
+        """Test complex indexing on 2D tensors with integer array indexing."""
+        if self.DEVICE == "cuda":
+            # Pallas Triton backend doesn't support gather operations with array indices
+            # This limitation is in the Pallas/Triton lowering, not our implementation
+            self.skipTest(
+                "Multi-dimensional gather not supported on Pallas Triton (CUDA) backend"
+            )
+
+        def fn(x, row_indices):
+            # Select specific rows using integer array indexing
+            return x[row_indices, :]
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, 8, device=self.DEVICE)
+        # Use power-of-2 sizes (Pallas Triton requirement)
+        row_indices = torch.tensor([0, 2, 5, 7], dtype=torch.int64, device=self.DEVICE)
+        result = compiled(x, row_indices)
+        expected = fn(x, row_indices)
+        self.assertEqual(result, expected)
+
 
 @unittest.skipUnless(HAS_PALLAS, "requires jax and pallas")
 class PallasTestsCUDA(PallasTestsMixin, TestCase):
@@ -319,14 +430,16 @@ class PallasTestsCPU(PallasTestsMixin, TestCase):
     DEVICE = "cpu"
 
 
-# Create test variants using the main test suite
-# Note: Only enable GPU tests since Pallas primarily targets GPU
-if hasattr(sys.modules.get(__name__), "test_torchinductor") and HAS_PALLAS:
-    if getattr(test_torchinductor, "HAS_GPU", False):
-        # Uncomment these to run full test suite with Pallas backend
-        # make_pallas(test_torchinductor.SweepInputsGPUTest)
-        # make_pallas(test_torchinductor.GPUTests)
-        pass
+if test_torchinductor.HAS_CPU and HAS_PALLAS:
+    make_pallas(test_torchinductor.SweepInputsCpuTest)
+    # make_pallas(test_torchinductor.CpuTests)
+
+
+if test_torchinductor.HAS_GPU and HAS_PALLAS:
+    # make_pallas(test_torchinductor.SweepInputsGPUTest)
+    # make_pallas(test_torchinductor.GPUTests)
+    pass
+
 
 if __name__ == "__main__":
     if HAS_PALLAS:
