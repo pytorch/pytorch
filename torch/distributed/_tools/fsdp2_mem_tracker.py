@@ -12,6 +12,7 @@ from torch._guards import active_fake_mode
 from torch.distributed._tools.mem_tracker import _RefType, _State, MemTracker
 from torch.distributed.fsdp import FSDPModule
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
+from torch.distributed.tensor import DTensor
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map_only
 from torch.utils.weak import WeakIdKeyDictionary, weakref
@@ -502,7 +503,6 @@ class FSDPMemTracker(MemTracker):
         if self._depth == 0:
             self._register_module_and_optimizer_hooks()
             self._track_resize()
-            self._track_dtensor_dispatch()
             self._peak_mem_snap = self.get_tracker_snapshot()
             self._peak_mem = {
                 dev: dev_snap[_TOTAL_KEY]
@@ -518,11 +518,16 @@ class FSDPMemTracker(MemTracker):
         if self._depth == 0:
             self._deregister_module_and_optimizer_hooks()
             self._restore_resize()
-            self._restore_dtensor_dispatch()
             self._mod_tracker.__exit__(*args)
         TorchDispatchMode.__exit__(self, *args)
 
     def __torch_dispatch__(self, func, types, args=..., kwargs=None):  # type: ignore[no-untyped-def]
+        # When running this mode with DTensor, ordinarily all modes will
+        # run **before** subclasses get a chance to run.
+        # Returning NotImplemented here gives us a chance to let DTensor
+        # run and desugar into local tensor ops, before `MemTracker` sees them.
+        if any(t == DTensor for t in types):
+            return NotImplemented
         if (
             func is torch.ops._c10d_functional.wait_tensor.default
             and active_fake_mode()
