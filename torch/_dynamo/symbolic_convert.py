@@ -4881,6 +4881,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     "orig_graphmodule"
                 ] = weakref.ref(module)
 
+        assert not isinstance(func, SkipFunctionVariable)
         tracer: InliningInstructionTranslator
         if is_generator(code):
             tracer = InliningGeneratorInstructionTranslator(
@@ -4985,7 +4986,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         symbolic_stream_state: SymbolicStreamState,
         funcvar: BaseUserFunctionVariable | LocalGeneratorObjectVariable,
     ) -> None:
-        f_globals = funcvar.get_globals()  # type: ignore[attr-defined]
+        f_globals = funcvar.get_globals()
         f_builtins = f_globals["__builtins__"]
         if not isinstance(f_builtins, dict):
             f_builtins = f_builtins.__dict__
