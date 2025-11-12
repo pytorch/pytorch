@@ -1527,7 +1527,7 @@ class TestLinalg(TestCase):
                 if error is None:
                     torch.linalg.vector_norm(input, dim=dim)
                 else:
-                    with self.assertRaises(error):
+                    with self.assertRaises(error, msg=error_msg):
                         torch.linalg.vector_norm(input, dim=dim)
 
     # This test compares torch.linalg.norm and numpy.linalg.norm to ensure that
@@ -7133,7 +7133,7 @@ class TestLinalg(TestCase):
         elapsed_ortho_general = 0
         elapsed_scipy = 0
         elapsed_general_scipy = 0
-        for i in range(repeat):
+        for _ in range(repeat):
             start = time.time()
             torch.lobpcg(A1, X=X1, niter=niter, method='ortho', tol=tol)
             end = time.time()
@@ -7329,11 +7329,11 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         m2 = torch.randn(50, 25, device=device).to(dtype)
         self._test_addmm_addmv(func, M, m1, m2, activation=activation)
 
-        # vector-shaped bias (or with 1-len dims on the left from the leading dim)
+        # vector (or with 1-len dims in shape[:-1])/matrix-shaped bias
         # and beta=1 result in epilogue fusion in CUDA
         V = torch.randn(25, device=device).to(dtype)
-        self._test_addmm_addmv(func, V, m1, m2, beta=1, activation=activation)
-        self._test_addmm_addmv(func, V.unsqueeze(0), m1, m2, beta=1, activation=activation)
+        for c in (V, V.unsqueeze(0), M):
+            self._test_addmm_addmv(func, c, m1, m2, beta=1, activation=activation)
 
         # Test 0-strided
         M = torch.randn(10, 1, device=device).to(dtype).expand(10, 25)
@@ -7357,12 +7357,10 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
             m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
             m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
-            self._test_addmm_addmv(func, M, m1, m2, transpose_out=t4, activation=activation)
 
-            if t1:
-                # use vector/(1 by k)-shaped V instead of matrix M for epilogue fusion in CUDA (doesn't depend on t1)
-                self._test_addmm_addmv(func, V, m1, m2, beta=1, transpose_out=t4, activation=activation,)
-                self._test_addmm_addmv(func, V.unsqueeze(0), m1, m2, beta=1, transpose_out=t4, activation=activation,)
+            for c, beta in itertools.product((M, V, V.unsqueeze(0)), (0, 1)):
+                # beta=1 to test epilogue fusions with either vector or matrix input
+                self._test_addmm_addmv(func, c, m1, m2, beta=beta, transpose_out=t4, activation=activation)
 
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
@@ -8769,7 +8767,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
             num_matrices = tensors_batch.size(0)
             tensors_list = []
-            for i in range(num_matrices):
+            for _ in range(num_matrices):
                 tensors_list.append(torch.randn(n[-2], n[-1], dtype=dtype, device=device))
 
             for i in range(num_matrices):

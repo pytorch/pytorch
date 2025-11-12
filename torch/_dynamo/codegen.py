@@ -15,7 +15,7 @@ import dataclasses
 import re
 import sys
 import types
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Callable, Iterable
 from typing import Any, Optional, TYPE_CHECKING, Union
 
@@ -38,7 +38,7 @@ from .bytecode_transformation import (
     create_rot_n,
     Instruction,
 )
-from .exc import IncorrectUsage, unimplemented_v2
+from .exc import IncorrectUsage, unimplemented
 from .source import AttrSource, ChainedSource, DictGetItemSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
@@ -153,7 +153,7 @@ class PyCodegen:
             self.clear_tos()
 
     def __call__(
-        self, value: Union[VariableTracker, Source], allow_cache: bool = True
+        self, value: Union[VariableTracker, Source, None], allow_cache: bool = True
     ) -> None:
         """
         Generate code such that top-of-stack (TOS) is set to value.
@@ -188,7 +188,7 @@ class PyCodegen:
             value to handle aliasing (check side_effects.py and search for
             allow_cache=False).
 
-            b) If value.source is None, this is not allowed. TODO - assert this.
+            b) If value.source is None, this is not allowed
 
         Notable effects:
         1. `self.top_of_stack` will be set to `value`, if we don't codegen
@@ -197,6 +197,7 @@ class PyCodegen:
             `top_of_stack` or cached `tempvars`, or (b). `value` has special VT
             types like `NNModuleVariable`, etc.
         """
+        assert value is not None
         if isinstance(value, Source):
             # If the source needs to be overridden, use the new one.
             source = self.overridden_sources.get(value, value)
@@ -214,7 +215,7 @@ class PyCodegen:
             try:
                 self.call_reconstruct(source)
             except NotImplementedError:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Reconstruction failure: source.reconstruct not implemented",
                     context=str(source),
                     explanation=f"Dynamo has no bytecode reconstruction implemented for {type(source)} variable {source}.",
@@ -289,7 +290,8 @@ class PyCodegen:
             self.load_graph_output(graph_outputs[graph_outputs_key].index)
             output.append(
                 self.create_load_global(
-                    value.global_mangled_class_name(self.tx), add=True
+                    value.global_mangled_class_name(self.tx),  # type: ignore[arg-type]
+                    add=True,
                 )
             )
             output.extend(create_call_function(2, False))
@@ -357,7 +359,7 @@ class PyCodegen:
             try:
                 self.call_reconstruct(value)
             except NotImplementedError:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Reconstruction failure",
                     context=str(value),
                     explanation=f"Dynamo has no bytecode reconstruction implemented for sourceless variable {value}.",
@@ -595,32 +597,35 @@ class PyCodegen:
 
         graphargs = self.tx.output.graphargs
 
-        seen_sources: OrderedSet[Source] = OrderedSet()
-
-        def collect_temp_source(source: Source) -> None:
-            if source in seen_sources:
-                # This source is used at least twice, so it can be reused
-                self.mark_source_temp(source)
-                # Dont trace source further. This prevents us from marking too
-                # many nodes as temp sources.
-                return
-
-            seen_sources.add(source)
-
+        def extract_nested_sources(source: Source) -> list[Source]:
+            nested_sources: list[Source] = []
             if isinstance(source, ChainedSource):
-                collect_temp_source(source.base)
-
+                nested_sources.append(source.base)
             if isinstance(source, DictGetItemSource) and isinstance(
                 source.index, Source
             ):
-                collect_temp_source(source.index)
+                nested_sources.append(source.index)
+            return nested_sources
+
+        def collect_temp_sources(sources: deque[Source], codegen: PyCodegen) -> None:
+            seen_sources: OrderedSet[Source] = OrderedSet()
+            while sources:
+                current_source = sources.popleft()
+                if current_source in seen_sources:
+                    # This source is used at least twice, so it can be reused
+                    codegen.mark_source_temp(current_source)
+                    # Dont trace source further. This prevents us from marking too
+                    # many nodes as temp sources.
+                    continue
+                seen_sources.add(current_source)
+                sources.extend(extract_nested_sources(current_source))
 
         # Collect all the sources that are used more than once, so that we can
         # generate tmp variables in the generated pre-graph bytecode. This
         # essentially implements CSE.
-        for arg in graphargs:
-            if arg.source is not None:
-                collect_temp_source(arg.source)
+        collect_temp_sources(
+            deque([arg.source for arg in graphargs if arg.source is not None]), self
+        )
 
         cm_var = None
         if config.record_runtime_overhead:
