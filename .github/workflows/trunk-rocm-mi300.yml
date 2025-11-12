@@ -2,8 +2,9 @@ name: trunk-rocm-mi300
 
 on:
   push:
-    tags:
-      - ciflow/trunk/*
+    branches:
+      - main
+      - release/*
   workflow_dispatch:
   schedule:
     - cron: 29 8 * * *  # about 1:29am PDT
