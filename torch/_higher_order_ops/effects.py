@@ -7,6 +7,7 @@ from torch._C import DispatchKey
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.custom_ops import CustomOpDef
 from torch._library.effects import EffectType
+from torch._library.utils import RegistrationHandle
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -37,32 +38,27 @@ def _get_op_qualname(op: _op_identifier) -> str:
         return op._qualname
     elif isinstance(op, str):
         return op
-    else:
-        return str(op)
+
+    raise ValueError(f"Invalid operator input {op}")
 
 
-def _register_effectful_op(op: _op_identifier, effect: Optional[EffectType]) -> None:
-    if isinstance(op, torch._ops.HigherOrderOperator):
-        qualname = _get_op_qualname(op)
-        entry = torch._library.simple_registry.singleton.find(qualname)
-        entry.effect = effect
-    else:
-        torch.library._register_effectful_op(op, effect)
-
-
-def _deregister_effectful_op(op: _op_identifier) -> None:
+def _register_effectful_op(
+    op: _op_identifier, effect: Optional[EffectType]
+) -> RegistrationHandle:
     qualname = _get_op_qualname(op)
     entry = torch._library.simple_registry.singleton.find(qualname)
-    entry.effect = None
+    handle = entry.effect.register(effect)
+    return handle
 
 
 def _get_effect(op: _op_identifier) -> Optional[_EffectType]:
     qualname = _get_op_qualname(op)
     entry = torch._library.simple_registry.singleton.find(qualname)
-    return entry.effect
+    return entry.effect.effect
 
 
 _register_effectful_op("aten::_print", _EffectType.ORDERED)
+_register_effectful_op("aten::_async_error", _EffectType.ORDERED)
 _register_effectful_op("profiler::_record_function_exit._RecordFunction", None)
 _register_effectful_op(call_torchbind, _EffectType.ORDERED)
 
@@ -93,6 +89,7 @@ class WithEffects(HigherOrderOperator):
     ) -> tuple[Any, ...]:
         assert isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
         assert not has_aliasing(op), "Ops with aliasing is not supported"
+        assert has_effects(op)
         assert isinstance(kwargs, dict)
         return super().__call__(token, op, *args, **kwargs)
 
@@ -103,7 +100,7 @@ with_effects = WithEffects()
 def has_aliasing(op: OpType):
     # NOT FOR PUBLIC USE
     if isinstance(op, torch._ops.HigherOrderOperator):
-        return False
+        return not _get_effect(op)
 
     for arg in op._schema.arguments:
         if arg.alias_info is not None:
@@ -114,7 +111,7 @@ def has_aliasing(op: OpType):
     return False
 
 
-def has_effects(op, args, kwargs) -> bool:
+def has_effects(op) -> bool:
     # Skip over the profiler's RecordFunction as they should not show up in the graph
     _skip_ops = {torch.ops.profiler._record_function_exit._RecordFunction}
     if op in _skip_ops:

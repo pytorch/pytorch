@@ -1,9 +1,7 @@
 from collections.abc import Callable
 from typing import Any, Optional
 
-import torch
-
-from .effects import EffectType
+from .effects import EffectHolder
 from .fake_impl import FakeImplHolder
 from .utils import RegistrationHandle
 
@@ -54,23 +52,7 @@ class SimpleOperatorEntry:
             GenericTorchDispatchRuleHolder(qualname)
         )
 
-        self.effect: Optional[EffectType] = None
-        # If the op contains a ScriptObject input, we want to mark it as having
-        # effects by default
-        if len(qualname.split(".")) > 1:
-            overload = qualname.split(".")[1]
-            qualname = qualname.split(".")[0]
-        else:
-            overload = ""
-        try:
-            schema = torch._C._get_schema(qualname, overload)
-        except RuntimeError:
-            # In the HOO case
-            return
-        for arg in schema.arguments:
-            if isinstance(arg.type, torch.ClassType):
-                self.effect = EffectType.ORDERED
-                break
+        self.effect: EffectHolder = EffectHolder(qualname)
 
     # For compatibility reasons. We can delete this soon.
     @property
