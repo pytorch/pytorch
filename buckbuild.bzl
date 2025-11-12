@@ -489,8 +489,7 @@ def gen_aten_files(
         cmd = "$(exe {}torchgen:gen) ".format(ROOT_PATH) + " ".join([
             "--source-path $(location {}:aten_src_path)/aten/src/ATen".format(ROOT),
             "--install_dir $OUT",
-            "--aoti_install_dir $OUT/torch/csrc/inductor/aoti_torch/generated",
-            "--headeronly_install_dir $OUT/torch/headeronly"
+            "--aoti_install_dir $OUT/torch/csrc/inductor/aoti_torch/generated"
         ] + extra_params),
         visibility = visibility,
         compatible_with = compatible_with,

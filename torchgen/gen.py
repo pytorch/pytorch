@@ -2755,12 +2755,6 @@ def main() -> None:
         default="torch/csrc/inductor/aoti_torch/generated",
     )
     parser.add_argument(
-        "--headeronly-install-dir",
-        "--headeronly_install_dir",
-        help="output directory for header-only files",
-        default="torch/headeronly",
-    )
-    parser.add_argument(
         "--rocm",
         action="store_true",
         help="reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly",
@@ -2958,9 +2952,19 @@ def main() -> None:
     Path(aoti_install_dir).mkdir(parents=True, exist_ok=True)
 
     # Create directory and file manager for torch/headeronly
-    headeronly_install_dir = f"{options.headeronly_install_dir}/core"
+    # Derive headeronly_install_dir from install_dir (build output)
+    # Going up 3 levels from build/aten/src/ATen -> build, then to torch/headeronly/core
+    install_dir_parent = os.path.dirname(
+        os.path.dirname(os.path.dirname(options.install_dir))
+    )
+    headeronly_install_dir = f"{install_dir_parent}/torch/headeronly/core"
     Path(headeronly_install_dir).mkdir(parents=True, exist_ok=True)
-    headeronly_template_dir = "torch/headeronly/templates"
+    # Derive headeronly_template_dir from source_path (source tree)
+    # Going up 3 levels from aten/src/ATen -> root, then to torch/headeronly/templates
+    source_path_parent = os.path.dirname(
+        os.path.dirname(os.path.dirname(options.source_path))
+    )
+    headeronly_template_dir = f"{source_path_parent}/torch/headeronly/templates"
 
     core_fm = make_file_manager(options=options, install_dir=core_install_dir)
     cpu_fm = make_file_manager(options=options)

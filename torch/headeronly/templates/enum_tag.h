@@ -5,10 +5,8 @@
 #include <torch/headeronly/macros/Macros.h>
 
 namespace at {
-  // Enum of valid tags obtained from the entries in tags.yaml
-  enum class Tag {
-    ${enum_of_valid_tags}
-  };
+// Enum of valid tags obtained from the entries in tags.yaml
+enum class Tag { ${enum_of_valid_tags} };
 } // namespace at
 
 HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
