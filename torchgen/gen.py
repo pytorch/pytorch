@@ -2196,6 +2196,7 @@ def gen_headers(
     def gen_tags_enum() -> dict[str, str]:
         return {"enum_of_valid_tags": (",\n".join(sorted(valid_tags)))}
 
+    assert headeronly_fm is not None, "headeronly_fm must be provided to gen_headers"
     headeronly_fm.write("enum_tag.h", gen_tags_enum)
 
     # Generate forwarding header at ATen/core/enum_tag.h for backward compatibility
