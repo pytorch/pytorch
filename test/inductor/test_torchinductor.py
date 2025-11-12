@@ -15943,9 +15943,8 @@ if RUN_GPU:
                 "tl.atomic_add" in code[0],
                 "bf16 should generate tl.atomic_add",
             )
-            torch.testing.assert_close(
-                result, output.index_put_([indices], values, accumulate=True)
-            )
+            expected = torch.zeros(512, 768, dtype=torch.bfloat16, device=GPU_TYPE)
+            torch.testing.assert_close(result, fn(expected, indices, values))
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
