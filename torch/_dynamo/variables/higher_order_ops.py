@@ -325,7 +325,8 @@ def _call_function_with_auto_output_flattening(
                 # For autograd.Function, running the example we need to rewrite
                 # the requires_grad because the body_r is traced with grad
                 # disabled.
-                orig_vt.requires_grad = subgraph_vt.requires_grad
+                if isinstance(orig_vt, variables.TensorVariable):
+                    orig_vt.requires_grad = subgraph_vt.requires_grad
     return body_r
 
 
