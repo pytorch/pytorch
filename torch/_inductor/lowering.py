@@ -26,6 +26,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.utils import get_layout_constraint_tag
 from torch._prims_common import (  # pyrefly: ignore  # deprecated; pyrefly: ignore [deprecated]
     canonicalize_dim,
@@ -2704,6 +2705,8 @@ def require_channels_last(_, *args, **kwargs):
 
 
 def constrain_to_fake_tensor(arg, fake_arg):
+    if isinstance(fake_arg, FakeScriptObject):
+        return arg
     if isinstance(arg, ir.IRNode):
         meta_stride_expr = [
             s.node.expr if isinstance(s, torch.SymInt) else s for s in fake_arg.stride()

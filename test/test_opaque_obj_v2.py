@@ -4,6 +4,7 @@ import random
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._functorch.aot_autograd import aot_export_module
 from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject
@@ -43,11 +44,21 @@ class OpaqueQueue:
 
 class RNGState:
     def __init__(self, seed):
-        self.rng = random.Random(seed)
+        self.seed = seed
+        self.rng = random.Random(self.seed)
+
+
+class Counter:
+    def __init__(self, start):
+        self.counter = torch.tensor(start)
+
+    def increment_counter(self):
+        self.counter += 1
 
 
 register_opaque_type(OpaqueQueue, "_TestOpaqueObject_OpaqueQueue")
 register_opaque_type(RNGState, "_TestOpaqueObject_RNGState")
+register_opaque_type(Counter, "_TestOpaqueObject_Counter")
 
 
 class TestOpaqueObject(TestCase):
@@ -126,6 +137,20 @@ class TestOpaqueObject(TestCase):
         @torch.library.register_fake("_TestOpaqueObject::noisy_inject", lib=self.lib)
         def noisy_inject_fake(x: torch.Tensor, obj: RNGState) -> torch.Tensor:
             return torch.empty_like(x)
+
+        @torch.library.custom_op(
+            "_TestOpaqueObject::increment_counter",
+            mutates_args=["prev"],
+        )
+        def increment_counter_impl(c: Counter, prev: torch.Tensor) -> torch.Tensor:
+            assert isinstance(c, Counter)
+            prev.copy_(c.counter)
+            c.increment_counter()
+            return c.counter
+
+        @increment_counter_impl.register_fake
+        def increment_counter_fake(c: Counter, prev: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(prev)
 
         super().setUp()
 
@@ -293,6 +318,109 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             torch.library._register_effectful_op(
                 "_TestOpaqueObject::noisy_inject", None
             )
+
+    def test_compile(self):
+        def foo(rng_state, x):
+            x = torch.ops._TestOpaqueObject.noisy_inject(x, rng_state)
+            x = x * x
+            x = torch.ops._TestOpaqueObject.noisy_inject(x, rng_state)
+            x = x + x
+            return x
+
+        rng = RNGState(0)
+        x = torch.ones(2, 3)
+
+        res = torch.compile(foo, fullgraph=True, backend="inductor")(rng, x)
+        self.assertFalse(torch.allclose(res, x * x + x))
+
+        backend = AotEagerAndRecordGraphs()
+        torch.compile(foo, fullgraph=True, backend=backend)(rng, x)
+        self.assertExpectedInline(
+            backend.graphs[0].code.strip(),
+            """\
+def forward(self, L_x_ : torch.Tensor, L_rng_state_ : __main___RNGState):
+    l_x_ = L_x_
+    l_rng_state_ = L_rng_state_
+    x = torch.ops._TestOpaqueObject.noisy_inject(l_x_, l_rng_state_);  l_x_ = None
+    x_1 = x * x;  x = None
+    x_2 = torch.ops._TestOpaqueObject.noisy_inject(x_1, l_rng_state_);  x_1 = l_rng_state_ = None
+    x_3 = x_2 + x_2;  x_2 = None
+    return (x_3,)""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            backend.fw_graphs[0].code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(arg0_1, arg1_1);  arg0_1 = None
+    mul = torch.ops.aten.mul.Tensor(noisy_inject, noisy_inject);  noisy_inject = None
+    noisy_inject_1 = torch.ops._TestOpaqueObject.noisy_inject.default(mul, arg1_1);  mul = arg1_1 = None
+    add = torch.ops.aten.add.Tensor(noisy_inject_1, noisy_inject_1);  noisy_inject_1 = None
+    return (add,)""",  # noqa: B950
+        )
+
+    def test_compile_intermediate(self):
+        counter = Counter(0)
+
+        def foo(x, y):
+            z = torch.ops._TestOpaqueObject.increment_counter(counter, y)
+            x = x * z
+            z = torch.ops._TestOpaqueObject.increment_counter(counter, y)
+            x = x + z
+            return x, counter
+
+        inp = (torch.tensor(1), torch.tensor(0))
+        backend = AotEagerAndRecordGraphs()
+        opt_f = torch.compile(foo, fullgraph=True, backend=backend)
+        res = opt_f(*inp)
+        self.assertEqual(res[0], torch.tensor(3))
+        self.assertEqual(res[1].counter, torch.tensor(2))
+
+        res = opt_f(*inp)
+        self.assertEqual(res[0], torch.tensor(7))
+        self.assertEqual(res[1].counter, torch.tensor(4))
+
+        # counter is automatically lifted as an input
+        # Even though we returned counter in the eager code, it does not get
+        # returned in the graph because dynamo does not detect that the object
+        # is mutated.
+        self.assertExpectedInline(
+            backend.fw_graphs[0].code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops._TestOpaqueObject.increment_counter.default, c = arg1_1, _prev_base_index = 0, _all_bases = [arg0_1])
+    getitem = auto_functionalized_v2[0]
+    getitem_1 = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+    mul = torch.ops.aten.mul.Tensor(arg2_1, getitem);  arg2_1 = getitem = None
+    auto_functionalized_v2_1 = torch.ops.higher_order.auto_functionalized_v2(torch.ops._TestOpaqueObject.increment_counter.default, c = arg1_1, _prev_base_index = 0, _all_bases = [getitem_1]);  arg1_1 = getitem_1 = None
+    getitem_2 = auto_functionalized_v2_1[0]
+    getitem_3 = auto_functionalized_v2_1[1];  auto_functionalized_v2_1 = None
+    add = torch.ops.aten.add.Tensor(mul, getitem_2);  mul = getitem_2 = None
+    copy_ = torch.ops.aten.copy_.default(arg0_1, getitem_3);  arg0_1 = getitem_3 = copy_ = None
+    return (add,)""",  # noqa: B950
+        )
+
+    def test_compile_attribute(self):
+        counter = Counter(0)
+
+        def foo(counter, x):
+            x = x * x
+            counter.increment_counter()
+            return x
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Attempted to access attributes/methods on an OpaqueObject"
+        ):
+            torch.compile(foo)(counter, torch.ones(2, 3))
+
+        def bar(counter, x):
+            x = x * x
+            x += counter.counter
+            return x
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Attempted to access attributes/methods on an OpaqueObject"
+        ):
+            torch.compile(bar)(counter, torch.ones(2, 3))
 
 
 instantiate_parametrized_tests(TestOpaqueObject)

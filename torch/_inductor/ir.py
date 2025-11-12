@@ -9295,6 +9295,10 @@ class TorchBindObject(NonTensorObj):
     def get_buf_bytes(self) -> int:
         # Returns the sum of all tensors in the flattened object
         real_script_obj = self.get_real_obj()
+
+        if real_script_obj is None:
+            return 0
+
         assert hasattr(real_script_obj, "__obj_flatten__")
         flat_dict = dict(real_script_obj.__obj_flatten__())
         flat_elems = pytree.tree_flatten(flat_dict)[0]
