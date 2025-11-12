@@ -41,9 +41,6 @@ class Shard : public Placement {
   std::int64_t dim;
   explicit Shard(std::int64_t dim_) : dim(dim_) {}
 
-  // Copy constructor
-  Shard(const Shard& other) : Placement(other), dim(other.dim) {}
-
   bool is_shard(std::optional<std::int64_t> dim_) const override {
     if (typeid(*this) != typeid(Shard)) {
       return false;
