@@ -14,11 +14,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    HAS_GPU,
-    HAS_TRITON
-)
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, HAS_TRITON
 
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
