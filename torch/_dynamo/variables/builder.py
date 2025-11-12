@@ -359,6 +359,13 @@ class GraphArg:
     # stash a strong reference too.
     example_strong_ref: Optional[torch.Tensor] = None
 
+    def __setattr__(self, name, value):
+        # Use object.__setattr__ to bypass Dynamo's STORE_ATTR interception.
+        # This is needed because when PYTORCH_TEST_WITH_DYNAMO=1, even internal
+        # GraphArg creation can be traced, and with replay_side_effects=False,
+        # normal STORE_ATTR bytecode only records mutations without applying them.
+        object.__setattr__(self, name, value)
+
     @property
     def example(self):
         if isinstance(self._example, TensorWeakRef):

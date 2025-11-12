@@ -1845,7 +1845,7 @@ class OutputGraph(OutputGraphCommon):
                 [create_instruction("DELETE_FAST", argval=graph_output_var)]
             )
 
-        if self.export:
+        if torch._dynamo.config.side_effect_replay_policy in ["warn", "error"]:
             from torch.export._trace import _ExportModuleSpecTrackerDict
 
             potential_side_effects = []
@@ -1881,10 +1881,16 @@ class OutputGraph(OutputGraphCommon):
             ]
 
             if side_effect_refs:
-                warnings.warn(
-                    f"While exporting, we found certain side effects happened in the model.forward. "
-                    f"Here are the list of potential sources you can double check: {side_effect_refs}"
-                )
+                if torch._dynamo.config.side_effect_replay_policy == "warn":
+                    warnings.warn(
+                        f"While compiling, we found certain side effects happened in the model.forward. "
+                        f"Here are the list of potential sources you can double check: {side_effect_refs}"
+                    )
+                else:
+                    raise RuntimeError(
+                        f"While compiling, we found certain side effects happened in the model.forward. "
+                        f"Here are the list of potential sources you can double check: {side_effect_refs}"
+                    )
 
         return all_stack_locals_metas
 
@@ -1930,7 +1936,8 @@ class OutputGraph(OutputGraphCommon):
                 assert self.backward_state_var is not None
                 cg.append_output(cg.create_load(self.backward_state_var))
                 cg.store_attr(name)
-        self.side_effects.codegen_hooks(cg)
+        if config.replay_side_effects:
+            self.side_effects.codegen_hooks(cg)
 
         # TODO get debug_locals working for nested graph breaks
         # Return variables used for logging at the end
@@ -1945,7 +1952,8 @@ class OutputGraph(OutputGraphCommon):
         self.codegen_cells(tx, cg)
 
         cg.restore_stack(stack_values, value_from_source=not tx.export)
-        self.side_effects.codegen_update_mutated(cg)
+        if config.replay_side_effects:
+            self.side_effects.codegen_update_mutated(cg)
 
     def cleanup_graph(self) -> None:
         """

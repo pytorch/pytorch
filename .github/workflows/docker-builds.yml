@@ -119,6 +119,22 @@ jobs:
         with:
           docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
 
+      - name: Generate output
+        if: contains(matrix.docker-image-name, 'rocm')
+        id: generate_output
+        run: |
+          docker_image_name="${{ matrix.docker-image-name }}"
+          docker_image_tag="${{ steps.build-docker-image.outputs.docker-image }}"
+          echo "${docker_image_name}=${docker_image_tag}" >> docker-builds-output-${docker_image_name}.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4.4.0
+        if: contains(matrix.docker-image-name, 'rocm')
+        with:
+          name: docker-builds-artifacts-${{ matrix.docker-image-name }}
+          retention-days: 14
+          path: ./docker-builds-output-${{ matrix.docker-image-name }}.txt
+
       - uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
         name: Push to https://ghcr.io/
         id: push-to-ghcr-io
