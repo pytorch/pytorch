@@ -109,6 +109,38 @@ def found_inf_reduce_handler(
     target_tensor.copy_(found_inf)
 
 
+def squeeze_handler(
+    op_call: torch._ops.OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> object:
+    """
+    Custom handler for squeeze that only squeezes globally singleton dimensions.
+    """
+    op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
+    dtensor.DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
+    output_sharding = op_info.output_sharding
+    assert output_sharding is not None, "output sharding should not be None"
+
+    input_dtensor = cast(dtensor.DTensor, args[0])
+    global_shape = input_dtensor.shape
+
+    dim_arg = args[1] if len(args) > 1 else kwargs.get("dim", None)
+
+    if dim_arg is not None:
+        dim_normalized = dim_arg if dim_arg >= 0 else dim_arg + len(global_shape)
+        singleton_dims = [dim_normalized] if global_shape[dim_normalized] == 1 else []
+    else:
+        singleton_dims = [i for i, size in enumerate(global_shape) if size == 1]
+
+    local_tensor = cast(torch.Tensor, op_info.local_args[0])
+    local_result = local_tensor
+    for dim in reversed(singleton_dims):
+        local_result = torch.squeeze(local_result, dim=dim)
+
+    return dtensor.DTensor._op_dispatcher.wrap(local_result, output_sharding.output_spec)
+
+
 class OpDispatcher:
     """
     Op dispatching class instance to handle args/kwargs pre-processing (un-wrapping), sharding
@@ -142,6 +174,9 @@ class OpDispatcher:
             aten.convolution.default: convolution_handler,
             aten.convolution_backward.default: convolution_backward_handler,
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
+            aten.squeeze.default: squeeze_handler,
+            aten.squeeze.dim: squeeze_handler,
+            aten.squeeze_.dim: squeeze_handler,
             aten.as_strided.default: as_strided_handler,
         }
 
