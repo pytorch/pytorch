@@ -1,4 +1,4 @@
-﻿# mypy: allow-untyped-defs
+﻿# mypy: allow-untyped-defs 
 """
 This is a script for launching PyTorch inference on Intel® Xeon® Scalable Processors with optimal configurations.
 
@@ -198,12 +198,6 @@ class _CPUinfo:
                         self.logical_core_node_map[int(cpuinfo[0])] = int(node_id)
                 self.node_physical_cores.append(cur_node_physical_core)
                 self.node_logical_cores.append(cur_node_logical_core)
-
-    def _physical_core_nums(self):
-        return len(self.node_physical_cores) * len(self.node_physical_cores[0])
-
-    def _logical_core_nums(self):
-        return len(self.node_logical_cores) * len(self.node_logical_cores[0])
 
     def get_node_physical_cores(self, node_id):
         if node_id < 0 or node_id > self.node_nums - 1:
@@ -502,12 +496,22 @@ but you specify %s cores in core_list",
                         f"there are {len(cores)} total cores but you specify {args.ninstances} ninstances; \
 please make sure ninstances <= total_cores)"
                     )
+                if args.skip_cross_node_cores:
+                    if args.ninstances > self.cpuinfo.node_nums:
+                        raise RuntimeError(
+                            f"--ninstances should not be larger than numa node number \
+when --skip-cross-node-cores is set"
+                        )
+                    cores.clear()
+                    args.ncores_per_instance.clear()
+                    for i in range(args.ninstances):
+                        per_node_cores = self.cpuinfo.get_node_physical_cores(i)
+                        cores.extend(per_node_cores)
+                        args.ncores_per_instance.append(len(per_node_cores))
                 else:
                     args.ncores_per_instance = [len(cores) // args.ninstances] * args.ninstances
-            elif args.ncores_per_instance != [-1] and args.ninstances == -1:
-                if not args.skip_cross_node_cores:
-                    args.ninstances = len(args.ncores_per_instance)
-                else:
+            elif args.ncores_per_instance != [-1]:
+                if args.skip_cross_node_cores:
                     utilized_node_cores = self.cpuinfo.node_logical_cores if args.use_logical_core else self.cpuinfo.node_physical_cores
                     ncore_per_node = [len(c) for c in utilized_node_cores]
                     if len(args.ncores_per_instance) > len(ncore_per_node):
@@ -536,23 +540,12 @@ this node and skip_cross_node_cores. ",
                             # Exclude excessive cores from largest core IDs
                             leftover_cores.extend(utilized_node_cores[i][leftover_num:])
                     # used node num < total node num, mark the rest node cores as unused
-                    while i < len(ncore_per_node):
-                        leftover_cores.extend(utilized_node_cores[i][:])
-                        i += 1
-                    if len(leftover_cores) == 0:
-                        args.ninstances = len(args.ncores_per_instance)
-                    else:
-                        # skip cross-node cores
-                        if args.ninstances != -1 and args.ninstances != len(args.ncores_per_instance):
-                            logger.warning(
-                                "--skip-cross-node-cores is exclusive to --ninstances. --ninstances \
-won't take effect even if it is set explicitly."
-                            )
-
-                        for core_rm in leftover_cores:
-                            if core_rm in cores:
-                                cores.remove(core_rm)
-                        args.ninstances = len(args.ncores_per_instance)
+                    for j in range(i + 1, len(ncore_per_node)):
+                        leftover_cores.extend(utilized_node_cores[j][:])
+                    for core_rm in leftover_cores:
+                        if core_rm in cores:
+                            cores.remove(core_rm)
+                args.ninstances = len(args.ncores_per_instance)
             else:
                 if sum(args.ncores_per_instance) > len(cores):
                     raise RuntimeError(
@@ -626,6 +619,7 @@ won't take effect even if it is set explicitly."
         # check whether is launched from torchrun with --nproc-per-node <num workers>
         local_size = int(os.environ.get("LOCAL_WORLD_SIZE", 1))
         local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        cores = sorted(cores)
         for i in range(args.ninstances):
             cmd = []
             cur_process_cores = ""
@@ -634,7 +628,6 @@ won't take effect even if it is set explicitly."
                     cmd = ["numactl"]
                 elif enable_taskset:
                     cmd = ["taskset"]
-                cores = sorted(cores)
                 core_index_start = 0
                 if (
                     args.rank == -1
@@ -642,13 +635,13 @@ won't take effect even if it is set explicitly."
                     for j in range(i):
                         core_index_start += args.ncores_per_instance[j]
                     core_list = cores[
-                        core_index_start : args.ncores_per_instance[i]
+                        core_index_start : core_index_start + args.ncores_per_instance[i]
                     ]
                 else:  # assign ncores_per_instance from rank
                     for j in range(args.rank):
                         core_index_start += args.ncores_per_instance[j]
                     core_list = cores[
-                        core_index_start : args.ncores_per_instance[args.rank]
+                        core_index_start : core_index_start + args.ncores_per_instance[args.rank]
                     ]
 
                 core_ranges: list[dict] = []
