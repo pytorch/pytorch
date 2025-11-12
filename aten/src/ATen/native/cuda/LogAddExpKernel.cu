@@ -9,6 +9,7 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/OpMathType.h>
 #include <c10/util/MathConstants.h>
+#include <c10/util/complex.h>
 
 #include <cmath>
 #include <limits>
@@ -118,20 +119,31 @@ __host__ __device__ c10::complex<scalar_t> _log_add_exp_helper(const c10::comple
 
 // Complex logaddexp jiterator string
 const auto logaddexp_complex_string = jiterator_stringify(
-    template <typename T>
-    struct get_scalar_type;
-
-    template <typename U>
-    struct get_scalar_type<std::complex<U>> {
-        using type = U;
-    };
+    template<typename T>
+    std::complex<T> log1p(const std::complex<T>& z)
+    {
+      using complex_t = std::complex<T>;
+      T x = z.real();
+      T y = z.imag();
+      T zabs = abs(z);
+      T theta = atan2(y, x + T(1));
+      if (zabs < 0.5) {
+          T r = x * (T(2) + x) + y * y;
+          if (r == 0) { // handle underflow
+              return complex_t(x, theta);
+          }
+          return complex_t(T(0.5) * std::log1p(r), theta);
+      } else {
+          T z0 = std::hypot(x + 1, y);
+          return complex_t(log(z0), theta);
+      }
+    }
 
     // separated _logaddexp_minmax into 2 different functions for jiterator_string
     template <typename T>
-    T logaddexp_min(const T& x, const T& y) {
-        using scalar_t = typename get_scalar_type<T>::type;
-        scalar_t xr = x.real();
-        scalar_t yr = y.real();
+    std::complex<T> logaddexp_min(const std::complex<T>& x, const std::complex<T>& y) {
+        T xr = x.real();
+        T yr = y.real();
         if (isnan(yr) || isnan(y.imag())) {
             return y;
         } else if (isnan(xr) || isnan(x.imag())) {
@@ -142,10 +154,9 @@ const auto logaddexp_complex_string = jiterator_stringify(
     }
 
     template <typename T>
-    T logaddexp_max(const T& x, const T& y) {
-        using scalar_t = typename get_scalar_type<T>::type;
-        scalar_t xr = x.real();
-        scalar_t yr = y.real();
+    std::complex<T> logaddexp_max(const std::complex<T>& x, const std::complex<T>& y) {
+        T xr = x.real();
+        T yr = y.real();
         if (isnan(yr) || isnan(y.imag())) {
             return y;
         } else if (isnan(xr) || isnan(x.imag())) {
@@ -156,68 +167,63 @@ const auto logaddexp_complex_string = jiterator_stringify(
     }
 
     template <typename T>
-    T fast_build_exp(const T& x) {
-        using scalar_t = typename get_scalar_type<T>::type;
+    std::complex<T> fast_build_exp(const std::complex<T>& x) {
         const auto xreal = x.real();
         const auto ximag = x.imag();
         const auto exp_x_abs = exp(xreal);
         auto exp_x_real = exp_x_abs * cos(ximag);
         auto exp_x_imag = exp_x_abs * sin(ximag);
-        return T(exp_x_real, exp_x_imag);
+        return std::complex<T>(exp_x_real, exp_x_imag);
     }
 
     template <typename T>
-    T fast_build_exp_inf(const T& x) {
-        using scalar_t = typename get_scalar_type<T>::type;
+    std::complex<T> fast_build_exp_inf(const std::complex<T>& x) {
+        using complex_t = std::complex<T>;
         const auto ximag = x.imag();
-        const scalar_t exp_x_abs = INFINITY;
+        const T exp_x_abs = INFINITY;
         if (!isfinite(ximag)) {
-            return T(exp_x_abs, NAN);
+            return complex_t(exp_x_abs, NAN);
         }
         const auto sin_val = sin(ximag);
         const auto cos_val = cos(ximag);
-        auto exp_x_real = (cos_val == scalar_t(0)) ? scalar_t(0) : exp_x_abs * cos_val;
-        auto exp_x_imag = (sin_val == scalar_t(0)) ? scalar_t(0) : exp_x_abs * sin_val;
-        return T(exp_x_real, exp_x_imag);
+        auto exp_x_real = (cos_val == T(0)) ? T(0) : exp_x_abs * cos_val;
+        auto exp_x_imag = (sin_val == T(0)) ? T(0) : exp_x_abs * sin_val;
+        return complex_t(exp_x_real, exp_x_imag);
     }
 
-    template <typename T>
-    T logaddexp_complex(T x, T y) {
-        using scalar_t = typename get_scalar_type<T>::type;
-
-        T min_val = logaddexp_min(x, y);
-        T max_val = logaddexp_max(x, y);
-        scalar_t min_real = min_val.real();
-        scalar_t max_real = max_val.real();
+    template <typename complex_t>
+    complex_t logaddexp_complex(complex_t x, complex_t y) {
+        using T = typename complex_t::value_type;
+        complex_t min_val = logaddexp_min(x, y);
+        complex_t max_val = logaddexp_max(x, y);
+        T min_real = min_val.real();
+        T max_real = max_val.real();
 
         if (isnan(min_real) || isnan(min_val.imag())) {
-            return T(NAN, NAN);
+            return complex_t(NAN, NAN);
         }
         else if ((!isfinite(min_real)) && (min_real == max_real)) {
-            if (min_real < scalar_t(0)) {
+            if (min_real < T(0)) {
                 return min_val;
             } else {
                 const auto exp_min = fast_build_exp_inf<T>(min_val);
                 const auto exp_max = fast_build_exp_inf<T>(max_val);
-                return log(exp_min + exp_max);
+                return log1p(exp_min + exp_max - complex_t(1, 0));
             }
         } else {
             const auto minmax = min_val - max_val;
-            T exp_minmax;
+            complex_t exp_minmax;
             if (!isfinite(minmax.real())) {
-                exp_minmax = (minmax.real() < scalar_t(0)) ? T(0, 0) : fast_build_exp_inf<T>(minmax);
+                exp_minmax = (minmax.real() < T(0)) ? complex_t(0, 0) : fast_build_exp_inf<T>(minmax);
             } else {
                 exp_minmax = fast_build_exp<T>(minmax);
             }
-            return log(T(1, 0) + exp_minmax) + max_val;
+            return log1p(exp_minmax) + max_val;
         }
     }
 );
 
-#if AT_USE_JITERATOR()
-constexpr char logaddexp_name[] = "logaddexp";
 constexpr char logaddexp_complex_name[] = "logaddexp_complex";
-#endif
 void logaddexp_kernel_cuda(TensorIteratorBase& iter) {
   if (at::isComplexType(iter.dtype())) {
 #if AT_USE_JITERATOR()
