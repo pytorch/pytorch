@@ -12,6 +12,7 @@ import subprocess
 import sys
 from collections import namedtuple
 from typing import cast as _cast
+import functools
 
 
 try:
@@ -542,7 +543,7 @@ def get_cpu_info(run_lambda):
         cpu_info = err
     return cpu_info
 
-
+@functools.cache
 def get_platform():
     if sys.platform.startswith("linux"):
         return "linux"
