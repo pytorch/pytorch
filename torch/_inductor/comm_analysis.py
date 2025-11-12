@@ -196,16 +196,9 @@ def estimate_nccl_collective_runtime_nccl_estimator(snode) -> Optional[float]:  
     if "all_gather_into_tensor_out" in py_kernel_name:
         args = args[1:] + args[0]
 
-    try:
-        with torch.distributed._time_estimator(
-            group=pg, device=device
-        ) as time_estimator:
-            w = fn(*args, **kwargs)
-            torch.ops._c10d_functional.wait_tensor.default(w)
-    except Exception as e:
-        # NCCL estimator can fail
-        log.info(e)  # noqa: G200
-        return None
+    with torch.distributed._time_estimator(group=pg, device=device) as time_estimator:
+        w = fn(*args, **kwargs)
+        torch.ops._c10d_functional.wait_tensor.default(w)
 
     est_time_us = time_estimator.estimated_time
     # -1000 constant is NCCL return in case of error during estimations.
@@ -359,7 +352,6 @@ def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
 def estimate_nccl_collective_runtime_from_fx_node(
     fx_node: torch.fx.Node,
     override_size: Optional[int] = None,
-    # TODO(ivankobzarev): NCCL estimator sometimes fail unexpectedly, enable back after fix.
     use_nccl_estimator: bool = True,
 ) -> float:
     """
