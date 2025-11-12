@@ -3334,7 +3334,12 @@ std::tuple<Tensor, Tensor> atan2_backward(
   }
   auto denom = self * self + other * other;
   auto recip = denom.reciprocal();
-  recip.masked_fill_(denom == 0, 0);
+  if (at::areAnyTensorSubclassLike({self, other, denom, recip}) ||
+      at::GradMode::is_enabled()) {
+    recip = recip.masked_fill(denom == 0, 0);
+  } else {
+    recip.masked_fill_(denom == 0, 0);
+  }
   return std::tuple<Tensor, Tensor>{
       output_mask[0] ? grad * other * recip : Tensor(),
       output_mask[1] ? grad * -self * recip : Tensor()};
