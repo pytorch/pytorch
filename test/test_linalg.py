@@ -10000,7 +10000,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # Such matrix will take more than 4Gb in memory
         n = 50_000
         A = torch.ones(n, n, dtype=dtype, device=device)
-        B = torch.rand(n, dtype=dtype, device=device)
+        B = torch.randn(n, dtype=dtype, device=device)
         C = torch.matmul(A, B)
         self.assertEqual(C, B.sum().expand(B.shape))
 
