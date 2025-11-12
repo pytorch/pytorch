@@ -1883,7 +1883,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
       LOG(INFO) << pg_->logPrefix()
                 << "Dump signal received through pipe, triggering FR dump.";
       futures.emplace_back(std::async(std::launch::async, [this, onlyActive]() {
-        return this->pg_->dumpDebuggingInfo(false, onlyActive);
+        return this->pg_->dumpDebuggingInfo(true, onlyActive);
       }));
     }
   }

@@ -1,13 +1,13 @@
-name: inductor-rocm
+name: inductor-rocm-mi200
 
 on:
   schedule:
-    - cron: 0 * * * *
+    - cron: 0 */3 * * *
   push:
     branches:
       - release/*
     tags:
-      - ciflow/inductor-rocm/*
+      - ciflow/inductor-rocm-mi200/*
   workflow_dispatch:
 
 concurrency:
