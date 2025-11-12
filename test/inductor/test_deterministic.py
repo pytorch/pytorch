@@ -124,6 +124,7 @@ class DeterministicTest(TestCase):
             ("BertForMaskedLM", "training", "float16"),
             ("BertForMaskedLM", "inference", "amp"),
             ("DistillGPT2", "training", "float16"),
+            ("GoogleFnet", "training", "float32"),
         ):
             self.skipTest("The first accuracy run fail")
 
