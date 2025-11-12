@@ -3070,7 +3070,15 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-class HintsWrapperHigherOrderVariable(TorchHigherOrderOperatorVariable):
+class HintsWrapperHigherOrderVariable(WrapHigherOrderVariable):
+    def install_subgraph_in_output_graph(
+        self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
+    ):
+        return tx.output.install_subgraph(
+            "hints_wrapper_body",
+            body_gmod,
+        )
+
     @raise_hard_error_if_graph_break(
         reason="hints_wrapper doesn't work unless it is captured completely with torch.compile."
     )
@@ -3100,46 +3108,44 @@ class HintsWrapperHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         operands = args[1].unpack_var_sequence(tx)
+        fn_kwargs = args[2].as_python_constant()
 
+        # Use create_wrapped_node from WrapHigherOrderVariable
         (
-            (body_r, treespec),
-            body_graph,
-            body_lifted_freevars,
-        ) = speculate_subgraph(
+            p_args,
+            _,
+            example_value,
+            body_r,
+            body_gmod,
+            _,
+            body_graph_output_vts,
+        ) = self.create_wrapped_node(
             tx,
             args[0],  # function
             operands,
-            args[2].as_python_constant(),
+            fn_kwargs,
             "hints_wrapper",
-            source_target=self.value,
-            should_flatten_outputs=True,
         )
 
-        body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
-        body_name = tx.output.install_subgraph(
-            "hints_wrapper_body",
-            body_gmod,
-        )
-
-        body_node = make_attr(tx, body_name)
-
-        # Since, we call `speculate_subgraph` with `set_subgraph_inputs="automatic`,
-        # all the arguments are lifted.
-        lifted_args = tuple(body_lifted_freevars.keys())
+        # hints_wrapper expects (body_node, args, kwargs) as positional args
+        # So we need to restructure p_args from (body_node, *lifted_args)
+        # to (body_node, lifted_args_tuple, {})
+        body_node = p_args[0]
+        lifted_args = p_args[1:]
         p_args = (body_node, lifted_args, {})
 
-        p_kwargs = {}
         # add hints into p_kwargs
+        p_kwargs = {}
         p_kwargs["hints"] = kwargs["hints"].as_python_constant()
 
-        flat_example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            body_r.as_proxy(),
-        )
-
-        return _call_function_and_unflatten_output(
-            tx, self.value, p_args, p_kwargs, flat_example_value, treespec, body_r
+        return _call_function_with_auto_output_flattening(
+            tx,
+            self.value,
+            p_args,
+            p_kwargs,
+            example_value,
+            body_r,
+            body_graph_output_vts,
         )
 
 
