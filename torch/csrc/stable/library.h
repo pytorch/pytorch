@@ -169,7 +169,7 @@ template <
 struct boxer_impl {
   static_assert(
       torch::headeronly::guts::false_t<ReturnType>::value,
-      "Unsupported schema for TORCH_BOX.");
+      "Unsupported function schema for TORCH_BOX.");
 };
 
 // Multiple returns
@@ -189,15 +189,15 @@ struct boxer_impl<
       uint64_t num_outputs) {
     STD_TORCH_CHECK(
         num_args == sizeof...(ParameterTypes),
-        "Expected ",
+        "Registered schema has ",
         num_args,
-        " args, got ",
+        " args, but the kernel to box has ",
         sizeof...(ParameterTypes));
     STD_TORCH_CHECK(
         num_outputs == sizeof...(ReturnTypes),
-        "Expected ",
+        "Registered schema has ",
         num_outputs,
-        " outputs, got ",
+        " outputs, but the kernel to box has ",
         sizeof...(ReturnTypes));
     std::tuple<unbox_type_t<ParameterTypes>...> args =
         unbox_to_tuple<unbox_type_t<ParameterTypes>...>(stack);
@@ -223,12 +223,16 @@ struct boxer_impl<
       uint64_t num_outputs) {
     STD_TORCH_CHECK(
         num_args == sizeof...(ParameterTypes),
-        "Expected ",
+        "Registered schema has ",
         num_args,
-        " args, got ",
+        " args, but the kernel to box has ",
         sizeof...(ParameterTypes));
     STD_TORCH_CHECK(
-        num_outputs == 1, "Expected ", num_outputs, " outputs, got ", 1);
+        num_outputs == 1,
+        "Registered schema has ",
+        num_outputs,
+        " outputs, but the kernel to box has ",
+        1);
     std::tuple<unbox_type_t<ParameterTypes>...> args =
         unbox_to_tuple<unbox_type_t<ParameterTypes>...>(stack);
     auto res = std::apply(func, args);
@@ -249,12 +253,16 @@ struct boxer_impl<
       uint64_t num_outputs) {
     STD_TORCH_CHECK(
         num_args == sizeof...(ParameterTypes),
-        "Expected ",
+        "Registered schema has ",
         num_args,
-        " args, got ",
+        " args, but the kernel to box has ",
         sizeof...(ParameterTypes));
     STD_TORCH_CHECK(
-        num_outputs == 0, "Expected ", num_outputs, " outputs, got ", 0);
+        num_outputs == 0,
+        "Registered schema has ",
+        num_outputs,
+        " outputs, but the kernel to box has ",
+        0);
     std::tuple<unbox_type_t<ParameterTypes>...> args =
         unbox_to_tuple<unbox_type_t<ParameterTypes>...>(stack);
     std::apply(func, args);
