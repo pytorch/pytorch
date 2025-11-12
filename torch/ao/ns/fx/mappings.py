@@ -1,5 +1,5 @@
 import operator
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -461,7 +461,7 @@ def get_base_name_to_sets_of_related_ops() -> dict[str, set[NSNodeTargetType]]:
 def get_base_name_for_op(
     base_name_to_sets_of_related_ops: dict[str, set[NSNodeTargetType]],
     op: NSNodeTargetType,
-) -> Optional[str]:
+) -> str | None:
     for base_name, set_of_related_ops in base_name_to_sets_of_related_ops.items():
         if op in set_of_related_ops:
             return base_name
@@ -471,7 +471,7 @@ def get_base_name_for_op(
 def add_op_to_sets_of_related_ops(
     base_name_to_sets_of_related_ops: dict[str, set[NSNodeTargetType]],
     op: NSNodeTargetType,
-    related_op: Optional[NSNodeTargetType],
+    related_op: NSNodeTargetType | None,
 ) -> None:
     if related_op is not None:
         for set_of_related_ops in base_name_to_sets_of_related_ops.values():
