@@ -1,4 +1,4 @@
-name: rocm
+name: rocm-mi200
 
 on:
   push:
