@@ -927,8 +927,8 @@ class GraphModule(torch.nn.Module):
             op="call_function", target=torch.ops.aten.mm.default
         )
         self.assertEqual(len(mm_nodes), 4)
-        self.assertEqual(mm_nodes[0].meta["partitioner_tag"], "is_forward")
-        self.assertEqual(mm_nodes[1].meta["partitioner_tag"], "is_forward")
+        self.assertNotIn("partitioner_tag", mm_nodes[0].meta)
+        self.assertNotIn("partitioner_tag", mm_nodes[1].meta)
         self.assertEqual(mm_nodes[2].meta["partitioner_tag"], "is_backward")
         self.assertEqual(mm_nodes[3].meta["partitioner_tag"], "is_backward")
         self.assertEqual(mm_nodes[0].meta["custom"]["inside_local_map"], 0)
