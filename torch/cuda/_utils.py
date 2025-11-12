@@ -12,7 +12,7 @@ def _get_hip_runtime_library() -> ctypes.CDLL:
     if sys.platform == "win32":
         lib = ctypes.CDLL(f"amdhip64_{torch.version.hip[0]}.dll")
     else:  # Unix-based systems
-        lib = ctypes.CDLL("libamdhip64.so")
+        lib = ctypes.CDLL(f"libamdhip64.so.{torch.version.hip[0]}")
     lib.cuGetErrorString = lib.hipGetErrorString  # type: ignore[attr-defined]
     lib.cuModuleLoadData = lib.hipModuleLoadData  # type: ignore[attr-defined]
     lib.cuModuleGetFunction = lib.hipModuleGetFunction  # type: ignore[attr-defined]
@@ -54,7 +54,7 @@ def _get_hiprtc_library() -> ctypes.CDLL:
         version_str = "".join(["0", torch.version.hip[0], "0", torch.version.hip[2]])
         lib = ctypes.CDLL(f"hiprtc{version_str}.dll")
     else:
-        lib = ctypes.CDLL("libhiprtc.so")
+        lib = ctypes.CDLL(f"libhiprtc.so.{torch.version.hip[0]}")
 
     # Provide aliases for HIP RTC functions to match NVRTC API
     lib.nvrtcGetErrorString = lib.hiprtcGetErrorString  # type: ignore[attr-defined]
