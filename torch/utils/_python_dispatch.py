@@ -19,14 +19,7 @@ from torch._C import (
     _push_on_torch_dispatch_stack,
     DispatchKey,
 )
-
-
-try:
-    from torch._C._dynamo.guards import set_is_in_mode_without_ignore_compile_internals
-except ImportError:
-    # Fallback for when the function isn't available (shouldn't happen in practice)
-    def set_is_in_mode_without_ignore_compile_internals(value: bool) -> None:
-        pass
+from torch._C._dynamo.guards import set_is_in_mode_without_ignore_compile_internals
 
 
 if TYPE_CHECKING:
@@ -148,7 +141,6 @@ class TorchDispatchMode:
             _is_in_any_mode_without_ignore_compile_internals
             or not self.ignore_compile_internals()
         )
-        # Update the C++ TLS cache so LocalState doesn't need to call Python
         set_is_in_mode_without_ignore_compile_internals(
             _is_in_any_mode_without_ignore_compile_internals
         )
@@ -171,7 +163,6 @@ class TorchDispatchMode:
         _is_in_any_mode_without_ignore_compile_internals = (
             self.old_without_ignore_compile_internals_dispatch_mode_flags.pop()
         )
-        # Update the C++ TLS cache so LocalState doesn't need to call Python
         set_is_in_mode_without_ignore_compile_internals(
             _is_in_any_mode_without_ignore_compile_internals
         )

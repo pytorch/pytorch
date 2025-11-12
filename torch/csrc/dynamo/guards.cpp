@@ -122,7 +122,6 @@ typedef struct {
 
 namespace torch::dynamo {
 
-// Thread-local cache for mode visibility tracking
 thread_local bool tls_is_in_mode_without_ignore_compile_internals = false;
 
 void set_is_in_mode_without_ignore_compile_internals(bool value) {
@@ -7842,7 +7841,6 @@ PyObject* torch_c_dynamo_guards_init() {
 
 #endif
 
-  // Expose the TLS setter for mode visibility tracking
   py_m.def(
       "set_is_in_mode_without_ignore_compile_internals",
       &set_is_in_mode_without_ignore_compile_internals,
