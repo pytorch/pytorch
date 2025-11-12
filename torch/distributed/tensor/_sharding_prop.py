@@ -25,6 +25,7 @@ from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
     compute_local_stride,
 )
+from torch.distributed.tensor.placement_types import Partial
 
 
 aten = torch.ops.aten
@@ -351,6 +352,42 @@ class ShardingPropagator:
         # special case op, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
         if op_schema.op is aten._local_scalar_dense.default:
+            # there should only be one argument for _local_scalar_dense
+            arg = op_schema.args_schema[0]
+
+            if isinstance(arg, DTensorSpec):
+                has_partial = False
+                for placement in arg.placements:
+                    if isinstance(placement, Partial):
+                        has_partial = True
+                        break
+
+                if has_partial:
+                    # Need to reduce partial values to replicate before calling item()
+                    # Replace Partial placements with Replicate, keep others unchanged
+                    from torch.distributed.tensor.placement_types import Replicate
+
+                    new_placements = tuple(
+                        Replicate() if isinstance(p, Partial) else p
+                        for p in arg.placements
+                    )
+                    replicate_spec = DTensorSpec(
+                        arg.mesh,
+                        new_placements,
+                        arg.tensor_meta,
+                    )
+                    suggestion_schema = OpSchema(
+                        op_schema.op,
+                        (replicate_spec,),
+                        {},
+                    )
+                    suggestion_schema._inplace_rewrap_schema_suggestion(op_schema)
+                    return OutputSharding(
+                        None,
+                        suggestion_schema,
+                        needs_redistribute=True,
+                    )
+
             return OutputSharding(None, op_schema)
 
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
