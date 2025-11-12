@@ -831,15 +831,33 @@ class DistTensorOpsTest(DTensorTestBase):
     def test_item(self):
         mesh = self.build_device_mesh()
         rank = dist.get_rank()
-        local_tensor = torch.tensor([rank])
 
+        local_tensor = torch.tensor([rank])
         dt = DTensor.from_local(
             local_tensor, device_mesh=mesh, placements=[Partial("sum")]
         )
 
         item_without_redistribute = dt.item()
-
         dt.redistribute(dt.device_mesh, placements=[Replicate()])
+        item_with_redistribute = dt.item()
+
+        self.assertEqual(item_without_redistribute, item_with_redistribute)
+
+        mesh_2d = DeviceMesh(self.device_type, torch.arange(4).reshape(2, 2))
+        dt = DTensor.from_local(
+            local_tensor,
+            device_mesh=mesh_2d,
+            placements=[Partial("sum"), Partial("sum")],
+        )
+
+        item_without_redistribute = dt.item()
+        dt.redistribute(
+            dt.device_mesh,
+            placements=[
+                Replicate(),
+                Replicate(),
+            ],
+        )
         item_with_redistribute = dt.item()
 
         self.assertEqual(item_without_redistribute, item_with_redistribute)
