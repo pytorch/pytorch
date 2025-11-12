@@ -13,7 +13,7 @@ import torch.fx.traceback as fx_traceback
 import torch.nn as nn
 import torch.utils._pytree as pytree
 from torch._decomp import decomposition_table
-from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._dynamo.testing import normalize_gm
 from torch._functorch._aot_autograd.descriptors import (
     BufferAOTInput,
@@ -48,17 +48,13 @@ from torch.testing._internal.common_utils import (
 
 def graph_capture(model, inputs, with_export):
     gm = model
-    fake_mode = None
+    tracing_context = None
     if with_export:
-        with (
-            torch._dynamo.config.patch(install_free_tensors=True),
-            fx_traceback.preserve_node_meta(),
-        ):
-            # TODO: switch to use the official graph_capture API once it is ready
-            gm = _dynamo_graph_capture_for_export(model)(*inputs)
-            fake_mode = gm.meta.get("fake_mode", None)
+        with fx_traceback.preserve_node_meta():
+            gm = dynamo_graph_capture_for_export(model)(*inputs)
+            tracing_context = gm.meta.get("tracing_context", None)
 
-    with tracing(TracingContext(fake_mode)):
+    with tracing(tracing_context):
         with ExitStack() as stack:
             joint_with_descriptors = aot_export_joint_with_descriptors(
                 stack,
@@ -325,7 +321,7 @@ class inner_f(torch.nn.Module):
         inputs = (torch.randn(4, 3),)
         kwargs = {"scale": torch.tensor(2.0)}
 
-        gm = _dynamo_graph_capture_for_export(model)(*inputs, **kwargs)
+        gm = dynamo_graph_capture_for_export(model)(*inputs, **kwargs)
 
         with ExitStack() as stack:
             # Export joint with descriptors
@@ -356,8 +352,8 @@ class inner_f(torch.nn.Module):
         primals,
         tangents,
     ):
-        primals_1: "f32[2, 3]"  # ParamAOTInput(target='L__self___linear_weight')
-        primals_2: "f32[2]"  # ParamAOTInput(target='L__self___linear_bias')
+        primals_1: "f32[2, 3]"  # ParamAOTInput(target='linear.weight')
+        primals_2: "f32[2]"  # ParamAOTInput(target='linear.bias')
         primals_3: "f32[4, 3]"  # PlainAOTInput(idx=0)
         primals_4: "f32[]"  # PlainAOTInput(idx=1)
         tangents_1: "f32[4, 2]"  # TangentAOTInput(output=PlainAOTOutput(idx=0))
@@ -379,8 +375,8 @@ class inner_f(torch.nn.Module):
         transpose_3: "f32[2, 3]" = torch.ops.prims.transpose.default(transpose_2, [1, 0]);  transpose_2 = None
         return pytree.tree_unflatten([
             mul_2,  # PlainAOTOutput(idx=0)
-            transpose_3,  # GradAOTOutput(grad_of=ParamAOTInput(target='L__self___linear_weight'))
-            as_strided,  # GradAOTOutput(grad_of=ParamAOTInput(target='L__self___linear_bias'))
+            transpose_3,  # GradAOTOutput(grad_of=ParamAOTInput(target='linear.weight'))
+            as_strided,  # GradAOTOutput(grad_of=ParamAOTInput(target='linear.bias'))
             None,  # None
             None,  # None
         ], self._out_spec)""",
@@ -1063,11 +1059,38 @@ class inner_f(torch.nn.Module):
             str(custom_metadata),
             """\
 ('call_function', 'new_empty', {'pp_stage': 0})
+('get_attr', '_tensor_constant0', {'pp_stage': 0})
 ('call_function', 'index_put', {'pp_stage': 0})
 ('call_function', 'slice_2', {'pp_stage': 0})
 ('call_function', 'slice_backward', {'pp_stage': 0})
+('get_attr', '_tensor_constant0_1', {'pp_stage': 0})
 ('call_function', 'index', {'pp_stage': 0})""",
         )
+
+    def test_static_input_indices(self):
+        """Test basic linear module with aot_export_joint_with_descriptors"""
+
+        class SimpleLinear(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = SimpleLinear()
+        inputs = (torch.randn(4, 3),)
+        gm = dynamo_graph_capture_for_export(model)(*inputs)
+        fake_mode = gm.meta.get("fake_mode", None)
+
+        with tracing(TracingContext(fake_mode)):
+            with ExitStack() as stack:
+                joint = aot_export_joint_with_descriptors(
+                    stack,
+                    gm,
+                    inputs,
+                )
+        self.assertEqual(joint._aot_state.fw_metadata.static_input_indices, [0, 1])
 
 
 if __name__ == "__main__":

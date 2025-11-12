@@ -14,12 +14,12 @@ import re
 import sys
 import textwrap
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
 from typing_extensions import Self
 from unittest.mock import patch
 
@@ -2145,6 +2145,8 @@ class ExternKernelChoice:
         # There is no src hash for ExternKernelChoice in the traditional sense
         # so we indicate this by returning None
         self.src_hash = None
+        # By default GraphModule is None for extern kernels if not set
+        self.gm = None
 
     def to_callable(self):
         return getattr(extern_kernels, self.name)
@@ -2317,6 +2319,7 @@ class ExternKernelCaller(ChoiceCaller):
         self.choice = choice
         self.kwargs = kwargs or {}
         self.has_out_variant = has_out_variant
+        self.gm = choice.gm
 
     def __str__(self) -> str:
         return f"ExternKernelCaller({self.choice.call_name()})"
@@ -2700,6 +2703,7 @@ class AlgorithmSelectorCache(PersistentCache):
         precompilation_timeout_seconds: int = 60 * 60,
         return_multi_template=False,
         best_config_future=None,
+        return_choice=False,  # TODO: return_choice is temporary and will be refactored soon
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
@@ -2709,8 +2713,10 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # Templates selected with input_gen_fns require specific input data to avoid IMA
         # Passing custom input gen fns to benchmark_fusion NYI, so skip deferred template selection
-        # TODO(jgong5): support multi-template on CPU
-        if input_gen_fns is not None or layout.device.type == "cpu":
+        # TODO(jgong5): support multi-template on CPU C++ backend
+        if input_gen_fns is not None or (
+            layout.device.type == "cpu" and config.cpu_backend != "triton"
+        ):
             return_multi_template = False
 
         # TODO - assert that we have not mutating kernels here
@@ -2971,18 +2977,25 @@ class AlgorithmSelectorCache(PersistentCache):
                         "Autotuning returned empty timings, falling back to first `ExternKernelCaller`: %s",
                         node,
                     )
+                    if return_choice:
+                        return node, choice
                     return node
             node = choices[0].output_node()
+            choice = choices[0]
             log.debug(
                 "Autotuning returned empty timings, falling back to first choice: %s",
                 node,
             )
+            if return_choice:
+                return node, choice
             return node
 
         # if we got any timings at all, pick the best of those
         choice = min(timings, key=timings.__getitem__)
         node = choice.output_node()
         log.debug("Autotuning selected choice: %s", node)
+        if return_choice:
+            return node, choice
         return node
 
     def make_precompile_fn(
@@ -3717,9 +3730,7 @@ class AlgorithmSelectorCache(PersistentCache):
             M, K = input_nodes[-2].get_size()[:2]
             N = input_nodes[-1].get_size()[-1]
 
-            out_dict = {
-                str((M, K, N)): [get_choice_info(choice) for choice in timings.keys()]
-            }
+            out_dict = {str((M, K, N)): [get_choice_info(choice) for choice in timings]}
 
             append_to_log(mm_filename, out_dict)
 
