@@ -6,7 +6,16 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
-from torch.complex.complextensor.ops.common import _as_interleaved, COMPLEX_TO_REAL
+from torch.complextensor.ops.common import (
+    _as_complex_tensor,
+    _as_interleaved,
+    _get_op_name,
+    COMPLEX_OPS_TABLE,
+    COMPLEX_TO_REAL,
+    FORCE_TEST_LIST,
+    OpOverloadPacket,
+)
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import TestCase as PytorchTestCase
 from torch.utils._pytree import tree_flatten
 
@@ -14,7 +23,7 @@ from torch.utils._pytree import tree_flatten
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from torch._ops import OpOverloadPacket
+    from torch.testing._internal.opinfo.core import OpInfo
 
 COMPLEX_DTYPES = set(COMPLEX_TO_REAL)
 
@@ -30,6 +39,19 @@ def _as_local(arg: dist.tensor.DTensor | Any) -> torch.Tensor | Any:
         return arg
 
     return arg.full_tensor()
+
+
+def _as_complex_dtensor(arg: torch.Tensor | Any) -> torch.Tensor | Any:
+    if not isinstance(arg, torch.Tensor):
+        return arg
+
+    return dist.tensor.DTensor.from_local(_as_complex_tensor(arg))
+
+
+TRANSFORM_FUNCS = {
+    Variant.Op: _as_complex_tensor,
+    Variant.Distributed: _as_complex_dtensor,
+}
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -101,3 +123,101 @@ class TestCase(PytorchTestCase):
                 value_a = _as_interleaved(_as_local(value_a))
 
                 self.assertEqual(value_e, value_a, *args, **kwargs)
+
+    def check_consistency(
+        self, device: torch.device, dtype, op: OpInfo, compile: bool, variant: Variant
+    ) -> None:
+        try:
+            from .test_complextensor import EXTRA_KWARGS, SKIPS
+        except ImportError:
+            from test_complextensor import EXTRA_KWARGS, SKIPS
+        test_info = Descriptor(
+            op=get_overload_packet_from_name(op.name),
+            device=device,
+            dtype=dtype,
+            compile=compile,
+            variant=variant,
+        )
+        for xfail_info, reason in SKIPS.items():
+            if xfail_info.matches(test_info):
+                self.skipTest(reason)
+
+        kwargs = {}
+        for extra_info, extra_kw in EXTRA_KWARGS.items():
+            if extra_info.matches(test_info):
+                kwargs = extra_kw
+                break
+
+        sample_inputs = op.sample_inputs(device, dtype)
+        op_eager = op
+        if compile:
+            op = torch.compile(op, fullgraph=True)
+
+        transform_fn = TRANSFORM_FUNCS[variant]
+
+        for sample_input in sample_inputs:
+
+            def expected(sample_input=sample_input):
+                return op_eager(
+                    sample_input.input, *sample_input.args, **sample_input.kwargs
+                )
+
+            subclass_sample = sample_input.transform(transform_fn)
+
+            def actual(subclass_sample=subclass_sample):
+                return op(
+                    subclass_sample.input,
+                    *subclass_sample.args,
+                    **subclass_sample.kwargs,
+                )
+
+            self.assertSameResult(expected, actual, ignore_exc_types=compile, **kwargs)
+
+
+torch._dynamo.config.recompile_limit = float("inf")
+torch._dynamo.config.accumulated_recompile_limit = float("inf")
+
+aten = torch.ops.aten
+
+complex_op_db = tuple(
+    filter(lambda op: any(op.supports_dtype(ct, "cpu") for ct in COMPLEX_DTYPES), op_db)
+)
+
+
+def get_overload_packet_from_name(name: str) -> OpOverloadPacket:
+    for domain_name in torch.ops:
+        op_namespace = getattr(torch.ops, domain_name)
+        op: OpOverloadPacket | None = getattr(op_namespace, name, None)
+        if op is not None:
+            return op
+
+    raise RuntimeError(f"No op with {name=} found.")
+
+
+force_test_names = set(map(_get_op_name, FORCE_TEST_LIST))
+implemented_op_names = (
+    set(map(_get_op_name, COMPLEX_OPS_TABLE.keys())) - force_test_names
+)
+implemented_op_db = tuple(
+    filter(lambda op: op.name in implemented_op_names, complex_op_db)
+)
+force_test_op_db = tuple(filter(lambda op: op.name in force_test_names, op_db))
+
+tested_op_names = {op.name for op in implemented_op_db} | {
+    op.name for op in force_test_op_db
+}
+non_tested_ops = {
+    op for op in COMPLEX_OPS_TABLE if _get_op_name(op) not in tested_op_names
+}
+
+if len(non_tested_ops) != 0:
+    import textwrap
+    import warnings
+
+    list_missing_ops = "\n".join(sorted([str(op) for op in non_tested_ops]))
+    warnings.warn(
+        "Not all implemented ops are tested. List of ops missing tests:"
+        f"\n{textwrap.indent(list_missing_ops, '    ')}",
+        UserWarning,
+        stacklevel=2,
+    )
