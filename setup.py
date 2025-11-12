@@ -1646,8 +1646,7 @@ def main() -> None:
     mirror_files_into_torchgen()
     if RUN_BUILD_DEPS:
         build_deps()
-
-    mirror_inductor_external_kernels()
+        mirror_inductor_external_kernels()
 
     (
         ext_modules,

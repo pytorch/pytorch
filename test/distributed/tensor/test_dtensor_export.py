@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
-import unittest
 
 import torch
 import torch.distributed as dist
@@ -372,7 +371,6 @@ class DTensorExportTest(TestCase):
 
     # aot_export_joint_with_descriptors on strict-exported exported_program.module()
     # is producing a joint graph with backward region missing
-    @unittest.expectedFailure
     def test_strict_export_parallelize_module_with_dtensor_input(self):
         self._run_test(strict_export_and_aot_export_joint_with_descriptors)
 
@@ -534,6 +532,19 @@ class DTensorExportTest(TestCase):
         gm = graph_capture_and_aot_export_joint_with_descriptors(fn, (z,))
 
         self.assertEqual(fn(z), gm(z)[0])
+
+    def test_dtensor_data_dependent_index(self):
+        device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x[y]
+
+        x = torch.randn(10)
+        y = torch.randint(1, (10,)).bool()
+        x_dt = distribute_tensor(x, device_mesh, placements=[Replicate()])
+        y_dt = distribute_tensor(y, device_mesh, placements=[Replicate()])
+        _dynamo_graph_capture_for_export(Foo())(x_dt, y_dt)
 
 
 instantiate_parametrized_tests(DTensorExportTest)
