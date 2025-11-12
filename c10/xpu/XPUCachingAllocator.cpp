@@ -38,8 +38,6 @@ struct BlockPool {
   std::set<Block*, Comparison> unmapped;
   const bool is_small;
   PrivatePool* owner_PrivatePool;
-
-  MempoolId_t owner_MempoolId() const;
 };
 
 struct ExpandableSegment;
@@ -389,15 +387,6 @@ struct PrivatePool {
     return allocator_;
   }
 };
-
-MempoolId_t BlockPool::owner_MempoolId() const {
-  if (owner_PrivatePool) {
-    return owner_PrivatePool->id;
-  } else {
-    return {0, 0};
-  }
-}
-
 struct MempoolIdHash {
   std::size_t operator()(const MempoolId_t& mempool_id) const noexcept {
     return mempool_id.first != 0 ? mempool_id.first : mempool_id.second;
