@@ -553,7 +553,7 @@ SparseTensor& mul_out_sparse_mps(const Tensor& t_, const Tensor& src_, SparseTen
   auto [outA_idx, outB_idx, M_int64] = mps_intersect_binary_search(
       A_keys, B_keys, lenA, lenB, A_is_lhs);
 
-  const uint32_t M = static_cast<uint32_t>(M_int64); // number of structural matches
+  const auto M = static_cast<uint32_t>(M_int64); // number of structural matches
 
   r_.resize_as_(lhs);
 
