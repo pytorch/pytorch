@@ -424,7 +424,7 @@ class SummaryWriter:
             fw_tag = fw_logdir + "/" + main_tag.replace("/", "_") + "_" + tag
             if self.all_writers is None:
                 raise AssertionError("self.all_writers is None")
-            if fw_tag in self.all_writers.keys():
+            if fw_tag in self.all_writers:
                 fw = self.all_writers[fw_tag]
             else:
                 fw = FileWriter(
