@@ -79,6 +79,7 @@ endmacro()
 # MODULE argument is added for clarity that CMake is searching
 # for FindHIP.cmake in Module mode
 find_package_and_print_version(HIP 1.0 MODULE)
+enable_language(HIP)
 
 if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
@@ -184,6 +185,9 @@ if(HIP_FOUND)
   find_package_and_print_version(rocthrust REQUIRED)
   find_package_and_print_version(hipsolver REQUIRED)
   find_package_and_print_version(rocsolver REQUIRED)
+  if (USE_NVSHMEM)
+    find_package_and_print_version(rocshmem REQUIRED)
+  endif()
   # workaround cmake 4 build issue
   if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
     message(WARNING "Work around hiprtc cmake failure for cmake >= 4")
