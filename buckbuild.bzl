@@ -400,6 +400,7 @@ def get_aten_generated_files(enabled_backends):
         "core/aten_interned_strings.h",
         "core/enum_tag.h",
         "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
+        "torch/headeronly/core/enum_tag.h",
     ] + get_aten_derived_type_srcs(enabled_backends)
 
     # This is tiresome.  A better strategy would be to unconditionally
@@ -488,7 +489,8 @@ def gen_aten_files(
         cmd = "$(exe {}torchgen:gen) ".format(ROOT_PATH) + " ".join([
             "--source-path $(location {}:aten_src_path)/aten/src/ATen".format(ROOT),
             "--install_dir $OUT",
-            "--aoti_install_dir $OUT/torch/csrc/inductor/aoti_torch/generated"
+            "--aoti_install_dir $OUT/torch/csrc/inductor/aoti_torch/generated",
+            "--headeronly_install_dir $OUT/torch/headeronly"
         ] + extra_params),
         visibility = visibility,
         compatible_with = compatible_with,

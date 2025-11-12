@@ -233,6 +233,7 @@ if(INTERN_BUILD_ATEN_OPS)
       "${Python_EXECUTABLE}" -m torchgen.gen
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
+      --headeronly_install_dir ${CMAKE_BINARY_DIR}/torch/headeronly
       ${GEN_PER_OPERATOR_FLAG}
       ${GEN_ROCM_FLAG}
       ${GEN_MPS_FLAG}

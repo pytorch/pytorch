@@ -2072,6 +2072,7 @@ def gen_headers(
     cpu_fm: FileManager,
     device_fms: dict[str, FileManager],
     ops_fm: FileManager,
+    headeronly_fm: FileManager,
     dispatch_keys: Sequence[DispatchKey],
     functions_keys: set[DispatchKey],
     rocm: bool,
@@ -2191,10 +2192,14 @@ def gen_headers(
 
     core_fm.write("aten_interned_strings.h", gen_aten_interned_strings)
 
+    # Generate enum_tag.h in torch/headeronly/core
     def gen_tags_enum() -> dict[str, str]:
-        return {"enum_of_valid_tags": (",\n".join(sorted(valid_tags)))}
+        return {"enum_of_valid_tags": (",\n        ".join(sorted(valid_tags)))}
 
-    core_fm.write("enum_tag.h", gen_tags_enum)
+    headeronly_fm.write("enum_tag.h", gen_tags_enum)
+
+    # Generate forwarding header at ATen/core/enum_tag.h for backward compatibility
+    core_fm.write("enum_tag.h", dict)
 
 
 def gen_source_files(
@@ -2749,6 +2754,12 @@ def main() -> None:
         default="torch/csrc/inductor/aoti_torch/generated",
     )
     parser.add_argument(
+        "--headeronly-install-dir",
+        "--headeronly_install_dir",
+        help="output directory for header-only files",
+        default="torch/headeronly",
+    )
+    parser.add_argument(
         "--rocm",
         action="store_true",
         help="reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly",
@@ -2945,12 +2956,22 @@ def main() -> None:
     aoti_install_dir = f"{options.aoti_install_dir}"
     Path(aoti_install_dir).mkdir(parents=True, exist_ok=True)
 
+    # Create directory and file manager for torch/headeronly
+    headeronly_install_dir = f"{options.headeronly_install_dir}/core"
+    Path(headeronly_install_dir).mkdir(parents=True, exist_ok=True)
+    headeronly_template_dir = "torch/headeronly/templates"
+
     core_fm = make_file_manager(options=options, install_dir=core_install_dir)
     cpu_fm = make_file_manager(options=options)
     cpu_vec_fm = make_file_manager(options=options)
     cuda_fm = make_file_manager(options=options)
     ops_fm = make_file_manager(options=options, install_dir=ops_install_dir)
     aoti_fm = make_file_manager(options=options, install_dir=aoti_install_dir)
+    headeronly_fm = make_file_manager(
+        options=options,
+        install_dir=headeronly_install_dir,
+        template_dir=headeronly_template_dir,
+    )
     device_fms = {"cuda": cuda_fm}
     if options.xpu:
         device_fms["xpu"] = make_file_manager(options=options)
@@ -3004,6 +3025,7 @@ def main() -> None:
             cpu_fm=cpu_fm,
             device_fms=device_fms,
             ops_fm=ops_fm,
+            headeronly_fm=headeronly_fm,
             dispatch_keys=dispatch_keys,
             functions_keys=functions_keys,
             rocm=options.rocm,
