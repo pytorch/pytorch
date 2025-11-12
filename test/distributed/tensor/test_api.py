@@ -413,7 +413,6 @@ class DTensorAPITest(DTensorTestBase):
             lambda x: int(x),
             lambda x: float(x),
         ]
-
         for method in scalar_extraction_methods:
             with self.assertRaisesRegex(
                 RuntimeError,
@@ -432,33 +431,6 @@ class DTensorAPITest(DTensorTestBase):
 
         result_float = float(dt_replicated)
         self.assertEqual(result_float, float(expected))
-
-    @with_comms
-    def test_item_with_partial_placement(self):
-        device_mesh = self.build_device_mesh()
-
-        tensor = torch.arange(8, device=self.device_type)
-        dt = distribute_tensor(tensor, device_mesh, [Shard(0)])
-
-        dt_sum = dt.sum()
-
-        self.assertTrue(any(isinstance(p, Partial) for p in dt_sum.placements))
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Cannot call scalar extraction \(e\.g\., item, bool, int, float\) on DTensor with Partial placement",
-        ):
-            dt_sum.item()
-
-        dt_replicated = dt_sum.redistribute(placements=[Replicate()])
-        result = dt_replicated.item()
-        expected = tensor.sum().item()
-        self.assertEqual(result, expected)
-
-        scalar_tensor = torch.tensor(42.0, device=self.device_type)
-        dt_replicate = distribute_tensor(scalar_tensor, device_mesh, [Replicate()])
-        result = dt_replicate.item()
-        self.assertEqual(result, 42.0)
 
 
 DTensorAPITestWithLocalTensor = create_local_tensor_test_class(
