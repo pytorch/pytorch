@@ -91,13 +91,13 @@ from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
-    LeafSpec,
     register_constant,
     tree_flatten,
     tree_map,
     tree_unflatten,
     TreeSpec,
     treespec_dumps,
+    treespec_leaf,
     treespec_loads,
 )
 
@@ -331,7 +331,12 @@ class TestDynamismExpression(TestCase):
                 return torch.ops.aten.slice.Tensor(*args)
 
         inp = (torch.rand((10, 3, 224, 224)), 0, 0, 9223372036854775807)
-        dynamic_shapes = (({0: Dim("dim")}, None, None, None),)
+        dynamic_shapes = (
+            {0: Dim("dim")},
+            None,
+            None,
+            None,
+        )
         torch.export.export(
             Slice(),
             inp,
@@ -720,6 +725,37 @@ class TestExport(TestCase):
                     node.meta["from_node"][-1].action == [NodeSourceAction.CREATE]
                 )
                 self.assertEqual(node.meta["from_node"][-1].graph_id, graph_id)
+
+    def test_annotate_on_assert(self):
+        # nodes added in `apply_runtime_assertion_pass` will be annotated
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                with torch.fx.traceback.annotate({"moo": 0}):
+                    x = torch.cat([x, x])
+                    b = y.item()
+                    torch._check(b >= x.shape[0])
+                    return x * b
+
+        with torch.fx.traceback.preserve_node_meta():
+            ep = torch.export.export(
+                M(),
+                (torch.randn(3), torch.tensor(6)),
+                dynamic_shapes={"x": {0: Dim("b")}, "y": None},
+            )
+
+        custom_metadata = torch.fx.traceback._get_custom_metadata(ep.module())
+        self.assertExpectedInline(
+            str(custom_metadata),
+            """\
+('placeholder', 'x', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace'})
+('placeholder', 'y', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace'})
+('call_function', 'cat', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
+('call_function', 'item', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
+('call_function', 'ge_1', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
+('call_function', '_assert_scalar_default', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
+('call_function', 'mul', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
+('output', 'output', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace'})""",
+        )
 
     @requires_gpu
     def test_flex_attention_export(self):
@@ -1193,8 +1229,14 @@ graph():
     %p_block_linear2_bias : [num_users=1] = placeholder[target=p_block_linear2_bias]
     %x : [num_users=1] = placeholder[target=x]
     %wrap_body0 : [num_users=1] = get_attr[target=wrap_body0]
-    %tag_activation_checkpoint : [num_users=1] = call_function[target=torch.ops.higher_order.tag_activation_checkpoint](args = (%wrap_body0, %x, %p_block_linear1_weight, %p_block_linear1_bias, %p_block_linear2_weight, %p_block_linear2_bias), kwargs = {})
+    %tag_activation_checkpoint : [num_users=7] = call_function[target=torch.ops.higher_order.tag_activation_checkpoint](args = (%wrap_body0, %x, %p_block_linear1_weight, %p_block_linear1_bias, %p_block_linear2_weight, %p_block_linear2_bias), kwargs = {})
     %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 0), kwargs = {})
+    %getitem_1 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 1), kwargs = {})
+    %getitem_2 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 2), kwargs = {})
+    %getitem_3 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 3), kwargs = {})
+    %getitem_4 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 4), kwargs = {})
+    %getitem_5 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 5), kwargs = {})
+    %getitem_6 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 6), kwargs = {})
     return (getitem,)""",
         )
 
@@ -1203,14 +1245,14 @@ graph():
             """\
 graph():
     %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
-    %arg1_1 : [num_users=1] = placeholder[target=arg1_1]
-    %arg2_1 : [num_users=1] = placeholder[target=arg2_1]
-    %arg3_1 : [num_users=1] = placeholder[target=arg3_1]
-    %arg4_1 : [num_users=1] = placeholder[target=arg4_1]
-    %linear : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%arg0_1, %arg1_1, %arg2_1), kwargs = {})
-    %relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default](args = (%linear,), kwargs = {})
+    %arg1_1 : [num_users=2] = placeholder[target=arg1_1]
+    %arg2_1 : [num_users=2] = placeholder[target=arg2_1]
+    %arg3_1 : [num_users=2] = placeholder[target=arg3_1]
+    %arg4_1 : [num_users=2] = placeholder[target=arg4_1]
+    %linear : [num_users=2] = call_function[target=torch.ops.aten.linear.default](args = (%arg0_1, %arg1_1, %arg2_1), kwargs = {})
+    %relu : [num_users=2] = call_function[target=torch.ops.aten.relu.default](args = (%linear,), kwargs = {})
     %linear_1 : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%relu, %arg3_1, %arg4_1), kwargs = {})
-    return (linear_1,)""",
+    return (linear_1, arg1_1, arg2_1, linear, relu, arg3_1, arg4_1)""",
         )
 
         stack = contextlib.ExitStack()
@@ -5496,21 +5538,11 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         w = Wrapped()
 
-        if is_retracebility_test(self._testMethodName):
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.UserError,
-                "Detected mismatch between the structure of `inputs` and `dynamic_shapes`"
-                ": `inputs` has 2 elements, but `dynamic_shapes` has 1 elements",
-            ):
-                export(w, args, dynamic_shapes={"args": ({0: batch}, {0: batch})})
-        else:
-            compiled = export(
-                w, args, dynamic_shapes={"args": ({0: batch}, {0: batch})}
-            )
-            expected = w(*args)
-            mod = compiled.module()
-            got = mod(*args)
-            self.assertTrue(torch.allclose(expected, got))
+        compiled = export(w, args, dynamic_shapes=({0: batch}, {0: batch}))
+        expected = w(*args)
+        mod = compiled.module()
+        got = mod(*args)
+        self.assertTrue(torch.allclose(expected, got))
 
     def test_dynamic_shapes_builder_basic(self):
         class M(torch.nn.Module):
@@ -6093,26 +6125,19 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         retry_export(
             cf_implicitsize(),
             (torch.tensor(2), torch.randn(10)),
-            fixes=[
-                # Could not guard on data-dependent expression u0 < 0
-                "torch._check(i >= 0)",
-            ],
+            fixes=[],
         )
 
         class cf_stacklist(torch.nn.Module):
             def forward(self, xs, y, fixes):
                 i = y.item()
                 eval(fixes)
-                # instead of xs[i]
                 return torch.stack(xs, 0).narrow(0, i, 1).squeeze()
 
         retry_export(
             cf_stacklist(),
             ([torch.ones(5) * i for i in range(10)], torch.tensor(2)),
-            fixes=[
-                # Could not guard on data-dependent expression u0 < 0
-                "torch._check(i >= 0)",
-            ],
+            fixes=[],
         )
 
         class cf_tensorsplit(torch.nn.Module):
@@ -6166,7 +6191,12 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         class cf_stacklist(torch.nn.Module):
             def forward(self, xs, y):
                 # y.item() is not a local, so we can't suggest a fix
-                return torch.stack(xs, 0).narrow(0, y.item(), 1).squeeze()
+                if y.item() < 0:
+                    return (
+                        torch.stack(xs, 0).narrow(0, y.item() + xs.size(), 1).squeeze()
+                    )
+                else:
+                    return torch.stack(xs, 0).narrow(0, y.item(), 1).squeeze()
 
         with self.assertRaisesRegex(
             error_type,
@@ -6196,7 +6226,18 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, xs, y):
                 box = Box(y.item())
                 # box.content is not a local, so we can't suggest a fix
-                return torch.stack(xs, 0).narrow(0, box.content, 1).squeeze()
+                if box.content < 0:
+                    return (
+                        torch.stack(xs, 0)
+                        .narrow(0, box.content + xs.size(), 1)
+                        .squeeze()
+                    )
+                else:
+                    return (
+                        torch.stack(xs, 0)
+                        .narrow(0, box.content + xs.size(), 1)
+                        .squeeze()
+                    )
 
         with self.assertRaisesRegex(
             error_type,
@@ -7791,7 +7832,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         dt = MyDataClass(x=3, y=4)
         flat, spec = tree_flatten(dt)
-        self.assertTrue(spec, LeafSpec())
+        self.assertTrue(spec, treespec_leaf())
         self.assertTrue(len(flat) == 1)
 
         torch.export.register_dataclass(
@@ -7802,7 +7843,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         flat, spec = tree_flatten(dt)
         self.assertEqual(
             spec,
-            TreeSpec(MyDataClass, [["x", "y"], ["z"]], [LeafSpec(), LeafSpec()]),
+            TreeSpec(
+                MyDataClass, [["x", "y"], ["z"]], [treespec_leaf(), treespec_leaf()]
+            ),
         )
         self.assertEqual(flat, [3, 4])
 
@@ -7835,7 +7878,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             TreeSpec(
                 MyOtherDataClass,
                 [["x", "y", "z"], []],
-                [LeafSpec(), LeafSpec(), LeafSpec()],
+                [treespec_leaf(), treespec_leaf(), treespec_leaf()],
             ),
         )
         self.assertEqual(flat, [3, 4, None])
@@ -17455,6 +17498,105 @@ def forward(self, x):
         original_param_names = [name for name, _ in m.named_parameters()]
         exported_param_names = [name for name, _ in gm.named_parameters()]
         self.assertEqual(original_param_names, exported_param_names)
+
+    def test_export_compiled_model_with_nested_dynamic_shapes(self):
+        class M(torch.nn.Module):
+            def forward(self, data_batch):
+                return data_batch["a1"] + data_batch["a2"]
+
+        m = M()
+        compiled_m = torch.compile(m)
+        example_args = (
+            {
+                "a1": torch.ones(3, 3),
+                "a2": torch.ones(3, 3),
+            },
+        )
+        dynamic_shapes = (
+            {
+                "a1": {0: Dim.DYNAMIC},
+                "a2": {0: Dim.DYNAMIC},
+            },
+        )
+        ep = export(
+            compiled_m, example_args, dynamic_shapes=dynamic_shapes, strict=True
+        )
+        gm = ep.module()
+        self.assertEqual(gm(*example_args), compiled_m(*example_args))
+
+    def test_export_model_with_nested_dynamic_shapes(self):
+        class M(torch.nn.Module):
+            def forward(self, data_batch):
+                return data_batch["a1"] + data_batch["a2"]
+
+        m = M()
+        example_args = (
+            {
+                "a1": torch.ones(3, 3),
+                "a2": torch.ones(3, 3),
+            },
+        )
+        B = torch.export.Dim("batch", min=1, max=65536)
+        dynamic_shapes = (
+            {
+                "a1": {0: B},
+                "a2": {0: B},
+            },
+        )
+        ep = export(m, example_args, dynamic_shapes=dynamic_shapes, strict=True)
+        gm = ep.module()
+        self.assertEqual(gm(*example_args), m(*example_args))
+
+    def test_export_compiled_model_with_kwargs_dynamic_shapes(self):
+        class M(torch.nn.Module):
+            def forward(self, a1, a2):
+                return a1 + a2
+
+        m = M()
+        compiled_m = torch.compile(m)
+        example_args = ()
+        example_kwargs = {
+            "a1": torch.ones(3, 3),
+            "a2": torch.ones(3, 3),
+        }
+        dynamic_shapes = {
+            "a1": {0: Dim.DYNAMIC},
+            "a2": {0: Dim.DYNAMIC},
+        }
+        ep = export(
+            compiled_m,
+            example_args,
+            kwargs=example_kwargs,
+            dynamic_shapes=dynamic_shapes,
+            strict=True,
+        )
+        gm = ep.module()
+        self.assertEqual(gm(**example_kwargs), compiled_m(**example_kwargs))
+
+    def test_export_model_with_kwargs_dynamic_shapes(self):
+        class M(torch.nn.Module):
+            def forward(self, a1, a2):
+                return a1 + a2
+
+        m = M()
+        example_args = ()
+        example_kwargs = {
+            "a1": torch.ones(3, 3),
+            "a2": torch.ones(3, 3),
+        }
+        dynamic_shapes = {
+            "a1": {0: Dim.DYNAMIC},
+            "a2": {0: Dim.DYNAMIC},
+        }
+        ep = export(
+            m,
+            example_args,
+            kwargs=example_kwargs,
+            dynamic_shapes=dynamic_shapes,
+            strict=True,
+        )
+        gm = ep.module()
+        self.assertEqual(gm(**example_kwargs), m(**example_kwargs))
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")

@@ -2979,7 +2979,7 @@ class TestScriptList(JitTestCase):
                 self.col2 = "b"
 
             def forward(self):
-                if self.col1 in self.segments_groupby_col.keys():
+                if self.col1 in self.segments_groupby_col:
                     return 1
                 else:
                     return 2
