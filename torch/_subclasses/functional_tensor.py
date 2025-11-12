@@ -471,7 +471,7 @@ class FunctionalTensorMode(TorchDispatchMode):
 
         from torch._higher_order_ops.effects import handle_effects, has_effects
 
-        if has_effects(func, args, kwargs):
+        if has_effects(func):
             assert not torch._C._dispatch_has_kernel_for_dispatch_key(
                 func.name(), torch._C.DispatchKey.Functionalize
             )
@@ -511,7 +511,9 @@ class FunctionalTensorMode(TorchDispatchMode):
             # and cannot recognize FakeScriptObject.
             ctx = PythonFunctionalizeAPI()
             fully_unwrapped_args = ctx.unwrap_tensors(args)
-            fully_unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
+            fully_unwrapped_kwargs = ctx.unwrap_tensors(
+                kwargs  # pyrefly: ignore[bad-argument-type]
+            )
             outs_unwrapped = func(
                 *fully_unwrapped_args,
                 **fully_unwrapped_kwargs,
