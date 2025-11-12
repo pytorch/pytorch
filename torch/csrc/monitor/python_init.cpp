@@ -17,8 +17,6 @@
 #include <torch/csrc/monitor/events.h>
 #include <torch/csrc/monitor/python_init.h>
 
-TORCH_MAKE_PYBIND_ENUM_FASTER(torch::monitor::Aggregation)
-
 namespace pybind11::detail {
 template <>
 struct type_caster<torch::monitor::data_value_t> {
@@ -26,7 +24,7 @@ struct type_caster<torch::monitor::data_value_t> {
   PYBIND11_TYPE_CASTER(torch::monitor::data_value_t, _("data_value_t"));
 
   // Python -> C++
-  bool load(handle src, bool) {
+  bool load(handle src, bool /*unused*/) {
     PyObject* source = src.ptr();
     if (THPUtils_checkLong(source)) {
       this->value = THPUtils_unpackLong(source);

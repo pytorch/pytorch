@@ -138,7 +138,7 @@ void Tensor::_backward(TensorList inputs,
         const std::optional<Tensor>& gradient,
         std::optional<bool> keep_graph,
         bool create_graph) const {
-  return impl::GetVariableHooks()->_backward(*this, inputs, gradient, keep_graph, create_graph);
+  impl::GetVariableHooks()->_backward(*this, inputs, gradient, keep_graph, create_graph);
 }
 
 const TensorBase& TensorBase::requires_grad_(bool _requires_grad) const {
@@ -171,6 +171,14 @@ void TensorBase::remove_hook(unsigned pos) const {
 
 unsigned TensorBase::_register_hook(std::function<TensorBase(const TensorBase&)> hook) const {
   return impl::GetVariableHooks()->_register_hook(*this, std::move(hook));
+}
+
+std::optional<ScalarType> TensorBase::grad_dtype() const {
+  return impl::GetVariableHooks()->grad_dtype(*this);
+}
+
+void TensorBase::set_grad_dtype(const std::optional<ScalarType>& grad_dtype) const {
+  return impl::GetVariableHooks()->set_grad_dtype(*this, grad_dtype);
 }
 
 } // namespace at

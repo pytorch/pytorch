@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
+import contextlib
 import dataclasses
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Protocol
+from typing import Any, Optional, Protocol
 
 from torch import _C, _ops, autograd, Tensor
 from torch.utils import _pytree
@@ -232,6 +234,16 @@ def not_list_of_optional_tensor(tree):
     if isinstance(tree, list):
         return any(l is not None and not isinstance(l, Tensor) for l in tree)
     return True
+
+
+@contextlib.contextmanager
+def autograd_fallback_mode(mode):
+    prev = _C._get_autograd_fallback_mode()
+    try:
+        _C._set_autograd_fallback_mode(mode)
+        yield
+    finally:
+        _C._set_autograd_fallback_mode(prev)
 
 
 flatten = _pytree.tree_flatten

@@ -2,7 +2,6 @@
 """Defines bias subclasses that work with scaled_dot_product_attention"""
 
 from enum import auto, IntEnum
-from typing import Optional
 from warnings import warn
 
 import torch
@@ -117,7 +116,7 @@ class CausalBias(torch.Tensor):
     .. warning:: This class is a prototype and subject to change.
     """
 
-    def __init__(self, variant: CausalVariant, seq_len_q: int, seq_len_kv: int):
+    def __init__(self, variant: CausalVariant, seq_len_q: int, seq_len_kv: int) -> None:
         """
         Initializes the CausalBias instance with a specified variant and sequence lengths.
 
@@ -134,7 +133,8 @@ class CausalBias(torch.Tensor):
         self.seq_len_kv = seq_len_kv
         if seq_len_q > seq_len_kv and variant == CausalVariant.LOWER_RIGHT:
             warn(
-                "Lower right causal bias will produce NaNs in the output when seq_len_q > seq_len_kv!"
+                "Lower right causal bias will produce NaNs in the output when seq_len_q > seq_len_kv!",
+                stacklevel=2,
             )
 
     def _upper_left(self, device: torch.device) -> torch.Tensor:
@@ -153,7 +153,8 @@ class CausalBias(torch.Tensor):
             diagonal=diagonal_offset,
         )
 
-    def _materialize(self, device: Optional[torch.device] = None) -> torch.Tensor:
+    # pyrefly: ignore [bad-return]
+    def _materialize(self, device: torch.device | None = None) -> torch.Tensor:
         """
         Materializes the causal bias into a tensor form.
 
@@ -181,7 +182,7 @@ class CausalBias(torch.Tensor):
         attn_mask: "CausalBias",
         dropout_p: float = 0.0,
         is_causal: bool = False,
-        scale: Optional[float] = None,
+        scale: float | None = None,
         enable_gqa: bool = False,
     ) -> torch.Tensor:
         r"""
@@ -294,7 +295,7 @@ class CausalBias(torch.Tensor):
             return cls._dispatch(*args, **kwargs)
         return super().__torch_function__(func, types, args, kwargs)
 
-    def __repr__(self):  # type:ignore[override]
+    def __repr__(self) -> str:  # type:ignore[override]
         return self._materialize().__repr__()
 
 

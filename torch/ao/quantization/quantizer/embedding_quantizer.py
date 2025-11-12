@@ -77,7 +77,7 @@ class EmbeddingQuantizer(Quantizer):
             # just as an example of alternate ways of annotating
             if (
                 node.op == "call_function"
-                and node.target == torch.ops.aten.embedding.default
+                and node.target is torch.ops.aten.embedding.default
             ):
                 if embedding_config.config.weight is None:
                     raise ValueError(

@@ -2,9 +2,9 @@
 import operator
 import pickle
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from itertools import chain
-from typing import Any, Callable, no_type_check, TYPE_CHECKING
+from typing import Any, no_type_check, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -26,7 +26,7 @@ class MemoryProfileDispatchMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func, types, args=..., kwargs=None):
         rs = func(*args, **kwargs)
-        if func == torch.ops.aten.detach.default:
+        if func is torch.ops.aten.detach.default:
             return rs
         func_name: str = (
             self.memory_tracker._cur_module_name
@@ -232,7 +232,9 @@ class MemoryTracker:
         def _pre_forward_hook(module: nn.Module, inputs: Any) -> None:
             self._cur_module_name = f"{name}.forward"
             if (
+                # pyrefly: ignore [invalid-argument]
                 hasattr(module, "_memory_tracker_is_root")
+                # pyrefly: ignore [not-callable]
                 and module._memory_tracker_is_root
             ):
                 self._add_marker("fw_start")
@@ -248,7 +250,9 @@ class MemoryTracker:
             outputs: Sequence[torch.Tensor],
         ) -> None:
             if (
+                # pyrefly: ignore [invalid-argument]
                 hasattr(module, "_memory_tracker_is_root")
+                # pyrefly: ignore [not-callable]
                 and module._memory_tracker_is_root
             ):
                 self._add_marker("fw_bw_boundary")

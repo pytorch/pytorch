@@ -1784,7 +1784,9 @@ def norm(  # noqa: F811
 
         if isinstance(p, str):
             if p == "fro" and (
-                dim is None or isinstance(dim, (int, torch.SymInt)) or len(dim) <= 2
+                dim is None
+                or isinstance(dim, (int, torch.SymInt))
+                or len(dim) <= 2  # pyrefly: ignore  # bad-argument-type
             ):
                 if out is None:
                     return torch.linalg.vector_norm(
@@ -1827,7 +1829,7 @@ def norm(  # noqa: F811
             return _VF.norm(input, p, dim=_dim, keepdim=keepdim)  # type: ignore[attr-defined]
 
     # TODO: when https://github.com/pytorch/pytorch/issues/33782 is fixed
-    # remove the overloads where dim is an int and replace with BraodcastingList1
+    # remove the overloads where dim is an int and replace with BroadcastingList1
     # and remove next four lines, replace _dim with dim
     if dim is not None:
         if isinstance(dim, (int, torch.SymInt)):
@@ -1940,7 +1942,7 @@ def _unravel_index(indices: Tensor, shape: Union[int, Sequence[int]]) -> Tensor:
     torch._check_type(
         not indices.is_complex()
         and not indices.is_floating_point()
-        and not indices.dtype == torch.bool,
+        and indices.dtype != torch.bool,
         lambda: f"expected 'indices' to be integer dtype, but got {indices.dtype}",
     )
 
@@ -1950,7 +1952,7 @@ def _unravel_index(indices: Tensor, shape: Union[int, Sequence[int]]) -> Tensor:
     )
 
     if isinstance(shape, (int, torch.SymInt)):
-        shape = torch.Size([shape])
+        shape = torch.Size([shape])  # pyrefly: ignore [bad-argument-type]
     else:
         for dim in shape:
             torch._check_type(

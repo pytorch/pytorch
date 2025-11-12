@@ -22,9 +22,13 @@ import os
 import re
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, NamedTuple, Optional
+from typing import Any, NamedTuple, Optional, TYPE_CHECKING
 
 from yaml import load
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 # Safely load fast C Yaml loader/dumper if they are available

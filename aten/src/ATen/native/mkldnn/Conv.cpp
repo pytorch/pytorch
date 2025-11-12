@@ -38,7 +38,6 @@ REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub)
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
-#include <ATen/native/ConvUtils.h>
 #include <c10/util/irange.h>
 
 namespace at::native {
@@ -105,7 +104,7 @@ static void check_shape_forward(const Tensor& input,
     // If kernel size is incorrect
     std::ostringstream input_ss;
     std::ostringstream kernel_ss;
-    std::string separator = "";
+    std::string separator;
 
     for (int i = 0, len = input_shape.size(); i < len; ++i) {
       input_ss << separator << input_shape[i];
@@ -148,7 +147,7 @@ static void check_shape_forward(const Tensor& input,
 //  blocked format will propagate between layers. Input, output will be in blocked format.
 //
 //  For inference case, weight can be prepacked into blocked format by
-//  (so as to save weight reoder overhead):
+//  (so as to save weight reorder overhead):
 //      model = torch.utils.mkldnn.to_mkldnn(model)
 //
 //  For training case, grad_output can be CPU tensor or MKLDNN tensor,
@@ -156,13 +155,17 @@ static void check_shape_forward(const Tensor& input,
 //
 
 static bool mkldnn_conv_enabled_fpmath_mode_bf16(){
-  return at::globalContext().float32Precision("mkldnn", "conv") == "bf16" &&
+  return at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::CONV) == at::Float32Precision::BF16 &&
       mkldnn_bf16_device_check();
 }
 
 static bool mkldnn_conv_enabled_fpmath_mode_tf32(){
-  return at::globalContext().float32Precision("mkldnn", "conv") == "tf32" &&
-      cpuinfo_has_x86_amx_fp16();
+#if defined(__x86_64__) || defined(_M_X64)
+    return at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::CONV) == at::Float32Precision::TF32 &&
+        cpuinfo_has_x86_amx_fp16();
+#else
+    return false;   //TF32 not supported on power system
+#endif
 }
 
 static inline at::MemoryFormat mkldnn_convolution_memory_format(int64_t dims, bool is_channels_last) {
@@ -720,7 +723,7 @@ Tensor _mkldnn_convolution_transpose(
   ideep::tensor w = itensor_from_tensor(weight, /*from_const_data_ptr*/true);
   if (!weight.is_mkldnn()) {
     // mkldnn transposed convolution has weight in logical order of OIHW or OIDHW,
-    // while PyTorch has IOHW or IODHW, `._tranpose()` switches strides (no memory copy).
+    // while PyTorch has IOHW or IODHW, `._transpose()` switches strides (no memory copy).
     w.transpose_(0, 1);
   }
 

@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, Union
 
 import sympy
 
@@ -708,11 +708,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         src_is_tensor,
         reduce,
         kwargs,
+        device,
     ):
         reduce = self._get_scatter_reduce_enum(reduce)
 
         # call the ABI shim function instead of the ATen one
-        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, self.device)
+        self.add_device_include(device)
+        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, device)
+
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
         cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
         self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()

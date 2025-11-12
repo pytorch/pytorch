@@ -40,7 +40,7 @@ inline int start_index(int out_idx, int out_len, int in_len) {
    * This function computes the start index on input matrix.
    */
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  return (int)std::floor((float)(out_idx * in_len) / out_len);
+  return static_cast<int>(std::floor(static_cast<float>(out_idx * in_len) / out_len));
 }
 
 inline int end_index(int out_idx, int out_len, int in_len) {
@@ -49,12 +49,12 @@ inline int end_index(int out_idx, int out_len, int in_len) {
    * This function computes the end index on input matrix.
    */
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  return (int)std::ceil((float)((out_idx + 1) * in_len) / out_len);
+  return static_cast<int>(std::ceil(static_cast<float>((out_idx + 1) * in_len) / out_len));
 }
 
 // adaptive avg pool for 2D and 3D inputs
 template <typename scalar_t>
-static void adaptive_avg_pool_single_out_frame(
+void adaptive_avg_pool_single_out_frame(
     scalar_t* input_p,
     scalar_t* output_p,
     int64_t sizeC,

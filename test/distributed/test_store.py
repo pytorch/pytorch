@@ -43,7 +43,7 @@ from torch.testing._internal.common_utils import (
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 if platform == "darwin":
     LOOPBACK = "lo0"
@@ -317,6 +317,7 @@ class HashStoreTest(TestCase, StoreTestBase):
 
 class PrefixStoreTest(TestCase):
     def setUp(self):
+        super().setUp()
         # delete is false as FileStore will automatically clean up the file
         self.file = tempfile.NamedTemporaryFile(delete=False)
 

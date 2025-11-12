@@ -2,17 +2,18 @@
 #include <wchar.h> // _wgetenv for nvtx
 #endif
 
+#include <cuda_runtime.h>
+
 #ifndef ROCM_ON_WINDOWS
-#ifdef TORCH_CUDA_USE_NVTX3
+#if CUDART_VERSION >= 13000 || defined(TORCH_CUDA_USE_NVTX3)
 #include <nvtx3/nvtx3.hpp>
-#else // TORCH_CUDA_USE_NVTX3
+#else // CUDART_VERSION >= 13000 || defined(TORCH_CUDA_USE_NVTX3)
 #include <nvToolsExt.h>
-#endif // TORCH_CUDA_USE_NVTX3
+#endif // CUDART_VERSION >= 13000 || defined(TORCH_CUDA_USE_NVTX3)
 #else // ROCM_ON_WINDOWS
 #include <c10/util/Exception.h>
 #endif // ROCM_ON_WINDOWS
 #include <c10/cuda/CUDAException.h>
-#include <cuda_runtime.h>
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch::cuda::shared {

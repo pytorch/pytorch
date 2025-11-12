@@ -47,6 +47,7 @@
 #include <c10/macros/Macros.h>
 #include <thrust/copy.h>
 #include <thrust/device_ptr.h>
+#include <thrust/distance.h>
 #include <thrust/for_each.h>
 #include <thrust/functional.h>
 #include <thrust/gather.h>

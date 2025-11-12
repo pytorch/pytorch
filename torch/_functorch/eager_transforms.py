@@ -7,8 +7,9 @@
 # LICENSE file in the root directory of this source tree.
 
 import contextlib
+from collections.abc import Callable
 from functools import partial, wraps
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.autograd.forward_ad as fwAD

@@ -8,10 +8,11 @@ import re
 import subprocess
 import sys
 import warnings
+from collections.abc import Callable
 from enum import Enum
 from functools import cache
 from logging import info
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 from urllib.request import Request, urlopen
 
 import yaml
@@ -502,6 +503,7 @@ def perform_misc_tasks(
     job_name: str,
     pr_body: str,
     branch: Optional[str] = None,
+    tag: Optional[str] = None,
 ) -> None:
     """
     In addition to apply the filter logic, the script also does the following
@@ -509,7 +511,11 @@ def perform_misc_tasks(
     """
     set_output(
         "keep-going",
-        branch == MAIN_BRANCH or check_for_setting(labels, pr_body, "keep-going"),
+        branch == MAIN_BRANCH
+        or bool(tag and re.match(r"^trunk/[a-f0-9]{40}$", tag))
+        # Pattern for tags created via manual run on HUD
+        or bool(tag and re.match(r"^ciflow/[^/]+/[a-f0-9]{40}$", tag))
+        or check_for_setting(labels, pr_body, "keep-going"),
     )
     set_output(
         "ci-verbose-test-logs",
@@ -634,6 +640,7 @@ def main() -> None:
         job_name=args.job_name,
         pr_body=pr_body if pr_body else "",
         branch=args.branch,
+        tag=tag,
     )
 
     # Set the filtered test matrix as the output

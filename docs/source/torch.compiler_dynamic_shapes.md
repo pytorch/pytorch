@@ -189,7 +189,7 @@ Here is a quick example:
 ```{code-cell}
 import torch
 
-@torch.compile(dynamic=True)
+@torch.compile
 def f(x):
     return x * x.size()[0]
 

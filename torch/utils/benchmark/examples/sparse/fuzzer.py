@@ -8,7 +8,7 @@ import sys
 
 import torch.utils.benchmark as benchmark_utils
 
-def main():
+def main() -> None:
     add_fuzzer = benchmark_utils.Fuzzer(
         parameters=[
             [
@@ -40,7 +40,7 @@ def main():
             [
                 benchmark_utils.FuzzedSparseTensor(
                     name=name,
-                    size=tuple([f"k{i}" for i in range(3)]),
+                    size=tuple(f"k{i}" for i in range(3)),
                     min_elements=64 * 1024,
                     max_elements=128 * 1024,
                     sparse_dim="sparse_dim",

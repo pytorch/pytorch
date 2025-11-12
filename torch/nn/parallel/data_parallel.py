@@ -3,7 +3,7 @@ import operator
 import warnings
 from collections.abc import Sequence
 from itertools import chain
-from typing import Any, Generic, Optional, TypeVar, Union
+from typing import Any, Generic, TypeVar, Union
 
 import torch
 from torch._utils import (
@@ -30,13 +30,14 @@ def _check_balance(device_ids: Sequence[Union[int, torch.device]]) -> None:
     device_ids = [_get_device_index(x, True) for x in device_ids]
     dev_props = _get_devices_properties(device_ids)
 
-    def warn_imbalance(get_prop):
+    def warn_imbalance(get_prop) -> bool:
         values = [get_prop(props) for props in dev_props]
         min_pos, min_val = min(enumerate(values), key=operator.itemgetter(1))
         max_pos, max_val = max(enumerate(values), key=operator.itemgetter(1))
         if min_val / max_val < 0.75:
             warnings.warn(
-                imbalance_warn.format(device_ids[min_pos], device_ids[max_pos])
+                imbalance_warn.format(device_ids[min_pos], device_ids[max_pos]),
+                stacklevel=2,
             )
             return True
         return False
@@ -135,8 +136,8 @@ class DataParallel(Module, Generic[T]):
     def __init__(
         self,
         module: T,
-        device_ids: Optional[Sequence[Union[int, torch.device]]] = None,
-        output_device: Optional[Union[int, torch.device]] = None,
+        device_ids: Sequence[Union[int, torch.device]] | None = None,
+        output_device: Union[int, torch.device] | None = None,
         dim: int = 0,
     ) -> None:
         super().__init__()
@@ -160,6 +161,7 @@ class DataParallel(Module, Generic[T]):
         self.module = module
         self.device_ids = [_get_device_index(x, True) for x in device_ids]
         self.output_device = _get_device_index(output_device, True)
+        # pyrefly: ignore [read-only]
         self.src_device_obj = torch.device(device_type, self.device_ids[0])
 
         if device_type == "cuda":
@@ -173,6 +175,7 @@ class DataParallel(Module, Generic[T]):
             if not self.device_ids:
                 return self.module(*inputs, **kwargs)
 
+            # pyrefly: ignore [bad-argument-type]
             for t in chain(self.module.parameters(), self.module.buffers()):
                 if t.device != self.src_device_obj:
                     raise RuntimeError(
@@ -202,7 +205,7 @@ class DataParallel(Module, Generic[T]):
     def scatter(
         self,
         inputs: tuple[Any, ...],
-        kwargs: Optional[dict[str, Any]],
+        kwargs: dict[str, Any] | None,
         device_ids: Sequence[Union[int, torch.device]],
     ) -> Any:
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
@@ -221,10 +224,10 @@ class DataParallel(Module, Generic[T]):
 def data_parallel(
     module: Module,
     inputs: Any,
-    device_ids: Optional[Sequence[Union[int, torch.device]]] = None,
-    output_device: Optional[Union[int, torch.device]] = None,
+    device_ids: Sequence[Union[int, torch.device]] | None = None,
+    output_device: Union[int, torch.device] | None = None,
     dim: int = 0,
-    module_kwargs: Optional[Any] = None,
+    module_kwargs: Any | None = None,
 ) -> torch.Tensor:
     r"""Evaluate module(input) in parallel across the GPUs given in device_ids.
 
@@ -259,8 +262,10 @@ def data_parallel(
 
     device_ids = [_get_device_index(x, True) for x in device_ids]
     output_device = _get_device_index(output_device, True)
+    # pyrefly: ignore [no-matching-overload]
     src_device_obj = torch.device(device_type, device_ids[0])
 
+    # pyrefly: ignore [bad-argument-type]
     for t in chain(module.parameters(), module.buffers()):
         if t.device != src_device_obj:
             raise RuntimeError(

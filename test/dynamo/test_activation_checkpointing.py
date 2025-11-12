@@ -1,4 +1,6 @@
 # Owner(s): ["module: dynamo"]
+# flake8: noqa: B950
+# flake8: noqa: E731
 import contextlib
 import copy
 import functools
@@ -15,7 +17,11 @@ import torch.nn as nn
 import torch.utils.checkpoint
 from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo.backends.common import aot_autograd
-from torch._dynamo.testing import CompileCounterWithBackend
+from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
+    CompileCounterWithBackend,
+    normalize_gm,
+)
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfHpu
@@ -153,7 +159,9 @@ def _get_custom_policy(no_recompute_list=None, must_recompute_list=None):
     return _custom_policy
 
 
-class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
+class ActivationCheckpointingViaTagsTests(
+    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
+):
     def _validate(
         self,
         fn,
@@ -759,6 +767,38 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             ),
         )
 
+    def test_sac_with_partial_context_fn(self):
+        class CustomPolicy:
+            def __init__(self):
+                super().__init__()
+
+            def __call__(self, ctx, out, func, *args, **kwargs):
+                return CheckpointPolicy.MUST_SAVE
+
+        def f(x, y):
+            return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
+
+        context_fn1 = functools.partial(
+            create_selective_checkpoint_contexts, CustomPolicy()
+        )
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                f,
+                x,
+                y,
+                use_reentrant=False,
+                context_fn=context_fn1,
+            )
+
+        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
+        a = torch.randn(4, 4, requires_grad=True, device="cpu")
+        b = torch.randn(4, 4, requires_grad=True, device="cpu")
+
+        expected = fn(a, b)
+        result = opt_fn(a, b)
+        self.assertEqual(result, expected)
+
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     def test_compile_selective_checkpoint_must_not_recompute_gemm(self, device):
@@ -802,6 +842,55 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
             partition_fn=min_cut_rematerialization_partition,
+        )
+        self._validate(fn, backend, x, y)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
+
+    @requires_cuda_and_triton
+    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    def test_compile_selective_checkpoint_must_not_recompute_gemm_no_functionalization(
+        self, device
+    ):
+        def selective_checkpointing_context_fn():
+            no_recompute_list = [
+                torch.ops.aten.mm.default,
+            ]
+            return create_selective_checkpoint_contexts(
+                _get_custom_policy(no_recompute_list=no_recompute_list)
+            )
+
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                y,
+                use_reentrant=False,
+                context_fn=selective_checkpointing_context_fn,
+            )
+
+        x = torch.randn(4, 4, requires_grad=True, device=device)
+        y = torch.randn(4, 4, requires_grad=True, device=device)
+
+        fw_compiler = functools.partial(
+            count_ops,
+            freq=1,
+            op=torch.ops.aten.sigmoid.default,
+        )
+        bw_compiler = functools.partial(
+            count_ops,
+            # Main check here is just that sigmoid is properly recomputed
+            # (we will see a sigmoid() and sigmoid_backward() in the bw graph)
+            freq=1,
+            op=torch.ops.aten.sigmoid.default,
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=min_cut_rematerialization_partition,
+            disable_functionalization=True,
         )
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
@@ -1565,6 +1654,174 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         x = torch.randn(1, 1)
 
         self.assertEqual(opt_fn(x), fn(x))
+
+    def test_return_same_element_twice(self):
+        def gn(x):
+            y = torch.sin(x)
+            return y, y
+
+        def fn(x):
+            return torch.utils.checkpoint.checkpoint(gn, x, use_reentrant=True)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        ref = fn(x)
+
+        backend = AotEagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1], res[1])
+
+        self.assertExpectedInline(
+            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[4, 4]"):
+        l_x_ = L_x_
+
+        wrap_body_0 = self.wrap_body_0
+        tag_activation_checkpoint = torch.ops.higher_order.tag_activation_checkpoint(wrap_body_0, l_x_, use_reentrant = True);  wrap_body_0 = l_x_ = None
+        getitem: "f32[4, 4]" = tag_activation_checkpoint[0]
+        getitem_1: "f32[4, 4]" = tag_activation_checkpoint[1];  tag_activation_checkpoint = None
+        return (getitem, getitem_1)
+
+    class wrap_body_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[4, 4]"):
+            y: "f32[4, 4]" = torch.sin(l_x_);  l_x_ = None
+            return (y, y)
+""",
+        )
+
+    @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=True)
+    def test_nonlocal_mutation(self):
+        counter = 0
+
+        def gn(x):
+            nonlocal counter
+            counter += 1
+            return torch.sin(x)
+
+        def fn(x):
+            return torch.utils.checkpoint.checkpoint(gn, x, use_reentrant=True)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        fn(x).sum().backward()
+        # The mutation is reapplied in the backward as well
+        self.assertEqual(counter, 2)
+        counter = 0
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn(x).sum().backward()
+        # The mutation is not reapplied in the backward because the flag was on.
+        self.assertEqual(counter, 1)
+
+    @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=True)
+    def test_nonlocal_list_mutation(self):
+        def gn(x, z):
+            out = x.sin()
+            z.append(out)
+            return torch.cos(torch.sin(torch.matmul(x, x) @ x)), out
+
+        def fn(x):
+            z = []
+
+            out1, out2 = torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                z,
+                use_reentrant=False,
+            )
+
+            return out1, z[0]
+
+        x = torch.randn(4, 4, requires_grad=True)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1], res[1])
+
+    @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=True)
+    def test_nonlocal_list_mutation_hidden(self):
+        def gn(x, z):
+            o = torch.matmul(x, x) @ x
+            out = x.sin()
+            z.append(out)
+            return torch.cos(torch.sin(o)), torch.sin(x)
+
+        def fn(x):
+            z = []
+
+            outs = torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                z,
+                use_reentrant=False,
+            )
+            out1 = outs[0]
+            # Check that the extra output pytree handling is done properly
+            out2 = outs[-1]
+
+            return out1 + out2, z[0]
+
+        x = torch.randn(4, 4, requires_grad=True)
+        ref = fn(x)
+
+        backend = AotEagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1], res[1])
+
+        self.assertExpectedInline(
+            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[4, 4]"):
+        l_x_ = L_x_
+
+        wrap_body_0 = self.wrap_body_0
+        tag_activation_checkpoint = torch.ops.higher_order.tag_activation_checkpoint(wrap_body_0, l_x_, use_reentrant = False);  wrap_body_0 = l_x_ = None
+        out1: "f32[4, 4]" = tag_activation_checkpoint[0]
+        out2: "f32[4, 4]" = tag_activation_checkpoint[1]
+        getitem_4: "f32[4, 4]" = tag_activation_checkpoint[4];  tag_activation_checkpoint = None
+
+        add: "f32[4, 4]" = out1 + out2;  out1 = out2 = None
+        return (add, getitem_4)
+
+    class wrap_body_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[4, 4]"):
+            matmul: "f32[4, 4]" = torch.matmul(l_x_, l_x_)
+            o: "f32[4, 4]" = matmul @ l_x_
+
+            out: "f32[4, 4]" = l_x_.sin()
+
+            sin_1: "f32[4, 4]" = torch.sin(o)
+            child: "f32[4, 4]" = torch.cos(sin_1)
+            child_1: "f32[4, 4]" = torch.sin(l_x_);  l_x_ = None
+            return (child, child_1, matmul, o, out, sin_1)
+""",
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[4, 4]"):
+        mm: "f32[4, 4]" = torch.ops.aten.mm.default(primals_1, primals_1)
+        mm_1: "f32[4, 4]" = torch.ops.aten.mm.default(mm, primals_1);  mm = None
+
+        sin: "f32[4, 4]" = torch.ops.aten.sin.default(primals_1)
+
+        sin_1: "f32[4, 4]" = torch.ops.aten.sin.default(mm_1);  mm_1 = None
+        cos: "f32[4, 4]" = torch.ops.aten.cos.default(sin_1);  sin_1 = None
+        sin_2: "f32[4, 4]" = torch.ops.aten.sin.default(primals_1)
+
+        add: "f32[4, 4]" = torch.ops.aten.add.Tensor(cos, sin_2);  cos = sin_2 = None
+        return (add, sin, primals_1)
+""",
+        )
 
 
 devices = ["cuda", "hpu"]

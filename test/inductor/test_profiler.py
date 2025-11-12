@@ -245,7 +245,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
                 skip_first=3, wait=1, warmup=1, active=2, repeat=1
             ),
         ) as prof:
-            for idx in range(10):
+            for _ in range(10):
                 fn(*inputs)
                 prof.step()
 

@@ -146,6 +146,10 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force /*=false*/) {
         "copy the tensor to host memory first.");
 
     TORCH_CHECK(
+        !at::_is_zerotensor(tensor),
+        " Cannot convert a ZeroTensor to numpy. Set force=True if you need the zero array.");
+
+    TORCH_CHECK(
         !(at::GradMode::is_enabled() && tensor.requires_grad()),
         "Can't call numpy() on Tensor that requires grad. "
         "Use tensor.detach().numpy() instead.");
@@ -185,6 +189,9 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force /*=false*/) {
       nullptr));
   if (!array)
     return nullptr;
+
+  if (at::_is_zerotensor(tensor))
+    PyArray_FILLWBYTE(reinterpret_cast<PyArrayObject*>(array.get()), 0);
 
   // TODO: This attempts to keep the underlying memory alive by setting the base
   // object of the ndarray to the tensor and disabling resizes on the storage.

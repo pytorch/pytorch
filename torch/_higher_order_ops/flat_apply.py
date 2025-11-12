@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import torch
 import torch.fx.node

@@ -108,14 +108,10 @@ def efficient_conv_bn_eval_decomposed(
     else:
         bias_on_the_fly = torch.zeros_like(bn_running_var)
 
-    if bn_weight is not None:
-        bn_weight = bn_weight
-    else:
+    if bn_weight is None:
         bn_weight = torch.ones_like(bn_running_var)
 
-    if bn_bias is not None:
-        bn_bias = bn_bias
-    else:
+    if bn_bias is None:
         bn_bias = torch.zeros_like(bn_running_var)
 
     # shape of [C_out, 1, 1, 1] in Conv2d
@@ -144,6 +140,7 @@ def efficient_conv_bn_eval_decomposed(
             torch.nn.functional.batch_norm,
         ]
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=efficient_conv_bn_eval_pass,
     extra_check=lambda match: not inductor_config.freezing
     and inductor_config.efficient_conv_bn_eval_fx_passes,
@@ -235,6 +232,7 @@ def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs
             torch.ops.aten.batch_norm.default,
         ]
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=efficient_conv_bn_eval_pass,
     extra_check=lambda match: not inductor_config.freezing
     and inductor_config.efficient_conv_bn_eval_fx_passes,
@@ -330,6 +328,7 @@ def efficient_conv_bn_eval_graph_transform_decomposed(match: Match, *args, **kwa
             nn.SyncBatchNorm,
         ],
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=efficient_conv_bn_eval_pass,
     extra_check=lambda match: not inductor_config.freezing
     and inductor_config.efficient_conv_bn_eval_fx_passes,

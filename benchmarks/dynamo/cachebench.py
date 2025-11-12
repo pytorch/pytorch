@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
-from typing import Callable
+from collections.abc import Callable
 
 from torch._inductor.utils import fresh_cache
 
@@ -23,7 +23,6 @@ TORCHBENCH_MODELS: list[str] = [
     "resnet50",
     "moco",
     "llama",
-    "hf_T5",
 ]
 HUGGINGFACE_MODELS: list[str] = [
     "AllenaiLongformerBase",

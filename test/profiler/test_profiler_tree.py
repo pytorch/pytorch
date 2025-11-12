@@ -624,8 +624,7 @@ class TestProfilerTree(TestCase):
                           torch/nn/modules/module.py(...): __getattr__
                           <built-in function linear>
                             aten::linear
-                              aten::reshape
-                                aten::view
+                              aten::view
                               aten::t
                                 aten::transpose
                                   aten::as_strided
@@ -671,8 +670,7 @@ class TestProfilerTree(TestCase):
                           torch/nn/modules/module.py(...): __getattr__
                           <built-in function linear>
                             aten::linear
-                              aten::reshape
-                                aten::view
+                              aten::view
                               aten::t
                                 aten::transpose
                                   aten::as_strided
@@ -762,21 +760,22 @@ class TestProfilerTree(TestCase):
               torch/profiler/profiler.py(...): __enter__
                 ...
               aten::add
-                torch/_library/simple_registry.py(...): find_torch_dispatch_rule
-                  torch/_library/simple_registry.py(...): find
-                    <built-in method get of dict object at 0xXXXXXXXXXXXX>
-                  torch/_library/simple_registry.py(...): find
-                    <built-in method get of dict object at 0xXXXXXXXXXXXX>
-                test_profiler_tree.py(...): __torch_dispatch__
-                  torch/utils/_pytree.py(...): tree_map
-                    ...
-                  torch/utils/_pytree.py(...): tree_map
-                    ...
-                  torch/_ops.py(...): __call__
-                    <built-in method  of PyCapsule object at 0xXXXXXXXXXXXX>
-                      aten::add
-                  torch/utils/_pytree.py(...): tree_map
-                    ...
+                PythonSubclass
+                  torch/_library/simple_registry.py(...): find_torch_dispatch_rule
+                    torch/_library/simple_registry.py(...): find
+                      <built-in method get of dict object at 0xXXXXXXXXXXXX>
+                    torch/_library/simple_registry.py(...): find
+                      <built-in method get of dict object at 0xXXXXXXXXXXXX>
+                  test_profiler_tree.py(...): __torch_dispatch__
+                    torch/utils/_pytree.py(...): tree_map
+                      ...
+                    torch/utils/_pytree.py(...): tree_map
+                      ...
+                    torch/_ops.py(...): __call__
+                      <built-in method  of PyCapsule object at 0xXXXXXXXXXXXX>
+                        aten::add
+                    torch/utils/_pytree.py(...): tree_map
+                      ...
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
                   ...""",

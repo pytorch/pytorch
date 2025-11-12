@@ -83,7 +83,7 @@ def get_torch_version(sha: str | None = None) -> str:
         version = sdist_version
         origin = "PKG-INFO"
     else:
-        version = open(pytorch_root / "version.txt").read().strip()
+        version = Path(pytorch_root / "version.txt").read_text().strip()
         origin = "version.txt"
         if sdist_version is None and sha != UNKNOWN:
             if sha is None:

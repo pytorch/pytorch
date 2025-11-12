@@ -97,7 +97,7 @@ class ModelTest(PackageTestCase):
         # how they want to save it but the 'server' can always
         # use the same API to load the package.
 
-        # The convension is for each model to provide a
+        # The convention is for each model to provide a
         # 'model' package with a 'load' function that actual
         # reads the model out of the archive.
 
@@ -123,7 +123,7 @@ class ModelTest(PackageTestCase):
                 import torch_package_importer as resources
 
                 # server knows to call model.load() to get the model,
-                # maybe in the future it passes options as arguments by convension
+                # maybe in the future it passes options as arguments by convention
                 def load():
                     return resources.load_pickle('model', 'pickled')
                 """

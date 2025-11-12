@@ -279,6 +279,7 @@ class _CudaModule:
             return self._kernels[name]
 
         # Import the CUDA library inside the method
+        # pyrefly: ignore [missing-module-attribute]
         from torch.cuda._utils import _get_gpu_runtime_library
 
         libcuda = _get_gpu_runtime_library()
@@ -420,7 +421,7 @@ class _CudaKernel:
             # navi, CDNA1-CDNA3 allows a max of 64KB shared memory
             # CDNA4 allows a max of 160KB shared memory
             max_shared_mem = (
-                65536 if device_props.gcnArchName not in ["gfx950"] else 160 * 1024
+                65536 if device_props.gcnArchName != "gfx950" else 160 * 1024
             )
         else:
             max_shared_mem = getattr(

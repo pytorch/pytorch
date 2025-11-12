@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import torch
 import torch._prims_common as utils
@@ -56,6 +57,7 @@ def _interleave(a, b, dim=0):
 
     stacked = torch.stack([a, b], dim=dim + 1)
     interleaved = torch.flatten(stacked, start_dim=dim, end_dim=dim + 1)
+    # pyrefly: ignore [unbound-name]
     if b_trunc:
         # TODO: find torch alternative for slice_along dim for torch.jit.script to work
         interleaved = aten.slice(interleaved, dim, 0, b.shape[dim] + a.shape[dim] - 1)
@@ -95,6 +97,7 @@ class AssociativeScanOp(HigherOrderOperator):
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(combine_fn, xs, additional_inputs)
 
+    # pyrefly: ignore [bad-override]
     def gen_schema(self, combine_fn, xs, additional_inputs):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
@@ -196,18 +199,18 @@ def associative_scan(
     def _validate_input(cfn, lxs, d, r, cm):
         # Basic arguments check
         if not callable(cfn):
-            raise ValueError("Combine_fn must be a callable, but got {cfn}")
+            raise ValueError(f"Combine_fn must be a callable, but got {cfn}")
         if not isinstance(d, int):
             raise ValueError("Dim must be an int, but got " + str(type(d)))
         if not isinstance(r, bool):
             raise RuntimeError("Reverse must be a bool, but got " + str(type(r)))
         if cm not in ["pointwise", "generic"]:
             raise ValueError(
-                "Combine_mode must either 'pointwise' or 'generic', but got {cm}"
+                f"Combine_mode must either 'pointwise' or 'generic', but got {cm}"
             )
-        if cm == "pointwise" and not all(l.device.type == "cuda" for l in lxs):
+        if cm == "pointwise" and not all(l.device.type in ("cuda", "xpu") for l in lxs):
             raise ValueError(
-                "For combine_mode='pointwise', all input tensors need to be on CUDA"
+                "For combine_mode='pointwise', all input tensors need to be on CUDA or XPU"
             )
 
         # Checks for xs
@@ -647,6 +650,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
     """
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def forward(
         ctx,
         combine_fn,

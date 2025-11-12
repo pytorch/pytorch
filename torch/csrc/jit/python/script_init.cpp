@@ -75,9 +75,6 @@
 
 #include <fmt/format.h>
 
-TORCH_MAKE_PYBIND_ENUM_FASTER(
-    torch::jit::logging::LockingLogger::AggregationType)
-
 namespace torch::jit {
 
 using ::c10::Argument;

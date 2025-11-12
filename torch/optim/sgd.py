@@ -39,7 +39,7 @@ class SGD(Optimizer):  # noqa: D101
         foreach: Optional[bool] = None,
         differentiable: bool = False,
         fused: Optional[bool] = None,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if lr < 0.0:
@@ -143,7 +143,9 @@ class SGD(Optimizer):  # noqa: D101
 
             if group["momentum"] != 0:
                 # update momentum_buffers in state
-                for p, momentum_buffer in zip(params, momentum_buffer_list):
+                for p, momentum_buffer in zip(
+                    params, momentum_buffer_list, strict=True
+                ):
                     state = self.state[p]
                     state["momentum_buffer"] = momentum_buffer
 
@@ -265,7 +267,7 @@ def sgd(
     dampening: float,
     nesterov: bool,
     maximize: bool,
-):
+) -> None:
     r"""Functional API that performs SGD algorithm computation.
 
     See :class:`~torch.optim.SGD` for details.
@@ -331,8 +333,9 @@ def _single_tensor_sgd(
     nesterov: bool,
     maximize: bool,
     has_sparse_grad: bool,
-):
-    assert grad_scale is None and found_inf is None
+) -> None:
+    if grad_scale is not None or found_inf is not None:
+        raise AssertionError("Expected grad_scale and found_inf to be None")
 
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
@@ -347,6 +350,7 @@ def _single_tensor_sgd(
                     # usually this is the differentiable path, which is why the param.clone() is needed
                     grad = grad.addcmul_(param.clone(), weight_decay)
                 else:
+                    # pyrefly: ignore [bad-argument-type]
                     grad = grad.add(param, alpha=weight_decay)
             else:
                 grad = grad.add(param, alpha=weight_decay)
@@ -370,6 +374,7 @@ def _single_tensor_sgd(
             if lr.requires_grad:
                 param.addcmul_(grad, lr, value=-1)
             else:
+                # pyrefly: ignore [bad-argument-type]
                 param.add_(grad, alpha=-lr)
         else:
             param.add_(grad, alpha=-lr)
@@ -389,8 +394,9 @@ def _multi_tensor_sgd(
     nesterov: bool,
     maximize: bool,
     has_sparse_grad: bool,
-):
-    assert grad_scale is None and found_inf is None
+) -> None:
+    if grad_scale is not None or found_inf is not None:
+        raise AssertionError("Expected grad_scale and found_inf to be None")
 
     if len(params) == 0:
         return
@@ -441,6 +447,7 @@ def _multi_tensor_sgd(
                 torch._foreach_add_(bufs, device_grads, alpha=1 - dampening)
             else:
                 bufs = []
+
                 for i in range(len(device_momentum_buffer_list)):
                     if device_momentum_buffer_list[i] is None:
                         buf = device_momentum_buffer_list[i] = momentum_buffer_list[

@@ -727,11 +727,16 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
   std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs;
   for (int r = 0; r < world_size; ++r) {
     if (r == rank) {
-      alloc_refs.emplace_back(block->alloc_ref);
       if (mc_addr != nullptr) {
         alloc_refs.push_back(c10::make_intrusive<AllocationRef>(
             mc_addr, mc_handle, block->block_size, block->device_idx, true));
       }
+      // Note that in B200, cuMulticastUnbind can error if the mapped buffers
+      // are free'd before the multicast object is free'd. That's why the
+      // alloc_ref for the multicast object is added first into the vector,
+      // such that ~AllocationRef can release it first. For more context,
+      // see: https://github.com/pytorch/pytorch/issues/162429
+      alloc_refs.emplace_back(block->alloc_ref);
       continue;
     }
     alloc_refs.push_back(c10::make_intrusive<AllocationRef>(

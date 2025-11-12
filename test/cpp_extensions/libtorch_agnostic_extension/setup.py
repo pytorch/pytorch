@@ -33,7 +33,7 @@ class clean(distutils.command.clean.clean):
 
 def get_extension():
     extra_compile_args = {
-        "cxx": ["-fdiagnostics-color=always"],
+        "cxx": ["-fdiagnostics-color=always", "-DTORCH_STABLE_ONLY"],
     }
 
     extension = CppExtension

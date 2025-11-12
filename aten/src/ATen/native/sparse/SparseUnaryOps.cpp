@@ -26,6 +26,8 @@
 #include <ATen/ops/erf_native.h>
 #include <ATen/ops/erfinv.h>
 #include <ATen/ops/erfinv_native.h>
+#include <ATen/ops/exp.h>
+#include <ATen/ops/exp_native.h>
 #include <ATen/ops/expm1.h>
 #include <ATen/ops/expm1_native.h>
 #include <ATen/ops/floor.h>
@@ -175,6 +177,7 @@ COALESCED_UNARY_UFUNC(atanh)
 COALESCED_UNARY_UFUNC(ceil)
 COALESCED_UNARY_UFUNC(deg2rad)
 COALESCED_UNARY_UFUNC(erf)
+COALESCED_UNARY_UFUNC(exp)
 COALESCED_UNARY_UFUNC(erfinv)
 COALESCED_UNARY_UFUNC(expm1)
 COALESCED_UNARY_UFUNC(floor)

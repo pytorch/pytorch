@@ -37,7 +37,8 @@ class FileSystem(FileSystemBase):
     def create_stream(
         self, path: Union[str, os.PathLike], mode: str
     ) -> Generator[io.IOBase, None, None]:
-        assert self.fs is not None
+        if self.fs is None:
+            raise AssertionError("fs should not be None")
         path = os.fspath(path)
 
         # fsspec does not support concurrent transactions, and not all

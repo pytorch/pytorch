@@ -15,10 +15,11 @@ import time
 import traceback
 import warnings
 from collections import defaultdict
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch.distributed.elastic.rendezvous as rdzv
 import torch.distributed.elastic.utils.store as store_util
@@ -47,7 +48,8 @@ logger = get_logger(__name__)
 
 @dataclass
 class WorkerSpec:
-    """Blueprint information about a particular type of worker.
+    """
+    Blueprint information about a particular type of worker.
 
     For a given role, there must only exist a single worker spec.
     Worker spec is expected to be homogeneous across all nodes (machine),
@@ -74,6 +76,14 @@ class WorkerSpec:
              takes precedence over ``redirects`` settings.
         event_log_handler: name of the event logging handler as registered in
           `elastic/events/handlers.py <https://docs.pytorch.org/docs/stable/elastic/events.html>`_.
+        duplicate_stdout_filters: If non-empty, duplicates stdout to a file containing only lines
+                                 that match _any_ of the filter strings.
+        duplicate_stderr_filters: If non-empty, duplicates stderr to a file containing only lines
+                                 that match _any_ of the filter strings.
+        virtual_local_rank: Enable virtual local rank mode for workers (defaults to False).
+                            When enabled, LOCAL_RANK is set to 0 for all workers and
+                            CUDA_VISIBLE_DEVICES is adjusted so each worker accesses its
+                            assigned GPU at device index 0.
     """
 
     role: str
@@ -90,6 +100,9 @@ class WorkerSpec:
     local_addr: Optional[str] = None
     event_log_handler: str = "null"
     numa_options: Optional[NumaOptions] = None
+    duplicate_stdout_filters: Optional[list[str]] = None
+    duplicate_stderr_filters: Optional[list[str]] = None
+    virtual_local_rank: bool = False
 
     def __post_init__(self):
         assert self.local_world_size > 0
@@ -99,6 +112,7 @@ class WorkerSpec:
             warnings.warn(
                 "WorkerSpec.fn will be deprecated,"
                 " please use WorkerSpec.entrypoint instead",
+                stacklevel=2,
                 category=DeprecationWarning,
             )
             self.entrypoint = self.fn
@@ -720,7 +734,7 @@ class SimpleElasticAgent(ElasticAgent):
             self._record_worker_events(result)
             return result
         except RendezvousGracefulExitError as e:
-            logger.info("Rendezvous gracefully exited: %s", e)
+            logger.info("Rendezvous gracefully exited: %s", e)  # noqa: G200
         except SignalException as e:
             logger.warning("Received %s death signal, shutting down workers", e.sigval)
             self._shutdown(e.sigval)

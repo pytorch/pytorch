@@ -1787,7 +1787,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         # extract weights
         results = extract_weights('fp32', mp, 'int8', mq)
         mq_node_names = [node.name for node in mq.graph.nodes]
-        for layer_name in results.keys():
+        for layer_name in results:
             self.assertTrue(layer_name in mq_node_names)
 
         # match activations
@@ -1799,7 +1799,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         mq_ns(data)
         results = extract_logger_info(mp_ns, mq_ns, OutputLogger, 'int8')
         mq_node_names = [node.name for node in mq_ns.graph.nodes]
-        for layer_name in results.keys():
+        for layer_name in results:
             self.assertTrue(layer_name in mq_node_names)
 
         # match shadow activations
@@ -1810,7 +1810,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         results = extract_shadow_logger_info(
             mp_shadows_mq, OutputLogger, 'int8')
         mq_node_names = [node.name for node in mp_shadows_mq.graph.nodes]
-        for layer_name in results.keys():
+        for layer_name in results:
             self.assertTrue(layer_name in mq_node_names)
 
     @skipIfNoFBGEMM
@@ -1834,11 +1834,11 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
         for layer_results in results.values():
             assert 'sqnr_int8_vs_fp32' in \
-                layer_results['weight']['int8'][0].keys()
+                layer_results['weight']['int8'][0]
             assert 'l2_error_int8_vs_fp32' in \
-                layer_results['weight']['int8'][0].keys()
+                layer_results['weight']['int8'][0]
             assert 'cosine_similarity_int8_vs_fp32' in \
-                layer_results['weight']['int8'][0].keys()
+                layer_results['weight']['int8'][0]
 
     @skipIfNoFBGEMM
     def test_int8_shadows_fp32_simple(self):
@@ -2252,7 +2252,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
             msp(*example_input)
 
         def _check_logger_count(model, exp_count_stats, exp_count_comparisons):
-            for name, mod in model.named_modules():
+            for mod in model.modules():
                 if isinstance(mod, OutputLogger):
                     self.assertTrue(
                         len(mod.stats) == exp_count_stats,

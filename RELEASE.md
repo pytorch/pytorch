@@ -3,6 +3,7 @@
 <!-- toc -->
 
   - [Release Compatibility Matrix](#release-compatibility-matrix)
+    - [PyTorch CUDA Support Matrix](#pytorch-cuda-support-matrix)
   - [Release Cadence](#release-cadence)
   - [General Overview](#general-overview)
     - [Frequently Asked Questions](#frequently-asked-questions)
@@ -62,6 +63,22 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 | 2.0 | >=3.8, <=3.11 | C++14 | CUDA 11.7, CUDNN 8.5.0.96 | CUDA 11.8, CUDNN 8.7.0.84 | ROCm 5.4 |
 | 1.13 | >=3.7, <=3.10 | C++14 | CUDA 11.6, CUDNN 8.3.2.44 | CUDA 11.7, CUDNN 8.5.0.96 | ROCm 5.2 |
 | 1.12 | >=3.7, <=3.10 | C++14 | CUDA 11.3, CUDNN 8.3.2.44 | CUDA 11.6, CUDNN 8.3.2.44 | ROCm 5.0 |
+
+### PyTorch CUDA Support Matrix
+
+For Release 2.9 PyTorch Supports following CUDA Architectures:
+
+| CUDA | architectures supported for Linux x86 and Windows builds | notes |
+| --- | --- | --- |
+| 12.6.3 | Maxwell(5.0), Pascal(6.0), Volta(7.0), Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0) | |
+| 12.8.1 | Volta(7.0), Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0)  | |
+| 13.0.0 | Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0+PTX) | +PTX available on linux builds only |
+
+| CUDA | architectures supported for Linux aarch64 builds |
+| --- | --- |
+| 12.6.3 | Ampere(8.0), Hopper(9.0) |
+| 12.8.1 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 12.0)  |
+| 13.0.0 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 11.0, 12.0+PTX) |
 
 ## Release Cadence
 

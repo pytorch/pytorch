@@ -1,7 +1,7 @@
 #include <sstream>
 
 #ifndef ROCM_ON_WINDOWS
-#ifdef TORCH_CUDA_USE_NVTX3
+#if CUDART_VERSION >= 13000 || defined(TORCH_CUDA_USE_NVTX3)
 #include <nvtx3/nvtx3.hpp>
 #else
 #include <nvToolsExt.h>

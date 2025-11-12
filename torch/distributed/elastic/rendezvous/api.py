@@ -7,8 +7,9 @@
 
 import socket
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, ClassVar, Optional
+from typing import Any, ClassVar, Optional
 
 from torch.distributed import Store
 from torch.distributed.elastic.utils.distributed import get_free_port

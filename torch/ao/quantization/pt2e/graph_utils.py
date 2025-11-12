@@ -2,8 +2,8 @@
 import itertools
 import operator
 from collections import OrderedDict
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Sequence
+from typing import Any
 
 import torch
 from torch.export import ExportedProgram
@@ -95,7 +95,7 @@ def find_sequential_partitions(
     gm: torch.fx.GraphModule,
     partition_types: list[Any],
     include_functional_equivalent=True,
-    filter_fn: Optional[Callable[[Node], bool]] = None,
+    filter_fn: Callable[[Node], bool] | None = None,
 ):
     if not _valid_type_sequence(partition_types):
         raise ValueError(
@@ -124,9 +124,18 @@ def _get_submodule(
     graph_module: torch.fx.GraphModule, node: torch.fx.Node, arg_index: int
 ) -> tuple[str, torch.nn.Module, torch.fx.Node]:
     submod_node = node.args[arg_index]
-    assert isinstance(submod_node, torch.fx.Node)
-    assert submod_node.op == "get_attr"
-    assert isinstance(submod_node.target, str)
+    if not isinstance(submod_node, torch.fx.Node):
+        raise AssertionError(
+            f"Expected submod_node to be a torch.fx.Node, got {type(submod_node)}"
+        )
+    if submod_node.op != "get_attr":
+        raise AssertionError(
+            f"Expected submod_node.op to be 'get_attr', got {submod_node.op}"
+        )
+    if not isinstance(submod_node.target, str):
+        raise AssertionError(
+            f"Expected submod_node.target to be a string attribute name, got {type(submod_node.target)}"
+        )
     submodule = graph_module.get_submodule(submod_node.target)
     # pyre-ignore
     return submod_node.target, submodule, node
@@ -157,13 +166,14 @@ def _get_control_flow_submodules(
 
 
 def bfs_trace_with_node_process(
-    model: Union[ExportedProgram, torch.fx.GraphModule], node_op: Callable
+    model: ExportedProgram | torch.fx.GraphModule, node_op: Callable
 ) -> None:
     """Traverse the graph module and apply node_op to each node."""
 
-    assert isinstance(model, (ExportedProgram, torch.fx.GraphModule)), (
-        f"Expected GraphModule or ExportedProgram, got {type(model)}"
-    )
+    if not isinstance(model, (ExportedProgram, torch.fx.GraphModule)):
+        raise AssertionError(
+            f"Expected GraphModule or ExportedProgram, got {type(model)}"
+        )
     gm = model.graph_module if isinstance(model, ExportedProgram) else model
     queue = [gm]
     while queue:
