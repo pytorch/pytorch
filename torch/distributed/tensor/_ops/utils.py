@@ -49,6 +49,52 @@ def register_prop_rule(
     return wrapper
 
 
+def register_single_dim_strategy(
+    op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
+    schema_info: Optional[RuntimeSchemaInfo] = None,
+) -> Callable[[Callable[[OpSchema], list[OpSpec]]], Callable[[OpSchema], StrategyType]]:
+    """
+    Registers a simplified op strategy that only considers a single mesh dim, taking care to expand it
+    to cover all the mesh dims present in the runtime inputs.
+    """
+
+    def expanded_registration_wrapper(
+        single_dim_strategy: Callable[[OpSchema], list[OpSpec]],
+    ) -> Callable[[OpSchema], StrategyType]:
+        def _expanded_strategy(op_schema: OpSchema) -> StrategyType:
+            """
+            Expands the single_mesh_dim impl across all mesh dims, and expands ShardingPlacholder into all
+            sharding types used by inputs.
+            """
+            inputs_strategy = op_schema.args_strategy
+            mesh = inputs_strategy[0].mesh
+            strategies_over_one_mesh_dim = single_dim_strategy(op_schema)
+
+            # copied from einsum strategy..
+            # TODO: identify differences between this and 'expand_' util
+            # TODO: handle 'ShardingPlaceholder' expansion (doesn't exist yet)
+            all_mesh_dim_strategies = [strategies_over_one_mesh_dim] * mesh.ndim
+            strategy_combs = itertools.product(*all_mesh_dim_strategies)
+            all_strategies = []
+            for strategy_comb in strategy_combs:
+                spec_list = [
+                    DTensorSpec(mesh, tuple(specs)) for specs in zip(*strategy_comb)
+                ]
+                all_strategies.append(
+                    OpSpec(output_specs=spec_list[0], input_specs=spec_list[1:])
+                )
+
+            return OpStrategy(all_strategies)
+
+        # register_op_strategy returns another wrapper that actually does the strategy registration,
+        # we just add another layer of wrapping that expands the single_dim_strategy into a strategy that's
+        # compatible with register_op_strategy
+        register_op_strategy(op, schema_info)(_expanded_strategy)
+        return _expanded_strategy
+
+    return expanded_registration_wrapper
+
+
 def register_op_strategy(
     op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
     schema_info: Optional[RuntimeSchemaInfo] = None,
