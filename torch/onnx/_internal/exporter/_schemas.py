@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # A special value to indicate that the default value is not specified
 class _Empty:
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "_EMPTY_DEFAULT"
 
 

@@ -408,8 +408,12 @@ class Library:
             op_name: operator name (along with the overload) or OpOverload object.
             effect: The effect of the op.
         """
-        entry = torch._library.simple_registry.singleton.find(op_name)
-        entry.effect = effect
+        from torch._higher_order_ops.effects import (
+            _register_effectful_op as hoo_register_effect,
+        )
+
+        handle = hoo_register_effect(op_name, effect)
+        self._registration_handles.append(handle)
 
     def _destroy(self):
         if self.m is not None:

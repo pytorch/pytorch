@@ -5,7 +5,6 @@ import random
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._functorch.aot_autograd import aot_export_module
-from torch._higher_order_ops.effects import _deregister_effectful_op
 from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import register_opaque_type
@@ -272,12 +271,13 @@ def forward(self, arg0_1, arg1_1):
         torch.library._register_effectful_op(
             "_TestOpaqueObject::noisy_inject", EffectType.ORDERED
         )
-        gm = aot_export_module(mod, (rng, fake_x), trace_joint=False)[0]
-        # inputs: token, rng, x
-        # return: token, res
-        self.assertExpectedInline(
-            gm.code.strip(),
-            """\
+        try:
+            gm = aot_export_module(mod, (rng, fake_x), trace_joint=False)[0]
+            # inputs: token, rng, x
+            # return: token, res
+            self.assertExpectedInline(
+                gm.code.strip(),
+                """\
 def forward(self, arg0_1, arg1_1, arg2_1):
     with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops._TestOpaqueObject.noisy_inject.default, arg2_1, arg1_1);  arg0_1 = arg2_1 = None
     getitem = with_effects[0]
@@ -288,9 +288,11 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     getitem_3 = with_effects_1[1];  with_effects_1 = None
     add = torch.ops.aten.add.Tensor(getitem_3, getitem_3);  getitem_3 = None
     return (getitem_2, add)""",  # noqa: B950
-        )
-
-        _deregister_effectful_op("_TestOpaqueObject::noisy_inject")
+            )
+        finally:
+            torch.library._register_effectful_op(
+                "_TestOpaqueObject::noisy_inject", None
+            )
 
 
 instantiate_parametrized_tests(TestOpaqueObject)
