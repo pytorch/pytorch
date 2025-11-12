@@ -357,6 +357,7 @@ def standalone_compile(
     dynamic_shapes: Any,
     options: Any,
     aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
+    compile_fn=None,
 ) -> CompiledArtifact:
     """
     Implementation of torch.inductor.standalone_compile
@@ -420,9 +421,13 @@ def standalone_compile(
     ):
         # compile_fx can mutate gm
         gm = copy.deepcopy(gm)
-        compiled_fn = compile_fx(
-            gm, example_inputs, ignore_shape_env=ignore_shape_env, **options
-        )
+
+        if compile_fn is not None:
+            compiled_fn = compile_fn(gm, example_inputs, **options)
+        else:
+            compiled_fn = compile_fx(
+                gm, example_inputs, ignore_shape_env=ignore_shape_env, **options
+            )
         assert callable(compiled_fn)
         if aot:
             if not hasattr(compiled_fn, "serialize"):
