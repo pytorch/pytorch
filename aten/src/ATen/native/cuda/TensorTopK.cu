@@ -213,7 +213,7 @@ void launch(
 
 namespace warptopk {
 
-constexpr int MAX_WARP_TOPK_SLICE = 512;
+constexpr int MAX_WARP_TOPK_SLICE = 1024;
 constexpr int WARPS_PER_BLOCK = 4;
 
 template <typename scalar_t>
@@ -507,7 +507,7 @@ void launch(
   const auto stream = c10::cuda::getCurrentCUDAStream();
   dim3 grid(numInputSlices);
 
-  // Use optimized LDS-based tinyTopKKernel for n≤256
+  // Use optimized LDS-based tinyTopKKernel for n≤1024
   if (inputSliceSize <= 64) {
     dim3 block(64);
     tinyTopKKernel<scalar_t, IndexType, Dim, 64><<<grid, block, 0, stream>>>(
@@ -523,11 +523,17 @@ void launch(
     tinyTopKKernel<scalar_t, IndexType, Dim, 256><<<grid, block, 0, stream>>>(
         input, inputSliceSize, k, largest, numInputSlices, inputWithinSliceStride,
         topK, topKWithinSliceStride, indices, indicesWithinSliceStride);
-  } else {
-    // For n>256, fall back to blockBitonicTopKKernel
-    launch_block_bitonic<scalar_t, IndexType, Dim, 512>(
+  } else if (inputSliceSize <= 512) {
+    dim3 block(512);
+    tinyTopKKernel<scalar_t, IndexType, Dim, 512><<<grid, block, 0, stream>>>(
         input, inputSliceSize, k, largest, numInputSlices, inputWithinSliceStride,
-        topK, topKWithinSliceStride, indices, indicesWithinSliceStride, stream);
+        topK, topKWithinSliceStride, indices, indicesWithinSliceStride);
+  } else {
+    // For n=1024
+    dim3 block(1024);
+    tinyTopKKernel<scalar_t, IndexType, Dim, 1024><<<grid, block, 0, stream>>>(
+        input, inputSliceSize, k, largest, numInputSlices, inputWithinSliceStride,
+        topK, topKWithinSliceStride, indices, indicesWithinSliceStride);
   }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 #endif
@@ -1121,13 +1127,13 @@ bool should_use_warp_topk(int64_t slice_size, int64_t k) {
   if (slice_size <= 0 || k <= 0) {
     return false;
   }
-  // Use optimized LDS-based tinyTopKKernel for n≤256 with small k
-  // This beats sbtopk (radixSelect) for tiny sizes
-  if (slice_size > 256) {
+  // Use optimized LDS-based tinyTopKKernel for n≤1024 with small k
+  // Even with full bitonic sort overhead, beats radixSelect for small k
+  if (slice_size > 1024) {
     return false;
   }
   // Only enable for small k where full sort is acceptable
-  return k <= 64;
+  return k <= 32;
 #else
   return false;
 #endif
