@@ -1023,6 +1023,7 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
             DispatchKey.BackendSelect,
             DispatchKey.PythonTLSSnapshot,
             DispatchKey.PythonDispatcher,
+            DispatchKey.Functionalize,
         ]
 
         def _may_use_fallthrough_instead_of_fallback(key: DispatchKey):

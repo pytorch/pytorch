@@ -4,6 +4,8 @@ import random
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._functorch.aot_autograd import aot_export_module
+from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import register_opaque_type
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -232,6 +234,65 @@ def forward(self, arg0_1, arg1_1):
             "Tried to call __setattr__ with attr",
         ):
             make_fx(f, tracing_mode=make_fx_tracing_mode)(RNGState(0), torch.ones(3))
+
+    def test_aot_export(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, rng_state, x):
+                x = torch.ops._TestOpaqueObject.noisy_inject(x, rng_state)
+                x = x * x
+                x = torch.ops._TestOpaqueObject.noisy_inject(x, rng_state)
+                x = x + x
+                return (x,)
+
+        mod = Model()
+        rng = RNGState(0)
+        x = torch.ones(2, 3)
+
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        fake_rng = torch._library.fake_class_registry.maybe_to_fake_obj(fake_mode, rng)
+        fake_x = fake_mode.from_tensor(x)
+        gm = aot_export_module(mod, (fake_rng, fake_x), trace_joint=False)[0]
+
+        # By default we don't register ops containing PyObjs as being effectful
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(arg1_1, arg0_1);  arg1_1 = None
+    mul = torch.ops.aten.mul.Tensor(noisy_inject, noisy_inject);  noisy_inject = None
+    noisy_inject_1 = torch.ops._TestOpaqueObject.noisy_inject.default(mul, arg0_1);  mul = arg0_1 = None
+    add = torch.ops.aten.add.Tensor(noisy_inject_1, noisy_inject_1);  noisy_inject_1 = None
+    return (add,)""",  # noqa: B950
+        )
+
+        torch.library._register_effectful_op(
+            "_TestOpaqueObject::noisy_inject", EffectType.ORDERED
+        )
+        try:
+            gm = aot_export_module(mod, (rng, fake_x), trace_joint=False)[0]
+            # inputs: token, rng, x
+            # return: token, res
+            self.assertExpectedInline(
+                gm.code.strip(),
+                """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops._TestOpaqueObject.noisy_inject.default, arg2_1, arg1_1);  arg0_1 = arg2_1 = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1];  with_effects = None
+    mul = torch.ops.aten.mul.Tensor(getitem_1, getitem_1);  getitem_1 = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TestOpaqueObject.noisy_inject.default, mul, arg1_1);  getitem = mul = arg1_1 = None
+    getitem_2 = with_effects_1[0]
+    getitem_3 = with_effects_1[1];  with_effects_1 = None
+    add = torch.ops.aten.add.Tensor(getitem_3, getitem_3);  getitem_3 = None
+    return (getitem_2, add)""",  # noqa: B950
+            )
+        finally:
+            torch.library._register_effectful_op(
+                "_TestOpaqueObject::noisy_inject", None
+            )
 
 
 instantiate_parametrized_tests(TestOpaqueObject)
