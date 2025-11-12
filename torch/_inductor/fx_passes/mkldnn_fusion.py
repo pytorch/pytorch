@@ -780,9 +780,9 @@ if torch._C._has_mkldnn:
                 # CppTemplateBuffer will not be used directly but the view.
                 return True
             else:
-                # This is a special case on VIT model:
-                # QLinearPointwiseBinaryPT2E(sum) -> QLinearPointwiseBinaryPT2E(sum) -> ...
-                # That means the output of previous QLinearPointwiseBinaryPT2E is
+                # The case of QLinearPointwiseBinaryPT2E(sum) -> QLinearPointwiseBinaryPT2E(sum)
+                # is similar to CppTemplateBuffer above.
+                # The output of previous QLinearPointwiseBinaryPT2E is
                 # the input x2 of current QLinearPointwiseBinaryPT2E.
                 # Use V.graph.operations to check if _other is a view of the output
                 # of previous QLinearPointwiseBinaryPT2E (the inputs[6]).

@@ -623,15 +623,12 @@ def _register_quantized_linear_binary_lowering(
         unary_op_args = kwargs["unary_op_args"]
         unary_op_algorithm = kwargs["unary_op_algorithm"]
         if (
-            # TODO Ensure sum is safe and remove such check, i.e., x2 is not used by other operations
+            # TODO Ensure sum is safe and remove such check, i.e.,
+            # x2 is not used by other operations
             # or current qlinear sum is the last user of x2.
-            # This needs to be ensured when registering `quantized_linear_binary`.
-            binary_op_name == "sum"
-            # Support sum for a special case on VIT model when the output of
-            # previous QLinearPointwiseBinaryPT2E/CPPTemplateBuffer
-            # is the x2 of current QLinearPointwiseBinaryPT2E even if x2 is a view of
-            # the output of previous QLinearPointwiseBinaryPT2E/CPPTemplateBuffer
-            and (not _qlinear_binary_can_be_inplace(x2))
+            # This needs to be ensured when registering
+            # the lowering pattern of quantized_linear_binary.
+            binary_op_name == "sum" and (not _qlinear_binary_can_be_inplace(x2))
         ):
             binary_op_name = "add"
 
