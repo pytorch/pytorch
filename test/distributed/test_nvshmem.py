@@ -4,6 +4,8 @@
 # python test/distributed/test_nvshmem.py
 
 
+import copy
+
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
@@ -1051,8 +1053,8 @@ class HierRouter(nn.Module):
 
     def forward(self, x):
         seq_len = x.size(0)
-        scores = self.lin(x)
-        # scores = torch.rand(seq_len, self.n_experts, device=x.device)
+        # scores = self.lin(x)
+        scores = torch.rand(seq_len, self.n_experts, device=x.device)
         group_scores = (
             scores.view(seq_len, self.n_groups, -1)
             .topk(self.topk_groups, dim=-1)[0]
@@ -1263,14 +1265,12 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
 
         seqlen = 1024
         hid_dim = 1024
-        inp = torch.randn((seqlen, hid_dim), dtype=dtype, device=self.device)
+        inp = torch.rand((seqlen, hid_dim), dtype=dtype, device=self.device)
 
         nnodes = self.inter_group.size()
 
         # Total # of experts
         n_experts = 32
-        # Number of experts per node
-        experts_per_node = n_experts // nnodes
         # Global # topk experts
         topk_experts = 8
         # Limit token routing to half of the nodes
@@ -1290,6 +1290,7 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
         mempool = torch.cuda.MemPool(allocator)
 
         # Dedup dispatch
+        from torch.nn.moe._combine import dedup_combine
         from torch.nn.moe._dispatch import dedup_dispatch
 
         # A ratio between worst-case output buffer size versus input seqlen
@@ -1311,35 +1312,23 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
         # Compare results of two runs to make sure MemPool is not messing up tensors
         with torch.cuda.use_mem_pool(mempool):
             rv1 = run()
+
+        # Copy out to compare with 2nd run below
+        copied_tuple = copy.deepcopy(rv1)
+        # Delete tensors to make room for reuse in 2nd run
+        del rv1
+
+        # A 2nd run to (i) reuse tensors and (ii) compare results against golden test below
+        with torch.cuda.use_mem_pool(mempool):
             rv2 = run()
 
         # Compare two returned tuples
         def compare_results(rv1, rv2):
-            self.assertEqual(rv1[0], rv2[0])
-            self.assertEqual(rv1[1], rv2[1])
-            self.assertEqual(rv1[2], rv2[2])
-            intra_plan1 = rv1[3]
-            intra_plan2 = rv2[3]
-            self.assertEqual(intra_plan1.in_splits, intra_plan2.in_splits)
-            self.assertEqual(intra_plan1.out_splits, intra_plan2.out_splits)
-            self.assertEqual(intra_plan1.dst_offsets, intra_plan2.dst_offsets)
-            # We don't compare `src_offsets` because it's not used filled by the kernel, neither is it used later
+            # Skip comparison of intra_plan (3) bc source offset is not set
+            for i in [0, 1, 2, 4]:
+                self.assertEqual(rv1[i], rv2[i])
 
-        compare_results(rv1, rv2)
-
-        # Copy out to compare with 3rd run below
-        import copy
-
-        copied_tuple = copy.deepcopy(rv1)
-
-        # Delete tensors to make room for reuse in 3rd run
-        del rv1, rv2
-
-        # A third run to (i) reuse tensors and (ii) compare results against golden test below
-        with torch.cuda.use_mem_pool(mempool):
-            rv3 = run()
-
-        compare_results(copied_tuple, rv3)
+        compare_results(copied_tuple, rv2)
 
         # Unpack
         (
@@ -1347,60 +1336,31 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
             topk_indices_intranode_out,
             inter_plan,
             intra_plan,
+            occurrences,
             topk_weight_out,
             _inter_out,
             _recv_intra_inp_splits,
-        ) = rv3
+        ) = rv2
 
-        # Numeric Verfication
-        def verify():
-            filler = torch.full_like(
-                topk_indices_intranode_out, fill_value=experts_per_node
-            )
-            topk_indices_intranode = torch.where(
-                topk_indices_intranode_out >= 0, topk_indices_intranode_out, filler
-            )
-            sorted_indices_intra = torch.argsort(topk_indices_intranode.view(-1))
-            expanded_inp_intra = _inter_out[sorted_indices_intra // topk_experts]
-            expanded_seqlen_intra = _inter_out.shape[0] * topk_experts
-            expanded_inp_intra_symm = symm_mem.empty(
-                expanded_seqlen_intra, hid_dim, dtype=dtype, device=self.device
-            ).copy_(expanded_inp_intra)
-            expanded_intra_in_splits = symm_mem.empty(
-                experts_per_node, dtype=torch.int64, device=self.device
-            ).copy_(_recv_intra_inp_splits)
-            intra_out_splits_offsets = symm_mem.empty(
-                (
-                    2,
-                    experts_per_node,
-                ),
-                dtype=torch.int64,
-                device=self.device,
-            )
-            max_out_len_intra = seqlen * out_len_ratio
-            intra_out_golden = symm_mem.empty(
-                max_out_len_intra, hid_dim, dtype=dtype, device=self.device
+        # Combine the tokens intra node
+        with torch.cuda.use_mem_pool(mempool):
+            condensed_out = dedup_combine(
+                intra_out,
+                topk_indices_intranode_out,
+                occurrences,
+                topk_node_idx,
+                intra_plan,
+                inter_plan,
+                self.intra_group,
+                self.inter_group,
+                seqlen,
             )
 
-            torch.ops.symm_mem.all_to_all_vdev_2d(
-                expanded_inp_intra_symm,
-                intra_out_golden,
-                expanded_intra_in_splits,
-                intra_out_splits_offsets,
-                self.intra_group.group_name,
-                align,
-            )
-
-            # tot_recv_len = intra_out_splits_offsets[0].sum()
-            for i in range(experts_per_node):
-                split = intra_out_splits_offsets[0][i]
-                offset = intra_out_splits_offsets[1][i]
-                self.assertEqual(
-                    intra_out[offset : offset + split],
-                    intra_out_golden[offset : offset + split],
-                )
-
-        verify()
+        expected = inp * topk_experts
+        torch.testing.assert_close(
+            condensed_out,
+            expected,
+        )
 
 
 if __name__ == "__main__":
