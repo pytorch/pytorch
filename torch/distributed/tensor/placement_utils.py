@@ -1,6 +1,3 @@
-# mypy: allow-untyped-defs
-# Copyright (c) Meta Platforms, Inc. and affiliates
-
 import itertools
 import math
 from collections import defaultdict
@@ -15,6 +12,14 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+
+
+__all__ = [
+    "ShardOrderEntry",
+    "convert_shard_order_to_StridedShard",
+    "maybe_convert_StridedShard_to_shard_order",
+    "format_shard_order_str",
+]
 
 
 class ShardOrderEntry(NamedTuple):
