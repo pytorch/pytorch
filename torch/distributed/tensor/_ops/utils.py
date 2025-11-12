@@ -4,8 +4,7 @@ import functools
 import itertools
 import operator
 from collections.abc import Callable, Iterable, Sequence
-from typing import cast, Optional, TypeVar, Union
-from typing_extensions import ParamSpec
+from typing import cast, Optional, Union
 
 import torch
 from torch._prims_common import DimsSequenceType, DimsType
@@ -30,10 +29,6 @@ from torch.distributed.tensor.placement_types import (
 )
 
 
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
-
-
 # convenient wrapper to register sharding propagation rules
 def register_prop_rule(
     op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
@@ -55,10 +50,9 @@ def register_prop_rule(
 
 
 def register_op_strategy(
-    op, schema_info=None
-) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
-    # pyre-fixme[2]: Parameter must be annotated.
-
+    op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
+    schema_info: Optional[RuntimeSchemaInfo] = None,
+) -> Callable[[Callable[[OpSchema], StrategyType]], Callable[[OpSchema], StrategyType]]:
     # For every ATen op that accepts any args in this list,
     # the arg itself can impact the strides (and potentially the sharding strategy)
     # of the output tensor.
@@ -68,7 +62,9 @@ def register_op_strategy(
         "memory_format",
     ]
 
-    def wrapper(impl):
+    def wrapper(
+        impl: Callable[[OpSchema], StrategyType],
+    ) -> Callable[[OpSchema], StrategyType]:
         if isinstance(op, list):
             overloads = op
         else:
