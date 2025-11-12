@@ -194,6 +194,10 @@ else:
             _rank_map: Optional[torch.Tensor] = None,
             _root_mesh: Optional["DeviceMesh"] = None,
         ) -> None:
+            # no-op in OSS, logs API usage metrics in meta-internal runs
+            torch._C._log_api_usage_once(
+                "torch.distributed.device_mesh.DeviceMesh.__init__"
+            )
             if mesh is not None:
                 if _layout is not None or _rank_map is not None:
                     raise TypeError(
@@ -237,10 +241,31 @@ else:
                     f"backend_override should have the same length as the number of mesh dimensions, "
                     f"but got {len(backend_override)} and {len(self._layout)}."
                 )
+            # Internal bookkeeping for the device mesh.
+            self._layout = (
+                _layout
+                if _layout
+                else _MeshLayout(self.mesh.size(), self.mesh.stride())
+            )
+            if not self._layout.check_non_overlap():
+                raise AssertionError(
+                    "Please use a non-overlapping layout when creating a DeviceMesh."
+                )
+            # Because we still need to support slicing of flattened dim from root mesh, so we don't check stride here.
+            if self._layout.numel() != self.mesh.numel():
+                raise AssertionError(
+                    "Please use a valid layout when creating a DeviceMesh."
+                    f"The layout {self._layout} is not consistent with the mesh size {self.mesh.size()}."
+                )
+
+            # private field to pre-generate DeviceMesh's hash
+            self._flatten_rank_map = tuple(self._rank_map.tolist())
+            self._thread_id = None
+            # Initialize instance-specific flatten mapping
+            self._flatten_mapping = {}
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
-            self._thread_id = None
             if device_type != "xla":
                 # always try to create default (world) pg, even if it is not initialized
                 # already. The world pg is used for device mesh identity (rank) on each
@@ -263,15 +288,13 @@ else:
 
                 # calculate the coordinates of the current global rank on the mesh
                 rank_coords = (self.mesh == _rank).nonzero()
-                assert rank_coords.size(0) in (0, 1)
+                if rank_coords.size(0) not in (0, 1):
+                    raise AssertionError(
+                        f"rank_coords.size(0) must be 0 or 1, got {rank_coords.size(0)}"
+                    )
                 self._coordinate_on_dim: Optional[list[int]] = (
                     rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
                 )
-
-            # private field to pre-generate DeviceMesh's hash
-            self._flatten_rank_map = tuple(self._rank_map.tolist())
-            # Initialize instance-specific flatten mapping
-            self._flatten_mapping = {}
 
         @property
         def device_type(self) -> str:
@@ -619,7 +642,7 @@ else:
 
             root_mesh = self._get_root_mesh()
             root_to_flatten_mapping = root_mesh._flatten_mapping
-            if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping.keys():
+            if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping:
                 dim_group_name = root_to_flatten_mapping[
                     mesh_dim  # type: ignore[index]
                 ]._dim_group_names[0]
@@ -630,7 +653,10 @@ else:
                     if isinstance(mesh_dim, str)
                     else mesh_dim
                 )
-                assert isinstance(mesh_dim, int)
+                if not isinstance(mesh_dim, int):
+                    raise AssertionError(
+                        f"mesh_dim must be an int, got {type(mesh_dim)}"
+                    )
                 return not_none(_resolve_process_group(self._dim_group_names[mesh_dim]))
 
         def get_all_groups(self) -> list[ProcessGroup]:
@@ -737,9 +763,8 @@ else:
             root_mesh = self._get_root_mesh()
             child_mesh_dim_names = self._mesh_dim_names
             if root_mesh and child_mesh_dim_names:
-                assert len(child_mesh_dim_names) == 1, (
-                    "The submesh can only be a 1D mesh."
-                )
+                if len(child_mesh_dim_names) != 1:
+                    raise AssertionError("The submesh can only be a 1D mesh.")
                 child_mesh_dim_name = child_mesh_dim_names[0]
                 return root_mesh._get_mesh_dim_by_name(child_mesh_dim_name)
             return None
@@ -1018,9 +1043,10 @@ else:
                 mesh_dim = 0
 
             mesh_dim_group = not_none(self.get_group(mesh_dim))
-            assert isinstance(mesh_dim_group, ProcessGroup), (
-                "We expect ProcessGroup before calling `get_rank`!"
-            )
+            if not isinstance(mesh_dim_group, ProcessGroup):
+                raise AssertionError(
+                    "We expect ProcessGroup before calling `get_rank`!"
+                )
             return not_none(get_rank(mesh_dim_group))
 
         def get_coordinate(self) -> Optional[list[int]]:
