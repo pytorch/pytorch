@@ -354,11 +354,11 @@ def test_linalg(device="cpu") -> None:
 
 
 def test_sdpa(device="cpu", dtype=torch.float16) -> None:
-    """ Regression test for https://github.com/pytorch/pytorch/issues/167602
+    """Regression test for https://github.com/pytorch/pytorch/issues/167602
     Without nvrtc_builtins on CuDNN-9.13 on CUDA-13 fails with ` No valid execution plans built.`
     """
     print(f"Testing SDPA on {device} using type {dtype}")
-    k,q,v=torch.rand(3, 1, 16, 77, 64, dtype=dtype, device=device).unbind(0);
+    k, q, v = torch.rand(3, 1, 16, 77, 64, dtype=dtype, device=device).unbind(0)
     attn = torch.rand(1, 1, 77, 77, dtype=dtype, device=device)
     rc = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn)
     assert rc.isnan().any().item() is False
