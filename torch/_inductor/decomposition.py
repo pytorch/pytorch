@@ -142,7 +142,7 @@ def register_decomposition(
 
 
 def maybe_disable_decompositions(
-    ops: list[_GenericOperator], enabled: Callable[(), bool]
+    ops: list[_GenericOperator], enabled: Callable[[], bool]
 ):
     orig = {op: decompositions[op] for op in ops}
     remove_decompositions(decompositions, ops)
