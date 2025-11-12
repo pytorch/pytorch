@@ -926,14 +926,15 @@ class DeviceCachingAllocator {
           (release_cached_blocks() && alloc_block(params, true));
     }
     if (!block_found) {
-      const auto& raw_device = c10::xpu::get_raw_device(device);
-      const auto device_total =
-          raw_device.get_info<sycl::info::device::global_mem_size>();
+      c10::xpu::DeviceProp device_prop;
+      c10::xpu::get_device_properties(&device_prop, device);
+      auto device_total = device_prop.global_mem_size;
       // Estimate the available device memory when the SYCL runtime does not
       // support the corresponding aspect (ext_intel_free_memory).
-      size_t device_free = device_total -
+      size_t device_free = device_prop.global_mem_size -
           stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
               .current;
+      auto& raw_device = c10::xpu::get_raw_device(device);
       // TODO: Remove the aspect check once the SYCL runtime bug is fixed on
       // affected devices.
       if (raw_device.has(sycl::aspect::ext_intel_free_memory)) {
@@ -1051,37 +1052,21 @@ class DeviceCachingAllocator {
     }
   }
 
-  std::pair<size_t, size_t> getMemoryInfo() {
-    const auto& device = c10::xpu::get_raw_device(device_index);
-    const size_t total = device.get_info<sycl::info::device::global_mem_size>();
-    TORCH_CHECK(
-        device.has(sycl::aspect::ext_intel_free_memory),
-        "The device (",
-        device.get_info<sycl::info::device::name>(),
-        ") doesn't support querying the available free memory. ",
-        "You can file an issue at https://github.com/pytorch/pytorch/issues ",
-        "to help us prioritize its implementation.");
-    const size_t free =
-        device.get_info<sycl::ext::intel::info::device::free_memory>();
-    return {free, total};
-  }
-
   double getMemoryFraction() {
     if (!set_fraction) {
       return 1.0;
     }
 
-    const auto device_total =
-        xpu::get_raw_device(device_index)
-            .get_info<sycl::info::device::global_mem_size>();
+    c10::xpu::DeviceProp device_prop;
+    c10::xpu::get_device_properties(&device_prop, device_index);
     return static_cast<double>(allowed_memory_maximum) /
-        static_cast<double>(device_total);
+        static_cast<double>(device_prop.global_mem_size);
   }
 
   void setMemoryFraction(double fraction) {
-    const auto device_total =
-        xpu::get_raw_device(device_index)
-            .get_info<sycl::info::device::global_mem_size>();
+    c10::xpu::DeviceProp device_prop;
+    c10::xpu::get_device_properties(&device_prop, device_index);
+    auto device_total = device_prop.global_mem_size;
     allowed_memory_maximum = static_cast<size_t>(fraction * device_total);
     set_fraction = true;
   }
@@ -1253,11 +1238,6 @@ class XPUAllocator : public DeviceAllocator {
     assertValidDevice(dev_to_access);
     c10::xpu::get_raw_device(dev).ext_oneapi_enable_peer_access(
         c10::xpu::get_raw_device(dev_to_access));
-  }
-
-  std::pair<size_t, size_t> getMemoryInfo(DeviceIndex device) override {
-    assertValidDevice(device);
-    return device_allocators[device]->getMemoryInfo();
   }
 
   double getMemoryFraction(DeviceIndex device) {

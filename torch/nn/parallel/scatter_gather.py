@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from collections.abc import Sequence
-from typing import Any, Optional, overload, TypeVar, Union
+from typing import Any, overload, TypeVar, Union
 from typing_extensions import deprecated
 
 import torch
@@ -93,7 +93,7 @@ def scatter(inputs, target_gpus, dim=0):
 
 def scatter_kwargs(
     inputs: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]],
+    kwargs: dict[str, Any] | None,
     target_gpus: Sequence[Union[int, torch.device]],
     dim: int = 0,
 ) -> tuple[tuple[Any, ...], tuple[dict[str, Any], ...]]:
