@@ -25,8 +25,7 @@ void kai_pack_int4_rhs(
 size_t kai_pack_rhs_int4_size(
     const int64_t n,
     const int64_t k,
-    const int64_t bl,
-    at::ScalarType tensor_dtype = at::kFloat);
+    const int64_t bl);
 
 /**
  * @brief Run 2 operations ( Input quantize and pack -> 4 bit Matmul )

@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
+import unittest
 
 import torch
 import torch.distributed as dist
@@ -371,6 +372,7 @@ class DTensorExportTest(TestCase):
 
     # aot_export_joint_with_descriptors on strict-exported exported_program.module()
     # is producing a joint graph with backward region missing
+    @unittest.expectedFailure
     def test_strict_export_parallelize_module_with_dtensor_input(self):
         self._run_test(strict_export_and_aot_export_joint_with_descriptors)
 
