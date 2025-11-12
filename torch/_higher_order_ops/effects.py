@@ -6,7 +6,7 @@ from weakref import WeakKeyDictionary
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.print import print
+from torch._higher_order_ops.print import print as hop_print
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._ops import HigherOrderOperator
@@ -29,7 +29,7 @@ SIDE_EFFECTS = WeakKeyDictionary[OpType, _EffectType](
     [
         (torch.ops.aten._print.default, _EffectType.ORDERED),
         (call_torchbind, _EffectType.ORDERED),
-        (print, _EffectType.ORDERED),
+        (hop_print, _EffectType.ORDERED),
     ]
 )
 
@@ -212,7 +212,7 @@ def _get_schema(op, args) -> torch.FunctionSchema:
         return op._schema
     elif op == call_torchbind:
         return getattr(args[0], args[1]).schema
-    elif op == print:
+    elif op == hop_print:
         return op.gen_schema(args)
     else:
         raise RuntimeError(f"Unable to get schema for op {op}")
