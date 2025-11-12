@@ -306,6 +306,26 @@ inline uint32_t get_num_threads() {
   return num_threads;
 }
 
+// We expect this to be the stable version of the empty op that takes in
+// device and dtype parameters. The empty op creates a tensor with uninitialized
+// values of the specified size, dtype, and device.
+inline torch::stable::Tensor empty(
+    torch::headeronly::IntHeaderOnlyArrayRef size,
+    std::optional<c10::ScalarType> dtype = std::nullopt,
+    std::optional<torch::stable::Device> device = std::nullopt) {
+  const auto num_args = 6;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(size),
+      torch::stable::detail::from(dtype),
+      torch::stable::detail::from(std::nullopt),
+      torch::stable::detail::from(device),
+      torch::stable::detail::from(std::nullopt),
+      torch::stable::detail::from(std::nullopt)};
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::empty", "memory_format", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
 #endif
 
 HIDDEN_NAMESPACE_END(torch, stable)

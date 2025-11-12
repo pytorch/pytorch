@@ -824,3 +824,32 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("test_parallel_for", &boxed_test_parallel_for);
   m.impl("test_get_num_threads", &boxed_test_get_num_threads);
 }
+
+Tensor my_empty(
+    torch::headeronly::HeaderOnlyArrayRef<int64_t> size,
+    std::optional<torch::headeronly::ScalarType> dtype,
+    std::optional<torch::stable::Device> device) {
+  return empty(size, dtype, device);
+}
+
+void boxed_my_empty(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  Tensor res = my_empty(
+      torch::stable::detail::to<std::vector<int64_t>>(stack[0]),
+      torch::stable::detail::to<std::optional<torch::headeronly::ScalarType>>(
+          stack[1]),
+      torch::stable::detail::to<std::optional<torch::stable::Device>>(
+          stack[2]));
+  stack[0] = torch::stable::detail::from(res);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def(
+      "my_empty(int[] size, ScalarType? dtype=None, Device? device=None) -> Tensor");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("my_empty", &boxed_my_empty);
+}

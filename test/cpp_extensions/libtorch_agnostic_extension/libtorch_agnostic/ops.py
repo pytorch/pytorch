@@ -487,3 +487,17 @@ def test_get_num_threads() -> int:
     Returns: int - the number of threads for the parallel backend
     """
     return torch.ops.libtorch_agnostic.test_get_num_threads.default()
+
+
+def my_empty(size, dtype=None, device=None) -> Tensor:
+    """
+    Creates an empty tensor with the specified size, dtype, and device.
+
+    Args:
+        size: list[int] - size of the tensor to create
+        dtype: ScalarType or None - data type of the tensor
+        device: Device or None - device on which to create the tensor
+
+    Returns: Tensor - an uninitialized tensor with the specified properties
+    """
+    return torch.ops.libtorch_agnostic.my_empty.default(size, dtype, device)
