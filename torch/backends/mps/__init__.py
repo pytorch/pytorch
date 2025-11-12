@@ -1,5 +1,5 @@
 from functools import lru_cache as _lru_cache
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 
 import torch
 from torch.library import Library as _Library

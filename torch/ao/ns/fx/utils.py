@@ -219,32 +219,7 @@ def get_node_input_qparams(
         module_obj = getattr_from_fqn(gm, prev_node.target)
         if isinstance(
             module_obj,
-            (
-                nnq.Linear,
-                nnq.Conv1d,
-                nnq.Conv2d,
-                nniq.ConvReLU2d,
-                nnq.Conv3d,
-                nnq.BatchNorm2d,
-                nnq.BatchNorm3d,
-                nnq.ConvTranspose1d,
-                nnq.ConvTranspose2d,
-                nnq.ELU,
-                nnq.GroupNorm,
-                nnq.InstanceNorm1d,
-                nnq.InstanceNorm2d,
-                nnq.InstanceNorm3d,
-                nnq.LayerNorm,
-                nnq.Hardswish,
-                nnq.LeakyReLU,
-                nnq.ReLU6,
-                nniq.BNReLU2d,
-                nniq.BNReLU3d,
-                nniq.ConvReLU1d,
-                nniq.ConvReLU2d,
-                nniq.ConvReLU3d,
-                nniq.LinearReLU,
-            ),
+            (nnq.Linear, nnq.Conv1d, nnq.Conv2d, nniq.ConvReLU2d, nnq.Conv3d, nnq.BatchNorm2d, nnq.BatchNorm3d, nnq.ConvTranspose1d, nnq.ConvTranspose2d, nnq.ELU, nnq.GroupNorm, nnq.InstanceNorm1d, nnq.InstanceNorm2d, nnq.InstanceNorm3d, nnq.LayerNorm, nnq.Hardswish, nnq.LeakyReLU, nnq.ReLU6, nniq.BNReLU2d, nniq.BNReLU3d, nniq.ConvReLU1d, nniq.ConvReLU3d, nniq.LinearReLU),
         ):
             return (module_obj.scale, module_obj.zero_point)  # type: ignore[return-value]
 

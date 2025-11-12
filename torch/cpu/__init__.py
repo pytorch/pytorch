@@ -5,7 +5,7 @@ to facilitate writing device-agnostic code.
 """
 
 from contextlib import AbstractContextManager
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import torch
 
