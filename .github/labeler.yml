@@ -165,3 +165,16 @@
 - torch/_inductor/kernel/mm.py
 - test/inductor/test_max_autotune.py
 - third_party/fbgemm
+
+"ciflow/mps":
+- aten/src/ATen/mps/**
+- aten/src/ATen/native/mps/**
+- torch/_inductor/codegen/mps.py
+- test/test_mps.py
+- test/inductor/test_mps_basic.py
+
+"ciflow/h100-symm-mem":
+- torch/csrc/distributed/c10d/symm_mem/**
+- torch/distributed/_symmetric_memory/**
+- test/distributed/**/*mem*
+- test/distributed/**/*mem*/**
