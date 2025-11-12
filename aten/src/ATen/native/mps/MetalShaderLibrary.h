@@ -159,7 +159,7 @@ class MetalShaderLibrary {
   std::pair<MTLComputePipelineState_t, MTLFunction_t> getLibraryPipelineState(
       MTLLibrary_t lib,
       const std::string& fname);
-  MTLLibrary_t compileLibrary(const std::string& src);
+  MTLLibrary_t compileLibrary(const std::string& src) const;
   std::string shaderSource;
   unsigned nparams;
   MTLCompileOptions* compile_options;

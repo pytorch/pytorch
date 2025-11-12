@@ -846,10 +846,16 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
     default:
       TORCH_INTERNAL_ASSERT(false, "Unsupported number of paramaters ", nparams);
   }
+
+  {
+    std::lock_guard library_guard(library_mutex_);
+    library_ = lib;
+  }
+
   return lib;
 }
 
-id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
+id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) const {
   static auto fast_math = []() {
     auto const val = c10::utils::get_env("PYTORCH_MPS_FAST_MATH");
     return val.has_value() && val != "0";
@@ -870,17 +876,16 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
     }
   }
 
-  std::lock_guard guard(library_mutex_);
   const auto str = [NSString stringWithCString:src.c_str() encoding:NSASCIIStringEncoding];
   auto device = MPSDevice::getInstance()->device();
-  library_ = [device newLibraryWithSource:str options:options error:&error];
-  if (library_ == nil) {
+  id<MTLLibrary> lib = [device newLibraryWithSource:str options:options error:&error];
+  if (lib == nil) {
     if ([error domain] == MTLLibraryErrorDomain && [error code] == MTLLibraryErrorCompileFailure) {
       throw c10::SyntaxError([[error localizedDescription] UTF8String]);
     }
     TORCH_CHECK(false, "Failed to create metal library, error: ", [[error description] UTF8String]);
   }
-  return library_;
+  return lib;
 }
 
 std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getLibraryPipelineState(
@@ -904,10 +909,13 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
 }
 
 std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
-  std::lock_guard guard(library_mutex_);
-  if (C10_UNLIKELY(!library_ && nparams > 0)) {
-    throw std::runtime_error("Library must be initialized first");
+  {
+    std::lock_guard guard(library_mutex_);
+    if (C10_UNLIKELY(!library_ && nparams > 0)) {
+      throw std::runtime_error("Library must be initialized first");
+    }
   }
+
   std::vector<std::string> rc;
   @autoreleasepool {
     NSArray<NSString*>* names = [getLibrary() functionNames];
