@@ -1,6 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import copy
 import inspect
 import warnings
 from collections.abc import Callable, Sequence
@@ -100,7 +101,9 @@ class _ToTorchTensor(torch.autograd.Function):
             tensor_stride == dtensor_meta.stride
             and grad_placements == dtensor_spec.placements
         ):
-            grad_spec = dtensor_spec
+            # Avoid actual sharing of specs in case they're modified during (e.g.)
+            # sharding propagation.
+            grad_spec = copy.copy(dtensor_spec)
         else:
             grad_spec = DTensorSpec(
                 mesh,
