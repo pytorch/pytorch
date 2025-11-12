@@ -27,7 +27,6 @@ from torch._guards import detect_fake_mode
 from torch._prims_common import CUDARngStateHelper
 from torch.fx.experimental.proxy_tensor import (
     _proxy_tensor_disable_update_tensor_tracker,
-    get_proxy_mode,
     maybe_disable_thunkify,
     maybe_enable_thunkify,
 )
@@ -296,10 +295,6 @@ def create_joint(
             (outs, tangent_mask), (outs_descs, _) = call_and_expect_output_descs(
                 fn, primals
             )
-        mode = get_proxy_mode()
-        assert mode is not None
-        for node in mode.tracer.graph.nodes:
-            node.meta["partitioner_tag"] = "is_forward"
 
         # TODO: I think this hook can also be eliminated now
         if joint_fn_handle and joint_fn_handle.post_forward:
