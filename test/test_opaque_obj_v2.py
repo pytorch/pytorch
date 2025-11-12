@@ -1,15 +1,22 @@
 # Owner(s): ["module: custom-operators"]
 
 import random
+from contextlib import ExitStack
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import AotEagerAndRecordGraphs
-from torch._functorch.aot_autograd import aot_export_module
+from torch._functorch.aot_autograd import (
+    aot_compile_joint_with_descriptors,
+    aot_export_joint_with_descriptors,
+    aot_export_module,
+)
 from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import register_opaque_type
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -421,6 +428,73 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             RuntimeError, "Attempted to access attributes/methods on an OpaqueObject"
         ):
             torch.compile(bar)(counter, torch.ones(2, 3))
+
+    def test_export_joint(self):
+        class Moo(torch.nn.Module):
+            def forward(self, x, y):
+                return x * y
+
+        register_opaque_type(Moo, "_TestOpaqueObject_Moo")
+
+        torch.library.define(
+            "_TestOpaqueObject::module_mul",
+            "(_TestOpaqueObject_Moo a, Tensor b, SymInt c) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::module_mul", "CompositeExplicitAutograd", lib=self.lib
+        )
+        def module_mul_impl(m: Moo, a: torch.Tensor, b: int) -> torch.Tensor:
+            assert isinstance(m, Moo)
+            return m(a, b)
+
+        @torch.library.register_fake("_TestOpaqueObject::module_mul", lib=self.lib)
+        def module_mul_fake(m: Moo, a: torch.Tensor, b: int) -> torch.Tensor:
+            return torch.empty_like(a)
+
+        def module_mul_setup_context(ctx, inputs, output):
+            m, a, b = inputs
+            ctx.b = b
+
+        def module_mul_backward(ctx, grad) -> torch.Tensor:
+            return None, grad * ctx.b, None
+
+        torch.library.register_autograd(
+            "_TestOpaqueObject::module_mul",
+            module_mul_backward,
+            setup_context=module_mul_setup_context,
+            lib=self.lib,
+        )
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.moo = Moo()
+
+            def forward(self, x, y):
+                b = y.item()
+                return torch.ops._TestOpaqueObject.module_mul(self.moo, x, b)
+
+        inp = (torch.randn(3, requires_grad=True), torch.tensor(4))
+        with ExitStack() as stack:
+            with FakeTensorMode(shape_env=ShapeEnv()):
+                joint = aot_export_joint_with_descriptors(stack, M(), inp)
+                self.assertExpectedInline(
+                    joint.graph_module.code.strip(),
+                    """\
+def forward(self, primals, tangents):
+    primals_1, primals_2, tangents_1, = fx_pytree.tree_flatten_spec([primals, tangents], self._in_spec)
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(primals_2);  primals_2 = None
+    _opaque_obj0 = self._opaque_obj0
+    module_mul = torch.ops._TestOpaqueObject.module_mul.default(_opaque_obj0, primals_1, _local_scalar_dense);  _opaque_obj0 = primals_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, _local_scalar_dense);  tangents_1 = _local_scalar_dense = None
+    return pytree.tree_unflatten([module_mul, mul_1, None], self._out_spec)""",  # noqa: B950
+                )
+                compiled_fn = aot_compile_joint_with_descriptors(joint)
+
+        self.assertEqual(compiled_fn(*inp), M()(*inp))
 
 
 instantiate_parametrized_tests(TestOpaqueObject)
