@@ -1140,6 +1140,10 @@ struct IValueOrDTensorSpec {
   }
 };
 
+// This corresponds to the Python OpSchema class in that it is the key
+// for the (native version of the) sharding propagator cache. It is
+// missing essentially everything else from the Python OpSchema
+// though.
 class NativeOpSchema {
  public:
   NativeOpSchema(
@@ -1187,6 +1191,8 @@ class NativeOpSchema {
   // make an algorithm change to be less brittle, such as including
   // None defaults for Tensor arguments in the comparison.
   std::size_t args_schema_len_;
+  // There is no particular justification for the choice of 8
+  // here. Feel free to change it.
   c10::SmallVector<IValueOrDTensorSpec, 8> comparison_key_;
 };
 
@@ -1399,10 +1405,10 @@ static bool get_local_results(
           reinterpret_cast<THPDtype*>(dtype.ptr())->scalar_type;
       if (py::cast<py::tuple>(sizes).empty()) {
         // scalar tensor
-        return torch::zeros({}, scalar_type);
+        return at::zeros({}, scalar_type);
       } else {
         // non-scalar tensor
-        return torch::empty({0}, scalar_type);
+        return at::empty({0}, scalar_type);
       }
     };
     auto handle_sequence = [&default_tensor, &op, stack](auto sequence) {
@@ -2016,7 +2022,7 @@ static /*DTensorSpec*/ py::object try_replicate_spec_for_scalar_tensor(
 
   // scalar tensor can be safely treated as replicated.
   const auto num_placements =
-      py::cast<ssize_t>(compute_mesh.attr(dtensor_interned_strings.ndim));
+      py::cast<Py_ssize_t>(compute_mesh.attr(dtensor_interned_strings.ndim));
   py::tuple placements_tuple(num_placements);
   py::object replicate = get_replicate_class()();
   for (const auto idx : c10::irange(num_placements)) {
@@ -2095,8 +2101,7 @@ create_native_op_schema(
                          .attr(dtensor_interned_strings.needs_pytree)
                          .ptr())) {
     // Punting on pytree flattening in the fast path on IValues for
-    // now since only a minority of ops need it. REVIEW: should we
-    // TORCH_WARN on this?
+    // now since only a minority of ops need it.
     return std::nullopt;
   }
 
