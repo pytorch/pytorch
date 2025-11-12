@@ -473,9 +473,7 @@ class CustomOpDef:
         return fn
 
     def register_effect(self, effect: Optional[EffectType]) -> None:
-        from torch._higher_order_ops.effects import _register_effectful_op
-
-        _register_effectful_op(self._qualname, effect)
+        self._lib._register_effectful_op(self._qualname, effect)
 
     def register_torch_dispatch(
         self, torch_dispatch_class: Any, fn: Optional[Callable] = None, /
