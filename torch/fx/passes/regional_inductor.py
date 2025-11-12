@@ -112,7 +112,7 @@ def _compile_submod(gm, prefix):
     return gm
 
 
-def _needs_inductor_compile(node):
+def _needs_inductor_compile(node: torch.fx.Node):
     return (
         node.op not in ("placeholder", "output")
         and hasattr(node, "meta")
