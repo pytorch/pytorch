@@ -22,7 +22,6 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import _fx_map_arg as map_arg, _NodeIter
 from torch.utils._dtype_abbrs import dtype_abbrs
-
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
 from .immutable_collections import immutable_dict
@@ -297,7 +296,9 @@ class _ParsedStackTrace:
 
 
 # get File:lineno code from stack_trace
-def _parse_stack_trace(stack_trace: str):
+def _parse_stack_trace(
+    stack_trace: str, filter_fn: Optional[Callable[[str, str, str], bool]] = None
+):
     if stack_trace is None:
         return None
     pattern = re.compile(r"^File \"(.+)\", line (\d+), in (.+)$")
@@ -314,6 +315,8 @@ def _parse_stack_trace(stack_trace: str):
             name = matches.group(3)
             # next line should be the code
             code = lines[idx + 1].strip()
+            if filter_fn and not filter_fn(file, name, code):
+                continue
             return _ParsedStackTrace(file, lineno, name, code)
     return None
 
