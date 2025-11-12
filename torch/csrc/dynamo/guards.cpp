@@ -7843,9 +7843,10 @@ PyObject* torch_c_dynamo_guards_init() {
 #endif
 
   // Expose the TLS setter for mode visibility tracking
-  py_m.def("set_is_in_mode_without_ignore_compile_internals",
-           &set_is_in_mode_without_ignore_compile_internals,
-           "Set the thread-local cache for whether we're in a mode with ignore_compile_internals=False");
+  py_m.def(
+      "set_is_in_mode_without_ignore_compile_internals",
+      &set_is_in_mode_without_ignore_compile_internals,
+      "Set the thread-local cache for whether we're in a mode with ignore_compile_internals=False");
 
   return m;
 }

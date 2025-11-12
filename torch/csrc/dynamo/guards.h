@@ -13,10 +13,10 @@ PyObject* torch_c_dynamo_guards_init();
 void* convert_to_root_guard_manager(py::object root);
 bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals);
 
-// Thread-local cache for whether we're in a mode with ignore_compile_internals=False.
-// This is updated from Python when modes are entered/exited, avoiding the need
-// to call into Python during LocalState construction (which can cause issues
-// in dynamo compilation paths).
+// Thread-local cache for whether we're in a mode with
+// ignore_compile_internals=False. This is updated from Python when modes are
+// entered/exited, avoiding the need to call into Python during LocalState
+// construction (which can cause issues in dynamo compilation paths).
 extern thread_local bool tls_is_in_mode_without_ignore_compile_internals;
 
 // Called from Python to update the TLS cache when modes are entered/exited
