@@ -11,9 +11,9 @@ import math
 import operator
 import os
 import textwrap
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE
@@ -1929,6 +1929,7 @@ class TritonKernelOverrides(TritonOverrides):
         name: str,
         reduction_type: str,
         value: CSEVariable,
+        extra_meta: dict[str, Any],
     ) -> None:
         raise NotImplementedError
 
@@ -3114,7 +3115,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
             self.cse.generate(launch_buffer, launch_if_last_load, dtype=torch.int32)
 
-    def partial_accumulate(self, name: str, reduction_type, val):
+    def partial_accumulate(
+        self, name: str, reduction_type, val, extra_meta: dict[str, Any]
+    ):
         self.saved_partial_accumulate.append(
             PartialAccumulate(name, reduction_type, val)
         )
@@ -4568,14 +4571,22 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
                 accumname2var[name] = self.cse.namedvar(name, dtype=torch.float)
             self.body.writeline("split_size = min(RSPLIT_SIZE, xnumel - xoffset)")
-            self.body.writeline("for suboff in range(0, split_size, XBLOCK):")
+            self.body.writeline(
+                "for _ in tl.range(0, split_size, XBLOCK, num_stages=NUM_STAGES):"
+            )
             with self.body.indent(offset=1):
+                # generate xmask if it's not constant
+                if not self._has_constant_xmask():
+                    entry = self.range_trees[0]
+                    assert entry.prefix == "x"
+                    x = entry.prefix
+                    self.body.writeline(f"{x}mask = {entry.name} < {x}numel")
+                self.body.splice(self.indexing_code)
                 self.body.writelines(
                     [
-                        "x0 = xindex + suboff",
+                        "xindex += XBLOCK",
                     ]
                 )
-                self.body.splice(self.indexing_code)
                 self.body.splice(self.loads)
                 self.body.splice(self.compute)
                 self.body.splice(self.stores)
@@ -4833,7 +4844,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             result.writeline("args = get_args()")
             result.writeline(
-                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40)"
+                f"ms = benchmarker.benchmark(lambda: call(args), device={V.graph.get_current_device_or_throw().type}, rep=40)"  # noqa: B950 line too long
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -5033,6 +5044,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         if self.mix_order_reduction:
             add_constexpr_arg("RSPLIT_SIZE")
+            add_constexpr_arg("NUM_STAGES")
 
         triton_meta_signature = signature_to_meta(
             signature, size_dtype=self.index_dtype, argdefs=argdefs
@@ -5367,7 +5379,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry):
         line = f"{entry.name} = {self.kexpr(self.rename_indexing(entry.expr))}"
-        if entry.root.is_loop:
+
+        # mix order reduction introduces an extra loop across the x
+        # dimension
+        if entry.root.is_loop or (self.mix_order_reduction and entry.prefix == "x"):
             self.indexing_code.writeline(line)
         else:
             # lift non-reduction stores outside loop
@@ -5578,9 +5593,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 ]
             )
         if self._has_constant_mask(entry):
-            sizes = self.dense_size_str()
-            code.writeline(f"{x}mask = tl.full({sizes}, True, tl.int1)")
-        else:
+            code.writeline(self.create_constant_mask(entry))
+        elif not (x == "x" and self.mix_order_reduction):
+            # mix order reduction should generate xmask inside the loop
             code.writeline(f"{x}mask = {entry.name} < {x}numel")
 
 
@@ -5789,18 +5804,21 @@ class TritonScheduling(SIMDScheduling):
                 # skip benchmarking the kernel if there are register spills
                 ms = float("inf")
             else:
+                device = V.graph.get_current_device_or_throw()
                 # We have to clone the inplace updated arguments to avoid earlier calls
                 # generating out of range indices for later calls.
-                ms = benchmarker.benchmark_gpu(
-                    lambda: call(wrapped_jit_function.clone_args(*args)[0])
+                ms = benchmarker.benchmark(
+                    lambda: call(wrapped_jit_function.clone_args(*args)[0]),
+                    device=device,
                 )
                 # overhead of cloning args gives bias for fusing the kernel
                 # in the case of mutating/in-placeable second fusion
                 # TODO - would be better as a hook in triton do_bench that reset
                 # the input values between benchmarking
                 if len(wrapped_jit_function.mutated_arg_names) > 0:
-                    ms = ms - benchmarker.benchmark_gpu(
-                        lambda: wrapped_jit_function.clone_args(*args)
+                    ms = ms - benchmarker.benchmark(
+                        lambda: wrapped_jit_function.clone_args(*args),
+                        device=str(device),
                     )
 
             log.debug(
@@ -5969,13 +5987,16 @@ class TritonScheduling(SIMDScheduling):
                 # skip benchmarking the kernel if there are register spills
                 ms = ms_clone = float("inf")
             else:
+                device = V.graph.get_current_device_or_throw()
                 # We have to clone the inplace updated arguments to avoid earlier calls
                 # generating out of range indices for later calls.
-                ms = benchmarker.benchmark_gpu(
-                    lambda: call(wrapped_jit_function.clone_args(*args)[0])
+                ms = benchmarker.benchmark(
+                    lambda: call(wrapped_jit_function.clone_args(*args)[0]),
+                    device=device,
                 )
-                ms_clone = benchmarker.benchmark_gpu(
-                    lambda: wrapped_jit_function.clone_args(*args)[0]
+                ms_clone = benchmarker.benchmark(
+                    lambda: wrapped_jit_function.clone_args(*args)[0],
+                    device=device,
                 )
 
             log.debug(

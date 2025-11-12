@@ -150,7 +150,9 @@ class Sequential(Module):
             delattr(self, key)
         # To preserve numbering
         str_indices = [str(i) for i in range(len(self._modules))]
-        self._modules = OrderedDict(list(zip(str_indices, self._modules.values())))
+        self._modules = OrderedDict(
+            zip(str_indices, self._modules.values(), strict=True)
+        )
 
     @_copy_to_script_wrapper
     def __len__(self) -> int:
@@ -395,7 +397,9 @@ class ModuleList(Module):
             delattr(self, self._get_abs_string_index(idx))
         # To preserve numbering, self._modules is being reconstructed with modules after deletion
         str_indices = [str(i) for i in range(len(self._modules))]
-        self._modules = OrderedDict(list(zip(str_indices, self._modules.values())))
+        self._modules = OrderedDict(
+            zip(str_indices, self._modules.values(), strict=True)
+        )
 
     @_copy_to_script_wrapper
     def __len__(self) -> int:
@@ -432,7 +436,9 @@ class ModuleList(Module):
 
         lines = []
         main_str = self._get_name() + "("
-        for (start_id, end_id), b in zip(start_end_indices, repeated_blocks):
+        for (start_id, end_id), b in zip(
+            start_end_indices, repeated_blocks, strict=True
+        ):
             local_repr = f"({start_id}): {b}"  # default repr
 
             if start_id != end_id:
@@ -513,8 +519,7 @@ class ModuleDict(Module):
       :meth:`~torch.nn.ModuleDict.update`).
 
     Note that :meth:`~torch.nn.ModuleDict.update` with other unordered mapping
-    types (e.g., Python's plain ``dict`` before Python version 3.6) does not
-    preserve the order of the merged mapping.
+    types does not preserve the order of the merged mapping.
 
     Args:
         modules (iterable, optional): a mapping (dictionary) of (string: module)
