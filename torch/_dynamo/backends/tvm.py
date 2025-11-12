@@ -27,6 +27,7 @@ import os
 import sys
 import tempfile
 from collections.abc import Callable
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Optional
 
@@ -211,7 +212,7 @@ def has_tvm() -> bool:
 @functools.cache
 def llvm_target() -> str:
     if sys.platform == "linux":
-        cpuinfo = open("/proc/cpuinfo").read()
+        cpuinfo = Path("/proc/cpuinfo").read_text()
         if "avx512" in cpuinfo:
             return "llvm -mcpu=skylake-avx512"
         elif "avx2" in cpuinfo:

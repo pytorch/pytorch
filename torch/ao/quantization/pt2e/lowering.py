@@ -38,7 +38,7 @@ def lower_pt2e_quantized_to_x86(
         aten = torch.ops.aten
         g = m.graph
         for node in g.nodes:
-            if node.target == aten.t.default:
+            if node.target is aten.t.default:
                 with g.inserting_before(node):
                     x = node.args[0]
                     dims = [1, 0]

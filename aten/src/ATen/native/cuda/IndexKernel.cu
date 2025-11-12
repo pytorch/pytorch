@@ -5,7 +5,6 @@
 #include <array>
 #include <type_traits>
 #include <ATen/core/TensorBase.h>
-#include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -74,7 +73,6 @@ void gpu_index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, co
 
   char* const out_ptr = static_cast<char*>(iter.data_ptr(0));
   char* const in_ptr = static_cast<char*>(iter.data_ptr(1));
-
   if (is_gather_like && num_indices==1) {
       const size_t element_size = iter.element_size(0);
       constexpr size_t alignment = 16;
@@ -84,16 +82,9 @@ void gpu_index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, co
         auto ind_dim_size = index_size[0];
         auto inp_stride_bytes = index_stride[0];
         auto out_stride_bytes = iter.strides(0)[1];
-        // avoid grid overflow in the fast kernel
-        const int64_t vec_chunks = ceil_div(slice_size, alignment);
-        const int64_t blocks_per_slice_upper = ceil_div(vec_chunks, (int64_t)launch_size_nd);
-        const int max_grid_y = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
-        // if it's an eligible grid we use the fast path, otherwise default to slower path
-        if (blocks_per_slice_upper <= max_grid_y) {
-          at::native::vectorized_gather_kernel_launch<alignment, int64_t>(out_ptr, in_ptr, (int64_t*)iter.data_ptr(2), num_ind,
-          slice_size, ind_dim_size, inp_stride_bytes, out_stride_bytes, /*allow_neg_indices*/true);
-          return;
-        }
+        at::native::vectorized_gather_kernel_launch<alignment, int64_t>(out_ptr, in_ptr, (int64_t*)iter.data_ptr(2), num_ind,
+        slice_size, ind_dim_size, inp_stride_bytes, out_stride_bytes, /*allow_neg_indices*/true);
+        return;
     }
   }
 
