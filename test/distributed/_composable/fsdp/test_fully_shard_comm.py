@@ -446,8 +446,10 @@ class TestFullyShardCommunication(FSDPTest):
         model = Transformer(model_args)
         ref_model = copy.deepcopy(model).to(device_type)
         ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
-        mesh_dim_names = ("outer", ) if len(mesh_shape) == 1 else ("outer", "inner")
-        mesh = init_device_mesh(device_type.type, mesh_shape, mesh_dim_names=mesh_dim_names)
+        mesh_dim_names = ("outer",) if len(mesh_shape) == 1 else ("outer", "inner")
+        mesh = init_device_mesh(
+            device_type.type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
         for module in model.modules():
             if isinstance(module, TransformerBlock):
                 fully_shard(module, reshard_after_forward=False, mesh=mesh)
@@ -460,7 +462,7 @@ class TestFullyShardCommunication(FSDPTest):
         for ref_mod in ref_model.modules():
             if isinstance(ref_mod, TransformerBlock):
                 block_params.update(ref_mod.parameters())
-        non_block_params = set(ref_model.parameters())  - block_params
+        non_block_params = set(ref_model.parameters()) - block_params
 
         torch.manual_seed(42 + self.rank)
         inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type.type)
@@ -481,7 +483,6 @@ class TestFullyShardCommunication(FSDPTest):
             check_sharded_parity(self, ref_model, model)
             ref_optim.zero_grad()
             optim.zero_grad()
-
 
     def _test_set_reduce_scatter_divide_factor_mixed_prevision(
         self, divide_factor: float

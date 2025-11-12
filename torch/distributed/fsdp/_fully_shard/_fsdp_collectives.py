@@ -725,7 +725,6 @@ def _get_gradient_divide_factors(
     if all_reduce_group is not None:
         data_parallel_size *= all_reduce_group.size()
 
-
     if not overflow_risk and not force_sum_reduction_for_comms:
         if factor is None:
             # Warning: NCCL ReduceOp.AVG may produce incorrect results with
