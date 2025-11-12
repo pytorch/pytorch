@@ -8,6 +8,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch.distributed.tensor.placement_utils import format_shard_order_str
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
@@ -54,9 +55,7 @@ def _stringify_attributes(tensor, attributes) -> str:
 
 
 def _stringify_dtensor_spec(spec) -> str:
-    from torch.distributed.tensor._dtensor_spec import DTensorSpec
-
-    return DTensorSpec.format_shard_order_str(spec.placements, spec.shard_order)
+    return format_shard_order_str(spec.placements, spec.shard_order)
 
 
 class TensorIdTracker:

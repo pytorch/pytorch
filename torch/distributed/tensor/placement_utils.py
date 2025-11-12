@@ -1,10 +1,12 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
-from typing import cast, NamedTuple, Optional
-from torch.distributed.device_mesh import DeviceMesh
+import itertools
 import math
 from collections import defaultdict
+from typing import cast, NamedTuple, Optional
+
+from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
     MaskPartial,
@@ -13,6 +15,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+
 
 class ShardOrderEntry(NamedTuple):
     """
@@ -49,6 +52,7 @@ class ShardOrderEntry(NamedTuple):
 #     - Tensor dimension 0 is sharded on mesh dimension 1
 #     - Tensor dimension 2 is sharded on mesh dimension 0 first, then mesh dimension 3
 ShardOrder = tuple[ShardOrderEntry, ...]
+
 
 def _verify_shard_order(
     placements: tuple[Placement, ...], shard_order: ShardOrder
@@ -87,9 +91,7 @@ def _normalize_placements_into_shard_order(
     if not any(isinstance(p, _StridedShard) for p in placements):
         return placements, _compute_default_shard_order(placements)
     # _StridedShard in placements, try check if it can be decoded as shard order
-    shard_order = maybe_convert_StridedShard_to_shard_order(
-        placements, mesh
-    )
+    shard_order = maybe_convert_StridedShard_to_shard_order(placements, mesh)
     if shard_order is not None:
         normalized_placements = tuple(
             [
@@ -116,9 +118,8 @@ def _compute_default_shard_order(
     tensor_dim_to_mesh_dims: defaultdict[int, list[int]] = defaultdict(list)
     mesh_ndim = len(placements)
     for mesh_dim in range(mesh_ndim):
-        if isinstance(placements[mesh_dim], _StridedShard):
-            return ()
-        if isinstance(placements[mesh_dim], Shard):
+        # _StridedShard may not be a subclass of Shard in the future
+        if isinstance(placements[mesh_dim], Shard | _StridedShard):
             placement = cast(Shard, placements[mesh_dim])
             shard_dim = placement.dim
             assert shard_dim >= 0, (
@@ -133,6 +134,18 @@ def _compute_default_shard_order(
         if value
     )
     return default_shard_order
+
+
+def _is_default_shard_order(shard_order: ShardOrder) -> bool:
+    """
+    Check if the device order is the default left-to-right order.
+    """
+    for entry in shard_order:
+        mesh_dims = entry.mesh_dims
+        is_increasing = all(prev < nxt for prev, nxt in itertools.pairwise(mesh_dims))
+        if not is_increasing:
+            return False
+    return True
 
 
 def convert_shard_order_to_StridedShard(
@@ -208,6 +221,7 @@ def convert_shard_order_to_StridedShard(
                 )
     return tuple(placements_list)
 
+
 def maybe_convert_StridedShard_to_shard_order(
     placements: tuple[Placement, ...], mesh: DeviceMesh
 ) -> Optional[ShardOrder]:
@@ -272,9 +286,7 @@ def maybe_convert_StridedShard_to_shard_order(
     )
     shard_order = []
 
-    tensor_dim_to_mesh_dims_order: list[list[int]] = [
-        [] for i in range(max_tensor_dim)
-    ]
+    tensor_dim_to_mesh_dims_order: list[list[int]] = [[] for i in range(max_tensor_dim)]
     for mesh_dim in reversed(range(len(placements))):
         cur_placement = placements[mesh_dim]
         # _StridedShard may not be a subclass of Shard in the future, so write in this way:

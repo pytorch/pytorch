@@ -1321,9 +1321,7 @@ class TestDTensorSpec(DTensorTestBase):
                 ShardOrderEntry(tensor_dim=2, mesh_dims=(1,)),
             ),
         )
-        self.assertTrue(
-            DTensorSpec.is_default_device_order(tensor_global._spec.shard_order)
-        )
+        self.assertTrue(putils._is_default_shard_order(tensor_global._spec.shard_order))
         # manually set the shard_order by exchange mesh dim 0 and 2
         tensor_global._spec._maybe_update_placements_given_shard_order(
             (
@@ -1332,7 +1330,7 @@ class TestDTensorSpec(DTensorTestBase):
             )
         )
         self.assertFalse(
-            DTensorSpec.is_default_device_order(tensor_global._spec.shard_order)
+            putils._is_default_shard_order(tensor_global._spec.shard_order)
         )
 
 

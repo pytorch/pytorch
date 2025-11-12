@@ -13,13 +13,9 @@ from typing import cast, NamedTuple, Optional
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
+import torch.distributed.tensor.placement_utils as putils
 from torch.distributed._functional_collectives import _are_we_tracing
-from torch.distributed.tensor._dtensor_spec import (
-    DTensorSpec,
-    ShardOrder,
-    ShardOrderEntry,
-    TensorMeta,
-)
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
     Partial,
@@ -27,6 +23,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor.placement_utils import ShardOrder, ShardOrderEntry
 from torch.utils._debug_mode import get_active_debug_mode
 
 
@@ -100,7 +97,7 @@ class DTensorRedistributePlanner:
             )
 
         def __repr__(self):
-            return DTensorSpec.format_shard_order_str(
+            return putils.format_shard_order_str(
                 self.placements,
                 self.tensor_dim_to_mesh_dim,
             )
@@ -174,10 +171,10 @@ class DTensorRedistributePlanner:
         """
         assert len(src_placements) == mesh.ndim
         normalized_src_placements, src_shard_order = (
-            DTensorSpec.normalize_placements_into_shard_order(src_placements, mesh)
+            putils._normalize_placements_into_shard_order(src_placements, mesh)
         )
         if src_shard_order is None:
-            src_shard_order = DTensorSpec.compute_default_shard_order(
+            src_shard_order = putils._compute_default_shard_order(
                 normalized_src_placements
             )
         cur_placement = list(normalized_src_placements)
@@ -489,15 +486,11 @@ class DTensorRedistributePlanner:
         dst_spec: DTensorSpec,
         full_tensor_shape: tuple[int, ...],
     ) -> list[_TransformInfo]:
-        src_placements, src_shard_order = (
-            DTensorSpec.normalize_placements_into_shard_order(
-                src_spec.placements, src_spec.mesh
-            )
+        src_placements, src_shard_order = putils._normalize_placements_into_shard_order(
+            src_spec.placements, src_spec.mesh
         )
-        dst_placements, dst_shard_order = (
-            DTensorSpec.normalize_placements_into_shard_order(
-                dst_spec.placements, dst_spec.mesh
-            )
+        dst_placements, dst_shard_order = putils._normalize_placements_into_shard_order(
+            dst_spec.placements, dst_spec.mesh
         )
         assert src_shard_order is not None
         assert dst_shard_order is not None
@@ -659,10 +652,10 @@ def _gen_transform_infos_non_cached(
 ) -> list[_TransformInfo]:
     transform_infos: list[_TransformInfo] = []
     device_mesh = src_spec.device_mesh
-    src_shard_order = DTensorSpec._maybe_convert_StridedShard_to_shard_order(
+    src_shard_order = putils.maybe_convert_StridedShard_to_shard_order(
         src_spec.placements, device_mesh
     )
-    dst_shard_order = DTensorSpec._maybe_convert_StridedShard_to_shard_order(
+    dst_shard_order = putils.maybe_convert_StridedShard_to_shard_order(
         dst_spec.placements, device_mesh
     )
     # TODO(zpcore): consider special case (e.g., shard after view) where shard
@@ -673,7 +666,7 @@ def _gen_transform_infos_non_cached(
             src_shard_order is None
             or dst_shard_order is None
             or all(
-                DTensorSpec.is_default_device_order(order)
+                putils._is_default_shard_order(order)
                 for order in (src_shard_order, dst_shard_order)
             )
         ):
