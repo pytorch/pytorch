@@ -1718,6 +1718,39 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         self.assertEqual(eager_no_sq, comp_ind_no_sq)
         self.assertEqual(eager_no_sq.stride(), comp_ind_no_sq.stride())
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_unbacked_activation_specialized_in_inductor(self):
+        """Test compilation with unbacked operations like nonzero."""
+        torch._dynamo.reset()
+
+        def fuzzed_program(arg_0, sentinel):
+            var_node_1 = arg_0
+            var_node_5 = torch.full((1, 2), -66, dtype=torch.int32)
+            var_node_6 = torch.full((1, 2), 77, dtype=torch.int64)
+            var_node_4 = torch.ops.aten.add(var_node_5, var_node_6)
+            var_node_7 = torch.full((1, 2), -64, dtype=torch.int32)
+            var_node_3 = torch.ops.aten.mul(var_node_4, var_node_7)
+            var_node_9 = torch.full((3, 4), False, dtype=torch.bool)
+            var_node_8 = torch.nonzero(var_node_9)
+            var_node_2 = torch.ops.aten.add(var_node_3, var_node_8)
+            var_node_0 = torch.ops.aten.div(var_node_1, var_node_2)
+            result = var_node_0 * sentinel
+            if result.is_complex():
+                result = result.real
+            return result
+
+        sentinel = torch.tensor(1.0, requires_grad=True)
+        arg_0 = torch.randint(0, 3, (1, 2), dtype=torch.int64)
+        args = (arg_0,) + (sentinel,)
+
+        result_original = fuzzed_program(*args)
+
+        compiled_program = torch.compile(fuzzed_program, fullgraph=True, dynamic=True)
+        result_compiled = compiled_program(*args)
+
+        self.assertTrue(torch.allclose(result_original, result_compiled))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

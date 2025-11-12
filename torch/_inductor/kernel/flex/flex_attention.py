@@ -244,6 +244,7 @@ def flex_attention(
             full_kv_num_blocks,
             full_kv_indices,
             mask_graph=mask_graph,
+            subgraph=subgraph,
         )
 
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)

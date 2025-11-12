@@ -115,7 +115,7 @@ def make_crossref_functionalize(
     from torch._subclasses.fake_tensor import FakeTensorMode
 
     # This case is pretty weird, suppress it for now
-    if op == torch.ops.aten.lift_fresh.default:
+    if op is torch.ops.aten.lift_fresh.default:
         return final_key
 
     def handler(*args: _P.args, **kwargs: _P.kwargs) -> _T:
