@@ -4,6 +4,7 @@
 import itertools
 
 import torch
+import torch.distributed as dist
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -825,6 +826,23 @@ class DistTensorOpsTest(DTensorTestBase):
                     unbinded_dist_tensors, local_tensor.unbind(dim=unbind_dim)
                 ):
                     self.assertEqual(x.full_tensor(), y)
+
+    @with_comms
+    def test_item(self):
+        mesh = self.build_device_mesh()
+        rank = dist.get_rank()
+        local_tensor = torch.tensor([rank])
+
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("sum")]
+        )
+
+        item_without_redistribute = dt.item()
+
+        dt.redistribute(dt.device_mesh, placements=[Replicate()])
+        item_with_redistribute = dt.item()
+
+        self.assertEqual(item_without_redistribute, item_with_redistribute)
 
 
 DistTensorOpsTestWithLocalTensor = create_local_tensor_test_class(
