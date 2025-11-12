@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Union
+from collections.abc import Callable
+from typing import Any, Union
 
 import torch
 from torch.ao.quantization.backend_config import BackendConfig
@@ -64,9 +65,8 @@ class DefaultFuseHandler(FuseHandler):
         fuser_method_mapping: dict[Pattern, Union[torch.nn.Sequential, Callable]],
         is_qat: bool,
     ) -> Node:
-        assert root_node.op == "call_module", (
-            "Expecting module node to be a call_module Node"
-        )
+        if root_node.op != "call_module":
+            raise AssertionError("Expecting module node to be a call_module Node")
         root_module = named_modules[str(root_node.target)]
 
         def get_modules(pattern):
@@ -84,7 +84,7 @@ class DefaultFuseHandler(FuseHandler):
                 n = pattern
                 if n.op == "call_module":
                     return named_modules[n.target]
-                elif n.op == "call_function" and n.target == torch.nn.functional.relu:
+                elif n.op == "call_function" and n.target is torch.nn.functional.relu:
                     relu = torch.nn.ReLU()
                     relu.training = root_module.training
                     return relu

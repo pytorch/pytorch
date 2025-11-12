@@ -110,11 +110,21 @@ struct PartitionCache {
   // bit 1: is uint8
   // bit 2: fp16(0) / bf16(1)
   // bit 3: is fp32
-  // bit 4: is sdp pattern
-  // bit 5-7: N/A
+  // bit 4: is sdpa pattern
+  // bit 5: is sdpa backward pattern
+  // bit 6-7: reserved for future use
   // The rest of the bits depend upon the arguments provided
   // However, down the line, we might have different bitsets for different
   // patterns
+  enum class BitType : uint8_t {
+    Int8 = 0,
+    Uint8 = 1,
+    Bfloat16 = 2,
+    Float32 = 3,
+    SdpaPattern = 4,
+    SdpaBwdPattern = 5
+  };
+
   dnnl::graph::partition& insert_partition_cache(
       std::bitset<32>& patternID,
       dnnl::graph::partition& p) {

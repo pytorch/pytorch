@@ -38,12 +38,11 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     parametrize,
     run_tests,
-    skipIfRocmVersionLessThan,
     skipIfTorchDynamo,
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 _BOOL_SUB_ERR_MSG = "Subtraction, the `-` operator"
@@ -196,7 +195,6 @@ class TestForeach(TestCase):
                         zero_size=True,
                     )
 
-    @skipIfRocmVersionLessThan((6, 0))
     @ops(
         foreach_unary_op_db
         + foreach_binary_op_db
@@ -320,13 +318,11 @@ class TestForeach(TestCase):
                 return arg
 
         scalar_self_arg_test_complete = False
-        for i, sample in enumerate(
-            op.sample_inputs(
-                device,
-                dtype,
-                noncontiguous=not is_fastpath,
-                allow_higher_dtype_scalars=True,
-            )
+        for sample in op.sample_inputs(
+            device,
+            dtype,
+            noncontiguous=not is_fastpath,
+            allow_higher_dtype_scalars=True,
         ):
             (rhs_arg,) = sample.args
             kwargs = {} or sample.kwargs
@@ -1375,7 +1371,7 @@ class TestForeach(TestCase):
         ref_out = torch.empty_like(self_tensor).copy_(src_tensor)
         self.assertEqual(self_tensor, ref_out)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     def test_foreach_copy_with_different_device_inputs(self, device, dtype, op):
         if dtype in (torch.complex128, torch.complex64):

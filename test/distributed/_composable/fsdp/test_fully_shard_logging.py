@@ -1,16 +1,14 @@
 # Owner(s): ["module: fsdp"]
 import functools
 import os
-import unittest.mock
+import unittest
 
 import torch.distributed as dist
 from torch._dynamo.test_case import run_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import LoggingTestCase
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )
@@ -39,9 +37,9 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import fully_shard
-logger = logging.getLogger("torch.distributed._composable.fsdp")
+logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 logger.setLevel(logging.DEBUG)
-device = {device_type.type}
+device = '{device_type.type}'
 torch.manual_seed(0)
 model = nn.Sequential(*[nn.Linear(4, 4, device=device, bias=False) for _ in range(2)])
 for layer in model:
