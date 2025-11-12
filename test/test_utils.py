@@ -32,7 +32,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
-    TEST_ACCELERATOR,
+    TEST_GPU,
 )
 from torch.utils._device import set_device
 from torch.utils._pytree import tree_all_only, tree_any
@@ -304,7 +304,7 @@ class TestCheckpoint(TestCase):
 
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
 
-    @unittest.skipIf(not TEST_ACCELERATOR, "No accelerator")
+    @unittest.skipIf(not TEST_GPU, "No accelerator")
     def test_checkpoint_rng_gpu(self):
         for _ in range(5):
             inp = torch.randn(20000, device=device_type).requires_grad_()
@@ -332,7 +332,7 @@ class TestCheckpoint(TestCase):
 
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
 
-    @unittest.skipIf(not TEST_ACCELERATOR, "No accelerator")
+    @unittest.skipIf(not TEST_GPU, "No accelerator")
     def test_checkpoint_not_preserve_rng_state_and_without_reentrant(self):
         inp = torch.randn(2, device=device_type).requires_grad_()
         layer = torch.nn.Dropout()
@@ -437,7 +437,7 @@ class TestCheckpoint(TestCase):
             out = checkpoint(run_fn2, input_var, input_var2, use_reentrant=True)
             out.sum().backward()
 
-    @unittest.skipIf(not TEST_ACCELERATOR, "No accelerator")
+    @unittest.skipIf(not TEST_GPU, "No accelerator")
     def test_checkpointing_without_reentrant_early_free(self):
         # I don't know how to check if the temporary saved variable buffer
         # get de-allocated directly. So using GPU memory usage as a proxy
