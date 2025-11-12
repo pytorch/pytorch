@@ -4138,6 +4138,7 @@ class BaseHOPVariable(WrapHigherOrderVariable):
 class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     supports_input_mutation = True
     supports_aliasing = False
+    restore_side_effects = False
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name

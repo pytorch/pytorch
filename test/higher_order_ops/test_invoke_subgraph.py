@@ -2504,6 +2504,107 @@ class GraphModule(torch.nn.Module):
                 self.assertEqual(f(x, other), f_compile(x, other))
                 self.assertTrue(called)
 
+    def test_udf_output(self):
+        class Foo:
+            def __init__(self, a, b):
+                self.a = a
+                self.b = b
+
+        @nested_compile_region
+        def gn(x, y):
+            a = torch.sin(x)
+            b = torch.cos(y)
+            return Foo(a, b)
+
+        def fn(x, y):
+            foo1 = gn(x, y)
+            foo2 = gn(foo1.a, y)
+            return foo1.b + foo2.a  # + foo2.b
+
+        backend = AotEagerAndRecordGraphs()
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        x = torch.randn(8, 8, requires_grad=True)
+        y = torch.randn(8, 8, requires_grad=True)
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
+
+        ref = fn(x, y)
+        res = opt_fn(x_clone, y_clone)
+
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[8, 8]", L_y_: "f32[8, 8]"):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        subgraph_0 = self.subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_);  subgraph_0 = l_x_ = None
+        getitem: "f32[8, 8]" = invoke_subgraph[0]
+        getitem_1: "f32[8, 8]" = invoke_subgraph[1];  invoke_subgraph = None
+        subgraph_1 = self.subgraph_0
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', getitem, l_y_);  subgraph_1 = getitem = l_y_ = None
+        getitem_2: "f32[8, 8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+
+        add: "f32[8, 8]" = getitem_1 + getitem_2;  getitem_1 = getitem_2 = None
+        return (add,)
+
+    class subgraph_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[8, 8]", l_y_: "f32[8, 8]"):
+            a: "f32[8, 8]" = torch.sin(l_x_);  l_x_ = None
+
+            b: "f32[8, 8]" = torch.cos(l_y_);  l_y_ = None
+            return (a, b)
+""",
+            )
+
+    # High piority - grads are wrong
+    @unittest.expectedFailure
+    def test_grad_accuracy_check(self):
+        class Foo:
+            def __init__(self, a, b):
+                self.a = a
+                self.b = b
+
+        @nested_compile_region
+        def gn(x):
+            a = torch.sin(x)
+            b = torch.cos(x)
+            return (a, b)
+
+        def fn(x):
+            foo1 = gn(x)
+            foo2 = gn(foo1[0])
+            return foo1[1] + foo2[0] + foo2[1]
+
+        backend = AotEagerAndRecordGraphs()
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        x = torch.randn(8, 8, requires_grad=True)
+        x_clone = x.detach().clone().requires_grad_(True)
+        x.grad = None
+        x_clone.grad = None
+
+        ref = fn(x)
+        res = opt_fn(x_clone)
+
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 @parameterized_class(
