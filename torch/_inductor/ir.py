@@ -8733,6 +8733,87 @@ class InvokeSubgraph(ExternKernel):
 
 
 @ir_dataclass(frozen=False)
+class HopPrint(ExternKernel):
+    format_str: str
+    print_kwargs: dict[str, Any] = dataclasses.field(default_factory=dict)
+
+    def __init__(
+        self,
+        format_str: str,
+        print_kwargs: dict[str, Any],
+        layout: NoneLayout,
+    ) -> None:
+        inputs: list[IRNode] = []
+        kwargs_for_op: dict[str, Any] = {}
+
+        # Separate IRNode inputs from constant kwargs
+        for key, value in print_kwargs.items():
+            if isinstance(value, IRNode):
+                inputs.append(value)
+                kwargs_for_op[key] = value
+            else:
+                kwargs_for_op[key] = value
+
+        super().__init__(
+            name=None,
+            layout=layout,
+            inputs=inputs,
+            constant_args=(format_str,),
+            kwargs=kwargs_for_op,
+            python_kernel_name="torch.ops.higher_order.print",
+        )
+        self.format_str = format_str
+        self.print_kwargs = print_kwargs
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
+
+    @classmethod
+    def create(
+        cls,
+        format_str: str,
+        **kwargs: object,
+    ) -> list[NoneAsConstantBuffer]:
+        # Realize inputs that are IRNodes
+        realized_kwargs: dict[str, Any] = {}
+        for key, value in kwargs.items():
+            if isinstance(value, (TensorBox, StorageBox)):
+                realized_kwargs[key] = cls.realize_input(value)
+            else:
+                realized_kwargs[key] = value
+
+        # Create the HopPrint node with NoneLayout since print returns None
+        hop_print = HopPrint(
+            format_str=format_str,
+            print_kwargs=realized_kwargs,
+            layout=NoneLayout(device=None),
+        )
+
+        # Return a NoneAsConstantBuffer to represent the None return value
+        return [NoneAsConstantBuffer(device=None)]
+
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        # Codegen the print operation
+        args = [self.format_str]
+
+        # Generate the kernel call using the base ExternKernel codegen
+        from .codegen.wrapper import get_wrapper_codegen_for_device
+
+        # Build the function call with format_str and kwargs
+        kernel_name = self.python_kernel_name
+        assert kernel_name is not None
+
+        # Prepare kwargs for codegen
+        kwargs_code = ", ".join(
+            f"{k}={v.codegen_reference() if isinstance(v, IRNode) else repr(v)}"
+            for k, v in self.print_kwargs.items()
+        )
+
+        # Write the print call
+        wrapper.writeline(f"{kernel_name}({repr(self.format_str)}, {kwargs_code})")
+
+
+
+@ir_dataclass(frozen=False)
 class Conditional(ExternKernel):
     predicate: Optional[IRNode] = None
     operands: Optional[Sequence[IRNode]] = None
