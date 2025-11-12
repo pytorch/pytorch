@@ -72,30 +72,11 @@ def has_jax_tpu_backend() -> bool:
         return False
 
 
-import sys
-
-def has_torch_xla_device() -> bool:
-    try:
-        print("DEBUG: Attempting to import torch_xla.core.xla_model", file=sys.stderr)
-        import torch_xla.core.xla_model as xm
-        print("DEBUG: Import successful", file=sys.stderr)
-        world_size = xm.xrt_world_size()
-        print(f"DEBUG: xm.xrt_world_size() returned: {world_size}", file=sys.stderr)
-        return world_size > 0
-    except ImportError as e:
-        print(f"DEBUG: ImportError caught: {e}", file=sys.stderr)
-        return False
-    except Exception as e:
-        print(f"DEBUG: An unexpected error occurred: {e}", file=sys.stderr)
-        return False
-
-
 @functools.cache
 def has_tpu_pallas() -> bool:
     """Checks for a full Pallas-on-TPU environment."""
     return (
         has_pallas_package()
-        and has_torch_xla_device()
         and has_jax_tpu_backend()
     )
 

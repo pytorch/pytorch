@@ -342,6 +342,9 @@ TAGS
 # bazel symlinks
 bazel-*
 
+# torch-xla repo
+/xla/
+
 # direnv, posh-direnv
 .env
 .envrc

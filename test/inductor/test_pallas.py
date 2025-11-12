@@ -448,17 +448,6 @@ class PallasTestsXLA(PallasTestsMixin, TestCase):
     DEVICE = "xla"
 
 
-@unittest.skipUnless(test_torchinductor.HAS_TPU, "Requires TPU")
-class PallasUtilTests(TestCase):
-    def test_has_torch_xla_device(self):
-        from torch.utils._pallas import has_torch_xla_device
-        self.assertTrue(has_torch_xla_device(), "has_torch_xla_device() should be True on a TPU machine")
-
-    def test_has_tpu_pallas(self):
-        from torch.utils._pallas import has_tpu_pallas
-        self.assertTrue(has_tpu_pallas(), "has_tpu_pallas() should be True on a TPU machine with JAX/XLA installed")
-
-
 if __name__ == "__main__":
     if HAS_PALLAS:
         run_tests(needs="filelock")

@@ -3,23 +3,18 @@
 -i https://us-python.pkg.dev/ml-oss-artifacts-published/jax/simple/
 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 
+# If the newest versions are needed:
 # pip install -U --pre jax jaxlib libtpu requests -i https://us-python.pkg.dev/ml-oss-artifacts-published/jax/simple/ -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 
-# Newer v7x versions - temporarily commented out to resolve torch_xla dependency conflict
-# jax==0.8.0.dev20251013
-# jaxlib==0.8.0.dev20251013
-# libtpu==0.0.25.dev20251012+nightly
-
-# Aligned nightly versions for torch_xla compatibility
-jax==0.8.0.dev20251001
-jaxlib==0.8.0.dev20251001
-libtpu==0.0.24.dev20250929+nightly
+# Newer v7x versions
+jax==0.8.0.dev20251013
+jaxlib==0.8.0.dev20251013
+libtpu==0.0.25.dev20251012+nightly
 
 tpu-info==0.6.0
 torchvision==0.23.0
 flax==0.11.1
 
-torch_xla[tpu,pallas] @ https://storage.googleapis.com/pytorch-xla-releases/wheels/tpuvm/torch_xla-2.9.0.dev-cp312-cp312-linux_x86_64.whl
 cmake>=3.26.1
 packaging>=24.2
 setuptools==78.1.0
