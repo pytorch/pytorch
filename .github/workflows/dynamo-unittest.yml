@@ -3,19 +3,12 @@
 name: dynamo-unittest
 
 on:
-  pull_request:
-    branches-ignore:
-      - nightly
   push:
-    branches:
-      - main
-      - release/*
-      - landchecks/*
     tags:
-      - ciflow/pull/*
-  # workflow_dispatch:
-  # schedule:
-  #   - cron: 29 8 * * *  # about 1:29am PDT
+      - ciflow/dynamo/*
+  workflow_call:
+  schedule:
+    - cron: 29 8 * * * # about 1:29am PDT
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -43,17 +36,17 @@ jobs:
     needs: get-label-type
     strategy:
       matrix:
-        python-version: ['3.10', '3.11', '3.12', '3.13']
+        python-version: ['3.11', '3.12']
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py${{ matrix.python-version }}-clang12
       docker-image-name: ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang12
       test-matrix: |
         { include: [
-          { config: "dynamo_core", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_core", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
         ]}
     secrets: inherit
 
@@ -63,15 +56,15 @@ jobs:
     needs: [get-label-type, dynamo-build]
     strategy:
       matrix:
-        python-version: ['3.10', '3.11', '3.12', '3.13']
+        python-version: ['3.11', '3.12']
     with:
       build-environment: linux-jammy-py${{ matrix.python-version }}-clang12
       docker-image: ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang12
       test-matrix: |
         { include: [
-          { config: "dynamo_core", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_core", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
         ]}
     secrets: inherit
