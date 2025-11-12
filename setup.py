@@ -1359,7 +1359,7 @@ class concat_license_files:
 # Need to create the proper LICENSE.txt for the wheel
 class bdist_wheel(setuptools.command.bdist_wheel.bdist_wheel):
     def _wrap_headers_with_macro(self, bdist_dir: Path) -> None:
-        """Wrap all header files with #ifndef TORCH_STABLE_ONLY macro.
+        """Wrap all header files with #if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION).
 
         Excludes:
         - torch/include/torch/headeronly/*
