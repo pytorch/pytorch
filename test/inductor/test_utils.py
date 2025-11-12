@@ -1,8 +1,8 @@
 # Owner(s): ["module: inductor"]
 
 import unittest
+from collections.abc import Callable
 from copy import deepcopy
-from typing import Callable
 
 from sympy import Symbol, sympify
 
@@ -304,7 +304,7 @@ class TestFakeTensorUpdater(TestCase):
 
     # TODO: remove this XFAIL by resolving our failure to update into torch.cond
     # subgraphs.
-    @unittest.expectedFailure
+    # @unittest.expectedFailure
     def test_hop_implicit_subgraph_inputs(self):
         def fn(x: torch.Tensor) -> torch.Tensor:
             return torch.cond(torch.sum(x) < 0, torch.sin, torch.cos, (x,))

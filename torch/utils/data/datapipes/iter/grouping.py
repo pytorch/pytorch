@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from collections import defaultdict
 from collections.abc import Callable, Iterator, Sized
-from typing import Any, NoReturn, Optional, TypeVar
+from typing import Any, NoReturn, TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import DataChunk, IterDataPipe
@@ -199,8 +199,8 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         *,
         keep_key: bool = False,
         buffer_size: int = 10000,
-        group_size: Optional[int] = None,
-        guaranteed_group_size: Optional[int] = None,
+        group_size: int | None = None,
+        guaranteed_group_size: int | None = None,
         drop_remaining: bool = False,
     ) -> None:
         _check_unpickable_fn(group_key_fn)
