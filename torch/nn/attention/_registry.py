@@ -5,7 +5,8 @@ This module contains the registration system for flash attention implementations
 It has no torch dependencies to avoid circular imports during initialization.
 """
 
-from typing import Callable, Literal, Protocol
+from collections.abc import Callable
+from typing import Literal, Protocol
 
 
 class FlashAttentionHandle(Protocol):
