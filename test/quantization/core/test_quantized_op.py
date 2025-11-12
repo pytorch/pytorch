@@ -2163,7 +2163,7 @@ class TestQuantizedOps(TestCase):
 
         test_cases = itertools.product(x_dims, sides, dims, largest, sorted, dtypes, is_nhwc)
         k = 2
-        for x_dim, side, dim, larg, sort, dtype, nhwc in test_cases:
+        for x_dim, side, dim, large, sort, dtype, nhwc in test_cases:
             if nhwc and x_dim != 4:  # NHWC requires 4 dimensions
                 continue
             if dim >= x_dim:  # Dimension to find top-k for should exist
@@ -2176,12 +2176,12 @@ class TestQuantizedOps(TestCase):
                 qX = qX.permute([0, 3, 1, 2])
                 X = np.transpose(X, [0, 3, 1, 2])
 
-            unquantized_out = torch.topk(qX.dequantize(), k, dim=dim, largest=larg, sorted=sort)
+            unquantized_out = torch.topk(qX.dequantize(), k, dim=dim, largest=large, sorted=sort)
 
             values = torch.quantize_per_tensor(X, scale, zp, dtype)
             indices = torch.tensor(X).long()
 
-            quantized_out = torch.topk(qX, k, dim=dim, largest=larg, sorted=sort)
+            quantized_out = torch.topk(qX, k, dim=dim, largest=large, sorted=sort)
 
             assert len(unquantized_out) == len(quantized_out)
             torch.testing.assert_close(quantized_out[0].dequantize(), unquantized_out[0])
@@ -5964,7 +5964,7 @@ class TestQuantizedConv(TestCase):
             "out_channel:", out_channel,
             "kernel_size:", kernel_size,
             "height:", height,
-            "widht:", width
+            "width:", width
         )
         conv = torch.nn.Conv2d(in_channel, out_channel, kernel_size).cuda()
         input = torch.randn((batch_size, in_channel, height, width), device='cuda')
