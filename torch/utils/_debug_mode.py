@@ -4,7 +4,7 @@ import functools
 import traceback
 import weakref
 from collections.abc import Callable
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -140,7 +140,7 @@ def _get_stack_trace() -> str:
     return "".join(summary.format())
 
 
-def _maybe_get_autograd_trace() -> Optional[str]:
+def _maybe_get_autograd_trace() -> str | None:
     if torch._C._current_autograd_node() is not None:
         tb = torch._C._current_autograd_node().metadata.get("traceback_")  # type: ignore[attr-defined]
         if tb:
@@ -154,8 +154,8 @@ class _DebugCall:
     def __init__(
         self,
         call_depth: int,
-        record: Optional[dict[str, Any]] = None,
-        log: Optional[dict[str, Any]] = None,
+        record: dict[str, Any] | None = None,
+        log: dict[str, Any] | None = None,
         stack: bool = False,
     ) -> None:
         self.call_depth = call_depth
@@ -166,10 +166,10 @@ class _DebugCall:
         # results from dispatch hooks
         self.record = record
         self.log = log
-        self.output_str: Optional[str] = None
+        self.output_str: str | None = None
 
     def stringify_args(
-        self, attributes: list[str], tensor_memo: Optional[TensorIdTracker] = None
+        self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
     ) -> None:
         """
         To reduce memory consumption, this method stringifies args/kwargs, stores the result, and deletes original args/kwargs.
@@ -182,7 +182,7 @@ class _DebugCall:
         self,
         output: Any,
         attributes: list[str],
-        tensor_memo: Optional[TensorIdTracker] = None,
+        tensor_memo: TensorIdTracker | None = None,
     ) -> None:
         """Store stringified version of call output in self.output_str"""
         if tree_all(lambda x: x is None, output):
@@ -213,11 +213,11 @@ class _OpCall(_DebugCall):
         self.args = args
         self.kwargs = kwargs
 
-        self.args_str: Optional[str] = None
-        self.kwargs_str: Optional[str] = None
+        self.args_str: str | None = None
+        self.kwargs_str: str | None = None
 
     def stringify_args(
-        self, attributes: list[str], tensor_memo: Optional[TensorIdTracker] = None
+        self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
     ) -> None:
         self.args_str = ", ".join(
             _arg_to_str(arg, attributes, tensor_memo) for arg in self.args
@@ -289,10 +289,10 @@ class _RedistributeCall(_DebugCall):
         self.dst_placement = dst_placement
         self.transform_info_str = transform_info_str
 
-        self.arg_str: Optional[str] = None
+        self.arg_str: str | None = None
 
     def stringify_args(
-        self, attributes: list[str], tensor_memo: Optional[TensorIdTracker] = None
+        self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
     ) -> None:
         self.arg_str = f"{_arg_to_str(self.arg, attributes, tensor_memo)}"
         del self.arg
@@ -339,7 +339,7 @@ class _NNModuleCall(_DebugCall):
         self.module_name = module_name
 
     def stringify_args(
-        self, attributes: list[str], tensor_memo: Optional[TensorIdTracker] = None
+        self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
     ) -> None:
         pass  # nothing to stringify
 
@@ -418,7 +418,7 @@ class DebugMode(TorchDispatchMode):
         # This flag currently has no effect on torch.compiled-regions.
         self.record_nn_module = record_nn_module
 
-        self.module_tracker: Optional[ModTracker] = None
+        self.module_tracker: ModTracker | None = None
         if self.record_nn_module:
             self.module_tracker_setup()
 
@@ -585,7 +585,7 @@ class DebugMode(TorchDispatchMode):
         arg,
         src_placement,
         dst_placement,
-        transform_info_str: Optional[str] = None,
+        transform_info_str: str | None = None,
     ):
         try:
             self._record_call(
@@ -615,8 +615,8 @@ class DebugMode(TorchDispatchMode):
     @staticmethod
     @contextlib.contextmanager
     def dispatch_hooks(
-        record_hook: Optional[Callable] = None,
-        log_hook: Optional[Callable] = None,
+        record_hook: Callable | None = None,
+        log_hook: Callable | None = None,
     ):
         """
         Allows installing post-hooks on arguments to intercepted __torch_dispatch__ calls;
@@ -660,9 +660,7 @@ class DebugMode(TorchDispatchMode):
 
     @staticmethod
     @contextlib.contextmanager
-    def log_tensor_hashes(
-        hash_fn: Optional[Callable] = None, hash_inputs: bool = False
-    ):
+    def log_tensor_hashes(hash_fn: Callable | None = None, hash_inputs: bool = False):
         """
         Installs hook for tensor hash logging.
 
@@ -696,7 +694,7 @@ class DebugMode(TorchDispatchMode):
             yield
 
 
-def get_active_debug_mode() -> Optional[DebugMode]:
+def get_active_debug_mode() -> DebugMode | None:
     debug_mode = None
     for mode in _get_current_dispatch_mode_stack():
         if isinstance(mode, DebugMode):
