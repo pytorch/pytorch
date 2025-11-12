@@ -3541,9 +3541,9 @@ Tensor _dyn_quant_matmul_4bit_cpu(
     const int64_t out_features) {
   auto M = inp.size(0);
   TORCH_CHECK(
-      inp.dtype() == kFloat || (inp.dtype() == kBFloat16 && block_size == in_features),
+      inp.dtype() == kFloat,
       __func__,
-      " : expect input to be float32 or bfloat16 tensor.");
+      " : expect input to be 32-bit float tensor.");
   TORCH_CHECK(
       block_size == in_features ||
           (!(block_size % 32) && !(in_features % block_size)),
