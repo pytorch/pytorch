@@ -749,7 +749,6 @@ class ScalingType(Enum):
 
 __all__ += ["ScalingType"]
 
-
 def selu(input: Tensor, inplace: bool = ...) -> Tensor: ...
 
 __all__ += ["selu"]
