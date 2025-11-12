@@ -52,6 +52,7 @@ class TestCheckpointWriterConfig(TestCase):
 
 class TestCheckpointWriter(TestCase):
     def setUp(self):
+        super().setUp()
         # Create a temporary directory for test checkpoints
         self.temp_dir = tempfile.mkdtemp()
 
@@ -90,7 +91,7 @@ class TestCheckpointWriter(TestCase):
         checkpoint_path = os.path.join(self.temp_dir, "checkpoint")
 
         # Call write
-        self.writer.write(self.state_dict, checkpoint_path)
+        self.writer.write(checkpoint_path, self.state_dict)
 
         # Verify that the checkpoint file exists
         expected_file_path = os.path.join(
@@ -111,7 +112,7 @@ class TestCheckpointWriter(TestCase):
         checkpoint_path = os.path.join(self.temp_dir, "checkpoint")
 
         # Call write
-        self.writer.write(self.state_dict, checkpoint_path)
+        self.writer.write(checkpoint_path, self.state_dict)
 
         # Verify that the barrier was called
         self.mock_barrier.execute_barrier.assert_called_once()
@@ -123,7 +124,7 @@ class TestCheckpointWriter(TestCase):
 
         # Call write with additional kwargs
         kwargs = {"extra": "value"}
-        self.writer.write(self.state_dict, checkpoint_path, **kwargs)
+        self.writer.write(checkpoint_path, self.state_dict, **kwargs)
 
         # Verify that the pre_commit hook was called with the correct parameters
         self.assertTrue(self.mock_hook.pre_commit_called)
@@ -157,7 +158,7 @@ class TestCheckpointWriter(TestCase):
         checkpoint_path = os.path.join(self.temp_dir, "checkpoint_no_barrier")
 
         # Call write
-        writer.write(self.state_dict, checkpoint_path)
+        writer.write(checkpoint_path, self.state_dict)
 
         # Verify that the checkpoint file exists
         expected_file_path = os.path.join(
@@ -179,7 +180,7 @@ class TestCheckpointWriter(TestCase):
         checkpoint_path = os.path.join(self.temp_dir, "checkpoint_no_hook")
 
         # Call write
-        writer.write(self.state_dict, checkpoint_path)
+        writer.write(checkpoint_path, self.state_dict)
 
         # Verify that the checkpoint file exists
         expected_file_path = os.path.join(

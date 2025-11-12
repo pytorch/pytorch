@@ -21,6 +21,16 @@ from _pytest.terminal import _get_raw_skip_reason
 from pytest_shard_custom import pytest_addoptions as shard_addoptions, PytestShardPlugin
 
 
+try:
+    from torch.testing._internal.common_utils import parse_cmd_line_args
+except ImportError:
+    # Temporary workaround needed until parse_cmd_line_args makes it into a nightlye because
+    # main / PR's tests are sometimes run against the previous day's nightly which won't
+    # have this function.
+    def parse_cmd_line_args():
+        pass
+
+
 if TYPE_CHECKING:
     from _pytest._code.code import ReprFileLocation
 
@@ -83,6 +93,7 @@ def pytest_addoption(parser: Parser) -> None:
 
 
 def pytest_configure(config: Config) -> None:
+    parse_cmd_line_args()
     xmlpath = config.option.xmlpath_reruns
     # Prevent opening xmllog on worker nodes (xdist).
     if xmlpath and not hasattr(config, "workerinput"):
@@ -227,7 +238,7 @@ def pytest_pycollect_makemodule(module_path, path, parent) -> Module:
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_report_teststatus(report, config):
-    # Add the test time to the verbose output, unforunately I don't think this
+    # Add the test time to the verbose output, unfortunately I don't think this
     # includes setup or teardown
     pluggy_result = yield
     if not isinstance(report, pytest.TestReport):

@@ -9,19 +9,82 @@
 
 #include <cuda_runtime_api.h>
 #include <future>
-#include <unordered_map>
 
 namespace at::cuda {
 namespace {
 
+// Note: cudaEventCreate when concurrently invoked from multiple threads can be
+// very expensive (at least on certain device/driver combinations). Thus, we a)
+// serialize event creation at a per-device level, and b) pool the events to
+// avoid constantly calling cudaEventCreate/cudaEventDestroy. This results in
+// significant improvements in multithreaded workloads with high allocation
+// rates.
+class EventPool {
+ public:
+  using Event = std::unique_ptr<
+      at::cuda::CUDAEvent,
+      std::function<void(at::cuda::CUDAEvent*)>>;
+  EventPool() : pools_(at::cuda::device_count()) {}
+
+  Event get(DeviceIndex device) {
+    TORCH_INTERNAL_ASSERT(0 <= device);
+    TORCH_INTERNAL_ASSERT(device < static_cast<DeviceIndex>(pools_.size()));
+    auto& pool = pools_[device];
+    auto destructor = [&pool](at::cuda::CUDAEvent* event) {
+      std::lock_guard<std::mutex> g(pool.mutex_);
+      pool.event_pool_.push_back(std::unique_ptr<at::cuda::CUDAEvent>(event));
+    };
+
+    // Try to acquire an event from the per-device pool.
+    {
+      std::lock_guard<std::mutex> g(pool.mutex_);
+      if (!pool.event_pool_.empty()) {
+        auto* event = pool.event_pool_.back().release();
+        pool.event_pool_.pop_back();
+        return Event(event, destructor);
+      }
+    }
+    // otherwise, allocate a new event that will be returned to the pool on
+    // destruction.
+    return Event(
+        std::make_unique<at::cuda::CUDAEvent>(cudaEventDisableTiming).release(),
+        destructor);
+  }
+
+  void empty_cache() {
+    for (auto& pool : pools_) {
+      std::lock_guard<std::mutex> g(pool.mutex_);
+      pool.event_pool_.clear();
+    }
+  }
+
+ private:
+  struct PerDevicePool {
+    alignas(64) std::mutex mutex_;
+    std::vector<std::unique_ptr<at::cuda::CUDAEvent>> event_pool_;
+  };
+  std::vector<PerDevicePool> pools_;
+};
+
 using Block = HostBlock<CUDAStream>;
 
 struct CUDACachingHostAllocatorImpl
-    : public CachingHostAllocatorImpl<CUDAStream, CUDAEventPool::Event> {
+    : public CachingHostAllocatorImpl<CUDAStream, EventPool::Event> {
  private:
-  std::unordered_map<void*, bool> use_host_register;
+  ska::flat_hash_map<void*, bool> use_host_register;
 
   void allocate_host_memory(size_t size, void** ptr) override {
+    // try allocating from reserve segment first before calling into expensive APIs
+    if (get_reserve_segment().initialized()) {
+      *ptr = get_reserve_segment().allocate(size);
+      if (*ptr != nullptr) {
+        return;
+      }
+    }
+    allocate_host_memory_slowpath(size, ptr);
+  }
+
+  void allocate_host_memory_slowpath(size_t size, void** ptr) {
     // Pinned memory pointers allocated by any device can be directly used by
     // any other device, regardless of the current device at the time of
     // allocation, since we assume unified addressing. So we grab any existing
@@ -60,9 +123,21 @@ struct CUDACachingHostAllocatorImpl
   }
 
   void free_block(Block* block) override {
+    // We never free blocks from the reserve segment
+    if (get_reserve_segment().initialized()) {
+      // Check if the block is from the reserve segment
+      if (get_reserve_segment().owns(block->ptr_)) {
+        return;
+      }
+    }
+
+    free_block_slowpath(block);
+  }
+
+  void free_block_slowpath(Block* block) {
     auto start = std::chrono::steady_clock::now();
     // Users may change the allocator config at will. torch unit tests do this.
-    // However, allocations using cudaHostRegister should use corresonding
+    // However, allocations using cudaHostRegister should use corresponding
     // cudaHostUnregister and similarly for cudaHostAlloc / cudaFreeHost.
     void* ptr = block->ptr_;
     bool use_register = false;
@@ -90,26 +165,42 @@ struct CUDACachingHostAllocatorImpl
   }
 
   void record_stream(
-      std::optional<std::vector<CUDAEventPool::Event>>& events,
+      std::optional<std::vector<EventPool::Event>>& events,
       CUDAStream stream) override {
     auto event = create_event_internal(stream.device_index());
     event->record(stream);
     events->push_back(std::move(event));
   }
 
-  bool query_event(CUDAEventPool::Event& event) override {
-    return event->query();
+  bool query_event(EventPool::Event& event) override {
+    cudaError_t err = cudaEventQuery(*event);
+    if (err == cudaErrorNotReady) {
+      (void)cudaGetLastError(); // clear CUDA error
+      return false;
+    } else if (err != cudaSuccess) {
+      C10_CUDA_CHECK(err);
+    }
+    return true;
   }
 
-  bool pinned_use_background_threads() override {
-    return c10::CachingAllocator::AcceleratorAllocatorConfig::
-        pinned_use_background_threads();
-  }
-
-  CUDAEventPool::Event create_event_internal(DeviceIndex idx) {
+  EventPool::Event create_event_internal(DeviceIndex idx) {
     // Leak the event pool to avoid shutdown issue.
-    static auto* event_pool = new CUDAEventPool();
+    static auto* event_pool = new EventPool();
     return event_pool->get(idx);
+  }
+
+  PinnedReserveSegment& get_reserve_segment() {
+    static auto reserve_segment = [&]() {
+      if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::pinned_reserve_segment_size_mb() > 0) {
+        void *ptr;
+        size_t sz = c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::pinned_reserve_segment_size_mb() * 1024 * 1024;
+        allocate_host_memory_slowpath(sz, &ptr);
+        return PinnedReserveSegment(ptr, sz);
+      } else {
+        return PinnedReserveSegment();
+      }
+    } ();
+    return reserve_segment;
   }
 
   TaskThreadPool* getThreadPool() {
@@ -126,15 +217,15 @@ struct CUDACachingHostAllocatorImpl
       size_t numThreads,
       size_t pageSize) {
     uintptr_t start = (uintptr_t)ptr + (size * i / numThreads);
-    uintptr_t end = (uintptr_t)start + (size / numThreads);
+    uintptr_t end = start + (size / numThreads);
     if (i == (numThreads - 1)) {
       end = (uintptr_t)ptr + size;
     }
 
     // pre-fault/map the pages by setting the first byte of the page
     uintptr_t alignedStart =
-        (((uintptr_t)start + pageSize - 1) & ~(pageSize - 1));
-    for (uintptr_t p = alignedStart; p < ((uintptr_t)end); p += pageSize) {
+        ((start + pageSize - 1) & ~(pageSize - 1));
+    for (uintptr_t p = alignedStart; p < (end); p += pageSize) {
       // NOLINTNEXTLINE(performance-no-int-to-ptr)
       memset((void*)p, 0, 1);
     }

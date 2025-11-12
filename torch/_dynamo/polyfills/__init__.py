@@ -10,9 +10,10 @@ Python polyfills for common builtins.
 
 import types
 from collections import OrderedDict
-from collections.abc import Hashable, Iterable, MutableMapping, Sequence
+from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from itertools import repeat as _repeat
-from typing import Any, Callable, TYPE_CHECKING
+from operator import eq, ne
+from typing import Any, TYPE_CHECKING
 
 import torch
 
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
     # See also the POLYFILLED_MODULE_NAMES in torch/_dynamo/polyfills/loader.py
     # Put the submodules here to avoid circular imports
     from . import (
+        _collections as _collections,
         builtins as builtins,
         functools as functools,
         itertools as itertools,
@@ -105,13 +107,24 @@ def accumulate_grad(x, new_grad):
 # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/listobject.c#L3352-L3413
 def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequence[Any]):
     """emulate `(1,2,3) > (1,2)` etc"""
+
+    # Optimization: For equality, short-circuit if lengths differ
+    # This avoids iterating through elements and triggering guards on SymInts
+    left_len = len(left)
+    right_len = len(right)
+
+    if op is eq and left_len != right_len:
+        return False
+    if op is ne and left_len != right_len:
+        return True
+
     # Apply `op` to the first pair that differ
     for a, b in zip(left, right):
         if a != b:
             return op(a, b)
 
     # No more pairs to compare, so compare sizes.
-    return op(len(left), len(right))
+    return op(left_len, right_len)
 
 
 def dict___eq__(d, other):
@@ -243,6 +256,10 @@ def set_difference_update(set1, *others):
     set1.update(result)
 
 
+def assert_dict_equal(self_, d1, d2, msg=None):
+    self_.assertTrue(d1 == d2, msg)
+
+
 def assert_multi_line_equal(self_, first, second, msg=None):
     return self_.assertTrue(first == second, msg)
 
@@ -259,7 +276,7 @@ def getattr_and_trace(*args, **kwargs):
     return fn(*args[2:], **kwargs)
 
 
-def mapping_get(obj, key, value=None):
+def mapping_get(obj, key, value=None, /):
     try:
         return obj.__getitem__(key)
     except KeyError:
@@ -276,31 +293,45 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
     return obj
 
 
-# Used with something like dict(obj)
-def construct_dict(cls, /, *args, **kwargs):
-    dst = cls.__new__(cls)
-
-    if args:
-        src = args[0]
-
-        if not isinstance(src, Iterable):
-            raise TypeError(f"{type(src)} object is not iterable")
-
-        # Ensure that the overridden __iter__ method is invoked
-        if isinstance(src, (dict, MutableMapping, types.MappingProxyType)):
-            for key in src:
-                # This will inline the __getitem__ of the src object
-                dst[key] = src[key]
-        else:
-            # likely a sequence like tuple of pairs
-            for key, value in src:
-                dst[key] = value
+def mutable_mapping_update(self, data=(), /, **kwargs):
+    if isinstance(data, Mapping):
+        # Merge standard mapping with PyMapping_Items
+        for key, value in data.items():
+            self[key] = value
+    # FIXME: Enabling the `elif`-branch below needs too many `VariableClass.call_obj_hasattr` changes.
+    #   >>> class Foo:
+    #   ...     def __init__(self):
+    #   ...         self.keys = lambda: ['a', 'b', 'c']  # not required to be a method
+    #   ...
+    #   ...     def __getitem__(self, key):
+    #   ...         return 0
+    #   ...
+    #   >>> dict(Foo())
+    #   {'a': 0, 'b': 0, 'c': 0}
+    #
+    # > This is a rare case, so we comment it out for now.
+    #
+    # elif hasattr(data, "keys"):
+    #     # Merge mapping-like object with PyMapping_Keys + PyObject_GetItem
+    #     for key in data.keys():
+    #         self[key] = data[key]
+    else:
+        if not isinstance(data, Iterable):
+            raise TypeError(f"{type(data).__name__!r} object is not iterable")
+        # Likely a sequence of pairs
+        for key, value in data:
+            self[key] = value
 
     if kwargs:
-        for key in kwargs:
-            dst[key] = kwargs[key]
+        for key, value in kwargs.items():
+            self[key] = value
 
-    return dst
+
+# Used with something like dict(obj)
+def construct_dict(cls, data=(), /, **kwargs):
+    self = cls.__new__(cls)
+    mutable_mapping_update(self, data, **kwargs)
+    return self
 
 
 def foreach_map_fn(*args):

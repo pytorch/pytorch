@@ -5,6 +5,7 @@
 #include <torch/csrc/profiler/orchestration/vulkan.h>
 #endif // USE_KINETO
 
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <iostream>
