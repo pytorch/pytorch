@@ -437,7 +437,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                 subclass_type = type(arg)
                 if (
                     subclass_type.__torch_dispatch__
-                    == torch._C._disabled_torch_dispatch_impl
+                    is torch._C._disabled_torch_dispatch_impl
                 ):
                     continue
 
@@ -530,7 +530,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
         dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
         return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
 
-    # NOTE [HigherOrderOprator Schema]
+    # NOTE [HigherOrderOperator Schema]
     # Each invocation of a HigherOrderOperator (hop) should have its own schema because
     # the subgraphs and the arguments can be different even for the same hop.
     #
@@ -1246,7 +1246,7 @@ class OpOverloadPacket(Generic[_P, _T]):
         # the schema and cause an error for torchbind op when inputs consist of FakeScriptObject so we
         # intercept it here and call TorchBindOpverload instead.
         if self._has_torchbind_op_overload and _must_dispatch_in_python(args, kwargs):
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             return _call_overload_packet_from_python(self, *args, **kwargs)
         return self._op(*args, **kwargs)
 

@@ -226,8 +226,8 @@ template <
     typename B = HostBlock<S>>
 struct CachingHostAllocatorImpl {
   virtual ~CachingHostAllocatorImpl() {
-    active_ = false;
-    if (pinned_use_background_threads()) {
+    if (active_) {
+      active_ = false;
       getBackgroundThreadPool()->waitWorkComplete();
     }
   }
@@ -260,6 +260,7 @@ struct CachingHostAllocatorImpl {
     if (pinned_use_background_threads()) {
       // Launch the background thread and process events in a loop.
       static bool background_thread_flag [[maybe_unused]] = [this] {
+        active_ = true;
         getBackgroundThreadPool()->run([&]() {
           while (active_) {
             process_events();
@@ -677,15 +678,15 @@ struct CachingHostAllocatorImpl {
   // size. This allows us to quickly find a free block of the right size.
   // We use deque to store per size free list and guard the list with its own
   // mutex.
-  alignas(hardware_destructive_interference_size) std::vector<FreeBlockList<B>> free_list_ =
-      std::vector<FreeBlockList<B>>(MAX_SIZE_INDEX);
+  alignas(hardware_destructive_interference_size) std::vector<FreeBlockList<B>>
+      free_list_{MAX_SIZE_INDEX};
 
   alignas(hardware_destructive_interference_size) std::mutex events_mutex_;
   std::deque<std::pair<E, B*>> events_; // event queue paired with block
 
-  // Indicates whether the object is active.
+  // Indicates whether the event-processing thread pool is active.
   // Set to false in the destructor to signal background threads to stop.
-  std::atomic<bool> active_{true};
+  std::atomic<bool> active_{false};
 protected:
   alignas(hardware_destructive_interference_size) HostStatsStaged stats_;
 };

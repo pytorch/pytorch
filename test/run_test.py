@@ -73,7 +73,22 @@ from tools.testing.test_selections import (
     ShardedTest,
     THRESHOLD,
 )
-from tools.testing.upload_artifacts import zip_and_upload_artifacts
+
+
+try:
+    from tools.testing.upload_artifacts import (
+        parse_xml_and_upload_json,
+        zip_and_upload_artifacts,
+    )
+except ImportError:
+    # some imports in those files might fail, e.g., boto3 not installed. These
+    # functions are only needed under specific circumstances (CI) so we can
+    # define dummy functions here.
+    def parse_xml_and_upload_json():
+        pass
+
+    def zip_and_upload_artifacts(failed: bool):
+        pass
 
 
 # Make sure to remove REPO_ROOT after import is done
@@ -248,13 +263,7 @@ S390X_BLOCKLIST = [
 
 XPU_BLOCKLIST = [
     "test_autograd",
-    "profiler/test_cpp_thread",
-    "profiler/test_execution_trace",
     "profiler/test_memory_profiler",
-    "profiler/test_profiler",
-    "profiler/test_profiler_tree",
-    "profiler/test_record_function",
-    "profiler/test_torch_tidy",
     "test_openreg",
 ]
 
@@ -755,6 +764,8 @@ def run_test_retries(
                 REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
             ) as f:
                 current_failure = f.read()
+                if current_failure == "null":
+                    current_failure = f"'{test_file}'"
         except FileNotFoundError:
             print_to_file(
                 "No stepcurrent file found. Either pytest didn't get to run (e.g. import error)"
@@ -791,10 +802,8 @@ def run_test_retries(
             print_to_file("Retrying single test...")
         print_items = []  # do not continue printing them, massive waste of space
 
-    if "null" in num_failures:
-        num_failures[f"'{test_file}'"] = num_failures.pop("null")
-    consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
-    flaky_failures = [x[1:-1] for x in num_failures.keys() if 0 < num_failures[x] < 3]
+    consistent_failures = [x[1:-1] for x in num_failures if num_failures[x] >= 3]
+    flaky_failures = [x[1:-1] for x in num_failures if 0 < num_failures[x] < 3]
     if len(flaky_failures) > 0:
         print_to_file(
             "The following tests failed and then succeeded when run in a new process"
@@ -1626,7 +1635,7 @@ def get_selected_tests(options) -> list[str]:
     if options.xpu:
         selected_tests = exclude_tests(XPU_BLOCKLIST, selected_tests, "on XPU")
     else:
-        # Exclude all xpu specifc tests otherwise
+        # Exclude all xpu specific tests otherwise
         options.exclude.extend(XPU_TEST)
 
     # Filter to only run onnx tests when --onnx option is specified
@@ -1672,7 +1681,7 @@ def get_selected_tests(options) -> list[str]:
             ]
         )
 
-    if sys.version_info[:2] < (3, 13):
+    if sys.version_info[:2] < (3, 13) or sys.version_info[:2] >= (3, 14):
         # Skip tests for older Python versions as they may use syntax or features
         # not supported in those versions
         options.exclude.extend(
@@ -1826,9 +1835,14 @@ def run_test_module(
         test_name = test.name
 
         # Printing the date here can help diagnose which tests are slow
-        print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
+        start = time.perf_counter()
+        print_to_stderr(f"Running {str(test)} ... [{datetime.now()}][{start}]")
         handler = CUSTOM_HANDLERS.get(test_name, run_test)
         return_code = handler(test, test_directory, options)
+        end = time.perf_counter()
+        print_to_stderr(
+            f"Finished {str(test)} ... [{datetime.now()}][{end}], took {(end - start) / 60:.2f}min"
+        )
         assert isinstance(return_code, int) and not isinstance(return_code, bool), (
             f"While running {str(test)} got non integer return code {return_code}"
         )
@@ -1882,6 +1896,7 @@ def run_tests(
     def handle_complete(failure: Optional[TestFailure]):
         failed = failure is not None
         if IS_CI and options.upload_artifacts_while_running:
+            parse_xml_and_upload_json()
             zip_and_upload_artifacts(failed)
         if not failed:
             return False

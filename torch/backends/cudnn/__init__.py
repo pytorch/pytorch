@@ -34,11 +34,11 @@ if _cudnn is not None:
     def _init():
         global __cudnn_version
         if __cudnn_version is None:
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             __cudnn_version = _cudnn.getVersionInt()
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             runtime_version = _cudnn.getRuntimeVersion()
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             compile_version = _cudnn.getCompileVersion()
             runtime_major, runtime_minor, _ = runtime_version
             compile_major, compile_minor, _ = compile_version
@@ -47,7 +47,7 @@ if _cudnn is not None:
             # Not sure about MIOpen (ROCm), so always do a strict check
             if runtime_major != compile_major:
                 cudnn_compatible = False
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             elif runtime_major < 7 or not _cudnn.is_cuda:
                 cudnn_compatible = runtime_minor == compile_minor
             else:

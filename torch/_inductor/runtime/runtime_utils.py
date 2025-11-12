@@ -187,3 +187,31 @@ def compile_mps_shader(source: str) -> Any:
         return torch.mps.compile_shader(source)
     except SyntaxError as err:
         raise SyntaxError(f"failed to compile {source} with {err.msg}") from err
+
+
+def torch_dtype_to_jax(dtype: torch.dtype) -> str:
+    """
+    Map PyTorch dtype to JAX dtype expression.
+
+    This helper is used at compile time in codegen to generate
+    JAX dtype expressions for Pallas kernels.
+
+    Args:
+        dtype: PyTorch dtype to convert
+
+    Returns:
+        JAX dtype expression as string (e.g., "jnp.float32")
+    """
+    dtype_map = {
+        torch.float32: "jnp.float32",
+        torch.float64: "jnp.float64",
+        torch.float16: "jnp.float16",
+        torch.bfloat16: "jnp.bfloat16",
+        torch.int32: "jnp.int32",
+        torch.int64: "jnp.int64",
+        torch.int16: "jnp.int16",
+        torch.int8: "jnp.int8",
+        torch.uint8: "jnp.uint8",
+        torch.bool: "jnp.bool_",
+    }
+    return dtype_map.get(dtype, f"jnp.{dtype}")
