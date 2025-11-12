@@ -648,7 +648,9 @@ class DebugMode(TorchDispatchMode):
         with torch._C.DisableTorchFunction():
             if not show_stack_trace:
                 result = "\n".join(
-                    "  " + "  " * op.call_depth + op.render(self.record_tensor_attributes)
+                    "  "
+                    + "  " * op.call_depth
+                    + op.render(self.record_tensor_attributes)
                     for op in self.operators
                 )
                 return result
@@ -660,9 +662,9 @@ class DebugMode(TorchDispatchMode):
             for op in self.operators:
                 # Get the stack trace: prefer fwd_stack_trace, fallback to stack_trace
                 stack_trace = None
-                if hasattr(op, 'fwd_stack_trace') and op.fwd_stack_trace:
+                if hasattr(op, "fwd_stack_trace") and op.fwd_stack_trace:
                     stack_trace = op.fwd_stack_trace
-                elif hasattr(op, 'stack_trace') and op.stack_trace:
+                elif hasattr(op, "stack_trace") and op.stack_trace:
                     stack_trace = op.stack_trace
 
                 stack_summary = None
@@ -674,11 +676,15 @@ class DebugMode(TorchDispatchMode):
                     if lines:  # don't add blank line at the very start
                         lines.append("")
                     indent = "  " * (op.call_depth + 1)
-                    lines.append(f"{indent}# {stack_summary}")
+                    lines.append(indent + "# " + stack_summary)
                     prev_stack_summary = stack_summary
 
                 # Add the operation line
-                line = "  " + "  " * op.call_depth + op.render(self.record_tensor_attributes)
+                line = (
+                    "  "
+                    + "  " * op.call_depth
+                    + op.render(self.record_tensor_attributes)
+                )
                 lines.append(line)
 
             return "\n".join(lines)
