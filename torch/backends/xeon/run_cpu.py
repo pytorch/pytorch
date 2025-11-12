@@ -1,4 +1,4 @@
-﻿# mypy: allow-untyped-defs
+﻿# mypy: allow-untyped-defs 
 """
 This is a script for launching PyTorch inference on Intel® Xeon® Scalable Processors with optimal configurations.
 
@@ -62,7 +62,7 @@ Single instance inference
 
 ::
 
-   python -m torch.backends.xeon.run_cpu --throughput-mode script.py args
+   python -m torch.backends.xeon.run_cpu --ninstances 1 script.py args
 
 2. Run single-instance inference on a single CPU node.
 
@@ -81,11 +81,19 @@ Multi-instance inference
 
    python -m torch.backends.xeon.run_cpu -- python_script args
 
-   eg: on an Intel® Xeon® Scalable Processor with 14 instance, 4 cores per instance
+   eg: on an Intel® Xeon® Scalable Processor with 14 instances, 4 cores per instance
 
 ::
 
    python -m torch.backends.xeon.run_cpu --ninstances 14 --ncores-per-instance 4 python_script args
+
+   Setting different cores for each instance is supported.
+
+::
+
+   python -m torch.backends.xeon.run_cpu --ncores-per-instance 43 43 42 43 43 42 --ninstances 6 python_script args
+
+   eg: on an Intel® Xeon® Scalable Processor with 6 instances, each instance has 43 or 42 cores, as specified.
 
 2. Run single-instance inference among multiple instances.
    By default, runs all ninstances. If you want to independently run a single instance among ninstances, specify rank.
