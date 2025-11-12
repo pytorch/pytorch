@@ -501,3 +501,43 @@ def my_empty(size, dtype=None, device=None) -> Tensor:
     Returns: Tensor - an uninitialized tensor with the specified properties
     """
     return torch.ops.libtorch_agnostic.my_empty.default(size, dtype, device)
+
+
+def my_flatten(t, start_dim=0, end_dim=-1) -> Tensor:
+    """
+    Flattens the input tensor from start_dim to end_dim into a single dimension.
+
+    Args:
+        t: Tensor - tensor to flatten
+        start_dim: int - first dimension to flatten (default: 0)
+        end_dim: int - last dimension to flatten (default: -1)
+
+    Returns: Tensor - flattened tensor
+    """
+    return torch.ops.libtorch_agnostic.my_flatten.default(t, start_dim, end_dim)
+
+
+def my_reshape(t, shape) -> Tensor:
+    """
+    Returns a tensor with the same data but different shape.
+
+    Args:
+        t: Tensor - tensor to reshape
+        shape: list[int] - new shape for the tensor
+
+    Returns: Tensor - reshaped tensor
+    """
+    return torch.ops.libtorch_agnostic.my_reshape.default(t, shape)
+
+
+def my_view(t, size) -> Tensor:
+    """
+    Returns a new tensor with the same data as the input tensor but of a different shape.
+
+    Args:
+        t: Tensor - tensor to view
+        size: list[int] - new size for the tensor
+
+    Returns: Tensor - tensor with new view
+    """
+    return torch.ops.libtorch_agnostic.my_view.default(t, size)

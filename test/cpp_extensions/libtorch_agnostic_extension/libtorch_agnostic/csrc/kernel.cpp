@@ -845,11 +845,60 @@ void boxed_my_empty(
   stack[0] = torch::stable::detail::from(res);
 }
 
+Tensor my_flatten(Tensor t, int64_t start_dim, int64_t end_dim) {
+  return flatten(t, start_dim, end_dim);
+}
+
+void boxed_my_flatten(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  Tensor res = my_flatten(
+      torch::stable::detail::to<Tensor>(stack[0]),
+      torch::stable::detail::to<int64_t>(stack[1]),
+      torch::stable::detail::to<int64_t>(stack[2]));
+  stack[0] = torch::stable::detail::from(res);
+}
+
+Tensor my_reshape(Tensor t, torch::headeronly::HeaderOnlyArrayRef<int64_t> shape) {
+  return reshape(t, shape);
+}
+
+void boxed_my_reshape(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  Tensor res = my_reshape(
+      torch::stable::detail::to<Tensor>(stack[0]),
+      torch::stable::detail::to<std::vector<int64_t>>(stack[1]));
+  stack[0] = torch::stable::detail::from(res);
+}
+
+Tensor my_view(Tensor t, torch::headeronly::HeaderOnlyArrayRef<int64_t> size) {
+  return view(t, size);
+}
+
+void boxed_my_view(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  Tensor res = my_view(
+      torch::stable::detail::to<Tensor>(stack[0]),
+      torch::stable::detail::to<std::vector<int64_t>>(stack[1]));
+  stack[0] = torch::stable::detail::from(res);
+}
+
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def(
       "my_empty(int[] size, ScalarType? dtype=None, Device? device=None) -> Tensor");
+  m.def("my_flatten(Tensor t, int start_dim=0, int end_dim=-1) -> Tensor");
+  m.def("my_reshape(Tensor t, int[] shape) -> Tensor");
+  m.def("my_view(Tensor t, int[] size) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("my_empty", &boxed_my_empty);
+  m.impl("my_flatten", &boxed_my_flatten);
+  m.impl("my_reshape", &boxed_my_reshape);
+  m.impl("my_view", &boxed_my_view);
 }

@@ -326,6 +326,49 @@ inline torch::stable::Tensor empty(
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
+// We expect this to be the stable version of the flatten.using_ints op.
+// This flattens the tensor from start_dim to end_dim into a single dimension.
+inline torch::stable::Tensor flatten(
+    const torch::stable::Tensor& self,
+    int64_t start_dim = 0,
+    int64_t end_dim = -1) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(start_dim),
+      torch::stable::detail::from(end_dim)};
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::flatten", "using_ints", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the reshape op.
+// This returns a tensor with the same data but different shape.
+inline torch::stable::Tensor reshape(
+    const torch::stable::Tensor& self,
+    torch::headeronly::IntHeaderOnlyArrayRef shape) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(shape)};
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::reshape", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the view op.
+// This returns a new tensor with the same data as the self tensor but of a
+// different shape.
+inline torch::stable::Tensor view(
+    const torch::stable::Tensor& self,
+    torch::headeronly::IntHeaderOnlyArrayRef size) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(size)};
+  TORCH_ERROR_CODE_CHECK(
+      torch_call_dispatcher("aten::view", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
 #endif
 
 HIDDEN_NAMESPACE_END(torch, stable)

@@ -557,6 +557,56 @@ if not IS_WINDOWS:
             finally:
                 torch.use_deterministic_algorithms(deterministic)
 
+        def test_my_flatten(self, device):
+            import libtorch_agnostic
+
+            t = torch.randn(2, 3, 4, device=device)
+            result = libtorch_agnostic.ops.my_flatten(t)
+            expected = torch.flatten(t)
+            self.assertEqual(result, expected)
+
+            result_start = libtorch_agnostic.ops.my_flatten(t, 1)
+            expected_start = torch.flatten(t, 1)
+            self.assertEqual(result_start, expected_start)
+
+            result_range = libtorch_agnostic.ops.my_flatten(t, 2, -1)
+            expected_range = torch.flatten(t, 2, -1)
+            self.assertEqual(result_range, expected_range)
+
+        def test_my_reshape(self, device):
+            import libtorch_agnostic
+
+            t = torch.randn(2, 3, 4, device=device)
+
+            result = libtorch_agnostic.ops.my_reshape(t, [6, 4])
+            expected = torch.reshape(t, [6, 4])
+            self.assertEqual(result, expected)
+
+            result_infer = libtorch_agnostic.ops.my_reshape(t, [-1, 4])
+            expected_infer = torch.reshape(t, [-1, 4])
+            self.assertEqual(result_infer, expected_infer)
+
+            result_flat = libtorch_agnostic.ops.my_reshape(t, [-1])
+            expected_flat = torch.reshape(t, [-1])
+            self.assertEqual(result_flat, expected_flat)
+
+        def test_my_view(self, device):
+            import libtorch_agnostic
+
+            t = torch.randn(2, 3, 4, device=device)
+
+            result = libtorch_agnostic.ops.my_view(t, [6, 4])
+            expected = t.view([6, 4])
+            self.assertEqual(result, expected)
+
+            result_infer = libtorch_agnostic.ops.my_view(t, [-1, 4])
+            expected_infer = t.view([-1, 4])
+            self.assertEqual(result_infer, expected_infer)
+
+            result_flat = libtorch_agnostic.ops.my_view(t, [-1])
+            expected_flat = t.view([-1])
+            self.assertEqual(result_flat, expected_flat)
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":
