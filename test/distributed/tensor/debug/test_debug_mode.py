@@ -433,7 +433,9 @@ class TestDTensorDebugMode(TestCase):
             op for op in debug_mode.operators if str(op.op) == "aten.sum.dim_IntList"
         ][-1]
         self.assertTrue("self.l2(self.l1(x))" in sum_op.fwd_stack_trace)
-        self.assertTrue("self.l2(self.l1(x))" in debug_mode.debug_string(show_stack_trace=True))
+        self.assertTrue(
+            "self.l2(self.l1(x))" in debug_mode.debug_string(show_stack_trace=True)
+        )
 
     def test_pretty_print_dtensor_make_fx(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
