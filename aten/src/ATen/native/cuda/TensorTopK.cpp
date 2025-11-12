@@ -30,10 +30,59 @@ void topk_out_with_sort(
   indices.copy_(sorted_indices.narrow(dim, 0, k));
 }
 
-bool should_use_sort(const Tensor& self, int64_t dim) {
+bool should_use_sort(const Tensor& self, int64_t k, int64_t dim) {
 #if defined(USE_ROCM)
   if (self.dtype() == kBool) return false; // Bool sort not supported in ROCm: https://github.com/pytorch/pytorch/issues/139972
-  return (self.numel() >= 10000 && self.numel() == self.size(dim)); // based on the experiments in https://github.com/pytorch/pytorch/pull/146387
+
+  // Only use full sort for 1D contiguous large arrays
+  if (self.numel() < 10000 || self.numel() != self.size(dim)) {
+    return false;
+  }
+
+  int64_t n = self.size(dim);
+
+  // Strategy: Balance between full sort and TopK selection based on size and k
+  //
+  // Analysis:
+  // - TopK (mbtopk): O(n * radix_passes) ≈ O(n * 4) for float32
+  //   - Has multi-block overhead and atomics
+  //   - Better for very large n with small k
+  //
+  // - Full sort: O(n * log2(n))
+  //   - Better memory patterns and cache locality
+  //   - Efficient rocThrust implementation for moderate sizes
+  //   - Crossover depends on both n and k
+  //
+  // Empirical thresholds (based on benchmarks):
+  //   For n < 500k:  Use sort (rocThrust is well-optimized for moderate sizes)
+  //   For n >= 500k AND k < 64: Use TopK (avoids O(n log n) overhead)
+  //   For k > n/4:   Use sort (large k regime, better memory patterns)
+
+  // For moderate sizes (10k-500k), rocThrust sort is highly optimized
+  // and faster than TopK multi-block overhead
+  if (n < 500000) {
+    return true;  // Use sort for n < 500k
+  }
+
+  // For very large arrays (n >= 500k), check k ratio
+  if (k < 64) {
+    // Small k with large n: TopK selection wins over full sort
+    // Example: k=8, n=1M → use TopK (O(n) vs O(n log n))
+    return false;
+  }
+
+  if (k * 1000 < n) {
+    // Very small k relative to n (k < 0.1% of n): TopK is faster
+    return false;
+  }
+
+  if (k * 4 > n) {
+    // Large k (k > 25% of n): Full sort has better memory patterns
+    return true;
+  }
+
+  // Middle range: Default to sort (safer for edge cases)
+  return true;
 #else
   return false;
 #endif
@@ -49,7 +98,7 @@ TORCH_IMPL_FUNC(topk_out_cuda)
 
   dim = at::maybe_wrap_dim(dim, self);
 
-  if (should_use_sort(self, dim)) {
+  if (should_use_sort(self, k, dim)) {
     topk_out_with_sort(self, k, dim, largest, values, indices);
     return;
   }

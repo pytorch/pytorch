@@ -560,7 +560,13 @@ constexpr int RADIX_DIGITS = 1 << RADIX_BITS; // 2 ^ RADIX_BITS
 constexpr int RADIX_MASK = (RADIX_DIGITS - 1);
 static_assert(RADIX_DIGITS <= BLOCK_THREADS, "RADIX_DIGITS must be <= BLOCK_THREADS");
 constexpr int MIN_ITEMS_PER_THREAD = 4;
+#if defined(USE_ROCM)
+// AMD: Allow higher items_per_thread for large arrays to reduce blocks_per_slice
+// This reduces overhead in accumulation loops (computeBlockwiseWithinKCounts, gatherTopK)
+constexpr int MAX_ITEMS_PER_THREAD = 96;
+#else
 constexpr int MAX_ITEMS_PER_THREAD = 64;
+#endif
 
 template <typename T, typename IndexType>
 __global__ void fill(T* x, T value, IndexType size) {
@@ -727,9 +733,33 @@ __global__ void computeBlockwiseWithinKCounts(
   if (tidx < RADIX_DIGITS) {
     uint32_t sum = 0;
     // Accumulate counts across all blocks in the slice for this digit
+#if defined(USE_ROCM)
+    // AMD optimization: Improve memory access pattern to reduce latency
+    // Access pattern: counts[base + blk * RADIX_DIGITS + tidx]
+    // For large blocks_per_slice, this loop dominates kernel time
+    // Unroll by 4 to improve instruction-level parallelism and hide latency
+    const short* count_ptr = counts + slice_idx * blocks_per_slice * RADIX_DIGITS + tidx;
+    uint32_t blk = 0;
+    // Process 4 blocks at a time to improve ILP
+    for (; blk + 3 < blocks_per_slice; blk += 4) {
+      uint32_t v0 = count_ptr[0 * RADIX_DIGITS];
+      uint32_t v1 = count_ptr[1 * RADIX_DIGITS];
+      uint32_t v2 = count_ptr[2 * RADIX_DIGITS];
+      uint32_t v3 = count_ptr[3 * RADIX_DIGITS];
+      sum += v0 + v1 + v2 + v3;
+      count_ptr += 4 * RADIX_DIGITS;
+    }
+    // Handle remaining blocks
+    for (; blk < blocks_per_slice; ++blk) {
+      sum += count_ptr[0];
+      count_ptr += RADIX_DIGITS;
+    }
+#else
+    // Original code for CUDA
     for (uint32_t blk = 0; blk < blocks_per_slice; ++blk) {
       sum += counts[(slice_idx * blocks_per_slice + blk) * RADIX_DIGITS + tidx];
     }
+#endif
     digit_totals[tidx] = sum;
   }
   __syncthreads();
@@ -913,6 +943,50 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
     uint32_t prefix_kth = 0;
     uint32_t total_within = 0;
     uint32_t slice_offset = slice_idx * blocks_per_slice;
+#if defined(USE_ROCM)
+    // AMD optimization: Unroll prefix sum loop to improve ILP
+    // This loop iterates up to 245 times for 1M case, causing memory latency
+    const uint32_t* within_ptr = withinKCounts + slice_offset;
+    const uint32_t* kth_ptr = kthCounts + slice_offset;
+    uint32_t blk = 0;
+    // Process 4 blocks at a time
+    for (; blk + 3 < blocks_per_slice; blk += 4) {
+      uint32_t w0 = within_ptr[0];
+      uint32_t w1 = within_ptr[1];
+      uint32_t w2 = within_ptr[2];
+      uint32_t w3 = within_ptr[3];
+      total_within += w0 + w1 + w2 + w3;
+      if (blk < blk_idx_in_slice) {
+        prefix_within += w0;
+        prefix_kth += kth_ptr[0];
+      }
+      if (blk + 1 < blk_idx_in_slice) {
+        prefix_within += w1;
+        prefix_kth += kth_ptr[1];
+      }
+      if (blk + 2 < blk_idx_in_slice) {
+        prefix_within += w2;
+        prefix_kth += kth_ptr[2];
+      }
+      if (blk + 3 < blk_idx_in_slice) {
+        prefix_within += w3;
+        prefix_kth += kth_ptr[3];
+      }
+      within_ptr += 4;
+      kth_ptr += 4;
+    }
+    // Handle remaining blocks
+    for (; blk < blocks_per_slice; ++blk) {
+      uint32_t within_val = *within_ptr++;
+      total_within += within_val;
+      if (blk < blk_idx_in_slice) {
+        prefix_within += within_val;
+        prefix_kth += *kth_ptr;
+      }
+      kth_ptr++;
+    }
+#else
+    // Original code for CUDA
     for (uint32_t blk = 0; blk < blocks_per_slice; ++blk) {
       uint32_t within_val = withinKCounts[slice_offset + blk];
       total_within += within_val;
@@ -921,6 +995,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
         prefix_kth += kthCounts[slice_offset + blk];
       }
     }
+#endif
     slice_prefix_within = prefix_within;
     slice_prefix_kth = prefix_kth;
     slice_total_within = total_within;
@@ -975,16 +1050,52 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
 }
 
 int get_items_per_thread(uint64_t num_slices, uint64_t slice_size) {
-  // occupancy of this kernel is limited by registers per threads
-  constexpr int REGS_PER_THREAD = 40; // from nsight launch statistics
+  // Occupancy of this kernel is limited by registers per thread
+  // Platform-specific tuning for optimal register pressure
+#if defined(USE_ROCM)
+  // AMD RDNA/CDNA architecture: measured via rocprof for mbtopk kernels
+  // MI250X has different register file organization than NVIDIA
+  // - More VGPRs available per thread (256 vs 255 on NVIDIA)
+  // - Wave64 execution model requires different occupancy tuning
+  // Empirically tuned for large 1D TopK (1M elements, k=8 case)
+  constexpr int REGS_PER_THREAD = 48;  // Higher register usage acceptable on AMD
+#else
+  constexpr int REGS_PER_THREAD = 40;  // from nsight launch statistics (NVIDIA)
+#endif
   constexpr int REGS_PER_BLOCK = REGS_PER_THREAD * BLOCK_THREADS;
+
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int mpc = prop->multiProcessorCount;
   int regs_per_mp = prop->regsPerMultiprocessor;
   int max_blocks_per_mp = prop->maxBlocksPerMultiProcessor;
   int blocks_per_mp = std::min(regs_per_mp / REGS_PER_BLOCK, max_blocks_per_mp);
+
+  // Calculate items_per_thread to maximize GPU utilization
   int64_t items_per_thread = at::ceil_div((int64_t)(slice_size * num_slices), (int64_t)(mpc * blocks_per_mp * BLOCK_THREADS));
-  items_per_thread = std::max(MIN_ITEMS_PER_THREAD, std::min((int)items_per_thread, MAX_ITEMS_PER_THREAD)); // clamp to (4, 64)
+
+#if defined(USE_ROCM)
+  // AMD-specific optimization: For large 1D slices, use higher items_per_thread
+  // to significantly reduce blocks_per_slice, which reduces overhead in:
+  // - computeBlockwiseWithinKCounts accumulation loop (lines 730-750)
+  // - gatherTopK prefix sum loop (lines 940-981)
+  // Goal: Keep blocks_per_slice under 100 for optimal performance
+  if (num_slices <= 4 && slice_size >= 800000) {
+    // Very large arrays (800k+): Aggressively increase items_per_thread
+    // For 1M elements: items_per_thread=32 → blocks_per_slice=123
+    // For 1M elements: items_per_thread=48 → blocks_per_slice=82
+    // For 1M elements: items_per_thread=64 → blocks_per_slice=62
+    items_per_thread = std::max(items_per_thread, (int64_t)48);
+  } else if (num_slices <= 4 && slice_size >= 500000) {
+    // Large arrays (500k-800k): Moderately increase items_per_thread
+    items_per_thread = std::max(items_per_thread, (int64_t)32);
+  } else if (num_slices <= 4 && slice_size >= 250000) {
+    // Medium-large arrays (250k-500k): Slightly increase items_per_thread
+    items_per_thread = std::max(items_per_thread, (int64_t)24);
+  }
+#endif
+
+  // Clamp to valid range [MIN, MAX] (AMD: [4, 96], CUDA: [4, 64])
+  items_per_thread = std::max(MIN_ITEMS_PER_THREAD, std::min((int)items_per_thread, MAX_ITEMS_PER_THREAD));
   return items_per_thread;
 }
 
