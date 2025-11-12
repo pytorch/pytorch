@@ -121,6 +121,7 @@ def tensorify_python_scalars(
 
     graph = gm.graph
     tracer = fx.proxy.GraphAppendingTracer(graph)
+    expr_to_sym_int_nodes: dict[sympy.Expr, fx.Node] = {}
     expr_to_sym_proxy: dict[sympy.Expr, MetaProxy] = {}
     expr_to_tensor_proxy: dict[sympy.Expr, MetaProxy] = {}
     tensorified_symbols: set[sympy.Symbol] = set()
@@ -145,6 +146,10 @@ def tensorify_python_scalars(
         if isinstance(expr, Symbol) and expr not in expr_to_tensor_proxy:
             # This is guaranteed to be populated by invariant established by
             # insert_deferred_runtime_asserts
+            if expr in expr_to_sym_int_nodes:
+                expr_to_sym_proxy[expr] = MetaProxy(
+                    expr_to_sym_int_nodes[expr], tracer=tracer, fake_mode=fake_mode
+                )
             expr_to_tensor_proxy[expr] = torch.ops.aten.scalar_tensor.default(
                 expr_to_sym_proxy[expr]
             )
@@ -208,6 +213,7 @@ def tensorify_python_scalars(
             ):
                 dtype = node.args[0].meta["val"].dtype
                 if not dtype.is_floating_point:
+                    expr_to_sym_int_nodes[node.meta["val"].node.expr] = node
                     continue
 
                 assert isinstance(node.args[0], fx.Node), node.args[0]

@@ -213,6 +213,25 @@ class TestInductorDynamic(TestCase):
                 self.assertEqual(fn(x), fn_c(x))
                 self.assertEqual(fn(y), fn_c(y))
 
+    def test_division_with_python_scalars(self):
+        """Test that division between Python scalars doesn't cause KeyError: u0"""
+        torch._dynamo.config.capture_scalar_outputs = True
+        torch._dynamo.config.capture_dynamic_output_shape_ops = True
+
+        def fn(arg_0):
+            var_1 = -6 * arg_0
+            var_2 = torch.full((), 1, dtype=torch.int64).item()
+            result = var_1 / var_2
+            return result
+
+        arg = 5
+
+        result_eager = fn(arg)
+        compiled_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        result_compiled = compiled_fn(arg)
+
+        self.assertEqual(result_eager, result_compiled)
+
     def test_arange_dynamic(self, device):
         def fn(a):
             batch_size = a.numel()
