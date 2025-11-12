@@ -2330,7 +2330,7 @@ class PrintHigherOrderVariable(TorchHigherOrderOperatorVariable):
             proxy=tx.output.create_proxy(
                 "call_function",
                 self.value,
-                args=tuple(args[0]),
+                args=tuple(args_proxy),
                 kwargs=kwargs_proxy,
             ),
         )
@@ -4197,7 +4197,7 @@ _hop_name_to_variable_class = {
     "associative_scan": AssociativeScanHigherOrderVariable,
     "scan": ScanHigherOrderVariable,
     "call_torchbind": CallTorchbindHigherOrderVariable,
-    "hop_print": PrintHigherOrderVariable,
+    "print": PrintHigherOrderVariable,
     "wrap_with_set_grad_enabled": WrapWithSetGradEnabledHigherOrderVariable,
     "wrap_with_autocast": WrapWithAutocastHigherOrderVariable,
     "dynamo_bypassing_wrapper": DynamoBypassingWrapperHigherOrderVariable,
