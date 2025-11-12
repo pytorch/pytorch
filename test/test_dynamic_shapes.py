@@ -425,6 +425,17 @@ class TestPySymInt(TestCase):
             str(shape_env.guards[0][0]), """Eq(BitwiseFn_bitwise_or(s97, s26), 14)"""
         )
 
+    def test_symint_bitwise_xor(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 0b1100)
+        b0 = create_symint(shape_env, 0b1010)
+        res_xor = a0 ^ b0
+        self.assertEqual(res_xor, 0b0110)
+        self.assertIsInstance(res_xor, torch.SymInt, msg=type(res_xor))
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]), """Eq(BitwiseFn_bitwise_xor(s97, s26), 6)"""
+        )
+
     def test_stride(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 5), shape_env)

@@ -5788,6 +5788,20 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
 
         self.assertTrue(torch.allclose(dynamo_output, output))
 
+    def test_repr(self):
+        class Config:
+            def __repr__(self):
+                return "Config()"
+
+        def forward(x, config):
+            return x * len(repr(config))
+
+        config = Config()
+        x = torch.randn(2, 2)
+
+        compiled = torch.compile(forward, fullgraph=True)
+        compiled(x, config)
+
     def test_nn_functional_reduction(self):
         def fn(loss, reduction):
             reduction_enum = F._Reduction.get_enum(reduction)

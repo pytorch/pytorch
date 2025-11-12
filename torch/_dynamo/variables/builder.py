@@ -986,7 +986,6 @@ class VariableBuilder:
                     value,
                     source=self.source,
                     saved_tensors=SavedTensorBox(saved_tensors),
-                    smuggled_tensors=SavedTensorBox(),
                 ),
             )
         elif (

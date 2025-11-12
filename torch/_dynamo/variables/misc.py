@@ -700,6 +700,7 @@ class AutogradFunctionVariable(VariableTracker):
         VariableTracker.visit(visit, (args, kwargs))
 
         if requires_grad and torch.is_grad_enabled():
+            source = self.source
             if config.capture_autograd_function is False:
                 warnings.warn(
                     "The config.capture_autograd_function flag is deprecated, it's now always true."
@@ -719,6 +720,10 @@ class AutogradFunctionVariable(VariableTracker):
                 forward_fn = autograd_function_forward_rewritten(
                     self.fn_cls.forward, self.fn_cls.setup_context
                 )
+                # The forward points to a new function now, so we can't use the
+                # old source. Later on, we guard specifically on
+                # is_setup_ctx_defined
+                source = None
 
             vjp_fn = self.fn_cls.vjp  # type: ignore[attr-defined]
             if vjp_fn is not torch.autograd.Function.vjp:
@@ -751,29 +756,23 @@ class AutogradFunctionVariable(VariableTracker):
 
             from .higher_order_ops import AutogradFunctionApplyVariable
 
-            source = self.source
-            if source is None:
+            if source is None and not is_setup_ctx_defined:
                 source = AttrSource(
                     tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
                 )
+            apply_source = source and AttrSource(source, member="apply")
 
             val = AutogradFunctionApplyVariable(
                 forward_fn,
                 self.fn_cls.backward,
                 source,
-                source=AttrSource(source, member="apply"),
+                source=apply_source,
             ).call_function(tx, args, kwargs)
-            # Inside of AutogradFunctionApplyVariable.call_function, we use sourceless variable wrapping
-            # the forward function, as we don't want to generate guards for new_forward.__closure__
-            # if forward is rewritten by autograd_function_forward_rewritten.
-            # But we still need to generate correct guards for the original forward and setup_context
-            # functions, so we have to add guards manually.
-            if self.source:
+            if self.source and is_setup_ctx_defined:
                 fwd_src = AttrSource(self.source, "forward")
                 install_guard(fwd_src.make_guard(GuardBuilder.CLOSURE_MATCH))
-                if is_setup_ctx_defined:
-                    setup_ctx_src = AttrSource(self.source, "setup_context")
-                    install_guard(setup_ctx_src.make_guard(GuardBuilder.CLOSURE_MATCH))
+                setup_ctx_src = AttrSource(self.source, "setup_context")
+                install_guard(setup_ctx_src.make_guard(GuardBuilder.CLOSURE_MATCH))
 
             return val
 
@@ -901,7 +900,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         "proxy",
         "inference",
         "saved_tensors",
-        "smuggled_tensors",
         *UserDefinedObjectVariable._nonvar_fields,
     }
 
@@ -911,7 +909,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         value_type=None,
         inference=False,
         saved_tensors=None,
-        smuggled_tensors=None,
         needs_input_grad=None,
         non_differentiable=None,
         **kwargs,
@@ -919,7 +916,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         super().__init__(value=value, value_type=value_type, **kwargs)
         self.inference = inference
         self.saved_tensors = saved_tensors
-        self.smuggled_tensors = smuggled_tensors
         self.needs_input_grad = needs_input_grad
         self.non_differentiable = non_differentiable
 
@@ -938,7 +934,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 AutogradFunctionContextVariable,
                 inference=True,
                 saved_tensors=SavedTensorBox(),
-                smuggled_tensors=SavedTensorBox(),
                 needs_input_grad=needs_input_grad,
             ),
             {},
@@ -964,12 +959,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__setattr__":
-            if len(args) == 2 and isinstance(args[1], variables.TensorVariable):
-                tx.output.current_tracer.maybe_lift_tracked_freevar_to_input(
-                    args[1].as_proxy()
-                )
-                self.smuggled_tensors.tensors.append(args[1])
-
             return super().call_method(tx, name, args, kwargs)
         elif name == "mark_non_differentiable":
             if kwargs:
@@ -1011,7 +1000,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         if len(self.saved_tensors.tensors) > 0:
             self.saved_tensors.tensors = []
         for arg in args:
-            tx.output.current_tracer.maybe_lift_tracked_freevar_to_input(arg.as_proxy())
             self.saved_tensors.tensors.append(arg)
         return variables.ConstantVariable.create(None)
 

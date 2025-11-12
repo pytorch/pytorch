@@ -252,7 +252,7 @@ def _make_inlined(tx: "InstructionTranslator", f):
     return inline_call
 
 
-def _call_function_and_unflatten_output_wrap_semantics(
+def _call_function_with_auto_output_flattening(
     tx: "InstructionTranslator",
     fn: Any,
     args: tuple[Any, ...],
@@ -262,9 +262,9 @@ def _call_function_and_unflatten_output_wrap_semantics(
     graph_output_vts: VariableTracker | tuple[VariableTracker, ...],
 ) -> Optional[VariableTracker]:
     """
-    Create HOP call node and reproxify output VTs for HOPs with wrap semantics.
+    Create HOP call node and reproxify output VTs for HOPs with auto output semantics.
 
-    This function is used by HOPs with wrap semantics (see speculate_subgraph_with_wrap_semantics)
+    This function is used by HOPs with auto output semantics (see speculate_subgraph_with_auto_output_flattening)
     to create the actual HOP call in the FX graph and properly handle the output variable trackers.
 
     The key operation is "reproxifying" - updating the proxies of the original tensor VTs
@@ -321,6 +321,11 @@ def _call_function_and_unflatten_output_wrap_semantics(
                     subgraph_vt, (variables.SymNodeVariable, variables.TensorVariable)
                 )
                 orig_vt.proxy = subgraph_vt.proxy
+
+                # For autograd.Function, running the example we need to rewrite
+                # the requires_grad because the body_r is traced with grad
+                # disabled.
+                orig_vt.requires_grad = subgraph_vt.requires_grad
     return body_r
 
 
@@ -824,16 +829,8 @@ def validate_args_and_maybe_create_graph_inputs(
             if set_subgraph_inputs == "automatic":
                 args.append(a)
                 continue
-            elif set_subgraph_inputs == "semi_automatic":
-                if isinstance(a, AutogradFunctionContextVariable):
-                    example_value = a.as_proxy().node.meta["example_value"]
-                    arg_name = (
-                        a.as_proxy().node.name
-                        if sub_args_names is None
-                        else sub_args_names[idx]
-                    )
-                    tracer.create_graph_input(arg_name, a.python_type(), example_value)
-                elif a.maybe_fx_node() is not None:
+            elif set_subgraph_inputs == "automatic_with_new_placeholder":
+                if isinstance(a, variables.TensorVariable):
                     node = a.maybe_fx_node()
                     example_value = node.meta["example_value"]
                     arg_name = (
@@ -1011,7 +1008,181 @@ def _merge_graph_inputs(
     return l_graph, r_graph, l_shared, r_shared, unique_l, unique_r
 
 
-def speculate_subgraph_with_wrap_semantics(
+# NOTE: [HigherOrderOperator subgraph input ordering]
+# The input ordering of the higher order ops is determined by the order of
+# the creation of the placeholder.
+# Manually created inputs are created in validate_args_and_maybe_create_graph_inputs before
+# speculating subgraph.
+# During subgraph speculation, we may lift closured tensors and free symbols as inputs,
+# their ordering is determined by the time they are lifted: earlier lifted ones precede later
+# lifted ones.
+#
+# Suppose the placeholders are
+# O1, O2, X1, O3, O4, X2, X3, O5 where Xs are lifted phs
+# The following code re-order the placeholders to
+# O1, O2, O3, O4, O5, X1, X2, X3
+def move_lifted_freevars_phs_to_end(
+    graph: torch.fx.Graph, lifted_freevars: tuple[torch.fx.Node]
+):
+    lifted_ph_set = {child_p.node for child_p in lifted_freevars.values()}
+
+    prev_phs = [n for n in graph.nodes if n.op == "placeholder"]
+
+    # No need to reorder when graph doesn't have args or doesn't
+    # have lifted freevars or all inputs are lifted freevars.
+    if (
+        len(prev_phs) == 0
+        or len(lifted_ph_set) == 0
+        or len(prev_phs) == len(lifted_ph_set)
+    ):
+        return
+
+    # Step 1: find first X1
+    for x1 in prev_phs:
+        if x1 in lifted_ph_set:
+            break
+
+    assert x1 is not None and x1.op == "placeholder"
+    # Step 2: starting from the X1, skip Xs and prepend Os before X1.
+    cand_x = x1.next
+    while cand_x is not None and cand_x.op == "placeholder":
+        if cand_x in lifted_ph_set:
+            cand_x = cand_x.next
+        else:
+            nxt = cand_x.next
+            cand_x._remove_from_list()
+            x1.prepend(cand_x)
+            cand_x = nxt
+
+    # Step 3: assert that all placeholders are in the correct order as .
+    # in lifted_freevars
+    after_phs = [node for node in graph.nodes if node.op == "placeholder"][
+        -len(lifted_freevars) :
+    ]
+    assert len(after_phs) == len(lifted_freevars)
+    for child_proxy, ph in zip(lifted_freevars.values(), after_phs):
+        assert child_proxy.node is ph, (
+            "The order of placeholders is different from the order of lifted_freevars"
+        )
+
+    graph.lint()
+
+
+def check_aliasing_and_input_mutation(
+    subtracer, graph, supports_input_mutation, supports_aliasing, source_target
+):
+    if not supports_input_mutation:
+        mutation_info = subtracer.has_input_mutation()
+        if mutation_info.has_mutation:
+            context = f"{mutation_info.msg} in\n {graph}"
+            unimplemented(
+                gb_type="Encountered input mutation during higher order op tracing",
+                context=context,
+                explanation=f"Higher order ops do not support input mutation. Found in {source_target.name()}",
+                hints=[
+                    "Consider using the debug context to change user code to avoid mutation.",
+                    "Please open an issue.",
+                ],
+            )
+
+    if not supports_aliasing:
+        aliasing_info = subtracer.has_aliasing()
+        if aliasing_info.has_aliasing:
+            context = f"{aliasing_info.msg} in\n {graph}"
+            unimplemented(
+                gb_type="Encountered aliasing during higher order op tracing",
+                context=context,
+                explanation=f"Higher order ops do not support aliasing. Found in {source_target.name()}",
+                hints=[
+                    "Replace `return input` with `return input.clone()` to avoid aliasing.",
+                    "Consider using the debug context to change user code to avoid aliasing.",
+                    "Please open an issue.",
+                ],
+            )
+
+
+def trace_hop_function(
+    f,
+    tx,
+    subtracer,
+    enable_grad,
+    under_activation_checkpoint,
+    restore_side_effects,
+    args,
+    sub_kwargs,
+):
+    autograd_ctx = (
+        dynamo_enable_grad(tx, enable_grad)
+        if enable_grad is not None
+        else contextlib.nullcontext()
+    )
+    checkpoint_ctx = (
+        dynamo_under_activation_checkpoint(tx)
+        if under_activation_checkpoint
+        else contextlib.nullcontext()
+    )
+
+    # For handling side effects, we can make an argument that we don't
+    # have to do anything here. The side effects infra does a good job
+    # of graph breaking if we mutate any nonlocal or global variable
+    # while subtracing. As a result if tracing succeeds, side effects
+    # data structure will only contain read-only data structures that
+    # are put there for tracking purposes.
+    # But on the other hand, there is an argument that if we ever write
+    # a new side effect in Dynamo which does not go through the side
+    # effect infra, we can end up in bad state.
+    # Therefore we restore the side effects after tracing. The catch is
+    # that we have to special handle tensor variables. If we have seen a
+    # nonlocal variable tensor during subtracing, we want to keep a
+    # track of that tensor, so that later subtracing or the root tracer
+    # itself does not create a new proxy for the already observed tensor
+    # variable.
+    if restore_side_effects:
+        prev_side_effects = tx.output.side_effects.clone()
+
+    with autograd_ctx, checkpoint_ctx:
+        output = f.call_function(tx, args, sub_kwargs)
+
+    if restore_side_effects:
+        new_side_effects = tx.output.side_effects.clone()
+        prev_side_effects.track_runahead_tensor_and_symvar_side_effects(
+            new_side_effects
+        )
+        tx.output.side_effects = prev_side_effects
+    return output
+
+
+def get_hop_args(
+    tx, f, subtracer, sub_args, sub_kwargs, set_subgraph_inputs, description
+):
+    sub_args_names = maybe_positional_arg_names(f)
+    # User mismatch in the number of args. Will eventually lead to an error.
+    if sub_args_names is not None and len(sub_args_names) < len(sub_args):
+        sub_args_names = None
+    args = validate_args_and_maybe_create_graph_inputs(
+        sub_args,
+        subtracer,
+        tx,
+        set_subgraph_inputs,
+        description,
+        sub_args_names,
+    )
+
+    validate_args_and_maybe_create_graph_inputs(
+        sub_kwargs.values(),
+        subtracer,
+        tx,
+        set_subgraph_inputs="automatic",
+        description=description,
+    )
+    return args
+
+
+# TODO - The eventual goal is to replace
+# speculate_subgraph_with_auto_output_flattening with speculate_subgraph or
+# merge them two into one. We are following a staged approach because of
+# existing implementation complexity for control flow ops.
+def speculate_subgraph_with_auto_output_flattening(
     tx: "InstructionTranslator",
     f: VariableTracker,
     sub_args: Sequence[VariableTracker],
@@ -1024,7 +1195,7 @@ def speculate_subgraph_with_wrap_semantics(
     enable_grad: Optional[bool] = None,
     # TODO - We can probably just make everyone use automatic for wrap_semantics
     set_subgraph_inputs: Literal[
-        "automatic", "semi_automatic", "flatten_manual", "manual"
+        "automatic", "automatic_with_new_placeholder", "flatten_manual", "manual"
     ] = "automatic",
     # Make default False
     restore_side_effects: bool = True,
@@ -1047,18 +1218,21 @@ def speculate_subgraph_with_wrap_semantics(
     ],  # graph_output_vts: Tensor/symint VTs that are actual FX graph outputs
 ]:
     """
-    Speculate subgraph for Higher-Order Operators (HOPs) with wrap semantics.
+    Speculate subgraph for Higher-Order Operators (HOPs) with automatic output flattening.
 
-    ## Wrap Semantics
+    ## Automatic output flattening
 
-    Some HOPs have "wrap semantics", meaning the HOP at runtime essentially just runs
-    the subgraph with the inputs. For example:
+    For many HOPs, the representation exists only as a container for the
+    subgraph. In later compiler stages or at runtime, the HOP is desugared and
+    simply executes the subgraph directly, as if it were inlined. For such hops,
+    we follow automatic output flattening.
+    For example:
     - invoke_subgraph
     - activation checkpointing (torch.utils.checkpoint.checkpoint)
     - autograd.Function
     - nested_compile_region
 
-    This is in contrast to control flow HOPs which do NOT follow wrap semantics:
+    This is in contrast to control flow HOPs which do not follow this desugaring:
     - torch.cond (conditional execution based on predicate)
     - torch.while_loop (iterative execution)
     - torch.map (parallel execution over batch dimension)
@@ -1068,7 +1242,7 @@ def speculate_subgraph_with_wrap_semantics(
 
     ## Key Advantage: Disentangling VTs from Graph Outputs
 
-    Wrap semantics simplify HOP processing by allowing us to disentangle the output
+    Desugaring simplify HOP processing by allowing us to disentangle the output
     variable trackers (VTs) from the HOP subgraph outputs. This mirrors typical
     Dynamo processing where:
     - VTs "run ahead" representing the program state for continued tracing
@@ -1112,7 +1286,7 @@ def speculate_subgraph_with_wrap_semantics(
 
     assert set_subgraph_inputs in {
         "automatic",
-        "semi_automatic",
+        "automatic_with_new_placeholder",
         "flatten_manual",
         "manual",
     }, "Please use one of the supported set_subgraph_inputs options."
@@ -1136,65 +1310,21 @@ def speculate_subgraph_with_wrap_semantics(
         )
 
         with tx.output.subtracer(source_target, tracer) as subtracer:
-            sub_args_names = maybe_positional_arg_names(f)
-            # User mismatch in the number of args. Will eventually lead to an error.
-            if sub_args_names is not None and len(sub_args_names) < len(sub_args):
-                sub_args_names = None
-            args = validate_args_and_maybe_create_graph_inputs(
-                sub_args,
-                subtracer,
+            args = get_hop_args(
+                tx, f, subtracer, sub_args, sub_kwargs, set_subgraph_inputs, description
+            )
+
+            output = trace_hop_function(
+                f,
                 tx,
-                set_subgraph_inputs,
-                description,
-                sub_args_names,
-            )
-
-            validate_args_and_maybe_create_graph_inputs(
-                sub_kwargs.values(),
                 subtracer,
-                tx,
-                set_subgraph_inputs="automatic",
-                description=description,
+                enable_grad,
+                under_activation_checkpoint,
+                restore_side_effects,
+                args,
+                sub_kwargs,
             )
 
-            autograd_ctx = (
-                dynamo_enable_grad(tx, enable_grad)
-                if enable_grad is not None
-                else contextlib.nullcontext()
-            )
-            checkpoint_ctx = (
-                dynamo_under_activation_checkpoint(tx)
-                if under_activation_checkpoint
-                else contextlib.nullcontext()
-            )
-
-            # For handling side effects, we can make an argument that we don't
-            # have to do anything here. The side effects infra does a good job
-            # of graph breaking if we mutate any nonlocal or global variable
-            # while subtracing. As a result if tracing succeeds, side effects
-            # data structure will only contain read-only data structures that
-            # are put there for tracking purposes.
-            # But on the other hand, there is an argument that if we ever write
-            # a new side effect in Dynamo which does not go through the side
-            # effect infra, we can end up in bad state.
-            # Therefore we restore the side effects after tracing. The catch is
-            # that we have to special handle tensor variables. If we have seen a
-            # nonlocal variable tensor during subtracing, we want to keep a
-            # track of that tensor, so that later subtracing or the root tracer
-            # itself does not create a new proxy for the already observed tensor
-            # variable.
-            if restore_side_effects:
-                prev_side_effects = tx.output.side_effects.clone()
-
-            with autograd_ctx, checkpoint_ctx:
-                output = f.call_function(tx, args, sub_kwargs)
-
-            if restore_side_effects:
-                new_side_effects = tx.output.side_effects.clone()
-                prev_side_effects.track_runahead_tensor_and_symvar_side_effects(
-                    new_side_effects
-                )
-                tx.output.side_effects = prev_side_effects
             # NOTE: [Separation of graph outputs and output VTs]
             # In Dynamo (outside of speculate_subgraph), VTs and the graph are
             # separate concepts:
@@ -1303,97 +1433,16 @@ def speculate_subgraph_with_wrap_semantics(
             graph.lint()
             lifted_freevars = subtracer.lifted_freevars
 
-            # NOTE: [HigherOrderOperator subgraph input ordering]
-            # The input ordering of the higher order ops is determined by the order of
-            # the creation of the placeholder.
-            # Manually created inputs are created in validate_args_and_maybe_create_graph_inputs before
-            # speculating subgraph.
-            # During subgraph speculation, we may lift closured tensors and free symbols as inputs,
-            # their ordering is determined by the time they are lifted: earlier lifted ones precede later
-            # lifted ones.
-            #
-            # Suppose the placeholders are
-            # O1, O2, X1, O3, O4, X2, X3, O5 where Xs are lifted phs
-            # The following code re-order the placeholders to
-            # O1, O2, O3, O4, O5, X1, X2, X3
-            def move_lifted_freevars_phs_to_end(
-                graph: torch.fx.Graph, lifted_freevars: tuple[torch.fx.Node]
-            ):
-                lifted_ph_set = {child_p.node for child_p in lifted_freevars.values()}
-
-                prev_phs = [n for n in graph.nodes if n.op == "placeholder"]
-
-                # No need to reorder when graph doesn't have args or doesn't
-                # have lifted freevars or all inputs are lifted freevars.
-                if (
-                    len(prev_phs) == 0
-                    or len(lifted_ph_set) == 0
-                    or len(prev_phs) == len(lifted_ph_set)
-                ):
-                    return
-
-                # Step 1: find first X1
-                for x1 in prev_phs:
-                    if x1 in lifted_ph_set:
-                        break
-
-                assert x1 is not None and x1.op == "placeholder"
-                # Step 2: starting from the X1, skip Xs and prepend Os before X1.
-                cand_x = x1.next
-                while cand_x is not None and cand_x.op == "placeholder":
-                    if cand_x in lifted_ph_set:
-                        cand_x = cand_x.next
-                    else:
-                        nxt = cand_x.next
-                        cand_x._remove_from_list()
-                        x1.prepend(cand_x)
-                        cand_x = nxt
-
-                # Step 3: assert that all placeholders are in the correct order as .
-                # in lifted_freevars
-                after_phs = [node for node in graph.nodes if node.op == "placeholder"][
-                    -len(lifted_freevars) :
-                ]
-                assert len(after_phs) == len(lifted_freevars)
-                for child_proxy, ph in zip(lifted_freevars.values(), after_phs):
-                    assert child_proxy.node is ph, (
-                        "The order of placeholders is different from the order of lifted_freevars"
-                    )
-
-                graph.lint()
-
             if len(lifted_freevars) > 0:
                 move_lifted_freevars_phs_to_end(graph, lifted_freevars)
 
-            if not supports_input_mutation:
-                mutation_info = subtracer.has_input_mutation()
-                if mutation_info.has_mutation:
-                    context = f"{mutation_info.msg} in\n {graph}"
-                    unimplemented(
-                        gb_type="Encountered input mutation during higher order op tracing",
-                        context=context,
-                        explanation=f"Higher order ops do not support input mutation. Found in {source_target.name()}",
-                        hints=[
-                            "Consider using the debug context to change user code to avoid mutation.",
-                            "Please open an issue.",
-                        ],
-                    )
-
-            if not supports_aliasing:
-                aliasing_info = subtracer.has_aliasing()
-                if aliasing_info.has_aliasing:
-                    context = f"{aliasing_info.msg} in\n {graph}"
-                    unimplemented(
-                        gb_type="Encountered aliasing during higher order op tracing",
-                        context=context,
-                        explanation=f"Higher order ops do not support aliasing. Found in {source_target.name()}",
-                        hints=[
-                            "Replace `return input` with `return input.clone()` to avoid aliasing.",
-                            "Consider using the debug context to change user code to avoid aliasing.",
-                            "Please open an issue.",
-                        ],
-                    )
-
+            check_aliasing_and_input_mutation(
+                subtracer,
+                graph,
+                supports_input_mutation,
+                supports_aliasing,
+                source_target,
+            )
             # Return both the output VT and the graph output VTs separately:
             # - `output`: The VT that Dynamo continues tracing with (may be
             #   complex Python objects, tuples, dicts, etc.)
@@ -1463,7 +1512,7 @@ def speculate_subgraph(
 
     assert set_subgraph_inputs in {
         "automatic",
-        "semi_automatic",
+        "automatic_with_new_placeholder",
         "flatten_manual",
         "manual",
     }, "Please use one of the supported set_subgraph_inputs options."
@@ -1487,65 +1536,20 @@ def speculate_subgraph(
         )
 
         with tx.output.subtracer(source_target, tracer) as subtracer:
-            sub_args_names = maybe_positional_arg_names(f)
-            # User mismatch in the number of args. Will eventually lead to an error.
-            if sub_args_names is not None and len(sub_args_names) < len(sub_args):
-                sub_args_names = None
-            args = validate_args_and_maybe_create_graph_inputs(
-                sub_args,
-                subtracer,
+            args = get_hop_args(
+                tx, f, subtracer, sub_args, sub_kwargs, set_subgraph_inputs, description
+            )
+
+            output = trace_hop_function(
+                f,
                 tx,
-                set_subgraph_inputs,
-                description,
-                sub_args_names,
-            )
-
-            validate_args_and_maybe_create_graph_inputs(
-                sub_kwargs.values(),
                 subtracer,
-                tx,
-                set_subgraph_inputs="automatic",
-                description=description,
+                enable_grad,
+                under_activation_checkpoint,
+                restore_side_effects,
+                args,
+                sub_kwargs,
             )
-
-            autograd_ctx = (
-                dynamo_enable_grad(tx, enable_grad)
-                if enable_grad is not None
-                else contextlib.nullcontext()
-            )
-            checkpoint_ctx = (
-                dynamo_under_activation_checkpoint(tx)
-                if under_activation_checkpoint
-                else contextlib.nullcontext()
-            )
-
-            # For handling side effects, we can make an argument that we don't
-            # have to do anything here. The side effects infra does a good job
-            # of graph breaking if we mutate any nonlocal or global variable
-            # while subtracing. As a result if tracing succeeds, side effects
-            # data structure will only contain read-only data structures that
-            # are put there for tracking purposes.
-            # But on the other hand, there is an argument that if we ever write
-            # a new side effect in Dynamo which does not go through the side
-            # effect infra, we can end up in bad state.
-            # Therefore we restore the side effects after tracing. The catch is
-            # that we have to special handle tensor variables. If we have seen a
-            # nonlocal variable tensor during subtracing, we want to keep a
-            # track of that tensor, so that later subtracing or the root tracer
-            # itself does not create a new proxy for the already observed tensor
-            # variable.
-            if restore_side_effects:
-                prev_side_effects = tx.output.side_effects.clone()
-
-            with autograd_ctx, checkpoint_ctx:
-                output = f.call_function(tx, args, sub_kwargs)
-
-            if restore_side_effects:
-                new_side_effects = tx.output.side_effects.clone()
-                prev_side_effects.track_runahead_tensor_and_symvar_side_effects(
-                    new_side_effects
-                )
-                tx.output.side_effects = prev_side_effects
 
             treespec = None
             masks_to_filter_const_values = None
@@ -1580,59 +1584,9 @@ def speculate_subgraph(
                         output, masks_to_filter_const_values
                     )
 
-            # NOTE - [Return subgraph intermediates as subgraph outputs]
-            # This helps HOPs which allow side effects. Consider the
-            # following example
-            #
-            # def gn(x, z):
-            #     o = torch.matmul(x, x) @ x
-            #     out = x.sin()
-            #     z.append(out)
-            #     return torch.cos(torch.sin(o))
-
-            # def fn(x):
-            #     z = []
-            #     out1 = torch.utils.checkpoint.checkpoint(
-            #         gn,
-            #         x,
-            #         z,
-            #         use_reentrant=False,
-            #     )
-            #     return out1, z[0]
-            #
-            # In this example, list `z` is in outer scope and gets appended
-            # in the subgraph with `out`. But `out` is not an output of the
-            # subgraph. This can cause issue because later on when the outer
-            # graph returns `z[0]` it needs to have access to the graph node
-            # `out`. To solve this problem, we just return all intermediates
-            # from the subgraph.
-
-            # TODO - Today this is supported only for AC. AC HOP gets
-            # desugared in AOTDispatcher so even though subgraph has extra
-            # unused outputs in Dynamo, its ok even if we don't DCE them in
-            # Dynamo. As AOTDispatcher desugars/inlines the subgraph, the
-            # subgraph boundary disappears. And even for AC, today this only
-            # works when the skip_fwd_side_effects_in_bwd_under_checkpoint
-            # flag is True, i.e., only when we allow side-effects. But, we
-            # want this to be supported for other Hops as well, specifically
-            # nested_compile_region and autograd.Function. Today, its safe
-            # because we error out on seeing a side-effect.
+            # TODO - clean up num_intermediate_nodes_as_outputs - we do not need
+            # after AC moved to auto_output_flattening
             num_intermediate_nodes_as_outputs = 0
-            if under_activation_checkpoint and should_flatten_outputs:
-                output_vts = {
-                    vt
-                    for vt in output.items
-                    if isinstance(
-                        vt, (variables.TensorVariable, variables.SymNodeVariable)
-                    )
-                }
-                extra_outputs = []
-                for out in subtracer.tracked_tensor_or_symint_vt:
-                    if out not in output_vts:
-                        extra_outputs.append(out)
-                output = TupleVariable(output.items + extra_outputs)
-                num_intermediate_nodes_as_outputs = len(extra_outputs)
-
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
             # TODO: support pytree output
@@ -1674,98 +1628,16 @@ def speculate_subgraph(
                 graph.lint()
                 lifted_freevars = subtracer.lifted_freevars
 
-                # NOTE: [HigherOrderOperator subgraph input ordering]
-                # The input ordering of the higher order ops is determined by the order of
-                # the creation of the placeholder.
-                # Manually created inputs are created in validate_args_and_maybe_create_graph_inputs before
-                # speculating subgraph.
-                # During subgraph speculation, we may lift closured tensors and free symbols as inputs,
-                # their ordering is determined by the time they are lifted: earlier lifted ones precede later
-                # lifted ones.
-                #
-                # Suppose the placeholders are
-                # O1, O2, X1, O3, O4, X2, X3, O5 where Xs are lifted phs
-                # The following code re-order the placeholders to
-                # O1, O2, O3, O4, O5, X1, X2, X3
-                def move_lifted_freevars_phs_to_end(
-                    graph: torch.fx.Graph, lifted_freevars: tuple[torch.fx.Node]
-                ):
-                    lifted_ph_set = {
-                        child_p.node for child_p in lifted_freevars.values()
-                    }
-
-                    prev_phs = [n for n in graph.nodes if n.op == "placeholder"]
-
-                    # No need to reorder when graph doesn't have args or doesn't
-                    # have lifted freevars or all inputs are lifted freevars.
-                    if (
-                        len(prev_phs) == 0
-                        or len(lifted_ph_set) == 0
-                        or len(prev_phs) == len(lifted_ph_set)
-                    ):
-                        return
-
-                    # Step 1: find first X1
-                    for x1 in prev_phs:
-                        if x1 in lifted_ph_set:
-                            break
-
-                    assert x1 is not None and x1.op == "placeholder"
-                    # Step 2: starting from the X1, skip Xs and prepend Os before X1.
-                    cand_x = x1.next
-                    while cand_x is not None and cand_x.op == "placeholder":
-                        if cand_x in lifted_ph_set:
-                            cand_x = cand_x.next
-                        else:
-                            nxt = cand_x.next
-                            cand_x._remove_from_list()
-                            x1.prepend(cand_x)
-                            cand_x = nxt
-
-                    # Step 3: assert that all placeholders are in the correct order as .
-                    # in lifted_freevars
-                    after_phs = [
-                        node for node in graph.nodes if node.op == "placeholder"
-                    ][-len(lifted_freevars) :]
-                    assert len(after_phs) == len(lifted_freevars)
-                    for child_proxy, ph in zip(lifted_freevars.values(), after_phs):
-                        assert child_proxy.node is ph, (
-                            "The order of placeholders is different from the order of lifted_freevars"
-                        )
-
-                    graph.lint()
-
                 if len(lifted_freevars) > 0:
                     move_lifted_freevars_phs_to_end(graph, lifted_freevars)
 
-                if not supports_input_mutation:
-                    mutation_info = subtracer.has_input_mutation()
-                    if mutation_info.has_mutation:
-                        context = f"{mutation_info.msg} in\n {graph}"
-                        unimplemented(
-                            gb_type="Encountered input mutation during higher order op tracing",
-                            context=context,
-                            explanation=f"Higher order ops do not support input mutation. Found in {source_target.name()}",
-                            hints=[
-                                "Consider using the debug context to change user code to avoid mutation.",
-                                "Please open an issue.",
-                            ],
-                        )
-
-                if not supports_aliasing:
-                    aliasing_info = subtracer.has_aliasing()
-                    if aliasing_info.has_aliasing:
-                        context = f"{aliasing_info.msg} in\n {graph}"
-                        unimplemented(
-                            gb_type="Encountered aliasing during higher order op tracing",
-                            context=context,
-                            explanation=f"Higher order ops do not support aliasing. Found in {source_target.name()}",
-                            hints=[
-                                "Replace `return input` with `return input.clone()` to avoid aliasing.",
-                                "Consider using the debug context to change user code to avoid aliasing.",
-                                "Please open an issue.",
-                            ],
-                        )
+                check_aliasing_and_input_mutation(
+                    subtracer,
+                    graph,
+                    supports_input_mutation,
+                    supports_aliasing,
+                    source_target,
+                )
 
                 return (
                     (
@@ -2930,7 +2802,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             body_graph,
             body_lifted_freevars,
             body_graph_output_vts,
-        ) = speculate_subgraph_with_wrap_semantics(
+        ) = speculate_subgraph_with_auto_output_flattening(
             tx,
             fn_vt,
             fn_args_vt,
@@ -3003,7 +2875,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 ],
             )
 
-        return _call_function_and_unflatten_output_wrap_semantics(
+        return _call_function_with_auto_output_flattening(
             tx,
             self.value,
             tuple(p_args),
@@ -3264,7 +3136,7 @@ class HintsWrapperHigherOrderVariable(WrapHigherOrderVariable):
         p_kwargs = {}
         p_kwargs["hints"] = kwargs["hints"].as_python_constant()
 
-        return _call_function_and_unflatten_output_wrap_semantics(
+        return _call_function_with_auto_output_flattening(
             tx,
             self.value,
             p_args,
@@ -3451,7 +3323,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
 
         _, checkpoint_kwargs = proxy_args_kwargs([], checkpoint_kwargs)
 
-        return _call_function_and_unflatten_output_wrap_semantics(
+        return _call_function_with_auto_output_flattening(
             tx,
             self.value,
             p_args,
@@ -3505,7 +3377,7 @@ class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
         gmod_meta_key = "_dynamo_bypassing_wrapper_fn"
         gmod.meta[gmod_meta_key] = func
 
-        return _call_function_and_unflatten_output_wrap_semantics(
+        return _call_function_with_auto_output_flattening(
             tx,
             self.value,
             (gmod_meta_key,) + tuple(p_args),
@@ -3802,222 +3674,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
         self.bwd_fn = bwd_fn
         self.parent_source = parent_source
 
-    def rewire_bwd_graph_outputs(
-        self, fwd_graph, fwd_freevars, bwd_graph, orig_fwd_args, bwd_out
-    ):
-        # Ensure fwd-input and bwd-output consistency - autograd.Function
-        # requires that the inputs of the forward line up correctly with the
-        # outputs of the backward. This is the responsibily of the user.  Now,
-        # when Dynamo is creating a new autograd.Function, it is now Dynamo
-        # responsibility to do this lineup. To do this, we use the original user
-        # point as the anchor point to provide this mapping.
-
-        # if isinstance(bwd_out, variables.TensorVariable):
-        #     return
-        # Dynamo traced forward graph can have different number and ordering of inputs than the original forward graph
-        orig_arg_positions = {}
-        for idx, arg in enumerate(orig_fwd_args):
-            if isinstance(arg, variables.TensorVariable):
-                orig_arg_positions[arg.as_proxy()] = idx
-
-        new_arg_positions_in_orig_fwd = {}
-        for idx, new_fwd_input_proxy in enumerate(fwd_freevars):
-            if new_fwd_input_proxy in orig_arg_positions:
-                new_arg_positions_in_orig_fwd[idx] = orig_arg_positions[
-                    new_fwd_input_proxy
-                ]
-            else:
-                new_arg_positions_in_orig_fwd[idx] = None
-
-        # Now new_arg_positions_in_orig_fwd and new_output_positions_in_orig_bwd
-        # values are our anchor points. The only thing we need to do is to
-        # rewire the outputs of the bwd_graph in the new autograd.Function so
-        # that they are consistent with the new fwd inputs.
-
-        if len(new_arg_positions_in_orig_fwd) == 1 and isinstance(
-            bwd_out, variables.TensorVariable
-        ):
-            return
-        # breakpoint()
-        # Rewrite the output of bwd_graph to remove the grad output for the non-Tensor args.
-        bwd_outputs = None
-        for node in bwd_graph.find_nodes(op="output"):
-            bwd_outputs = node.args[0]
-            break
-
-        if bwd_outputs is None:
-            return
-
-        if not isinstance(bwd_outputs, (list, tuple)):
-            bwd_outputs = (bwd_outputs,)
-        rewired_bwd_outputs = []
-        for original_fwd_position in new_arg_positions_in_orig_fwd.values():
-            if original_fwd_position is None:
-                rewired_bwd_outputs.append(None)
-            else:
-                rewired_bwd_outputs.append(bwd_outputs[original_fwd_position])
-
-        for node in bwd_graph.find_nodes(op="output"):
-            bwd_graph.erase_node(node)
-            break
-        bwd_graph.output(tuple(rewired_bwd_outputs))
-        # breakpoint()
-        bwd_graph.lint()
-
-    def handle_saved_tensors_wiring(
-        self, ctx, fwd_graph, fwd_freevars, bwd_graph, bwd_freevars, bwd_args
-    ):
-        # Rewrite the output of fwd_graph to (output, stuff_necessary_for_bwd)
-        fwd_outputs = []
-        for node in fwd_graph.find_nodes(op="output"):
-            fwd_outputs = node.args[0]
-            fwd_graph.erase_node(node)
-            break
-
-        # symint_nodes = []
-        # for node in fwd_graph.find_nodes(op="placeholder"):
-        #     if isinstance(node.meta.get("example_value"), torch.SymInt):
-        #         symint_nodes.append(node)
-
-        fwd_symint_proxies = []
-        for main_var in fwd_freevars.values():
-            if isinstance(main_var.node.meta.get("example_value", None), torch.SymInt):
-                fwd_symint_proxies.append(main_var)
-
-        def transform(outer_proxy):
-            if outer_proxy in fwd_freevars:
-                return fwd_freevars[outer_proxy].node
-            elif outer_proxy is None:
-                return None
-            else:
-                return outer_proxy.node
-
-        saved_tensor_proxies = list(
-            {
-                x.as_proxy(): None
-                for x in ctx.saved_tensors.tensors + ctx.smuggled_tensors.tensors
-            }.keys()
-        )
-        saved_tensor_nodes_fwd = [transform(x) for x in saved_tensor_proxies]
-        symint_nodes_fwd = [x.node for x in fwd_symint_proxies]
-
-        # Because we lift the bwd_freevars as inputs of the bwd_graph,
-        # we have to manually add the bwd_freevars as output of fwd_graph.
-        # However, the bwd_freevars got from speculate_subgraph use the Proxies in the bwd_graph,
-        # we need to convert them to Proxies in the fwd_graph and then generate new fwd_graph output.
-        # fwd_proxy_of_bwd_freevars = []
-        # for k in bwd_freevars.keys():
-        #     if k in fwd_freevars:
-        #         fwd_proxy_of_bwd_freevars.append(fwd_freevars[k].node)
-
-        new_fwd_graph_outputs = (
-            fwd_outputs,
-            tuple(symint_nodes_fwd + saved_tensor_nodes_fwd),
-        )
-        fwd_graph.output(new_fwd_graph_outputs)
-        fwd_graph.lint()
-
-        bwd_symint_proxies = []
-        for main_var in bwd_freevars.values():
-            if isinstance(main_var.node.meta.get("example_value", None), torch.SymInt):
-                bwd_symint_proxies.append(main_var)
-
-        new_graph = torch.fx.Graph()
-        env = {}
-
-        def transform(outer_proxy):
-            if outer_proxy in bwd_freevars:
-                return bwd_freevars[outer_proxy].node
-            else:
-                return None
-                # raise RuntimeError("A saved tensor was not found in bwd_freevars")
-
-        saved_tensor_nodes_bwd = [transform(x) for x in saved_tensor_proxies]
-        symint_nodes_bwd = [x.node for x in bwd_symint_proxies]
-        # [transform(x.as_proxy()) for x in ctx.saved_tensors.tensors]
-
-        # # Add new placeholder nodes in the order specified by the inputs
-        # for node in inputs:
-        #     new_node = new_graph.placeholder(node.name)
-        #     # Can't use node_copy here as we may be turning previous call_function into placeholders
-        #     new_node.meta = node.meta
-        #     # pyrefly: ignore  # unsupported-operation
-        #     env[node] = new_node
-        count = 0
-        num_tangents = len(bwd_args) - 1
-        seen_tangents = 0
-        for node in bwd_graph.nodes:
-            if node.op != "placeholder":
-                assert seen_tangents == num_tangents
-                break
-            if count == 0:
-                # ctx
-                env[node] = None
-                count += 1
-                continue
-
-            example_value = node.meta.get("example_value")
-            if isinstance(example_value, torch.Tensor) or example_value is None:
-                seen_tangents = seen_tangents + 1
-                if seen_tangents > num_tangents:
-                    break
-
-                new_node = new_graph.placeholder(node.name)
-                new_node.meta = copy.copy(node.meta)
-                env[node] = new_node
-
-        # for bwd_arg in bwd_args[1:]:
-        #     if isinstance(bwd_arg, variables.TensorVariable):
-        #         bwd_proxy = bwd_arg.as_proxy()
-        #         new_node = new_graph.placeholder(bwd_proxy.node.name)
-        #         if bwd_proxy in bwd_freevars:
-        #             env[bwd_freevars[bwd_proxy].node] = new_node
-
-        unused_id = itertools.count()
-        for node in symint_nodes_bwd + saved_tensor_nodes_bwd:
-            if node is None:
-                new_graph.placeholder(f"unused_{next(unused_id)}")
-            else:
-                new_node = new_graph.placeholder(node.name)
-                new_node.meta = copy.copy(node.meta)
-                env[node] = new_node
-        # for freevar_proxy in bwd_freevars.values():
-        #     bwd_node = freevar_proxy.node
-        #     new_node = new_graph.placeholder(bwd_node.name)
-        #     env[bwd_node] = new_node
-
-        # breakpoint()
-        for node in bwd_graph.nodes:
-            if node in env:
-                # Node must be one of our inputs. (Any member of env which wasn't an
-                # input to start must have been created by this loop and won't be in
-                # joint_graph.nodes).
-                continue
-            elif node.op == "placeholder":
-                raise RuntimeError("placeholders should have been in env")
-            elif node.op != "output":
-                env[node] = new_graph.node_copy(node, lambda x: env[x])
-                env[node].meta = copy.copy(node.meta)
-
-        output_values = []
-        old_outputs = bwd_graph.find_nodes(op="output")[0].args[0]
-        if isinstance(old_outputs, tuple):
-            for x in old_outputs:
-                if isinstance(x, torch.fx.Node):
-                    if x not in env:
-                        raise RuntimeError(f"Node {x} couldn't be found in env")
-                    output_values.append(env[x])
-                else:
-                    output_values.append(x)
-            new_graph.output(tuple(output_values))
-        elif old_outputs is None:
-            new_graph.output(None)
-        else:
-            new_graph.output(env[old_outputs])
-
-        new_graph.lint()
-        return fwd_graph, new_graph
-
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -4095,13 +3751,17 @@ class AutogradFunctionApplyVariable(VariableTracker):
             set_example_value(proxy.node, ctx.value)
             ctx.proxy = proxy
 
+        fwd_source = None
+        if self.parent_source:
+            fwd_source = AttrSource(self.parent_source, member="forward")
         if isinstance(self.fwd_fn, types.FunctionType):
-            fwd_fn = UserFunctionVariable(self.fwd_fn)
+            fwd_fn = UserFunctionVariable(self.fwd_fn, source=fwd_source)
             fwd_args = [ctx, *args]
         elif isinstance(self.fwd_fn, types.MethodType):
             fwd_fn = UserMethodVariable(
                 self.fwd_fn.__func__,
                 UserDefinedClassVariable(self.fwd_fn.__class__),
+                source=fwd_source,
             )
             fwd_args = [fwd_fn.obj, ctx, *args]
         else:
@@ -4113,17 +3773,18 @@ class AutogradFunctionApplyVariable(VariableTracker):
             )
 
         # Speculate subgraph on the fwd
-        (fwd_out, _), fwd_graph, fwd_freevars = speculate_subgraph(
-            tx,
-            fwd_fn,
-            fwd_args,
-            kwargs,
-            "autograd.Function",
-            enable_grad=False,
-            set_subgraph_inputs="automatic",
-            should_flatten_outputs=False,
-            restore_side_effects=False,
-            tracer=fwd_tracer,
+        fwd_out, fwd_graph, fwd_freevars, fwd_graph_output_vts = (
+            speculate_subgraph_with_auto_output_flattening(
+                tx,
+                fwd_fn,
+                fwd_args,
+                kwargs,
+                "autograd.Function",
+                enable_grad=False,
+                set_subgraph_inputs="automatic",
+                restore_side_effects=False,
+                tracer=fwd_tracer,
+            )
         )
 
         # For inputs that are not used but need to be captured, so that the gradient is tracked.
@@ -4154,17 +3815,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # Speculate subgraph on the backward. We make the
         # bwd tracer a child of the fwd tracer, because backward may rely on
         # tensors/attrs created in the fwd tracer.
-        # assert isinstance(fwd_out, variables.BaseListVariable)
-        # from torch._dynamo.external_utils import insert_const_values_with_mask
-
-        # unflattened_fwd_out = pytree.tree_unflatten(
-        #     insert_const_values_with_mask(
-        #         tuple(fwd_out.items),
-        #         fwd_spec.masks_to_filter_const_values,
-        #         fwd_spec.const_values,
-        #     ),
-        #     fwd_spec.treespec.as_python_constant(),
-        # )
         bwd_args = [
             ctx,
         ]
@@ -4172,18 +3822,16 @@ class AutogradFunctionApplyVariable(VariableTracker):
         if isinstance(fwd_out, variables.TensorVariable):
             bwd_args.append(fwd_out)
         else:
+            assert isinstance(fwd_out, variables.BaseListVariable)
             for i in fwd_out.items:
                 if isinstance(i, variables.TensorVariable):
                     bwd_args.append(i)
                 else:
                     bwd_args.append(ConstantVariable.create(None))
 
-        # if isinstance(fwd_out, variables.BaseListVariable):
-        #     bwd_args = [ctx, *fwd_out.items]
-        # else:
-        #     bwd_args = [ctx, fwd_out]
-
-        bwd_src = AttrSource(self.parent_source, member="backward")
+        bwd_src = None
+        if self.parent_source:
+            bwd_src = AttrSource(self.parent_source, member="backward")
         if isinstance(self.bwd_fn, types.FunctionType):
             bwd_fn = UserFunctionVariable(self.bwd_fn, source=bwd_src)
         elif isinstance(self.bwd_fn, types.MethodType):
@@ -4207,21 +3855,27 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 return v.proxy.tracer is not fwd_tracer
             return True
 
+        # automatic with new placeholder relies on the function arg names to
+        # create a new proxy. Also, it will always INSERT a tensor placeholder
+        # as input, even though it might not be used in the graph. This allows
+        # us to make a mapping for the backward graph.
         with (
             tx.output.subtracer(fwd_fn, fwd_tracer),
             tx.strict_translation_mode(is_strict_for),
         ):
             try:
-                (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
-                    tx,
-                    bwd_fn,
-                    bwd_args,
-                    kwargs,
-                    "autograd.Function",
-                    enable_grad=False,
-                    set_subgraph_inputs="manual",
-                    restore_side_effects=False,
-                    tracer=bwd_tracer,
+                bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts = (
+                    speculate_subgraph_with_auto_output_flattening(
+                        tx,
+                        bwd_fn,
+                        bwd_args,
+                        kwargs,
+                        "autograd.Function",
+                        enable_grad=False,
+                        set_subgraph_inputs="automatic_with_new_placeholder",
+                        restore_side_effects=False,
+                        tracer=bwd_tracer,
+                    )
                 )
             except torch._dynamo.exc.Unsupported as e:
                 if isinstance(
@@ -4259,16 +3913,18 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         "torch._dynamo.config._autograd_backward_strict_mode_conditional_banned_ops",
                         [],
                     ):
-                        (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
-                            tx,
-                            bwd_fn,
-                            bwd_args,
-                            kwargs,
-                            "autograd.Function",
-                            enable_grad=False,
-                            set_subgraph_inputs="manual",
-                            restore_side_effects=False,
-                            tracer=bwd_tracer,
+                        bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts = (
+                            speculate_subgraph_with_auto_output_flattening(
+                                tx,
+                                bwd_fn,
+                                bwd_args,
+                                kwargs,
+                                "autograd.Function",
+                                enable_grad=False,
+                                set_subgraph_inputs="automatic_with_new_placeholder",
+                                restore_side_effects=False,
+                                tracer=bwd_tracer,
+                            )
                         )
                 else:
                     raise e
@@ -4292,9 +3948,25 @@ class AutogradFunctionApplyVariable(VariableTracker):
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
 
-        self.rewire_bwd_graph_outputs(fwd_graph, fwd_freevars, bwd_graph, args, bwd_out)
+        # At this point, the fwd_out represents the output of the forward
+        # method. fwd_graph represents the tensor computation, its input and
+        # output do not match the original forward method. Same is true for the
+        # bwd_out and bwd_graph. However, in order to create a new
+        # autograd.Function to pass to the lower compiler, the fwd and bwd graph
+        # must be "consistent".
+        self.rewired_bwd_graph_inputs(
+            fwd_out, fwd_graph, fwd_freevars, bwd_out, bwd_graph, bwd_freevars, args
+        )
         fwd_graph, bwd_graph = self.handle_saved_tensors_wiring(
-            ctx, fwd_graph, fwd_freevars, bwd_graph, bwd_freevars, bwd_args
+            ctx,
+            fwd_out,
+            fwd_graph,
+            fwd_freevars,
+            fwd_graph_output_vts,
+            bwd_out,
+            bwd_graph,
+            bwd_freevars,
+            bwd_args,
         )
 
         # TODO: assert that bwd_graph didn't capture values that were
@@ -4373,22 +4045,176 @@ class AutogradFunctionApplyVariable(VariableTracker):
                     ),
                 )
                 example_value = autograd_function_apply(*fake_args, **kwargs)
-        from .builder import wrap_fx_proxy
 
-        return wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                autograd_function_apply,
-                args=p_args,
-                kwargs=kwargs,
-            ),
-            example_value=example_value,
+        return _call_function_with_auto_output_flattening(
+            tx,
+            autograd_function_apply,
+            p_args,
+            kwargs,
+            example_value,
+            fwd_out,
+            fwd_graph_output_vts,
         )
 
-        # return _call_function_and_unflatten_output(
-        #     tx, autograd_function_apply, p_args, kwargs, example_value, fwd_spec
-        # )
+    def rewired_bwd_graph_inputs(
+        self,
+        fwd_out,
+        fwd_graph,
+        fwd_freevars,
+        bwd_out,
+        bwd_graph,
+        bwd_freevars,
+        orig_fwd_args,
+    ):
+        # Ensure fwd-input and bwd-output consistency - autograd.Function
+        # requires that the inputs of the forward line up correctly with the
+        # outputs of the backward. This is the responsibily of the user.  Now,
+        # when Dynamo is creating a new autograd.Function, it is now Dynamo
+        # responsibility to do this lineup. To do this, we use the original user
+        # point as the anchor point to provide this mapping.
+
+        # Some more description to understand the following codebase
+        #
+        # fwd_freevars/bwd_freevars: A map from outer graph proxy to inner graph
+        # placeholder proxy. The keys are ALWAYS outer graph proxy, these could
+        # be inputs in the main graph or also intermediates in the main graph
+        # that are passed as inputs to the subgraph.
+        #
+        # orig_fwd_args - Variable trackers for the forward graph inputs. Since
+        # these are inputs, the tensor variables here are all OUTER graph proxies.
+
+        # bwd_outs - Variable trackers for the backward output. Since these are
+        # output, the variable trackers here point to INNER graph proxies. The
+        # special case is when an input is passed directly to the output of the
+        # backward graph, in which case, the variable tracker can still point to
+        # the outer graph proxy.
+
+        # To make the fwd-inputs and bwd-outputs consistent, we just rewire the
+        # backward graph outputs to match with the forward graph inputs. To do
+        # this, we first rely on orig_fwd_args and bwd_outs to make a mapping of
+        # outer_proxy to inner graph proxy. And walk through the fwd_graph
+        # inputs and this map to find the bwd outputs.
+
+        def get_bwd_node(vt):
+            # Backward tensor vt here can be - (1) an intermediate, or (2) input
+            # to the backward graph. If it is an input to the backward graph, we have to lookup bwd_freevars to get the inner proxy.
+            return bwd_freevars.get(vt.proxy, vt.proxy).node
+
+        # Find the mapping between orig_fwd_args and bwd_out
+        outer_fwd_proxy_to_bwd_node = {}
+        if isinstance(bwd_out, variables.BaseListVariable):
+            bwd_outs = bwd_out.items
+            for idx, fwd_arg in enumerate(orig_fwd_args):
+                # We care about tensor args. For non-tensor args, the bwd output returns None.
+                if isinstance(fwd_arg, variables.TensorVariable):
+                    bwd_out_at_idx = bwd_outs[idx]
+                    if isinstance(bwd_out_at_idx, variables.TensorVariable):
+                        outer_fwd_proxy_to_bwd_node[fwd_arg.proxy] = get_bwd_node(
+                            bwd_out_at_idx
+                        )
+                    else:
+                        # backward can return None at the output
+                        assert (
+                            isinstance(bwd_out_at_idx, variables.ConstantVariable)
+                            and bwd_out_at_idx.value is None
+                        )
+                        outer_fwd_proxy_to_bwd_node[fwd_arg.proxy] = None
+
+        elif isinstance(bwd_out, variables.TensorVariable):
+            outer_fwd_proxy_to_bwd_node[orig_fwd_args[0].proxy] = get_bwd_node(bwd_out)
+
+        # Ideally, we should have walked through the fwd placeholders. But we
+        # can instead walk through the fwd_freevars, which is a insertion sorted
+        # dictionary and therefore represents the outer_proxies for the
+        # placeholder in the same order as that as placeholders.
+        rewired_bwd_outputs = [
+            outer_fwd_proxy_to_bwd_node.get(fwd_proxy) for fwd_proxy in fwd_freevars
+        ]
+
+        for node in bwd_graph.find_nodes(op="output"):
+            bwd_graph.erase_node(node)
+            break
+        bwd_graph.output(tuple(rewired_bwd_outputs))
+        bwd_graph.lint()
+
+    def handle_saved_tensors_wiring(
+        self,
+        ctx,
+        fwd_out,
+        fwd_graph,
+        fwd_freevars,
+        fwd_graph_body_outputs,
+        bwd_out,
+        bwd_graph,
+        bwd_freevars,
+        bwd_args,
+    ):
+        # First we need to map the existing forward graph outputs to bwd graph inputs.
+        bwd_input_nodes = list(bwd_graph.find_nodes(op="placeholder"))
+
+        fwd_vt_to_bwd_node = {}
+        bwd_idx = 0
+        if isinstance(fwd_out, variables.BaseListVariable):
+            for fwd_vt in fwd_out.items:
+                if isinstance(fwd_vt, variables.TensorVariable):
+                    fwd_vt_to_bwd_node[fwd_vt] = bwd_input_nodes[bwd_idx]
+                    bwd_idx += 1
+        else:
+            if isinstance(fwd_out, variables.TensorVariable):
+                fwd_vt_to_bwd_node[fwd_out] = bwd_input_nodes[bwd_idx]
+                bwd_idx += 1
+
+        rewired_bwd_graph_inputs = []
+        for fwd_graph_vt in fwd_graph_body_outputs:
+            rewired_bwd_graph_inputs.append(fwd_vt_to_bwd_node.get(fwd_graph_vt))
+
+        # bwd_freevars also contains the symint passed from forward to backward
+        extra_fwd_output_nodes = []
+        for fwd_proxy, bwd_inner_proxy in bwd_freevars.items():
+            # For backward, its easy, just get the node from bwd_inner_proxy
+            rewired_bwd_graph_inputs.append(bwd_inner_proxy.node)
+
+            # For the fwd_proxy, it could be a proxy from the outer graph, or it
+            # could be an intermediate.
+            # First ensure that's its inner fwd proxy
+            inner_fwd_proxy = fwd_freevars.get(fwd_proxy, fwd_proxy)
+
+            extra_fwd_output_nodes.append(inner_fwd_proxy.node)
+
+        # We have all the info, lets change the fwd graph
+        fwd_output_nodes = []
+        for node in fwd_graph.find_nodes(op="output"):
+            fwd_output_nodes = node.args[0]
+            fwd_graph.erase_node(node)
+            break
+
+        new_fwd_graph_outputs = (fwd_output_nodes, tuple(extra_fwd_output_nodes))
+        fwd_graph.output(new_fwd_graph_outputs)
+        fwd_graph.lint()
+
+        # Now lets change the bwd graph.
+        new_graph = torch.fx.Graph()
+        env = {}
+
+        count = itertools.count()
+
+        for node in rewired_bwd_graph_inputs:
+            if node is None:
+                new_node = new_graph.placeholder(f"unused_{next(count)}")
+            else:
+                new_node = new_graph.placeholder(node.name)
+                new_node.meta = copy.copy(node.meta)
+            env[node] = new_node
+
+        for node in bwd_graph.nodes:
+            if node.op == "placeholder":
+                assert node in env
+            else:
+                env[node] = new_graph.node_copy(node, lambda x: env[x])
+                env[node].meta = copy.copy(node.meta)
+
+        new_graph.lint()
+        return fwd_graph, new_graph
 
 
 def _get_fake_value(x):
@@ -4454,7 +4280,7 @@ class BaseHOPVariable(WrapHigherOrderVariable):
         assert len(p_kwargs) == 0
 
         p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
-        return _call_function_and_unflatten_output_wrap_semantics(
+        return _call_function_with_auto_output_flattening(
             tx,
             self.value,
             p_args,
@@ -4565,7 +4391,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             body_name,
             *p_args[1:],
         )
-        return _call_function_and_unflatten_output_wrap_semantics(
+        return _call_function_with_auto_output_flattening(
             tx,
             torch._higher_order_ops.invoke_subgraph,
             tuple(p_args),
@@ -4789,7 +4615,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 
         # Step 5: Install local_map subgraph
         p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
-        out = _call_function_and_unflatten_output_wrap_semantics(
+        out = _call_function_with_auto_output_flattening(
             tx,
             self.value,
             p_args,
