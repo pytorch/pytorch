@@ -7,20 +7,20 @@ from abc import ABC, abstractmethod
 from ast import literal_eval
 from enum import Enum
 from functools import partial, wraps
-from logging import DEBUG, getLogger, Logger
+from logging import DEBUG, getLogger, INFO, Logger
 from os import PathLike
 from pathlib import Path
 from threading import Lock
 from time import time
-from typing import Any, Callable, TYPE_CHECKING
-from typing_extensions import override, TypeAlias
-
-from filelock import FileLock
+from typing import Any, TYPE_CHECKING, TypeAlias
+from typing_extensions import override
 
 from . import config, context, exceptions, implementations as impls, locks
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .utils import P, R
 
 
@@ -183,6 +183,7 @@ class _CacheIntf(ABC):
         fkey: Any = (
             (callee, params)
             if not custom_params_encoder
+            # pyrefly: ignore [invalid-param-spec]
             else (callee, custom_params_encoder(*params[0], **params[1]))
         )
         ikey: Any = context._isolation_key(
@@ -193,8 +194,10 @@ class _CacheIntf(ABC):
     def _make_dummy_record_wrapper(self, fn: Callable[P, R]) -> Callable[P, R]:
         @wraps(fn)
         def dummy_wrapper(*args: Any, **kwargs: Any) -> R:
+            # pyrefly: ignore [invalid-param-spec]
             return fn(*args, **kwargs)
 
+        # pyrefly: ignore [bad-return]
         return dummy_wrapper
 
     @abstractmethod
@@ -324,10 +327,10 @@ class _CacheIntf(ABC):
     def record(
         self,
         ischema: context.IsolationSchema | None = None,
-        custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_encoder: Callable[[R], Any] | None = None,
-        custom_result_decoder: Callable[[Any], R] | None = None,
-    ) -> Callable[[Callable[P, R]], Callable[P, R]]:
+        custom_params_encoder: Callable[..., Any] | None = None,
+        custom_result_encoder: Callable[..., Any] | None = None,
+        custom_result_decoder: Callable[..., ...] | None = None,
+    ) -> Callable[[Callable[..., ...]], Callable[..., ...]]:
         if custom_result_encoder and not custom_result_decoder:
             raise exceptions.CustomResultDecoderRequiredError(
                 "Custom result encoder provided without custom result decoder."
@@ -359,6 +362,7 @@ class _FastCacheIntf(_CacheIntf):
             callee_sub_dir: PathLike[str] = Path(callee)
             odc = impls._OnDiskCacheImpl(sub_dir=callee_sub_dir)
             self._callee_to_odc[callee] = odc
+        # pyrefly: ignore [unbound-name]
         return odc
 
     @override
@@ -500,15 +504,22 @@ class _DeterministicCacheIntf(_CacheIntf):
         super().__init__()
         self._imc: impls._InMemoryCacheImpl = impls._InMemoryCacheImpl()
 
-        if fpath := os.environ.get("TORCHINDUCTOR_PRE_POPULATE_DETERMINISTIC_CACHE"):
-            flock: FileLock = FileLock(str(fpath) + ".lock")
-            with locks._acquire_flock_with_timeout(flock):
-                with open(fpath) as fp:
-                    dump_for_pre_population: dict[str, str] = json.load(fp)
-                for key_r, value_r in dump_for_pre_population.items():
-                    key: bytes = literal_eval(key_r)
-                    value: bytes = literal_eval(value_r)
-                    self._imc._memory[key] = value
+        if fpath_str := os.environ.get(
+            "TORCHINDUCTOR_PRE_POPULATE_DETERMINISTIC_CACHE"
+        ):
+            fpath: Path = Path(fpath_str)
+            fpath_parent: PathLike[str] = fpath.parent
+            if fpath.is_file():
+                odc: impls._OnDiskCacheImpl = impls._OnDiskCacheImpl(
+                    sub_dir=fpath_parent
+                )
+                with odc.lock():
+                    with open(fpath) as fp:
+                        dump_for_pre_population: dict[str, str] = json.load(fp)
+                    for key_r, value_r in dump_for_pre_population.items():
+                        key: bytes = literal_eval(key_r)
+                        value: bytes = literal_eval(value_r)
+                        self._imc._memory[key] = value
 
         if config.STRICTLY_PRE_POPULATED_DETERMINISM:
             # we'll never need a synchronization cache if we're in strictly pre-populated mode,
@@ -545,6 +556,7 @@ class _DeterministicCacheIntf(_CacheIntf):
             callee_sub_dir: PathLike[str] = Path(callee)
             odc = impls._OnDiskCacheImpl(sub_dir=callee_sub_dir)
             self._callee_to_odc[callee] = odc
+        # pyrefly: ignore [unbound-name]
         return odc
 
     def _dump_imc_to_disk(self) -> Path | None:
@@ -570,7 +582,7 @@ class _DeterministicCacheIntf(_CacheIntf):
                     for key, value in existing_dump.items():
                         if key not in to_dump:
                             to_dump[key] = value
-                        else:
+                        elif to_dump[key] != value:
                             raise exceptions.DeterministicCachingIMCDumpConflictError from None
 
                     w_fp = open(fpath, "w")
@@ -578,6 +590,9 @@ class _DeterministicCacheIntf(_CacheIntf):
                     assert w_fp is not None
                     try:
                         json.dump(to_dump, w_fp, indent=4)
+                        logger.log(
+                            INFO, "Dumped deterministic cache memoization to %s", fpath
+                        )
                     finally:
                         w_fp.close()
 

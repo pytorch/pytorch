@@ -22,6 +22,9 @@
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
 #include <ATen/native/cuda/GroupMM.h>
+#ifdef USE_ROCM
+#include <ATen/native/hip/ck_group_gemm.h>
+#endif
 #include <ATen/ceil_div.h>
 
 #ifdef USE_FBGEMM_GENAI
@@ -213,9 +216,9 @@ _f4_f4_bf16_grouped_mm_fbgemm(
       const Tensor& mat_a,
       const Tensor& mat_b,
       const Tensor& scale_a,
-      const Tensor& global_scale_a,
+      const std::optional<Tensor>& global_scale_a,
       const Tensor& scale_b,
-      const Tensor& global_scale_b,
+      const std::optional<Tensor>& global_scale_b,
       const std::optional<Tensor>& offs,
       const std::optional<Tensor>& bias,
       Tensor& out) {
@@ -225,14 +228,28 @@ _f4_f4_bf16_grouped_mm_fbgemm(
       "mat_a must be Float4_e2n1fn_2, got: ", mat_a.scalar_type());
   TORCH_CHECK_VALUE(mat_b.scalar_type() == at::kFloat4_e2m1fn_x2,
       "mat_b must be Float4_e2n1fn_2, got: ", mat_b.scalar_type());
-  TORCH_CHECK_VALUE(scale_a.scalar_type() == at::kFloat8_e4m3fn,
-      "scale_a must be Float8_e4m3fn, got: ", scale_a.scalar_type());
-  TORCH_CHECK_VALUE(scale_b.scalar_type() == at::kFloat8_e4m3fn,
-      "scale_b must be Float8_e4m3fn, got: ", scale_b.scalar_type());
-  TORCH_CHECK_VALUE(global_scale_a.scalar_type() == at::kFloat,
-      "global_scale_a must be Float, got: ", global_scale_a.scalar_type());
-  TORCH_CHECK_VALUE(global_scale_b.scalar_type() == at::kFloat,
-      "global_scale_b must be Float, got: ", global_scale_b.scalar_type());
+
+  std::optional<Tensor> combined_global_scale = std::nullopt;
+  if (global_scale_a.has_value() || global_scale_b.has_value()) {
+      // NVFP4
+      TORCH_CHECK_VALUE(global_scale_a.has_value() && global_scale_b.has_value(),
+          "For NVFP4 grouped gemm both of global_scale_{a,b} must have values")
+      TORCH_CHECK_VALUE(scale_a.scalar_type() == at::kFloat8_e4m3fn,
+          "scale_a must be Float8_e4m3fn, got: ", scale_a.scalar_type());
+      TORCH_CHECK_VALUE(scale_b.scalar_type() == at::kFloat8_e4m3fn,
+          "scale_b must be Float8_e4m3fn, got: ", scale_b.scalar_type());
+      TORCH_CHECK_VALUE(global_scale_a.value().scalar_type() == at::kFloat,
+          "global_scale_a must be Float, got: ", global_scale_a.value().scalar_type());
+      TORCH_CHECK_VALUE(global_scale_b.value().scalar_type() == at::kFloat,
+          "global_scale_b must be Float, got: ", global_scale_b.value().scalar_type());
+      combined_global_scale = global_scale_a.value().mul(global_scale_b.value());
+  } else {
+      // MXFP4
+      TORCH_CHECK_VALUE(scale_a.scalar_type() == at::kFloat8_e8m0fnu,
+          "scale_a must be Float8_e8m0fnu, got: ", scale_a.scalar_type());
+      TORCH_CHECK_VALUE(scale_b.scalar_type() == at::kFloat8_e8m0fnu,
+          "scale_b must be Float8_e8m0fnu, got: ", scale_b.scalar_type());
+  }
 
   auto o = fbgemm_gpu::f4f4bf16_grouped_mm(
       mat_a,
@@ -241,7 +258,7 @@ _f4_f4_bf16_grouped_mm_fbgemm(
       scale_b,
       offs.value(),
       out,
-      global_scale_a.mul(global_scale_b)
+      combined_global_scale
   );
 #else
   TORCH_CHECK_NOT_IMPLEMENTED(false, "nvfp4 grouped gemm is not supported without USE_FBGEMM_GENAI, and only for CUDA")
@@ -471,9 +488,10 @@ namespace {
 
 using acceptance_fn = std::function<bool(c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&, c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&)>;
 
-std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 3> scale_grouped_kernel_dispatch = {{
+std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 4> scale_grouped_kernel_dispatch = {{
   { "rowwise_rowwise", scaled_blas::check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
   { "mxfp8_mxfp8", scaled_blas::check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8},
+  { "mxfp4_mxfp4", scaled_blas::check_mxfp4_recipe, ScaledGemmImplementation::MXFP4_MXFP4},
   { "nvfp4_nvfp4", scaled_blas::check_nvfp4_recipe, ScaledGemmImplementation::NVFP4_NVFP4}}};
 
 } // anonymous namespace
@@ -599,6 +617,21 @@ _scaled_grouped_mm_cuda_v2(
           offs.value(),
           out);
     }
+    case ScaledGemmImplementation::MXFP4_MXFP4: {
+      // scale shape checks
+      _check_scales_blocked(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
+      _check_scales_blocked(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
+      return _f4_f4_bf16_grouped_mm_fbgemm(
+          mat_a,
+          mat_b,
+          scale_a[0], /* block-scale A */
+          std::nullopt, /* global-scale A */
+          scale_b[0], /* block-scale B */
+          std::nullopt, /* global-scale B */
+          offs.value(),
+          std::nullopt, /* bias */
+          out);
+    }
     case ScaledGemmImplementation::NVFP4_NVFP4: {
       // scale shape checks
       _check_scales_blocked(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
@@ -636,12 +669,26 @@ std::optional<c10::ScalarType> out_dtype) {
   // _scaled_mm_allowed_device is used here within _grouped_mm_cuda which seems incorrect since scale is not used.
   // the _grouped_mm_fallback should be safe for any ROCm GPU since it's just calling typical mm/bmm
   bool use_fast_path = false;
+  // On non CK system(w/ ROCm), make sure use_fast_path is false
+#if defined(USE_ROCM_CK_GEMM)
+  if (at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"})) {
+    use_fast_path = true;
+  }
+#endif //USE_ROCM_CK_GEMM
 #endif
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
   if (use_fast_path) {
     // fast path, no d2h sync needed
+#ifndef USE_ROCM
     at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);
+#else
+#if defined(USE_ROCM_CK_GEMM)
+    at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
+#else
+    TORCH_WARN("ROCm: Group Gemm through CK not selected.");
+#endif //USE_ROCM_CK_GEMM
+#endif
   } else {
     _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
   }
