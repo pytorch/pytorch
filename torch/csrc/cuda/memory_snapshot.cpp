@@ -453,7 +453,7 @@ std::string _memory_snapshot_pickled() {
   }
 
   auto allocator_settings = new_dict();
-  IValue last_allocator_settings_s = "PYTORCH_CUDA_ALLOC_CONF";
+  IValue last_allocator_settings_s = "PYTORCH_ALLOC_CONF";
   IValue max_split_size_s = "max_split_size";
   IValue garbage_collection_threshold_s = "garbage_collection_threshold";
   IValue expandable_segments_s = "expandable_segments";

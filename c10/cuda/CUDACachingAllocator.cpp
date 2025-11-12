@@ -1566,7 +1566,7 @@ class DeviceCachingAllocator {
               reserved_bytes - allocated_bytes - allocated_in_private_pools),
           " is reserved by PyTorch but unallocated.",
           " If reserved but unallocated memory is large try setting",
-          " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
+          " PYTORCH_ALLOC_CONF=expandable_segments:True to avoid"
           " fragmentation.  See documentation for Memory Management "
           " (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)");
     }
@@ -4449,16 +4449,16 @@ struct BackendStaticInitializer {
   // instance based on its value. If no valid configuration is found, it falls
   // back to the default Native allocator.
   CUDAAllocator* parseEnvForBackend() {
-    auto val = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
+    auto val = c10::utils::get_env("PYTORCH_ALLOC_CONF");
+    if (!val.has_value()) {
+      val = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
+    }
 #ifdef USE_ROCM
     // convenience for ROCm users to allow either CUDA or HIP env var
     if (!val.has_value()) {
       val = c10::utils::get_env("PYTORCH_HIP_ALLOC_CONF");
     }
 #endif
-    if (!val.has_value()) {
-      val = c10::utils::get_env("PYTORCH_ALLOC_CONF");
-    }
     if (val.has_value()) {
       c10::CachingAllocator::ConfigTokenizer tokenizer(val.value());
       for (size_t i = 0; i < tokenizer.size(); i++) {

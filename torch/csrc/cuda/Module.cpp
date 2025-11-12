@@ -909,7 +909,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   }
 
   py::dict allocator_settings;
-  py::str last_allocator_settings_s = "PYTORCH_CUDA_ALLOC_CONF";
+  py::str last_allocator_settings_s = "PYTORCH_ALLOC_CONF";
   py::str max_split_size_s = "max_split_size";
   py::str garbage_collection_threshold_s = "garbage_collection_threshold";
   py::str expandable_segments_s = "expandable_segments";

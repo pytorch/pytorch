@@ -1601,7 +1601,7 @@ def allocator_option_enabled_fn(allocator_config, _, option):
 
 EXPANDABLE_SEGMENTS: bool = TestEnvironment.def_flag(
     "EXPANDABLE_SEGMENTS",
-    env_var="PYTORCH_CUDA_ALLOC_CONF",
+    env_var="PYTORCH_ALLOC_CONF",
     enabled_fn=functools.partial(allocator_option_enabled_fn, option='expandable_segments'),
 )
 
