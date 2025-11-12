@@ -32,6 +32,7 @@ import re
 
 import functools
 import itertools
+from pathlib import Path
 
 aten = torch.ops.aten
 
@@ -60,9 +61,7 @@ def process_failures():
 
     and processes them into a list of opinfo xfails
     """
-    f = open('pytest_failures')
-    failures = f.readlines()
-    failures = [i.strip() for i in failures]
+    failures = [i.strip() for i in Path('pytest_failures').read_text().splitlines()]
 
     def process_failure_string(s, matcher):
         out = re.search(matcher, s)

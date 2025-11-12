@@ -1001,10 +1001,24 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
     import inspect
 
     if isinstance(mod, torch.nn.Module):
-        if len(mod._forward_pre_hooks) == 0 and len(mod._forward_hooks) == 0:
+        # Mirrored from NNModuleVariable.call_function:
+        # https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/variables/nn_module.py#L1035
+        if (
+            len(mod._forward_pre_hooks) == 0
+            and len(mod._forward_hooks) == 0
+            and len(torch.nn.modules.module._global_forward_pre_hooks) == 0
+            and len(torch.nn.modules.module._global_forward_hooks) == 0
+            and len(mod._backward_pre_hooks) == 0
+            and len(mod._backward_hooks) == 0
+            and len(torch.nn.modules.module._global_backward_pre_hooks) == 0
+            and len(torch.nn.modules.module._global_backward_hooks) == 0
+        ):
             mod = mod.forward
+        elif isinstance(mod, torch.fx.GraphModule):
+            mod = mod._call_impl
         else:
             mod = mod.__call__
+
     if hasattr(mod, "__self__"):
         # pyrefly: ignore [missing-attribute]
         return mod.__func__, mod.__self__
