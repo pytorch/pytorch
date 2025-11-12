@@ -832,7 +832,9 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         expected = torch.compile(f4, backend=cnts, fullgraph=False)(x)
         self.assertEqual(actual, expected)
         self.assertEqual(len(torch._dynamo.utils.counters["graph_break"]), 1)
+        # f4 + f3, f3 end + f4 end
         self.assertEqual(cnts.frame_count, 2)
+        # multiplication by 32, 64, 128, 256
         self.assertEqual(cnts.op_count, 4)
 
 
