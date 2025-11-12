@@ -216,7 +216,11 @@ GEMM_TEMPLATE = r"""
         {{ micro_gemm.codegen_init(kernel) }}
 {%- if use_local_acc %}
     {%- set acc_buf_name = "local_acc_buf" %}
+    {%- if is_dynamic_M or maybe_k_slicing %}
         {{ kernel.define_buffer(acc_buf_name, ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype) }}
+    {%- else %}
+        {{ kernel.define_buffer(acc_buf_name, [template.cache_blocking(num_threads).block_m,micro_gemm.register_blocking.block_m, template.cache_blocking(num_threads).block_n,micro_gemm.register_blocking.block_n], acc_buf_dtype) }}
+    {%- endif %}
 {%- endif %}
         for (int64_t mc_block_id = 0; mc_block_id < num_Mc_blocks_per_thread; mc_block_id++) {
             {{ template.codegen_m_loop_params()|indent(12, false) }}
@@ -1083,6 +1087,13 @@ class CppGemmTemplate(CppTemplate):
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
                 new_input_nodes[1] = W_packed_constant
 
+                if has_bias:
+                    bias_node = new_input_nodes[2]
+                    if bias_node.get_name() in V.graph.constants:
+                        bias_bf16 = V.graph.constants[bias_node.get_name()]
+                        if bias_bf16.dtype == torch.bfloat16:
+                            bias_fp32 = bias_bf16.to(torch.float32)
+                            V.graph.constants[bias_node.get_name()] = bias_fp32
                 # Prune unused tensors
                 prune_tensors(input_nodes, new_input_nodes)
 

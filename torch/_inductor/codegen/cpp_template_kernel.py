@@ -206,14 +206,29 @@ class CppTemplateKernel(CppKernel):
 
     def define_buffer(self, name, sizes: list[Any], dtype=torch.float) -> str:
         """Define kernel local buffer"""
-        sizes = parse_expr_with_index_symbols(sizes)
-        buf = ir.Buffer(
-            name=name, layout=ir.FixedLayout(torch.device("cpu"), dtype, sizes)
-        )
-        self.local_buffers[name] = buf
-        ctype = f"{DTYPE_TO_CPP[dtype]}"
-        numel = f"{cexpr_index(buf.get_numel())}"
-        return f"auto _{name} = std::make_unique<{ctype}[]>({numel}); auto {name} = _{name}.get();"
+        if type(sizes[0])==str:
+            sizes = parse_expr_with_index_symbols(sizes)
+            buf = ir.Buffer(
+                name=name, layout=ir.FixedLayout(torch.device("cpu"), dtype, sizes)
+            )
+            self.local_buffers[name] = buf
+            ctype = f"{DTYPE_TO_CPP[dtype]}"
+            numel = f"{cexpr_index(buf.get_numel())}"
+            return f"auto _{name} = std::make_unique<{ctype}[]>({numel}); auto {name} = _{name}.get();"
+        else:
+            assert len(sizes) == 4 # should be [Mc_blocks, Mr, Nc_blocks, Nr]
+            numel = 1
+            for size in sizes:
+                numel *= size
+            buf = ir.Buffer(
+                name=name, layout=ir.FixedLayout(torch.device("cpu"), dtype, [sizes[0]*sizes[1],sizes[2]*sizes[3]])
+            )
+            self.local_buffers[name] = buf
+            ctype = f"{DTYPE_TO_CPP[dtype]}"
+            if numel < 1024*1024//dtype.itemsize: # stack size is 1MB on windows and 8MB on linux
+                return f"alignas(64) {ctype} {name}[{numel}];"
+            else:
+                return f"auto _{name} = std::make_unique<{ctype}[]>({numel}); auto {name} = _{name}.get();"
 
     def define_stack_allocated_buffer(
         self, name, sizes: list[Any], dtype=torch.float
@@ -233,8 +248,11 @@ class CppTemplateKernel(CppKernel):
         assert name in self.local_buffers
         buf = self.local_buffers[name]
         ctype = f"{DTYPE_TO_CPP[buf.layout.dtype]}"
-        numel = f"{cexpr_index(buf.get_numel())}"
-        return f"if (_{name} == nullptr) {{ _{name} = std::make_unique<{ctype}[]>({numel}); {name} = _{name}.get(); }}"
+        if (isinstance(buf.get_size()[0], sympy.core.numbers.Integer) or type(buf.get_size()[0])==int) and buf.get_numel() < 1024*1024//buf.layout.dtype.itemsize:
+            return ""
+        else:
+            numel = f"{cexpr_index(buf.get_numel())}"
+            return f"if (_{name} == nullptr) {{ _{name} = std::make_unique<{ctype}[]>({numel}); {name} = _{name}.get(); }}"
 
     def release_buffer(self, name):
         """Codegen the code to release the ownership of a local buffer to others"""
