@@ -422,22 +422,41 @@ from user code:
         import optree
 
         @torch.compile(backend="eager")
-        def fn(x):
-            d = {"a": 1}
-            optree.tree_flatten_with_path(d)
-            return torch.sin(x)
+        def fn1(x):
+            tree = {"a": x, "b": (x - 1, 2 * x)}
+            sin, cos = optree.tree_transpose_map(
+                lambda t: (torch.sin(t), torch.cos(t)),
+                tree,
+            )
+            return sin, cos
 
-        fn(torch.randn(4))
-        self.assertEqual(len(counters["graph_break"]), 1)
+        fn1(torch.randn(4))
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+        @torch.compile(backend="eager")
+        def fn2(x):
+            spec = optree.treespec_deque([])
+            return spec, x
+
+        fn2(torch.randn(4))
+        self.assertGreaterEqual(len(counters["graph_break"]), 1)
         first_graph_break = next(iter(counters["graph_break"].keys()))
+
+        def post_munge(string):
+            return re.sub(
+                r"(optree\.|qualname: )\S*(\.make_from_collection)",
+                r"\1<path>\2",
+                string,
+            )
+
         self.assertExpectedInline(
-            first_graph_break,
+            post_munge(first_graph_break),
             """\
 Attempted to call function marked as skipped
-  Explanation: Dynamo cannot trace optree C/C++ function optree._C.PyCapsule.flatten_with_path.
+  Explanation: Dynamo cannot trace optree C/C++ function optree.<path>.make_from_collection.
   Hint: Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py
 
-  Developer debug context: module: optree._C, qualname: PyCapsule.flatten_with_path, skip reason: <missing reason>
+  Developer debug context: module: optree._C, qualname: <path>.make_from_collection, skip reason: <missing reason>
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html""",
         )
@@ -1031,7 +1050,7 @@ Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especiall
         msg = re.sub(r"line (\d+)", "line N", msg)
         msg = re.sub(
             r"""(?s)Traceback \(most recent call last\):.*
-  File "exc.py", line N, in unimplemented_v2
+  File "exc.py", line N, in unimplemented
     raise Unsupported\(msg\)""",
             "<Internal traceback>\n",
             msg,
@@ -1540,7 +1559,7 @@ cannot resume from torch._dynamo.step_unsupported()
 
   Developer debug context:
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0283.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0284.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
