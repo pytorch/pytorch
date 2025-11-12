@@ -423,11 +423,9 @@ class Tracer(TracerBase):
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
         if isinstance(a, _constant_attribute_types) or is_opaque_type(type(a)):
-            qualname: Optional[str] = (
-                self.tensor_attrs.get(  # pyrefly: ignore[no-matching-overload]
-                    a
-                )
-            )
+            qualname: Optional[str] = self.tensor_attrs.get(
+                a
+            )  # pyrefly: ignore[no-matching-overload]
 
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
