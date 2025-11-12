@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/c/shim.h>
 #include <torch/csrc/stable/device_struct.h>
@@ -119,7 +120,7 @@ struct FromImpl<ScalarType> {
       case ScalarType::UInt64:
         return from(aoti_torch_dtype_uint64());
       default:
-        STD_TORCH_CHECK(
+        TORCH_CHECK(
             false,
             "Not yet supported ScalarType, please file an issue describing your use case.");
     }
