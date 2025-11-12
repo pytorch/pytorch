@@ -43,13 +43,27 @@ def as_strided_handler(
     args, kwargs = fill_defaults(op_call._schema, args, kwargs)
     assert not kwargs
     tensor, size, stride, storage_offset = args
+    size = tuple(size)
+    stride = tuple(stride)
+    if storage_offset is None:
+        storage_offset = tensor.storage_offset()
     if (
-        tensor.size() == tuple(size)
-        and tensor.stride() == tuple(stride)
-        and (storage_offset is None or tensor.storage_offset() == storage_offset)
+        tensor.size() == size
+        and tensor.stride() == stride
+        and tensor.storage_offset() == storage_offset
     ):
         return torch.ops.aten.alias.default(tensor)
-    raise RuntimeError("as_strided not supported with DTensor")
+
+    from torch.utils._as_strided import as_strided_via_views
+
+    r = as_strided_via_views(tensor, size, stride, storage_offset)
+    if r is NotImplemented:
+        raise RuntimeError(
+            "as_strided not supported with DTensor for these inputs:"
+            f"{tuple(tensor.size())}:{tensor.stride()} offset {tensor.storage_offset()} to "
+            f"{size}:{stride} offset {storage_offset}"
+        )
+    return r
 
 
 def is_same_size_handler(
