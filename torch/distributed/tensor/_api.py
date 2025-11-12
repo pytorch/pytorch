@@ -4,7 +4,7 @@
 import inspect
 import warnings
 from collections.abc import Callable, Sequence
-from typing import Any, cast, Optional
+from typing import Any, cast, Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -589,6 +589,42 @@ class DTensor(torch.Tensor):
             placements=[Replicate()] * self.device_mesh.ndim, async_op=False
         )
         return _ToTorchTensor.apply(redist_res, grad_placements)
+
+    def item(self) -> Union[int, float, bool]:
+        for placement in self.placements:
+            if isinstance(placement, Partial):
+                raise RuntimeError(
+                    "Cannot call scalar extraction (e.g., item, int, float) on "
+                    "DTensor with Partial placement. "
+                    "Different ranks have different local values. "
+                    "Call .redistribute(placements=[Replicate()]) first to reduce the tensor."
+                )
+
+        return self._local_tensor.item()
+
+    def __int__(self) -> int:
+        for placement in self.placements:
+            if isinstance(placement, Partial):
+                raise RuntimeError(
+                    "Cannot call scalar extraction (e.g., item, int, float) on "
+                    "DTensor with Partial placement. "
+                    "Different ranks have different local values. "
+                    "Call .redistribute(placements=[Replicate()]) first to reduce the tensor."
+                )
+
+        return int(self._local_tensor)
+
+    def __float__(self) -> float:
+        for placement in self.placements:
+            if isinstance(placement, Partial):
+                raise RuntimeError(
+                    "Cannot call scalar extraction (e.g., item, int, float) on "
+                    "DTensor with Partial placement. "
+                    "Different ranks have different local values. "
+                    "Call .redistribute(placements=[Replicate()]) first to reduce the tensor."
+                )
+
+        return float(self._local_tensor)
 
     @property
     def device_mesh(self) -> DeviceMesh:

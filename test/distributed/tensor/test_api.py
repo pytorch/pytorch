@@ -399,6 +399,41 @@ class DTensorAPITest(DTensorTestBase):
             dcp.save({"fqn": dtensor}, checkpoint_id=tempfile.mkdtemp())
 
     @with_comms
+    def test_scalar_extraction_with_partial_placement(self):
+        device_mesh = self.build_device_mesh()
+
+        tensor = torch.arange(8, device=self.device_type)
+        expected = tensor.sum().item()
+        dt = distribute_tensor(tensor, device_mesh, [Shard(0)])
+        dt_sum = dt.sum()
+
+        # test all scalar extraction with partial
+        scalar_extraction_methods = [
+            lambda x: x.item(),
+            lambda x: int(x),
+            lambda x: float(x),
+        ]
+
+        for method in scalar_extraction_methods:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"Cannot call scalar extraction \(e\.g\., item, int, float\) on DTensor with Partial placement",
+            ):
+                method(dt_sum)
+
+        # test all scalar extraction after redistribution
+        dt_replicated = dt_sum.redistribute(placements=[Replicate()])
+
+        result = dt_replicated.item()
+        self.assertEqual(result, expected)
+
+        result_int = int(dt_replicated)
+        self.assertEqual(result_int, int(expected))
+
+        result_float = float(dt_replicated)
+        self.assertEqual(result_float, float(expected))
+
+    @with_comms
     def test_item_with_partial_placement(self):
         device_mesh = self.build_device_mesh()
 
