@@ -1543,21 +1543,25 @@ class CPUReproTests(TestCase):
             with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
-                self.common(
-                    fn,
-                    (
-                        x,
-                        scale,
-                        zero_point,
-                        use_dequant,
-                        use_quant,
-                        quant_min,
-                        quant_max,
-                        dtype,
-                        dequant_out_dtype,
-                    ),
+                inputs = (
+                    x,
+                    scale,
+                    zero_point,
+                    use_dequant,
+                    use_quant,
+                    quant_min,
+                    quant_max,
+                    dtype,
+                    dequant_out_dtype,
                 )
+                self.common(fn, inputs)
                 check_metrics_vec_kernel_count(1)
+
+                # Check that both main and tail loops are vectorized
+                if dtype in [torch.float8_e4m3fn, torch.float8_e5m2]:
+                    compiled_fn = torch.compile(fn)
+                    _, code = run_and_get_cpp_code(compiled_fn, *inputs)
+                    FileCheck().check_count("loadu", 2, exactly=True).run(code)
 
     @requires_vectorization
     def test_dequant_quant_lowering_uint8(self):
@@ -1983,6 +1987,20 @@ class CPUReproTests(TestCase):
     @requires_vectorization
     def test_tile2d_store_channel_shuffle_cl_quant_output_int8(self):
         self._test_tile2d_store_channel_shuffle_cl_quant_output_helper(torch.int8)
+
+    @requires_vectorization
+    def test_to_channels_last_fp8(self):
+        def fn(x):
+            return x.to(memory_format=torch.channels_last)
+
+        for dtype in [torch.float8_e4m3fn, torch.float8_e5m2]:
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(
+                fn,
+                (torch.randn(20, 16, 48, 48).to(dtype=dtype),),
+            )
+            check_metrics_vec_kernel_count(2)
 
     def _test_dequant_relu_quant_dequant_relu_quant_lowering_helper(self, dtype):
         def fn(
@@ -2725,6 +2743,18 @@ class CPUReproTests(TestCase):
             actual = torch.compile(op)(t)
             self.assertEqual(expected, actual)
 
+    def test_outer_mean_large_size(self):
+        def fn(x):
+            x = x.flatten()
+            x_one = torch.ones_like(x)
+            x = torch.outer(x, x_one)
+            return torch.mean(x, dim=1)
+
+        x = torch.randn(2, 2, 64, 64)
+        expected = fn(x)
+        actual = torch.compile(fn)(x)
+        self.assertEqual(expected, actual, atol=1e-4, rtol=1e-4)
+
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
@@ -3271,6 +3301,15 @@ class CPUReproTests(TestCase):
             return x
 
         x = torch.randn(8, 8, 2)
+        metrics.reset()
+        self.common(fn, (x,))
+
+    def test_softmax_with_zero_dim(self):
+        def fn(x):
+            x = torch.softmax(x, 0)
+            return x
+
+        x = torch.rand([], dtype=torch.bfloat16)
         metrics.reset()
         self.common(fn, (x,))
 
