@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import glob
+import functools
 import importlib
 import importlib.abc
 import os
@@ -283,6 +284,7 @@ if IS_WINDOWS:
     COMMON_HIPCC_FLAGS.append('-Wno-ignored-attributes')
 
 
+@functools.cache
 def _get_icpx_version() -> str:
     icpx = 'icx' if IS_WINDOWS else 'icpx'
     compiler_info = subprocess.check_output([icpx, '--version'])
@@ -350,7 +352,7 @@ PLAT_TO_VCVARS = {
 }
 
 min_supported_cpython = "0x030A0000"  # Python 3.10 hexcode
-
+@functools.cache
 def get_cxx_compiler():
     if IS_WINDOWS:
         compiler = os.environ.get('CXX', 'cl')
@@ -2309,6 +2311,7 @@ def _write_ninja_file_and_build_library(
         error_prefix=f"Error building extension '{name}'")
 
 
+@functools.cache
 def is_ninja_available() -> bool:
     """Return ``True`` if the `ninja <https://ninja-build.org/>`_ build system is available on the system, ``False`` otherwise."""
     try:

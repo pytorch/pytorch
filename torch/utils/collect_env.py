@@ -267,7 +267,7 @@ def get_cudnn_version(run_lambda):
     result = "\n".join(files)
     return "Probably one of the following:\n{}".format(result)
 
-
+@functools.cache
 def get_nvidia_smi():
     # Note: nvidia-smi is currently available only on Windows and Linux
     smi = "nvidia-smi"
@@ -285,7 +285,7 @@ def get_nvidia_smi():
                 break
     return smi
 
-
+@functools.cache
 def _detect_linux_pkg_manager():
     if get_platform() != "linux":
         return "N/A"
