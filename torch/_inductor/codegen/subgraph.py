@@ -81,6 +81,10 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         import torch._inductor.config as inductor_config
         from torch._inductor.graph import GraphLowering
 
+        # Sanitize name to be a valid Python identifier
+        # Replace :: and other invalid characters with _
+        safe_name = self.name.replace("::", "_").replace(".", "_")
+
         bm_graph_lowering = GraphLowering(
             gm=self.gm,
             example_inputs=self.example_inputs,
@@ -90,7 +94,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             extern_node_serializer=V.graph.extern_node_serializer,
             is_inference=V.graph.is_inference,
             is_backward=V.graph.is_backward,
-            name=f"benchmark_{self.name}",
+            name=f"benchmark_{safe_name}",
         )
 
         for sym_inp in self.sym_inputs:
@@ -164,6 +168,17 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
     def autoheuristic_id(self) -> str:
         return f"subgraph_{self.name}"
+
+    def supports_collective_benchmarking(self) -> bool:
+        """Check if this choice supports collective benchmarking.
+
+        SubgraphChoiceCaller supports collective benchmarking since it has
+        a graph module that can be benchmarked with barrier synchronization.
+
+        Returns:
+            True, indicating support for collective benchmarking
+        """
+        return True
 
 
 class SubgraphTemplate(KernelTemplate):

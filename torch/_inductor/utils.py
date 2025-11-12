@@ -4098,3 +4098,31 @@ def should_fallback_by_default(node: torch.fx.Node) -> bool:
         return target in fallback_hops
 
     return not _needs_inductor_compile(node)
+
+
+# Collective operation names for specialized benchmarking
+COLLECTIVE_OPS = OrderedSet(
+    [
+        "torch.ops._c10d_functional.all_reduce.default",
+        "torch.ops._c10d_functional.all_reduce_.default",
+        "torch.ops._c10d_functional.all_gather_into_tensor.default",
+        "torch.ops._c10d_functional.reduce_scatter_tensor.default",
+        "torch.ops._c10d_functional.all_to_all_single.default",
+        "torch.ops._c10d_functional_autograd.all_reduce.default",
+        "torch.ops._c10d_functional_autograd.all_gather_into_tensor.default",
+        "torch.ops._c10d_functional_autograd.reduce_scatter_tensor.default",
+        "torch.ops._c10d_functional_autograd.all_to_all_single.default",
+    ]
+)
+
+
+def is_collective_op(op_name: str) -> bool:
+    """Check if an operation is a collective operation.
+
+    Args:
+        op_name: Name of the operation to check
+
+    Returns:
+        True if the operation is a collective op, False otherwise
+    """
+    return op_name in COLLECTIVE_OPS
