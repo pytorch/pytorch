@@ -1,5 +1,6 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/accelerator.h>
+#include <torch/csrc/stable/device.h>
 #include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/tensor.h>
 #include <torch/csrc/stable/ops.h>
@@ -528,6 +529,149 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("make_tensor_clones_and_call_foreach", &boxed_make_tensor_clones_and_call_foreach);
 }
 
+// Test functions for torch::stable::Tensor device method
+
+torch::stable::Device test_tensor_device(torch::stable::Tensor tensor) {
+  return tensor.device();
+}
+
+void boxed_test_tensor_device(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  torch::stable::Device res = test_tensor_device(
+      torch::stable::detail::to<torch::stable::Tensor>(stack[0]));
+  stack[0] = torch::stable::detail::from(res);
+}
+
+// Test functions for torch::stable::Device
+
+torch::stable::Device test_device_constructor(
+    bool is_cuda,
+    torch::stable::DeviceIndex index,
+    bool use_str) {
+  using torch::stable::Device;
+  using torch::stable::DeviceType;
+
+  if (use_str) {
+    std::string device_str;
+    if (is_cuda) {
+      device_str = "cuda:" + std::to_string(index);
+    } else {
+      device_str = "cpu";
+    }
+    return Device(device_str);
+  } else {
+    if (is_cuda) {
+      return Device(DeviceType::CUDA, index);
+    } else {
+      return Device(DeviceType::CPU);
+    }
+  }
+}
+
+void boxed_test_device_constructor(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  torch::stable::Device res = test_device_constructor(
+      torch::stable::detail::to<bool>(stack[0]),
+      torch::stable::detail::to<torch::stable::DeviceIndex>(stack[1]),
+      torch::stable::detail::to<bool>(stack[2]));
+  stack[0] = torch::stable::detail::from(res);
+}
+
+bool test_device_equality(torch::stable::Device d1, torch::stable::Device d2) {
+  return d1 == d2;
+}
+
+void boxed_test_device_equality(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  bool res = test_device_equality(
+      torch::stable::detail::to<torch::stable::Device>(stack[0]),
+      torch::stable::detail::to<torch::stable::Device>(stack[1]));
+  stack[0] = torch::stable::detail::from(res);
+}
+
+torch::stable::Device test_device_set_index(
+    torch::stable::Device device,
+    torch::stable::DeviceIndex index) {
+  device.set_index(index);
+  return device;
+}
+
+void boxed_test_device_set_index(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  torch::stable::Device res = test_device_set_index(
+      torch::stable::detail::to<torch::stable::Device>(stack[0]),
+      torch::stable::detail::to<torch::stable::DeviceIndex>(stack[1]));
+  stack[0] = torch::stable::detail::from(res);
+}
+
+torch::stable::DeviceIndex test_device_index(torch::stable::Device device) {
+  return device.index();
+}
+
+void boxed_test_device_index(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  torch::stable::DeviceIndex res = test_device_index(
+      torch::stable::detail::to<torch::stable::Device>(stack[0]));
+  stack[0] = torch::stable::detail::from(res);
+}
+
+bool test_device_is_cuda(torch::stable::Device device) {
+  return device.is_cuda();
+}
+
+void boxed_test_device_is_cuda(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  bool res = test_device_is_cuda(
+      torch::stable::detail::to<torch::stable::Device>(stack[0]));
+  stack[0] = torch::stable::detail::from(res);
+}
+
+bool test_device_is_cpu(torch::stable::Device device) {
+  return device.is_cpu();
+}
+
+void boxed_test_device_is_cpu(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  bool res = test_device_is_cpu(
+      torch::stable::detail::to<torch::stable::Device>(stack[0]));
+  stack[0] = torch::stable::detail::from(res);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("test_tensor_device(Tensor t) -> Device");
+  m.def(
+      "test_device_constructor(bool is_cuda, DeviceIndex index, bool use_str) -> Device");
+  m.def("test_device_equality(Device d1, Device d2) -> bool");
+  m.def("test_device_set_index(Device device, DeviceIndex index) -> Device");
+  m.def("test_device_index(Device device) -> DeviceIndex");
+  m.def("test_device_is_cuda(Device device) -> bool");
+  m.def("test_device_is_cpu(Device device) -> bool");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("test_tensor_device", &boxed_test_tensor_device);
+  m.impl("test_device_constructor", &boxed_test_device_constructor);
+  m.impl("test_device_equality", &boxed_test_device_equality);
+  m.impl("test_device_set_index", &boxed_test_device_set_index);
+  m.impl("test_device_index", &boxed_test_device_index);
+  m.impl("test_device_is_cuda", &boxed_test_device_is_cuda);
+  m.impl("test_device_is_cpu", &boxed_test_device_is_cpu);
+}
+
 // Test functions for torch::stable::accelerator APIs
 
 #ifdef LAE_USE_CUDA
@@ -617,3 +761,66 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
 }
 
 #endif // LAE_USE_CUDA
+
+Tensor test_parallel_for(int64_t size, int64_t grain_size) {
+  AtenTensorHandle tensor_handle;
+  int64_t stride = 1;
+
+  aoti_torch_empty_strided(
+      1,
+      &size,
+      &stride,
+      aoti_torch_dtype_int64(),
+      aoti_torch_device_type_cpu(),
+      0,
+      &tensor_handle);
+
+  Tensor tensor(tensor_handle);
+  int64_t* data_ptr = reinterpret_cast<int64_t*>(tensor.data_ptr());
+
+  torch::stable::zero_(tensor);
+
+  // Use parallel_for to fill each element with its index
+  // If using a parallel path, the thread id is encoded in the upper 32 bits
+  torch::stable::parallel_for(
+      0, size, grain_size, [data_ptr](int64_t begin, int64_t end) {
+        for (auto i = begin; i < end; i++) {
+          STD_TORCH_CHECK(i <= UINT32_MAX);
+          uint32_t thread_id;
+          torch_get_thread_idx(&thread_id);
+          data_ptr[i] = i | (static_cast<int64_t>(thread_id) << 32);
+        }
+      });
+
+  return tensor;
+}
+
+void boxed_test_parallel_for(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  Tensor res = test_parallel_for(to<int64_t>(stack[0]), to<int64_t>(stack[1]));
+  stack[0] = from(res);
+}
+
+uint32_t test_get_num_threads() {
+  return torch::stable::get_num_threads();
+}
+
+void boxed_test_get_num_threads(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  uint32_t res = test_get_num_threads();
+  stack[0] = from(res);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("test_parallel_for(int size, int grain_size) -> Tensor");
+  m.def("test_get_num_threads() -> int");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("test_parallel_for", &boxed_test_parallel_for);
+  m.impl("test_get_num_threads", &boxed_test_get_num_threads);
+}
