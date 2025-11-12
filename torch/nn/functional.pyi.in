@@ -725,8 +725,8 @@ def scaled_mm(
     scale_recipe_b: ScalingType | list[ScalingType],
     swizzle_a: SwizzleType | list[SwizzleType] | None = None,
     swizzle_b: SwizzleType | list[SwizzleType] | None = None,
-    bias: Optional[Tensor] = None,
-    output_dtype: Optional[torch.dtype] = torch.bfloat16,
+    bias: Tensor | None = None,
+    output_dtype: _dtype  = ...,
     contraction_dim: list[int] | tuple[int] = (),
     use_fast_accum: bool = False,
 ) -> Tensor: ...
