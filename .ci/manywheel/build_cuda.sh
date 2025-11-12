@@ -57,16 +57,24 @@ fi
 cuda_version_nodot=$(echo $CUDA_VERSION | tr -d '.')
 EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
 
+# Function to remove architectures from a list
+remove_archs() {
+    local result="$1"
+    shift
+    for arch in "$@"; do
+        result="${result//${arch};/}"
+    done
+    echo "$result"
+}
+
 # Function to filter CUDA architectures for aarch64
 # aarch64 ARM GPUs only support certain compute capabilities
 # Keep: 8.0 (A100), 9.0+ (Hopper, Grace Hopper, newer)
 # Remove: < 8.0 (no ARM GPUs), 8.6 (x86_64 RTX 3090/A6000 only)
 filter_aarch64_archs() {
     local arch_list="$1"
-    
     # Explicitly remove architectures not needed on aarch64
     arch_list=$(remove_archs "$arch_list" "5.0" "6.0" "7.0" "7.5" "8.6")
-    
     echo "$arch_list"
 }
 
@@ -76,8 +84,7 @@ TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0"
 case ${CUDA_VERSION} in
     12.6) TORCH_CUDA_ARCH_LIST="5.0;6.0;${TORCH_CUDA_ARCH_LIST}" ;;  # Only 12.6 includes Legacy Maxwell/Pascal that will be removed in future releases
     12.8) TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};10.0;12.0" ;;  # +Hopper/Blackwell support
-    12.9) 
-        TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};10.0;12.0+PTX" # +Hopper/Blackwell support + PTX for forward compatibility
+    12.9) TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};10.0;12.0+PTX" # +Hopper/Blackwell support + PTX for forward compatibility
         if [[ "$PACKAGE_TYPE" == "libtorch" ]]; then
             TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST//7.0;/}"  # Remove 7.0 to resolve the ld error
             TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST//8.6;/}"  # Remove 8.6 for libtorch
@@ -85,7 +92,8 @@ case ${CUDA_VERSION} in
         ;;
     13.0)
         TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;$([[ "$ARCH" == "aarch64" ]] && echo "11.0;" || echo "")12.0+PTX"
-        export TORCH_NVCC_FLAGS="-compress-mode=size" BUILD_BUNDLE_PTXAS=1
+        export TORCH_NVCC_FLAGS="-compress-mode=size"
+        export BUILD_BUNDLE_PTXAS=1
         ;;
     *) echo "unknown cuda version $CUDA_VERSION"; exit 1 ;;
 esac
@@ -94,7 +102,6 @@ esac
 [[ "$ARCH" == "aarch64" ]] && TORCH_CUDA_ARCH_LIST=$(filter_aarch64_archs "$TORCH_CUDA_ARCH_LIST")
 
 echo "TORCH_CUDA_ARCH_LIST set to: $TORCH_CUDA_ARCH_LIST"
-
 export TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 echo "${TORCH_CUDA_ARCH_LIST}"
 
