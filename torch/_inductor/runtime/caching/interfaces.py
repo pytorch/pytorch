@@ -12,7 +12,7 @@ from os import PathLike
 from pathlib import Path
 from threading import Lock
 from time import time
-from typing import Any, TYPE_CHECKING, TypeAlias
+from typing import Any, TYPE_CHECKING
 from typing_extensions import override
 
 from . import config, context, exceptions, implementations as impls, locks
@@ -23,11 +23,6 @@ if TYPE_CHECKING:
 
     from .utils import P, R
 
-
-# ideally we could annotate this as tuple[P.args, P.kwargs] but
-# functionally that doesn't work as P is defined in a specific
-# scope and P.args/P.kwargs are only valid in that scope
-Params: TypeAlias = tuple[Any, Any]
 
 logger: Logger = getLogger(__name__)
 
@@ -54,22 +49,25 @@ def _intf_callback(
     action: _IntfCallbackAction,
     dur: float,
     fn: Callable[P, R],
-    params: Params,
-    *args: Any,
+    fn_args: P.args,
+    fn_kwargs: P.kwargs,
+    *args,
 ) -> None:
+    params: tuple[P.args, P.kwargs] = (fn_args, fn_kwargs)
     if origin == _IntfCallbackOrigin.RECORD:
-        result: R = args[0]
         if action == _IntfCallbackAction.REPLAY:
+            cached_result: R = args[0]
             logger.log(
                 DEBUG,
                 "[RECORD] for fn %s with params %r cached, "
                 "returned result %r in %f seconds.",
                 fn.__name__,
                 params,
-                result,
+                cached_result,
                 dur,
             )
         elif action == _IntfCallbackAction.RECORD_INSERTED:
+            result: R = args[0]
             fn_dur: float = args[1]
             logger.log(
                 DEBUG,
@@ -83,6 +81,7 @@ def _intf_callback(
                 fn_dur,
             )
         elif action == _IntfCallbackAction.RECORD_NOT_INSERTED:
+            result = args[0]
             fn_dur = args[1]
             logger.log(
                 DEBUG,
@@ -98,6 +97,7 @@ def _intf_callback(
                 fn_dur,
             )
         elif action == _IntfCallbackAction.RECORD_NOT_INSERTED_REPLAY:
+            result = args[0]
             fn_dur = args[1]
             cached_result: R = args[2]
             logger.log(
@@ -175,16 +175,17 @@ class _CacheIntf(ABC):
     def _make_key(
         self,
         fn: Callable[P, R],
-        params: Params,
+        fn_args: P.args,
+        fn_kwargs: P.kwargs,
         ischema: context.IsolationSchema | None = None,
         custom_params_encoder: Callable[P, Any] | None = None,
     ) -> Any:
         callee: str = fn.__name__
         fkey: Any = (
-            (callee, params)
+            (callee, (fn_args, fn_kwargs))
             if not custom_params_encoder
             # pyrefly: ignore [invalid-param-spec]
-            else (callee, custom_params_encoder(*params[0], **params[1]))
+            else (callee, custom_params_encoder(*fn_args, **fn_kwargs))
         )
         ikey: Any = context._isolation_key(
             ischema if ischema is not None else context._DEFAULT_ISOLATION_SCHEMA
@@ -206,8 +207,8 @@ class _CacheIntf(ABC):
         fn: Callable[P, R],
         ischema: context.IsolationSchema | None = None,
         custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_encoder: Callable[[R], Any] | None = None,
-        custom_result_decoder: Callable[[Any], R] | None = None,
+        custom_result_encoder: Callable[P, Callable[[R], Any]] | None = None,
+        custom_result_decoder: Callable[P, Callable[[Any], R]] | None = None,
     ) -> Callable[P, R]:
         pass
 
@@ -215,22 +216,24 @@ class _CacheIntf(ABC):
     def _get(
         self,
         fn: Callable[P, R],
-        params: Params,
+        fn_args: P.args,
+        fn_kwargs: P.kwargs,
         ischema: context.IsolationSchema | None = None,
         custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_decoder: Callable[[Any], R] | None = None,
+        custom_result_decoder: Callable[P, Callable[[Any], R]] | None = None,
     ) -> impls.Hit | None:
         pass
 
     @abstractmethod
     def _insert(
         self,
-        fn: Callable[P, R],
-        params: Params,
         result: R,
+        fn: Callable[P, R],
+        fn_args: P.args,
+        fn_kwargs: P.kwargs,
         ischema: context.IsolationSchema | None = None,
         custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_encoder: Callable[[R], Any] | None = None,
+        custom_result_encoder: Callable[P, Callable[[R], Any]] | None = None,
     ) -> bool:
         pass
 
@@ -257,10 +260,11 @@ class _CacheIntf(ABC):
     def get(
         self,
         fn: Callable[P, R],
-        params: Params,
+        fn_args: P.args,
+        fn_kwargs: P.kwargs,
         ischema: context.IsolationSchema | None = None,
         custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_decoder: Callable[[Any], R] | None = None,
+        custom_result_decoder: Callable[P, Callable[[Any], R]] | None = None,
     ) -> impls.Hit | None:
         if not config.IS_CACHING_MODULE_ENABLED():
             return None
@@ -269,7 +273,8 @@ class _CacheIntf(ABC):
         with self.lock():  # type: ignore[call-arg]
             result: impls.Hit | None = self._get(
                 fn,
-                params,
+                fn_args,
+                fn_kwargs,
                 ischema=ischema,
                 custom_params_encoder=custom_params_encoder,
                 custom_result_decoder=custom_result_decoder,
@@ -281,7 +286,8 @@ class _CacheIntf(ABC):
             _IntfCallbackAction.HIT if result else _IntfCallbackAction.MISS,
             dur,
             fn,
-            params,
+            fn_args,
+            fn_kwargs,
             *((result.value,) if result else ()),
         )
 
@@ -289,12 +295,13 @@ class _CacheIntf(ABC):
 
     def insert(
         self,
-        fn: Callable[P, R],
-        params: Params,
         result: R,
+        fn: Callable[P, R],
+        fn_args: P.args,
+        fn_kwargs: P.kwargs,
         ischema: context.IsolationSchema | None = None,
         custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_encoder: Callable[[R], Any] | None = None,
+        custom_result_encoder: Callable[P, Callable[[R], Any]] | None = None,
     ) -> bool:
         if not config.IS_CACHING_MODULE_ENABLED():
             return False
@@ -302,9 +309,10 @@ class _CacheIntf(ABC):
         start_t: float = time()
         with self.lock():  # type: ignore[call-arg]
             inserted: bool = self._insert(
-                fn,
-                params,
                 result,
+                fn,
+                fn_args,
+                fn_kwargs,
                 ischema=ischema,
                 custom_params_encoder=custom_params_encoder,
                 custom_result_encoder=custom_result_encoder,
@@ -318,7 +326,8 @@ class _CacheIntf(ABC):
             else _IntfCallbackAction.NOT_INSERTED,
             dur,
             fn,
-            params,
+            fn_args,
+            fn_kwargs,
             result,
         )
 
@@ -371,20 +380,17 @@ class _FastCacheIntf(_CacheIntf):
         fn: Callable[P, R],
         ischema: context.IsolationSchema | None = None,
         custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_encoder: Callable[[R], Any] | None = None,
-        custom_result_decoder: Callable[[Any], R] | None = None,
+        custom_result_encoder: Callable[P, Callable[[R], Any]] | None = None,
+        custom_result_decoder: Callable[P, Callable[[Any], R]] | None = None,
     ) -> Callable[P, R]:
         @wraps(fn)
-        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        def wrapper(*fn_args: P.args, **fn_kwargs: P.kwargs) -> R:
             start_t: float = time()
-            params = (
-                args,
-                kwargs,
-            )
             with self.lock():
                 get: impls.Hit | None = self._get(
                     fn,
-                    params,
+                    fn_args,
+                    fn_kwargs,
                     ischema=ischema,
                     custom_params_encoder=custom_params_encoder,
                     custom_result_decoder=custom_result_decoder,
@@ -397,18 +403,20 @@ class _FastCacheIntf(_CacheIntf):
                         _IntfCallbackAction.REPLAY,
                         dur,
                         fn,
-                        params,
+                        fn_args,
+                        fn_kwargs,
                         get.value,
                     )
                     return get.value
                 else:
                     fn_start_t: float = time()
-                    result: R = fn(*args, **kwargs)
+                    result: R = fn(*fn_args, **fn_kwargs)
                     fn_dur: float = time() - fn_start_t
                     inserted: bool = self._insert(
-                        fn,
-                        params,
                         result,
+                        fn,
+                        fn_args,
+                        fn_kwargs,
                         ischema=ischema,
                         custom_params_encoder=custom_params_encoder,
                         custom_result_encoder=custom_result_encoder,
@@ -421,7 +429,8 @@ class _FastCacheIntf(_CacheIntf):
                         else _IntfCallbackAction.RECORD_NOT_INSERTED,
                         dur,
                         fn,
-                        params,
+                        fn_args,
+                        fn_kwargs,
                         result,
                         fn_dur,
                     )
@@ -433,13 +442,18 @@ class _FastCacheIntf(_CacheIntf):
     def _get(
         self,
         fn: Callable[P, R],
-        params: Params,
+        fn_args: P.args,
+        fn_kwargs: P.kwargs,
         ischema: context.IsolationSchema | None = None,
         custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_decoder: Callable[[Any], R] | None = None,
+        custom_result_decoder: Callable[P, Callable[[Any], R]] | None = None,
     ) -> impls.Hit | None:
         key: Any = self._make_key(
-            fn, params, ischema=ischema, custom_params_encoder=custom_params_encoder
+            fn,
+            fn_args,
+            fn_kwargs,
+            ischema=ischema,
+            custom_params_encoder=custom_params_encoder,
         )
         odc: impls._OnDiskCacheImpl = self._get_odc_from_callee(fn.__name__)
         with locks._acquire_many_impl_locks_with_timeout(self._imc, odc):
@@ -450,31 +464,46 @@ class _FastCacheIntf(_CacheIntf):
                 imc_get: impls.Hit | None = self._imc.get(key)
                 if imc_get:
                     if custom_result_decoder:
-                        return impls.Hit(value=custom_result_decoder(imc_get.value))
+                        return impls.Hit(
+                            value=custom_result_decoder(*fn_args, **fn_kwargs)(
+                                imc_get.value
+                            )
+                        )
                     else:
                         return imc_get
                 else:
                     odc_get: impls.Hit | None = odc.get(key)
                     if odc_get:
                         if custom_result_decoder:
-                            return impls.Hit(value=custom_result_decoder(odc_get.value))
+                            return impls.Hit(
+                                value=custom_result_decoder(*fn_args, **fn_kwargs)(
+                                    odc_get.value
+                                )
+                            )
                         return odc_get
                 return None
             except exceptions.KeyEncodingError as err:
-                raise exceptions.CustomParamsEncoderRequiredError(fn, params) from err
+                raise exceptions.CustomParamsEncoderRequiredError(
+                    fn, *fn_args, **fn_kwargs
+                ) from err
 
     @override
     def _insert(
         self,
-        fn: Callable[P, R],
-        params: Params,
         result: R,
+        fn: Callable[P, R],
+        fn_args: P.args,
+        fn_kwargs: P.kwargs,
         ischema: context.IsolationSchema | None = None,
         custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_encoder: Callable[[R], Any] | None = None,
+        custom_result_encoder: Callable[P, Callable[[R], Any]] | None = None,
     ) -> bool:
         key: Any = self._make_key(
-            fn, params, ischema=ischema, custom_params_encoder=custom_params_encoder
+            fn,
+            fn_args,
+            fn_kwargs,
+            ischema=ischema,
+            custom_params_encoder=custom_params_encoder,
         )
         odc: impls._OnDiskCacheImpl = self._get_odc_from_callee(fn.__name__)
         with locks._acquire_many_impl_locks_with_timeout(self._imc, odc):
@@ -482,7 +511,7 @@ class _FastCacheIntf(_CacheIntf):
                 encoded_result: Any = (
                     result
                     if not custom_result_encoder
-                    else custom_result_encoder(result)
+                    else custom_result_encoder(*fn_args, **fn_kwargs)(result)
                 )
                 # reverse order of get, as we don't want to memoize values
                 # if we haven't actually inserted them into the on-disk cache
@@ -492,10 +521,12 @@ class _FastCacheIntf(_CacheIntf):
                     return True
                 return False
             except exceptions.KeyEncodingError as err:
-                raise exceptions.CustomParamsEncoderRequiredError(fn, params) from err
+                raise exceptions.CustomParamsEncoderRequiredError(
+                    fn, *fn_args, **fn_kwargs
+                ) from err
             except exceptions.ValueEncodingError as err:
                 raise exceptions.CustomResultEncoderRequiredError(
-                    f"Custom result encoder required for function {fn} with parameters {params} and result {result}."
+                    f"Custom result encoder required for function {fn} with parameters {(fn_args, fn_kwargs)} and result {result}."
                 ) from err
 
 
@@ -604,22 +635,19 @@ class _DeterministicCacheIntf(_CacheIntf):
         fn: Callable[P, R],
         ischema: context.IsolationSchema | None = None,
         custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_encoder: Callable[[R], Any] | None = None,
-        custom_result_decoder: Callable[[Any], R] | None = None,
+        custom_result_encoder: Callable[P, Callable[[R], Any]] | None = None,
+        custom_result_decoder: Callable[P, Callable[[Any], R]] | None = None,
     ) -> Callable[P, R]:
         @wraps(fn)
-        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        def wrapper(*fn_args: P.args, **fn_kwargs: P.kwargs) -> R:
             if not config.IS_DETERMINISTIC_CACHING_ENABLED():
                 raise exceptions.DeterministicCachingDisabledError
             start_t: float = time()
-            params = (
-                args,
-                kwargs,
-            )
             with self.lock():
                 get: impls.Hit | None = self._get(
                     fn,
-                    params,
+                    fn_args,
+                    fn_kwargs,
                     ischema=ischema,
                     custom_params_encoder=custom_params_encoder,
                     custom_result_decoder=custom_result_decoder,
@@ -632,21 +660,23 @@ class _DeterministicCacheIntf(_CacheIntf):
                         _IntfCallbackAction.REPLAY,
                         dur,
                         fn,
-                        params,
+                        fn_args,
+                        fn_kwargs,
                         get.value,
                     )
                     return get.value
                 else:
                     fn_start_t: float = time()
-                    result: R = fn(*args, **kwargs)
+                    result: R = fn(*fn_args, **fn_kwargs)
                     fn_dur: float = time() - fn_start_t
                     if not self._insert(
-                        fn,
-                        params,
                         result,
-                        ischema,
-                        custom_params_encoder,
-                        custom_result_encoder,
+                        fn,
+                        fn_args,
+                        fn_kwargs,
+                        ischema=ischema,
+                        custom_params_encoder=custom_params_encoder,
+                        custom_result_encoder=custom_result_encoder,
                     ):
                         # if we couldn't insert that means that some other callee has populated
                         # the key entry in the remote cache within the time between our first get
@@ -655,8 +685,9 @@ class _DeterministicCacheIntf(_CacheIntf):
                         # compile workers will also use that value
                         get = self._get(
                             fn,
-                            params,
-                            ischema,
+                            fn_args,
+                            fn_kwargs,
+                            ischema=ischema,
                             custom_params_encoder=custom_params_encoder,
                             custom_result_decoder=custom_result_decoder,
                         )
@@ -669,7 +700,9 @@ class _DeterministicCacheIntf(_CacheIntf):
                             _IntfCallbackAction.RECORD_NOT_INSERTED_REPLAY,
                             dur,
                             fn,
-                            params,
+                            fn_args,
+                            fn_kwargs,
+                            result,
                             fn_dur,
                             get.value,
                         )
@@ -680,7 +713,8 @@ class _DeterministicCacheIntf(_CacheIntf):
                         _IntfCallbackAction.RECORD_INSERTED,
                         dur,
                         fn,
-                        params,
+                        fn_args,
+                        fn_kwargs,
                         result,
                         fn_dur,
                     )
@@ -692,13 +726,18 @@ class _DeterministicCacheIntf(_CacheIntf):
     def _get(
         self,
         fn: Callable[P, R],
-        params: Params,
+        fn_args: P.args,
+        fn_kwargs: P.kwargs,
         ischema: context.IsolationSchema | None = None,
         custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_decoder: Callable[[Any], R] | None = None,
+        custom_result_decoder: Callable[P, Callable[[Any], R]] | None = None,
     ) -> impls.Hit | None:
         key: Any = self._make_key(
-            fn, params, ischema=ischema, custom_params_encoder=custom_params_encoder
+            fn,
+            fn_args,
+            fn_kwargs,
+            ischema=ischema,
+            custom_params_encoder=custom_params_encoder,
         )
         sc: impls._OnDiskCacheImpl | impls._RemoteCacheImpl | None = (
             self._get_sc_from_callee(fn.__name__)
@@ -712,7 +751,11 @@ class _DeterministicCacheIntf(_CacheIntf):
                 imc_get: impls.Hit | None = self._imc.get(key)
                 if imc_get:
                     if custom_result_decoder:
-                        return impls.Hit(value=custom_result_decoder(imc_get.value))
+                        return impls.Hit(
+                            value=custom_result_decoder(*fn_args, **fn_kwargs)(
+                                imc_get.value
+                            )
+                        )
                     else:
                         return imc_get
                 elif not sc:
@@ -721,23 +764,30 @@ class _DeterministicCacheIntf(_CacheIntf):
                     sc_get: impls.Hit | None = sc.get(key)
                     if sc_get:
                         if custom_result_decoder:
-                            return impls.Hit(value=custom_result_decoder(sc_get.value))
+                            return impls.Hit(
+                                value=custom_result_decoder(*fn_args, **fn_kwargs)(
+                                    sc_get.value
+                                )
+                            )
                         return sc_get
                     elif config.STRICTLY_CACHED_DETERMINISM:
                         raise exceptions.StrictDeterministicCachingKeyNotFoundError
                 return None
             except exceptions.KeyEncodingError as err:
-                raise exceptions.CustomParamsEncoderRequiredError(fn, params) from err
+                raise exceptions.CustomParamsEncoderRequiredError(
+                    fn, *fn_args, **fn_kwargs
+                ) from err
 
     @override
     def _insert(
         self,
-        fn: Callable[P, R],
-        params: Params,
         result: R,
+        fn: Callable[P, R],
+        fn_args: P.args,
+        fn_kwargs: P.kwargs,
         ischema: context.IsolationSchema | None = None,
         custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_encoder: Callable[[R], Any] | None = None,
+        custom_result_encoder: Callable[P, Callable[[R], Any]] | None = None,
     ) -> bool:
         if (
             config.STRICTLY_PRE_POPULATED_DETERMINISM
@@ -746,7 +796,11 @@ class _DeterministicCacheIntf(_CacheIntf):
             raise exceptions.StrictDeterministicCachingInsertionError
 
         key: Any = self._make_key(
-            fn, params, ischema=ischema, custom_params_encoder=custom_params_encoder
+            fn,
+            fn_args,
+            fn_kwargs,
+            ischema=ischema,
+            custom_params_encoder=custom_params_encoder,
         )
         sc: impls._OnDiskCacheImpl | impls._RemoteCacheImpl | None = (
             self._get_sc_from_callee(fn.__name__)
@@ -759,7 +813,7 @@ class _DeterministicCacheIntf(_CacheIntf):
                 encoded_result: Any = (
                     result
                     if not custom_result_encoder
-                    else custom_result_encoder(result)
+                    else custom_result_encoder(*fn_args, **fn_kwargs)(result)
                 )
                 # reverse order of get, as we don't want to memoize values
                 # if we haven't actually inserted them into the remote cache
@@ -771,26 +825,30 @@ class _DeterministicCacheIntf(_CacheIntf):
                     return True
                 return False
             except exceptions.KeyEncodingError as err:
-                raise exceptions.CustomParamsEncoderRequiredError(fn, params) from err
+                raise exceptions.CustomParamsEncoderRequiredError(
+                    fn, *fn_args, **fn_kwargs
+                ) from err
             except exceptions.ValueEncodingError as err:
                 raise exceptions.CustomResultEncoderRequiredError(
-                    f"Custom result encoder required for function {fn} with parameters {params} and result {result}."
+                    f"Custom result encoder required for function {fn} with parameters {(fn_args, fn_kwargs)} and result {result}."
                 ) from err
 
     @override
     def get(
         self,
         fn: Callable[P, R],
-        params: Params,
+        fn_args: P.args,
+        fn_kwargs: P.kwargs,
         ischema: context.IsolationSchema | None = None,
         custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_decoder: Callable[[Any], R] | None = None,
+        custom_result_decoder: Callable[P, Callable[[Any], R]] | None = None,
     ) -> impls.Hit | None:
         if not config.IS_DETERMINISTIC_CACHING_ENABLED():
             raise exceptions.DeterministicCachingDisabledError
         return super().get(
             fn,
-            params,
+            fn_args,
+            fn_kwargs,
             ischema=ischema,
             custom_params_encoder=custom_params_encoder,
             custom_result_decoder=custom_result_decoder,
@@ -799,19 +857,21 @@ class _DeterministicCacheIntf(_CacheIntf):
     @override
     def insert(
         self,
-        fn: Callable[P, R],
-        params: Params,
         result: R,
+        fn: Callable[P, R],
+        fn_args: P.args,
+        fn_kwargs: P.kwargs,
         ischema: context.IsolationSchema | None = None,
         custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_encoder: Callable[[R], Any] | None = None,
+        custom_result_encoder: Callable[P, Callable[[R], Any]] | None = None,
     ) -> bool:
         if not config.IS_DETERMINISTIC_CACHING_ENABLED():
             raise exceptions.DeterministicCachingDisabledError
         return super().insert(
             fn,
-            params,
             result,
+            fn_args,
+            fn_kwargs,
             ischema=ischema,
             custom_params_encoder=custom_params_encoder,
             custom_result_encoder=custom_result_encoder,
