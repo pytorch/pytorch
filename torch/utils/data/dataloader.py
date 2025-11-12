@@ -17,7 +17,7 @@ import queue
 import threading
 import warnings
 from collections.abc import Callable
-from typing import Any, Generic, NoReturn, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, NoReturn, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Self
 
 import torch

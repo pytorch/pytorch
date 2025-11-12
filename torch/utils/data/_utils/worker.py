@@ -9,7 +9,7 @@ import os
 import queue
 import random
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Optional, TYPE_CHECKING, TypeVar
 
 import torch
 from torch._utils import ExceptionWrapper
