@@ -400,7 +400,7 @@ class ShardingPropagator:
                     return OutputSharding(
                         None,
                         suggestion_schema,
-                        needs_redistribute=True,
+                        # needs_redistribute=True,
                     )
             return OutputSharding(None, op_schema)
 
