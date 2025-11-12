@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import math
+import sys
 from bisect import bisect_right, insort
 from typing import Optional
 
@@ -60,7 +61,7 @@ def _find_nd_overlapping_shards(
         start = current.shard_offsets[sweep_dim]
         end = start + current.shard_sizes[sweep_dim]
 
-        cutoff = bisect_right(active, (start, float("inf")))
+        cutoff = bisect_right(active, (start, sys.maxsize))
         if cutoff:
             del active[:cutoff]
 
