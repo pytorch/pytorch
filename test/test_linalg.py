@@ -7798,7 +7798,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("m", [1, 32])
     @parametrize("k", [64, 128])
     @parametrize("n", [4096, 11008])
-    def test__dyn_quant_matmul_4bit_fp32(self, device, m, k, n):
+    def test__dyn_quant_matmul_4bit(self, device, m, k, n):
         if self.device_type == "cuda":
             self.skipTest("CUDA is unsupported")
 
@@ -7870,86 +7870,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("m", [1, 32])
     @parametrize("k", [64, 128])
     @parametrize("n", [4096, 11008])
-    def test__dyn_quant_matmul_4bit_bf16(self, device, m, k, n):
-        if self.device_type == "cuda":
-            self.skipTest("CUDA is unsupported")
-
-
-        torch.manual_seed(1)
-        a_bfloat16 = torch.rand((m, k), dtype=torch.bfloat16, device=device)
-        b_bfloat16 = torch.rand((k, n), dtype=torch.bfloat16, device=device)
-        in_features = b_bfloat16.size(0)
-        out_features = b_bfloat16.size(1)
-        q_group = in_features
-
-        def dyn_quant_pack_4bit_weight(b, in_features, out_features):
-            b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
-                b, n_bit=4, groupsize=q_group
-            )
-
-            if q_group == in_features:
-                b_scales_and_zeros = b_scales_and_zeros.to(torch.float)
-            else:
-                b_scales_and_zeros = b_scales_and_zeros.to(torch.bfloat16)
-            b_int4pack = torch._dyn_quant_pack_4bit_weight(
-                b_uint8, b_scales_and_zeros, None, q_group, in_features, out_features
-            )
-
-            return b_int4pack, b_scales_and_zeros
-
-        def dyn_quant_matmul_4bit(
-            a, b_int4pack, q_group, in_features, out_features
-        ):
-            return torch.ops.aten._dyn_quant_matmul_4bit(
-                a,
-                b_int4pack,
-                q_group,
-                in_features,
-                out_features,
-            )
-
-        b_int4pack, b_scales_and_zeros = dyn_quant_pack_4bit_weight(
-            b_bfloat16, in_features, out_features
-        )
-
-        dtypes = [torch.bfloat16]
-
-        for dtype in dtypes:
-            a = a_bfloat16.to(dtype=dtype)
-            b = b_bfloat16.to(dtype=dtype)
-            ref = torch.mm(a, b)
-            res = dyn_quant_matmul_4bit(
-                a,
-                b_int4pack,
-                q_group,
-                in_features,
-                out_features,
-            )
-
-        # Mean relative error check
-        expected_mean_err = 0.00952
-        mean_err_tol = 0.005  # allow small deviation (±0.005)
-        mean_err = ((res - ref).abs() / ref.abs().clamp(min=1e-5)).mean()
-        self.assertTrue(
-            abs(mean_err - expected_mean_err) < mean_err_tol,
-            f"Mean relative error {mean_err:.6f} deviates from expected {expected_mean_err}"
-        )
-
-        # Elementwise relative error check
-        elementwise_diff = (res - ref).abs()
-        elementwise_relative_error = elementwise_diff / ref.abs().clamp(min=torch.finfo(ref.dtype).eps)
-        self.assertTrue(
-            torch.all(elementwise_relative_error < 0.070),
-            "Some elements have relative error >= 7%"
-        )
-
-    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
-    @onlyNativeDeviceTypes
-    @parametrize("m", [1, 32])
-    @parametrize("k", [64, 128])
-    @parametrize("n", [4096, 11008])
-    def test_compile_dyn_quant_matmul_4bit_fp32(self, device, m, k, n):
+    def test_compile_dyn_quant_matmul_4bit(self, device, m, k, n):
         if self.device_type == "cuda":
             self.skipTest("CUDA is unsupported")
 
@@ -8007,83 +7928,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         )
 
     @onlyNativeDeviceTypes
-    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
-    @onlyNativeDeviceTypes
-    @parametrize("m", [1, 32])
-    @parametrize("k", [64, 128])
-    @parametrize("n", [4096, 11008])
-    def test_compile_dyn_quant_matmul_4bit_bf16(self, device, m, k, n):
-        if self.device_type == "cuda":
-            self.skipTest("CUDA is unsupported")
-
-
-        torch.manual_seed(1)
-        a_bfloat16 = torch.rand((m, k), dtype=torch.bfloat16, device=device)
-        b_bfloat16 = torch.rand((k, n), dtype=torch.bfloat16, device=device)
-        in_features = b_bfloat16.size(0)
-        out_features = b_bfloat16.size(1)
-        q_group = in_features
-
-        b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
-            b_bfloat16, n_bit=4, groupsize=q_group
-        )
-
-        if q_group == in_features:
-            b_scales_and_zeros = b_scales_and_zeros.to(dtype=torch.float)
-        else:
-            b_scales_and_zeros = b_scales_and_zeros.to(dtype=torch.bfloat16)
-
-        @torch.compile
-        def dyn_quant_matmul_4bit(
-            a, b_uint8, b_scales_and_zeros, q_group, in_features, out_features
-        ):
-            b_int4pack = torch._dyn_quant_pack_4bit_weight(
-                b_uint8, b_scales_and_zeros, None, q_group, in_features, out_features
-            )
-            return torch._dyn_quant_matmul_4bit(
-                a,
-                b_int4pack,
-                q_group,
-                in_features,
-                out_features,
-            )
-
-        res = dyn_quant_matmul_4bit(
-            a_bfloat16,
-            b_uint8,
-            b_scales_and_zeros,
-            q_group,
-            in_features,
-            out_features,
-        )
-        ref = torch.mm(a_bfloat16, b_bfloat16)
-
-        # === Accuracy checks ===
-
-        # Mean relative error check
-        expected_mean_err = 0.00952
-        mean_err_tol = 0.005  # allow small deviation (±0.005)
-        mean_err = ((res - ref).abs() / ref.abs().clamp(min=1e-5)).mean()
-        self.assertTrue(
-            abs(mean_err - expected_mean_err) < mean_err_tol,
-            f"Mean relative error {mean_err:.6f} deviates from expected {expected_mean_err}"
-        )
-
-        # Avoid divide-by-zero with clamp
-        denominator = ref.abs().clamp(min=torch.finfo(ref.dtype).eps)
-
-        # Compute elementwise relative error — always non-negative
-        elementwise_relative_error = (res - ref).abs() / denominator
-
-        # Check if all elements are within 6% error
-        assert torch.all(elementwise_relative_error >= 0), "Relative error should never be negative"
-        self.assertTrue(
-            torch.all(elementwise_relative_error < 0.070),
-            "Some elements have relative error >= 7%"
-        )
-
-    @onlyCPU
     @parametrize("m", [32, 64])
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
