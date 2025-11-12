@@ -3,7 +3,7 @@ import dataclasses
 import inspect
 import logging
 import sys
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from collections.abc import Callable
 from enum import auto, Enum
 from typing import Any, Optional, TYPE_CHECKING, Union
@@ -721,7 +721,18 @@ def _combine_args(f, args, kwargs) -> dict[str, Any]:
         else inspect.signature(f)
     )
     kwargs = kwargs if kwargs is not None else {}
-    return signature.bind(*args, **kwargs).arguments
+    combined_args = signature.bind(*args, **kwargs).arguments
+    # if `args` is in the key, flatten it into args_0, args_1, ...
+    if "args" in combined_args:
+        flattened_args = {f"args_{i}": v for i, v in enumerate(combined_args["args"])}
+        combined_args = OrderedDict({**combined_args, **flattened_args})
+        del combined_args["args"]
+    # flatten kwargs into combined_args
+    if "kwargs" in combined_args:
+        for k, v in combined_args["kwargs"].items():
+            combined_args[k] = v
+        del combined_args["kwargs"]
+    return combined_args
 
 
 class ShapesCollection:
@@ -1333,7 +1344,7 @@ def refine_dynamic_shapes_from_suggested_fixes(
             roots.add(c.root.__name__)  # type: ignore[attr-defined]
 
     # check keys are existing dims or new roots
-    for k in shape_fixes.keys():
+    for k in shape_fixes:
         assert k in name_to_dim or k in roots
 
     # cache so we don't produce multiple derived dim objects
