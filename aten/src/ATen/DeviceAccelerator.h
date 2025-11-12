@@ -94,11 +94,6 @@ TORCH_API inline void resetPeakStats(c10::DeviceIndex device_index) {
   at::getDeviceAllocator(device_type)->resetPeakStats(device_index);
 }
 
-TORCH_API inline std::pair<size_t, size_t> getMemoryInfo(
-    c10::DeviceIndex device_index) {
-  const auto device_type = getAccelerator(true).value();
-  return at::getDeviceAllocator(device_type)->getMemoryInfo(device_index);
-}
 } // namespace at::accelerator
 
 namespace at {

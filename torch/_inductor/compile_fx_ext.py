@@ -468,8 +468,6 @@ class _SerializedFxCompile(FxCompile):
         fake_mode = _current_fake_mode()
         fake_tensor_mode = _FakeTensorModeSerializer(fake_mode)
 
-        from pickle import PicklingError
-
         try:
             input = _WireProtocolInput(
                 gm,
@@ -485,7 +483,7 @@ class _SerializedFxCompile(FxCompile):
                 fake_tensor_mode,
             ).serialize()
             return (input, constants)
-        except (AttributeError, BypassFxGraphCache, PicklingError):
+        except (AttributeError, BypassFxGraphCache):
             # For example: AttributeError: Can't pickle local object
             # 'make_opaque_unary_fn.<locals>.OpaqueUnaryFn'
 
