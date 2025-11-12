@@ -1,5 +1,5 @@
-# Workflow: Dynamo/Inductor Core Unit Test
-# runs unit tests for dynamo and inductor on all supported Python versions
+# Workflow: Dynamo Unit Test
+# runs unit tests for dynamo.
 name: dynamo-inductor-core-unittest
 
 on:
