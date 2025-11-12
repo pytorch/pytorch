@@ -6,6 +6,8 @@
 #include <ATen/native/nested/NestedTensorUtils.h>
 
 #include <c10/util/Exception.h>
+#include <cmath>
+#include <limits>
 #include <optional>
 #include <string_view>
 
@@ -270,7 +272,18 @@ Tensor _jagged_to_padded_dense_forward_cpu(
   padded_shape.push_back(batch_size);
   padded_shape.push_back(max_length);
   padded_shape.insert(padded_shape.end(), values_shape.begin() + 1, values_shape.end());
-  Tensor padded = values.new_full(padded_shape, padding_value);
+
+  // We must clamp infinite sentinels to dtype min/max and use the typed value
+  // directly to avoid double->int overflow (e.g., int64_max as double overflows).
+  Tensor padded;
+  if (std::isinf(padding_value) && !values.is_floating_point()) {
+    AT_DISPATCH_INTEGRAL_TYPES(values.scalar_type(), "_jagged_to_padded_dense_forward_cpu", [&] {
+      scalar_t fill_value = _get_padding_value<scalar_t>(padding_value, values.is_floating_point());
+      padded = values.new_full(padded_shape, fill_value);
+    });
+  } else {
+    padded = values.new_full(padded_shape, padding_value);
+  }
 
   // copy data to padded tensor
   for (auto i : c10::irange(batch_size)) {

@@ -1,5 +1,7 @@
 #include <cuda_fp16.h>
 #include <type_traits>
+#include <cmath>
+#include <limits>
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
@@ -1456,6 +1458,7 @@ at::Tensor _fbgemm_jagged_to_padded_dense_forward(
       values.scalar_type(),
       "jagged_to_padded_dense",
       [&] {
+        scalar_t fill_value = _get_padding_value<scalar_t>(padding_value, values.is_floating_point());  // Clamp infinite sentinels to dtype min/max to avoid overflow
         jagged_dense_elementwise_dense_output_<scalar_t>(
             values_canonicalized,
             offsets.vec(),
@@ -1464,7 +1467,7 @@ at::Tensor _fbgemm_jagged_to_padded_dense_forward(
            [] __device__(scalar_t x, scalar_t /*unused*/) -> scalar_t {
               return x;
             },
-            static_cast<scalar_t>(padding_value));
+            fill_value);
       });
 
   return padded_values;
