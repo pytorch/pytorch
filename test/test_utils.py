@@ -60,6 +60,7 @@ TEST_GPU = torch.xpu.is_available() or torch.cuda.is_available()
 
 from torch.testing._internal.common_utils import run_tests, TestCase
 
+
 # mypy: disable-error-code="name-defined"
 
 
