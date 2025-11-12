@@ -105,21 +105,22 @@ def aten_scaled_dot_product_attention_23(
         2. https://onnx.ai/onnx/operators/onnx__Attention.html
 
     Attempts to convert SDPA to Attention onnx op and fallbacks to an onnx graph equivalent to the following PyTorch code::
-        scale_factor = 1 / math.sqrt(Q.size(-1)) if scale is None else scale
+        scale_factor = 1.0 / math.sqrt(Q.size(-1)) if scale is None else scale
         attn_mask = (
             torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
             if is_causal
             else attn_mask
         )
         attn_mask = (
-            attn_mask.masked_fill(not attn_mask, -float("inf"))
-            if attn_mask.dtype == torch.bool
+            torch.zeros(L, S, dtype=Q.dtype, device=Q.device).masked_fill(~attn_mask, -float("inf"))
+            if attn_mask is not None and attn_mask.dtype == torch.bool
             else attn_mask
         )
         attn_weight = torch.softmax(
-            (Q @ K.transpose(-2, -1) *  attn_mask, dim=-1
+            (Q @ K.transpose(-2, -1) * scale_factor) + (attn_mask if attn_mask is not None else 0),
+            dim=-1,
         )
-        attn_weight = torch.dropout(attn_weight, dropout_p)
+        attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
         return attn_weight @ V
 
     where Q, K, V are the query, key, and value tensors, respectively.
@@ -268,7 +269,7 @@ def _causal_attention_mask(query: TFloat, key: TFloat, op: Opset) -> TFloat:
     Equivalent to::
         mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
         attn_mask = torch.zeros(L, S, dtype=torch.float)
-        attn_mask = attn_mask.masked_fill(not mask, -float("inf"))
+        attn_mask = attn_mask.masked_fill(~mask, -float("inf"))
 
     Args:
         query: Tensor of shape [..., L, E]
