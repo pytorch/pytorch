@@ -4,9 +4,8 @@ import logging
 import operator
 import os
 from collections import defaultdict
-from collections.abc import Sequence
-from typing import Any, Callable
-from typing_extensions import TypeAlias
+from collections.abc import Callable, Sequence
+from typing import Any, TypeAlias
 
 import torch
 from torch._dynamo.utils import counters
@@ -405,8 +404,8 @@ def normalize_stack_default(match: Match, *args, **kwargs):
 
 def find_next_users(split_node: torch.fx.Node) -> list[torch.fx.Node]:
     next_users = []
-    for getitem_node in split_node.users.keys():
-        for getitem_user in getitem_node.users.keys():
+    for getitem_node in split_node.users:
+        for getitem_user in getitem_node.users:
             if getitem_user not in next_users:
                 next_users.append(getitem_user)
     return next_users
@@ -624,7 +623,7 @@ def merge_splits(
             )
         first_split_num_to_user = {
             user.args[1]: user
-            for user in first_split.users.keys()  # type: ignore[union-attr]
+            for user in first_split.users  # type: ignore[union-attr]
         }
 
         new_split_num = 0
@@ -638,9 +637,7 @@ def merge_splits(
                 old_getitem.update_arg(1, new_split_num)
                 new_split_num += 1
             else:
-                next_split_num_to_user = {
-                    user.args[1]: user for user in node.users.keys()
-                }
+                next_split_num_to_user = {user.args[1]: user for user in node.users}
                 # It is not necessary all getitems from the split node are used.
                 for next_split_num in range(len(next_split_sections)):
                     with graph.inserting_after(new_split):
@@ -1161,9 +1158,7 @@ class UnbindCatRemover(SplitCatSimplifier):
             return
         # we need to check if the getitem indices from unbind are consecutive and all go to the same cat node
         # before we do the unbind remove, otherwise it will hit the error when we unbind part of them
-        getitem_indices = [
-            getitem_node.args[1] for getitem_node in unbind_node.users.keys()
-        ]
+        getitem_indices = [getitem_node.args[1] for getitem_node in unbind_node.users]
         if not is_sorted_and_consecutive(getitem_indices) or len(  # type: ignore[arg-type]
             getitem_indices
         ) != len(unbind_node.meta["example_value"]):
@@ -1315,10 +1310,7 @@ def merge_split_squeeze(
                 split_input.meta["example_value"], dim=dim
             )
         for item_index, getitem_node in sorted(
-            [
-                (getitem_node.args[1], getitem_node)
-                for getitem_node in split.users.keys()
-            ]
+            [(getitem_node.args[1], getitem_node) for getitem_node in split.users]
         ):
             squeeze = next(iter(getitem_node.users.keys()))
             new_get_item = graph.call_function(
@@ -1526,7 +1518,7 @@ def merge_getitem_cat(match: Match, split_sections: list[int], dim: int):
     # 'immutable_list' object does not support mutation. Create a new copy of it
     split_sections = list(split_sections)
     for cat_user in next_users:
-        if cat_user.target == torch.cat:
+        if cat_user.target is torch.cat:
             cat_dim = get_arg_value(cat_user, 1, "dim")
             # check the all getitems in the cat_user from the same node
             # check the input of the cat has all getitem from the split
@@ -1631,7 +1623,7 @@ def mutate_cat_node(match: Match, split_sections: list[int], dim: int):
     # Find the next users (i.e. users after the getitem)
     next_users = find_next_users(split_node)
     for cat_user in next_users:
-        if cat_user.target == torch.cat:
+        if cat_user.target is torch.cat:
             cat_dim = get_arg_value(cat_user, 1, "dim") or 0
             # check that all getitems in the cat_user from the same node
             # check the input of the cat has all getitem from the split
@@ -2010,7 +2002,7 @@ def merge_unbind_stack_aten(match: Match, *args, **kwargs):
     cat_dim = get_arg_value(node, 1, "dim")
     # check the unsqueeze nodes come from the select nodes
     if not all(
-        get_arg_value(unsqueeze_node, 0, "input").target == torch.ops.aten.select
+        get_arg_value(unsqueeze_node, 0, "input").target is torch.ops.aten.select
         for unsqueeze_node in unsqueeze_nodes
     ):
         return
@@ -2319,7 +2311,7 @@ def construct_cat_args(
 def remove_split_unbind_children(graph: torch.fx.Graph, inputs: list[torch.fx.Node]):
     nodes = OrderedSet[Any]()
     for input in inputs:
-        if input.target == operator.getitem:
+        if input.target is operator.getitem:
             nodes.add(input.args[0])  # type: ignore[union-attr]
         if len(input.users.keys()) == 0:
             graph.erase_node(input)
@@ -2754,14 +2746,12 @@ def unbind_stack_to_slices(match: Match, unbind_input: torch.fx.Node, dim: int):
 def get_view_shape_list(cat_arg: torch.fx.Node, stack_dim: int) -> list[int]:
     # cat_arg must be the split input
     view_shape_list = []
-    for user in cat_arg.users.keys():
-        if user.target == torch.split:
-            for getitem in user.users.keys():
-                if getitem.target == operator.getitem:
+    for user in cat_arg.users:
+        if user.target is torch.split:
+            for getitem in user.users:
+                if getitem.target is operator.getitem:
                     reshape_user = [
-                        user
-                        for user in getitem.users.keys()
-                        if user.target == torch.reshape
+                        user for user in getitem.users if user.target is torch.reshape
                     ]
                     if len(reshape_user) > 0:
                         view_shape_list = list(
@@ -2931,7 +2921,7 @@ def move_view_after_cat(match: Match, *args, **kwargs):
     split_input, split_section, split_dim = _get_split_args_default(split_node)
     split_users = list(split_node.users.keys())
     getitem_indices = [
-        getitem.args[1] for getitem in split_users if getitem.target == operator.getitem
+        getitem.args[1] for getitem in split_users if getitem.target is operator.getitem
     ]
     if not is_sorted_and_consecutive(getitem_indices):  # type: ignore[arg-type]
         return
@@ -2956,7 +2946,7 @@ def move_view_after_cat(match: Match, *args, **kwargs):
             continue
         # check if the view nodes are all from getitem nodes
         if not all(
-            view_node.args[0].target == operator.getitem for view_node in cat_inputs
+            view_node.args[0].target is operator.getitem for view_node in cat_inputs
         ):
             continue
         view_indices = [view.args[0].args[1] for view in cat_inputs]
@@ -3037,7 +3027,7 @@ def replace_einsum_to_pointwise(match: Match, *args, **kwargs):
             and is_node_meta_valid(input)
             and is_node_meta_valid(weights)
             and any(
-                user.target == "add" or user.target == operator.add for user in users
+                user.target == "add" or user.target is operator.add for user in users
             )
             and match_einsum_strings(equation)
         )
