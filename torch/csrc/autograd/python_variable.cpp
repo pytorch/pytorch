@@ -3006,7 +3006,7 @@ static PyMethodDef extra_methods[] = {
     {nullptr}};
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static PyMethodDef extra_functions[] = {
+static PyMethodDef extra_dtensor_functions[] = {
     {"_DTensor_OpSchema_post_init",
      DTensor_OpSchema_post_init,
      METH_O,
@@ -3753,6 +3753,7 @@ bool THPVariable_initModule(PyObject* module) {
   PyModule_AddObject(module, "TensorBase", (PyObject*)&THPVariableType);
   Py_INCREF(&THPVariableType);
   PyModule_AddObject(module, "_TensorBase", (PyObject*)&THPVariableType);
+#ifdef USE_DISTRIBUTED
   PyModule_AddObject(
       module,
       "__DTensor_fastpath_cache_cleanup",
@@ -3760,13 +3761,14 @@ bool THPVariable_initModule(PyObject* module) {
           []() { cleanup_thread_local_native_sharding_propagator_caches(); })
           .release()
           .ptr());
+  if (!intern_dtensor_strings()) {
+    return false;
+  }
+  PyModule_AddFunctions(module, extra_dtensor_functions);
+#endif
   torch::autograd::initTorchFunctions(module);
   torch::autograd::initTensorImplConversion(module);
   torch::utils::validate_numpy_for_dlpack_deleter_bug();
 
-  if (!intern_dtensor_strings()) {
-    return false;
-  }
-  PyModule_AddFunctions(module, extra_functions);
   return true;
 }
