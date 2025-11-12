@@ -2061,7 +2061,11 @@ class BuiltinVariable(VariableTracker):
         return None
 
     def call_dict(
-        self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
+        self,
+        tx: "InstructionTranslator",
+        /,
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
     ) -> VariableTracker:
         return BuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
 
@@ -2069,6 +2073,7 @@ class BuiltinVariable(VariableTracker):
     def call_custom_dict(
         tx: "InstructionTranslator",
         user_cls: type,
+        /,
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
@@ -2093,6 +2098,7 @@ class BuiltinVariable(VariableTracker):
     def call_custom_dict_fromkeys(
         tx: "InstructionTranslator",
         user_cls: type,
+        /,
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
