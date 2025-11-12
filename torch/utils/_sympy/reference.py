@@ -10,6 +10,7 @@ from torch.utils._sympy.functions import (
     _keep_float,
     BitwiseFn_bitwise_and,
     BitwiseFn_bitwise_or,
+    BitwiseFn_bitwise_xor,
     FloatPow,
     FloatTrueDiv,
     FloorDiv,
@@ -207,6 +208,10 @@ class ReferenceAnalysis:
     def bitwise_or(a, b):
         return BitwiseFn_bitwise_or(a, b)
 
+    @staticmethod
+    def bitwise_xor(a, b):
+        return BitwiseFn_bitwise_xor(a, b)
+
 
 # Unlike ReferenceAnalysis, does NOT sympyify, instead, works with plain
 # Python types and is FX traceable.  Inheritance here is purely for code
@@ -327,6 +332,10 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     def bitwise_or(a, b):
         return a | b
 
+    @staticmethod
+    def bitwise_xor(a, b):
+        return a ^ b
+
 
 # Like PythonReferenceAnalysis, but some export-unfriendly choices of
 # operators to make things faster
@@ -385,6 +394,10 @@ class TensorReferenceAnalysis:
     @staticmethod
     def bitwise_or(a, b):
         return torch.ops.aten.bitwise_or(a, b)
+
+    @staticmethod
+    def bitwise_xor(a, b):
+        return torch.ops.aten.bitwise_xor(a, b)
 
     @staticmethod
     def eq(a, b):
