@@ -796,6 +796,7 @@ def forward(self, x_1):
 
         self._test(f, [torch.randn(1, 10), torch.zeros(1, dtype=torch.long)])
 
+    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_T244632748(self):
         class TestModule(torch.nn.Module):
             def forward(self, x):
