@@ -312,7 +312,7 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
         out_tensor_mask = get_tensor_mask(dummy_out)
         dummy_out_masked = mask_list(out_tensor_mask, dummy_out)
 
-        # Pre-alocate
+        # Pre-allocate
         # outs -> Output matrix
         # idxs -> Index matrix for scatter_
         # out: (num_elems, M, N, ...)

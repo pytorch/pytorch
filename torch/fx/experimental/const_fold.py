@@ -130,6 +130,10 @@ def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
             new_node = gm.graph.node_copy(inline_node, replacement_fn)
         replacement_mapping[inline_node] = new_node
 
+    # Explicitly remove the module that was just inlined,
+    # this module may contain impure ops so cannot be dead code eliminated,
+    # this module is unneeded as it's just inlined back to main graph.
+    gm.graph.erase_node(call_mod_node_to_replace)
     gm.graph.eliminate_dead_code()
 
 
@@ -173,6 +177,26 @@ def split_const_subgraphs(
     else:
         mod_traced = module
 
+    def _subgraph_has_impure_ops(module: torch.fx.GraphModule) -> bool:
+        """
+        Return True if a GraphModule type subgraph contains any impure op, else False.
+        """
+        assert isinstance(module, torch.fx.GraphModule), (
+            "caller should only pass GraphModule to subgraph_has_impure_ops check"
+        )
+        for node in module.graph.nodes:
+            if node.op == "call_function" and node.is_impure():
+                return True
+            if (
+                # pyrefly: ignore [invalid-argument]
+                node.op == "call_module"
+                # pyrefly: ignore [not-callable]
+                and (submodule := module.get_submodule(node.target))
+                and isinstance(submodule, torch.fx.GraphModule)
+            ):
+                return _subgraph_has_impure_ops(submodule)
+        return False
+
     # Build up a list of const_nodes, defined as nodes that are themselves
     # get_attrs, or have all get_attr or other constant node inputs.
     const_nodes: set[torch.fx.Node] = set()
@@ -200,6 +224,17 @@ def split_const_subgraphs(
 
         # Skip folding nodes that have symbolic fill_value
         if isinstance(node.kwargs.get("fill_value", None), sympy.Expr):
+            continue
+
+        # Skip folding submodules that have impure ops
+        if (
+            # pyrefly: ignore [invalid-argument]
+            node.op == "call_module"
+            # pyrefly: ignore [not-callable]
+            and (target_mod := mod_traced.get_submodule(node.target))
+            and isinstance(target_mod, torch.fx.GraphModule)
+            and _subgraph_has_impure_ops(target_mod)
+        ):
             continue
 
         # Must be a constant foldable node at this point.

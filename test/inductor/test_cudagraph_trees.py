@@ -383,7 +383,7 @@ if HAS_CUDA_AND_TRITON:
             foo = get_compile_fn(backend)(foo)
 
             with capture_stderr() as captured_output:
-                for i in range(3):
+                for _ in range(3):
                     torch.compiler.cudagraph_mark_step_begin()
                     inp = torch.rand([4], device="cuda")
 
@@ -415,7 +415,7 @@ if HAS_CUDA_AND_TRITON:
             foo = get_compile_fn(backend)(foo)
 
             with capture_stderr() as captured_output:
-                for i in range(3):
+                for _ in range(3):
                     torch.compiler.cudagraph_mark_step_begin()
                     inp = torch.rand([4], device="cuda")
 
@@ -493,7 +493,7 @@ if HAS_CUDA_AND_TRITON:
                 # Should warn for current_node=None
                 mut(inp())
 
-                for i in range(3):
+                for _ in range(3):
                     torch.compiler.cudagraph_mark_step_begin()
                     tmp = foo(inp())
                     mut(tmp)  # should not warn
@@ -2180,7 +2180,7 @@ if HAS_CUDA_AND_TRITON:
 
             model = torch.nn.Linear(10, 10, bias=False, device="cuda")
             x = torch.randn(10, 10, device="cuda")
-            for i in range(5):
+            for _ in range(5):
                 out = model(x)
                 bwd(out.sum())
                 model.weight.grad = None
@@ -4101,6 +4101,53 @@ if HAS_CUDA_AND_TRITON:
             compiled_out = compiled_foo(x)
             self.assertEqual(eager_out, compiled_out)
 
+        # Use autotune_at_compile_time=True to test standalone_compile
+        @parametrize("autotune_at_compile_time", [True, False])
+        @config.patch("graph_partition", True)
+        def test_graph_partition_kernel_reuse(self, autotune_at_compile_time):
+            def foo(x):
+                # partition 1
+                x1 = x @ x
+                y1 = x1 + 1
+                z_cpu = y1.cpu() + 1
+                # partition 2
+                # partition 2 should reuse the fused triton kernel generated
+                # in partition 1
+                x2 = z_cpu.to("cuda") @ z_cpu.to("cuda")
+                y2 = x2 + 1
+                return y1, y2
+
+            with config.patch(
+                "triton.autotune_at_compile_time", autotune_at_compile_time
+            ):
+                compiled_foo = torch.compile(foo)
+                x = torch.randn((20, 20), device="cuda")
+                eager_out = foo(x)
+                compiled_out, code = run_and_get_code(compiled_foo, x)
+                self.assertEqual(eager_out, compiled_out)
+
+                if autotune_at_compile_time:
+                    # auto-tuning block should only appear once. We generate auto-tuning code
+                    # for all the kernels no matter if they are defined in the main graph or
+                    # subgraph, to avoid the overhead of executing multiple auto-tuning code blocks.
+                    FileCheck().check_count(
+                        "Compile-time auto-tuning block", 1, exactly=True
+                    ).run(code[0])
+                    # triton_poi_fused_add_ should appear twice, first in the auto-tuning block,
+                    # and then in the main code block
+                    FileCheck().check_count(
+                        "def triton_poi_fused_add_", 2, exactly=True
+                    ).run(code[0])
+                    # cpu kernel definition should only appence once, not in the auto-tuning block
+                    FileCheck().check_count(
+                        "cpp_fused__to_copy_add_1 = ", 1, exactly=True
+                    ).run(code[0])
+                else:
+                    # triton_poi_fused_add_ should appear once, because of kernel reuse
+                    FileCheck().check_count(
+                        "def triton_poi_fused_add_", 1, exactly=True
+                    ).run(code[0])
+
         def test_meta_tensor(self):
             def foobar(x, y):
                 return x * 2, y * 3
@@ -4505,7 +4552,7 @@ if HAS_CUDA_AND_TRITON:
             ]
             for i, compile_fn in enumerate(compile_fns):
                 torch.manual_seed(0)
-                for index in range(3):
+                for _ in range(3):
                     x = torch.randn(4, 4, device=device, requires_grad=True)
                     y = torch.randn(4, 4, device=device, requires_grad=True)
 
