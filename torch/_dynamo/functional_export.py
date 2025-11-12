@@ -637,7 +637,7 @@ def dynamo_graph_capture_for_export(
             pyt.in_shuffle_graph,
             pyt.out_shuffle_graph,
             tree_leaf_names,
-            pyt.root,
+            graph_module if isinstance(pyt.root, torch.nn.Module) else pyt.root,
         )  # type: ignore[attr-defined]
         normalize_graph_module(graph_module)
         if pyt.root is not None:
@@ -648,6 +648,10 @@ def dynamo_graph_capture_for_export(
             graph_module._non_persistent_buffers_set = (
                 pyt.root._non_persistent_buffers_set.copy()
             )
+            annotations = torch.nn.Module.__dict__.get("__annotations__", None)
+            for name, value in pyt.root.__dict__.items():
+                if annotations and name not in annotations:
+                    graph_module.__dict__[name] = value
         graph_module._in_spec = pyt.in_spec
         graph_module._out_spec = pyt.out_spec
         assert not hasattr(graph_module, "_in_shuffle_graph")
