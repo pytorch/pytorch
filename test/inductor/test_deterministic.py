@@ -119,10 +119,11 @@ class DeterministicTest(TestCase):
         the current working directory.
         """
 
-        if (model_name, precision) in (
-            ("BertForMaskedLM", "float32"),
-            ("BertForMaskedLM", "float16"),
-            ("DistillGPT2", "float16"),
+        if (model_name, training_or_inference, precision) in (
+            ("BertForMaskedLM", "training", "float32"),
+            ("BertForMaskedLM", "training", "float16"),
+            ("BertForMaskedLM", "inference", "amp"),
+            ("DistillGPT2", "training", "float16"),
         ):
             self.skipTest("The first accuracy run fail")
 
