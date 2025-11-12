@@ -15,6 +15,8 @@ using namespace c10::CachingDeviceAllocator;
 // newly allocated memory with 512-byte alignment.
 constexpr size_t kDeviceAlignment = 512;
 
+class XPUAllocator;
+
 namespace {
 using stream_set = ska::flat_hash_set<xpu::XPUStream>;
 
@@ -806,17 +808,8 @@ class DeviceCachingAllocator {
      * guarantee that all kernels can access to the blocks have finished.
      */
     TORCH_INTERNAL_ASSERT(!block->expandable_segment);
+    sycl::free(block->ptr, xpu::get_device_context());
     auto* pool = block->pool;
-    if (pool->owner_PrivatePool && pool->owner_PrivatePool->allocator()) {
-      pool->owner_PrivatePool->allocator()->raw_delete(block->ptr);
-    } else {
-      sycl::free(block->ptr, xpu::get_device_context());
-    }
-
-    if (pool->owner_PrivatePool) {
-      TORCH_INTERNAL_ASSERT(pool->owner_PrivatePool->allocation_count > 0);
-      pool->owner_PrivatePool->allocation_count--;
-    }
     pool->blocks.erase(block);
 
     StatTypes stat_types = get_stat_types_for_pool(*pool);
@@ -876,6 +869,13 @@ class DeviceCachingAllocator {
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       stats.reserved_bytes[stat_type].decrease(unmapped.size);
     });
+
+    if (block->pool->owner_PrivatePool) {
+      // The Freed block belonged to a XPU graph's PrivatePool.
+      TORCH_INTERNAL_ASSERT(
+          block->pool->owner_PrivatePool->allocation_count > 0);
+      block->pool->owner_PrivatePool->allocation_count--;
+    }
   }
 
   void release_blocks(BlockPool& pool) {
