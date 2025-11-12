@@ -345,8 +345,7 @@ Tensor _convolution_out(
     weight = view4d(weight_r);
   }
   // get computation format for Conv/TransposedConv
-  bool is_channels_last_suggested =
-      use_channels_last_for_conv(input, weight);
+  bool is_channels_last_suggested = use_channels_last_for_conv(input, weight);
 
   auto k = weight.ndimension();
   if (k == input.ndimension() + 1) {
