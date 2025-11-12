@@ -194,6 +194,7 @@ class TestHopPrintInDynamo(TestCase):
 
         x = torch.ones(3, 3)
         counters.clear()
+        # Eager backend for dynamo tracing testing
         opt_f = torch.compile(backend="eager")(f)
         self.assertEqual(len(counters["graph_break"]), 0)
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
@@ -231,13 +232,27 @@ class TestHopPrintInDynamo(TestCase):
 
     def test_print_full_graph(self):
         def fn(a, b):
-            torch._higher_order_ops.print("print hop")
+            torch._higher_order_ops.print("print hop {x} {y}", x=a, y=b)
             return torch.sin(a, out=b)
 
         inp = [torch.randn(3, 3), torch.ones(3, 3)]
         ref_out = fn(*inp)
+        # Validate the hop print can reduce the graph break in dynamo tracing
         out = torch.compile(fn, fullgraph=True)(*inp)
         self.assertEqual(ref_out, out)
+
+        # aot_eager backend for dynamo tracing testing with hop functionalization impl
+        aote_f = torch.compile(backend="aot_eager")(fn)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            opt_out = aote_f(*inp)
+            printed_output = mock_stdout.getvalue().strip()
+
+        self.assertTrue(same(ref_out, opt_out))
+        self.assertEqual(
+            printed_output,
+            f"print hop {inp[0]} {inp[1]}",
+        )
+
 
 if __name__ == "__main__":
     run_tests()
