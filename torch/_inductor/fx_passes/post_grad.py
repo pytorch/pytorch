@@ -1574,12 +1574,12 @@ def is_valid_addmm_activation_fusion(match: Match) -> bool:
     pass_dict=pass_patterns[1],
     extra_check=is_valid_addmm_activation_fusion,
 )
-def relu_addmm_fusion(match: Match, mat1, mat2, *, inp, alpha, beta):
-    def replacement(inp, mat1, mat2, alpha, beta):
-        return aten._addmm_activation(inp, mat1, mat2, alpha=alpha, beta=beta)
+def relu_addmm_fusion(match: Match, mat1, mat2, *, inp, beta, alpha):
+    def replacement(inp, mat1, mat2, beta, alpha):
+        return aten._addmm_activation(inp, mat1, mat2, beta=beta, alpha=alpha)
 
     # pyrefly: ignore [bad-argument-type]
-    match.replace_by_example(replacement, [inp, mat1, mat2, alpha, beta])
+    match.replace_by_example(replacement, [inp, mat1, mat2, beta, alpha])
 
 
 @register_graph_pattern(
@@ -1592,12 +1592,12 @@ def relu_addmm_fusion(match: Match, mat1, mat2, *, inp, alpha, beta):
     pass_dict=pass_patterns[1],
     extra_check=is_valid_addmm_activation_fusion,
 )
-def gelu_addmm_fusion(match: Match, mat1, mat2, *, inp, alpha, beta, approximate):
-    def replacement(inp, mat1, mat2, alpha, beta):
-        return aten._addmm_activation(inp, mat1, mat2, alpha=alpha, beta=beta, use_gelu=True)
+def gelu_addmm_fusion(match: Match, mat1, mat2, *, inp, beta, alpha, approximate):
+    def replacement(inp, mat1, mat2, beta, alpha, approximate):
+        return aten._addmm_activation(inp, mat1, mat2, beta=beta, alpha=alpha, use_gelu=True)
 
     # pyrefly: ignore [bad-argument-type]
-    match.replace_by_example(replacement, [inp, mat1, mat2, alpha, beta])
+    match.replace_by_example(replacement, [inp, mat1, mat2, alpha, beta, approximate])
 
 
 def is_valid_addmm_fusion(match):
