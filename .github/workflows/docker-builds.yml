@@ -49,52 +49,47 @@ jobs:
       matrix:
         runner: [linux.12xlarge]
         docker-image-name: [
-          #          pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11,
-          #          pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11,
-          #          pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm,
-          #          pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks,
-          #          pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9,
-          #          pytorch-linux-jammy-cuda12.4-cudnn9-py3-gcc11,
-          #          pytorch-linux-jammy-py3.10-clang12,
-          #          pytorch-linux-jammy-py3.11-clang12,
-          #          pytorch-linux-jammy-py3.12-clang12,
-          #          pytorch-linux-jammy-py3.13-clang12,
-          #          pytorch-linux-jammy-py3.14-clang12,
+          pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11,
+          pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11,
+          pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm,
+          pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks,
+          pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9,
+          pytorch-linux-jammy-cuda12.4-cudnn9-py3-gcc11,
+          pytorch-linux-jammy-py3.10-clang12,
+          pytorch-linux-jammy-py3.11-clang12,
+          pytorch-linux-jammy-py3.12-clang12,
+          pytorch-linux-jammy-py3.13-clang12,
+          pytorch-linux-jammy-py3.14-clang12,
           pytorch-linux-jammy-rocm-n-py3,
           pytorch-linux-noble-rocm-n-py3,
           pytorch-linux-jammy-rocm-n-py3-benchmarks,
-          #          pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang12,
-          #          pytorch-linux-jammy-py3.10-gcc11,
-          #          pytorch-linux-jammy-py3-gcc11-inductor-benchmarks,
-          #          pytorch-linux-jammy-py3.12-halide,
-          #          pytorch-linux-jammy-cuda12.8-py3.12-pallas,
-          #          pytorch-linux-jammy-xpu-n-1-py3,
-          #          pytorch-linux-noble-xpu-n-py3,
-          #          pytorch-linux-noble-xpu-n-py3-inductor-benchmarks,
-          #          pytorch-linux-jammy-py3-clang18-asan,
-          #          pytorch-linux-jammy-py3-clang12-onnx,
-          #          pytorch-linux-jammy-linter,
-          #          pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-linter,
-          #          pytorch-linux-jammy-py3-clang12-executorch,
-          #          pytorch-linux-jammy-py3.12-triton-cpu,
-          #          pytorch-linux-noble-riscv64-py3.12-gcc14
+          pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang12,
+          pytorch-linux-jammy-py3.10-gcc11,
+          pytorch-linux-jammy-py3-gcc11-inductor-benchmarks,
+          pytorch-linux-jammy-py3.12-halide,
+          pytorch-linux-jammy-cuda12.8-py3.12-pallas,
+          pytorch-linux-jammy-xpu-n-1-py3,
+          pytorch-linux-noble-xpu-n-py3,
+          pytorch-linux-noble-xpu-n-py3-inductor-benchmarks,
+          pytorch-linux-jammy-py3-clang18-asan,
+          pytorch-linux-jammy-py3-clang12-onnx,
+          pytorch-linux-jammy-linter,
+          pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-linter,
+          pytorch-linux-jammy-py3-clang12-executorch,
+          pytorch-linux-jammy-py3.12-triton-cpu,
+          pytorch-linux-noble-riscv64-py3.12-gcc14
         ]
-        #        include:
-        #          - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13
-        #            runner: linux.arm64.m7g.4xlarge
-        #          - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-clang21
-        #            runner: linux.arm64.m7g.4xlarge
-        #          - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks
-        #            runner: linux.arm64.m7g.4xlarge
-        #            timeout-minutes: 600
+        include:
+          - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13
+            runner: linux.arm64.m7g.4xlarge
+          - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-clang21
+            runner: linux.arm64.m7g.4xlarge
+          - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks
+            runner: linux.arm64.m7g.4xlarge
+            timeout-minutes: 600
     # Docker uploads fail from LF runners, see https://github.com/pytorch/pytorch/pull/137358
     # runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}"
     runs-on: "${{ matrix.runner }}"
-    outputs:
-      docker-pytorch-linux-jammy-rocm-n-py3: ${{ steps.generate_output.outputs.pytorch-linux-jammy-rocm-n-py3 }}
-      docker-pytorch-linux-noble-rocm-n-py3: ${{ steps.generate_output.outputs.pytorch-linux-noble-rocm-n-py3 }}
-      docker-pytorch-linux-jammy-rocm-n-py3-benchmarks: ${{ steps.generate_output.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}
-
     steps:
       - name: Clean workspace
         shell: bash
@@ -113,17 +108,16 @@ jobs:
 
       - name: Build docker image
         id: build-docker-image
-        #uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
-        uses: jithunnair-amd/test-infra/.github/actions/calculate-docker-image@disable_image_build
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-image-name: ci-image:${{ matrix.docker-image-name }}
           always-rebuild: true
           push: true
 
-      #- name: Pull docker image
-      #  uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-      #  with:
-      #    docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
+      - name: Pull docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
 
       - name: Generate output
         if: contains(matrix.docker-image-name, 'rocm')
