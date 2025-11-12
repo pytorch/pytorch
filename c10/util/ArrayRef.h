@@ -49,16 +49,14 @@ namespace c10 {
 /// and it is never incorrect for ArrayRef to call HeaderOnlyArrayRef methods.
 /// However, you should prefer to use ArrayRef when possible, because its use
 /// of TORCH_CHECK will lead to better user-facing error messages.
-///
-/// NOTE: ArrayRef cannot be derived from. Normally, we would use
-/// `final` specifier to force this constraint at compile time.
-/// However, Intel compiler does not recognize ArrayRef as a class
-/// template (which is required in the definition of
-/// at::TensorAccessor, for instance) when `final` specifier is
-/// used. So, we cannot define ArrayRef as final because of the Intel
-/// compiler issue.
 template <typename T>
-class ArrayRef final : public HeaderOnlyArrayRef<T> {
+// ArrayRef cannot be derived from. Normally, we would use `final`
+// specifier to force this constraint at compile time.  However, Intel
+// compiler does not recognize ArrayRef as a class template (which is
+// required in the definition of at::TensorAccessor, for instance)
+// when `final` specifier is used. So, we cannot define ArrayRef as
+// final because of the Intel compiler issue.
+class ArrayRef : public HeaderOnlyArrayRef<T> {
  public:
   /// @name Constructors, all inherited from HeaderOnlyArrayRef except for
   /// SmallVector. As inherited constructors won't work with class template
