@@ -684,13 +684,14 @@ class TestNumPyInterop(TestCase):
             f(xs)
 
     def test_copy_mode(self):
-        @torch.compile(backend="eager", fullgraph=True)
         def f(x):
             return np.array(x, copy=np._CopyMode.IF_NEEDED)
 
+        opt_f = torch.compile(backend="eager", fullgraph=True)(f)
         x = np.array([1, 2, 3])
         # Should run without throwing an exception
-        f(x)
+        y = opt_f(x)
+        self.assertEqual(y, f(x))
 
 
 instantiate_device_type_tests(TestNumPyInterop, globals())
