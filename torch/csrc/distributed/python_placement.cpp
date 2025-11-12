@@ -32,6 +32,7 @@ void initPlacementBindings(PyObject* module) {
       .def("is_shard", &Placement::is_shard, py::arg("dim") = py::none());
   py::class_<Shard, Placement>(distributed_module, "Shard")
       .def(py::init<int64_t>(), py::arg("dim"))
+      .def(py::init<const Shard&>(), py::arg("other"))
       .def_readonly("dim", &Shard::dim)
       .def("is_shard", &Shard::is_shard, py::arg("dim") = py::none())
       .def(
@@ -51,6 +52,7 @@ void initPlacementBindings(PyObject* module) {
           py::arg("dim"),
           py::kw_only(),
           py::arg("split_factor"))
+      .def(py::init<const StridedShard&>(), py::arg("other"))
       .def_readonly("split_factor", &StridedShard::split_factor)
       .def("is_shard", &StridedShard::is_shard, py::arg("dim") = py::none())
       .def(

@@ -41,7 +41,13 @@ class Shard : public Placement {
   std::int64_t dim;
   explicit Shard(std::int64_t dim_) : dim(dim_) {}
 
+  // Copy constructor
+  Shard(const Shard& other) : Placement(other), dim(other.dim) {}
+
   bool is_shard(std::optional<std::int64_t> dim_) const override {
+    if (typeid(*this) != typeid(Shard)) {
+      return false;
+    }
     return !dim_.has_value() || *dim_ == dim;
   }
 
@@ -68,7 +74,8 @@ class StridedShard : public Shard {
   std::int64_t split_factor;
   explicit StridedShard(std::int64_t dim, std::int64_t split_factor_)
       : Shard(dim), split_factor(split_factor_) {}
-
+  StridedShard(const StridedShard& other)
+      : StridedShard(other.dim, other.split_factor) {}
   // Override virtual equals to handle polymorphic comparison correctly
   // TODO(zpcore): once _StridedShard is not a subclass of Shard, we can clean
   // those up
