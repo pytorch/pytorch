@@ -30,7 +30,7 @@ def _check_balance(device_ids: Sequence[Union[int, torch.device]]) -> None:
     device_ids = [_get_device_index(x, True) for x in device_ids]
     dev_props = _get_devices_properties(device_ids)
 
-    def warn_imbalance(get_prop):
+    def warn_imbalance(get_prop) -> bool:
         values = [get_prop(props) for props in dev_props]
         min_pos, min_val = min(enumerate(values), key=operator.itemgetter(1))
         max_pos, max_val = max(enumerate(values), key=operator.itemgetter(1))

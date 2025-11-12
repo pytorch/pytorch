@@ -955,7 +955,7 @@ class MetalKernel(SIMDKernel):
         """
         wrapper = V.graph.wrapper_code
         # Make sure sizevars has been computed
-        for v in self.args.sizevars.keys():
+        for v in self.args.sizevars:
             wrapper.ensure_size_computed(v)
 
         _, call_args, _, arg_types = self.args.python_argdefs()
@@ -965,7 +965,7 @@ class MetalKernel(SIMDKernel):
 
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         args = [arg for arg in args if arg not in self.removed_buffers]
-        args += [str(v) for v in self.args.sizevars.keys()]
+        args += [str(v) for v in self.args.sizevars]
         arg_types = [arg_name_to_type[arg] for arg in args]
 
         # Add any dynamic ints as inputs
