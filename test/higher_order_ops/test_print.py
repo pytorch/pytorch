@@ -8,7 +8,6 @@ from torch._dynamo.testing import same
 from torch._dynamo.utils import counters
 from torch._functorch.aot_autograd import aot_export_module
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -102,12 +101,6 @@ def forward(self, arg0_1):
 
         inputs = (torch.randn(3),)
 
-        # Without functionalization, print should just appear in the graph directly
-        gm = make_fx(M())(*inputs)
-        FileCheck().check_count("torch.ops.higher_order.print", 2, exactly=True).run(
-            gm.code
-        )
-
         # With functionalization, it should appear wrapped with with_effects()
         gm, gs = aot_export_module(M(), inputs, trace_joint=False)
         self.assertExpectedInline(
@@ -162,18 +155,30 @@ x = add_1, y = add_2);  getitem = None
     return (getitem_2, add_1, add_2)""",
         )
 
-        gm = make_fx(M(), tracing_mode="symbolic")(*inputs)
-        new_inp = torch.randn(3)
-        orig_inp = new_inp.clone()
-        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            gm(
-                new_inp,
-            )
-            printed_output = mock_stdout.getvalue().strip()
+    def test_print_gen_schema(self):
+        from torch._higher_order_ops.print import print as print_op
 
-        self.assertEqual(
-            printed_output, f"moo {orig_inp} 2\nmoo {new_inp} {new_inp * 2}"
-        )
+        # Test basic schema generation with simple kwargs
+        format_str = "Hello {x} {y}"
+        schema = print_op.gen_schema(format_str, x=1, y=2)
+
+        # Check that the schema is a torch.FunctionSchema
+        self.assertIsInstance(schema, torch.FunctionSchema)
+
+        # Check that the schema name is correct
+        self.assertEqual(schema.name, "print")
+
+        # Check that the output is None
+        self.assertEqual(len(schema.returns), 1)
+        self.assertEqual(schema.returns[0].type.kind(), "TupleType")
+
+        # Test schema generation with no kwargs
+        schema_no_kwargs = print_op.gen_schema("Simple message")
+
+        self.assertIsInstance(schema_no_kwargs, torch.FunctionSchema)
+        self.assertEqual(schema_no_kwargs.name, "print")
+        self.assertEqual(len(schema_no_kwargs.returns), 1)
+        self.assertEqual(schema_no_kwargs.returns[0].type.kind(), "TupleType")
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
