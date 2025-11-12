@@ -233,9 +233,9 @@ class TestDropoutAlignRandomEager(InductorTestCase):
         eager.train()
         compiled.train()
 
-        num_iters = 3
+        num_iters = 10
         for i in range(num_iters):
-            seed = BASE_SEED
+            seed = BASE_SEED + i
             x = torch.randn(BATCH, SEQ_LEN, HIDDEN_DIM, device=device)
 
             _set_seed(seed)

@@ -2432,14 +2432,13 @@ def inductor_lookup_seed(seeds, index):
     )
 
 
-def get_seed_and_threads_per_round(x_device_index: int, nelem: int):
+def get_threads_per_round(x_device_index: int, nelem: int):
     prop = torch.cuda.get_device_properties(x_device_index)
     threads_per_round = (
         prop.multi_processor_count * prop.max_threads_per_multi_processor
     )
     gen = torch.cuda.default_generators[x_device_index]
-    seed = int(gen.initial_seed())
-    return seed, threads_per_round
+    return threads_per_round
 
 
 @register_lowering(inductor_prims.random, type_promotion_kind=None)
@@ -2463,7 +2462,7 @@ def inductor_random(
 
     if config.align_random_eager:
         nelem = math.prod(size)
-        seed_val, threads_per_round = get_seed_and_threads_per_round(
+        threads_per_round = get_threads_per_round(
             device.index, nelem
         )
 
@@ -2477,9 +2476,11 @@ def inductor_random(
         vec = _vec_from_dtype(align_dtype)
 
         def inner_fn(index):
+            rng_seed = seed_loader([0])
+            base_offset = seed_loader([1])
             return ops.rand_eager(
-                seed_val,
-                seed_loader([]),
+                rng_seed,
+                base_offset,
                 threads_per_round,
                 ops.index_expr(random_pos(index), torch.int32),
                 vec=int(vec),

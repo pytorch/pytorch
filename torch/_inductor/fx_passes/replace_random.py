@@ -48,26 +48,29 @@ def _shape_to_offset(size, device: torch.device) -> int:
     return used_offset
 
 
-def _reserve_offset(device: torch.device, used_offset: int) -> int:
+def _reserve_state(device: torch.device, used_offset: int) -> tuple[int, int]:
     dev_index = device.index if isinstance(device, torch.device) else int(device)
     gen = torch.cuda.default_generators[dev_index]
+    seed = int(gen.initial_seed())
     old_off = int(gen.get_offset())
     gen.set_offset(old_off + used_offset)
-    return old_off // 4
+    base = old_off // 4
+    return seed, base
 
 
 @custom_op("custom_op::rand_eager_offset", mutates_args={})
 def rand_eager_offset(offset: int, device: torch.device) -> torch.Tensor:
-    base = _reserve_offset(device, offset)
-    out = torch.empty(1, dtype=torch.int64, device=device)
-    out.fill_(int(base))
+    seed, base = _reserve_state(device, int(offset))
+    out = torch.empty(2, dtype=torch.int64, device=device)  # [seed, base]
+    out[0] = seed
+    out[1] = base
     return out
 
 
 @custom_op("custom_op::rand_eager_offsets", mutates_args={})
 def rand_eager_offsets(offsets: list[int], device: torch.device) -> torch.Tensor:
-    bases = [_reserve_offset(device, off) for off in offsets]
-    cpu = torch.tensor(bases, dtype=torch.int64).pin_memory()
+    states = [ _reserve_state(device, int(off)) for off in offsets ]  # list[(seed, base)]
+    cpu = torch.tensor(states, dtype=torch.int64).pin_memory()        # shape [N, 2]
     out = torch.empty_like(cpu, device=device)
     out.copy_(cpu, non_blocking=True)
     return out
@@ -75,12 +78,12 @@ def rand_eager_offsets(offsets: list[int], device: torch.device) -> torch.Tensor
 
 @rand_eager_offset.register_fake
 def _(offset: int, device: torch.device):
-    return torch.empty((1,), dtype=torch.int64, device=device)
+    return torch.empty((2,), dtype=torch.int64, device=device)
 
 
 @rand_eager_offsets.register_fake
 def _(offsets: list[int], device: torch.device):
-    return torch.empty((len(offsets),), dtype=torch.int64, device=device)
+    return torch.empty((len(offsets), 2), dtype=torch.int64, device=device)
 
 
 def replace_random_passes(gm: torch.fx.GraphModule):
@@ -100,22 +103,19 @@ def replace_random_passes(gm: torch.fx.GraphModule):
 
 def fuse_offset_creation_pass(graph: torch.fx.Graph):
     """
-    Horizontally fuse all the seed generation on each device
-
-        a = custom_op.rand_eager_offset(offset, dev)
-        b = custom_op.rand_eager_offset(offset, dev)
-
+    Horizontally fuse all the RNG state creation on each device
+        s0 = custom_op.rand_eager_offset(offset0, dev)   # shape [2]
+        s1 = custom_op.rand_eager_offset(offset1, dev)   # shape [2]
     Becomes:
-        offsets = custom_op.rand_eager_offsets([offset1, offset2...], dev)
-        a = inductor_lookup_seed(offsets, 0)
-        b = inductor_lookup_seed(offsets, 1)
-
-    We do this because seed creation is entirely launch overhead bound.
+        states = custom_op.rand_eager_offsets([offset0, offset1, ...], dev)  # shape [N, 2]
+        s0 = states[0]
+        s1 = states[1]
+    We do this because RNG state creation is entirely launch-overhead bound.
     """
     device_offsets = collections.defaultdict(list)
     for node in graph.nodes:
         if CallFunctionVarArgs(torch.ops.custom_op.rand_eager_offset).match(node):
-            device_offsets[node.args[1]].append(node)
+            device_offsets[node.args[1]].append(node)  # args: (offset, device)
 
     if not device_offsets:
         return 0
@@ -128,7 +128,7 @@ def fuse_offset_creation_pass(graph: torch.fx.Graph):
             )
             with V.fake_mode:
                 combined.meta["val"] = torch.empty(
-                    [len(offsets)], device=device, dtype=torch.int64
+                    [len(offsets), 2], device=device, dtype=torch.int64
                 )
                 combined.meta["tensor_meta"] = _extract_tensor_metadata(
                     combined.meta["val"]
@@ -136,11 +136,12 @@ def fuse_offset_creation_pass(graph: torch.fx.Graph):
 
         for idx, offset in enumerate(offsets):
             with graph.inserting_before(offset):
-                new_offset = graph.call_function(
-                    inductor_prims.lookup_seed, (combined, idx)
+                new_state = graph.call_function(
+                    torch.ops.aten.select.int,  # dim=0, index=idx
+                    (combined, 0, idx),
                 )
-            offset.replace_all_uses_with(new_offset)
-            new_offset.meta.update(offset.meta)
+            offset.replace_all_uses_with(new_state)
+            new_state.meta.update(offset.meta)
             graph.erase_node(offset)
 
     return len(device_offsets)
