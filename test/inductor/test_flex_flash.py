@@ -269,6 +269,21 @@ class TestFlexFlash(InductorTestCase):
         flash_vs_triton(q, k, v, score_mod=score_mod)
 
     @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_with_score_view_buffer(self, device, dtype):
+        """Score modifier should load from a non-contiguous view."""
+        num_heads = 4
+        q, k, v = create_test_tensors(num_heads=num_heads, dtype=dtype, device=device)
+
+        base_scales = torch.rand(num_heads, 2, device=device, dtype=dtype) + 0.5
+        scales_view = base_scales[:, 0]
+        assert not scales_view.is_contiguous()
+
+        def score_view_mod(score, b, h, q_idx, kv_idx):
+            return score + scales_view[h]
+
+        flash_vs_triton(q, k, v, score_mod=score_view_mod)
+
+    @dtypes(torch.float16, torch.bfloat16)
     def test_force_flash_error_with_requires_grad(self, device, dtype):
         """Test that force_flash=True raises error when tensor requires gradients."""
         q, k, v = create_test_tensors(dtype=dtype, device=device)
@@ -327,6 +342,64 @@ class TestFlexFlash(InductorTestCase):
             return (q_idx >= kv_idx) | (bias_value > 0)
 
         block_mask = create_block_mask(custom_mask, 2, 4, 512, 512, device=device)
+        flash_vs_triton(q, k, v, block_mask=block_mask)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_with_doc_mask(self, device, dtype):
+        """Test flash attention with a document-aware mask_mod."""
+        # Use shorter sequences to make the document layout explicit.
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=2, num_heads=4, seq_len=seq_len, dtype=dtype, device=device
+        )
+        lengths_per_batch = (
+            (16, 31, 25, 56),  # batch 0
+            (40, 9, 23, 56),  # batch 1 uses a different document arrangement
+        )
+        document_ids = []
+        for lengths in lengths_per_batch:
+            assert sum(lengths) == seq_len
+            doc_tokens = []
+            for doc_id, length in enumerate(lengths):
+                doc_tokens.extend([doc_id] * length)
+            document_ids.append(doc_tokens)
+        document_ids = torch.tensor(document_ids, device=device, dtype=torch.long)
+
+        def document_mask(b, _h, q_idx, kv_idx):
+            doc_id_q = document_ids[b, q_idx // 2]
+            doc_id_kv = document_ids[b, kv_idx]
+            return doc_id_q == doc_id_kv
+
+        block_mask = create_block_mask(
+            document_mask, 2, 1, seq_len, seq_len, device=device
+        )
+        flash_vs_triton(q, k, v, block_mask=block_mask)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_mask_mod_with_view_buffer(self, device, dtype):
+        """Mask modifier should support buffers that are non-contiguous views."""
+        batch_size, num_heads, seq_len = 2, 4, 512
+        q, k, v = create_test_tensors(
+            batch_size=batch_size, num_heads=num_heads, dtype=dtype, device=device
+        )
+
+        base_bias = torch.randn(num_heads, 3, device=device, dtype=dtype)
+        mask_bias_view = base_bias[:, 1]
+        assert not mask_bias_view.is_contiguous()
+
+        def mask_with_view_buffer(b, h, q_idx, kv_idx):
+            bias_value = mask_bias_view[h]
+            double_bias = bias_value * 2
+            return (q_idx >= kv_idx) | (double_bias > 0)
+
+        block_mask = create_block_mask(
+            mask_with_view_buffer,
+            batch_size,
+            num_heads,
+            seq_len,
+            seq_len,
+            device=device,
+        )
         flash_vs_triton(q, k, v, block_mask=block_mask)
 
     @dtypes(torch.float16, torch.bfloat16)
