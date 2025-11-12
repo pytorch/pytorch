@@ -327,7 +327,6 @@ inline torch::stable::Tensor empty(
 }
 
 // We expect this to be the stable version of the flatten.using_ints op.
-// This flattens the tensor from start_dim to end_dim into a single dimension.
 inline torch::stable::Tensor flatten(
     const torch::stable::Tensor& self,
     int64_t start_dim = 0,
@@ -343,7 +342,6 @@ inline torch::stable::Tensor flatten(
 }
 
 // We expect this to be the stable version of the reshape op.
-// This returns a tensor with the same data but different shape.
 inline torch::stable::Tensor reshape(
     const torch::stable::Tensor& self,
     torch::headeronly::IntHeaderOnlyArrayRef shape) {
@@ -356,8 +354,6 @@ inline torch::stable::Tensor reshape(
 }
 
 // We expect this to be the stable version of the view op.
-// This returns a new tensor with the same data as the self tensor but of a
-// different shape.
 inline torch::stable::Tensor view(
     const torch::stable::Tensor& self,
     torch::headeronly::IntHeaderOnlyArrayRef size) {
