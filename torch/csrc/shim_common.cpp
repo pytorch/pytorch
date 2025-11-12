@@ -1,3 +1,4 @@
+#include <c10/core/Device.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
@@ -7,6 +8,7 @@
 #include <torch/csrc/stable/library.h>
 #include <torch/library.h>
 
+#include <ATen/Parallel.h>
 #include <torch/csrc/shim_conversion_utils.h>
 #include <torch/csrc/stable/c/shim.h>
 
@@ -90,8 +92,14 @@ static StableIValue from_ivalue(
           ivalue.toScalarType(), extension_build_version);
     }
     case c10::TypeKind::DeviceObjType: {
-      return torch::stable::detail::_from(
-          ivalue.toDevice(), extension_build_version);
+      // Pack device type and index into StableIValue in platform-independent
+      // format Lower 32 bits = device index, upper 32 bits = device type
+      const auto& device = ivalue.toDevice();
+      uint64_t device_index_bits =
+          static_cast<uint64_t>(static_cast<uint32_t>(device.index()));
+      uint64_t device_type_bits =
+          static_cast<uint64_t>(static_cast<int8_t>(device.type())) << 32;
+      return device_index_bits | device_type_bits;
     }
     case c10::TypeKind::LayoutType: {
       return torch::stable::detail::_from(
@@ -175,8 +183,25 @@ static c10::IValue to_ivalue(
           stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::DeviceObjType: {
-      return c10::IValue(torch::stable::detail::_to<c10::Device>(
-          stable_ivalue, extension_build_version));
+      // Unpack device type and index from StableIValue
+      // Lower 32 bits = device index, upper 32 bits = device type
+      int32_t device_index = static_cast<int32_t>(
+          static_cast<uint32_t>(stable_ivalue & 0xFFFFFFFF));
+      c10::DeviceType device_type =
+          static_cast<c10::DeviceType>(static_cast<int8_t>(
+              static_cast<uint32_t>((stable_ivalue >> 32) & 0xFFFFFFFF)));
+      TORCH_CHECK(
+          device_index >= std::numeric_limits<int8_t>::min() &&
+              device_index <= std::numeric_limits<int8_t>::max(),
+          "Device index ",
+          device_index,
+          " is out of range for int8_t [",
+          static_cast<int>(std::numeric_limits<int8_t>::min()),
+          ", ",
+          static_cast<int>(std::numeric_limits<int8_t>::max()),
+          "]");
+      return c10::IValue(
+          c10::Device(device_type, static_cast<int8_t>(device_index)));
     }
     case c10::TypeKind::LayoutType: {
       return c10::IValue(torch::stable::detail::_to<c10::Layout>(
@@ -287,6 +312,19 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
         name,
         torch::CppFunction::makeFromBoxedFunctor(
             std::make_unique<StableIValueBoxedKernel>(fn, TORCH_ABI_VERSION)));
+  });
+}
+
+// Helper function to parse device string using c10::Device
+// Returns device type and index
+AOTI_TORCH_EXPORT AOTITorchError torch_parse_device_string(
+    const char* device_string,
+    uint32_t* out_device_type,
+    int32_t* out_device_index) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::Device device{std::string(device_string)};
+    *out_device_type = static_cast<uint32_t>(device.type());
+    *out_device_index = static_cast<int32_t>(device.index());
   });
 }
 
@@ -495,4 +533,30 @@ AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher(
           ret_type, torch::jit::pop(ivalue_stack), extension_build_version);
     }
   });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_parallel_for(
+    int64_t begin,
+    int64_t end,
+    int64_t grain_size,
+    ParallelFunc func,
+    void* ctx) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::parallel_for(
+        begin, end, grain_size, [func, ctx](int64_t begin, int64_t end) {
+          func(begin, end, ctx);
+        });
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_get_thread_idx(uint32_t* out_thread_idx) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *out_thread_idx = static_cast<uint32_t>(at::get_thread_num()); });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_get_num_threads(uint32_t* out_num_threads) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *out_num_threads = static_cast<uint32_t>(at::get_num_threads()); });
 }

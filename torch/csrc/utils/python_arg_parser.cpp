@@ -382,7 +382,7 @@ static py::object dispatch_on_subclass(
       } else {
         // Slow path -- reconstruct C++ data structures since they were not
         // provided.
-        auto schema = py::cast<FunctionSchema>(
+        auto schema = py::cast<at::FunctionSchema>(
             py::handle(torch_api_function).attr("_schema"));
         auto opt_op_handle =
             c10::Dispatcher::singleton().findOp(schema.operator_name());
