@@ -119,9 +119,7 @@ def aten_scaled_dot_product_attention_23(
             if attn_mask.dtype == torch.bool
             else attn_mask
         )
-        attn_weight = torch.softmax(
-            (Q @ K.transpose(-2, -1) *  attn_mask, dim=-1
-        )
+       attn_weight = torch.softmax((query @ key.transpose(-2, -1) * scale_factor) + attn_mask, dim=-1)
         attn_weight = torch.dropout(attn_weight, dropout_p)
         return attn_weight @ V
 
