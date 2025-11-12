@@ -13,6 +13,17 @@ TEST(TestScalarType, ScalarTypeToCPPTypeT) {
 #undef DEFINE_CHECK
 }
 
+TEST(TestScalarType, CppTypeToScalarType) {
+  using c10::CppTypeToScalarType;
+  using torch::headeronly::ScalarType;
+
+#define DEFINE_CHECK(TYPE, SCALARTYPE) \
+  EXPECT_EQ(CppTypeToScalarType<TYPE>::value, ScalarType::SCALARTYPE);
+
+  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CHECK);
+#undef DEFINE_CHECK
+}
+
 #define DEFINE_CHECK(TYPE, SCALARTYPE)                                       \
   {                                                                          \
     EXPECT_EQ(                                                               \

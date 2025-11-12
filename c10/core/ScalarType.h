@@ -33,20 +33,6 @@ namespace c10 {
 // See [dtype Macros note] in torch/headeronly/core/ScalarType.h
 // regarding macros.
 
-template <typename T>
-struct CppTypeToScalarType;
-
-#define SPECIALIZE_CppTypeToScalarType(cpp_type, scalar_type)                  \
-  template <>                                                                  \
-  struct CppTypeToScalarType<cpp_type>                                         \
-      : std::                                                                  \
-            integral_constant<c10::ScalarType, c10::ScalarType::scalar_type> { \
-  };
-
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
-
-#undef SPECIALIZE_CppTypeToScalarType
-
 #define DEFINE_CONSTANT(_, name) \
   constexpr ScalarType k##name = ScalarType::name;
 
