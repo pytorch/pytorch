@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import operator
 from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -227,7 +227,7 @@ def is_dequantize_node(node):
 def is_getattr_tensor_metadata_node(node):
     return (
         node.op == "call_function"
-        and node.target == getattr
+        and node.target is getattr
         and node.args[1] == "shape"
     )
 
@@ -334,7 +334,7 @@ DYNAMIC_LOWER_FUSED_MODULE_MAP: dict[
 # Mapping from a functional to lower to a 2-tuple of
 #   1) The quantized version of the op
 #   2) The quantized version of the op fused with relu, if it exists, else None
-STATIC_LOWER_FUNCTIONAL_MAP: dict[Callable, tuple[Callable, Optional[Callable]]] = {
+STATIC_LOWER_FUNCTIONAL_MAP: dict[Callable, tuple[Callable, Callable | None]] = {
     F.linear: (torch.ops.quantized.linear, torch.ops.quantized.linear_relu),
     F.conv1d: (torch.ops.quantized.conv1d, torch.ops.quantized.conv1d_relu),
     F.conv2d: (torch.ops.quantized.conv2d, torch.ops.quantized.conv2d_relu),
@@ -360,7 +360,7 @@ WEIGHT_PREPACK_OPS: set[Callable] = {
 #   1) The dynamically quantized version of the op
 #   2) The dynamically quantized version of the op fused with relu, if it exists, else None
 DYNAMIC_LOWER_FUNCTIONAL_MAP: dict[
-    Callable, dict[tuple[torch.dtype, torch.dtype], tuple[Callable, Optional[Callable]]]
+    Callable, dict[tuple[torch.dtype, torch.dtype], tuple[Callable, Callable | None]]
 ] = {
     F.linear: {
         (torch.quint8, torch.qint8): (
@@ -397,7 +397,7 @@ CONV_TRANSPOSE_FUNCTIONAL_OPS: set[Callable] = {
 }
 
 # TODO: add tests for lowering these ops
-QBIN_OP_MAPPING: dict[Union[Callable, str], Callable] = {
+QBIN_OP_MAPPING: dict[Callable | str, Callable] = {
     operator.add: torch.ops.quantized.add,
     torch.add: torch.ops.quantized.add,
     operator.mul: torch.ops.quantized.mul,
@@ -405,7 +405,7 @@ QBIN_OP_MAPPING: dict[Union[Callable, str], Callable] = {
     torch.mul: torch.ops.quantized.mul,
     torch.matmul: torch.ops.quantized.matmul,
 }
-QBIN_RELU_OP_MAPPING: dict[Union[Callable, str], Callable] = {
+QBIN_RELU_OP_MAPPING: dict[Callable | str, Callable] = {
     operator.add: torch.ops.quantized.add_relu,
     torch.add: torch.ops.quantized.add_relu,
     operator.mul: torch.ops.quantized.mul_relu,
@@ -541,7 +541,7 @@ def fold_weight(
     return quantized_model
 
 
-def _get_module(node: Node, modules: dict[str, nn.Module]) -> Optional[nn.Module]:
+def _get_module(node: Node, modules: dict[str, nn.Module]) -> nn.Module | None:
     """
     Return the `torch.nn.Module` that corresponds to the specified node's target.
     If no such node exists, return None.
@@ -558,7 +558,7 @@ def _match_static_pattern(
     qconfig_map: dict[str, QConfigAny],
     matching_modules_or_ops: list[Callable],
     dequantize_node_arg_indices: list[int],
-) -> Union[tuple[Node, Node, Node], tuple[None, None, None]]:
+) -> tuple[Node, Node, Node] | tuple[None, None, None]:
     """
     Match the pattern (dequantize - ref node - quantize) against the node provided.
 
@@ -640,7 +640,7 @@ def _match_static_pattern_with_two_inputs(
     modules: dict[str, nn.Module],
     qconfig_map: dict[str, QConfigAny],
     matching_modules_or_ops: list[Callable],
-) -> Union[tuple[Node, Node], tuple[None, None]]:
+) -> tuple[Node, Node] | tuple[None, None]:
     """
                       (dequantize \
     Match the pattern (dequantize - ref node - quantize) against the node provided.
@@ -952,14 +952,14 @@ def _lower_static_weighted_ref_functional(
         # Linear prepack args: (quantized weights[, bias])
         # Conv prepack args: (quantized weights[, bias, stride, padding, dilation, groups])
         prepack_args = [quantized_weight] + remaining_func_args
-        if func_node.target == F.linear:
+        if func_node.target is F.linear:
             weight_dtype = quantized_weight.args[-1]
             prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
         elif func_node.target in CONV_FUNCTIONAL_OPS:
             prepack_op = get_qconv_prepack_op(func_node.target)  # type: ignore[arg-type]
             # For conv1d, the stride, padding, and dilation args may be ints,
             # in which case we need to convert them to tuples
-            if func_node.target == F.conv1d:
+            if func_node.target is F.conv1d:
                 for i in [2, 3, 4]:
                     if len(prepack_args) > i and isinstance(prepack_args[i], int):
                         prepack_args[i] = (prepack_args[i],)
@@ -967,7 +967,7 @@ def _lower_static_weighted_ref_functional(
             prepack_op = get_qconv_prepack_op(func_node.target)  # type: ignore[arg-type]
             # For conv_transpose1d, the stride, padding, and dilation args may be ints,
             # in which case we need to convert them to tuples
-            if func_node.target == F.conv_transpose1d:
+            if func_node.target is F.conv_transpose1d:
                 # Note prepack_args[5] is groups.
                 for i in [2, 3, 4, 6]:
                     if len(prepack_args) > i and isinstance(prepack_args[i], int):
@@ -984,7 +984,7 @@ def _lower_static_weighted_ref_functional(
             # They are not needed for compute op (i.e., quantized::linear)
             kwargs = func_node.kwargs
             # F.linear uses 'bias' key for bias while qlinear_prepack uses 'B' for bias
-            if func_node.target == F.linear and "bias" in kwargs:
+            if func_node.target is F.linear and "bias" in kwargs:
                 kwargs = kwargs.copy()
                 kwargs["B"] = kwargs["bias"]
                 del kwargs["bias"]
@@ -1039,7 +1039,7 @@ def _lower_dynamic_weighted_ref_functional(
         # Handle cases where the functional op is wrapped in a ReLU
         if (
             func_node.op == "call_function"
-            and func_node.target == F.relu
+            and func_node.target is F.relu
             or func_node.op == "call_module"
             and type(modules[str(func_node.target)]) is torch.nn.ReLU
         ):
@@ -1111,7 +1111,7 @@ def _lower_dynamic_weighted_ref_functional(
         # Conv prepack args: (quantized weights[, bias, stride, padding, dilation, groups])
         prepack_args = [quantized_weight] + remaining_func_args
         prepack_kwargs = {}
-        if func_node.target == F.linear:
+        if func_node.target is F.linear:
             prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
             kwargs = func_node.kwargs.copy()
             if "bias" in kwargs:
@@ -1122,7 +1122,7 @@ def _lower_dynamic_weighted_ref_functional(
             prepack_op = get_qconv_prepack_op(func_node.target)
             # For conv1d, the stride, padding, and dilation args may be ints,
             # in which case we need to convert them to tuples
-            if func_node.target == F.conv1d:
+            if func_node.target is F.conv1d:
                 for i in [2, 3, 4]:
                     if len(prepack_args) > i and isinstance(prepack_args[i], int):
                         prepack_args[i] = (prepack_args[i],)
