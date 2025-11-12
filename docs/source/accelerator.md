@@ -40,7 +40,6 @@
     :nosignatures:
 
      empty_cache
-     get_memory_info
      max_memory_allocated
      max_memory_reserved
      memory_allocated
