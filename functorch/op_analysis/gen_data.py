@@ -25,7 +25,7 @@ def gen_data(special_op_lists, analysis_name):
     composite_ops = get_ops_for_key("CompositeImplicitAutograd")
     noncomposite_ops = all_ops - composite_ops
     with open("../../aten/src/ATen/native/native_functions.yaml") as f:
-        ops = yaml.load(f,Loader=yaml.CLoader)
+        ops = yaml.load(f.read(),Loader=yaml.CLoader)
 
     with open("annotated_ops") as f:
         annotated_ops = {
