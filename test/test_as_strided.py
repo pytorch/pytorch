@@ -585,6 +585,20 @@ class TestAsStrided(TestCase):
         base = torch.arange(5).expand(3, 5)
         self.check_as_strided_via_views(base, (3, 2, 5), (0, 0, 1))
 
+    def test_eliminate_last_dim(self) -> None:
+        """Test eliminating the last dimension (edge case: last target dim needs unflatten+squeeze)."""
+        # This is the pattern from indexing: tensor[:, :, 0]
+        # Source: (1, 888, 12) -> Target: (1, 888)
+        base = torch.arange(1 * 888 * 12).view(1, 888, 12)
+        self.check_as_strided_via_views(base, (1, 888), (10656, 12))
+
+        # Another similar case: (10, 20, 30) -> (10, 20)
+        base2 = torch.arange(10 * 20 * 30).view(10, 20, 30)
+        self.check_as_strided_via_views(base2, (10, 20), (600, 30))
+
+        # And with offset
+        self.check_as_strided_via_views(base2, (5, 10), (600, 30), storage_offset=1800)
+
     def test_unexpand_target_then_basic(self) -> None:
         """Test _unexpand_target_then with single stride-0 dim."""
         from torch.utils._as_strided import _unexpand_target_then
@@ -696,6 +710,23 @@ class TestAsStrided(TestCase):
         result = as_strided_via_views(base, (5,), (1,), storage_offset=-1)
         self.assertIs(result, NotImplemented)
 
+    def test_storage_offset_within_flattened_dimension(self) -> None:
+        """Test offset adjustment within a flattened dimension.
+
+        This tests the case where:
+        1. Input tensor gets flattened during canonicalization
+        2. Target has larger stride that's a multiple of canonical stride
+        3. Small offset needs to be consumed by unflattening and narrowing
+
+        Example: (1, 888, 12) -> (1, 888) with offset 1
+        This is equivalent to tensor[:, :, 1].
+        """
+        # Create tensor with shape (1, 888, 12)
+        base = torch.arange(1 * 888 * 12).view(1, 888, 12)
+        # Target: select element at index 1 along last dimension, remove that dimension
+        # Result should be equivalent to base[:, :, 1]
+        self.check_as_strided_via_views(base, (1, 888), (10656, 12), storage_offset=1)
+
     # Tests with multi-dimensional contiguous input tensors
     def test_2d_contiguous_source_simple(self) -> None:
         """Test with 2D contiguous input tensor."""
@@ -735,7 +766,9 @@ class TestAsStrided(TestCase):
     # Tests with non-contiguous multi-dimensional input tensors
     def test_2d_transposed_source(self) -> None:
         """Test with transposed (non-contiguous) 2D input tensor."""
-        base = torch.arange(24).view(4, 6).t()  # Non-contiguous: (6, 4) with strides (1, 6)
+        base = (
+            torch.arange(24).view(4, 6).t()
+        )  # Non-contiguous: (6, 4) with strides (1, 6)
         # Simple narrow
         self.check_as_strided_via_views(base, (3, 2), (1, 6))
 
@@ -762,7 +795,9 @@ class TestAsStrided(TestCase):
 
     def test_3d_non_contiguous_permuted(self) -> None:
         """Test with 3D tensor that's been permuted (non-contiguous)."""
-        base = torch.arange(60).view(3, 4, 5).permute(2, 0, 1)  # (5, 3, 4) with strides (1, 20, 5)
+        base = (
+            torch.arange(60).view(3, 4, 5).permute(2, 0, 1)
+        )  # (5, 3, 4) with strides (1, 20, 5)
         # Narrow and unflatten
         self.check_as_strided_via_views(base, (3, 2, 2), (1, 20, 5))
 
@@ -811,22 +846,32 @@ class TestAsStrided(TestCase):
     def test_storage_offset_3d_discontiguous_all_dims(self) -> None:
         """Test storage offset with 3D discontiguous tensor requiring narrows on multiple dims."""
         # Create 3D tensor with gaps in all dimensions
-        base = torch.arange(1000).view(10, 10, 10)[::2, ::3, ::5]  # (5, 4, 2) with strides (200, 30, 5)
+        base = torch.arange(1000).view(10, 10, 10)[
+            ::2, ::3, ::5
+        ]  # (5, 4, 2) with strides (200, 30, 5)
         # Offset = 30: just one step in the middle dimension
         # Requires narrow on discontiguous dimensions
-        self.check_as_strided_via_views(base, (4, 2, 2), (200, 30, 5), storage_offset=30)
+        self.check_as_strided_via_views(
+            base, (4, 2, 2), (200, 30, 5), storage_offset=30
+        )
 
     def test_storage_offset_3d_discontiguous_complex(self) -> None:
         """Test complex offset distribution across 3D discontiguous dims."""
-        base = torch.arange(1000).view(10, 10, 10)[::3, ::2, ::4]  # (4, 5, 3) with strides (300, 20, 4)
+        base = torch.arange(1000).view(10, 10, 10)[
+            ::3, ::2, ::4
+        ]  # (4, 5, 3) with strides (300, 20, 4)
         # Offset = 24: 24 = 1*20 + 1*4
         # Requires narrow on the smaller stride dimensions
-        self.check_as_strided_via_views(base, (2, 3, 2), (300, 20, 4), storage_offset=24)
+        self.check_as_strided_via_views(
+            base, (2, 3, 2), (300, 20, 4), storage_offset=24
+        )
 
     def test_storage_offset_2d_permuted_discontiguous(self) -> None:
         """Test storage offset where source dims are in non-descending stride order."""
         # Create non-contiguous tensor then permute so strides aren't descending
-        base_raw = torch.arange(100).view(10, 10)[::3, ::2]  # (4, 5) with strides (30, 2)
+        base_raw = torch.arange(100).view(10, 10)[
+            ::3, ::2
+        ]  # (4, 5) with strides (30, 2)
         # This already has strides in descending order, so let's transpose it
         base = base_raw.t()  # (5, 4) with strides (2, 30)
         # Now strides are NOT in descending order (2 < 30)

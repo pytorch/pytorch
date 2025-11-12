@@ -292,10 +292,15 @@ def _process_canonical_dims(
 
     Since the target stride is sorted in descending order (after _permute_target_then),
     we can process each canonical dim and consume target dims as we go.
+
+    Offset is consumed opportunistically during narrow operations.
     """
     # Read canonical sizes/strides from result (already canonicalized)
     canonical_sizes = result.size()
     canonical_strides = result.stride()
+
+    # Compute remaining offset to consume
+    remaining_offset = storage_offset - result.storage_offset()
 
     # Target dims are already sorted by stride descending (via _permute_target_then)
     # and size-1/stride-0 dims have been removed (via _squeeze_target_then)
@@ -313,7 +318,7 @@ def _process_canonical_dims(
         # Collect all target dims that map to this canonical dim
         # For dimension (x,):(a,), target stride s must satisfy: a <= s <= (x-1) * a
         min_stride = canonical_stride
-        max_stride = (canonical_size - 1) * canonical_stride
+        max_stride = (result.size(current_dim) - 1) * canonical_stride
 
         target_dims_for_this_canonical = []
         while target_idx < len(target_dims):
@@ -334,6 +339,9 @@ def _process_canonical_dims(
             continue
 
         # Process target_dims left to right (largest stride first, already sorted)
+        # Offset is consumed opportunistically during each narrow operation
+        # Track which result dimension we're working on within this inner loop
+        work_dim = current_dim
         for i, (original_pos, target_size, target_stride) in enumerate(
             target_dims_for_this_canonical
         ):
@@ -347,29 +355,84 @@ def _process_canonical_dims(
 
                 needed_size = target_size * next_dim_size
 
+                # Opportunistically consume offset when narrowing for unflatten
+                narrow_start = 0
+                if remaining_offset > 0:
+                    offset_in_dim = remaining_offset // canonical_stride
+                    if offset_in_dim < result.size(work_dim):
+                        narrow_start = offset_in_dim
+                        remaining_offset -= offset_in_dim * canonical_stride
+
                 # Check if we have enough size
-                if result.size(current_dim) < needed_size:
+                if result.size(work_dim) < needed_size + narrow_start:
                     return NotImplemented
 
                 # Narrow and unflatten
-                if result.size(current_dim) != needed_size:
-                    result = result.narrow(current_dim, 0, needed_size)
+                result = result.narrow(work_dim, narrow_start, needed_size)
 
-                result = result.unflatten(current_dim, (target_size, next_dim_size))
+                result = result.unflatten(work_dim, (target_size, next_dim_size))
+                # After unflatten, next target dim works on the remainder at work_dim + 1
+                work_dim += 1
 
             else:
                 # Last target dim
-                # Its stride must match the canonical stride
-                if target_stride != canonical_stride:
-                    return NotImplemented
+                if target_stride == canonical_stride:
+                    # Simple case: stride matches, just narrow to size
+                    # Opportunistically consume offset here
+                    narrow_start = 0
+                    if remaining_offset > 0:
+                        offset_in_dim = remaining_offset // canonical_stride
+                        if offset_in_dim < result.size(work_dim):
+                            narrow_start = offset_in_dim
+                            remaining_offset -= offset_in_dim * canonical_stride
 
-                # Narrow to final size
-                if result.size(current_dim) < target_size:
+                    # Check if we have enough size
+                    if result.size(work_dim) < target_size + narrow_start:
+                        return NotImplemented
+
+                    # Narrow to target size from the offset position
+                    result = result.narrow(work_dim, narrow_start, target_size)
+                elif (
+                    target_stride > canonical_stride
+                    and target_stride % canonical_stride == 0
+                ):
+                    # Edge case: need to unflatten and squeeze away trailing dimensions
+                    # unflatten(a*b, (a, b)) gives strides (b*canonical_stride, canonical_stride)
+                    # We want first dim stride = target_stride, so b = target_stride / canonical_stride
+                    remainder_size = target_stride // canonical_stride
+                    needed_size = target_size * remainder_size
+
+                    # Check if we have enough size
+                    if result.size(work_dim) < needed_size:
+                        return NotImplemented
+
+                    # Narrow if there's excess size
+                    if result.size(work_dim) != needed_size:
+                        result = result.narrow(work_dim, 0, needed_size)
+
+                    # Unflatten to create target dimension and remainder
+                    result = result.unflatten(work_dim, (target_size, remainder_size))
+
+                    # The remainder dimension (at work_dim + 1) needs to be eliminated
+                    # Opportunistically consume any remaining offset here
+                    narrow_start = 0
+                    if remaining_offset > 0 and canonical_stride > 0:
+                        # Can we consume offset by selecting a different position in the remainder?
+                        offset_in_remainder = remaining_offset // canonical_stride
+                        if offset_in_remainder < remainder_size:
+                            narrow_start = offset_in_remainder
+                            remaining_offset -= offset_in_remainder * canonical_stride
+
+                    result = result.narrow(work_dim + 1, narrow_start, 1)
+                    result = result.squeeze(work_dim + 1)
+                else:
                     return NotImplemented
-                if result.size(current_dim) != target_size:
-                    result = result.narrow(current_dim, 0, target_size)
 
             current_dim += 1
+
+    # Check if all offset was consumed
+    if remaining_offset != 0:
+        return NotImplemented
 
     return result
 
@@ -437,37 +500,11 @@ def as_strided_via_views(
     # Step 1: Canonicalize source tensor
     result = _canonicalize_tensor(tensor)
 
-    # Step 2: Handle storage offset by narrowing canonical dimensions
-    # After canonicalization, we have a tensor with strictly descending strides
-    # We can narrow each dimension to consume the required offset
+    # Step 2: Calculate offset to consume
+    # We'll consume this opportunistically during narrow operations in _process_canonical_dims
     offset_delta = storage_offset - result.storage_offset()
     if offset_delta < 0:
         return NotImplemented
-
-    if offset_delta > 0:
-        # Greedily consume offset from each canonical dimension (largest stride first)
-        for dim in range(result.ndim):
-            if offset_delta == 0:
-                break
-
-            canonical_size = result.size(dim)
-            canonical_stride = result.stride(dim)
-
-            # Maximum offset we can consume from this dimension
-            max_offset_for_dim = (canonical_size - 1) * canonical_stride
-            offset_to_consume = min(offset_delta, max_offset_for_dim)
-
-            # Calculate start position for narrow
-            start = offset_to_consume // canonical_stride
-
-            if start > 0:
-                new_length = canonical_size - start
-                result = result.narrow(dim, start, new_length)
-                offset_delta -= start * canonical_stride
-
-        # Check if we consumed all the required offset
-        if offset_delta != 0:
-            return NotImplemented
 
     # We're not going to take this straight to the target size/stride.
     # Instead we're going to first go to a "canonicalized" target which is in
