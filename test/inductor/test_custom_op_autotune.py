@@ -453,6 +453,155 @@ class TestCustomOpAutoTune(TestCase):
             multi_param_op, (test_x, test_factor), expected_result, "MultiParam"
         )
 
+    @skipIfXpu
+    def test_dynamic_range_tuning(self):
+        """Test dynamic input range-based autotuning.
+
+        Validates that different implementations can be selected automatically
+        based on input dimensions using range parameters in CustomOpConfig.
+
+        This test demonstrates the simplified range-based API:
+        - User provides CustomOpConfigs with range parameters
+        - System groups configs by range and benchmarks implementations
+        - System automatically selects the fastest implementation per range
+        - If all ranges use same impl → direct use (fusion-friendly)
+        - If different ranges use different impls → torch.cond dispatch
+        """
+        test_op_name = f"test_lib::dynamic_range_{id(self)}"
+
+        def short_sequence_impl(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            """Optimized for short sequences (< 512): uses simple einsum."""
+            return torch.einsum("bsh,h->bsh", x, weight)
+
+        def medium_sequence_impl(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            """Optimized for medium sequences (512-2048): uses chunked processing."""
+            batch_size, seq_len, hidden_dim = x.shape
+            chunk_size = 256
+            chunks = []
+            for start in range(0, seq_len, chunk_size):
+                end = min(start + chunk_size, seq_len)
+                chunk = x[:, start:end, :]
+                chunks.append(chunk * weight)
+            return torch.cat(chunks, dim=1)
+
+        def long_sequence_impl(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            """Optimized for long sequences (> 2048): uses reshape + broadcast."""
+            return x * weight.view(1, 1, -1)
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def dynamic_range_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            """Default implementation."""
+            return x * weight
+
+        @dynamic_range_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty_like(x)
+
+        # Register with range-based configs (CLEAN API with dim_range tuple)
+        # Each config specifies its range using tensor_name, dim_index, dim_range=(start, end)
+        register_custom_op_autotuning(
+            dynamic_range_op,
+            configs=[
+                # Range 1: [0, 512) - test all 3 implementations
+                CustomOpConfig(
+                    short_sequence_impl,
+                    tensor_name="x",
+                    dim_index=1,
+                    dim_range=(0, 512),
+                ),
+                CustomOpConfig(
+                    medium_sequence_impl,
+                    tensor_name="x",
+                    dim_index=1,
+                    dim_range=(0, 512),
+                ),
+                CustomOpConfig(
+                    long_sequence_impl, tensor_name="x", dim_index=1, dim_range=(0, 512)
+                ),
+                # Range 2: [512, 2048) - test all 3 implementations
+                CustomOpConfig(
+                    short_sequence_impl,
+                    tensor_name="x",
+                    dim_index=1,
+                    dim_range=(512, 2048),
+                ),
+                CustomOpConfig(
+                    medium_sequence_impl,
+                    tensor_name="x",
+                    dim_index=1,
+                    dim_range=(512, 2048),
+                ),
+                CustomOpConfig(
+                    long_sequence_impl,
+                    tensor_name="x",
+                    dim_index=1,
+                    dim_range=(512, 2048),
+                ),
+                # Range 3: [2048, inf) - test all 3 implementations
+                CustomOpConfig(
+                    short_sequence_impl,
+                    tensor_name="x",
+                    dim_index=1,
+                    dim_range=(2048, float("inf")),
+                ),
+                CustomOpConfig(
+                    medium_sequence_impl,
+                    tensor_name="x",
+                    dim_index=1,
+                    dim_range=(2048, float("inf")),
+                ),
+                CustomOpConfig(
+                    long_sequence_impl,
+                    tensor_name="x",
+                    dim_index=1,
+                    dim_range=(2048, float("inf")),
+                ),
+            ],
+            name="dynamic_range_autotuned",
+            input_gen_fns={
+                "x": lambda fake: torch.randn_like(fake, device=self.device) * 0.1,
+                "weight": lambda fake: torch.ones_like(fake, device=self.device),
+            },
+        )
+
+        # Test different sequence lengths to trigger different ranges
+        test_cases = [
+            (2, 256, 128),  # Short sequence (< 512)
+            (2, 1024, 128),  # Medium sequence (512-2048)
+            (2, 4096, 128),  # Long sequence (> 2048)
+        ]
+
+        for batch_size, seq_len, hidden_dim in test_cases:
+            test_x = torch.randn(
+                batch_size, seq_len, hidden_dim, device=self.device, dtype=self.dtype
+            )
+            test_weight = torch.ones(hidden_dim, device=self.device, dtype=self.dtype)
+
+            # Verify all implementations produce same result
+            expected = test_x * test_weight
+
+            for impl_name, impl_fn in [
+                ("short", short_sequence_impl),
+                ("medium", medium_sequence_impl),
+                ("long", long_sequence_impl),
+            ]:
+                result = impl_fn(test_x, test_weight)
+                torch.testing.assert_close(
+                    result,
+                    expected,
+                    rtol=1e-5,
+                    atol=1e-5,
+                    msg=f"{impl_name} implementation differs for seq_len={seq_len}",
+                )
+
+            # Test autotuning with compilation
+            self._run_autotune_test(
+                dynamic_range_op,
+                (test_x, test_weight),
+                expected,
+                f"DynamicRange_seq{seq_len}",
+            )
+
 
 if __name__ == "__main__":
     run_tests()
