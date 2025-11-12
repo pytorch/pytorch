@@ -19,6 +19,7 @@ from torch._C import (
     _push_on_torch_dispatch_stack,
     DispatchKey,
 )
+from torch._C._dynamo.guards import set_is_in_mode_without_ignore_compile_internals
 
 
 if TYPE_CHECKING:
@@ -140,6 +141,9 @@ class TorchDispatchMode:
             _is_in_any_mode_without_ignore_compile_internals
             or not self.ignore_compile_internals()
         )
+        set_is_in_mode_without_ignore_compile_internals(
+            _is_in_any_mode_without_ignore_compile_internals
+        )
         _push_mode(self)
         return self
 
@@ -158,6 +162,9 @@ class TorchDispatchMode:
         global _is_in_any_mode_without_ignore_compile_internals
         _is_in_any_mode_without_ignore_compile_internals = (
             self.old_without_ignore_compile_internals_dispatch_mode_flags.pop()
+        )
+        set_is_in_mode_without_ignore_compile_internals(
+            _is_in_any_mode_without_ignore_compile_internals
         )
         _pop_mode(mb_dk_or_mode_key)
 

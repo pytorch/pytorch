@@ -1092,6 +1092,57 @@ class inner_f(torch.nn.Module):
                 )
         self.assertEqual(joint._aot_state.fw_metadata.static_input_indices, [0, 1])
 
+    def test_no_annotation_on_gradient_acc_nodes(self):
+        """Test basic linear module with aot_export_joint_with_descriptors"""
+
+        class SimpleLinear(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 2)
+                self.linear2 = nn.Linear(3, 2)
+
+            def forward(self, x):
+                with fx_traceback.annotate({"test": 1}):
+                    return self.linear(x) - self.linear2(x)
+
+        model = SimpleLinear()
+        inputs = (torch.randn(4, 3, requires_grad=True),)
+        graph_module = graph_capture(model, inputs, True)
+        add_nodes = graph_module.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.add.Tensor
+        )
+        self.assertEqual(len(add_nodes), 1)
+        gradient_acc_node = add_nodes[0]
+        self.assertTrue(gradient_acc_node.meta["is_gradient_acc"])
+        self.assertEqual(gradient_acc_node.meta.get("custom", {}), {})
+        custom_metadata = fx_traceback._get_custom_metadata(graph_module)
+        self.assertExpectedInline(
+            str(custom_metadata),
+            """\
+('call_function', 't', {'test': 1})
+('call_function', 'addmm', {'test': 1})
+('call_function', 't_1', {'test': 1})
+('call_function', 'addmm_1', {'test': 1})
+('call_function', 'sub', {'test': 1})
+('call_function', 'neg', {'test': 1})
+('call_function', 't_2', {'test': 1})
+('call_function', 'mm', {'test': 1})
+('call_function', 't_3', {'test': 1})
+('call_function', 'mm_1', {'test': 1})
+('call_function', 't_4', {'test': 1})
+('call_function', 'sum_1', {'test': 1})
+('call_function', 'view', {'test': 1})
+('call_function', 't_5', {'test': 1})
+('call_function', 't_6', {'test': 1})
+('call_function', 'mm_2', {'test': 1})
+('call_function', 't_7', {'test': 1})
+('call_function', 'mm_3', {'test': 1})
+('call_function', 't_8', {'test': 1})
+('call_function', 'sum_2', {'test': 1})
+('call_function', 'view_1', {'test': 1})
+('call_function', 't_9', {'test': 1})""",
+        )
+
 
 if __name__ == "__main__":
     run_tests()
