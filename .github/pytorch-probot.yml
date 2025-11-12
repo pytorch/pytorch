@@ -2,11 +2,12 @@ tracking_issue: 24422
 ciflow_tracking_issue: 64124
 ciflow_push_tags:
 - ciflow/b200
-- ciflow/b200-symm-mem
 - ciflow/b200-distributed
+- ciflow/b200-symm-mem
 - ciflow/binaries
 - ciflow/binaries_libtorch
 - ciflow/binaries_wheel
+- ciflow/dynamo
 - ciflow/h100
 - ciflow/h100-cutlass-backend
 - ciflow/h100-distributed
