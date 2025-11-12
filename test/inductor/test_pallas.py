@@ -257,6 +257,10 @@ class PallasTestsMixin:
         wrapper_block = code[start:end]
 
         self.assertIn("jax.jit", code)
+        self.assertIn("donate_argnums", code)
+        self.assertIn("input_output_aliases", wrapper_block)
+        if self.DEVICE == "cuda":
+            self.assertNotIn(".copy_(", code)
         self.assertNotIn("torch.", wrapper_block)
 
     def test_2d_tensor(self):
@@ -377,6 +381,46 @@ class PallasTestsMixin:
         x = torch.randn(8, 16, device=self.DEVICE)
         result = compiled(x)
         expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_complex_indexing_gather(self):
+        """Test complex indexing with gather-like operations."""
+
+        def fn(x, indices):
+            # Use indices to gather elements from x
+            return x[indices]
+
+        compiled = self._compile(fn)
+
+        x = torch.arange(16, dtype=torch.float32, device=self.DEVICE)
+        # Use power-of-2 size for indices (Pallas Triton requirement)
+        indices = torch.tensor(
+            [0, 2, 5, 7, 11, 13, 14, 15], dtype=torch.int64, device=self.DEVICE
+        )
+        result = compiled(x, indices)
+        expected = fn(x, indices)
+        self.assertEqual(result, expected)
+
+    def test_complex_indexing_2d(self):
+        """Test complex indexing on 2D tensors with integer array indexing."""
+        if self.DEVICE == "cuda":
+            # Pallas Triton backend doesn't support gather operations with array indices
+            # This limitation is in the Pallas/Triton lowering, not our implementation
+            self.skipTest(
+                "Multi-dimensional gather not supported on Pallas Triton (CUDA) backend"
+            )
+
+        def fn(x, row_indices):
+            # Select specific rows using integer array indexing
+            return x[row_indices, :]
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, 8, device=self.DEVICE)
+        # Use power-of-2 sizes (Pallas Triton requirement)
+        row_indices = torch.tensor([0, 2, 5, 7], dtype=torch.int64, device=self.DEVICE)
+        result = compiled(x, row_indices)
+        expected = fn(x, row_indices)
         self.assertEqual(result, expected)
 
 
