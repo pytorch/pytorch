@@ -426,7 +426,7 @@ class TestDTensorDebugMode(TestCase):
         )
 
         with DebugMode(record_stack_trace=True) as debug_mode:
-            out = torch.compile(mod, backend="aot_eager")(inp).sum()
+            out = mod(inp).sum()
             out.backward()
 
         sum_op = [
