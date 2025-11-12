@@ -336,6 +336,90 @@ class <lambda>(torch.nn.Module):
         )
 
     @requires_cuda
+    @requires_multigpu()
+    def test_new_event_api(self) -> None:
+        from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
+        from torch._dynamo.variables.streams import new_event
+
+        def event_generation_backend(gm, *args, **kwargs):  # type: ignore[no-untyped-def]
+            e0_ind = new_event()
+            with torch.Stream(device="cuda:1"):
+                get_external_object_by_index(e0_ind).record()
+            e1_ind = new_event()
+            self.assertNotEqual(e0_ind, e1_ind)
+            self.assertNotEqual(
+                get_external_object_by_index(e0_ind),
+                get_external_object_by_index(e1_ind),
+            )
+            with gm.graph.inserting_after(next(iter(gm.graph.nodes))):
+                gm.graph.call_function(
+                    get_external_object_by_index, args=(1,), kwargs={}
+                )
+            return gm
+
+        @torch.compile(backend=event_generation_backend)
+        def fn(x):
+            return x + 1
+
+        fn(torch.ones(2, 2, device="cuda:0"))
+
+    @requires_cuda
+    def test_new_stream_api(self) -> None:
+        from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
+        from torch._dynamo.variables.streams import new_stream
+
+        def stream_generation_backend(gm, *args, **kwargs):  # type: ignore[no-untyped-def]
+            s0_ind = new_stream()
+            s1_ind = new_stream()
+            self.assertNotEqual(s0_ind, s1_ind)
+            self.assertNotEqual(
+                get_external_object_by_index(s0_ind),
+                get_external_object_by_index(s1_ind),
+            )
+            with gm.graph.inserting_after(next(iter(gm.graph.nodes))):
+                gm.graph.call_function(
+                    get_external_object_by_index, args=(1,), kwargs={}
+                )
+            return gm
+
+        @torch.compile(backend=stream_generation_backend)
+        def fn(x):
+            return x + 1
+
+        fn(torch.ones(2, 2, device="cuda:0"))
+
+    @requires_cuda
+    def test_current_stream_api(self) -> None:
+        from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
+        from torch._dynamo.variables.streams import get_current_stream
+
+        cur_stream = torch.accelerator.current_stream()
+        s0 = None
+
+        def stream_generation_backend(gm, *args, **kwargs):  # type: ignore[no-untyped-def]
+            nonlocal s0
+            s0_ind = get_current_stream(torch.device("cuda:0"))
+            self.assertEqual(get_external_object_by_index(s0_ind), cur_stream)
+            with gm.graph.inserting_after(next(iter(gm.graph.nodes))):
+                gm.graph.call_function(
+                    get_external_object_by_index, args=(s0_ind,), kwargs={}
+                )
+                gm.graph.call_function(
+                    lambda x: self.assertEqual(
+                        cur_stream, get_external_object_by_index(x)
+                    ),
+                    args=(s0_ind,),
+                    kwargs={},
+                )
+            return gm
+
+        @torch.compile(backend=stream_generation_backend)
+        def fn(x):
+            return x + 1
+
+        fn(torch.ones(2, 2, device="cuda:0"))
+
+    @requires_cuda
     def test_stream_with_mutation(self):
         def fn(x, y):
             s2 = torch.Stream()
@@ -522,6 +606,23 @@ class <lambda>(torch.nn.Module):
         finally:
             torch.accelerator.set_stream(original_stream)
             reset_user_object_tracking()
+
+    @requires_cuda
+    def test_run_opcheck_wait_record_stream(self):
+        from torch._dynamo.variables.streams import wait_stream
+        from torch.library import opcheck
+
+        s0 = torch.Stream()
+        s1 = torch.Stream()
+        s2 = torch.Stream()
+        store_user_object_weakrefs(s0, s1, s2)
+
+        sample_inputs = [
+            (0, 1),
+            (2, 0),
+        ]
+        for args in sample_inputs:
+            opcheck(wait_stream, args)
 
     @requires_cuda
     def test_inductor_lowering(self):
