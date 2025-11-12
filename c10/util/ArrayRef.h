@@ -54,9 +54,11 @@ namespace c10 {
 /// `final` specifier to force this constraint at compile time.
 /// However, Intel compiler does not recognize ArrayRef as a class
 /// template (which is required in the definition of
-/// at::TensorAccessor, for instance) when `final` specifier is used.
+/// at::TensorAccessor, for instance) when `final` specifier is
+/// used. So, we cannot define ArrayRef as final because of the Intel
+/// compiler issue.
 template <typename T>
-class ArrayRef : public HeaderOnlyArrayRef<T> {
+class ArrayRef final : public HeaderOnlyArrayRef<T> {
  public:
   /// @name Constructors, all inherited from HeaderOnlyArrayRef except for
   /// SmallVector. As inherited constructors won't work with class template
