@@ -1055,7 +1055,7 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         return getattr(self.vt, name)
 
     def get_globals(self) -> dict[str, Any]:
-        return self.vt.get_globals()
+        return self.vt.get_globals()  # type: ignore[attr-defined]
 
     def _build_inline_tracer(
         self,
