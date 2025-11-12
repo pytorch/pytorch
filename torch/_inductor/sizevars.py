@@ -3,8 +3,8 @@ import functools
 import itertools
 import logging
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
-from typing import Any, Callable, cast, Optional, Union
+from collections.abc import Callable, Iterable, Sequence
+from typing import Any, cast, Optional, Union
 
 import sympy
 from sympy import Expr
@@ -882,7 +882,7 @@ class SizeVarAllocator:
         # Start building the unbacked replacements mapping using CanonicalExprFinder
         # The mapping is from Expr to its "canonical" Expr.
         self.unbacked_replacements = {}
-        for expr in self.equality_graph.keys():
+        for expr in self.equality_graph:
             canonical_expr = uf.find_expr(expr)
             if expr != canonical_expr:
                 self.unbacked_replacements[expr] = canonical_expr
