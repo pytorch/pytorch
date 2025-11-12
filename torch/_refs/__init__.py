@@ -702,7 +702,7 @@ def exp2(a):
 # CompositeImplicitAutograd - don't register decomp
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("a,"),
+    type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
 def fill(a: TensorLikeType, value: NumberType) -> TensorLikeType:
