@@ -483,9 +483,7 @@ def _register_lowering(
             (fn in fallbacks or in_namespace(fn, "_c10d_functional")) for fn in aten_fn
         ):
             # explicitly assert for "out=" ops for better error messages
-            assert not any(x == "out" for x in kwargs.keys()), (
-                "out= ops aren't yet supported"
-            )
+            assert not any(x == "out" for x in kwargs), "out= ops aren't yet supported"
 
         args, kwargs = transform_args(
             args, kwargs, broadcast, type_promotion_kind, convert_input_to_bool
@@ -1303,8 +1301,11 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
     V.graph.register_operation(b_size)
     new_size = sym_size
 
-    if start_index is not None:
+    if x.maybe_get_layout() is None:
+        # realize tensor before accessing layout
         x.realize()
+
+    if start_index is not None:
         # we shouldn't have allocated storage offset symbol if start index was determinable
         assert sym_storage is None
         new_storage_offset = x.get_layout().offset + start_index * x.get_stride()[dim]
@@ -2382,6 +2383,10 @@ fallback_randn_default = fallback_handler(aten.randn.default)
 fallback_randn_generator = fallback_handler(aten.randn.generator)
 make_fallback(aten.randint)
 
+# TODO: mlazos reevaluate if we want to codegen something different
+make_fallback(torch.ops.streams.record_event.default)
+make_fallback(torch.ops.streams.wait_event.default)
+
 
 @register_lowering(aten.rand)
 def rand(*args, **kwargs):
@@ -2708,9 +2713,7 @@ def constrain_to_fake_tensor(arg, fake_arg):
         ]
         return ir.ExternKernel.require_exact_strides(arg, meta_stride_expr)
     if isinstance(arg, dict):
-        return {
-            key: constrain_to_fake_tensor(arg[key], fake_arg[key]) for key in arg.keys()
-        }
+        return {key: constrain_to_fake_tensor(arg[key], fake_arg[key]) for key in arg}
     elif isinstance(arg, (tuple, list)):
         return type(arg)(
             constrain_to_fake_tensor(a, f_a) for (a, f_a) in zip(arg, fake_arg)
@@ -2735,7 +2738,7 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
             )
             return ir.ExternKernel.require_stride_order(arg, stride_order)
         if isinstance(arg, dict):
-            return {key: apply_constraint(arg[key], fx_arg[key]) for key in arg.keys()}
+            return {key: apply_constraint(arg[key], fx_arg[key]) for key in arg}
         return arg
 
     args = tuple(
@@ -7099,29 +7102,12 @@ def sym_constrain_range(a, min=None, max=None):
 @register_lowering(aten.sym_size.int)
 def sym_size(a, dim):
     val = V.graph.current_node.meta["val"]
-    # Note [Can val be an int?]
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~
-    # In principle, someone could construct an FX graph where
-    # a call to size/stride has a val that is a plain int (not
-    # SymInt).  However, we will maintain the invariant that
-    # this is not possible: if you are constructing an FX graph
-    # where there is a call to size/stride that returns an
-    # int, but you KNOW that int must always be a constant,
-    # then you do not need trace that call at all (and just
-    # constant propagate the integer as is.)
-    assert isinstance(val, torch.SymInt), (
-        f"Expect val to be torch.SymInt but got val={val}"
-    )
     return val.node.expr
 
 
 @register_lowering(aten.sym_stride.int)
 def sym_stride(a, dim):
     val = V.graph.current_node.meta["val"]
-    # See Note [Can val be an int?]
-    assert isinstance(val, torch.SymInt), (
-        f"Expect val to be torch.SymInt but got val={val}"
-    )
     return val.node.expr
 
 
