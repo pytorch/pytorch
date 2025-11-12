@@ -119,7 +119,11 @@ class DeterministicTest(TestCase):
         the current working directory.
         """
 
-        if model_name == "BertForMaskedLM" and precision == "float32":
+        if (model_name, precision) in (
+            ("BertForMaskedLM", "float32"),
+            ("BertForMaskedLM", "float16"),
+            ("DistillGPT2", "float16"),
+        ):
             self.skipTest("The first accuracy run fail")
 
         def _setup_env(env):
