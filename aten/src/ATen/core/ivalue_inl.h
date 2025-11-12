@@ -990,7 +990,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed_) {
       // This should be rare and shouldn't cause log spew. Its important to
-      // log errors and thats why we have this log here.
+      // log errors and that's why we have this log here.
       std::string msg = c10::str(
           "Skipping setting following error on the Future since "
           "it is already marked completed (this is not necessarily "
