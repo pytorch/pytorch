@@ -2194,7 +2194,7 @@ def gen_headers(
 
     # Generate enum_tag.h in torch/headeronly/core
     def gen_tags_enum() -> dict[str, str]:
-        return {"enum_of_valid_tags": (",\n        ".join(sorted(valid_tags)))}
+        return {"enum_of_valid_tags": (",\n".join(sorted(valid_tags)))}
 
     headeronly_fm.write("enum_tag.h", gen_tags_enum)
 
