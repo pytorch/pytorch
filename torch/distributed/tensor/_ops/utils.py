@@ -50,8 +50,8 @@ def register_prop_rule(
 
 
 def register_op_strategy(
-    op,
-    schema_info=None,
+    op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
+    schema_info: Optional[RuntimeSchemaInfo] = None,
 ) -> Callable[[Callable[[OpSchema], StrategyType]], Callable[[OpSchema], StrategyType]]:
     # For every ATen op that accepts any args in this list,
     # the arg itself can impact the strides (and potentially the sharding strategy)
