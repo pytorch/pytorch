@@ -863,12 +863,13 @@ class Tracer(TracerBase):
                     _autowrap_check(
                         patcher, module.__dict__, self._autowrap_function_ids
                     )
+                ann = inspect.get_annotations(inspect.unwrap(fn))
                 self.create_node(
                     "output",
                     "output",
                     (self.create_arg(fn(*args)),),
                     {},
-                    type_expr=fn.__annotations__.get("return", None),
+                    type_expr=ann.get("return", None),
                 )
 
             self.submodule_paths = None
