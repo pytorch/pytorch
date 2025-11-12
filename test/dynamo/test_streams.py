@@ -512,8 +512,8 @@ class GraphModule(torch.nn.Module):
             return y0, z
 
         inp = (
-            torch.ones(2, 2, requires_grad=True) + 1,
-            torch.ones(2, 2, requires_grad=True),
+            torch.ones(2, 2, device="cuda:0", requires_grad=True) + 1,
+            torch.ones(2, 2, device="cuda:0", requires_grad=True),
         )
         expected = fn(*inp)
         (
