@@ -733,7 +733,7 @@ def _get_gradient_divide_factors(
             if data_parallel_size == 1:
                 return None, None, ReduceOp.SUM, ReduceOp.SUM
             return None, None, ReduceOp.AVG, ReduceOp.AVG
-        if factor == reduce_scatter_group.size():
+        if reduce_scatter_group is not None and factor == reduce_scatter_group.size():
             reduce_scatter_op = ReduceOp.AVG
         else:
             reduce_scatter_op = torch.distributed._make_nccl_premul_sum(1 / factor)
