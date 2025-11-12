@@ -385,7 +385,7 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     gemm_instance.SetWorkSpacePointer(&argument, ws_buf);
 
     auto invoker = gemm_instance.MakeInvoker();
-    hipStream_t stream = c10::hip::getCurrentHIPStream();
+    hipStream_t stream = c10::cuda::getCurrentCUDAStream();
     invoker.Run(argument, {stream});
     hipFree(gemm_arg_buf);
     hipFree(ws_buf);
