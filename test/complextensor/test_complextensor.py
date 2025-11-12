@@ -1,26 +1,37 @@
+# Owner(s): ["module: complex"]
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
-from torch.testing._internal.common_device_type import OpDTypes, instantiate_device_type_tests, ops
+from torch.complex.complextensor.ops.common import (
+    _as_complex_tensor,
+    _get_op_name,
+    COMPLEX_OPS_TABLE,
+    ComplexTensorMode,
+    FORCE_TEST_LIST,
+    OpOverloadPacket,
+)
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    OpDTypes,
+    ops,
+)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
-    TestGradients,
     parametrize,
     run_tests,
+    TestGradients,
     unMarkDynamoStrictTest,
 )
-from torch.testing._internal.opinfo.core import OpInfo
 
-from torch.complex.complextensor.ops.common import COMPLEX_OPS_TABLE, FORCE_TEST_LIST, ComplexTensorMode, _as_complex_tensor, OpType, _get_op_name, OpOverloadPacket
-from .utils import (
-    COMPLEX_DTYPES,
-    Descriptor,
-    TestCase,
-    Variant,
-)
+from .utils import COMPLEX_DTYPES, Descriptor, TestCase, Variant
+
+
+if TYPE_CHECKING:
+    from torch.testing._internal.opinfo.core import OpInfo
+
 
 torch._dynamo.config.recompile_limit = float("inf")
 torch._dynamo.config.accumulated_recompile_limit = float("inf")
@@ -46,10 +57,14 @@ force_test_names = set(map(_get_op_name, FORCE_TEST_LIST))
 implemented_op_names = (
     set(map(_get_op_name, COMPLEX_OPS_TABLE.keys())) - force_test_names
 )
-implemented_op_db = tuple(filter(lambda op: op.name in implemented_op_names, complex_op_db))
+implemented_op_db = tuple(
+    filter(lambda op: op.name in implemented_op_names, complex_op_db)
+)
 force_test_op_db = tuple(filter(lambda op: op.name in force_test_names, op_db))
 
-tested_op_names = {op.name for op in implemented_op_db} | {op.name for op in force_test_op_db}
+tested_op_names = {op.name for op in implemented_op_db} | {
+    op.name for op in force_test_op_db
+}
 non_tested_ops = {
     op for op in COMPLEX_OPS_TABLE if _get_op_name(op) not in tested_op_names
 }
@@ -58,9 +73,7 @@ if len(non_tested_ops) != 0:
     import textwrap
     import warnings
 
-    list_missing_ops = "\n".join(
-        sorted([str(op) for op in non_tested_ops])
-    )
+    list_missing_ops = "\n".join(sorted([str(op) for op in non_tested_ops]))
     warnings.warn(
         "Not all implemented ops are tested. List of ops missing tests:"
         f"\n{textwrap.indent(list_missing_ops, '    ')}",
@@ -82,7 +95,9 @@ SKIPS = {
     Descriptor(op=aten.angle, variant=Variant.GradCheck): "Numerical inconsistency",
     Descriptor(op=aten.asinh, variant=Variant.GradCheck): "Numerical inconsistency",
     Descriptor(op=aten.atanh, variant=Variant.GradCheck): "Numerical inconsistency",
-    Descriptor(op=aten.reciprocal, variant=Variant.GradCheck): "Numerical inconsistency",
+    Descriptor(
+        op=aten.reciprocal, variant=Variant.GradCheck
+    ): "Numerical inconsistency",
     Descriptor(op=aten.rsqrt, variant=Variant.GradCheck): "Numerical inconsistency",
     Descriptor(op=aten.select, variant=Variant.GradCheck): "Numerical inconsistency",
     Descriptor(op=aten.asin, variant=Variant.GradCheck): "Numerical inconsistency",
@@ -92,7 +107,9 @@ SKIPS = {
     Descriptor(op=aten.slice, variant=Variant.GradCheck): "Numerical inconsistency",
     Descriptor(op=aten.sqrt, variant=Variant.GradCheck): "Numerical inconsistency",
     Descriptor(op=aten.tan, variant=Variant.GradCheck): "Numerical inconsistency",
-    Descriptor(op=aten.true_divide, variant=Variant.GradCheck): "Numerical inconsistency",
+    Descriptor(
+        op=aten.true_divide, variant=Variant.GradCheck
+    ): "Numerical inconsistency",
     Descriptor(op=aten.prod, variant=Variant.GradCheck): "Numerical inconsistency",
     Descriptor(op=aten.div, variant=Variant.GradCheck): "Numerical inconsistency",
     Descriptor(op=aten.expm1, variant=Variant.GradCheck): "Numerical inconsistency",
@@ -157,7 +174,9 @@ SKIPS = {
     Descriptor(
         op=aten.squeeze, variant=Variant.Distributed
     ): "does not have a sharding strategy registered",
-    Descriptor(op=aten.index_select, variant=Variant.Distributed): "Sharding propagation failed",
+    Descriptor(
+        op=aten.index_select, variant=Variant.Distributed
+    ): "Sharding propagation failed",
     Descriptor(op=aten.real, variant=Variant.Distributed): "No scalar support",
     Descriptor(op=aten.imag, variant=Variant.Distributed): "No scalar support",
     Descriptor(op=aten.isfinite, variant=Variant.Distributed): "No scalar support",
@@ -205,17 +224,26 @@ def _as_complex_dtensor(arg: torch.Tensor | Any) -> torch.Tensor | Any:
     if not isinstance(arg, torch.Tensor):
         return arg
 
-    return dist.tensor.DTensor.from_local(_as_complex_tensor(arg), device_mesh=DEVICE_MESH)
+    return dist.tensor.DTensor.from_local(
+        _as_complex_tensor(arg), device_mesh=DEVICE_MESH
+    )
 
 
-TRANSFORM_FUNCS = {Variant.Op: _as_complex_tensor, Variant.Distributed: _as_complex_dtensor}
+TRANSFORM_FUNCS = {
+    Variant.Op: _as_complex_tensor,
+    Variant.Distributed: _as_complex_dtensor,
+}
 
 
 class TestComplexTensor(TestCase):
     _default_dtype_check_enabled = True
 
     @parametrize("compile", [False, True])
-    @ops(implemented_op_db, dtypes=OpDTypes.supported, allowed_dtypes=list(COMPLEX_DTYPES))
+    @ops(
+        implemented_op_db,
+        dtypes=OpDTypes.supported,
+        allowed_dtypes=list(COMPLEX_DTYPES),
+    )
     def test_consistency(self, device, dtype, op: OpInfo, compile: bool):
         self.check_consistency(device, dtype, op, compile, Variant.Op)
 
@@ -258,20 +286,32 @@ class TestComplexTensor(TestCase):
         for sample_input in sample_inputs:
 
             def expected(sample_input=sample_input):
-                return op_eager(sample_input.input, *sample_input.args, **sample_input.kwargs)
+                return op_eager(
+                    sample_input.input, *sample_input.args, **sample_input.kwargs
+                )
 
             subclass_sample = sample_input.transform(transform_fn)
 
             def actual(subclass_sample=subclass_sample):
-                return op(subclass_sample.input, *subclass_sample.args, **subclass_sample.kwargs)
+                return op(
+                    subclass_sample.input,
+                    *subclass_sample.args,
+                    **subclass_sample.kwargs,
+                )
 
             self.assertSameResult(expected, actual, ignore_exc_types=compile, **kwargs)
 
 
 @unMarkDynamoStrictTest
 class TestComplexBwdGradients(TestGradients):
-    @ops(implemented_op_db, dtypes=OpDTypes.supported_backward, allowed_dtypes=[torch.complex128])
-    def test_fn_grad(self, device: torch.device, dtype: torch.dtype, op: OpInfo) -> None:
+    @ops(
+        implemented_op_db,
+        dtypes=OpDTypes.supported_backward,
+        allowed_dtypes=[torch.complex128],
+    )
+    def test_fn_grad(
+        self, device: torch.device, dtype: torch.dtype, op: OpInfo
+    ) -> None:
         test_info = Descriptor(
             op=get_overload_packet_from_name(op.name),
             device=device,

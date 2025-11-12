@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields
-from enum import Enum, auto
+from enum import auto, Enum
 from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
+from torch.complex.complextensor.ops.common import _as_interleaved, COMPLEX_TO_REAL
 from torch.testing._internal.common_utils import TestCase as PytorchTestCase
 from torch.utils._pytree import tree_flatten
 
-from torch.complex.complextensor.ops.common import COMPLEX_TO_REAL, _as_interleaved
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
     from torch._ops import OpOverloadPacket
 
 COMPLEX_DTYPES = set(COMPLEX_TO_REAL)
@@ -80,14 +81,20 @@ class TestCase(PytorchTestCase):
         if ((exception_e is None) != (exception_a is None)) or not ignore_exc_types:
             if exception_a is not None and exception_e is None:
                 raise exception_a
-            self.assertIs(type(exception_e), type(exception_a), f"\n{exception_e=}\n{exception_a=}")
+            self.assertIs(
+                type(exception_e),
+                type(exception_a),
+                f"\n{exception_e=}\n{exception_a=}",
+            )
 
         if exception_e is None:
             flattened_e, spec_e = tree_flatten(result_e)
             flattened_a, spec_a = tree_flatten(result_a)
 
             self.assertEqual(
-                spec_e, spec_a, "Both functions must return a result with the same tree structure."
+                spec_e,
+                spec_a,
+                "Both functions must return a result with the same tree structure.",
             )
             for value_e, value_a in zip(flattened_e, flattened_a, strict=True):
                 value_e = _as_interleaved(_as_local(value_e))

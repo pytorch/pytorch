@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from contextvars import ContextVar, Token
-from typing import Any, overload
+from typing import Any, overload, TypeAlias
 from typing_extensions import Self, TypeIs
 
 import torch
@@ -15,11 +15,11 @@ from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 from ..core import ComplexTensor
 
 
-OpType = OpOverloadPacket | OpOverload
+OpType: TypeAlias = OpOverloadPacket | OpOverload
 
-TableType = dict[OpType, Callable]
+TableType: TypeAlias = dict[OpType, Callable]
 
-DebugSetType = set[OpType] | None
+DebugSetType: TypeAlias = set[OpType] | None
 
 # Mapping from ops to implementations
 COMPLEX_OPS_TABLE: TableType = {}

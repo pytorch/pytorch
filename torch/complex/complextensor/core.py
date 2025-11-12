@@ -101,7 +101,7 @@ class ComplexTensor(Tensor):
     def __torch_dispatch__(
         cls,
         func: OpOverload,
-        types: tuple[type],
+        types: tuple[type, ...],
         args: tuple = (),
         kwargs: dict | None = None,
     ):
