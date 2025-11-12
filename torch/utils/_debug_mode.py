@@ -198,9 +198,6 @@ def _get_stack_trace() -> str:
 
 def _get_user_stack_trace(stack_trace_str: str) -> str | None:
     # Extract user code stack trace, filtering out torch internals.
-    if not stack_trace_str:
-        return None
-
     torch_dir = os.path.dirname(inspect.getfile(torch))
     filter_fn = lambda file, name, code: not file.startswith(torch_dir + os.path.sep)
     trace = _parse_stack_trace(stack_trace_str, filter_fn=filter_fn)
