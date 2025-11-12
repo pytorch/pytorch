@@ -1545,7 +1545,6 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
 
 
 def is_valid_addmm_activation_fusion(match: Match) -> bool:
-    print("HERE")
     if not is_gpu(match.kwargs["inp"].meta["val"].device.type):
         return False
 
@@ -1575,7 +1574,7 @@ def is_valid_addmm_activation_fusion(match: Match) -> bool:
     pass_dict=pass_patterns[1],
     extra_check=is_valid_addmm_activation_fusion,
 )
-def relu_addmm_activation(match: Match, mat1, mat2, *, inp, alpha, beta):
+def relu_addmm_fusion(match: Match, mat1, mat2, *, inp, alpha, beta):
     def replacement(inp, mat1, mat2, alpha, beta):
         return aten._addmm_activation(inp, mat1, mat2, alpha=alpha, beta=beta)
 
@@ -1593,7 +1592,7 @@ def relu_addmm_activation(match: Match, mat1, mat2, *, inp, alpha, beta):
     pass_dict=pass_patterns[1],
     extra_check=is_valid_addmm_activation_fusion,
 )
-def gelu_addmm_activation(match: Match, mat1, mat2, *, inp, alpha, beta):
+def gelu_addmm_fusion(match: Match, mat1, mat2, *, inp, alpha, beta):
     def replacement(inp, mat1, mat2, alpha, beta):
         return aten._addmm_activation(inp, mat1, mat2, alpha=alpha, beta=beta, use_gelu=True)
 
