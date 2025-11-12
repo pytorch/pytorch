@@ -133,6 +133,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     HAS_MPS,
     HAS_MULTIGPU,
+    HAS_TPU,
     IS_BIG_GPU,
     requires_gpu,
     RUN_CPU,

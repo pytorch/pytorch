@@ -34,7 +34,7 @@ from torch._inductor.utils import (
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.utils._helion import has_helion
-from torch.utils._pallas import has_pallas
+from torch.utils._pallas import has_pallas, has_torch_xla_device
 from torch.utils._triton import has_triton
 from torch.utils._config_module import ConfigModule
 from torch.testing._internal.common_device_type import (
@@ -88,6 +88,7 @@ HAS_MPS = torch.mps.is_available()
 
 HAS_GPU = HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON
 HAS_GPU_AND_TRITON = HAS_GPU
+HAS_TPU = has_torch_xla_device()
 
 GPU_TYPE = get_gpu_type()
 

@@ -12,6 +12,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.testing._internal.inductor_utils import HAS_PALLAS
+from torch.utils._pallas import has_cuda_pallas, has_tpu_pallas
 from torch.utils._triton import has_triton
 
 
@@ -420,7 +421,7 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
 
-@unittest.skipUnless(HAS_PALLAS, "requires jax and pallas")
+@unittest.skipUnless(has_cuda_pallas(), "Pallas on CUDA is not available")
 class PallasTestsCUDA(PallasTestsMixin, TestCase):
     DEVICE = "cuda"
 
@@ -439,6 +440,23 @@ if test_torchinductor.HAS_GPU and HAS_PALLAS:
     # make_pallas(test_torchinductor.SweepInputsGPUTest)
     # make_pallas(test_torchinductor.GPUTests)
     pass
+
+
+
+@unittest.skipUnless(has_tpu_pallas(), "Pallas on TPU is not available")
+class PallasTestsXLA(PallasTestsMixin, TestCase):
+    DEVICE = "xla"
+
+
+@unittest.skipUnless(test_torchinductor.HAS_TPU, "Requires TPU")
+class PallasUtilTests(TestCase):
+    def test_has_torch_xla_device(self):
+        from torch.utils._pallas import has_torch_xla_device
+        self.assertTrue(has_torch_xla_device(), "has_torch_xla_device() should be True on a TPU machine")
+
+    def test_has_tpu_pallas(self):
+        from torch.utils._pallas import has_tpu_pallas
+        self.assertTrue(has_tpu_pallas(), "has_tpu_pallas() should be True on a TPU machine with JAX/XLA installed")
 
 
 if __name__ == "__main__":
