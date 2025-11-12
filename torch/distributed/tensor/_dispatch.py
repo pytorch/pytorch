@@ -202,10 +202,6 @@ class OpDispatcher:
         if participating:
             # computation that happens in the current rank of the mesh, normal case
             if output_sharding.needs_redistribute:
-                if ExplicitRedistributionContext.is_active():
-                    raise RuntimeError(
-                        f"Implicit redistribution occurred while ExplicitRedistributionContext was active for {op_info.schema}"
-                    )
                 # If sharding propagation decision needs redistribute, perform redistribute
                 # on args first, which could potentially modify args (i.e. allgather certain arg)
                 assert output_sharding.redistribute_schema is not None
@@ -390,7 +386,14 @@ class OpDispatcher:
                         if debug_mode is not None
                         else contextlib.nullcontext()
                     )
-
+                    if not ExplicitRedistributionContext.is_redistribute_allowed(
+                        arg_spec,
+                        # pyrefly: ignore [bad-argument-type]
+                        reshard_arg_spec,
+                    ):
+                        raise RuntimeError(
+                            f"Implicit redistribution occurred for {op_info.schema} while ExplicitRedistributionContext was active"
+                        )
                     with redistribute_context:
                         resharded_local_tensor = redistribute_local_tensor(
                             local_tensor,

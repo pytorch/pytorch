@@ -221,7 +221,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 """
             )
 
-        self.add_device_include(self.device)
+        for device in V.graph.device_types:
+            if device != "meta":
+                self.add_device_include(device)
 
         if V.graph.aot_mode:
             if config.aot_inductor.dynamic_linkage:
@@ -1423,11 +1425,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         src_is_tensor,
         reduce,
         kwargs,
+        device,
     ):
         reduce = self._get_scatter_reduce_enum(reduce)
 
         # call the ABI shim function instead of the ATen one
-        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, self.device)
+        self.add_device_include(device)
+        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, device)
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
         cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
         inputs_wrapped = [str(x) for x in inputs]

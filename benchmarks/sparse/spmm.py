@@ -83,10 +83,13 @@ if __name__ == "__main__":
 
     if args.outfile == "stdout":
         outfile = sys.stdout
+        need_close = False
     elif args.outfile == "stderr":
         outfile = sys.stderr
+        need_close = False
     else:
         outfile = open(args.outfile, "a")
+        need_close = True
 
     test_count = args.test_count
     m = args.m
@@ -147,3 +150,5 @@ if __name__ == "__main__":
             time,
             file=outfile,
         )
+    if need_close:
+        outfile.close()
