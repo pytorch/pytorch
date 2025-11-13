@@ -24,6 +24,7 @@ from torch._export.passes.lift_constants_pass import ConstantAttrMap
 from torch._export.utils import _fakify_params_buffers
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
@@ -101,7 +102,7 @@ class _KeyPathTrie:
             assert len(kp) > 0
             k, *kp = kp  # type: ignore[assignment]
             node = node[k]
-        # pyrefly: ignore  # bad-return
+        # pyrefly: ignore [bad-return]
         return node, kp
 
 
@@ -356,12 +357,12 @@ def _override_builtin_ops():
     original_min = builtins.min
     original_pow = math.pow
 
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     builtins.max = functools.partial(
         _tensor_min_max, real_callable=original_max, tensor_callable=torch.maximum
     )
 
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     builtins.min = functools.partial(
         _tensor_min_max, real_callable=original_min, tensor_callable=torch.minimum
     )
@@ -946,7 +947,9 @@ def _fakify_script_objects(
 
     try:
         for obj, fqns in constant_attrs.items():
-            if torch._library.fake_class_registry._is_script_object(obj):
+            if torch._library.fake_class_registry._is_script_object(
+                obj
+            ) or is_opaque_type(obj):
                 fake_script_obj = _maybe_fakify_obj(obj)
                 for fqn in fqns:
                     cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
@@ -1087,7 +1090,7 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
 
                 def run():
                     # Run sequence.
-                    # pyrefly: ignore  # index-error
+                    # pyrefly: ignore [index-error]
                     t = args[0]
                     for _method, _args in sequence:
                         t = _method(t, *_args)

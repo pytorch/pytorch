@@ -178,7 +178,7 @@ class TestSparseBase(TestCase):
 class TestSparse(TestSparseBase):
 
     def setUp(self):
-        TestCase.setUp(self)
+        super().setUp()
 
         self.index_tensor = lambda *args, **kwargs: torch.tensor(*args, **kwargs, dtype=torch.int64)
 
@@ -216,6 +216,12 @@ class TestSparse(TestSparseBase):
                 return True
             else:
                 existing_indices.add(index)
+
+    def test_negative_indices(self):
+        indices = torch.tensor([[0, 1, -1], [2, 0, 1]])
+        values = torch.tensor([1, 2, 3])
+        shape = torch.Size([3, 3])
+        self.assertRaisesRegex(RuntimeError, "found negative index", lambda: torch.sparse_coo_tensor(indices, values, shape))
 
     def randn(self, *args, **kwargs):
         """
@@ -1333,7 +1339,7 @@ class TestSparse(TestSparseBase):
         res_sparse = t.to_sparse().index_select(0, idx_empty)
         self.assertEqual(res_dense, res_sparse)
 
-        # non-contigous index
+        # non-contiguous index
         idx = torch.randint(low=0, high=5, size=(10, 2), device=device)[:, 0]
 
         def run_test(sizes):
@@ -1427,7 +1433,7 @@ class TestSparse(TestSparseBase):
         def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
             a_list = []
             b_list = []
-            for mat_idx in range(num_mats):
+            for _ in range(num_mats):
                 a_mat = self._gen_sparse(2, nnz, [dim_i, dim_j], dtype, device, coalesced)[0]
                 b_mat = torch.randn([dim_j, dim_k], dtype=dtype, device=device)
                 a_list.append(a_mat)
@@ -1483,7 +1489,7 @@ class TestSparse(TestSparseBase):
         def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
             a_list = []
             b_list = []
-            for mat_idx in range(num_mats):
+            for _ in range(num_mats):
                 a_list.append(self._gen_sparse(2, nnz, [dim_i, dim_j], dtype, device, coalesced)[0])
                 b_list.append(torch.randn([dim_j, dim_k], dtype=dtype, device=device))
 
@@ -2668,7 +2674,6 @@ class TestSparse(TestSparseBase):
             self._test_asin_arcsin(input_uncoalesced, coalesced)
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     def test_mv(self, device, dtype, coalesced):
@@ -3552,7 +3557,7 @@ class TestSparse(TestSparseBase):
                         values = torch.ones((indices.shape[1],) + shape[sparse_dim:], dtype=dtype, device=device)
                     else:
                         ranges = []
-                        for j, sz in enumerate(shape[:sparse_dim]):
+                        for sz in shape[:sparse_dim]:
                             ranges.append(list(range(sz)))
                         indices = torch.tensor(list(itertools.product(*ranges)), dtype=torch.long, device=device).t()
                         values = torch.zeros((indices.shape[1],) + shape[sparse_dim:], dtype=dtype, device=device)
@@ -3723,7 +3728,6 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @dtypes(*floating_and_complex_types())
     @dtypesIfMPS(*all_mps_types())
-    @expectedFailureMPS
     @dtypesIfCUDA(*floating_types_and(*[torch.half] if SM53OrLater and not TEST_WITH_ROCM else [],
                                       *[torch.bfloat16] if SM80OrLater and not TEST_WITH_ROCM else [],
                                       torch.complex64,
@@ -3820,9 +3824,9 @@ class TestSparse(TestSparseBase):
             def different_dtypes():
                 a, i_a, v_a = self._gen_sparse(2, 10, [2, 2], dtype, device, coalesced)
                 b, i_b, v_b = self._gen_sparse(2, 10, [2, 2], dtype, device, coalesced)
-                r2 = torch.sparse.mm(a.to(torch.float64), a.to(torch.float32))
+                r2 = torch.sparse.mm(a.to(torch.float32), a.to(torch.float16))
 
-            self.assertRaisesRegex(RuntimeError, 'mat1 dtype Double does not match mat2 dtype Float', different_dtypes)
+            self.assertRaisesRegex(RuntimeError, 'mat1 dtype Float does not match mat2 dtype Half', different_dtypes)
 
         def test_backward_noncontiguous():
             # Sparse.mm backward used to wrong with non-contiguous grads,

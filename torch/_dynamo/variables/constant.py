@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 """
 Constant and enum variable tracking in Dynamo.
 
@@ -8,14 +6,15 @@ values during compilation, ensuring proper handling of Python literals and
 maintaining type safety through the compilation process.
 """
 
+import enum
 import operator
-from typing import TYPE_CHECKING
+from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.source import AttrSource, GetItemSource
 
 from .. import graph_break_hints, variables
-from ..exc import raise_observed_exception, unimplemented_v2
+from ..exc import raise_observed_exception, unimplemented
 from ..utils import (
     cmp_name_to_op_mapping,
     common_constant_types,
@@ -23,7 +22,7 @@ from ..utils import (
     np,
     raise_args_mismatch,
 )
-from .base import VariableTracker
+from .base import ValueMutationNew, VariableTracker
 
 
 if TYPE_CHECKING:
@@ -40,7 +39,7 @@ class ConstantVariable(VariableTracker):
     """
 
     @staticmethod
-    def create(value, **kwargs) -> VariableTracker:
+    def create(value: Any, **kwargs: Any) -> VariableTracker:
         """
         Create a `ConstantVariable` based on the given value, and supports
         automatic routing for collection types like `tuple` (in which case we'd
@@ -76,7 +75,7 @@ class ConstantVariable(VariableTracker):
 
         return ConstantVariable(value, **kwargs)
 
-    def __init__(self, value, **kwargs) -> None:
+    def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         assert ConstantVariable.is_base_literal(value), f"""
 Cannot construct `ConstantVariable` for value of type {type(value)}.
@@ -92,48 +91,52 @@ its type to `common_constant_types`.
         else:
             self.value = value
 
-    def as_proxy(self):
+    def as_proxy(self) -> Any:
         return self.value
 
     def __repr__(self) -> str:
         return f"ConstantVariable({type(self.value).__name__}: {repr(self.value)})"
 
-    def as_python_constant(self):
+    def as_python_constant(self) -> Any:
         return self.value
 
-    def is_python_constant(self):
+    def is_python_constant(self) -> Literal[True]:
         return True
 
     @property
-    def items(self):
+    def items(self) -> list[VariableTracker]:
         """
         Need this when adding a BaseListVariable and a ConstantVariable together.
         Happens in detectron2.
         """
         return self.unpack_var_sequence(tx=None)
 
-    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
+    def getitem_const(
+        self, tx: "InstructionTranslator", arg: VariableTracker
+    ) -> VariableTracker:
         return ConstantVariable.create(
             self.value[arg.as_python_constant()],
         )
 
     @staticmethod
-    def is_base_literal(obj):
+    def is_base_literal(obj: object) -> bool:
         return type(obj) in common_constant_types
 
     @staticmethod
-    def is_literal(obj):
+    def is_literal(obj: object) -> bool:
         if type(obj) in (list, tuple, set, frozenset, torch.Size):
-            return all(ConstantVariable.is_literal(x) for x in obj)
+            return all(ConstantVariable.is_literal(x) for x in obj)  # type: ignore[attr-defined]
         return ConstantVariable.is_base_literal(obj)
 
-    def unpack_var_sequence(self, tx):
+    def unpack_var_sequence(
+        self, tx: Optional["InstructionTranslator"]
+    ) -> list[VariableTracker]:
         try:
             return [ConstantVariable.create(x) for x in self.as_python_constant()]
         except TypeError as e:
             raise NotImplementedError from e
 
-    def const_getattr(self, tx: "InstructionTranslator", name):
+    def const_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if not hasattr(self.value, name):
             raise_observed_exception(AttributeError, tx, args=[name])
         member = getattr(self.value, name)
@@ -144,10 +147,10 @@ its type to `common_constant_types`.
     def call_method(
         self,
         tx: "InstructionTranslator",
-        name,
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
-    ) -> "VariableTracker":
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         from .tensor import SymNodeVariable
 
         if name == "format" and istype(self.value, str):
@@ -168,12 +171,20 @@ its type to `common_constant_types`.
                 return ConstantVariable.create(self.value.join(arg_const))
             except NotImplementedError:
                 return super().call_method(tx, name, args, kwargs)
+        elif name == "__iter__" and istype(self.value, str):
+            # this could be some generic iterator to avoid the circular import,
+            # but ListIterator does what we want
+            from .lists import ListIteratorVariable
+
+            return ListIteratorVariable(
+                self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
+            )
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
-            return variables.SymNodeVariable(self.as_proxy(), self.value).call_method(
-                tx, name, args, kwargs
-            )
+            return variables.SymNodeVariable.create(
+                tx, self.as_proxy(), self.value
+            ).call_method(tx, name, args, kwargs)
 
         try:
             const_args = [a.as_python_constant() for a in args]
@@ -181,7 +192,7 @@ its type to `common_constant_types`.
         except NotImplementedError:
             return super().call_method(tx, name, args, kwargs)
 
-        if isinstance(self.value, str) and name in str.__dict__.keys():
+        if isinstance(self.value, str) and name in str.__dict__:
             method = getattr(self.value, name)
             try:
                 return ConstantVariable.create(method(*const_args, **const_kwargs))
@@ -222,7 +233,7 @@ its type to `common_constant_types`.
         elif isinstance(self.value, bytes) and name == "decode":
             method = getattr(self.value, name)
             return ConstantVariable.create(method(*const_args, **const_kwargs))
-        elif type(self.value) is complex and name in complex.__dict__.keys():
+        elif type(self.value) is complex and name in complex.__dict__:
             method = getattr(self.value, name)
             try:
                 return ConstantVariable.create(method(*const_args, **const_kwargs))
@@ -230,10 +241,12 @@ its type to `common_constant_types`.
                 raise_observed_exception(type(e), tx)
 
         if name == "__len__" and not (args or kwargs):
+            # pyrefly: ignore [bad-argument-type]
             return ConstantVariable.create(len(self.value))
         elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
             try:
                 return ConstantVariable.create(
+                    # pyrefly: ignore [no-matching-overload]
                     round(self.value, args[0].as_python_constant())
                 )
             except Exception as e:
@@ -244,6 +257,7 @@ its type to `common_constant_types`.
             assert not kwargs
             search = args[0].as_python_constant()
             try:
+                # pyrefly: ignore [unsupported-operation]
                 result = search in self.value
                 return ConstantVariable.create(result)
             except TypeError as e:
@@ -254,7 +268,7 @@ its type to `common_constant_types`.
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> "VariableTracker":
+    ) -> VariableTracker:
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
@@ -266,17 +280,19 @@ class EnumVariable(VariableTracker):
     both standard Enum and IntEnum with proper value tracking and comparison.
     """
 
-    def __init__(self, value, **kwargs) -> None:
+    def __init__(self, value: Union[enum.Enum, enum.IntEnum], **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
 
     @classmethod
-    def create(cls, cls_type, value_vt, options):
+    def create(
+        cls, cls_type: Any, value_vt: VariableTracker, options: Any
+    ) -> "EnumVariable":
         if isinstance(value_vt, variables.ConstantVariable):
             for member in list(cls_type):
                 if member.value == value_vt.as_python_constant():
                     return cls(member, **options)
-        unimplemented_v2(
+        unimplemented(
             gb_type="Failed to construct Enum variable",
             context=f"value: {value_vt}, allowed enum values: {list(cls_type)}",
             explanation="Attempted to construct an Enum value that is non-constant (e.g. int, string) "
@@ -285,7 +301,7 @@ class EnumVariable(VariableTracker):
             hints=[*graph_break_hints.USER_ERROR, *graph_break_hints.SUPPORTABLE],
         )
 
-    def as_proxy(self):
+    def as_proxy(self) -> Union[enum.Enum, int]:
         if isinstance(self.value, int):
             return int(self.value)  # convert IntEnum to a normal int
         return self.value
@@ -293,10 +309,10 @@ class EnumVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"EnumVariable({type(self.value)})"
 
-    def as_python_constant(self):
+    def as_python_constant(self) -> Union[enum.Enum, enum.IntEnum]:
         return self.value
 
-    def var_getattr(self, tx: "InstructionTranslator", name):
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if not hasattr(self.value, name):
             raise NotImplementedError
         if name in cmp_name_to_op_mapping:

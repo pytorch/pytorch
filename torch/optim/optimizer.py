@@ -62,7 +62,7 @@ def _use_grad_for_differentiable(func: Callable[_P, _T]) -> Callable[_P, _T]:
     def _use_grad(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         import torch._dynamo
 
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         self = cast(Optimizer, args[0])  # assume first positional arg is `self`
         prev_grad = torch.is_grad_enabled()
         try:
@@ -136,13 +136,13 @@ def _disable_dynamo_if_unsupported(
             if torch.compiler.is_compiling() and (
                 not kwargs.get("capturable", False)
                 and has_state_steps
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 and (arg := args[state_steps_ind])
                 and isinstance(arg, Sequence)
                 and arg[0].is_cuda
                 or (
                     "state_steps" in kwargs
-                    # pyrefly: ignore  # unsupported-operation
+                    # pyrefly: ignore [unsupported-operation]
                     and (kwarg := kwargs["state_steps"])
                     and isinstance(kwarg, Sequence)
                     and kwarg[0].is_cuda
@@ -204,7 +204,7 @@ def _device_dtype_check_for_fused(
         )
 
 
-def _view_as_real(params, *state_and_grads):
+def _view_as_real(params, *state_and_grads) -> None:
     for i, p in enumerate(params):
         if torch.is_complex(p):
             params[i] = torch.view_as_real(params[i])
@@ -362,18 +362,18 @@ class Optimizer:
 
     _optimizer_step_pre_hooks: dict[int, OptimizerPreHook]
     _optimizer_step_post_hooks: dict[int, OptimizerPostHook]
-    # pyrefly: ignore  # not-a-type
+    # pyrefly: ignore [not-a-type]
     _optimizer_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
     _optimizer_state_dict_post_hooks: (
-        # pyrefly: ignore  # not-a-type
+        # pyrefly: ignore [not-a-type]
         'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
     )
     _optimizer_load_state_dict_pre_hooks: (
-        # pyrefly: ignore  # not-a-type
+        # pyrefly: ignore [not-a-type]
         'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
     )
     _optimizer_load_state_dict_post_hooks: (
-        # pyrefly: ignore  # not-a-type
+        # pyrefly: ignore [not-a-type]
         'OrderedDict[int, Callable[["Optimizer"], None]]'
     )
 
@@ -522,7 +522,7 @@ class Optimizer:
                                 f"{func} must return None or a tuple of (new_args, new_kwargs), but got {result}."
                             )
 
-                # pyrefly: ignore  # invalid-param-spec
+                # pyrefly: ignore [invalid-param-spec]
                 out = func(*args, **kwargs)
                 self._optimizer_step_code()
 
@@ -941,7 +941,9 @@ class Optimizer:
             )
         param_lens = (len(g["params"]) for g in groups)
         saved_lens = (len(g["params"]) for g in saved_groups)
-        if any(p_len != s_len for p_len, s_len in zip(param_lens, saved_lens)):
+        if any(
+            p_len != s_len for p_len, s_len in zip(param_lens, saved_lens, strict=True)
+        ):
             raise ValueError(
                 "loaded state dict contains a parameter group "
                 "that doesn't match the size of optimizer's group"
@@ -952,6 +954,7 @@ class Optimizer:
             zip(
                 chain.from_iterable(g["params"] for g in saved_groups),
                 chain.from_iterable(g["params"] for g in groups),
+                strict=True,
             )
         )
 
@@ -961,9 +964,9 @@ class Optimizer:
                 return Optimizer._process_value_according_to_param_policy(
                     param,
                     value,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     param_id,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     param_groups,
                     key,
                 )
@@ -976,7 +979,7 @@ class Optimizer:
                 }
             elif isinstance(value, Iterable):
                 return type(value)(
-                    # pyrefly: ignore  # bad-argument-count
+                    # pyrefly: ignore [bad-argument-count]
                     _cast(param, v, param_id=param_id, param_groups=param_groups)
                     for v in value
                 )  # type: ignore[call-arg]
@@ -1005,7 +1008,9 @@ class Optimizer:
                 new_group["param_names"] = group["param_names"]
             return new_group
 
-        param_groups = [update_group(g, ng) for g, ng in zip(groups, saved_groups)]
+        param_groups = [
+            update_group(g, ng) for g, ng in zip(groups, saved_groups, strict=True)
+        ]
         self.__setstate__({"state": state, "param_groups": param_groups})
 
         for post_hook in self._optimizer_load_state_dict_post_hooks.values():

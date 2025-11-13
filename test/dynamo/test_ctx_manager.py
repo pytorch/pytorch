@@ -230,7 +230,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 12)
+        self.assertExpectedInline(str(cnts.op_count), """9""")
 
     @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
@@ -335,7 +335,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 21)
+        self.assertExpectedInline(str(cnts.op_count), """15""")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_compared_with_constant(self):
@@ -408,6 +408,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertEqual(ref0, res0)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skip(
+        "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
+    )
     def test_cuda_event_reconstruct(self):
         def fn(x):
             e = torch.cuda.Event()
@@ -425,6 +428,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertEqual(cnts.op_count, 3)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skip(
+        "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
+    )
     def test_cuda_event_across_graph_break(self):
         def fn(x):
             e = torch.cuda.Event()
@@ -446,9 +452,12 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         res = opt_fn(x)
         self.assertEqual(ref[0], res[0])
         self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 9)
+        self.assertEqual(cnts.op_count, 10)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skip(
+        "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
+    )
     def test_cuda_event_created_outside_of_graph(self):
         user_stream = torch.cuda.Stream()
         event = torch.cuda.Event()
@@ -478,9 +487,12 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         res = run_iters(func, compile=True)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 3)
+        self.assertEqual(cnts.op_count, 4)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skip(
+        "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
+    )
     def test_cuda_event_method_create_stream_outside_of_compile(self):
         def fn(x, cur_stream, new_stream):
             x = torch.mul(x, 1)
@@ -517,7 +529,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         res = opt_fn(x, cur_stream, new_stream)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 19)
+        self.assertExpectedInline(str(cnts.op_count), """16""")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_event_method(self):
@@ -537,7 +549,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
             with torch.cuda.stream(new_stream):
                 x = torch.add(x, 4)
 
-            new_event = torch.cuda.Event()
+            new_event = torch.Event()
             new_event.record(new_stream)
 
             new_event.wait(cur_stream)
@@ -557,7 +569,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 19)
+        self.assertExpectedInline(str(cnts.op_count), """16""")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_device(self):

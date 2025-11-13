@@ -26,6 +26,7 @@ from torch._dynamo.utils import (
 from torch._guards import detect_fake_mode
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.utils import BoxedBool
+from torch._library.autograd import autograd_fallback_mode
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -528,8 +529,12 @@ def create_aot_state(
     stack.enter_context(
         torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing()
     )
+    # Make it an error to backprop through PT2 compliant ops that silently
+    # detach autograd
+    stack.enter_context(autograd_fallback_mode("error"))
 
     from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
+    from torch._library.opaque_object import is_opaque_type
 
     # Tracing may mutate the states the fake script object,
     # so we need to duplicate the fake script objects so that subsequent tracing
@@ -537,7 +542,7 @@ def create_aot_state(
     def _dup_fake_script_obj(fake_flat_args):
         return [
             maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
-            if isinstance(arg, FakeScriptObject)
+            if isinstance(arg, FakeScriptObject) or is_opaque_type(type(arg))
             else arg
             for arg in fake_flat_args
         ]
@@ -975,7 +980,9 @@ def prepare_aot_module_simplified(
     (
         aot_autograd_arg_pos_to_source,
         static_input_indices,
-    ) = _try_get_metadata_from_dynamo(mod, params_buffers.keys(), len(full_args))
+    ) = _try_get_metadata_from_dynamo(
+        mod, params_buffers.keys(), len(full_args), full_args_descs
+    )
 
     dynamic_shapes = False
     for x in full_args:
@@ -1590,7 +1597,7 @@ def aot_export_joint_simple(
             decompositions=decompositions,
             trace_joint=trace_joint,
         )
-        in_spec, _kw_in_spec = in_spec.children_specs
+        in_spec, _kw_in_spec = in_spec.children()
     # At this point, we can just directly return the (joint or inference graph) that we traced.
     # First though: a bunch of assertions to make sure that our graph doesn't require
     # any calling convention changes compared to the original function.
@@ -1617,7 +1624,7 @@ def aot_export_joint_simple(
         raise RuntimeError(
             f"aot_export_joint_simple requires inputs to be a single list/tuple. in_spec={str(in_spec)}"
         )
-    if not all(child.is_leaf() for child in in_spec.children_specs):
+    if not all(child.is_leaf() for child in in_spec.children()):
         raise RuntimeError(
             f"aot_export_joint_simple requires individual inputs not to be pytrees. in_spec={str(in_spec)}"
         )
@@ -1625,7 +1632,7 @@ def aot_export_joint_simple(
         raise RuntimeError(
             f"aot_export_joint_simple requires outputs to be a single list/tuple. out_spec={str(out_spec)}"
         )
-    if not all(child.is_leaf() for child in out_spec.children_specs):
+    if not all(child.is_leaf() for child in out_spec.children()):
         raise RuntimeError(
             f"aot_export_joint_simple requires individual outputs not to be pytrees. out_spec={str(out_spec)}"
         )

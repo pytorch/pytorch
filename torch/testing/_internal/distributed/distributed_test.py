@@ -215,19 +215,16 @@ def get_profiling_event(event_name, profiler, dedup_gpu_user_annotation=False):
 def get_profiler_nccl_meta(prof):
     """Torch profiler includes nccl metadata in an inserted operator called "record_param_comms"
     We will need to test metadata obtained from profiler here"""
-    tf = tempfile.NamedTemporaryFile(mode="w+t", suffix=".json", delete=False)
-    tf.close()
-    trace_file = tf.name
+    with tempfile.NamedTemporaryFile(mode="w+t", suffix=".json") as tf:
+        tf.close()
+        trace_file = tf.name
 
-    prof.export_chrome_trace(trace_file)
-    with open(trace_file) as f:
-        events = json.load(f)["traceEvents"]
-    print(f"Trace saved to {trace_file}")
+        prof.export_chrome_trace(trace_file)
+        with open(trace_file) as f:
+            events = json.load(f)["traceEvents"]
+        print(f"Trace saved to {trace_file}")
 
-    # Comment to debug
-    os.remove(trace_file)
-
-    return [e for e in events if e.get("name") == "record_param_comms"]
+        return [e for e in events if e.get("name") == "record_param_comms"]
 
 
 # Base error message substring on unfinished reductions.
@@ -6094,7 +6091,7 @@ class DistributedTest:
                 dim=1,
             ).cuda(rank)
 
-            for i in range(100):
+            for _ in range(100):
                 y = model(input_var[rank].cuda(rank))
                 y.mean().backward()
 
@@ -6467,7 +6464,7 @@ class DistributedTest:
         def _run_reduction_test(
             self, tensor, expected_tensor, op, reduction_fn=dist.all_reduce, dst=None
         ):
-            if reduction_fn != dist.all_reduce and dst is None:
+            if reduction_fn is not dist.all_reduce and dst is None:
                 raise ValueError(f"Reduction fn {reduction_fn} must specify dst!")
             if dst is not None:
                 reduction_fn(tensor, dst, op)
@@ -7050,8 +7047,8 @@ class DistributedTest:
 
                 self.assertGreaterEqual(attrs.get("in_msg_nelems", -1), 0)
                 self.assertGreaterEqual(attrs.get("out_msg_nelems", -1), 0)
-                self.assertTrue("in_split_size" in attrs.keys())
-                self.assertTrue("out_split_size" in attrs.keys())
+                self.assertTrue("in_split_size" in attrs)
+                self.assertTrue("out_split_size" in attrs)
                 self.assertEqual(attrs.get("global_rank_start", -1), 0)
                 self.assertEqual(attrs.get("global_rank_stride", -1), 1)
 
@@ -7486,7 +7483,7 @@ class DistributedTest:
                         # iterate offset//2 more times than rank 0, to test nodes
                         # depleting inputs at different times.
                         if num_early_join_ranks > 1:
-                            for rank in mapping.keys():
+                            for rank in mapping:
                                 if rank > 0:
                                     mapping[rank] += offset // 2
                         mapping.update(
@@ -7888,8 +7885,8 @@ class DistributedTest:
                 return x.t
 
             def dict_validator(x):
-                self.assertTrue(EXPECTED_FIELDS[0] in x.keys())
-                self.assertTrue(EXPECTED_FIELDS[1] in x.keys())
+                self.assertTrue(EXPECTED_FIELDS[0] in x)
+                self.assertTrue(EXPECTED_FIELDS[1] in x)
                 self.assertEqual(1, len({t.device for t in x.values()}))
                 self.assertEqual(x[EXPECTED_FIELDS[0]].device.index, self.rank)
                 return x[EXPECTED_FIELDS[0]] + x[EXPECTED_FIELDS[1]]
@@ -9306,7 +9303,7 @@ class DistributedTest:
                 "tuple": tuple,
                 "dict": dict,
             }
-            for output_type in type_mapping.keys():
+            for output_type in type_mapping:
                 for _ in range(6):
                     out = model(inp, output_type=output_type)
                     loss = get_loss(out)

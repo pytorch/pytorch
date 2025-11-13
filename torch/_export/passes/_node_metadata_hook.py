@@ -32,7 +32,7 @@ def _node_metadata_hook(
     that nodes being added are only call_function nodes, and copies over the
     first argument node's nn_module_stack.
     """
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     fake_mode = fake_mode or contextlib.nullcontext()
 
     assert node.op == "call_function" and callable(node.target), (
@@ -48,7 +48,7 @@ def _node_metadata_hook(
         fake_args, fake_kwargs = pytree.tree_map_only(
             torch.fx.Node, lambda arg: arg.meta["val"], (node.args, node.kwargs)
         )
-        # pyrefly: ignore  # bad-context-manager
+        # pyrefly: ignore [bad-context-manager]
         with fake_mode, enable_python_dispatcher():
             fake_res = node.target(*fake_args, **fake_kwargs)
         node.meta["val"] = fake_res
@@ -84,7 +84,7 @@ def _node_metadata_hook(
         "torch_fn",
         (
             f"{node.target.__name__}_0",
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             f"{node.target.__class__.__name__}.{node.target.__name__}",
         ),
     )

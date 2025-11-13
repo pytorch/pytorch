@@ -1,11 +1,12 @@
 """torch.ops.aten operators under the `core` module."""
 # mypy: disable-error-code="misc,arg-type,type-arg,valid-type,assignment,return-value,type-var,operator,no-untyped-def,index"
+# pyrefly: ignore-errors
 # ruff: noqa: TCH001,TCH002
 # flake8: noqa: B950
 
 from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, Sequence, TYPE_CHECKING  # noqa: UP035
 
 from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
     opset20 as op20,
@@ -23,9 +24,6 @@ if TYPE_CHECKING:
     from onnxscript.values import Opset
 
 aten = torch.ops.aten
-
-_INT64_MAX = 9223372036854775807
-_INT64_MIN = -9223372036854775808
 
 
 @onnx_impl(aten.gelu.default, trace_only=True, opset_introduced=20)
@@ -50,11 +48,9 @@ def aten_group_norm(
 
     c = op21.Shape(input, start=1, end=2)
     if weight is None:
-        # pyrefly: ignore [missing-attribute]
-        weight = op21.ConstantOfShape(c, value=ir.tensor(1.0, dtype=input.dtype))
+        weight = op21.ConstantOfShape(c, value=ir.tensor([1.0], dtype=input.dtype))
     if bias is None:
-        # pyrefly: ignore [missing-attribute]
-        bias = op21.ConstantOfShape(c, value=ir.tensor(0.0, dtype=input.dtype))
+        bias = op21.ConstantOfShape(c, value=ir.tensor([0.0], dtype=input.dtype))
     return op21.GroupNormalization(
         input, weight, bias, epsilon=eps, num_groups=num_groups
     )
@@ -63,7 +59,7 @@ def aten_group_norm(
 @onnx_impl(aten.rms_norm.default, trace_only=True, opset_introduced=23)
 def aten_rms_norm(
     input: TFloat,
-    normalized_shape: list[int],
+    normalized_shape: Sequence[int],
     weight: Optional[TFloat] = None,
     eps: Optional[float] = None,
 ) -> TFloat:
@@ -82,8 +78,9 @@ def aten_rms_norm(
 
     # Create weight tensor if not provided
     if weight is None:
-        # pyrefly: ignore [missing-attribute]
-        weight = op23.Constant(value=ir.tensor(1.0, dtype=input.dtype))
+        weight = op23.ConstantOfShape(
+            op23.Shape(input), value=ir.tensor([1], dtype=input.dtype)
+        )
 
     return op23.RMSNormalization(input, weight, axis=axis, epsilon=eps)
 
@@ -131,7 +128,6 @@ def aten_scaled_dot_product_attention_23(
     assert (not is_causal) or (is_causal and attn_mask is None), (
         "is_causal and attn_mask cannot be set at the same time"
     )
-    # pyrefly: ignore [missing-attribute]
     assert len(query.shape) == 4 and len(key.shape) == 4 and len(value.shape) == 4, (
         "only 4D query, key, and value are supported"
     )
@@ -140,15 +136,12 @@ def aten_scaled_dot_product_attention_23(
     if dropout_p == 0:
         if enable_gqa:
             assert (
-                # pyrefly: ignore [index-error]
                 query.shape[1] > key.shape[1] == value.shape[1]
-                # pyrefly: ignore [index-error]
                 and query.shape[1] % key.shape[1] == 0
             ), (
                 "SDPA (GQA or MQA) requires q_num_heads > kv_num_heads & q_num_heads % kv_num_heads == 0"
             )
         else:
-            # pyrefly: ignore [index-error]
             assert query.shape[1] == key.shape[1] == value.shape[1], (
                 "SDPA (MHA) requires q_num_heads = kv_num_heads"
             )
@@ -209,9 +202,7 @@ def _attention_repeat_kv_for_group_query(
     """
 
     assert (
-        # pyrefly: ignore [missing-attribute]
         query.shape[1] > key.shape[1] == value.shape[1]
-        # pyrefly: ignore [missing-attribute]
         and query.shape[1] % key.shape[1] == 0
     ), (
         "SDPA (GQA or MQA) requires q_num_heads > kv_num_heads & q_num_heads % kv_num_heads == 0"
