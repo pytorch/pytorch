@@ -17,7 +17,7 @@ from torch.testing._internal.common_utils import (
 )
 
 
-class GeneratorTestsBase(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
         self._old = torch._dynamo.config.enable_faithful_generator_behavior

@@ -10,7 +10,7 @@ import torch._dynamo.testing
 global1, global2, global3, global4 = (torch.zeros(3),) * 4
 
 
-class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
     def test_single_graph_break(self):
         # NOTE marking f1, f2, f3 as global
         # prevents them from being freevars
