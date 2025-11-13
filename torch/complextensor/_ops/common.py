@@ -11,7 +11,7 @@ from torch.types import Number
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
-from ..core import ComplexTensor
+from .._core import ComplexTensor
 
 
 OpType: TypeAlias = OpOverloadPacket | OpOverload

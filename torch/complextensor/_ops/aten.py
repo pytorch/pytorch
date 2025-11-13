@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from ..core import ComplexTensor
+from .._core import ComplexTensor
 from .common import (
     _get_func_name,
     COMPLEX_TO_REAL,

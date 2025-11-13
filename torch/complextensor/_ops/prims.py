@@ -1,6 +1,6 @@
 import torch
 
-from ..core import ComplexTensor
+from .._core import ComplexTensor
 from .common import (
     complex_to_real_dtype,
     register_complex,
