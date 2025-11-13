@@ -24,8 +24,6 @@ class TestQuantizeOp(unittest.TestCase):
             scale_calculation_mode=0
         )
 
-        # print(output)
-        # print(golden_output)
         self.assertEqual(torch.equal(output, golden_output), True)
         self.assertEqual(torch.equal(scale, golden_scale), True)
     
@@ -48,8 +46,6 @@ class TestQuantizeOp(unittest.TestCase):
             scale_calculation_mode=0
         )
 
-        # print(output)
-        # print(golden_output)
         self.assertEqual(torch.equal(output, golden_output), True)
         self.assertEqual(torch.equal(scale, golden_scale), True)
     
@@ -70,8 +66,6 @@ class TestQuantizeOp(unittest.TestCase):
             scale_calculation_mode=0
         )
 
-        # print(output)
-        # print(golden_output)
         self.assertEqual(torch.equal(output, golden_output), True)
         self.assertEqual(torch.equal(scale, golden_scale), True)
     
@@ -101,8 +95,6 @@ class TestQuantizeOp(unittest.TestCase):
             scale_calculation_mode=0
         )
 
-        # print(output)
-        # print(golden_output)
         self.assertEqual(torch.equal(output, golden_output), True)
         self.assertEqual(torch.equal(scale, golden_scale), True)
 
@@ -212,12 +204,8 @@ def quantize_mxfp8_python(
             # quant_scale = 1.0 / scale_fp32 if scale_fp32 > 0 else 1.0
             quantized = block / scale_fp32
             
-            # print("golden before round are", quantized)
             # Apply rounding
-            # if rounding_mode == 1:  # round_even
             quantized = torch.round(quantized)
-            # elif rounding_mode == 0:  # floor
-            #     quantized = torch.floor(quantized)
             
             # Clamp to FP8 range
             quantized = torch.clamp(quantized, -fp8_max, fp8_max)
