@@ -16,7 +16,6 @@ from torch.utils._typing_utils import not_none
 
 
 __all__ = ["init_device_mesh", "DeviceMesh"]
-decouple_backend_at_save = False
 
 
 if not is_available():
@@ -174,6 +173,9 @@ else:
             >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
         """
 
+        # Flag to specify device save without backend info. This is a temporary variable
+        # We will remove this flag once we fully deprecate the behavior of save a device mesh with pg names.
+        decouple_backend_at_save = False
         _device_type: str
         _rank_map: torch.Tensor
         _mesh_dim_names: Optional[tuple[str, ...]]
@@ -1241,7 +1243,7 @@ else:
             """
             state: dict[str, Any] = {
                 "device_type": self._device_type,
-                "rank_map": self._rank_map.tolist(),
+                "rank_map": self._rank_map,
                 "layout": self._layout,
                 "mesh_dim_names": self._mesh_dim_names,
                 "thread_id": self._thread_id,
@@ -1261,7 +1263,7 @@ else:
                 flatten_mapping[mesh_name] = mesh.__getstate__()
             state["flatten_mapping"] = flatten_mapping
 
-            if not decouple_backend_at_save and hasattr(self, "_dim_group_names"):
+            if not self.decouple_backend_at_save and hasattr(self, "_dim_group_names"):
                 logger.warning(
                     "Save device mesh via torch.save with pg names and will be deprecated in PT 2.11. "
                     "Users are welcome to use Distributed checkpoint (DCP) or re-create pgs in the same order"
@@ -1281,6 +1283,9 @@ else:
                 "layout",
                 "mesh_dim_names",
                 "thread_id",
+                "coordinate_on_dim",
+                "root_mesh",
+                "flatten_mapping",
             }
             missing_keys = required_keys - state.keys()
             if missing_keys:
@@ -1288,14 +1293,10 @@ else:
 
             # Restore basic attributes
             self._device_type = state["device_type"]
-            self._rank_map = torch.tensor(
-                state["rank_map"], device="cpu", dtype=torch.int
-            )
+            self._rank_map = state["rank_map"]
             self._layout = state["layout"]
-            self._mesh_dim_names = (
-                tuple(state["mesh_dim_names"]) if state.get("mesh_dim_names") else None
-            )
-            self._thread_id = state.get("thread_id")
+            self._mesh_dim_names = state["mesh_dim_names"]
+            self._thread_id = state["thread_id"]
             if state.get("coordinate_on_dim") is not None:
                 self._coordinate_on_dim = state["coordinate_on_dim"]
 
@@ -1319,6 +1320,10 @@ else:
                     flatten_mesh.__setstate__(mesh_state)
                     self._flatten_mapping[mesh_name] = flatten_mesh
 
+            # We don't recommend load from saved pg names, because users need to ensure the same
+            # order in creating process groups when we save the device mesh.
+            # This is implicit and error-prone. We will remove this behavior soon.
+            # What we recommend users to do is to explicitly create PGs and set it to the loaded mesh.
             if state.get("dim_group_names"):
                 self._dim_group_names = state["dim_group_names"]
 
