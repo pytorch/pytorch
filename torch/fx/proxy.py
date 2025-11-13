@@ -187,6 +187,10 @@ class TracerBase:
             stack_trace = current_meta.get("stack_trace")
             if stack_trace:
                 node.stack_trace = stack_trace
+
+                if fx_traceback.GRADIENT_ACC_SPECIAL_STACK in stack_trace:
+                    node.meta["is_gradient_acc"] = True
+
             # Explicitly set the stack_trace, nn_module_stack and source_fn on the node.meta
             # If other meta fields are needed, they can be added here
             for field in _COPY_META_FIELDS:
