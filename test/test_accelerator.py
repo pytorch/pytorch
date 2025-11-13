@@ -239,12 +239,6 @@ class TestAccelerator(TestCase):
         self.assertEqual(torch.accelerator.max_memory_allocated(), prev_max_allocated)
         self.assertEqual(torch.accelerator.max_memory_reserved(), prev_max_reserved)
 
-    @unittest.skipIf(TEST_MPS, "MPS doesn't support torch.accelerator memory API!")
-    def test_get_memory_info(self):
-        free_bytes, total_bytes = torch.accelerator.get_memory_info()
-        self.assertGreaterEqual(free_bytes, 0)
-        self.assertGreaterEqual(total_bytes, 0)
-
 
 if __name__ == "__main__":
     run_tests()

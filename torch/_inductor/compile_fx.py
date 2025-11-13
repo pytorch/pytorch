@@ -91,6 +91,7 @@ from torch._inductor.utils import (
     tensor_is_aligned,
 )
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch._logging import trace_structured
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
@@ -508,6 +509,9 @@ def _recursive_pre_grad_passes(
         log_pt2_compile_event=True,
         dynamo_compile_column_us="pre_grad_pass_time_us",
     ):
+        if not config.use_pre_grad_passes:
+            return gm
+
         add_passes = config.add_pre_grad_passes
         remove_passes = config.remove_pre_grad_passes
         for subgraph_name in _get_subgraph_names(gm):
@@ -526,6 +530,9 @@ def _recursive_joint_graph_passes(
         log_pt2_compile_event=True,
         dynamo_compile_column_us="joint_graph_pass_time_us",
     ):
+        if not config.use_joint_graph_passes:
+            return
+
         # invoke_subgraph already runs the _recursive_joint_graph_passes.  In
         # AOTAutograd, `run_joint_graph_passes_on_hops` partitions the
         # invoke_subgraph HOP before calling the partitioner on the outer graph.
@@ -544,6 +551,9 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
         log_pt2_compile_event=True,
         dynamo_compile_column_us="post_grad_pass_time_us",
     ):
+        if not config.use_post_grad_passes:
+            return
+
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
             _recursive_post_grad_passes(subgraph, is_inference)
@@ -1630,7 +1640,9 @@ class _InProcessFxCompile(FxCompile):
                             # pyrefly: ignore [unbound-name]
                             (str, list, torch.fx.GraphModule),
                         ), type(compiled_fn)
-                        return CompiledAOTI(compiled_fn)
+                        return CompiledAOTI(
+                            filename=compiled_fn, device_type=graph.device_type
+                        )
 
                     # TODO: Hoist this above V.aot_compilation
                     # pyrefly: ignore [unbound-name]
@@ -2703,12 +2715,15 @@ def _compile_fx_main(
             or torch._guards.TracingContext(fake_mode)
         )
 
-        if V.aot_compilation:
+        if V.aot_compilation and not config.enable_autograd_for_aot:
             from .utils import is_valid_aoti_model_name
 
             is_valid_aoti_model_name()
 
-            with functorch_config.patch(unlift_effect_tokens=True):
+            with functorch_config.patch(
+                unlift_effect_tokens=True,
+                selective_decompose=config.selective_decompose,
+            ):
                 gm, graph_signature = aot_export_module(
                     model_,
                     example_inputs_,
@@ -2733,7 +2748,9 @@ def _compile_fx_main(
                             node.meta["val"] = fake_mode.from_tensor(
                                 target, static_shapes=True
                             )
-                        elif isinstance(target, torch.ScriptObject):
+                        elif isinstance(target, torch.ScriptObject) or is_opaque_type(
+                            type(target)
+                        ):
                             node.meta["val"] = (
                                 torch._library.fake_class_registry.maybe_to_fake_obj(
                                     fake_mode, target
@@ -2768,7 +2785,10 @@ def _compile_fx_main(
             V.set_fake_mode(fake_mode),
             torch._guards.tracing(tracing_context),
             compiled_autograd._disable(),
-            functorch_config.patch(unlift_effect_tokens=True),
+            functorch_config.patch(
+                unlift_effect_tokens=True,
+                selective_decompose=config.selective_decompose,
+            ),
         ):
             try:
                 return aot_autograd(
