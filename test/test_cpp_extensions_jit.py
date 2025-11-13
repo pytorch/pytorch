@@ -220,6 +220,12 @@ class TestCppExtensionJIT(common.TestCase):
 
         self.assertEqual(cpu_output, mps_output.to("cpu"))
 
+        # Regression test for https://github.com/pytorch/pytorch/issues/163721
+        lib = torch.mps.compile_shader("void kernel noop(device float *x) {}")
+        lib.noop(mps_output)
+        module.mps_add_one_new_context(mps_output)
+        self.assertEqual(cpu_output + 1.0, mps_output.to("cpu"))
+
     def _run_jit_cuda_archflags(self, flags, expected):
         # Compile an extension with given `flags`
         def _check_cuobjdump_output(expected_values, is_ptx=False):
@@ -1234,18 +1240,18 @@ class TestCppExtensionJIT(common.TestCase):
         at::Tensor my_abs(at::Tensor x) {
         StableIValue stack[1];
         RAIIATH raii(torch::aot_inductor::new_tensor_handle(std::move(x)));
-        stack[0] = from(raii.release());
+        stack[0] = torch::stable::detail::from(raii.release());
         aoti_torch_call_dispatcher("aten::abs", "", stack);
-        RAIIATH res(to<AtenTensorHandle>(stack[0]));
+        RAIIATH res(torch::stable::detail::to<AtenTensorHandle>(stack[0]));
         return *reinterpret_cast<at::Tensor*>(res.release());
         }
 
         at::Tensor my_floor(at::Tensor x) {
         StableIValue stack[1];
         RAIIATH raii(torch::aot_inductor::new_tensor_handle(std::move(x)));
-        stack[0] = from(raii.release());
+        stack[0] = torch::stable::detail::from(raii.release());
         aoti_torch_call_dispatcher("aten::floor", "", stack);
-        RAIIATH res(to<AtenTensorHandle>(stack[0]));
+        RAIIATH res(torch::stable::detail::to<AtenTensorHandle>(stack[0]));
         return *reinterpret_cast<at::Tensor*>(res.release());
         }
         """
@@ -1302,6 +1308,40 @@ class TestCppExtensionJIT(common.TestCase):
 
         # test if build was successful
         self.assertEqual(success, True)
+
+    @unittest.skipIf(
+        not IS_LINUX or not check_compiler_is_gcc(get_cxx_compiler()),
+        "PCH is only available on Linux with GCC",
+    )
+    def test_pch_command_injection(self):
+        """Tests that PCH compilation is not vulnerable to command injection."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            exploit_file = os.path.join(tmpdir, "pch_exploit")
+            # If executed by shell, this would create exploit_file
+            payload = f'; echo vulnerable > "{exploit_file}"'
+            cpp_source = "void foo() {}"
+
+            # Try to compile with malicious payload in extra_cflags
+            # The compilation may succeed or fail, but the key test is whether
+            # the shell command in the payload gets executed
+            try:
+                torch.utils.cpp_extension.load_inline(
+                    name="test_pch_injection",
+                    cpp_sources=cpp_source,
+                    functions=["foo"],
+                    extra_cflags=[payload],
+                    use_pch=True,
+                    verbose=True,
+                )
+            except RuntimeError:
+                # Compilation failure is expected since payload is not a valid flag
+                pass
+
+            # The critical security check: verify the shell command was NOT executed
+            self.assertFalse(
+                os.path.exists(exploit_file),
+                "Command injection vulnerability detected!",
+            )
 
 
 if __name__ == "__main__":

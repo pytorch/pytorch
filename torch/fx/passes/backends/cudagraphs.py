@@ -15,10 +15,10 @@ class CudaGraphsSupport(OperatorSupport):
         if node.op not in CALLABLE_NODE_OPS:
             return False
 
-        if node.target in [torch.ops.aten.embedding_dense_backward.default]:
+        if node.target is torch.ops.aten.embedding_dense_backward.default:
             return False
 
-        if node.target in [operator.getitem]:
+        if node.target is operator.getitem:
             return True
 
         found_not_cuda = False

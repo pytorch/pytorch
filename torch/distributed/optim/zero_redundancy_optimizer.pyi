@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import enum
-from typing import Any, Callable, overload
+from collections.abc import Callable
+from typing import Any, overload
 
 import torch
 from torch.distributed.algorithms.join import Joinable, JoinHook
