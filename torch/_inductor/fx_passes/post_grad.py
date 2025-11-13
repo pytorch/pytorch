@@ -52,8 +52,8 @@ from ..utils import (
     decode_device,
     get_all_devices,
     get_gpu_type,
-    has_uses_tagged_as,
     is_gpu,
+    is_pointwise_use,
     OPTIMUS_EXCLUDE_POST_GRAD,
 )
 from ..virtualized import V
@@ -290,6 +290,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             "max_compute_pre_fetch",
             "custom_runtime_estimation",
             "insert_overlap_deps",
+            "collective_estimator",
         )
         for key in config_keys:
             if (val := getattr(dist_opts, key)) is not None:
@@ -1511,24 +1512,34 @@ def should_prefer_unfused_addmm(match):
     if not is_gpu(inp.meta["val"].device.type):
         return False
 
-    return has_uses_tagged_as(
-        match.output_node(),
-        (torch.Tag.pointwise, torch.Tag.reduction),
-    )
+    output = match.output_node()
+    return all(is_pointwise_use(use) for use in output.users)
 
 
 @register_graph_pattern(
-    CallFunction(aten.addmm, KeywordArg("inp"), Arg(), Arg()),
+    CallFunction(
+        aten.addmm,
+        KeywordArg("inp"),
+        Arg(),
+        Arg(),
+        beta=KeywordArg("beta"),
+        alpha=KeywordArg("alpha"),
+    ),
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[2],
     extra_check=should_prefer_unfused_addmm,
 )
-def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
-    def repl(inp, x1, x2):
-        return x1 @ x2 + inp
+def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
+    def repl(inp, x1, x2, alpha, beta):
+        mm_result = x1 @ x2
+        if alpha != 1:
+            mm_result = alpha * mm_result
+        if beta != 1:
+            inp = beta * inp
+        return inp + mm_result
 
     # pyrefly: ignore [bad-argument-type]
-    match.replace_by_example(repl, [inp, mat1, mat2])
+    match.replace_by_example(repl, [inp, mat1, mat2, alpha, beta])
 
 
 def is_valid_addmm_fusion(match):
