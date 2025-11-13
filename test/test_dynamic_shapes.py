@@ -4523,6 +4523,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         self.assertEqual(cnt.frame_count, 1)
         run(torch.rand(2, 10), torch.rand(2, 10))
         self.assertEqual(cnt.frame_count, 2)
+
     @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
     def test_unbacked_view_extra(self):
         def fn(x):
