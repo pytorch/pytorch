@@ -198,7 +198,8 @@ THO_DISPATCH_V2
 # THO_EMPTY, THO_DISPATCH_CASE, THO_DISPATCH_SWITCH, THO_PRIVATE_CASE_TYPE_USING_HINT are tested through THO_DISPATCH_V2
 
 # torch/headeronly/core/TensorAccessor.h
-TensorAccessor
-GenericPackedTensorAccessor
-# TensorAccessorBase and GenericPackedTensorAccessorBase are tested
-# through TensorAccessor and GenericPackedTensorAccessor
+HeaderOnlyTensorAccessor
+HeaderOnlyGenericPackedTensorAccessor
+# HeaderOnlyTensorAccessorBase and
+# HeaderOnlyGenericPackedTensorAccessorBase are tested through
+# HeaderOnlyTensorAccessor and HeaderOnlyGenericPackedTensorAccessor

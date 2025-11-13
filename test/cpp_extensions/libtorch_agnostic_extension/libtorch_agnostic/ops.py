@@ -489,15 +489,15 @@ def test_get_num_threads() -> int:
     return torch.ops.libtorch_agnostic.test_get_num_threads.default()
 
 
-def mv_tensor_accessor(t1, t2) -> Tensor:
+def mv_tensor_accessor(m, v) -> Tensor:
     """
     Returns matrix-vector product.
 
     Args:
-        t1: any 2-D Tensor
-        t2: any 1-D Tensor
+        m: any 2-D Tensor with shape (N, M)
+        v: any 1-D Tensor with shape (M,)
 
     Returns:
-        a 1-D Tensor.
+        a 1-D Tensor with shape (N,)
     """
-    return torch.ops.libtorch_agnostic.mv_tensor_accessor.default(t1, t2)
+    return torch.ops.libtorch_agnostic.mv_tensor_accessor.default(m, v)

@@ -8,27 +8,25 @@
 
 using torch::stable::Tensor;
 
-Tensor mv_tensor_accessor_cuda(Tensor t1, Tensor t2) {
-  Tensor res = new_empty(t1, {t1.size(0)});
-  THO_DISPATCH_V2(t1.scalar_type(), "my_tensor_accessor_cuda",
+Tensor mv_tensor_accessor_cuda(Tensor m, Tensor v) {
+  STD_TORCH_CHECK(m.dim() == 2, "m must be 2D");
+  STD_TORCH_CHECK(v.dim() == 1, "v must be 1D");
+  STD_TORCH_CHECK(m.size(1) == v.size(0), "m.shape[1] == v.shape[0] must hold");
+  STD_TORCH_CHECK(m.scalar_type() == v.scalar_type(), "m and v must have the same dtype");
+  STD_TORCH_CHECK(m.device() == v.device(), "m and v must be on the same device");
+  Tensor res = new_empty(m, {m.size(0)});
+  THO_DISPATCH_V2(m.scalar_type(), "mv_tensor_accessor_cuda",
                   AT_WRAP(([&]() {
                     auto resa = Accessor_cuda<scalar_t, 1>(reinterpret_cast<scalar_t*>(res.data_ptr()), res.sizes().data(), res.strides().data());
-                    auto t1a = Accessor_cuda<scalar_t, 2>(reinterpret_cast<scalar_t*>(t1.data_ptr()), t1.sizes().data(), t1.strides().data());
-                    auto t2a = Accessor_cuda<scalar_t, 1>(reinterpret_cast<scalar_t*>(t2.data_ptr()), t2.sizes().data(), t2.strides().data());
-                    mv_tensor_accessor_kernel<Accessor_cuda, scalar_t><<<1, 1, 0, 0>>>(resa, t1a, t2a);
+                    auto ma = Accessor_cuda<scalar_t, 2>(reinterpret_cast<scalar_t*>(m.data_ptr()), m.sizes().data(), m.strides().data());
+                    auto va = Accessor_cuda<scalar_t, 1>(reinterpret_cast<scalar_t*>(v.data_ptr()), v.sizes().data(), v.strides().data());
+                    mv_tensor_accessor_kernel<Accessor_cuda, scalar_t><<<1, 1, 0, 0>>>(resa, ma, va);
                   })),
                   AT_FLOATING_TYPES);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return res;
 }
 
-void boxed_mv_tensor_accessor_cuda(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  Tensor t1 = torch::stable::detail::to<Tensor>(stack[0]);
-  Tensor t2 = torch::stable::detail::to<Tensor>(stack[1]);
-  Tensor res = mv_tensor_accessor_cuda(t1, t2);
-  stack[0] = torch::stable::detail::from(res);
-}
-
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CUDA, m) {
-  m.impl("mv_tensor_accessor", &boxed_mv_tensor_accessor_cuda);
+  m.impl("mv_tensor_accessor", TORCH_BOX(&mv_tensor_accessor_cuda));
 }
