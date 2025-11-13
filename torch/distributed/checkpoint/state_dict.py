@@ -521,7 +521,7 @@ def _get_model_state_dict(
     if info.submodule_prefixes:
         new_state_dict: dict[str, ValueType] = {}
         # TODO: make this faster.
-        for fqn in state_dict.keys():
+        for fqn in state_dict:
             for prefix in info.submodule_prefixes:
                 if not fqn.startswith(prefix):
                     continue
@@ -826,7 +826,7 @@ def _unflatten_optim_state_dict(
                 # the state_dict.
                 if fqn in info.shared_params_mapping:
                     in_params = False
-                    for k in param_group.keys():
+                    for k in param_group:
                         if k == _PARAMS:
                             continue
                         flatten_key = f"{_PG}.{fqn}.{k}"
@@ -850,7 +850,7 @@ def _unflatten_optim_state_dict(
 
                 # Reconstruct state for this parameter
                 state[fqn] = {}
-                for state_name in optim.state[param].keys():
+                for state_name in optim.state[param]:
                     flattened_state_key = f"{_STATE}.{fqn}.{state_name}"
 
                     if flattened_state_key not in state_dict:
@@ -868,7 +868,7 @@ def _unflatten_optim_state_dict(
                         ]
 
         first_param_fqn = cast(list[str], pg_state[-1][_PARAMS])[0]
-        for k in param_group.keys():
+        for k in param_group:
             if k == _PARAMS:
                 continue
             value = state_dict[f"{_PG}.{first_param_fqn}.{k}"]
@@ -980,9 +980,7 @@ def _split_optim_state_dict(
     return_osd: OptimizerStateType = {_STATE: state, _PG: pg_state}
     pg_mapping: dict[int, int] = {}
 
-    if all(
-        isinstance(k, int) for k in cast(DictValueType, optim_state_dict[_STATE]).keys()
-    ):
+    if all(isinstance(k, int) for k in cast(DictValueType, optim_state_dict[_STATE])):
         return optim_state_dict
 
     for param_group in optim.param_groups:
@@ -1139,7 +1137,7 @@ def _load_optim_state_dict(
             # dissimilar parameters in comparison to optim_state_dict. This is achieved by
             # incorporating differential parameters within local, which may result in optim
             # having additional parameters ultimately.
-            for optim_key in flatten_osd.keys():
+            for optim_key in flatten_osd:
                 if optim_key not in flatten_local_osd:
                     if optim_key not in osd_mapping:
                         raise AssertionError(

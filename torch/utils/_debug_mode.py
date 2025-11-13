@@ -1,10 +1,43 @@
 # mypy: allow-untyped-defs
+"""
+DebugMode is a debugging TorchDispatchMode that intercepts and logs runtime calls
+to a hierarchical string dump. It logs real tensor, DTensor, and optionally FakeTensor
+operations, with some additional handling for DTensor internals.
+
+An example dump from an eager mode DTensor matmul:
+
+    torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$6: f32[8, 32]| S(0)
+      aten::mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))
+        redistribute_input(1, S(0) -> R)
+          redistribute_input(t$2: f32[1, 32], trace: S(0)->R)
+            _c10d_functional::all_gather_into_tensor(t$2: f32[1, 32], 8, 0)  ->  t$3: f32[8, 32]
+            _c10d_functional::wait_tensor(t$3: f32[8, 32])  ->  t$3: f32[8, 32]
+        aten::mm(t$4: f32[1, 8], t$3: f32[8, 32])  ->  t$5: f32[1, 32]
+
+This mode runs "under" compile, which means it hides itself during compilation, and is re-enabled
+at runtime, and DebugMode-related operations won't show up in the compiled region.
+DebugMode also provides some visibility into non-torch-dispatch calls (e.g. DTensor redistribute calls,
+inductor-generated triton kernels), but requires special handling for these, since dispatch modes
+can't intercept them by default.
+
+The mode also provides some extensions for custom debugging (e.g. adding custom dispatch call hooks
+via dispatch_hooks), or numerics debugging (e.g. tensor hashing for bitwise equivalence/closeness,
+via log_tensor_hashes). These decorators allow annotating string dumps with additional per-call information,
+for any region of runtime code.
+
+Usage::
+
+    with DebugMode() as debug_mode:
+        result = some_pytorch_operation(tensor_input)
+    print(debug_mode.debug_string())
+"""
+
 import contextlib
 import functools
 import traceback
 import weakref
 from collections.abc import Callable
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING  # noqa: F401
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -14,12 +47,13 @@ from torch.utils._python_dispatch import (
     _get_current_dispatch_mode_stack,
     TorchDispatchMode,
 )
-from torch.utils._pytree import tree_all, tree_map
+from torch.utils._pytree import keystr, tree_all, tree_map, tree_map_with_path
 from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakIdRef
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.device_interface import DeviceInterface
     from torch.distributed._tools.mod_tracker import ModTracker
 
 
@@ -27,8 +61,19 @@ __all__ = ["DebugMode", "get_active_debug_mode"]
 
 
 REDISTRIBUTE_FUNC = "redistribute_input"
+# registered dispatch call hooks
 _DISPATCH_RECORD_HOOKS: list[Callable] = []
 _DISPATCH_LOG_HOOKS: list[Callable] = []
+# Tracks if we're in inductor benchmarking, and temporarily disables logging
+# (for ignoring autotuning kernel launches which don't affect the user-facing result)
+_IN_INDUCTOR_BENCHMARK = False
+# For record_outputs, log_tensor_hashes hooks for triton kernels.
+# Stores kernel outputs in call.record["output"]
+_RECORD_TRITON_OUTPUTS = False
+# Annotates kernel output hashes, and stores them in call.post_hashes
+_TRITON_OUTPUT_HASH_FN = None
+# Annotates kernel input hashes, and stores them in call.pre_hashes
+_TRITON_INPUT_HASH_FN = None
 
 
 def _stringify_shape(shape) -> str:
@@ -60,7 +105,7 @@ def _stringify_dtensor_spec(spec) -> str:
 
 
 class TensorIdTracker:
-    def __init__(self):
+    def __init__(self) -> None:
         self.tensor_memo: dict[WeakIdRef, int] = {}
         self.next_tensor_id = 0
 
@@ -68,7 +113,7 @@ class TensorIdTracker:
         with torch._C._DisablePythonDispatcher():
             o = WeakIdRef(tensor)
 
-            def del_memo():
+            def del_memo() -> None:
                 self.tensor_memo.pop(o, None)
 
             weakref.finalize(tensor, del_memo)
@@ -115,17 +160,25 @@ def default_hash_fn(t: torch.Tensor, use_scalar: bool = False) -> torch.Tensor:
     replacing NaN/inf values with fixed numbers, and then computing the L1 norm in float64 or complex128.
     This is used to generate a deterministic summary value for tensor comparison.
     """
-    if not (t.is_floating_point() or t.is_complex()):
-        t = t.float()
-    t = t.contiguous()
-    # Clean the tensor to handle NaN/inf values, then compute norm
-    t_clean = torch.nan_to_num(t, nan=0.0, posinf=1.0, neginf=-1.0)
+    with torch._C._DisablePythonDispatcher(), torch._C._DisableTorchDispatch():
+        if not (t.is_floating_point() or t.is_complex()):
+            t = t.float()
+        t = t.contiguous()
+        # Clean the tensor to handle NaN/inf values, then compute norm
+        t_clean = torch.nan_to_num(t, nan=0.0, posinf=1.0, neginf=-1.0)
 
-    dtype = torch.complex128 if t.is_complex() else torch.float64
-    out = t_clean.norm(p=1, dtype=dtype)
-    if use_scalar:
-        return out.item()
-    return out
+        dtype = torch.complex128 if t.is_complex() else torch.float64
+        out = t_clean.norm(p=1, dtype=dtype)
+        if use_scalar:
+            return out.item()
+        return out
+
+
+def _compute_rel_diff(hash1, hash2):
+    # Relative difference: |hash1 - hash2| / max(|hash1|, |hash2|, eps)
+    numerator = abs(hash1 - hash2)
+    denominator = max(abs(hash1), abs(hash2), 1e-10)
+    return numerator / denominator
 
 
 def _get_stack_trace() -> str:
@@ -140,12 +193,22 @@ def _get_stack_trace() -> str:
     return "".join(summary.format())
 
 
-def _maybe_get_autograd_trace() -> Optional[str]:
+def _maybe_get_autograd_trace() -> str | None:
     if torch._C._current_autograd_node() is not None:
         tb = torch._C._current_autograd_node().metadata.get("traceback_")  # type: ignore[attr-defined]
         if tb:
             return "".join(tb)
     return None
+
+
+def _get_op_name(op) -> str:
+    if isinstance(op, torch._ops.OpOverload):
+        op_name = op.__qualname__
+    elif hasattr(op, "__module__") and hasattr(op, "__name__"):
+        op_name = f"{op.__module__}.{op.__name__}"
+    else:
+        op_name = str(op)
+    return op_name
 
 
 class _DebugCall:
@@ -154,10 +217,10 @@ class _DebugCall:
     def __init__(
         self,
         call_depth: int,
-        record: Optional[dict[str, Any]] = None,
-        log: Optional[dict[str, Any]] = None,
+        record: dict[str, Any] | None = None,
+        log: dict[str, Any] | None = None,
         stack: bool = False,
-    ):
+    ) -> None:
         self.call_depth = call_depth
         if stack:
             self.stack_trace = _get_stack_trace()
@@ -166,10 +229,10 @@ class _DebugCall:
         # results from dispatch hooks
         self.record = record
         self.log = log
-        self.output_str: Optional[str] = None
+        self.output_str: str | None = None
 
     def stringify_args(
-        self, attributes: list[str], tensor_memo: Optional[TensorIdTracker] = None
+        self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
     ) -> None:
         """
         To reduce memory consumption, this method stringifies args/kwargs, stores the result, and deletes original args/kwargs.
@@ -182,7 +245,7 @@ class _DebugCall:
         self,
         output: Any,
         attributes: list[str],
-        tensor_memo: Optional[TensorIdTracker] = None,
+        tensor_memo: TensorIdTracker | None = None,
     ) -> None:
         """Store stringified version of call output in self.output_str"""
         if tree_all(lambda x: x is None, output):
@@ -207,17 +270,17 @@ class _OpCall(_DebugCall):
         kwargs: dict,
         call_depth: int,
         stack: bool = False,
-    ):
+    ) -> None:
         super().__init__(call_depth, stack=stack)
         self.op = op
         self.args = args
         self.kwargs = kwargs
 
-        self.args_str: Optional[str] = None
-        self.kwargs_str: Optional[str] = None
+        self.args_str: str | None = None
+        self.kwargs_str: str | None = None
 
     def stringify_args(
-        self, attributes: list[str], tensor_memo: Optional[TensorIdTracker] = None
+        self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
     ) -> None:
         self.args_str = ", ".join(
             _arg_to_str(arg, attributes, tensor_memo) for arg in self.args
@@ -282,17 +345,17 @@ class _RedistributeCall(_DebugCall):
         transform_info_str,
         call_depth,
         stack=False,
-    ):
+    ) -> None:
         super().__init__(call_depth, stack=stack)
         self.arg = arg
         self.src_placement = src_placement
         self.dst_placement = dst_placement
         self.transform_info_str = transform_info_str
 
-        self.arg_str: Optional[str] = None
+        self.arg_str: str | None = None
 
     def stringify_args(
-        self, attributes: list[str], tensor_memo: Optional[TensorIdTracker] = None
+        self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
     ) -> None:
         self.arg_str = f"{_arg_to_str(self.arg, attributes, tensor_memo)}"
         del self.arg
@@ -334,12 +397,12 @@ class _RedistributeCall(_DebugCall):
 class _NNModuleCall(_DebugCall):
     """Designates entering an nn.Module's forward method"""
 
-    def __init__(self, module_name: str, call_depth: int, stack: bool = False):
+    def __init__(self, module_name: str, call_depth: int, stack: bool = False) -> None:
         super().__init__(call_depth, stack=stack)
         self.module_name = module_name
 
     def stringify_args(
-        self, attributes: list[str], tensor_memo: Optional[TensorIdTracker] = None
+        self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
     ) -> None:
         pass  # nothing to stringify
 
@@ -353,6 +416,92 @@ class _NNModuleCall(_DebugCall):
             {},
             self.call_depth,
         ]
+
+
+class _TritonKernelCall(_DebugCall):
+    """Triton kernel call from Inductor"""
+
+    def __init__(
+        self,
+        kernel_name: str,
+        kwargs: dict[str, Any],
+        call_depth: int,
+    ):
+        super().__init__(call_depth)
+        self.kernel_name = kernel_name
+        self.kwargs = kwargs
+        self.kwargs_str: str | None = None
+
+        self.pre_hashes: dict[str, Any] | None = None
+        self.post_hashes: dict[str, Any] | None = None
+
+    def stringify_args(
+        self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
+    ) -> None:
+        # Optionally hash kernel inputs before launch
+        global _TRITON_INPUT_HASH_FN
+        if hash_fn := _TRITON_INPUT_HASH_FN:
+            self.pre_hashes = {
+                k: hash_fn(v)
+                for k, v in self.kwargs.items()
+                if isinstance(v, torch.Tensor)
+            }
+
+        if self.kwargs:
+            self.kwargs_str = ", ".join(
+                f"{k}={_arg_to_str(v, attributes, tensor_memo)}"
+                for k, v in self.kwargs.items()
+            )
+        else:
+            self.kwargs_str = ""
+
+    def render(self, attributes: list[str]) -> str:
+        base_str = f"[triton] {self.kernel_name}({self.kwargs_str})"
+        if self.pre_hashes:
+            pre_hashes_str = ", ".join(f"{k}: {v}" for k, v in self.pre_hashes.items())
+            pre_hashes_str = (
+                "\n  "
+                + "  " * self.call_depth
+                + f"# pre-kernel hashes: {{{pre_hashes_str}}}"
+            )
+        else:
+            pre_hashes_str = ""
+        if self.post_hashes:
+            post_hashes_str = ", ".join(
+                f"{k}: {v}" for k, v in self.post_hashes.items()
+            )
+            post_hashes_str = (
+                "\n  "
+                + "  " * self.call_depth
+                + f"# post-kernel hashes: {{{post_hashes_str}}}"
+            )
+        else:
+            post_hashes_str = ""
+        return f"{base_str}{pre_hashes_str}{post_hashes_str}\n"
+
+    def finalize(self, device_interface: "DeviceInterface"):
+        # synchronize -> hash/store kernel results
+        global _RECORD_TRITON_OUTPUTS, _TRITON_OUTPUT_HASH_FN
+        device_interface.synchronize(device_interface.current_device())
+        if _RECORD_TRITON_OUTPUTS:
+            self.record = {
+                "output": {
+                    k: v.clone() if isinstance(v, torch.Tensor) else v
+                    for k, v in self.kwargs.items()
+                }
+            }
+        if hash_fn := _TRITON_OUTPUT_HASH_FN:
+            self.post_hashes = {
+                k: hash_fn(v)
+                for k, v in self.kwargs.items()
+                if isinstance(v, torch.Tensor)
+            }
+
+        # don't store tensors
+        del self.kwargs
+
+    def __iter__(self):
+        yield from [self.kernel_name, (), self.kwargs_str, self.call_depth]
 
 
 def _run_hook(hook, *args):
@@ -382,6 +531,20 @@ def _run_dispatch_hooks(call: _DebugCall, func, types, args, kwargs, result) -> 
             call.log = log
 
 
+def _get_call_name(call: _DebugCall) -> str:
+    """String identifying _DebugCall (e.g. func, kernel, module name)"""
+    if isinstance(call, _OpCall):
+        return _get_op_name(call.op)
+    elif isinstance(call, _TritonKernelCall):
+        return call.kernel_name
+    elif isinstance(call, _NNModuleCall):
+        return call.module_name
+    elif isinstance(call, _RedistributeCall):
+        return REDISTRIBUTE_FUNC
+    else:
+        return str(call)
+
+
 class DebugMode(TorchDispatchMode):
     def __init__(
         self,
@@ -395,7 +558,7 @@ class DebugMode(TorchDispatchMode):
         record_stack_trace=False,
         record_output=False,
         record_ids=False,
-    ):
+    ) -> None:
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
 
@@ -418,7 +581,7 @@ class DebugMode(TorchDispatchMode):
         # This flag currently has no effect on torch.compiled-regions.
         self.record_nn_module = record_nn_module
 
-        self.module_tracker: Optional[ModTracker] = None
+        self.module_tracker: ModTracker | None = None
         if self.record_nn_module:
             self.module_tracker_setup()
 
@@ -440,13 +603,13 @@ class DebugMode(TorchDispatchMode):
 
         self.reset()
 
-    def reset(self):
+    def reset(self) -> None:
         self.operators = []
         self.call_depth = 0
         self._tensor_memo = TensorIdTracker()
         self._output_info: dict[int, object] = {}
 
-    def _track_op_output(self, op_index, result):
+    def _track_op_output(self, op_index, result) -> None:
         """Assign IDs to output tensors and store in output_info"""
         # self._track_tensor_ids(result)
         self._output_info[op_index] = result
@@ -455,10 +618,17 @@ class DebugMode(TorchDispatchMode):
     # will force torch.compile to always use the “eager” backend
     # With this, DebugMode will not take effect on torch.compile
     @classmethod
-    def ignore_compile_internals(cls):
+    def ignore_compile_internals(cls) -> bool:
         return True
 
-    def _record_call(self, call):
+    def _record_call(self, call) -> None:
+        global _IN_INDUCTOR_BENCHMARK
+        if _IN_INDUCTOR_BENCHMARK:
+            return
+
+        if str(call).startswith("profiler::_record_function"):
+            return
+
         if not self.store_original_args:
             call.stringify_args(
                 self.record_tensor_attributes,
@@ -466,7 +636,7 @@ class DebugMode(TorchDispatchMode):
             )
         self.operators.append(call)
 
-    def _record_call_output(self, call, output):
+    def _record_call_output(self, call, output) -> None:
         if not self.record_output:
             return
         call.stringify_output(
@@ -562,19 +732,19 @@ class DebugMode(TorchDispatchMode):
         if self.record_stack_trace:
             self.anomaly_for_traces.__exit__(*args)
 
-    def module_tracker_setup(self):
+    def module_tracker_setup(self) -> None:
         from torch.distributed._tools.mod_tracker import ModTracker
 
         self.module_tracker = ModTracker()
 
         # module pre-fw hook: record module call
-        def pre_fw_hook(module, input):
+        def pre_fw_hook(module, input) -> None:
             fqn = self.module_tracker._get_mod_name(module)  # type: ignore[attribute, union-attr]
             self.operators.append(_NNModuleCall(fqn, self.call_depth + 1))
             self.call_depth += 1
 
         # module post-fw hook: decrement call depth
-        def post_fw_hook(module, input, output):
+        def post_fw_hook(module, input, output) -> None:
             self.call_depth -= 1
 
         self.module_tracker.register_user_hooks(pre_fw_hook, post_fw_hook)
@@ -585,7 +755,7 @@ class DebugMode(TorchDispatchMode):
         arg,
         src_placement,
         dst_placement,
-        transform_info_str: Optional[str] = None,
+        transform_info_str: str | None = None,
     ):
         try:
             self._record_call(
@@ -603,6 +773,14 @@ class DebugMode(TorchDispatchMode):
         finally:
             self.call_depth -= 1
 
+    def record_triton_kernel(
+        self, kernel_name: str, kwargs: dict[str, Any]
+    ) -> _TritonKernelCall:
+        call = _TritonKernelCall(kernel_name, kwargs, self.call_depth + 1)
+        call.stringify_args(self.record_tensor_attributes)
+        self.operators.append(call)
+        return call
+
     def debug_string(self) -> str:
         with torch._C.DisableTorchFunction():
             result = ""
@@ -615,8 +793,8 @@ class DebugMode(TorchDispatchMode):
     @staticmethod
     @contextlib.contextmanager
     def dispatch_hooks(
-        record_hook: Optional[Callable] = None,
-        log_hook: Optional[Callable] = None,
+        record_hook: Callable | None = None,
+        log_hook: Callable | None = None,
     ):
         """
         Allows installing post-hooks on arguments to intercepted __torch_dispatch__ calls;
@@ -649,20 +827,23 @@ class DebugMode(TorchDispatchMode):
         """
 
         def dispatch_hook(func, types, args, kwargs, result):
-            with torch._C._DisablePythonDispatcher():
-                out = tree_map(
-                    lambda x: x.clone() if isinstance(x, torch.Tensor) else x, result
-                )
+            out = tree_map(
+                lambda x: x.clone() if isinstance(x, torch.Tensor) else x, result
+            )
             return {"output": out}
 
-        with DebugMode.dispatch_hooks(record_hook=dispatch_hook):
-            yield
+        global _RECORD_TRITON_OUTPUTS
+        try:
+            _old_record_triton = _RECORD_TRITON_OUTPUTS
+            _RECORD_TRITON_OUTPUTS = True
+            with DebugMode.dispatch_hooks(record_hook=dispatch_hook):
+                yield
+        finally:
+            _RECORD_TRITON_OUTPUTS = _old_record_triton
 
     @staticmethod
     @contextlib.contextmanager
-    def log_tensor_hashes(
-        hash_fn: Optional[Callable] = None, hash_inputs: bool = False
-    ):
+    def log_tensor_hashes(hash_fn: Callable | None = None, hash_inputs: bool = False):
         """
         Installs hook for tensor hash logging.
 
@@ -674,10 +855,9 @@ class DebugMode(TorchDispatchMode):
             hash_fn = functools.partial(default_hash_fn, use_scalar=True)
 
         def _tree_hash(obj):
-            with torch._C._DisablePythonDispatcher():
-                return tree_map(
-                    lambda x: hash_fn(x) if isinstance(x, torch.Tensor) else None, obj
-                )
+            return tree_map(
+                lambda x: hash_fn(x) if isinstance(x, torch.Tensor) else None, obj
+            )
 
         def _dispatch_hash_hook(func, types, args, kwargs, result):
             if "empty" in str(func) or "profiler" in str(func):
@@ -692,11 +872,240 @@ class DebugMode(TorchDispatchMode):
                 return None
             return out
 
-        with DebugMode.dispatch_hooks(log_hook=_dispatch_hash_hook):
+        global _TRITON_INPUT_HASH_FN, _TRITON_OUTPUT_HASH_FN
+        try:
+            if hash_inputs:
+                _old_input_hfn = _TRITON_INPUT_HASH_FN
+                _TRITON_INPUT_HASH_FN = hash_fn
+            _old_output_hfn = _TRITON_OUTPUT_HASH_FN
+            _TRITON_OUTPUT_HASH_FN = hash_fn
+            with DebugMode.dispatch_hooks(log_hook=_dispatch_hash_hook):
+                yield
+        finally:
+            if hash_inputs:
+                _TRITON_INPUT_HASH_FN = _old_input_hfn  # type: ignore[assignment]
+            _TRITON_OUTPUT_HASH_FN = _old_output_hfn
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _benchmarking_inductor():
+        """
+        Context manager for disabling logging during inductor benchmarking,
+        so logs don't contain all kernels launched from autotuning.
+        """
+        global _IN_INDUCTOR_BENCHMARK
+        try:
+            _IN_INDUCTOR_BENCHMARK = True
             yield
+        finally:
+            _IN_INDUCTOR_BENCHMARK = False
+
+    @property
+    def logs(self):
+        return list(self.operators)
+
+    @staticmethod
+    def check_hash_mismatches(
+        logs1: list, logs2: list, compare_inputs: bool = False
+    ) -> list[dict]:
+        """
+        Compares tensor hashes between two DebugMode runs, for checking run-to-run numerical divergence.
+
+        This first validates the two log sequences have identical structure (same operations, input shapes/dtypes, etc.),
+        then compares tensor hash values, and returns a list of call outputs where mismatches were found.
+        Expects input logs to have been run with log_tensor_hashes, and looks for hashes in .log["hash"] & .log["input_hash"]
+        (or .post_hashes & .pre_hashes for triton kernels).
+
+        note: skips checking log pairs where hashes aren't present, but will raise if present in one & not the other.
+
+        Args:
+            logs1: logs from the first DebugMode run (from debug_mode.logs)
+            logs2: logs from the second DebugMode run
+            compare_inputs: If True, also compare input tensor hashes (default: only output checking)
+
+        Returns:
+            List of dictionaries describing hash mismatches. Each dict contains:
+                - call_type: "torch op" or "triton kernel"
+                - call: Operator/kernel name
+                - arg_name: For triton kernels, the argument name; None for torch ops
+                - pytree_path: For torch ops, the pytree path to the differing tensor; None for kernels
+                - hash1: Hash value from the first run
+                - hash2: Hash value from the second run
+                - rel_diff: Relative difference between hash values
+                - is_input_hash: True if this is an input hash, False for output hash
+
+        Raises:
+            ValueError: If logs have different lengths, call types, operator names, or call depths
+
+        Usage::
+
+            # Run model first time
+            with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
+                model(x)
+                logs1 = debug_mode.logs
+
+            # Run again, in exactly the same way
+            with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
+                model(x)
+                logs2 = debug_mode.logs
+
+            mismatches = DebugMode.check_hash_mismatches(logs1, logs2)
+            for m in mismatches:
+                print(f"{m['call']}: hash diff {m['rel_diff']:.2e}")
+        """
+        if len(logs1) != len(logs2):
+            raise ValueError(f"Log lengths don't match: {len(logs1)} vs {len(logs2)}")
+
+        difference_info = []
+        for i, (log1, log2) in enumerate(zip(logs1, logs2)):
+            # check call type
+            call1_type = type(log1).__name__
+            call2_type = type(log2).__name__
+            if call1_type != call2_type:
+                raise ValueError(
+                    f"Call types don't match at index {i}: {call1_type} vs {call2_type}"
+                )
+            call_type = call1_type
+
+            # check call name
+            op1_name, op2_name = _get_call_name(log1), _get_call_name(log2)
+            if op1_name != op2_name:
+                raise ValueError(
+                    f"Operators don't match at index {i}: {call_type}[{op1_name}] vs {call_type}[{op2_name}]"
+                )
+            op_name = op1_name
+
+            # check call depth
+            if log1.call_depth != log2.call_depth:
+                raise ValueError(
+                    f"Call depths for {call_type}[{op_name}] don't match at index {i}: {log1.call_depth} vs {log2.call_depth}"
+                )
+
+            # Redistribute: call args should be the same
+            if isinstance(log1, _RedistributeCall):
+                if tuple(log1) != tuple(log2):
+                    raise ValueError(
+                        f"Redistribute calls don't match at index {i}: {log1} vs {log2}"
+                    )
+
+            # Triton kernel: same arg names, arg types
+            elif isinstance(log1, _TritonKernelCall):
+                if log1.kwargs_str != log2.kwargs_str:
+                    raise ValueError(
+                        f"Triton kernel call args don't match for {log1.kernel_name} at index {i}:"
+                        f"\n\nlog1: {log1.kwargs_str}\n\nlog2: {log2.kwargs_str}"
+                    )
+
+                def compare_triton_hashes(hashes1, hashes2, is_input):
+                    assert set(hashes1.keys()) == set(hashes2.keys())  # type: ignore[union-attr]
+                    for key in hashes1.keys():
+                        if hashes1[key] != hashes2[key]:
+                            difference_info.append(
+                                {
+                                    "call_type": "triton kernel",
+                                    "call": op_name,
+                                    "arg_name": key,
+                                    "pytree_path": None,
+                                    "hash1": hashes1[key],
+                                    "hash2": hashes2[key],
+                                    "rel_diff": _compute_rel_diff(
+                                        hashes1[key], hashes2[key]
+                                    ),
+                                    "is_input_hash": is_input,
+                                }
+                            )
+
+                # check output hashes
+                has_post_1, has_post_2 = (
+                    log1.post_hashes is not None,
+                    log2.post_hashes is not None,
+                )
+                if has_post_1 != has_post_2:
+                    raise ValueError(
+                        f"Triton kernel post-hash presence inconsistent for {log1.kernel_name} "
+                        f"at index {i}: log1 has post_hashes={has_post_1}, log2 has post_hashes={has_post_2}"
+                    )
+
+                if has_post_1:
+                    compare_triton_hashes(
+                        log1.post_hashes, log2.post_hashes, is_input=False
+                    )
+
+                # maybe check input hashes
+                if compare_inputs:
+                    has_pre_1, has_pre_2 = (
+                        log1.pre_hashes is not None,
+                        log2.pre_hashes is not None,
+                    )
+                    if has_pre_1 != has_pre_2:
+                        raise ValueError(
+                            f"Triton kernel pre-hash presence inconsistent for {log1.kernel_name} "
+                            f"at index {i}: log1 has pre_hashes={has_pre_1}, log2 has pre_hashes={has_pre_2}"
+                        )
+
+                    if has_pre_1:
+                        compare_triton_hashes(
+                            log1.pre_hashes, log2.pre_hashes, is_input=True
+                        )
+
+            # regular log calls
+            elif isinstance(log1, _OpCall):
+
+                def compare_op_hashes(hashes1, hashes2, is_input):
+                    def _helper(keypath, hash1, hash2):
+                        if hash1 != hash2:
+                            difference_info.append(
+                                {
+                                    "call_type": "torch op",
+                                    "call": op_name,
+                                    "arg_name": None,
+                                    "pytree_path": keystr(keypath),
+                                    "hash1": hash1,
+                                    "hash2": hash2,
+                                    "rel_diff": _compute_rel_diff(hash1, hash2),
+                                    "is_input_hash": is_input,
+                                }
+                            )
+
+                    tree_map_with_path(_helper, hashes1, hashes2)
+
+                # check output hashes
+                has_hash1 = log1.log is not None and "hash" in log1.log
+                has_hash2 = log2.log is not None and "hash" in log2.log
+                if has_hash1 != has_hash2:
+                    raise ValueError(
+                        f"Output hash presence inconsistent for triton kernel {call_type}[{op_name}] "
+                        f"at index {i}: log1 has hash={has_hash1}, log2 has hash={has_hash2}"
+                    )
+
+                if has_hash1:
+                    compare_op_hashes(
+                        log1.log["hash"],  # type: ignore[union-attr]
+                        log2.log["hash"],
+                        is_input=False,
+                    )
+
+                # maybe check input hashes
+                if compare_inputs:
+                    has_hash1 = log1.log is not None and "input_hash" in log1.log
+                    has_hash2 = log2.log is not None and "input_hash" in log2.log
+                    if has_hash1 != has_hash2:
+                        raise ValueError(
+                            f"Input hash presence inconsistent for triton kernel {call_type}[{op_name}] "
+                            f"at index {i}: log1 has input_hash={has_hash1}, log2 has input_hash={has_hash2}"
+                        )
+
+                    if has_hash1:
+                        compare_op_hashes(
+                            log1.log["input_hash"],  # type: ignore[union-attr]
+                            log2.log["input_hash"],
+                            is_input=True,
+                        )
+
+        return difference_info
 
 
-def get_active_debug_mode() -> Optional[DebugMode]:
+def get_active_debug_mode() -> DebugMode | None:
     debug_mode = None
     for mode in _get_current_dispatch_mode_stack():
         if isinstance(mode, DebugMode):
