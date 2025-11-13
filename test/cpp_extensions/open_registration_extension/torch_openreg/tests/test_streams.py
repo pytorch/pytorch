@@ -9,7 +9,6 @@ class TestStream(TestCase):
     def test_stream_create(self):
         stream = torch.Stream(device="openreg")
         self.assertEqual(stream.device_index, torch.openreg.current_device())
-
         stream = torch.Stream(device="openreg:1")
         self.assertEqual(stream.device.type, "openreg")
         self.assertEqual(stream.device_index, 1)
@@ -30,6 +29,21 @@ class TestStream(TestCase):
         with torch.Stream(device="openreg:1") as stream:
             self.assertEqual(torch.accelerator.current_stream(), stream)
 
+    def test_stream_context_exception_restore(self):
+        prev_stream = torch.Stream(device="openreg:0")
+        torch.accelerator.set_stream(prev_stream)
+        prev = torch.accelerator.current_stream()
+        inner_stream = torch.Stream(device="openreg:1")
+        try:
+            with inner_stream:
+                # inside the context we should be on the inner stream
+                self.assertEqual(torch.accelerator.current_stream(), inner_stream)
+                raise RuntimeError("forced")
+        except RuntimeError:
+            pass
+        # After the exception, the current stream should be restored.
+        self.assertEqual(torch.accelerator.current_stream(), prev)
+
     @skipIfTorchDynamo()
     def test_stream_switch(self):
         stream1 = torch.Stream(device="openreg:0")
@@ -38,6 +52,8 @@ class TestStream(TestCase):
         self.assertEqual(current_stream, stream1)
 
         stream2 = torch.Stream(device="openreg:1")
+        current_stream = torch.accelerator.current_stream()
+        self.assertEqual(current_stream, stream1)
         torch.accelerator.set_stream(stream2)
         current_stream = torch.accelerator.current_stream()
         self.assertEqual(current_stream, stream2)
