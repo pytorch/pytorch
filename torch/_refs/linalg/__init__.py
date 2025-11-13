@@ -392,6 +392,9 @@ def _apply_pivots(a, pivots, shape, *, inverse=False):
 
 
 def linalg_lu_solve_out_mps(LU, pivots, B, *, left=True, adjoint=False, out):
+    if out.numel() == 0:
+        return
+
     if not left:
         adjoint = not adjoint
         B = B.mH
@@ -413,8 +416,7 @@ def linalg_lu_solve_out_mps(LU, pivots, B, *, left=True, adjoint=False, out):
     if not left:
         x = x.mH
 
-    out.resize_(x.shape)
-    return out.copy_(x)
+    out.copy_(x)
 
 
 mps_lib = torch.library.Library("aten", "IMPL", "MPS")  # noqa: TOR901
