@@ -9289,12 +9289,37 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 torch.cholesky_inverse(a, out=out)
 
-        # cholesky_inverse raises an error for invalid inputs
+        # cholesky_inverse raises an error for invalid inputs on CPU
         # for example if at least one diagonal element is zero
         a = torch.randn(3, 3, device=device, dtype=dtype)
         a[1, 1] = 0
-        with self.assertRaisesRegex(torch.linalg.LinAlgError, r"cholesky_inverse: The diagonal element 2 is zero"):
-            torch.cholesky_inverse(a)
+        if self.device_type == 'cpu':
+            with self.assertRaisesRegex(torch.linalg.LinAlgError, r"cholesky_inverse: The diagonal element 2 is zero"):
+                torch.cholesky_inverse(a)
+        # cholesky_inverse on GPU raises an Accelerator CUDA error, which is easier to check with subprocess.
+        # This can be slow so moving test to  def test_cholesky_inverse_errors_and_warnings_subprocess
+
+    @skipCUDAIfNoMagma
+    @onlyCUDA
+    @slowTest
+    def test_cholesky_inverse_errors_and_warnings_subprocess(self):
+        # check cholesky_inverse errors on CUDA device.
+        # This error is thrown by at::_assert_async, thus it needs to run on its own subprocess to avoid corrupting the test process
+        import subprocess
+        import sys
+        result = subprocess.run(
+            [sys.executable, "-c", """\
+import torch
+a = torch.eye(3, device='cuda', dtype=torch.float32)
+a[1, 1] = 0
+torch.cholesky_inverse(a)
+torch.cuda.synchronize()
+"""],
+            capture_output=True
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cholesky_inverse: Diagonal contains zero element, matrix is singular.", str(result.stderr))
+
 
     def _select_broadcastable_dims(self, dims_full=None):
         # select full dimensionality
