@@ -78,6 +78,7 @@ from tools.testing.test_selections import (
 try:
     from tools.testing.upload_artifacts import (
         parse_xml_and_upload_json,
+        upload_adhoc_failure_json,
         zip_and_upload_artifacts,
     )
 except ImportError:
@@ -87,7 +88,10 @@ except ImportError:
     def parse_xml_and_upload_json():
         pass
 
-    def zip_and_upload_artifacts(failed: bool):
+    def zip_and_upload_artifacts(*args, **kwargs):
+        pass
+
+    def upload_adhoc_failure_json(*args, **kwargs):
         pass
 
 
@@ -636,6 +640,7 @@ def run_test(
                 output,
                 options.continue_through_error,
                 test_file,
+                options,
             )
         else:
             command.extend([f"--sc={stepcurrent_key}", "--print-items"])
@@ -722,6 +727,7 @@ def run_test_retries(
     output,
     continue_through_error,
     test_file,
+    options,
 ):
     # Run the test with -x to stop at first failure.  Rerun the test by itself.
     # If it succeeds, move on to the rest of the tests in a new process.  If it
@@ -739,6 +745,16 @@ def run_test_retries(
         print(s, file=output, flush=True)
 
     num_failures = defaultdict(int)
+
+    def read_pytest_cache(key: str) -> Any:
+        cache_file = (
+            REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key / key
+        )
+        try:
+            with open(cache_file) as f:
+                return f.read()
+        except FileNotFoundError:
+            return None
 
     print_items = ["--print-items"]
     sc_command = f"--sc={stepcurrent_key}"
@@ -760,12 +776,11 @@ def run_test_retries(
 
         # Read what just failed/ran
         try:
-            with open(
-                REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
-            ) as f:
-                current_failure = f.read()
-                if current_failure == "null":
-                    current_failure = f"'{test_file}'"
+            current_failure = read_pytest_cache("lastrun")
+            if current_failure is None:
+                raise FileNotFoundError
+            if current_failure == "null":
+                current_failure = f"'{test_file}'"
         except FileNotFoundError:
             print_to_file(
                 "No stepcurrent file found. Either pytest didn't get to run (e.g. import error)"
@@ -788,6 +803,13 @@ def run_test_retries(
             # This is for log classifier so it can prioritize consistently
             # failing tests instead of reruns. [1:-1] to remove quotes
             print_to_file(f"FAILED CONSISTENTLY: {current_failure[1:-1]}")
+            if (
+                read_pytest_cache("made_failing_xml") == "false"
+                and IS_CI
+                and options.upload_artifacts_while_running
+            ):
+                upload_adhoc_failure_json(test_file, current_failure[1:-1])
+
             if not continue_through_error:
                 print_to_file("Stopping at first consistent failure")
                 break
