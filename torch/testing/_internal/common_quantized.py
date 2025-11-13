@@ -530,10 +530,37 @@ def to_blocked(input_matrix) -> torch.Tensor:
 
     return rearranged.flatten()
 
+
+def down_size(size):
+    assert size[-1] % 2 == 0, f"{size} last dim not divisible by two"
+    return (*size[:-1], size[-1] // 2)
+
+
+def pack_uint4(uint8_data) -> torch.Tensor:
+    # converting to uint8 for operations
+    shape = uint8_data.shape
+    assert shape[-1] % 2 == 0
+    uint8_data = uint8_data.contiguous().view(-1)
+    return (uint8_data[1::2] << 4 | uint8_data[::2]).view(down_size(shape))
+
+
+# exponent and mantissa bits of `torch.float4_e2m1fn_x2`
+FP4_EBITS, FP4_MBITS = 2, 1
+
+
+def _bfloat16_to_float4_e2m1fn_x2(x):
+    assert x.dtype == torch.bfloat16
+    x = _f32_to_floatx_unpacked(x.float(), FP4_EBITS, FP4_MBITS)
+    x = pack_uint4(x)
+    x = x.view(torch.float4_e2m1fn_x2)
+    return x
+
+
 # This function is extracted from https://github.com/pytorch/ao/blob/v0.12.0/torchao/prototype/mx_formats/mx_tensor.py#L142
-def to_mxfp8(
+def to_mxfp(
     data_hp: torch.Tensor,
     block_size: int = 32,
+    format: str = "mxfp8",
 ):
     assert data_hp.dtype in (
         torch.bfloat16,
@@ -554,8 +581,12 @@ def to_mxfp8(
     data_hp = data_hp.to(torch.float32)
     max_abs = max_abs.to(torch.float32)
 
-    F8E4M3_MAX = torch.finfo(torch.float8_e4m3fn).max  # 448.0
-    max_pos = F8E4M3_MAX
+    if format == "mxfp8":
+        F8E4M3_MAX = torch.finfo(torch.float8_e4m3fn).max  # 448.0
+        max_pos = F8E4M3_MAX
+    elif format == "mxfp4":
+        F4E2M1_MAX = 6.
+        max_pos = F4E2M1_MAX
 
     # RCEIL
     def _to_mx_rceil(
@@ -592,9 +623,15 @@ def to_mxfp8(
     scale_e8m0_biased, data_lp = _to_mx_rceil(data_hp, max_abs, max_pos)
 
     # cast to target dtype
-    data_lp = data_lp.to(torch.float8_e4m3fn)
-    # need to reshape at the end to help inductor fuse things
-    data_lp = data_lp.reshape(orig_shape)
+    if format == "mxfp8":
+        data_lp = data_lp.to(torch.float8_e4m3fn)
+        # need to reshape at the end to help inductor fuse things
+        data_lp = data_lp.reshape(orig_shape)
+    elif format == "mxfp4":
+        data_lp = _bfloat16_to_float4_e2m1fn_x2(data_lp.to(torch.bfloat16))
+        final_shape = list(orig_shape)
+        final_shape[-1] //= 2
+        data_lp = data_lp.reshape(final_shape)
 
     scale_e8m0_biased = scale_e8m0_biased.view(torch.float8_e8m0fnu)
     scale_e8m0_biased = scale_e8m0_biased.squeeze(-1)

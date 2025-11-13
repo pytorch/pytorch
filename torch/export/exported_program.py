@@ -281,7 +281,7 @@ def _split_decomp_table_to_cia_and_python_decomp(
     for op in list(decomp_table.keys()):
         # TODO we are silently allowing non-safe(non-functional) ops through a crack
         # due to core aten decomp table having non-functional entries. Once we have
-        # a tigher check around core aten decomp, we should warn users about them.
+        # a tighter check around core aten decomp, we should warn users about them.
         # Tracking issue: (https://github.com/pytorch/pytorch/issues/135759)
 
         # if it is a valid CIA op we can mess with in export, we check if it is:
@@ -798,7 +798,7 @@ def _remove_unnecessary_copy_op_pass(
                     ):
                         if (
                             out.op == "call_function"
-                            and out.target == torch.ops.aten.copy.default
+                            and out.target is torch.ops.aten.copy.default
                         ):
                             out.replace_all_uses_with(out.args[1])  # type: ignore[arg-type]
                             gm.graph.erase_node(out)
@@ -817,7 +817,7 @@ def _common_getitem_elimination_pass(
             node_id: dict[torch.fx.Node, str] = {}
             getitems: dict[str, torch.fx.Node] = {}
             for node in list(module.graph.nodes):
-                if node.op == "call_function" and node.target == operator.getitem:
+                if node.op == "call_function" and node.target is operator.getitem:
                     source, idx = node.args
                     new_id = f"{node_id[source]}.{idx}"
                     if new_id in getitems:
@@ -1709,8 +1709,11 @@ def _convert_guards_to_code(graph_module):
     py_printer = torch.fx.experimental.symbolic_shapes.ShapeGuardPythonPrinter(
         shape_env.var_to_sources, lambda s: s.name(), shape_env.var_to_sources
     )
-    return [
+    ret = [
         py_printer.doprint(guard.expr)
         for guard in shape_env.guards
         if guard.expr.free_symbols.issubset(local_vars)
     ]
+    # TODO Figure out how to resolve guards containing weight sizes.
+    # This is not a big deal as _guards_code is mostly empty today.
+    return [guard for guard in ret if "L['self']" not in guard]

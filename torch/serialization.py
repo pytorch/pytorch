@@ -790,7 +790,7 @@ class _open_zipfile_writer_file(_opener[torch._C.PyTorchFileWriter]):
             # PyTorchFileWriter only supports ascii filename.
             # For filenames with non-ascii characters, we rely on Python
             # for writing out the file.
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self.file_stream = io.FileIO(self.name, mode="w")
             super().__init__(
                 torch._C.PyTorchFileWriter(  # pyrefly: ignore  # no-matching-overload
@@ -1250,7 +1250,7 @@ def _save(
         zip_file.write_record("byteorder", sys.byteorder, len(sys.byteorder))
 
     # Write each tensor to a file named tensor/the_tensor_key in the zip archive
-    for key in serialized_storages.keys():
+    for key in serialized_storages:
         name = f"data/{key}"
         storage = serialized_storages[key]
         num_bytes = storage.nbytes()
@@ -1393,7 +1393,7 @@ def load(
         # Load all tensors onto GPU 1
         >>> torch.load(
         ...     "tensors.pt",
-        ...     map_location=lambda storage, loc: storage.cuda(1),
+        ...     map_location=lambda storage, loc: storage.cuda(1),  # type: ignore[attr-defined]
         ...     weights_only=True,
         ... )  # type: ignore[attr-defined]
         # Map tensors from GPU 1 to GPU 0
@@ -1494,7 +1494,7 @@ def load(
 
     _check_dill_version(pickle_module)
 
-    if "encoding" not in pickle_load_args.keys():
+    if "encoding" not in pickle_load_args:
         pickle_load_args["encoding"] = "utf-8"
 
     with _open_file_like(f, "rb") as opened_file:
