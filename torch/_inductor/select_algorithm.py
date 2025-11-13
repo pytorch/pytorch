@@ -3390,8 +3390,6 @@ class AlgorithmSelectorCache(PersistentCache):
         output.zero_()
 
         result = choice.benchmark(*inputs, out=output)
-
-        # Synchronize device to shake out any CUDA errors
         device_type = next(
             (tensor.device.type for tensor in inputs if is_gpu(tensor.device.type)),
             "cuda",
@@ -3400,10 +3398,8 @@ class AlgorithmSelectorCache(PersistentCache):
         if device_interface.is_available():
             device_interface.synchronize()  # shake out any CUDA errors
 
-        # Verify output if requested
         if VERIFY and autotune_args.expected is not None:
             autotune_args.verify(**VERIFY)
-
         return result
 
     @classmethod
