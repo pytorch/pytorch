@@ -184,7 +184,6 @@ x = add_1, y = add_2);  getitem = None
                 """print(str format_str, *, bool lst) -> ((NoneType))""",
             )
 
-
         # No kwargs
         schema_no_kwargs = print_op.gen_schema("Simple message")
         self.assertExpectedInline(
