@@ -1,12 +1,22 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
+import unittest
 
 import torch
 import torch.distributed as dist
+from torch._dynamo.testing import CompileCounterWithBackend
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.distributed.tensor import DeviceMesh, DTensor, Partial, Replicate, Shard
+from torch.distributed.tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    DTensor,
+    Partial,
+    Replicate,
+    Shard,
+)
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -15,8 +25,15 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.utils._debug_mode import _OpCall, _RedistributeCall, DebugMode
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils._debug_mode import (
+    _OpCall,
+    _RedistributeCall,
+    _TritonKernelCall,
+    DebugMode,
+)
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._triton import has_triton_package
 
 
 @requires_cuda
@@ -42,22 +59,24 @@ class TestDTensorDebugMode(TestCase):
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
         y_dtensor = DTensor.from_local(y, mesh, [Shard(0)], run_check=False)
 
-        with DebugMode(record_torchfunction=True) as debug_mode:
+        with DebugMode(
+            record_torchfunction=True, record_ids=True, record_output=True
+        ) as debug_mode:
             torch.mm(x_dtensor, y_dtensor).sum()
 
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
-  torch.mm(dt: f32[8, 8]| S(0), dt: f32[8, 32]| S(0))
-    aten::mm(dt: f32[8, 8]| S(0), dt: f32[8, 32]| S(0))
+  torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$6: f32[8, 32]| S(0)
+    aten::mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))
       redistribute_input(1, S(0) -> R)
-        redistribute_input(t: f32[1, 32], trace: S(0)->R)
-          _c10d_functional::all_gather_into_tensor(t: f32[1, 32], 8, 0)
-          _c10d_functional::wait_tensor(t: f32[8, 32])
-      aten::mm(t: f32[1, 8], t: f32[8, 32])
-  <method 'sum' of 'torch._C.TensorBase' objects>(dt: f32[8, 32]| S(0))
-    aten::sum(dt: f32[8, 32]| S(0))
-      aten::sum(t: f32[1, 32])""",
+        redistribute_input(t$2: f32[1, 32], trace: S(0)->R)
+          _c10d_functional::all_gather_into_tensor(t$2: f32[1, 32], 8, 0)  ->  t$3: f32[8, 32]
+          _c10d_functional::wait_tensor(t$3: f32[8, 32])  ->  t$3: f32[8, 32]
+      aten::mm(t$4: f32[1, 8], t$3: f32[8, 32])  ->  t$5: f32[1, 32]
+  <method 'sum' of 'torch._C.TensorBase' objects>(dt$6: f32[8, 32]| S(0))  ->  dt$8: f32[]| P
+    aten::sum(dt$6: f32[8, 32]| S(0))
+      aten::sum(t$5: f32[1, 32])  ->  t$7: f32[]""",
         )
 
         self.assertTrue(isinstance(debug_mode.operators[0], _OpCall))
@@ -118,7 +137,9 @@ class TestDTensorDebugMode(TestCase):
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
         y_dtensor = DTensor.from_local(y, mesh, [Shard(1)], run_check=False)
 
-        with DebugMode(record_torchfunction=True) as debug_mode:
+        with DebugMode(
+            record_torchfunction=True, record_stack_trace=True
+        ) as debug_mode:
             z = x_dtensor + y_dtensor
             z.sum().backward()
 
@@ -150,6 +171,9 @@ class TestDTensorDebugMode(TestCase):
       aten::_to_copy(t: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu)
       aten::detach(t: f32[1, 8])""",
         )
+
+        # check stack trace
+        self.assertTrue("z.sum().backward()" in debug_mode.operators[-1].stack_trace)
 
     def test_debug_mode_densor_redistribution_trace(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
@@ -361,14 +385,22 @@ class TestDTensorDebugMode(TestCase):
         self.assertIn("torch.ops.higher_order.cond", debug_mode.debug_string())
 
     def test_compile(self):
-        @torch.compile
+        cnt = CompileCounterWithBackend("inductor")
+
+        @torch.compile(backend=cnt)
         def f(x):
             return x.sin().cos()
 
         x = torch.randn(8)
+        f(x)
         with DebugMode() as debug_mode:
             f(x)
-        self.assertEqual(len(debug_mode.debug_string()), 0)
+            self.assertEqual(len(debug_mode.debug_string()), 0)
+            f(x)
+        f(x)
+        self.assertEqual(
+            cnt.frame_count, 1
+        )  # check DebugMode doesn't trigger additional recompilations
 
     def test_nn_module(self):
         class Foo(torch.nn.Module):
@@ -409,6 +441,144 @@ class TestDTensorDebugMode(TestCase):
         aten::t(t: f32[4, 4])
         aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])""",
         )
+
+        with DebugMode(record_stack_trace=True) as debug_mode:
+            out = mod(inp).sum()
+            out.backward()
+
+        sum_op = [
+            op for op in debug_mode.operators if str(op.op) == "aten.sum.dim_IntList"
+        ][-1]
+        self.assertTrue("self.l2(self.l1(x))" in sum_op.fwd_stack_trace)
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    @unittest.skipIf(not has_triton_package(), "requires triton")
+    def test_triton_kernel_logs(self):
+        import triton
+
+        from torch.testing._internal.triton_utils import add_kernel_autotuned
+
+        def call_triton(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
+            add_kernel_autotuned[grid](x, y, output, n_elements)
+            return output
+
+        x = torch.randn(128, device=GPU_TYPE)
+        y = torch.randn(128, device=GPU_TYPE)
+
+        with DebugMode() as debug_mode:
+            torch.compile(call_triton)(x, y)
+
+        triton_calls = [
+            op for op in debug_mode.operators if isinstance(op, _TritonKernelCall)
+        ]
+        self.assertGreater(len(triton_calls), 0)
+        self.assertIn("[triton]", triton_calls[0].render([]))
+
+    def test_check_hash_mismatches(self):
+        x = torch.randn(64, 64, device=GPU_TYPE)
+        x_different = torch.randn(64, 64, device=GPU_TYPE)
+
+        # Identical runs should have no mismatches
+        with DebugMode() as dm1, DebugMode.log_tensor_hashes():
+            x.sin().sum()
+        with DebugMode() as dm2, DebugMode.log_tensor_hashes():
+            x.sin().sum()
+        mismatches = DebugMode.check_hash_mismatches(dm1.logs, dm2.logs)
+        self.assertEqual(len(mismatches), 0)
+
+        # Different inputs should produce hash mismatches
+        with DebugMode() as dm3, DebugMode.log_tensor_hashes():
+            x_different.sin().sum()
+
+        # Check that mismatches are detected
+        mismatches = DebugMode.check_hash_mismatches(dm1.logs, dm3.logs)
+        self.assertEqual(len(mismatches), 2)
+        self.assertEqual(
+            [call["call"] for call in mismatches], ["aten::sin", "aten::sum"]
+        )
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    @unittest.skipIf(not has_triton_package(), "requires triton")
+    def test_check_triton_hash_mismatches(self):
+        import triton
+
+        from torch.testing._internal.triton_utils import add_kernel_autotuned
+
+        def call_triton(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
+            add_kernel_autotuned[grid](x, y, output, n_elements)
+            return output
+
+        a = torch.randn(128, device=GPU_TYPE)
+        b = torch.randn(128, device=GPU_TYPE)
+        c = torch.randn(128, device=GPU_TYPE)
+
+        # Run with hash logging to verify triton kernels can be hashed
+        with DebugMode() as dm_t1, DebugMode.log_tensor_hashes(hash_inputs=True):
+            torch.compile(call_triton)(a, b)
+
+        # Different inputs should have different hashes in triton kernels
+        with DebugMode() as dm_t2, DebugMode.log_tensor_hashes(hash_inputs=True):
+            torch.compile(call_triton)(a, c)
+
+        # Compare triton kernel hashes
+        mismatches = DebugMode.check_hash_mismatches(
+            dm_t1.logs, dm_t2.logs, compare_inputs=True
+        )
+        triton_mismatches = [m for m in mismatches if m["call_type"] == "triton kernel"]
+        self.assertGreater(len(triton_mismatches), 0)
+
+        # check both input & output hash mismatches are detected
+        self.assertGreater(len([m for m in triton_mismatches if m["is_input_hash"]]), 0)
+        self.assertGreater(
+            len([m for m in triton_mismatches if not m["is_input_hash"]]), 0
+        )
+
+    def test_check_structure_mismatches(self):
+        x = torch.randn(32, 32, device=self.device_type)
+
+        with DebugMode() as dm1, DebugMode.log_tensor_hashes():
+            x.sin()
+        with DebugMode() as dm2, DebugMode.log_tensor_hashes():
+            x.cos()
+        with DebugMode() as dm3, DebugMode.log_tensor_hashes():
+            x.sin().cos()
+
+        with self.assertRaisesRegex(ValueError, "Operators don't match"):
+            DebugMode.check_hash_mismatches(dm1.logs, dm2.logs)
+
+        with self.assertRaisesRegex(ValueError, "Log lengths don't match"):
+            DebugMode.check_hash_mismatches(dm1.logs, dm3.logs)
+
+    def test_pretty_print_dtensor_make_fx(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        A = torch.randn(8, 32)
+        B = torch.randn(32, 32)
+        dA = distribute_tensor(A, mesh, [Shard(0)]).requires_grad_()
+        dB = distribute_tensor(B, mesh, [Replicate()]).requires_grad_()
+
+        def f(dA, dB):
+            dy = dA @ dB
+            loss = dy.sum()
+            loss.backward()
+            return dA.grad, dB.grad
+
+        # We actually need the tracing_mode='fake' here, or to trace under a FakeTensorMode.
+        # make_fx has some logic to ensure we don't accidentally stash real tensors in the graph
+        # so we won't stash our DTensors properly if they don't hold Fake inner tensors
+        gm = make_fx(f, tracing_mode="fake")(dA, dB)
+        # DCE isn't necessary here, there were just a lot of dead detach() nodes that spammed the graph
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+        # Colored is nice for actual viewing, not using in this test though
+        gm_str = gm.print_readable(colored=False, print_output=False)
+        self.assertTrue('"DTensor(f32[8, 32], S(0))" = torch.ops.aten.mm' in gm_str)
 
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
