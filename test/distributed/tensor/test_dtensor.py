@@ -568,12 +568,21 @@ class DTensorTest(DTensorTestBase):
         buffer.seek(0)
         reloaded_st = torch.load(buffer, weights_only=False)
         self.assertFalse(hasattr(reloaded_st._spec.mesh, "_dim_group_names"))
+        self.assertNotEqual(sharded_tensor._spec.mesh, reloaded_st._spec.mesh)
+        self.assertEqual(
+            sharded_tensor.to_local().tolist(), reloaded_st.to_local().tolist()
+        )
+        self.assertEqual(sharded_tensor._spec.placements, reloaded_st._spec.placements)
         reloaded_st._spec.mesh = device_mesh
-        # We will change this to be not Equal in the following PR.
         self.assertEqual(sharded_tensor, reloaded_st)
         buffer.seek(0)
         reloaded_st = torch.load(buffer, weights_only=True)
         self.assertFalse(hasattr(reloaded_st._spec.mesh, "_dim_group_names"))
+        self.assertNotEqual(sharded_tensor._spec.mesh, reloaded_st._spec.mesh)
+        self.assertEqual(
+            sharded_tensor.to_local().tolist(), reloaded_st.to_local().tolist()
+        )
+        self.assertEqual(sharded_tensor._spec.placements, reloaded_st._spec.placements)
         reloaded_st._spec.mesh = device_mesh
         self.assertEqual(sharded_tensor, reloaded_st)
         DeviceMesh.decouple_backend_at_save = False
