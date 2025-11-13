@@ -1526,37 +1526,6 @@ class OutputGraph(OutputGraphCommon):
 
         from .decorators import disable
 
-        if has_user_objects():
-            # NB: This is where we store possible user objects before running the graph
-            # index_to_user_object_weakref is the function used in the graph to translate
-            # the dynamo-generated index into the actual object passed to the compiled function.
-            # We generate bytecode to store all user objects at the proper index in the below
-            # call.
-            codegen = PyCodegen(
-                self.root_tx, root, overridden_sources=overridden_sources
-            )
-            codegen.add_push_null(
-                lambda: codegen.load_import_from(
-                    torch._dynamo.graph_bytecode_inputs.__name__,
-                    "store_user_object_weakrefs",
-                )
-            )
-            tmp_vars = []
-            for constructor in index_to_bytecode_constructor.values():
-                constructor(codegen)
-                var_name = (
-                    self.new_var()
-                )  # keep alive any temp objects for the rest of the frame
-                codegen.store(var_name)
-                tmp_vars.append(var_name)
-
-            for var_name in tmp_vars:
-                codegen.append_output(codegen.create_load(var_name))
-
-            codegen.call_function(len(index_to_bytecode_constructor), False)
-            codegen.pop_top()
-            self.add_output_instructions(codegen.get_instructions())
-
         # to handle random calls
         if len(self.random_calls) > 0:
             random_calls_instructions = []
@@ -2333,6 +2302,33 @@ class OutputGraph(OutputGraphCommon):
             assert self.root_tx is not None
             cg = PyCodegen(self.root_tx)
 
+            if has_user_objects():
+                # NB: This is where we store possible user objects before running the graph
+                # index_to_user_object_weakref is the function used in the graph to translate
+                # the dynamo-generated index into the actual object passed to the compiled function.
+                # We generate bytecode to store all user objects at the proper index in the below
+                # call.
+                cg.add_push_null(
+                    lambda: cg.load_import_from(
+                        torch._dynamo.graph_bytecode_inputs.__name__,
+                        "store_user_object_weakrefs",
+                    )
+                )
+                tmp_vars = []
+                for constructor in index_to_bytecode_constructor.values():
+                    constructor(cg)
+                    var_name = (
+                        self.new_var()
+                    )  # keep alive any temp objects for the rest of the frame
+                    cg.store(var_name)
+                    tmp_vars.append(var_name)
+
+                for var_name in tmp_vars:
+                    cg.append_output(cg.create_load(var_name))
+
+                cg.call_function(len(index_to_bytecode_constructor), False)
+                cg.pop_top()
+
             for idx, arg in enumerate(self.graphargs):
                 self.export_metadata.graph_input_idx_to_local_source[idx] = arg.source
 
@@ -2997,7 +2993,7 @@ class SubgraphTracer(fx.Tracer):
 
         self.tracked_tensor_or_symint_vt: OrderedSet[VariableTracker] = OrderedSet()
 
-    def record_tensor_or_symint_vt(self, vt):
+    def record_tensor_or_symint_vt(self, vt: VariableTracker):
         self.tracked_tensor_or_symint_vt.add(vt)
 
     # preserve original meta if it is available
