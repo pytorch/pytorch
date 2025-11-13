@@ -611,6 +611,8 @@ def dynamo_graph_capture_for_export(
     def inner(*args: Any, **kwargs: Any) -> Any:
         assert not torch._dynamo.config.install_free_tensors
         with (
+            torch._dynamo.config.patch(replay_side_effects=False),
+            torch._dynamo.config.patch(side_effect_replay_policy="warn"),
             get_metrics_context(),
             dynamo_timed("fullgraph_capture"),
         ):
