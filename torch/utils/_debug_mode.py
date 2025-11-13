@@ -34,6 +34,8 @@ Usage::
 
 import contextlib
 import functools
+import inspect
+import os
 import traceback
 import weakref
 from collections.abc import Callable
@@ -41,6 +43,7 @@ from typing import Any, Optional, TYPE_CHECKING  # noqa: F401
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch.fx.graph import _parse_stack_trace
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
@@ -191,6 +194,16 @@ def _get_stack_trace() -> str:
     ]
     summary = traceback.StackSummary.from_list(summary)
     return "".join(summary.format())
+
+
+def _get_user_stack_trace(stack_trace_str: str) -> str | None:
+    # Extract user code stack trace, filtering out torch internals.
+    torch_dir = os.path.dirname(inspect.getfile(torch))
+    filter_fn = lambda file, name, code: not file.startswith(torch_dir + os.path.sep)  # noqa: E731
+    trace = _parse_stack_trace(stack_trace_str, filter_fn=filter_fn)
+    if trace:
+        return f"File: {trace.file}:{trace.lineno} in {trace.name}, code: {trace.code}"
+    return None
 
 
 def _maybe_get_autograd_trace() -> str | None:
@@ -781,14 +794,55 @@ class DebugMode(TorchDispatchMode):
         self.operators.append(call)
         return call
 
-    def debug_string(self) -> str:
+    def debug_string(self, show_stack_trace: bool = False) -> str:
+        """
+        show_stack_trace: If True, display one-line stack trace summaries above groups
+                        of operations (similar to gm.print_readable() style).
+                        Requires record_stack_trace=True.
+        """
         with torch._C.DisableTorchFunction():
-            result = ""
-            result += "\n".join(
-                "  " + "  " * op.call_depth + op.render(self.record_tensor_attributes)
-                for op in self.operators
-            )
-        return result
+            if not show_stack_trace:
+                result = "\n".join(
+                    "  "
+                    + "  " * op.call_depth
+                    + op.render(self.record_tensor_attributes)
+                    for op in self.operators
+                )
+                return result
+
+            # Group operations by stack trace
+            lines = []
+            prev_stack_summary = None
+
+            for op in self.operators:
+                # Get the stack trace: prefer fwd_stack_trace, fallback to stack_trace
+                stack_trace = None
+                if hasattr(op, "fwd_stack_trace") and op.fwd_stack_trace:
+                    stack_trace = op.fwd_stack_trace
+                elif hasattr(op, "stack_trace") and op.stack_trace:
+                    stack_trace = op.stack_trace
+
+                stack_summary = None
+                if stack_trace:
+                    stack_summary = _get_user_stack_trace(stack_trace)
+
+                if stack_summary and stack_summary != prev_stack_summary:
+                    # add blank line before stack trace comment for readability
+                    if lines:  # don't add blank line at the very start
+                        lines.append("")
+                    indent = "  " * (op.call_depth + 1)
+                    lines.append(indent + "# " + stack_summary)
+                    prev_stack_summary = stack_summary
+
+                # Add the operation line
+                line = (
+                    "  "
+                    + "  " * op.call_depth
+                    + op.render(self.record_tensor_attributes)
+                )
+                lines.append(line)
+
+            return "\n".join(lines)
 
     @staticmethod
     @contextlib.contextmanager
