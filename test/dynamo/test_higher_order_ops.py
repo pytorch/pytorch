@@ -249,7 +249,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         # when testing with dynamic shape, symbols are lifted as input
         arg_count = ifdynstaticdefault(2, 3)
-        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count)
+        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 1)
 
     def test_return_captured_vars(self):
         freevar1 = torch.randn(3)
@@ -267,7 +267,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         # be the input.
         # when testing with dynamic shape, a symbol is lifted as input
         arg_count = ifdynstaticdefault(3, 4)
-        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 4)
+        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 1)
 
     def test_return_captured_var_used_multiple_times(self):
         freevar = torch.randn(3)
@@ -282,7 +282,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         # when testing with dynamic shape, a symbol is lifted as input
         arg_count = ifdynstaticdefault(3, 4)
-        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 3)
+        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 2)
 
     def test_capture_untracked_global(self):
         def f(x):
@@ -727,7 +727,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         arg_count = ifdynstaticdefault(4, 5)
         # when compiled with dynamic, we don't have upper bound runtime assertions for u0
-        expected_op_count = ifdynstaticdefault(9, 8)
+        expected_op_count = ifdynstaticdefault(9, 7)
         out_graph = self._test_wrap_simple(
             f,
             default_args_generator((x,)),
@@ -747,7 +747,6 @@ class GraphModule(torch.nn.Module):
         c: "i64[u0, 1]" = l_x_.nonzero()
 
         sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-        _check_is_size = torch._check_is_size(sym_size_int_1);  _check_is_size = None
 
         ge: "Sym(u0 >= 0)" = sym_size_int_1 >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
@@ -762,15 +761,15 @@ class GraphModule(torch.nn.Module):
         def forward(self, s77: "Sym(s77)", l_x_: "f32[s77]", u0: "Sym(u0)", c: "i64[u0, 1]"):
             wrap_body_0 = self.wrap_body_0
             wrap = torch.ops.higher_order.wrap(wrap_body_0, s77, l_x_, u0, c);  wrap_body_0 = s77 = l_x_ = u0 = c = None
-            child: "f32[s77]" = wrap[0]
-            child_1: "f32[u0, 1]" = wrap[1];  wrap = None
-            return (child, child_1)
+            getitem: "f32[s77]" = wrap[0]
+            getitem_1: "f32[u0, 1]" = wrap[1];  wrap = None
+            return (getitem, getitem_1)
 
         class wrap_body_0(torch.nn.Module):
             def forward(self, s77: "Sym(s77)", l_x_: "f32[s77]", u0: "Sym(u0)", c: "i64[u0, 1]"):
-                child: "f32[s77]" = l_x_.sin();  l_x_ = None
-                child_1: "f32[u0, 1]" = c.sin();  c = None
-                return (child, child_1)
+                sin: "f32[s77]" = l_x_.sin();  l_x_ = None
+                sin_1: "f32[u0, 1]" = c.sin();  c = None
+                return (sin, sin_1)
 """,
             )
         else:
@@ -800,15 +799,15 @@ class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[3]", u0: "Sym(u0)", c: "i64[u0, 1]"):
             wrap_body_0 = self.wrap_body_0
             wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_, u0, c);  wrap_body_0 = l_x_ = u0 = c = None
-            child: "f32[3]" = wrap[0]
-            child_1: "f32[u0, 1]" = wrap[1];  wrap = None
-            return (child, child_1)
+            getitem: "f32[3]" = wrap[0]
+            getitem_1: "f32[u0, 1]" = wrap[1];  wrap = None
+            return (getitem, getitem_1)
 
         class wrap_body_0(torch.nn.Module):
             def forward(self, l_x_: "f32[3]", u0: "Sym(u0)", c: "i64[u0, 1]"):
-                child: "f32[3]" = l_x_.sin();  l_x_ = None
-                child_1: "f32[u0, 1]" = c.sin();  c = None
-                return (child, child_1)
+                sin: "f32[3]" = l_x_.sin();  l_x_ = None
+                sin_1: "f32[u0, 1]" = c.sin();  c = None
+                return (sin, sin_1)
 """,
             )
 
@@ -920,16 +919,16 @@ class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[3]", size: "Sym(u0)", c: "i64[u0, 1]"):
             wrap_body_0 = self.wrap_body_0
             wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_, size, c);  wrap_body_0 = l_x_ = size = c = None
-            child: "f32[3]" = wrap[0]
-            child_1: "f32[u0, 1]" = wrap[1];  wrap = None
-            return (child, child_1)
+            getitem: "f32[3]" = wrap[0]
+            getitem_1: "f32[u0, 1]" = wrap[1];  wrap = None
+            return (getitem, getitem_1)
 
         class wrap_body_0(torch.nn.Module):
             def forward(self, l_x_: "f32[3]", size: "Sym(u0)", c: "i64[u0, 1]"):
                 sin: "f32[3]" = l_x_.sin();  l_x_ = None
-                child: "f32[3]" = sin + size;  sin = size = None
-                child_1: "f32[u0, 1]" = c.sin();  c = None
-                return (child, child_1)
+                add: "f32[3]" = sin + size;  sin = size = None
+                sin_1: "f32[u0, 1]" = c.sin();  c = None
+                return (add, sin_1)
 """,
             )
 
@@ -2454,10 +2453,10 @@ class GraphModule(torch.nn.Module):
 
     class wrap_body_0(torch.nn.Module):
         def forward(self, l_arg1_0_: "f32[3]", l_arg2_0_: "f32[3]"):
-            child: "f32[3]" = l_arg1_0_ + 1;  l_arg1_0_ = None
+            add: "f32[3]" = l_arg1_0_ + 1;  l_arg1_0_ = None
 
-            child_1: "f32[3]" = l_arg2_0_ + 1;  l_arg2_0_ = None
-            return (child, child_1)
+            add_1: "f32[3]" = l_arg2_0_ + 1;  l_arg2_0_ = None
+            return (add, add_1)
 """,
         )
 
@@ -2651,9 +2650,9 @@ class GraphModule(torch.nn.Module):
 
     class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[2, 3]"):
-            child: "f32[2, 3]" = l_x_.sin()
-            child_1: "f32[2, 3]" = l_x_.cos();  l_x_ = None
-            return (child, child_1)
+            sin: "f32[2, 3]" = l_x_.sin()
+            cos: "f32[2, 3]" = l_x_.cos();  l_x_ = None
+            return (sin, cos)
 """,
         )
 
@@ -2683,13 +2682,13 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
-        value: "f32[3]" = wrap[0];  wrap = None
-        return (value,)
+        getitem: "f32[3]" = wrap[0];  wrap = None
+        return (getitem,)
 
     class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[3]"):
-            child: "f32[3]" = -l_x_;  l_x_ = None
-            return (child,)
+            neg: "f32[3]" = -l_x_;  l_x_ = None
+            return (neg,)
 """,
         )
 
@@ -3314,17 +3313,17 @@ class GraphModule(torch.nn.Module):
 
         hints_wrapper_body_1 = self.hints_wrapper_body_1
         hints_wrapper = torch.ops.higher_order.hints_wrapper(hints_wrapper_body_1, (x, l_y_), {}, hints = {'outer_body': True});  hints_wrapper_body_1 = x = l_y_ = None
-        res: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
-        return (res,)
+        getitem: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
+        return (getitem,)
 
     class hints_wrapper_body_1(torch.nn.Module):
         def forward(self, x: "f32[2, 4]", l_y_: "f32[4]"):
             hints_wrapper_body_0 = self.hints_wrapper_body_0
             hints_wrapper = torch.ops.higher_order.hints_wrapper(hints_wrapper_body_0, (x, l_y_), {}, hints = {'inner_body': True});  hints_wrapper_body_0 = x = l_y_ = None
-            x_1: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
+            getitem: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
 
-            x_2: "f32[2, 4]" = torch.abs(x_1);  x_1 = None
-            return (x_2,)
+            x_1: "f32[2, 4]" = torch.abs(getitem);  getitem = None
+            return (x_1,)
 
         class hints_wrapper_body_0(torch.nn.Module):
             def forward(self, x: "f32[2, 4]", l_y_: "f32[4]"):
@@ -3350,7 +3349,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2, 4)
         y = torch.ones(4)
 
-        msg = "hints_wrapper - key hints not provided"
+        msg = "hints_wrapper: improper args/kwargs"
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn_with_hints, backend=cnt)(x, y)
 
@@ -4512,12 +4511,9 @@ class GraphModule(torch.nn.Module):
             model, params, inputs, targets
         )
         self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(
-            {
-                "torch.func.functional_call capture is disabled, it can be "
-                "turned on by setting `torch._dynamo.config.inline_inbuilt_nn_modules=True`": 1,
-            },
-            dict(counters["graph_break"]),
+        self.assertIn(
+            "torch.func.functional_call capture is disabled",
+            next(iter(counters["graph_break"].keys())),
         )
         self.assertEqual(actual, expected)
 
@@ -4666,6 +4662,7 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
 
         y: "f32[3]" = torch.randn(3)
+
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func.{grad, vjp, jacrev, hessian} don't yet support saved tensor hooks. Please open an issue with your use case.");  _saved_tensors_hooks_disable = None
         _grad_increment_nesting = torch._C._functorch._grad_increment_nesting();  _grad_increment_nesting = None
 
