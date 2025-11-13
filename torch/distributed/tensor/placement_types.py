@@ -106,23 +106,23 @@ class Shard(torch._C._distributed.Shard):
         Returns (new local shard size, offset)
 
         """
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
+
         # Compute the chunk size inline with ``torch.chunk``
-        if curr_local_size % num_chunks == 0:
+        if guard_or_false(
+            curr_local_size % num_chunks == 0
+        ):  # assume uneven sharding by default
             full_chunk_size = curr_local_size // num_chunks
             return full_chunk_size, full_chunk_size * rank
 
         # uneven sharding case
         full_chunk_size = (curr_local_size + num_chunks - 1) // num_chunks
         shard_starting_idx = full_chunk_size * rank
-
-        if curr_local_size < shard_starting_idx:
-            return 0, curr_local_size
-        else:
-            local_shard_size = (
-                min(curr_local_size, shard_starting_idx + full_chunk_size)
-                - shard_starting_idx
-            )
-            return local_shard_size, shard_starting_idx
+        shard_end_idx = torch.sym_min(
+            curr_local_size, shard_starting_idx + full_chunk_size
+        )
+        local_shard_size = torch.sym_max(0, shard_end_idx - shard_starting_idx)
+        return local_shard_size, torch.sym_min(curr_local_size, shard_starting_idx)
 
     def _local_shard_size_and_offset(
         self,
