@@ -141,6 +141,33 @@ def register_decomposition(
     return decomp.register_decomposition(ops, decompositions)
 
 
+def maybe_disable_decompositions(
+    ops: list[_GenericOperator], enabled: Callable[[], bool]
+):
+    orig = {op: decompositions[op] for op in ops}
+    remove_decompositions(decompositions, ops)
+
+    def wrapper(orig):
+        def result(*args, **kwargs):
+            if enabled():
+                return orig(*args, **kwargs)
+            return NotImplemented
+
+        return result
+
+    for op in ops:
+        register_decomposition([op])(wrapper(orig[op]))
+
+
+maybe_disable_decompositions(
+    [
+        aten._fused_rms_norm.default,
+        aten._fused_rms_norm_backward.default,
+    ],
+    lambda: not config.triton.match_eager_rms_norm,
+)
+
+
 @register_decomposition([aten.embedding_dense_backward])
 def _embedding_dense_backward(
     grad_output: torch.Tensor,

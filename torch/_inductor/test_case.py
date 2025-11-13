@@ -46,3 +46,6 @@ class TestCase(DynamoTestCase):
     def tearDown(self) -> None:
         super().tearDown()
         self._inductor_test_stack.close()
+
+    def assertIdentical(self, first, second, msg=None):
+        return self.assertEqual(first, second, atol=0, rtol=0, msg=msg)
