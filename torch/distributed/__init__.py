@@ -145,6 +145,8 @@ if is_available():
         _reduce_scatter_base,
         _time_estimator,
         get_node_local_rank,
+        DistributedWorkerInfo,
+        get_worker_info,
     )
     from .remote_device import _remote_device
     from .rendezvous import (
