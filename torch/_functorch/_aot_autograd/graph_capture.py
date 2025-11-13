@@ -477,9 +477,6 @@ def aot_dispatch_autograd_graph(
     # After copying metadata, assign streams to gradient accumulation nodes
     assign_backward_streams(fx_g)
 
-    # Insert synchronization for all backward nodes if consumers are
-    # on different streams than producers
-
     fx_g.graph.eliminate_dead_code()
     if not aot_config.disable_functionalization:
         # There should be *NO* mutating ops in the graph at this point.
