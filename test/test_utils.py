@@ -51,7 +51,7 @@ from torch.utils.data import DataLoader
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -649,6 +649,7 @@ class TestHipify(TestCase):
 
 class TestHipifyTrie(TestCase):
     def setUp(self):
+        super().setUp()
         from torch.utils.hipify import hipify_python
 
         self.trie = hipify_python.Trie()

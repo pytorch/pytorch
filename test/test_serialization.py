@@ -57,6 +57,7 @@ from torch.testing._internal.common_utils import (
     TemporaryDirectoryName,
     TemporaryFileName,
     TEST_DILL,
+    TEST_WITH_MTIA,
     TestCase,
 )
 from torch.testing._internal.two_tensor import TwoTensor  # noqa: F401
@@ -68,6 +69,9 @@ if not IS_WINDOWS:
     from mmap import MAP_PRIVATE, MAP_SHARED
 else:
     MAP_SHARED, MAP_PRIVATE = None, None
+
+if TEST_WITH_MTIA:
+    import mtia.host_runtime.torch_mtia.dynamic_library  # noqa: F401
 
 # These tests were all copied from `test/test_torch.py` at some point, so see
 # the actual blame, see this revision
@@ -291,7 +295,7 @@ class SerializationMixin:
             5,
             6
         ]
-        for i in range(0, 100):
+        for _ in range(100):
             data.append(0)
         t = torch.tensor(data, dtype=torch.uint8)
 
@@ -309,15 +313,17 @@ class SerializationMixin:
     def test_serialization_gzip(self):
         # Test serialization with gzip file
         b = self._test_serialization_data()
-        f1 = tempfile.NamedTemporaryFile(delete=False)
-        f2 = tempfile.NamedTemporaryFile(delete=False)
-        torch.save(b, f1)
-        with open(f1.name, 'rb') as f_in, gzip.open(f2.name, 'wb') as f_out:
-            shutil.copyfileobj(f_in, f_out)
+        with tempfile.NamedTemporaryFile() as f1, tempfile.NamedTemporaryFile(delete=False) as f2:
+            torch.save(b, f1)
+            f1.seek(0)
+            with gzip.open(f2.name, 'wb') as f_out:
+                shutil.copyfileobj(f1, f_out)
 
-        with gzip.open(f2.name, 'rb') as f:
-            c = torch.load(f)
-        self._test_serialization_assert(b, c)
+            with gzip.open(f2.name, 'rb') as f:
+                c = torch.load(f)
+                self._test_serialization_assert(b, c)
+            f2.close()
+            os.unlink(f2.name)
 
     @unittest.skipIf(
         not TEST_DILL or HAS_DILL_AT_LEAST_0_3_1,
@@ -378,19 +384,19 @@ class SerializationMixin:
     def test_serialization_offset_gzip(self):
         a = torch.randn(5, 5)
         i = 41
-        f1 = tempfile.NamedTemporaryFile(delete=False)
         f2 = tempfile.NamedTemporaryFile(delete=False)
-        with open(f1.name, 'wb') as f:
-            pickle.dump(i, f)
-            torch.save(a, f)
-        with open(f1.name, 'rb') as f_in, gzip.open(f2.name, 'wb') as f_out:
-            shutil.copyfileobj(f_in, f_out)
+        with tempfile.NamedTemporaryFile() as f1:
+            pickle.dump(i, f1)
+            torch.save(a, f1)
+            f1.seek(0)
+            with gzip.open(f2.name, 'wb') as f_out:
+                shutil.copyfileobj(f1, f_out)
 
-        with gzip.open(f2.name, 'rb') as f:
-            j = pickle.load(f)
-            b = torch.load(f)
-        self.assertTrue(torch.equal(a, b))
-        self.assertEqual(i, j)
+            with gzip.open(f2.name, 'rb') as f:
+                j = pickle.load(f)
+                b = torch.load(f)
+                self.assertTrue(torch.equal(a, b))
+                self.assertEqual(i, j)
 
     def _test_serialization_sparse(self, weights_only):
         def _test_serialization(conversion):
@@ -648,6 +654,10 @@ class SerializationMixin:
         xpu_last_map_locations = [
             f'xpu:{torch.xpu.device_count() - 1}',
         ]
+        mtia_0_map_locations = generate_map_locations('mtia')
+        mtia_last_map_locations = [
+            f'mtia:{torch.mtia.device_count() - 1}',
+        ]
 
         def check_map_locations(map_locations, dtype, intended_device):
             for fileobject_lambda in fileobject_lambdas:
@@ -672,6 +682,13 @@ class SerializationMixin:
                 xpu_last_map_locations,
                 torch.float,
                 torch.device('xpu', torch.xpu.device_count() - 1)
+            )
+        if torch.mtia.is_available():
+            check_map_locations(mtia_0_map_locations, torch.float, torch.device('mtia', 0))
+            check_map_locations(
+                mtia_last_map_locations,
+                torch.float,
+                torch.device('mtia', torch.mtia.device_count() - 1)
             )
 
     @unittest.skipIf(torch.cuda.is_available(), "Testing torch.load on CPU-only machine")
@@ -933,7 +950,7 @@ class SerializationMixin:
             with safe_globals([TwoTensor]), skip_data():
                 sd_loaded = torch.load(f)
             self.assertNotEqual(sd_loaded, sd)
-            for k in sd_loaded.keys():
+            for k in sd_loaded:
                 sd_loaded[k] = sd_loaded[k].zero_()
             self.assertEqual(sd_loaded, sd_zeroed)
 
@@ -1266,7 +1283,7 @@ class TestSerialization(TestCase, SerializationMixin):
             torch.save(p, f)
             f.seek(0)
             with self.assertRaisesRegex(pickle.UnpicklingError,
-                                        "GLOBAL __main__.Point was not an allowed global by default"):
+                                        f"GLOBAL {__name__}.Point was not an allowed global by default"):
                 torch.load(f, weights_only=True)
             f.seek(0)
             with torch.serialization.safe_globals([Point]):
@@ -1285,7 +1302,7 @@ class TestSerialization(TestCase, SerializationMixin):
             torch.save(c, f)
             f.seek(0)
             with self.assertRaisesRegex(pickle.UnpicklingError,
-                                        "GLOBAL __main__.ClassThatUsesBuildInstruction was not an allowed global by default"):
+                                        f"GLOBAL {__name__}.ClassThatUsesBuildInstruction was not an allowed global by default"):
                 torch.load(f, weights_only=True)
             try:
                 with torch.serialization.safe_globals([ClassThatUsesBuildInstruction]):
@@ -1315,7 +1332,7 @@ class TestSerialization(TestCase, SerializationMixin):
             torch.save(obj, f)
             f.seek(0)
             with self.assertRaisesRegex(pickle.UnpicklingError,
-                                        f"GLOBAL __main__.{obj_cls.__name__} was not an allowed global by default"):
+                                        f"GLOBAL {__name__}.{obj_cls.__name__} was not an allowed global by default"):
                 torch.load(f, weights_only=True)
 
             f.seek(0)
@@ -4486,9 +4503,10 @@ class TestSerialization(TestCase, SerializationMixin):
         # Test that without materialize_fake_tensor, behavior for fake_tensors is not altered by ctx
         if not materialize_fake:
             ft = converter.from_real_tensor(mode, torch.randn(2, device=t_device))
+            exc = pickle.PicklingError if sys.version_info >= (3, 14) else AttributeError
             with self.assertRaisesRegex(
-                AttributeError,
-                "Can't (get|pickle) local object 'WeakValueDictionary.__init__.<locals>.remove'"
+                exc,
+                "Can't (get|pickle) local object (<function |')WeakValueDictionary.__init__.<locals>.remove"
             ):
                 with skip_data(), BytesIOContext() as f:
                     torch.save(ft, f)
@@ -4538,7 +4556,7 @@ class TestSerialization(TestCase, SerializationMixin):
         with TemporaryFileName() as f:
             torch.save(m, f)
             try:
-                old_value = os.environ[env_var] if env_var in os.environ else None
+                old_value = os.environ.get(env_var, None)
                 os.environ[env_var] = "1"
                 # if weights_only is explicitly set, TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD cannot override it
                 with self.assertRaisesRegex(pickle.UnpicklingError, "Weights only load failed"):
@@ -4786,6 +4804,18 @@ class TestSerialization(TestCase, SerializationMixin):
                 y = torch.load(checkpoint)
 
             assert x.dtype == y.dtype
+
+    @skipIfTorchDynamo("getrefcount does not work in dynamo")
+    def test_serializaion_no_storage_leak(self):
+        # Test https://github.com/pytorch/pytorch/issues/149846
+        t = torch.rand(10, 10)
+        state_dict = {'a': 1, 'b': 2, 'c': t}
+        storage = t.untyped_storage()
+        ref1 = sys.getrefcount(storage)
+        with tempfile.NamedTemporaryFile() as checkpoint:
+            torch.save(state_dict, checkpoint)
+        ref2 = sys.getrefcount(storage)
+        self.assertEqual(ref1, ref2)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):

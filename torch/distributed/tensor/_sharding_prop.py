@@ -1,11 +1,13 @@
 # mypy: allow-untyped-defs
+import contextlib
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from functools import lru_cache
 from itertools import chain
-from typing import Callable, cast, Optional, Union
+from typing import cast, Optional, Union
 
 import torch
+from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
@@ -47,6 +49,9 @@ class LocalLRUCache(threading.local):
 
     def cache_info(self):
         return self.cache.cache_info()
+
+    def cache_clear(self):
+        return self.cache.cache_clear()
 
 
 class ShardingPropagator:
@@ -166,7 +171,16 @@ class ShardingPropagator:
         # these operators to be inserted in the fx graph.
         from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
-        with FakeTensorMode(), disable_proxy_modes_tracing():
+        # DTensor.dispatch runs fake tensor prop twice, once here, and once for the actual
+        # local tensor result. The result here is never surfaced to tracing, and so if
+        # the op is data-dependent, can result in PendingUnbackedSymbolNotFound errors.
+        fake_mode = detect_fake_mode() or FakeTensorMode()
+        suppress_fresh_symbols_ctx = (
+            fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+            if fake_mode.shape_env
+            else contextlib.nullcontext()
+        )
+        with fake_mode, disable_proxy_modes_tracing(), suppress_fresh_symbols_ctx:
             fake_args = op_schema.gen_fake_args()
             fake_kwargs = op_schema.gen_fake_kwargs()
             fake_out = op_schema.op(*fake_args, **fake_kwargs)
@@ -345,6 +359,10 @@ class ShardingPropagator:
         """
         Propagate the sharding for an operator given the op_schema.
         """
+        # no-op in OSS, logs API usage metrics in meta-internal runs
+        torch._C._log_api_usage_once(
+            "torch.distributed.tensor._sharding_prop.ShardingPropagator.propogate_op_sharding_non_cached"
+        )
         # special case op, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
         if op_schema.op is aten._local_scalar_dense.default:
@@ -418,16 +436,14 @@ class ShardingPropagator:
                     output_specs: OutputSpecType = output_strategy.output_specs
                     if isinstance(output_specs, DTensorSpec):
                         output_specs = tuple(
-                            [
-                                # create a new DTensorSpec with the same placement as the
-                                # output_specs in output_strategy
-                                DTensorSpec(
-                                    mesh=output_specs.mesh,
-                                    placements=output_specs.placements,
-                                    tensor_meta=output_specs.tensor_meta,
-                                )
-                                for _ in range(len(op_schema.op._schema.returns))
-                            ]
+                            # create a new DTensorSpec with the same placement as the
+                            # output_specs in output_strategy
+                            DTensorSpec(
+                                mesh=output_specs.mesh,
+                                placements=output_specs.placements,
+                                tensor_meta=output_specs.tensor_meta,
+                            )
+                            for _ in range(len(op_schema.op._schema.returns))
                         )
                 elif (
                     op_schema.return_type_tensor()

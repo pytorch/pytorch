@@ -38,7 +38,11 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     freeze_rng_state,
+    instantiate_parametrized_tests,
     IS_FBCODE,
+    MI350_ARCH,
+    parametrize,
+    skipIfRocmArch,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     xfailIfPy312Plus,
@@ -83,6 +87,7 @@ check_model_cuda = test_torchinductor.check_model_cuda
 aten = torch.ops.aten
 
 
+@instantiate_parametrized_tests
 class CudaReproTests(TestCase):
     device = "cuda"
     common = check_model_cuda
@@ -218,6 +223,7 @@ class CudaReproTests(TestCase):
         # dont check rng state
         self.assertEqual(out[:2], fn(query, key, value, input_tensor2)[:2])
 
+    @skipIfRocmArch(MI350_ARCH)
     def test_effn_attn_bias_padding_misaligned(self):
         seqlen_start = 1008
 
@@ -538,7 +544,7 @@ class CudaReproTests(TestCase):
 
         input = torch.randn(10, 10, device="cuda", requires_grad=True)
 
-        for i in range(2):
+        for _ in range(2):
             output_ref = model_ref(input)
             output_res = model_opt(input)
             output_ref.sum().backward()
@@ -1538,7 +1544,7 @@ class CudaReproTests(TestCase):
                 t2 = a0.view(379, 165, 2).mean(dim=2)
                 t7 = ((((a1) - a2) - a3) - a2) - a4
                 t8 = t7.view(379, 165)
-                t11 = torch.nn.functional.gelu(a5).mean(dim=0)
+                t11 = torch.nn.functional.relu(a5).mean(dim=0)
                 t12 = t2 - t11
                 t13 = (((t2) / t8) / t11) / t12
                 return t13
@@ -2191,6 +2197,40 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(f(x_ref, y_ref), out)
 
+    def test_red_dtype_mismatch(self):
+        for per in (True, False):
+            torch._dynamo.reset()
+            if not per:
+                torch._inductor.config.triton.persistent_reductions = False
+
+            def f(arg0_1, arg1_1):
+                embedding = torch.ops.aten.embedding.default(arg1_1, arg0_1)
+                view = torch.ops.aten.view.default(embedding, [64, 3072])
+                unsqueeze = torch.ops.aten.unsqueeze.default(view, 0)
+                expand = torch.ops.aten.expand.default(unsqueeze, [576, -1, -1])
+                view_1 = torch.ops.aten.view.default(expand, [2, 8, 36, 64, 3072])
+                permute = torch.ops.aten.permute.default(view_1, [0, 1, 3, 2, 4])
+                clone = torch.ops.aten.clone.default(
+                    permute, memory_format=torch.contiguous_format
+                )
+                view_2 = torch.ops.aten.view.default(clone, [2, 18432, 3072])
+                iota = torch.ops.prims.iota.default(
+                    36,
+                    start=0,
+                    step=1,
+                    dtype=torch.int64,
+                    device="cuda",
+                    requires_grad=False,
+                )
+                view_3 = torch.ops.aten.view.default(iota, [1, 36])
+                max_1 = torch.ops.aten.max.default(view_3)
+                return (max_1,)
+
+            x = torch.ones(1, 64, device="cuda", dtype=torch.int64)
+            y = torch.randn(64, 3072, device="cuda", dtype=torch.bfloat16)
+            out = f(x, y)
+            self.assertEqual(torch.compile(f)(x, y), out)
+
     @unittest.skipIf(
         not config.is_fbcode(),
         "bfloat16 atomic add is only supported in fbcode today #97016",
@@ -2404,6 +2444,96 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                     f"Max diff: {torch.max(torch.abs(eager_output - compiled_output)):.6f}",
                 )
 
+    @parametrize(
+        "quantiles_shape,quantiles_strides,batch_size",
+        [
+            ((100, 10), (10, 1), 16),  # Contiguous C-order
+            ((100, 10), (1, 100), 16),  # Transposed/F-order
+            ((80, 12), (1, 80), 16),  # Transposed different size
+            ((50, 20), (1, 50), 16),  # Transposed medium
+            ((200, 8), (1, 200), 16),  # Transposed large x small
+            ((25, 40), (1, 25), 16),  # Transposed small x large
+            ((20, 5, 8), (40, 1, 5), 16),  # 3D case with mixed strides
+            ((20, 5, 8), (1, 20, 100), 16),  # 3D case different stride order
+        ],
+    )
+    def test_searchsorted_stride_permutations(
+        self, quantiles_shape, quantiles_strides, batch_size
+    ):
+        class Foo(torch.nn.Module):
+            def __init__(self, quantiles: torch.Tensor) -> None:
+                super().__init__()
+                assert quantiles.shape[0] > 0
+                quantiles = quantiles.T
+                self.q = torch.nn.Parameter(quantiles, requires_grad=False)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return torch.searchsorted(self.q, x.T).T
+
+        torch.manual_seed(42)
+
+        # Create contiguous tensor first
+        numel = 1
+        for dim in quantiles_shape:
+            numel *= dim
+        data = torch.randn(numel, dtype=torch.float32, device="cuda")
+
+        # Create tensor with specified shape and strides
+        quantiles = torch.as_strided(
+            data, size=quantiles_shape, stride=quantiles_strides
+        )
+
+        quantiles = torch.sort(quantiles, dim=0)[0]
+
+        x_shape = (batch_size,) + quantiles_shape[1:]
+        x = torch.randn(*x_shape, dtype=torch.float32, device="cuda")
+
+        foo = Foo(quantiles)
+        foo_compiled = torch.compile(Foo(quantiles), fullgraph=True)
+
+        # Test eager vs compiled
+        with torch.no_grad():
+            eager = foo(x)
+            compiled = foo_compiled(x)
+
+        self.assertEqual(eager, compiled)
+
+    def test_identity_load(self):
+        device = "cuda"
+
+        def f(x, y):
+            y2 = torch.cat(
+                [
+                    x[:, 1:],
+                    y[:, None] + 32 * 2048,
+                ],
+                dim=1,
+            )
+
+            x2 = x[:, 1:, None]
+            y3 = y2[:, -1:, None]
+
+            return (
+                torch.cat([x2, y3], dim=1)
+                + torch.arange(-2048, 0, device=device)[None, None, :]
+            ).reshape(1, 32 * 2048)
+
+        # This succeeds
+        eager_out = f(
+            torch.zeros(1, 32, dtype=torch.int64, device=device),
+            torch.zeros(1, dtype=torch.int32, device=device),
+        )
+        # This crashes
+        compile_out, code = run_and_get_code(
+            torch.compile(f),
+            torch.zeros(1, 32, dtype=torch.int64, device=device),
+            torch.zeros(1, dtype=torch.int32, device=device),
+        )
+        # make sure the identity is maintained
+        FileCheck().check("(1 + ((31)").run(code[0])
+
+        self.assertEqual(eager_out, compile_out)
+
     def test_qwen2_7b_sdpa_input_alignment_requires_recompile(self):
         # SDPA constraints ensures inputs have alignment (8).
         device = "cuda"
@@ -2506,6 +2636,52 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         correct = forward(*example_inputs)
         actual = compiled(*example_inputs)
         self.assertEqual(actual, correct)
+
+    @config.patch({"emulate_divison_rounding": True})
+    def test_truediv_emulate_divison_rounding(self):
+        from decimal import Decimal
+
+        y, x = 7.0, 11.0
+
+        @torch.compile
+        def compiled_divide(x, y):
+            return x / y
+
+        for y_dtype in [torch.float16, torch.bfloat16, torch.float32, torch.float64]:
+            for x_dtype in [
+                torch.float16,
+                torch.bfloat16,
+                torch.float32,
+                torch.float64,
+            ]:
+                y_ten = torch.tensor([y], dtype=y_dtype, device="cuda")
+                x_ten = torch.tensor([x], dtype=x_dtype, device="cuda")
+
+                torch._dynamo.reset()
+                compiled_div = Decimal(compiled_divide(x_ten, y_ten).item())
+                eager_div = Decimal((x_ten / y_ten).item())
+
+                self.assertEqual(eager_div, compiled_div)
+
+    @config.patch({"emulate_divison_rounding": False})
+    def test_truediv_base_not_bitwise_equivalent(self):
+        from decimal import Decimal
+
+        y, x = 7.0, 11.0
+
+        y_ten = torch.tensor([y], dtype=torch.float32, device="cuda")
+        x_ten = torch.tensor([x], dtype=torch.float32, device="cuda")
+
+        compile_out, code = run_and_get_code(
+            torch.compile(lambda x, y: x / y),
+            x_ten,
+            y_ten,
+        )
+        compiled_div = Decimal(compile_out.item())
+        eager_div = Decimal((x_ten / y_ten).item())
+
+        self.assertNotEqual(eager_div, compiled_div)
+        self.assertTrue("div_rn" not in code)
 
 
 if __name__ == "__main__":
