@@ -570,14 +570,22 @@ class TestOverlapPreservingBucketing(InductorTestCase):
 
     def test_split_mm(self):
         def func(a, b):
+            a = a * 2
+            b = b * 3
             mm = torch.mm(a, b)
+            mm = mm * 2
             return mm
 
-        # Trace with make_fx
-        ref_a = torch.randn(16, 8)
-        ref_b = torch.randn(8, 4)
-        gm = make_fx(func)(ref_a, ref_b)
-        ref_out = func(ref_a, ref_b)
+        def _inps():
+            return torch.randn(16, 8, device=self.device), torch.randn(
+                8, 4, device=self.device
+            )
+
+        inps = _inps()
+        ref_out = func(*inps)
+
+        gm = make_fx(func, tracing_mode="fake")(*inps)
+
         from torch._inductor.fx_passes.decompose_mm import split_mms
 
         split_mms(gm, 16, 4)
@@ -587,15 +595,25 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             4,
             exactly=True,
         ).run(graph_str)
-        out = gm(ref_a, ref_b)
+        out = gm(*inps)
+
         self.assertTrue(same(out, ref_out))
 
+    def test_split_mm_noncont(self):
         # Non contiguous matmuls are not split
+        def func(a, b):
+            return torch.mm(a, b)
 
-        ref_a2 = torch.empty_strided((16, 8), (1, 8))
-        ref_b2 = torch.randn(8, 4)
-        gm = make_fx(func)(ref_a2, ref_b2)
+        def _inps():
+            return torch.empty_strided((16, 8), (1, 8)), torch.randn(8, 4)
+
+        inps = _inps()
+
+        gm = make_fx(func, tracing_mode="fake")(*inps)
+        from torch._inductor.fx_passes.decompose_mm import split_mms
+
         split_mms(gm, 16, 4)
+        graph_str = str(gm.graph)
         FileCheck().check_count(
             "torch.ops.aten.mm",
             1,
