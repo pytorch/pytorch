@@ -27,6 +27,7 @@ import sympy
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import (
     counters,
@@ -81,6 +82,7 @@ from .utils import (
     do_bench_using_profiling,
     FakeIndentedBuffer,
     get_dtype_size,
+    is_gpu,
     Placeholder,
     restore_stdout_stderr,
     sympy_dot,
@@ -2706,7 +2708,6 @@ class AlgorithmSelectorCache(PersistentCache):
         best_config_future=None,
         return_choice=False,  # TODO: return_choice is temporary and will be refactored soon
         is_collective=False,  # Flag for collective operations
-        process_group=None,  # Process group for collective ops
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
@@ -3388,16 +3389,29 @@ class AlgorithmSelectorCache(PersistentCache):
         inputs, output = benchmark_tensors.unpack()
         output.zero_()
 
-        timing = choice.benchmark(*inputs, out=output)
-        return timing
+        result = choice.benchmark(*inputs, out=output)
+
+        # Synchronize device to shake out any CUDA errors
+        device_type = next(
+            (tensor.device.type for tensor in inputs if is_gpu(tensor.device.type)),
+            "cuda",
+        )
+        device_interface = get_interface_for_device(device_type)
+        if device_interface.is_available():
+            device_interface.synchronize()  # shake out any CUDA errors
+
+        # Verify output if requested
+        if VERIFY and autotune_args.expected is not None:
+            autotune_args.verify(**VERIFY)
+
+        return result
 
     @classmethod
     def benchmark_collective_choice(
         cls,
         choice: ChoiceCaller,
         autotune_args: AutotuneArgs,
-        process_group,
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float = 30,
     ) -> float:
         """
         Benchmark a choice for collective operations with cross-rank synchronization.
@@ -3409,14 +3423,15 @@ class AlgorithmSelectorCache(PersistentCache):
         Args:
             choice: The choice to benchmark
             autotune_args: Autotuning arguments containing input/output tensors
-            process_group: Process group for collective synchronization
-            timeout_seconds: Timeout for benchmarking (unused in current impl)
+            timeout_seconds: TODO: Timeout for benchmarking (unused in current impl)
 
         Returns:
             Benchmark time in microseconds (averaged and max-reduced across ranks)
         """
         import torch.distributed as dist
 
+        # Use default process group (None = all ranks)
+        process_group = None
         rank = dist.get_rank(process_group)
 
         # Get benchmark tensors
@@ -3470,11 +3485,6 @@ class AlgorithmSelectorCache(PersistentCache):
             return timing
         else:
             # Fallback to regular benchmark for non-subgraph choices
-            log.debug(
-                "Choice %s on rank %d does not have gm attribute, using regular benchmark",
-                choice.name,
-                rank,
-            )
             return cls.benchmark_choice(choice, autotune_args)
 
     @classmethod
@@ -3483,7 +3493,6 @@ class AlgorithmSelectorCache(PersistentCache):
         choices: Sequence[ChoiceCaller],
         autotune_args: AutotuneArgs,
         is_collective: bool = False,
-        process_group=None,
     ) -> dict[ChoiceCaller, float]:
         """
         Benchmark a list of choices and return timing dict.
@@ -3495,7 +3504,6 @@ class AlgorithmSelectorCache(PersistentCache):
             choices: List of choices to benchmark
             autotune_args: Autotuning arguments
             is_collective: Whether this is a collective operation
-            process_group: Process group for collective synchronization
 
         Returns:
             Dictionary mapping choices to their benchmark times
@@ -3511,7 +3519,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
                 is_collective = False
             else:
-                rank = dist.get_rank(process_group)
+                rank = dist.get_rank(None)  # Use default process group
                 log.debug(
                     "Using collective benchmarking for %d choices on rank %d",
                     len(choices),
@@ -3522,9 +3530,7 @@ class AlgorithmSelectorCache(PersistentCache):
             try:
                 if is_collective:
                     # Use collective benchmarking with timeout protection
-                    timing = cls.benchmark_collective_choice(
-                        choice, autotune_args, process_group
-                    )
+                    timing = cls.benchmark_collective_choice(choice, autotune_args)
                 else:
                     # Regular benchmarking
                     timing = cls.benchmark_choice(choice, autotune_args)
@@ -3592,7 +3598,6 @@ class AlgorithmSelectorCache(PersistentCache):
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
         hint_override: Optional[int] = None,
         is_collective=False,
-        process_group=None,
     ) -> dict[ChoiceCaller, float]:
         inputs = cls.get_inputs(
             choices, input_nodes, layout, input_gen_fns, hint_override=hint_override
@@ -3601,7 +3606,6 @@ class AlgorithmSelectorCache(PersistentCache):
             choices,
             inputs,
             is_collective=is_collective,
-            process_group=process_group,
         )
 
     @classmethod
@@ -3635,37 +3639,13 @@ class AlgorithmSelectorCache(PersistentCache):
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
         hint_override: Optional[int] = None,
         is_collective=False,
-        process_group=None,
     ):
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
 
-        if config.autotune_in_subproc:
-            # Collective ops in subprocess require special handling.
-            # For now, fallback to current process if collective.
-            if is_collective:
-                log.debug(
-                    "Collective op autotuning in subprocess not yet supported. "
-                    "Falling back to current process."
-                )
-                return functools.partial(
-                    cls.benchmark_in_current_process,
-                    input_nodes=input_nodes,
-                    layout=layout,
-                    input_gen_fns=input_gen_fns,
-                    hint_override=hint_override,
-                    is_collective=is_collective,
-                    process_group=process_group,
-                )
-            else:
-                return functools.partial(
-                    cls.benchmark_in_sub_process,
-                    input_nodes=input_nodes,
-                    layout=layout,
-                    input_gen_fns=input_gen_fns,
-                    hint_override=hint_override,
-                )
-        else:
+        # Collective ops must use current process (subprocess not supported)
+        # Non-collective ops can use subprocess if enabled
+        if is_collective or not config.autotune_in_subproc:
             return functools.partial(
                 cls.benchmark_in_current_process,
                 input_nodes=input_nodes,
@@ -3673,7 +3653,15 @@ class AlgorithmSelectorCache(PersistentCache):
                 input_gen_fns=input_gen_fns,
                 hint_override=hint_override,
                 is_collective=is_collective,
-                process_group=process_group,
+            )
+        else:
+            # Non-collective ops with subprocess enabled
+            return functools.partial(
+                cls.benchmark_in_sub_process,
+                input_nodes=input_nodes,
+                layout=layout,
+                input_gen_fns=input_gen_fns,
+                hint_override=hint_override,
             )
 
     @staticmethod
