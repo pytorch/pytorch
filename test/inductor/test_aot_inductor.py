@@ -7520,7 +7520,7 @@ class AOTInductorTestsTemplate:
             "libomp",
             "libgomp",
             "libiomp",
-            'libiomp5',
+            "libiomp5",
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
