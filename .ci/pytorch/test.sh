@@ -1908,7 +1908,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     # Do this after checkout_install_torchbench to ensure we clobber any
     # nightlies that torchbench may pull in
     # Skip torchrec/fbgemm for cuda13 as they're not compatible yet
-    if [[ "${TEST_CONFIG}" != *cpu* && "${BUILD_ENVIRONMENT}" != *cuda13* ]]; then
+    if [[ "${TEST_CONFIG}" != *cpu* && "${TEST_CONFIG}" != *xpu* && "${BUILD_ENVIRONMENT}" != *cuda13* ]]; then
       install_torchrec_and_fbgemm
     fi
     PYTHONPATH=/torchbench test_dynamo_benchmark torchbench "$id"
