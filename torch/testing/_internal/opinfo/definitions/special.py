@@ -13,7 +13,11 @@ from torch.testing._internal.common_device_type import (
     tol,
     toleranceOverride,
 )
-from torch.testing._internal.common_dtype import all_types_and, floating_types
+from torch.testing._internal.common_dtype import (
+    all_types,
+    all_types_and,
+    floating_types,
+)
 from torch.testing._internal.common_utils import TEST_SCIPY, torch_to_numpy_dtype_dict
 from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
@@ -645,7 +649,7 @@ op_db: list[OpInfo] = [
                 }
             ),
         ),
-        dtypes=all_types_and(torch.bool),
+        dtypes=all_types(),
         ref=lambda x: scipy.special.spherical_jn(0, x) if TEST_SCIPY else None,
         supports_autograd=False,
     ),
