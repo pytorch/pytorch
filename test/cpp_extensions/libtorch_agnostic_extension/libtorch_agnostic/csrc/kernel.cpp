@@ -348,6 +348,7 @@ uint64_t get_template_any_data_ptr(Tensor t, c10::ScalarType dtype, bool mutable
     }                                                                   \
   }
   switch (dtype) {
+    // per aten/src/ATen/templates/TensorMethods.cpp:
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CASE)
     AT_FORALL_QINT_TYPES(DEFINE_CASE)
     DEFINE_CASE(uint16_t, UInt16)
