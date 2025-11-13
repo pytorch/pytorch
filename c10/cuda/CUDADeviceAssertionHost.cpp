@@ -295,11 +295,19 @@ DeviceAssertionsData* CUDAKernelLaunchRegistry::
   C10_CUDA_CHECK_WO_DSA(
       cudaMallocManaged(&uvm_assertions_ptr, sizeof(DeviceAssertionsData)));
 
+#if CUDART_VERSION >= 13000
+  cudaMemLocation cpuDevice;
+  cpuDevice.type = cudaMemLocationTypeDevice;
+  cpuDevice.id = cudaCpuDeviceId;
+#else
+  const auto cpuDevice = cudaCpuDeviceId;
+#endif
+
   C10_CUDA_CHECK_WO_DSA(cudaMemAdvise(
       uvm_assertions_ptr,
       sizeof(DeviceAssertionsData),
       cudaMemAdviseSetPreferredLocation,
-      cudaCpuDeviceId));
+      cpuDevice));
 
   // GPU will establish direct mapping of data in CPU memory, no page faults
   // will be generated
@@ -307,7 +315,7 @@ DeviceAssertionsData* CUDAKernelLaunchRegistry::
       uvm_assertions_ptr,
       sizeof(DeviceAssertionsData),
       cudaMemAdviseSetAccessedBy,
-      cudaCpuDeviceId));
+      cpuDevice));
 
   // Initialize the memory from the CPU; otherwise, pages may have to be created
   // on demand. We think that UVM documentation indicates that first access may
