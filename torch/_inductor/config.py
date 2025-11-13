@@ -1780,6 +1780,9 @@ class aot_inductor:
     # Whether the compiled .so should link to libtorch
     link_libtorch: bool = True
 
+    # Whether the compiled .so should link to OpenMP
+    link_openmp: bool = True
+
     # Currently the only valid option is "windows".
     # We'll use x86_64-w64-mingw32-gcc to cross-compile a .dll file
     # If using cuda, you also need to set WINDOWS_CUDA_HOME env var
