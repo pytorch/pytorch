@@ -11,11 +11,13 @@ import sympy
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.convert_frame import CaptureOutput, fullgraph_capture, get_traced_fn
 from torch._dynamo.eval_frame import argument_names, check_user_input_output
 from torch._dynamo.exc import UserErrorType
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
+from torch._guards import TracingContext
 from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
 from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -434,7 +436,7 @@ def _suggest_or_raise_constraint_violation(
 
         # Error if we have any constraints on static values
 
-        for k in shape_env.var_to_range.keys():
+        for k in shape_env.var_to_range:
             if isinstance(k, sympy.Integer):
                 constraint_violation_error = ConstraintViolationError(
                     f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"
@@ -447,6 +449,14 @@ def _suggest_or_raise_constraint_violation(
             constraint_violation_error, orig_callable, args, kwargs
         )
         raise constraint_violation_error
+
+
+def _normalize_shuffle_graph(shuffle_gm: torch.fx.GraphModule) -> None:
+    shuffle_gm.graph.eliminate_dead_code()
+    shuffle_gm.recompile()
+    for name, buffer in list(shuffle_gm.named_buffers()):
+        delattr(shuffle_gm, name)
+        setattr(shuffle_gm, name, buffer)
 
 
 @dataclass(frozen=True)
@@ -525,6 +535,7 @@ def pytreeify(
     in_shuffle_graph = make_fx(
         InShuffle(), tracing_mode="symbolic", proxy_module_inputs=True
     )(*flat_real_args)
+    _normalize_shuffle_graph(in_shuffle_graph)
 
     output_node = next(iter(reversed(backend_input.graph_module.graph.nodes)))
 
@@ -569,9 +580,11 @@ def pytreeify(
     fake_mode = torch._dynamo.utils.detect_fake_mode(flat_out_shuffle_args)
     if fake_mode and fake_mode.shape_env is None:
         fake_mode.shape_env = ShapeEnv()
-    out_shuffle_graph = make_fx(
-        out_shuffle, tracing_mode="symbolic", proxy_module_inputs=True
-    )(*flat_out_shuffle_args)
+    with enable_python_dispatcher():
+        out_shuffle_graph = make_fx(
+            out_shuffle, tracing_mode="real", proxy_module_inputs=True
+        )(*flat_out_shuffle_args)
+    _normalize_shuffle_graph(out_shuffle_graph)
 
     assert out_shuffle.out_spec is not None
     return PyTreeifyOutput(
@@ -626,7 +639,7 @@ def dynamo_graph_capture_for_export(
             pyt.in_shuffle_graph,
             pyt.out_shuffle_graph,
             tree_leaf_names,
-            pyt.root,
+            graph_module if isinstance(pyt.root, torch.nn.Module) else pyt.root,
         )  # type: ignore[attr-defined]
         normalize_graph_module(graph_module)
         if pyt.root is not None:
@@ -637,6 +650,10 @@ def dynamo_graph_capture_for_export(
             graph_module._non_persistent_buffers_set = (
                 pyt.root._non_persistent_buffers_set.copy()
             )
+            annotations = torch.nn.Module.__dict__.get("__annotations__", None)
+            for name, value in pyt.root.__dict__.items():
+                if annotations and name not in annotations:
+                    graph_module.__dict__[name] = value
         graph_module._in_spec = pyt.in_spec
         graph_module._out_spec = pyt.out_spec
         assert not hasattr(graph_module, "_in_shuffle_graph")
@@ -650,6 +667,10 @@ def dynamo_graph_capture_for_export(
         )
         assert out.backend_input is not None
         graph_module.meta["fake_mode"] = out.backend_input.fake_mode  # type: ignore[attr-defined]
+        graph_module.meta["fake_mode"].allow_non_fake_inputs = True
+        tracing_context = TracingContext(graph_module.meta["fake_mode"])
+        tracing_context.tensor_to_context = out.backend_input.tensor_to_context  # type: ignore[attr-defined]
+        graph_module.meta["tracing_context"] = tracing_context
         return graph_module
 
     return inner

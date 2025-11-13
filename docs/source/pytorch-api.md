@@ -29,6 +29,7 @@ mps
 xpu
 mtia
 mtia.memory
+mtia.mtia_graph
 meta
 torch.backends <backends>
 torch.export <user_guide/torch_compiler/export>

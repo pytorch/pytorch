@@ -54,12 +54,10 @@ from torch.testing._internal.common_distributed import (
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
-    MI300_ARCH,
     retry_on_connect_failures,
     run_tests,
     skip_but_pass_in_sandcastle,
     skipIfRocm,
-    skipIfRocmArch,
     TestCase,
 )
 
@@ -1233,7 +1231,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_gather_stress(inputs, lambda t: t.clone())
 
     @skip_if_lt_x_gpu(2)
-    @skipIfRocmArch(MI300_ARCH)
+    @skipIfRocm
     @requires_gloo()
     def test_gather_stress_cuda(self):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
@@ -2357,6 +2355,7 @@ class ReducerModule(nn.Module):
 
 class ReducerTest(TestCase):
     def setUp(self):
+        super().setUp()
         self.file = tempfile.NamedTemporaryFile(delete=False)
         world_size = 1
         self.store = c10d.FileStore(self.file.name, world_size)

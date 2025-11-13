@@ -30,6 +30,7 @@ import numpy as np
 import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.aoti_eager
+import torch.fx.traceback as fx_traceback
 import torch.nn as nn
 from torch._C._dynamo.guards import assert_alignment, assert_size_stride
 from torch._dispatch.python import enable_python_dispatcher
@@ -2938,17 +2939,18 @@ class CommonTemplate:
             self.common(fn2, (torch.randn(size1), torch.randn(size2)))
 
     def test_views2(self):
-        def fn1(x):
-            return (x.view(size2) + 1,)
-
-        def fn2(x):
-            return ((x * 2).view(size2) + 1,)
-
         for size1, size2 in [
             ([2, 2, 2, 2], [4, -1]),
             ([10, 1, 10, 1, 10], [-1, 100]),
             ([10 * 5, 20], [10, -1, 20]),
         ]:
+
+            def fn1(x):
+                return (x.view(size2) + 1,)
+
+            def fn2(x):
+                return ((x * 2).view(size2) + 1,)
+
             self.common(fn1, (torch.randn(size1),))
             self.common(fn2, (torch.randn(size1),))
 
@@ -5874,6 +5876,22 @@ class CommonTemplate:
             (a, a),
             exact_stride=True,
             reference_in_float=False,
+        )
+
+    @skipIfMPS
+    def test_linalg_eig_stride_consistency(self):
+        def fn(x):
+            eigenvals, eigenvecs = torch.linalg.eig(x)
+            return eigenvecs
+
+        x = torch.randn(5, 5, device=self.device, dtype=torch.float32)
+
+        self.common(
+            fn,
+            [x],
+            exact_stride=True,
+            exact_dtype=True,
+            check_lowp=False,
         )
 
     def test_view_as_complex(self):
@@ -13547,6 +13565,224 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             size_assert_pattern = r"assert_size_stride.[a-z]+[0-9]+, .2, 3, 16, 32, 32., .49152, 16384, 1, 512, 16.."
         FileCheck().check_regex(size_assert_pattern).run(code)
 
+    def test_lite_mode_fallback(self):
+        def f(x):
+            z = x.sin()
+            return z.cos()
+
+        f = torch.compile(f, mode="lite")
+
+        _, code = run_and_get_code(f, torch.randn(2, device=self.device))
+
+        # Checks that aten ops are kept and run
+        if config.cpp_wrapper:
+            FileCheck().check("aoti_torch_call_dispatcher(").check("aten::sin").check(
+                "aoti_torch_call_dispatcher("
+            ).check("aten::cos").run(code[0])
+        else:
+            FileCheck().check("torch.ops.aten.sin.default(").check(
+                "torch.ops.aten.cos.default("
+            ).run(code[0])
+            # Checks that no triton code run in the generated code
+            self.assertFalse(".run(" in code[0])
+
+    # skip cpu test since rms norm is always decomposed on cpu
+    def test_lite_mode_not_decompose(self):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        def f(x, shape):
+            y = x + 1
+            z = torch.ops.aten._fused_rms_norm(y, shape, None, None)
+            return z[0] + z[1]
+
+        f = torch.compile(f, mode="lite")
+
+        x = torch.randn(2, 3, device=self.device)
+        _, code = run_and_get_code(f, x, [2, 3])
+        if config.cpp_wrapper:
+            FileCheck().check(
+                "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda__fused_rms_norm("
+            ).run(code[0])
+        else:
+            FileCheck().check("torch.ops.aten._fused_rms_norm.default(").run(code[0])
+
+        if config.cpp_wrapper:
+            # arg type List[int] is not yet supported by custom_op_wrapper
+            pass
+        else:
+            x = torch.randn(2, 3, device=self.device, requires_grad=True)
+            _, codes = run_fw_bw_and_get_code(lambda: f(x, [2, 3]))
+            self.assertEqual(len(codes), 2)
+            FileCheck().check("torch.ops.aten._fused_rms_norm.default(").run(code[0])
+
+    def test_lite_regional_compile_flex_attention(self):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        def _squared(score, b, h, m, n):
+            return score * score
+
+        def mask_mod(b, h, q, k):
+            return q >= 0
+
+        a = 12
+        b = 64
+        block_mask = create_block_mask(
+            mask_mod, None, None, a * b, a * b, device=self.device
+        )
+
+        def fn(x):
+            x = torch.sin(x)
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                x = flex_attention(x, x, x, block_mask=block_mask, score_mod=_squared)
+            return torch.cos(x)
+
+        x = torch.randn(
+            1,
+            1,
+            a * b,
+            b,
+            dtype=torch.bfloat16,
+            device=self.device,
+            requires_grad=True,
+        )
+
+        opt_fn = torch.compile(
+            fn,
+            mode="lite",
+            fullgraph=True,
+        )
+
+        # Check that inductor compilation is called twice
+        _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
+        self.assertEqual(len(codes), 2)
+
+    @unittest.skipIf(
+        config.cpp_wrapper,
+        "codegen invoke_subgraph is not implemented for cpp wrapper",
+    )
+    def test_lite_regional_compile_invoke_subgraph(self):
+        # Checks that get_attr nodes custom metadata is propagated
+        @torch.compiler.nested_compile_region
+        def gn(x):
+            return torch.sin(x)
+
+        def fn(x):
+            x = x + 1
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                z = gn(x)
+            return torch.sigmoid(z)
+
+        opt_fn = torch.compile(fn, mode="lite", fullgraph=True)
+        x = torch.randn(10, requires_grad=True)
+
+        _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
+        self.assertEqual(len(codes), 2)
+
+    @unittest.skipIf(
+        config.cpp_wrapper,
+        "codegen triton_kernel_wrapper_functional is not implemented for cpp wrapper",
+    )
+    def test_lite_triton_kernel_wrapper_functional(self):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            kernel_side_table,
+            triton_kernel_wrapper_functional,
+        )
+        from torch.testing._internal.triton_utils import mul2_kernel
+
+        kernel_side_table.reset_table()
+
+        def f(x, output):
+            out = triton_kernel_wrapper_functional(
+                kernel_idx=kernel_side_table.add_kernel(mul2_kernel),
+                constant_args_idx=kernel_side_table.add_constant_args(
+                    {"n_elements": output.numel(), "BLOCK_SIZE": 16}
+                ),
+                grid=[(x.numel(),)],
+                tma_descriptor_metadata={},
+                kwargs={
+                    "in_ptr0": x,
+                    "out_ptr": output,
+                },
+                tensors_to_clone=["in_ptr0", "out_ptr"],
+            )
+            return out["out_ptr"]
+
+        t1 = torch.rand(5, device=self.device)
+        t2 = torch.rand(5, device=self.device)
+
+        compiled_f = torch.compile(f, mode="lite")
+        out = compiled_f(t1, t2)
+
+        # Make sure t2 was not modified
+        self.assertNotEqual(out, t2)
+
+    def test_lite_regional_compile_repeated_blocks(self):
+        def fn(x, y):
+            sin = torch.sin(x)
+
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                mul = sin * y
+                add = mul + 1
+
+            return torch.sin(add)
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                a = fn(x, y)
+                return fn(a, y)
+
+        mod = Mod()
+
+        opt_mod = torch.compile(
+            mod,
+            mode="lite",
+            fullgraph=True,
+        )
+        x = torch.randn(10, requires_grad=True)
+        y = torch.randn(10, requires_grad=True)
+
+        _, codes = run_fw_bw_and_get_code(lambda: opt_mod(x, y))
+        self.assertEqual(len(codes), 2)
+
+    def test_lite_dynamic_shape_assertion(self):
+        class Model(torch.nn.Module):
+            def forward(self, c):
+                d = torch.concat([c, c], dim=0)
+                with fx_traceback.annotate({"compile_with_inductor": "my_region"}):
+                    d = d + 1
+                return d
+
+        model = Model()
+        model = torch.compile(
+            model,
+            mode="lite",
+            fullgraph=True,
+        )
+
+        c = torch.randn((64, 32), device=self.device)
+        torch._dynamo.decorators.mark_unbacked(c, 0)
+
+        _, code = run_and_get_code(model, c)
+        # Checks that unbacked symint assertions are kept
+        if config.cpp_wrapper:
+            FileCheck().check_regex(r"if \(!\(u.* >= 0L\)\)").check_regex(
+                "Expected u.* >= 0 but receive"
+            ).run(code[0])
+        else:
+            FileCheck().check_regex(r"if not \(u.* >= 0\):").check_regex(
+                r"raise RuntimeError\('u.* >= 0'\)"
+            ).run(code[0])
+
     @lowering.force_fallback(aten.sort.default)
     @unittest.skipIf(
         config.cpp_wrapper,
@@ -14407,6 +14643,20 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return (x.argmin(), x.argmax())
 
         self.common(fn, (torch.randn(6, 4, device=GPU_TYPE).t().contiguous().t(),))
+
+    @skip_if_halide
+    @requires_cuda_and_triton
+    def test_unbacked_float_item(self):
+        def fn(x, max_val):
+            return torch.clamp(x, 0, max_val.item())
+
+        self.common(
+            fn,
+            (
+                torch.randn(10, 20, 30, device=self.device),
+                torch.tensor(5.0, device=self.device),
+            ),
+        )
 
     # end of class CommonTemplate - add new tests here
 
@@ -15280,7 +15530,7 @@ if RUN_GPU:
                 ),
                 (
                     fn3,
-                    "triton_poi_fused_addmm_native_layer_norm",
+                    "triton_poi_fused_native_layer_norm_relu",
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]
@@ -15293,7 +15543,7 @@ if RUN_GPU:
                 ),
                 (
                     fn3,
-                    "triton_poi_fused_LayerNorm_Linear_ReLU",
+                    "triton_poi_fused_LayerNorm_ReLU",
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]

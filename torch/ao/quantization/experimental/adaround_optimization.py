@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 from torch.ao.quantization.experimental.adaround_fake_quantize import (
@@ -17,12 +17,12 @@ from torch.utils.data import DataLoader, TensorDataset
 class AdaptiveRoundingOptimizer:
     def __init__(
         self,
-        model: Union[torch.nn.Module, torch.nn.DataParallel],
+        model: torch.nn.Module | torch.nn.DataParallel,
         callback: Callable[
             [
-                Union[torch.nn.Module, torch.nn.DataParallel],
+                torch.nn.Module | torch.nn.DataParallel,
                 Any,
-                Optional[torch.nn.Module],
+                torch.nn.Module | None,
             ],
             None,
         ],
@@ -35,7 +35,7 @@ class AdaptiveRoundingOptimizer:
         quant_max=127,
         qscheme: torch.qscheme = torch.per_tensor_symmetric,
         batch_size: int = 256,
-        feed_forward_wrapper: Optional[torch.nn.Module] = None,
+        feed_forward_wrapper: torch.nn.Module | None = None,
     ):
         if torch.cuda.is_available():
             self.model = model.cuda()
@@ -169,7 +169,7 @@ class AdaptiveRoundingOptimizer:
         self,
         module: torch.nn.Module,
         q_module: torch.nn.Module,
-        activation: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
+        activation: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> None:
         ada_quantizer = AdaroundFakeQuantizer(
             dtype=self.dtype,
