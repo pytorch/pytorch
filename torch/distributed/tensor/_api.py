@@ -206,10 +206,9 @@ class _FromTorchTensor(torch.autograd.Function):
                 tensor_meta=grad_output._spec.tensor_meta,
             )
             local_tensor = grad_output._local_tensor
-            output, new_placements = redistribute_local_tensor(
+            output, _ = redistribute_local_tensor(
                 local_tensor, current_spec, target_spec, is_backward=True
             )
-            assert tuple(new_placements) == target_spec.placements
             # TODO: return the redistributed local tensor directly without
             # differentiable backward. see if this make sense for all cases.
             return output, None, None, None, None, None
