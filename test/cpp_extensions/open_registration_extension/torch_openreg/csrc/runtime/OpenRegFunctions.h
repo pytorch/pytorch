@@ -12,6 +12,7 @@ namespace c10::openreg {
 OPENREG_EXPORT DeviceIndex device_count() noexcept;
 OPENREG_EXPORT DeviceIndex current_device();
 OPENREG_EXPORT void set_device(DeviceIndex device);
+OPENREG_EXPORT DeviceIndex maybe_exchange_device(DeviceIndex to_device);
 
 OPENREG_EXPORT DeviceIndex ExchangeDevice(DeviceIndex device);
 

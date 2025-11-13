@@ -74,4 +74,8 @@ OPENREG_EXPORT DeviceIndex ExchangeDevice(DeviceIndex device) {
   return current_device;
 }
 
+OPENREG_EXPORT DeviceIndex maybe_exchange_device(DeviceIndex to_device) {
+  check_device_index(to_device);
+  return ExchangeDevice(to_device);
+}
 } // namespace c10::openreg

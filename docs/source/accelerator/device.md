@@ -2,37 +2,34 @@
 
 ## Background
 
-Device management is a foundational component of PyTorch's accelerator support system, enabling PyTorch to interact with different hardware accelerators in a unified manner. For custom accelerators like OpenReg, device management provides the essential infrastructure for:
+Device management handles basic operations like querying how many devices are available and switching between them. Accelerator backends need to wrap their device runtime's APIs and expose them to PyTorch.
 
-- **Device Discovery and Enumeration**: Identifying how many accelerator devices are available in the system
-- **Device Context Management**: Tracking and switching between different devices during computation
-- **Error Handling and Validation**: Ensuring device operations are safe and providing meaningful error messages
-- **Integration with PyTorch Ecosystem**: Enabling device-aware features like tensors, streams, events, and automatic mixed precision
-
-The OpenReg device management implementation (`OpenRegFunctions.h/cpp`) serves as an adapter layer that wraps the underlying third-party OpenReg runtime and exposes a PyTorch-compatible C++ API. This module provides simple, well-tested functions that higher layers (streams, events, generators, Python bindings) rely on to manage device state throughout the backend.
+The OpenReg implementation ([`OpenRegFunctions.h/cpp`][OpenReg Device Management]) shows how to wrap a third-party runtime. These functions are used throughout the backend - by streams, events, generators, and Python bindings.
 
 ## Design
 
-The device management system must support the following basic functionalities:
+Accelerator vendors need to implement these core functions:
 
-| Functionality            | Description                                               | Application Scenarios                                                                                          |
-| ------------------------ | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| **Device Count Query**   | Query the total number of available devices in the system | - Application initialization<br>- Multi-device workload distribution<br>- Validating device indices before use |
-| **Current Device Query** | Get the currently active device for the calling thread    | - Debugging and logging<br>- Determining tensor placement<br>- Guard implementations                           |
-| **Set Device**           | Change the active device for subsequent operations        | - Switching context between devices<br>- Initializing specific device resources<br>- Multi-GPU training loops  |
-| **Exchange Device**      | Atomically swap device and return the previous device     | - Implementing device guards<br>- Temporarily switching device context<br>- RAII-based device management       |
+| Function Name             | Description                                                      | Application Scenarios                                                                                          |
+| ------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `device_count()`          | Query the total number of available devices in the system        | - Application initialization<br>- Multi-device workload distribution<br>- Validating device indices before use |
+| `current_device()`        | Get the currently active device for the calling thread           | - Debugging and logging<br>- Determining tensor placement<br>- Guard implementations                           |
+| `set_device()`            | Change the active device for subsequent operations               | - Switching context between devices<br>- Initializing specific device resources<br>- Multi-GPU training loops  |
+| `exchange_device()`       | Atomically swap device and return the previous device            | - Implementing device guards<br>- Temporarily switching device context<br>- RAII-based device management       |
+| `maybe_exchange_device()` | Conditionally exchange device only if the index is valid (-1 OK) | - Safe device switching with optional indices<br>- Guard implementations with nullable device values           |
 
-These core functionalities form the foundation upon which more complex features (streams, events, memory management) are built. Each function must handle errors gracefully and integrate with PyTorch's existing error reporting infrastructure.
+These functions are building blocks for more complex features like streams, events, and memory management. Make sure to validate inputs and handle errors properly.
 
 ## Implementation
 
-This section demonstrates how to implement the device management functionality using `set_device` as an example. The implementation follows a layered approach: low-level C++ wrappers, high-level C++ API, Python bindings, and finally Python user-facing API.
+This section shows how to implement device management using `set_device` as an example. The implementation requires:
+1. C++ wrappers around the device runtime
+2. Python bindings to expose the C++ functions
+3. User-friendly Python APIs
 
 ### C++ Side
 
-The C++ implementation consists of two layers: a thin wrapper around the third-party runtime and a public API with error handling.
-
-The `SetDevice` function wraps the OpenReg runtime calls and adds optimization (avoiding redundant sets):
+Wrap the device runtime's API and add error handling. The `SetDevice` function shows this pattern:
 
 ```{eval-rst}
 .. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/csrc/runtime/OpenRegFunctions.cpp
@@ -42,30 +39,16 @@ The `SetDevice` function wraps the OpenReg runtime calls and adds optimization (
     :linenos:
 ```
 
-**Key implementation points:**
+**Key points:**
 
-1. **Error Checking**: All OpenReg runtime calls are wrapped with `OPENREG_CHECK`, which converts error codes to exceptions
-2. **Optimization**: Avoids redundant device switching by checking if the target device is already current
-3. **Bounds Validation**: The public `set_device()` function calls `check_device_index()` to validate the device index is within valid range
-4. **Caching**: `device_count()` uses static initialization to cache the device count, avoiding repeated system calls
+1. **Error Checking**: Wrap all runtime calls with error checking (like `OPENREG_CHECK`)
+2. **Optimization**: Skip redundant operations (e.g., don't set device if already current)
+3. **Validation**: Check device indices are valid before calling runtime
+4. **Caching**: Cache values like device count to avoid repeated system calls
 
-### Python Side
+### Binding
 
-The Python implementation provides a user-friendly API that internally calls the C++ bindings. The implementation in `torch_openreg/openreg/__init__.py` wraps the C extension (for example, `torch.openreg.set_device()`):
-
-```{eval-rst}
-.. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/torch_openreg/openreg/__init__.py
-    :language: python
-    :start-after: LITERALINCLUDE START: PYTHON SET DEVICE FUNCTION
-    :end-before: LITERALINCLUDE END: PYTHON SET DEVICE FUNCTION
-    :linenos:
-```
-
-## Integration
-
-### Python
-
-Device management functions must be exposed from C++ to Python to enable user access. The following example shows how `set_device` is exposed through Python bindings:
+Expose the C++ functions to Python using pybind11:
 
 ```{eval-rst}
 .. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/torch_openreg/csrc/Module.cpp
@@ -75,21 +58,32 @@ Device management functions must be exposed from C++ to Python to enable user ac
     :linenos:
 ```
 
+### Python Side
 
-The complete list of device management APIs exposed to Python:
+Wrap the C++ bindings with user-friendly Python functions:
 
-| C++ Binding Function | Python API                                                                       | Description                                  | Application Scenarios                                                                 |
-| -------------------- | -------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `_getDeviceCount`    | `torch_openreg._C._get_device_count()`<br>`torch_openreg.openreg.device_count()` | Returns the total number of devices          | - Application startup<br>- Multi-device configuration<br>- Device availability checks |
-| `_getDevice`         | `torch_openreg._C._get_device()`<br>`torch_openreg.openreg.current_device()`     | Returns the current active device index      | - Debugging<br>- Logging device context<br>- Conditional device operations            |
-| `_setDevice`         | `torch_openreg._C._set_device(idx)`<br>`torch_openreg.openreg.set_device(idx)`   | Sets the active device                       | - Multi-GPU training<br>- Device context switching<br>- Explicit device placement     |
-| `_exchangeDevice`    | `torch_openreg._C._exchangeDevice(idx)`                                          | Atomically swaps device and returns previous | - Guard context managers<br>- Temporary device switches<br>- RAII patterns            |
+```{eval-rst}
+.. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/torch_openreg/openreg/__init__.py
+    :language: python
+    :start-after: LITERALINCLUDE START: PYTHON SET DEVICE FUNCTION
+    :end-before: LITERALINCLUDE END: PYTHON SET DEVICE FUNCTION
+    :linenos:
+```
 
-### Guard
+Here's the complete mapping from C++ to Python:
 
-Device guards are essential for managing device context in PyTorch. They enable automatic, exception-safe device switching through RAII (Resource Acquisition Is Initialization) patterns. Guards are used extensively throughout PyTorch internals and user code.
+| C++ Binding Function | C++ Binding API (pybind11)               | Python User API                  | Description                                  |
+| -------------------- | ---------------------------------------- | -------------------------------- | -------------------------------------------- |
+| `_getDeviceCount`    | `torch_openreg._C._get_device_count()`   | `torch.openreg.device_count()`   | Returns the total number of devices          |
+| `_getDevice`         | `torch_openreg._C._get_device()`         | `torch.openreg.current_device()` | Returns the current active device index      |
+| `_setDevice`         | `torch_openreg._C._set_device(idx)`      | `torch.openreg.set_device(idx)`  | Sets the active device                       |
+| `_exchangeDevice`    | `torch_openreg._C._exchange_device(idx)` | N/A (internal use only)          | Atomically swaps device and returns previous |
 
-The OpenReg backend integrates device management into `OpenRegGuardImpl`, which implements the `DeviceGuardImplInterface`. Below shows the key device management methods in the guard implementation:
+## Guard
+
+Device guards provide automatic device switching with exception safety. They're similar to lock guards in C++ - they switch device on construction and restore it on destruction.
+
+Implement `DeviceGuardImplInterface` to integrate with PyTorch's guard system:
 
 ```{eval-rst}
 .. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/csrc/runtime/OpenRegGuard.h
@@ -99,24 +93,13 @@ The OpenReg backend integrates device management into `OpenRegGuardImpl`, which 
     :linenos:
 ```
 
-**Key guard implementation points:**
+**What needs to be implemented:**
 
-1. **Device Type Enforcement**: The guard enforces that it only manages `PrivateUse1` devices through compile-time constants and runtime checks
-2. **Device Management Methods**:
-   - `exchangeDevice()`: Atomically swaps to a new device and returns the previous device, used for RAII patterns
-   - `getDevice()`: Queries the current active device by calling `current_device()`
-   - `setDevice()`: Sets the active device with type validation
-3. **Type Safety**: All methods validate that the device type is `PrivateUse1` using `is_privateuseone()` checks
-4. **Integration**: Methods directly call the device management functions (`ExchangeDevice`, `current_device`, `set_device`) we implemented earlier
+1. **exchangeDevice()**: Switch to a new device and return the old one (used by guard constructors)
+2. **getDevice()**: Get the current device
+3. **setDevice()**: Set the active device
+4. **Type checking**: Validate that device type matches the backend
 
-The guard is registered with PyTorch using the macro shown below:
+This makes the guard available to PyTorch for the `PrivateUse1` device type. Users can then use standard PyTorch device guards with the custom backend.
 
-```{eval-rst}
-.. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/csrc/runtime/OpenRegGuard.cpp
-    :language: c++
-    :start-after: LITERALINCLUDE START: OPENREG GUARD REGISTRATION
-    :end-before: LITERALINCLUDE END: OPENREG GUARD REGISTRATION
-    :linenos:
-```
-
-This registration makes the guard implementation available to PyTorch's device management system for the `PrivateUse1` device type.
+[OpenReg Device Management]: https://github.com/pytorch/pytorch/blob/main/test/cpp_extensions/open_registration_extension/torch_openreg/csrc/runtime/OpenRegFunctions.cpp "OpenReg Device Management"
