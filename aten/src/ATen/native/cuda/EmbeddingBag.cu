@@ -79,7 +79,8 @@ __global__ void EmbeddingBag_updateOutputKernel_max(
       int64_t bag_size_ = 0;
       int64_t maxWord = -1;
 
-      // Validate input indices before processing
+      // Separate validation loop reduces register pressure in the main loop below.
+      // No early exit (break) on invalid input as benchmarking shows it degrades performance.
       bool has_invalid_index = false;
       for (int64_t emb = begin; emb < end; emb++) {
         index_t input_idx = input[emb];
@@ -138,7 +139,8 @@ __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
       accscalar_t weightFeatSum = 0;
       int64_t bag_size_ = 0;
 
-      // Validate input indices before processing
+      // Separate validation loop reduces register pressure in the main loop below.
+      // No early exit (break) on invalid input as benchmarking shows it degrades performance.
       bool has_invalid_index = false;
       for (int64_t emb = begin; emb < end; emb++) {
         index_t input_idx = input[emb];
