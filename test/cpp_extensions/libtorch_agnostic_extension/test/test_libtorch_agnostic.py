@@ -533,20 +533,19 @@ if not IS_WINDOWS:
                 # set use_deterministic_algorithms to fill uninitialized memory
                 torch.use_deterministic_algorithms(True)
 
-                # Test with just size
                 size = [2, 3]
-                result = libtorch_agnostic.ops.my_empty(size, None, None)
+                result = libtorch_agnostic.ops.my_empty(size, None, None, None)
                 expected = torch.empty(size)
                 self.assertEqual(result, expected, exact_device=True)
 
-                # Test with size and dtype
-                result_float = libtorch_agnostic.ops.my_empty(size, torch.float32, None)
+                result_float = libtorch_agnostic.ops.my_empty(
+                    size, torch.float32, None, None
+                )
                 expected_float = torch.empty(size, dtype=torch.float32)
                 self.assertEqual(result_float, expected_float, exact_device=True)
 
-                # Test with size, dtype, and device
                 result_with_device = libtorch_agnostic.ops.my_empty(
-                    size, torch.float64, device
+                    size, torch.float64, device, None
                 )
                 expected_with_device = torch.empty(
                     size, dtype=torch.float64, device=device
@@ -554,6 +553,16 @@ if not IS_WINDOWS:
                 self.assertEqual(
                     result_with_device, expected_with_device, exact_device=True
                 )
+
+                if device == "cuda":
+                    result_pinned = libtorch_agnostic.ops.my_empty(
+                        size, torch.float32, "cpu", True
+                    )
+                    expected_pinned = torch.empty(
+                        size, dtype=torch.float32, device="cpu", pin_memory=True
+                    )
+                    self.assertEqual(result_pinned, expected_pinned)
+                    self.assertTrue(result_pinned.is_pinned())
             finally:
                 torch.use_deterministic_algorithms(deterministic)
 
