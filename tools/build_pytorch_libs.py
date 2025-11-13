@@ -94,7 +94,7 @@ def build_pytorch(
         and not check_env_flag("USE_SYSTEM_NCCL")
     ):
         checkout_nccl()
-    build_test = check_env_flag("BUILD_TEST")
+    build_test = not check_negative_env_flag("BUILD_TEST")
     cmake.generate(
         version, cmake_python_library, build_python, build_test, my_env, rerun_cmake
     )
