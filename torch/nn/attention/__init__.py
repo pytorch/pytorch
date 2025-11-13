@@ -14,15 +14,17 @@ from torch.backends.cuda import (
     SDPAParams,
 )
 
-from .varlen import varlen_attn
-
 
 __all__: list[str] = [
     "SDPBackend",
     "sdpa_kernel",
     "WARN_FOR_UNFUSED_KERNELS",
-    "varlen_attn",
+    "register_flash_attention_impl",
+    "activate_flash_attention_impl",
+    "list_flash_attention_impls",
+    "current_flash_attention_impl",
 ]
+
 
 # Note: [SDPA warnings]
 # TODO: Consider using this for sdpa regardless of subclasses
@@ -93,7 +95,7 @@ def _cur_sdpa_kernel_backends(with_priority: bool = False):
     return backends
 
 
-def _sdpa_kernel(backends: Iterable, set_priority: bool = False):
+def _sdpa_kernel(backends: Iterable, set_priority: bool = False) -> None:
     for name, val in _backend_names.items():
         enabled = getattr(SDPBackend, val) in backends
         getattr(torch._C, f"_set_sdp_use_{name}")(enabled)
@@ -165,3 +167,23 @@ def _sdpa_kernel_variadic(*backends: SDPBackend):
 def _get_flash_version() -> str:
     """This returns the closest matching tag for the flash attention backend"""
     return "2.5.7"
+
+
+from . import _registry
+
+
+# Re-export registry types and functions for public API
+_FlashAttentionImpl = _registry._FlashAttentionImpl
+_RegisterFn = _registry._RegisterFn
+register_flash_attention_impl = _registry.register_flash_attention_impl
+activate_flash_attention_impl = _registry.activate_flash_attention_impl
+list_flash_attention_impls = _registry.list_flash_attention_impls
+current_flash_attention_impl = _registry.current_flash_attention_impl
+
+register_flash_attention_impl.__module__ = __name__
+activate_flash_attention_impl.__module__ = __name__
+list_flash_attention_impls.__module__ = __name__
+current_flash_attention_impl.__module__ = __name__
+
+# Import built-in implementations to trigger self-registration
+from . import _fa4  # noqa: F401

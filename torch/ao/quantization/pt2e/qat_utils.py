@@ -4,7 +4,7 @@ import dataclasses
 import itertools
 import operator
 from collections.abc import Callable
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.nn.functional as F
@@ -375,7 +375,7 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> dict[str, tuple[Node, Nod
         "conv_bias_q", "conv_bias_dq"
     """
 
-    def _get_nodes(nodes: list[Node]) -> tuple[Node, Node, Optional[Node]]:
+    def _get_nodes(nodes: list[Node]) -> tuple[Node, Node, Node | None]:
         """
         Return a 3-tuple of (conv_node, bn_node, getitem_node).
         This asserts that the match contains exactly one of each node.
@@ -396,7 +396,7 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> dict[str, tuple[Node, Nod
                         f"Found multiple bn nodes in match, previous: {bn_node}, new: {n}"
                     )
                 bn_node = n
-            if n.target == operator.getitem:
+            if n.target is operator.getitem:
                 if getitem_node is not None:
                     raise AssertionError(
                         f"Found multiple getitem nodes in match, previous: {getitem_node}, new: {n}"
@@ -939,7 +939,7 @@ def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
     # remove in place add from batchnorm tracking training stats
     for node in m.graph.nodes:
         if (
-            node.target == torch.ops.aten.add_.Tensor
+            node.target is torch.ops.aten.add_.Tensor
             and node.args[0].op == "get_attr"
             and node.args[1] == 1
             and (

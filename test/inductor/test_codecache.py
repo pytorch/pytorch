@@ -68,11 +68,15 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     HAS_MULTIGPU,
     HAS_TRITON,
+    HAS_XPU_AND_TRITON,
     patch_inductor_backend,
     requires_gpu,
     requires_triton,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import (
+    requires_cuda_and_triton,
+    requires_gpu_and_triton,
+)
 
 
 try:
@@ -202,6 +206,10 @@ class TestPyCodeCache(TestCase):
                 .decode()
                 .strip()
             )
+            # XPU have extra lines, so get the last line, refer https://github.com/intel/torch-xpu-ops/issues/2261
+            if torch.xpu.is_available():
+                wrapper_path = wrapper_path.splitlines()[-1]
+                hit = hit.splitlines()[-1]
             self.assertEqual(hit, "1")
 
             with open(wrapper_path) as f:
@@ -1215,7 +1223,7 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @with_tf32_off
@@ -1238,7 +1246,7 @@ class TestFxGraphCache(TestCase):
         def fn2(q, k, v):
             return flex_attention(q, k, v, score_mod=score_mod2, block_mask=block_mask)
 
-        a, b, c = (torch.randn(1, 4, 512, 64).cuda() for _ in range(3))
+        a, b, c = (torch.randn(1, 4, 512, 64).to(GPU_TYPE) for _ in range(3))
         compiled_fn = torch.compile(fn)
         compiled_fn2 = torch.compile(fn2)
 
@@ -2952,8 +2960,8 @@ class TestAutotuneCache(TestCase):
         for k in global_stats.triton.cache.keys():
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
-    @requires_cuda_and_triton
-    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    @requires_gpu_and_triton
+    @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"autotune_local_cache": False})
@@ -2971,10 +2979,10 @@ class TestAutotuneCache(TestCase):
         def f(x, y, a, b):
             return Model()(x, y, a, b)
 
-        x = torch.randn(100, 100).cuda()
-        y = torch.randn(100, 100).cuda()
-        a = torch.randn(1000, 100).cuda()
-        b = torch.randn(1000, 100).cuda()
+        x = torch.randn(100, 100).to(GPU_TYPE)
+        y = torch.randn(100, 100).to(GPU_TYPE)
+        a = torch.randn(1000, 100).to(GPU_TYPE)
+        b = torch.randn(1000, 100).to(GPU_TYPE)
         f_compiled = torch.compile(f, fullgraph=True)
 
         with PatchCaches():
@@ -2993,8 +3001,8 @@ class TestAutotuneCache(TestCase):
         for k in global_stats.triton.cache.keys():
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
-    @requires_cuda_and_triton
-    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    @requires_gpu_and_triton
+    @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"autotune_local_cache": True})
@@ -3012,12 +3020,12 @@ class TestAutotuneCache(TestCase):
 
         f_compiled = torch.compile(f, fullgraph=True)
 
-        a = torch.randn(101, 100).cuda()
-        b = torch.randn(101, 100).cuda()
-        c = torch.randn(102, 100).cuda()
-        d = torch.randn(102, 100).cuda()
-        e = torch.randn(103, 100).cuda()
-        f = torch.randn(103, 100).cuda()
+        a = torch.randn(101, 100).to(GPU_TYPE)
+        b = torch.randn(101, 100).to(GPU_TYPE)
+        c = torch.randn(102, 100).to(GPU_TYPE)
+        d = torch.randn(102, 100).to(GPU_TYPE)
+        e = torch.randn(103, 100).to(GPU_TYPE)
+        f = torch.randn(103, 100).to(GPU_TYPE)
 
         with PatchCaches():
             f_compiled(a, b, c, d, e, f)
@@ -3054,8 +3062,8 @@ class TestAutotuneCache(TestCase):
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
     @requires_triton()
-    @requires_cuda_and_triton
-    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    @requires_gpu_and_triton
+    @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"bundled_autotune_remote_cache": False})
@@ -3118,8 +3126,8 @@ class TestAutotuneCache(TestCase):
 
 
 class TestRemoteAOTAutogradCache(TestCase):
-    @requires_cuda_and_triton
-    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    @requires_gpu()
+    @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": True})
     @torch._functorch.config.patch({"enable_autograd_cache": False})
@@ -3129,8 +3137,8 @@ class TestRemoteAOTAutogradCache(TestCase):
             return a + b
 
         f_compiled = torch.compile(f)
-        a = torch.randn(101, 100, device="cuda", requires_grad=False)
-        b = torch.randn(101, 100, device="cuda", requires_grad=False)
+        a = torch.randn(101, 100, device=GPU_TYPE, requires_grad=False)
+        b = torch.randn(101, 100, device=GPU_TYPE, requires_grad=False)
         with PatchCaches():
             f_compiled(a, b)
 
@@ -3157,8 +3165,8 @@ class TestRemoteAOTAutogradCache(TestCase):
         for k in global_stats.fx_graph.cache.keys():
             self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c[0-9]+")
 
-    @requires_cuda_and_triton
-    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    @requires_gpu_and_triton
+    @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": True})
     @torch._functorch.config.patch({"enable_autograd_cache": False})
@@ -3232,7 +3240,7 @@ class TestUtils(TestCase):
 
     # This combination of settings exposed a bug where we cleared the
     # PyCodeCache disk artifacts while they were still needed:
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @config.patch(
         {
             "coordinate_descent_tuning": True,
@@ -3241,9 +3249,9 @@ class TestUtils(TestCase):
     )
     def test_force_disable_coordinate_descent(self):
         def fn():
-            inp = torch.randn(32, 50, 768, device="cuda")
-            weight = torch.randn(768, 768, device="cuda")
-            layer = torch.nn.LayerNorm(768, device="cuda")
+            inp = torch.randn(32, 50, 768, device=GPU_TYPE)
+            weight = torch.randn(768, 768, device=GPU_TYPE)
+            layer = torch.nn.LayerNorm(768, device=GPU_TYPE)
             return layer(inp @ weight)
 
         torch.compile(fn)()
