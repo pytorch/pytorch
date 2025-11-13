@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 import torch
 from torch._dynamo.testing import same
-from torch._dynamo.utils import counters
 from torch._functorch.aot_autograd import aot_export_module
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -204,10 +203,8 @@ class TestHopPrintInDynamo(TestCase):
             return (x1, x3)
 
         x = torch.ones(3, 3)
-        counters.clear()
         # Eager backend for dynamo tracing testing
-        opt_f = torch.compile(backend="eager")(f)
-        self.assertEqual(len(counters["graph_break"]), 0)
+        opt_f = torch.compile(backend="eager", fullgraph=True)(f)
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             opt_out = opt_f(x)
             printed_output = mock_stdout.getvalue().strip()
@@ -231,8 +228,7 @@ class TestHopPrintInDynamo(TestCase):
             return res
 
         inputs = (torch.tensor([1]),)
-        counters.clear()
-        opt_f = torch.compile(backend="eager")(f)
+        opt_f = torch.compile(backend="eager", fullgraph=True)(f)
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             opt_out = opt_f(*inputs)
             printed_output = mock_stdout.getvalue().strip()
