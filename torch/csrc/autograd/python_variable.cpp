@@ -1020,6 +1020,7 @@ struct DTensorInternedStrings {
 
 static DTensorInternedStrings dtensor_interned_strings;
 
+#ifdef USE_DISTRIBUTED
 static bool intern_dtensor_strings() {
 #define INTERN_DTENSOR_STRING(s)                                           \
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dtensor_interned_strings.s == nullptr); \
@@ -1032,6 +1033,7 @@ static bool intern_dtensor_strings() {
 #undef INTERN_DTENSOR_STRING
   return true;
 }
+#endif
 
 static bool checked_not(PyObject* obj) {
   int result = PyObject_Not(obj);
@@ -1791,7 +1793,7 @@ static /*DTensorSpec*/ py::object try_replicate_spec_for_scalar_tensor(
 
   // scalar tensor can be safely treated as replicated.
   const auto num_placements =
-      py::cast<ssize_t>(compute_mesh.attr(dtensor_interned_strings.ndim));
+      py::cast<Py_ssize_t>(compute_mesh.attr(dtensor_interned_strings.ndim));
   py::tuple placements_tuple(num_placements);
   py::object replicate = get_replicate_class()();
   for (const auto idx : c10::irange(num_placements)) {
