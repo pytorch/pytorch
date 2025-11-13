@@ -352,8 +352,8 @@ def autotune_custom_op(
 
 def _generate_dynamic_configs(
     tensor_inputs: list[Buffer],
-    config_generator: Callable,
-    default_impl: Callable,
+    config_generator: Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]],
+    default_impl: Callable[..., Any],
     operation_name: str,
 ) -> list[CustomOpConfig]:
     """Generate configs dynamically based on input tensors at lowering time."""
