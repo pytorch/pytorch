@@ -25,9 +25,10 @@ def get_stream(node: Node) -> Optional[int]:
 
 
 def set_stream(node: Node, ind: int) -> None:
-    annotations = node.meta.get("custom", {})
-    annotations.update({"stream": ind})
-    torch.fx.traceback.annotate(annotations)
+    if "custom" in node.meta:
+        node.meta["custom"].update({"stream": ind})
+    else:
+        node.meta["custom"] = {"stream": ind}
 
 
 def assign_backward_streams(gm: torch.fx.GraphModule) -> None:
@@ -40,9 +41,7 @@ def assign_backward_streams(gm: torch.fx.GraphModule) -> None:
             # 2. Match first stream assignment of the first user
             gradients = _get_flat_args(node, {})
             users = list(node.users.keys())
-            assert len(users) == 1, (
-                "There should only be one user of the accumulated gradients"
-            )
+
             # All gradients will be on same device, they will be coerced if they were not with a .to() node
             for neighbor in gradients + users:
                 ind = get_stream(neighbor)

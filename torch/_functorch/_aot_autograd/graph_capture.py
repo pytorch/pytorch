@@ -474,9 +474,11 @@ def aot_dispatch_autograd_graph(
     # fw node match might be erased
     copy_fwd_metadata_to_bw_nodes(fx_g)
 
-    # After copying metadata, assign streams to gradient accumulation
-    # nodes and insert syncrhonization
+    # After copying metadata, assign streams to gradient accumulation nodes
     assign_backward_streams(fx_g)
+
+    # Insert synchronization for all backward nodes if consumers are
+    # on different streams than producers
 
     fx_g.graph.eliminate_dead_code()
     if not aot_config.disable_functionalization:

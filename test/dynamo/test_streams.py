@@ -585,7 +585,7 @@ class GraphModule(torch.nn.Module):
         # Annotation: {'stream': 1}
         mul_3: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_1, 2);  tangents_1 = None
 
-        #
+        # Annotation: {'stream': 0}
         add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = mul_3 = None
         return (add_3, add_2)
 """,
