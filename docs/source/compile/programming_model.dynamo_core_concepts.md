@@ -91,13 +91,13 @@ The semantics of `torch.compile(f)(x)` are roughly this:
 def compiled_f_semantics(x):
    y = torch.compile(g, fullgraph=True)(x)
    torch.save(y, "foo.pt")
-   z = torch.compile(h, fullgraph=True)(x)
+   z = torch.compile(h, fullgraph=True)(y)
    return z
 
 def g(x):
     return x ** 2  / 2
 
-def h(x):
+def h(y):
     return y ** 3 / 6
 ```
 
