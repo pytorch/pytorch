@@ -449,9 +449,11 @@ class TestModule(TestCase):
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=True, training=training)
+        if "xpu" in device and module_info.name == "nn.MultiheadAttention":
+            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/2356")
         # === Set nondet tol for gradcheck to user-defined value if on CUDA and cudNN is enabled
         gradcheck_nondet_tol = 0.0
-        if (torch.device(device).type == 'cuda' and torch.backends.cudnn.enabled):
+        if (torch.device(device).type == 'cuda' and torch.backends.cudnn.enabled) or device_type == "xpu":
             gradcheck_nondet_tol = module_info.gradcheck_nondet_tol
 
         for module_input in module_inputs:
@@ -553,7 +555,10 @@ class TestModule(TestCase):
                 and 'cuda' in device
                 and torch.backends.cudnn.enabled):
             return
-
+        if "xpu" in device and module_info.name == "nn.ConvTranspose3d" and dtype is torch.complex32:
+            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/2354")
+        if "xpu" in device and module_info.name == "nn.CrossEntropyLoss" and dtype is torch.float16:
+            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/2354")
         # Test cpu and gpu results are the same
         module_cls = module_info.module_cls
         module_inputs_cpu = module_info.module_inputs_func(module_info, device="cpu", dtype=dtype,
@@ -635,6 +640,17 @@ class TestModule(TestCase):
     @with_tf32_off
     @modules(module_db)
     def test_memory_format(self, device, dtype, module_info, training):
+        if (
+            "xpu" in device
+            and module_info.name in [
+                "nn.GroupNorm",
+                "nn.ReflectionPad2d",
+                "nn.ReflectionPad3d",
+                "nn.ReplicationPad2d",
+                "nn.ReplicationPad3d"
+            ]
+        ):
+            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/2357")
         is_sm86or80 = device.startswith("cuda") and (torch.cuda.get_device_capability(0) == (8, 6)
                                                      or torch.cuda.get_device_capability(0) == (8, 0))
         # TODO tighten it to a specific module
