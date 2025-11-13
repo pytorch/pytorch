@@ -1254,8 +1254,6 @@ def proxy_args_kwargs(args: Any, kwargs: Any) -> tuple[tuple[Any, ...], dict[str
         from .exc import unimplemented
         from .variables.base import typestr
 
-        breakpoint()
-
         unimplemented(
             gb_type="Failed to convert args/kwargs to proxy",
             context=f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}",
