@@ -195,7 +195,10 @@ class EagerConsistencyTest(TestCase):
         B = 128
         H = 256
         dtype = torch.float32
-        fn = lambda x, w: torch.nn.functional.rms_norm(x, [H], w)
+
+        def fn(x, w):
+            return torch.nn.functional.rms_norm(x, [H], w)
+
         x = torch.randn(B, H, dtype=dtype, device=GPU_TYPE)
         w = torch.randn(H, dtype=dtype, device=GPU_TYPE)
         do = torch.randn(B, H, dtype=dtype, device=GPU_TYPE)
@@ -209,7 +212,10 @@ class EagerConsistencyTest(TestCase):
         H = 256
         dtype = torch.float32
         eps = 1e-5
-        fn = lambda x, w: torch.nn.functional.rms_norm(x, [H], w, eps)
+
+        def fn(x, w):
+            return torch.nn.functional.rms_norm(x, [H], w, eps)
+
         x = torch.randn(B, H, dtype=dtype, device=GPU_TYPE)
         w = torch.randn(H, dtype=dtype, device=GPU_TYPE)
         do = torch.randn(B, H, dtype=dtype, device=GPU_TYPE)

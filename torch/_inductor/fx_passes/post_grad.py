@@ -2109,6 +2109,7 @@ def _fused_rms_norm_backward_eager_decomp(
 
     N = prod(inner_dims)  # type: ignore[arg-type]
     M = prod(outer_dims)  # type: ignore[arg-type]
+    from torch._inductor._numeric_utils import fma, ordered_fma_sum
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     if guard_or_false(M == 0) or guard_or_false(N == 0):
@@ -2118,19 +2119,12 @@ def _fused_rms_norm_backward_eager_decomp(
         )
 
     rstd = _unsqueeze_to_dim(rstd, input_cast.dim())  # type: ignore[union-attr]
-    if weight_cast is not None:
-        grad_x_hat = grad_out_cast * weight_cast
-    else:
-        grad_x_hat = grad_out_cast
+    assert weight_cast is not None
 
-    d_input: Optional[Tensor] = None
-    d_weight: Optional[Tensor] = None
-
-    x_hat = input_cast * rstd
+    d_input: Optional[torch.Tensor] = None
+    d_weight: Optional[torch.Tensor] = None
 
     if output_mask[0]:
-        from torch._inductor._numeric_utils import fma, ordered_fma_sum
-
         sum_val = ordered_fma_sum(
             (weight_cast * grad_out_cast) * input_cast,
             rstd,
@@ -2145,7 +2139,7 @@ def _fused_rms_norm_backward_eager_decomp(
             -rstd * input_cast * sum_val, N * weight_cast, grad_out_cast
         )
 
-    if output_mask[1] and weight_cast is not None:
+    if output_mask[1]:
         if len(outer_dim_indices) > 0:
             d_weight = ordered_fma_sum(
                 input_cast * grad_out_cast,
@@ -2154,8 +2148,6 @@ def _fused_rms_norm_backward_eager_decomp(
                 dim=0,
                 keepdim=False,
             )
-        else:
-            d_weight = d_weight_full_shape
 
     return (
         _maybe_cast(d_input, input.dtype),
