@@ -520,7 +520,7 @@ else:
             if not self._hash:
                 self._hash = hash(
                     (
-                        self._flatten_rank_map,
+                        self._get_universe_id(),
                         self._layout,
                         self._device_type,
                         self._mesh_dim_names,
@@ -535,7 +535,7 @@ else:
             if not isinstance(other, DeviceMesh):
                 return False
             return (
-                self._flatten_rank_map == other._flatten_rank_map
+                self._get_universe_id() == other._get_universe_id()
                 and self._layout == other._layout
                 and self._device_type == other._device_type
                 and self._mesh_dim_names == other._mesh_dim_names
@@ -1048,6 +1048,12 @@ else:
                 )
             return not_none(get_rank(mesh_dim_group))
 
+        def _get_universe_id(self) -> Union[tuple[int, ...], int]:
+            if self.decouple_backend_at_save:
+                return id(self._rank_map)
+            else:
+                return self._flatten_rank_map
+
         def get_coordinate(self) -> Optional[list[int]]:
             """
             Return the relative indices of this rank relative to all
@@ -1207,7 +1213,7 @@ else:
             concat_sizes: list[IntTuple] = []
             concat_strides: list[IntTuple] = []
             concat_dim_group_name: list[str] = []
-            flatten_rank_map = device_mesh_list[0]._flatten_rank_map
+            mesh_universe_id = device_mesh_list[0]._get_universe_id()
             for dm in device_mesh_list:
                 for i in range(len(dm._layout)):
                     concat_sizes.append(dm._layout[i].sizes)
@@ -1216,7 +1222,7 @@ else:
                 concat_dim_group_name.extend(not_none(dm._dim_group_names))
                 # Concatenate device mesh having different root mesh tensors are meaningless
                 # because the concatenated indices should be indexed by the same root mesh tensor.
-                if dm._flatten_rank_map != flatten_rank_map:
+                if dm._get_universe_id() != mesh_universe_id:
                     raise RuntimeError(
                         "Cannot concatenate DeviceMeshes derived from different device meshs"
                     )
