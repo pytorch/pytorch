@@ -608,6 +608,19 @@ max_autotune_subproc_terminate_timeout_seconds = 0.0
 # If autotuning in subprocess, whether to use multiple devices
 autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
 
+# Timeout for collective operations during benchmarking (in seconds)
+# This applies to distributed collective operations like all_reduce
+# Default is 30 seconds. Can be overridden with env variable for testing.
+collective_benchmark_timeout_seconds = float(
+    os.environ.get("TORCHINDUCTOR_COLLECTIVE_BENCHMARK_TIMEOUT", "30")
+)
+
+# Number of benchmark runs for collective operations
+# Default is 10 runs, can be overridden with env variable
+collective_benchmark_nruns = int(
+    os.environ.get("TORCHINDUCTOR_COLLECTIVE_BENCHMARK_NRUNS", "10")
+)
+
 coordinate_descent_tuning = (
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
 )

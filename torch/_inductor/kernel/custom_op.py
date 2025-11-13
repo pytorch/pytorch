@@ -45,7 +45,9 @@ def _detect_collective_ops(choices: list) -> bool:
                 op_name = str(node.target)
 
                 # Check if this is a collective operation
-                if is_collective_op(op_name) or is_collective_op(f"torch.ops.{op_name}"):
+                if is_collective_op(op_name) or is_collective_op(
+                    f"torch.ops.{op_name}"
+                ):
                     return True
 
     return False
