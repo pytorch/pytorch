@@ -12,7 +12,13 @@ import torch.distributed.tensor._random as random
 from torch._library.utils import fill_defaults
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed.tensor._op_schema import OpInfo, OpSchema, OutputSpecType
+from torch.distributed.tensor._op_schema import (
+    is_inplace_op,
+    is_out_variant_op,
+    OpInfo,
+    OpSchema,
+    OutputSpecType,
+)
 from torch.distributed.tensor._random import is_rng_supported_mesh
 from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor._sharding_prop import ShardingPropagator
@@ -268,7 +274,7 @@ class OpDispatcher:
             #   2. if the return type is Tensor or List[Tensor], return empty
             #   tensor(s) with correct dtype.
             spec = output_sharding.output_spec
-            ret_list = op_info.schema.op._schema.returns
+            ret_list = op_call._schema.returns
 
             if spec is None:
                 # For a scalar return type, the non-participating device has None
@@ -317,7 +323,7 @@ class OpDispatcher:
                 dist.all_reduce(r, op=dist.ReduceOp.MIN)
                 local_results = bool(r.item())
 
-        if op_info.schema.is_inplace_op():
+        if is_inplace_op(op_call):
             # inplace op should return self instead of re-wrapping
             if output_sharding.output_spec is not None:
                 # NOTE: aten.squeeze_.dim is an inplace op but it also may change
@@ -336,7 +342,7 @@ class OpDispatcher:
                     return args[0]
             else:
                 return None
-        elif op_info.schema.is_out_variant_op():
+        elif is_out_variant_op(op_call):
             # out variant could possibly have multiple out args (i.e. lu_unpack.out)
             output_specs = (
                 (output_sharding.output_spec,)
@@ -356,7 +362,7 @@ class OpDispatcher:
             return tuple(out_dts) if len(out_dts) > 1 else out_dts[0]
         else:
             ret = self.wrap(local_results, output_sharding.output_spec)  # type: ignore[possibly-undefined]
-            if participating and op_info.schema.is_view_op():
+            if participating and op_call._schema._is_view_op():
                 return return_and_correct_aliasing(op_call, args, kwargs, ret)
             else:
                 return ret
@@ -423,6 +429,15 @@ class OpDispatcher:
         op_call: torch._ops.OpOverload,
         args: tuple[object, ...],
         kwargs: dict[str, object],
+    ) -> OpInfo:
+        return self._unwrap_to_op_info_impl(op_call, args, kwargs, True)
+
+    def _unwrap_to_op_info_impl(
+        self,
+        op_call: torch._ops.OpOverload,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+        create_schema: bool,
     ) -> OpInfo:
         # get runtime schema info to determine whether to use pytree to flatten inputs
         runtime_schema_info = self.sharding_propagator.op_to_schema_info.get(
@@ -499,7 +514,9 @@ class OpDispatcher:
                 ),
                 kwargs_schema,
                 schema_info=runtime_schema_info,
-            ),
+            )
+            if create_schema
+            else None,  # type: ignore[arg-type]
             args_schema,
             tuple(local_args),
             local_kwargs,

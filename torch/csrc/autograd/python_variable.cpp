@@ -993,6 +993,7 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   _(_custom_op_handlers)                                      \
   _(_local_tensor)                                            \
   _(_spec)                                                    \
+  _(_unwrap_to_op_info_impl)                                  \
   _(args_schema)                                              \
   _(device_mesh)                                              \
   _(dtype)                                                    \
@@ -1009,8 +1010,7 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   _(static_argnum)                                            \
   _(static_kwargkey)                                          \
   _(stride)                                                   \
-  _(tensor_meta)                                              \
-  _(unwrap_to_op_info)
+  _(tensor_meta)
 
 struct DTensorInternedStrings {
 #define DECLARE_INTERNED_STRING_VARIABLE(s) PyObject* s;
@@ -1324,14 +1324,13 @@ py::object dispatchDTensorOp(
     cached_sharding =
         native_sharding_propagator_cache->find(*opt_native_op_schema);
   }
-  // For now, Python OpInfo is needed even for the fast path;
-  // we are in the middle of an incremental port.
-  py::object py_op_info = checked_vectorcall(
-      op_dispatcher.attr(dtensor_interned_strings.unwrap_to_op_info).ptr(),
-      py_op.ptr(),
-      args.ptr(),
-      kwargs.ptr());
+  py::object py_op_info;
   if (!cached_sharding) {
+    py_op_info = checked_vectorcall(
+        op_dispatcher.attr("unwrap_to_op_info").ptr(),
+        py_op.ptr(),
+        args.ptr(),
+        kwargs.ptr());
     py::object sharding = checked_vectorcall(
         op_dispatcher
             .attr("_propagate_op_sharding_non_cached_dispatch_slow_path")
@@ -1349,7 +1348,16 @@ py::object dispatchDTensorOp(
       native_sharding_propagator_cache->insert(
           std::move(*opt_native_op_schema), std::move(sharding));
     }
+  } else {
+    py_op_info = checked_vectorcall(
+        op_dispatcher.attr(dtensor_interned_strings._unwrap_to_op_info_impl)
+            .ptr(),
+        py_op.ptr(),
+        args.ptr(),
+        kwargs.ptr(),
+        Py_False);
   }
+
   py_op_info.attr(dtensor_interned_strings.output_sharding) = cached_sharding;
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       !kwargs.is_none(),
