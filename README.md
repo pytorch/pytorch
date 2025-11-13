@@ -297,7 +297,7 @@ export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMA
 python -m pip install --no-build-isolation -v -e .
 
 # the CMake prefix for non-conda environment, e.g. Python venv
-# after activating the venv
+# call following after activating the venv
 export CMAKE_PREFIX_PATH="${VIRTUAL_ENV}:${CMAKE_PREFIX_PATH}"
 ```
 
