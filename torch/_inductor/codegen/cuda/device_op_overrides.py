@@ -86,11 +86,43 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 CUDA_DRIVER_CHECK(cuModuleLoad(&mod, filePath.c_str()));
                 CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
                 if (sharedMemBytes > 0) {
-                    CUDA_DRIVER_CHECK(cuFuncSetAttribute(
-                        func,
-                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                        sharedMemBytes
-                    ))
+                    try {
+                        // Query device max shared memory to avoid cross-architecture issues
+                        CUdevice dev;
+                        int maxSharedMem;
+                        CUDA_DRIVER_CHECK(cuCtxGetDevice(&dev));
+                        CUDA_DRIVER_CHECK(cuDeviceGetAttribute(
+                            &maxSharedMem,
+                            CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
+                            dev
+                        ));
+
+                        // Clamp to device limit to handle PTX JIT compilation across architectures
+                        uint32_t adjustedSharedMem = std::min(sharedMemBytes, static_cast<uint32_t>(maxSharedMem));
+
+                        CUDA_DRIVER_CHECK(cuFuncSetAttribute(
+                            func,
+                            CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                            adjustedSharedMem
+                        ))
+                    } catch (const std::exception& e) {
+                        // Get device info for debugging
+                        CUdevice dev;
+                        int maxSharedMem = -1;
+                        int computeCapabilityMajor = -1, computeCapabilityMinor = -1;
+                        if (cuCtxGetDevice(&dev) == CUDA_SUCCESS) {
+                            cuDeviceGetAttribute(&maxSharedMem, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN, dev);
+                            cuDeviceGetAttribute(&computeCapabilityMajor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, dev);
+                            cuDeviceGetAttribute(&computeCapabilityMinor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, dev);
+                        }
+                        throw std::runtime_error(
+                            std::string("Failed to set shared memory attribute in loadKernel (file path).\\n") +
+                            "Requested: " + std::to_string(sharedMemBytes) + " bytes\\n" +
+                            "Device max: " + std::to_string(maxSharedMem) + " bytes\\n" +
+                            "Compute capability: sm_" + std::to_string(computeCapabilityMajor) + std::to_string(computeCapabilityMinor) + "\\n" +
+                            "Original error: " + e.what()
+                        );
+                    }
                 }
                 return func;
             }
@@ -101,11 +133,43 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 CUDA_DRIVER_CHECK(cuModuleLoadData(&mod, start));
                 CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
                 if (sharedMemBytes > 0) {
-                    CUDA_DRIVER_CHECK(cuFuncSetAttribute(
-                        func,
-                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                        sharedMemBytes
-                    ))
+                    try {
+                        // Query device max shared memory to avoid cross-architecture issues
+                        CUdevice dev;
+                        int maxSharedMem;
+                        CUDA_DRIVER_CHECK(cuCtxGetDevice(&dev));
+                        CUDA_DRIVER_CHECK(cuDeviceGetAttribute(
+                            &maxSharedMem,
+                            CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
+                            dev
+                        ));
+
+                        // Clamp to device limit to handle PTX JIT compilation across architectures
+                        uint32_t adjustedSharedMem = std::min(sharedMemBytes, static_cast<uint32_t>(maxSharedMem));
+
+                        CUDA_DRIVER_CHECK(cuFuncSetAttribute(
+                            func,
+                            CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                            adjustedSharedMem
+                        ))
+                    } catch (const std::exception& e) {
+                        // Get device info for debugging
+                        CUdevice dev;
+                        int maxSharedMem = -1;
+                        int computeCapabilityMajor = -1, computeCapabilityMinor = -1;
+                        if (cuCtxGetDevice(&dev) == CUDA_SUCCESS) {
+                            cuDeviceGetAttribute(&maxSharedMem, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN, dev);
+                            cuDeviceGetAttribute(&computeCapabilityMajor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, dev);
+                            cuDeviceGetAttribute(&computeCapabilityMinor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, dev);
+                        }
+                        throw std::runtime_error(
+                            std::string("Failed to set shared memory attribute in loadKernel (module data).\\n") +
+                            "Requested: " + std::to_string(sharedMemBytes) + " bytes\\n" +
+                            "Device max: " + std::to_string(maxSharedMem) + " bytes\\n" +
+                            "Compute capability: sm_" + std::to_string(computeCapabilityMajor) + std::to_string(computeCapabilityMinor) + "\\n" +
+                            "Original error: " + e.what()
+                        );
+                    }
                 }
                 return func;
             }
