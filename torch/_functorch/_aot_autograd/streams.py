@@ -12,10 +12,6 @@ def is_gradient_acc(node: Node) -> bool:
     return node.meta.get("is_gradient_acc", False)
 
 
-def get_device(node: Node) -> torch.device:
-    return node.meta["val"].device
-
-
 def get_stream(node: Node) -> Optional[int]:
     maybe_annotation = node.meta.get("custom", None)
     if maybe_annotation is not None:
@@ -39,11 +35,16 @@ def assign_backward_streams(gm: torch.fx.GraphModule) -> None:
             # Accumulation stream selection. Follow the rules from top to bottom to determine the accumulation stream:
             # 1. Match first stream assignment encountered in the args from left to right
             # 2. Match first stream assignment of the first user
+            # This differs from eager in some cases:
+            # Specifically the eager code uses the autograd node to determine the stream,
+            # crucially this does not necessarily correspond to the FX graph node. For example,
+            # in the backward for an add node with a constant we will passthrough and during backward tracing,
+            # no op will be added to the FX graph, so our stream assignment will differ in this case.
             gradients = _get_flat_args(node, {})
             users = list(node.users.keys())
 
             # All gradients will be on same device, they will be coerced if they were not with a .to() node
-            for neighbor in gradients + users:
+            for neighbor in users + gradients:
                 ind = get_stream(neighbor)
                 if ind is not None:
                     set_stream(node, ind)
