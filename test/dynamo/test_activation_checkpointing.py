@@ -354,10 +354,7 @@ class ActivationCheckpointingViaTagsTests(
 
         def partition_fn(joint_gm, *args, **kwargs):
             gm_str = joint_gm.print_readable(print_output=False)
-            self.assertTrue(
-                "# recompute: 'CheckpointPolicy.PREFER_RECOMPUTE', ac_graph_id: '2'"
-                in gm_str
-            )
+            self.assertTrue("# ac_graph_id: 2 - PREFER_RECOMPUTE" in gm_str)
             return min_cut_rematerialization_partition(joint_gm, *args, **kwargs)
 
         backend = aot_autograd(

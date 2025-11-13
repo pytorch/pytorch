@@ -735,10 +735,15 @@ class CodeGen:
                 # in tlparse, when you run torch.compile.
                 recompute = node.meta.get("recompute", None)
                 ac_graph_id = node.meta.get("ac_graph_id", None)
+
                 if recompute is not None and ac_graph_id is not None:
-                    recompute_str = f"recompute: {pprint.pformat(str(recompute), width=80, compact=True)}"
-                    ac_graph_id_str = f"ac_graph_id: {pprint.pformat(str(ac_graph_id), width=80, compact=True)}"
-                    body.append(f"# {recompute_str}, {ac_graph_id_str}\n")
+                    body.append(
+                        f"# ac_graph_id: {str(ac_graph_id)} - {str(recompute.name)}\n"
+                    )
+                elif recompute is not None:
+                    body.append(f"# recompute: {str(recompute.name)}\n")
+                elif ac_graph_id is not None:
+                    body.append(f"# ac_graph_id: {str(ac_graph_id)}\n")
 
             if node.op == "placeholder":
                 assert isinstance(node.target, str)
