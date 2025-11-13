@@ -6,7 +6,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
-from torch.complextensor.ops.common import (
+from torch.complextensor._ops.common import (
     _as_complex_tensor,
     _as_interleaved,
     _get_op_name,
