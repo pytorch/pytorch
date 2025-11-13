@@ -385,7 +385,13 @@ def handle_noncontiguous_outputs(input_tlist, output):
 
 
 def _broadcast_shapes(*_shapes):
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, is_nested_int
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        is_nested_int,
+        size_hint,
+    )
+
+    backed_so = torch.fx.experimental._config.backed_size_oblivious
 
     shapes = tuple(
         (x,) if isinstance(x, IntLike) else x
@@ -418,6 +424,22 @@ def _broadcast_shapes(*_shapes):
                 ):
                     continue
             else:
+                # When backed size oblivious is used, we specialize for broadcasting
+                # if its the only way to compile the example input.
+                # i.e: s0:1, s1:1 ==>
+                #           assert s0==s1, no specialization on ==1 or !=1.
+                #            The non-broadcast path is picked
+                #      s0:1, s1:4 ==>
+                #           specialize(s0) to be 1.
+                #      s0:4, s1:1 ==>
+                #           specialize(s1) to be 1.
+                if backed_so:
+                    a = size_hint(shape[idx], allow_none=True)
+                    b = size_hint(common_shape[idx], allow_none=True)
+                    if a == 1 and b != 1:
+                        torch._check(shape[idx] == 1)
+                    if b == 1 and a != 1:
+                        torch._check(common_shape[idx] == 1)
                 if guard_or_false(shape[idx] == common_shape[idx]):
                     continue
 
@@ -702,7 +724,7 @@ def exp2(a):
 # CompositeImplicitAutograd - don't register decomp
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("a,"),
+    type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
 def fill(a: TensorLikeType, value: NumberType) -> TensorLikeType:
@@ -3155,7 +3177,7 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
 
     # Tries to take a view
     # TODO: we could look at directing collapse_view to skip its meta function here (unsafe_collapse_view)
-    # Unbacked semnatics: if validty of in-place flattening is undecided we copy.
+    # Unbacked semantics: if validity of in-place flattening is undecided we copy.
     new_shape, _new_strides = prims._collapse_view_helper(
         a, start_dim, end_dim, must_be_valid=None
     )

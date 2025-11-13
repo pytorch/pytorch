@@ -4251,9 +4251,9 @@ class TestSparseCompressedTritonKernels(TestCase):
         # Test warn_once when requesting non-existing tuned parameters multiple times
         f = io.StringIO()
         with redirect_stderr(f):
-            for i in range(5):
+            for _ in range(5):
                 get_meta(16, 16, 16)
-            for i in range(5):
+            for _ in range(5):
                 get_meta(16, 16, 32)
 
         msg = f.getvalue()
