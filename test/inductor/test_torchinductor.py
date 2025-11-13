@@ -14387,6 +14387,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             "Generated Triton code should use triton_helpers.minimum for clamping",
         )
 
+    @skipIfMPS  # Accuracy issue on MPS
     def test_weight_norm_conv2d(self):
         """
         Verify fix for https://github.com/pytorch/pytorch/issues/165749
