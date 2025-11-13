@@ -105,7 +105,7 @@ class ComplexTensor(Tensor):
         args: tuple = (),
         kwargs: dict | None = None,
     ):
-        from ._ops.common import DEBUG_SET, lookup_complex
+        from ._ops.common import lookup_complex
 
         kwargs = {} if kwargs is None else kwargs
 
@@ -113,34 +113,7 @@ class ComplexTensor(Tensor):
         if impl is None:
             return NotImplemented
 
-        ret = impl(*args, **kwargs)
-
-        # Note (debugging ops): This block checks if debugging mode is enabled,
-        # and if it is, checks if the current op matches the behaviour of the
-        # reference op. It is useful for detecting behaviour mismatches.
-        debug_set = DEBUG_SET.get()
-        if debug_set is not None and all(
-            disallowed_name not in str(func) for disallowed_name in ("empty", "rand")
-        ):
-            from torch.utils._pytree import tree_flatten, tree_map
-
-            from ._ops.common import _as_interleaved
-
-            args_ref, kwargs_ref = tree_map(_as_interleaved, (args, kwargs))
-            ret_ref = func(*args_ref, **kwargs_ref)
-
-            ret_flat, _ = tree_flatten(ret)
-            ret_ref_flat, _ = tree_flatten(ret_ref)
-            if not all(
-                torch.allclose(_as_interleaved(r), rr, equal_nan=True)
-                for r, rr in zip(ret_flat, ret_ref_flat, strict=True)
-                if isinstance(rr, Tensor)
-            ):
-                debug_set.add(func)
-
-        return ret
-
-    __torch_function__ = torch._C._disabled_torch_function_impl
+        return impl(*args, **kwargs)
 
     @staticmethod
     def from_interleaved(t: Tensor) -> ComplexTensor:

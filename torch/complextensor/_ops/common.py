@@ -1,7 +1,6 @@
 from collections.abc import Callable
-from contextvars import ContextVar, Token
 from typing import Any, overload, TypeAlias
-from typing_extensions import Self, TypeIs
+from typing_extensions import TypeIs
 
 import torch
 from torch import Tensor
@@ -18,8 +17,6 @@ from ..core import ComplexTensor
 OpType: TypeAlias = OpOverloadPacket | OpOverload
 
 TableType: TypeAlias = dict[OpType, Callable]
-
-DebugSetType: TypeAlias = set[OpType] | None
 
 # Mapping from ops to implementations
 COMPLEX_OPS_TABLE: TableType = {}
@@ -113,9 +110,6 @@ def register_force_test(op: OpType, *args, **kwargs):
 
 
 DECOMPOSITIONS = get_decompositions(list(torch.ops.aten))  # type: ignore[no-matching-overload]
-
-# Set of ops found to be "problematic" in a debugging context.
-DEBUG_SET: ContextVar[DebugSetType] = ContextVar("DEBUG_SET", default=None)
 
 
 def lookup_complex(func: OpOverload, *args, **kwargs) -> Callable | None:
@@ -285,26 +279,18 @@ def _as_interleaved(arg: ComplexTensor | Any) -> Tensor | Any:
 
 class ComplexTensorMode(TorchDispatchMode):
     _compile: bool
-    _debug: bool
-    _debug_token: Token[DebugSetType] | None
 
     """ A TorchDispatchMode to replace any Tensor that has a complex dtype with a ComplexTensor for the computation. """
 
-    def __init__(
-        self, _dispatch_key=None, *, _compile: bool = False, _debug: bool = False
-    ):
+    def __init__(self, _dispatch_key=None, *, _compile: bool = False):
         """Initialize a ComplexTensorMode.
 
         Args:
             _dispatch_key: passed on to TorchDispatchMode
             _compile: Compile the op before the computation
-            _debug: Find inconsistencies with the base Tensor
-                    while performing the computation.
         """
         super().__init__(_dispatch_key)
         self._compile = _compile
-        self._debug = _debug
-        self._debug_token = None
 
     def __torch_dispatch__(
         self,
@@ -323,19 +309,3 @@ class ComplexTensorMode(TorchDispatchMode):
         kwargs = tree_map(_as_complex_tensor, kwargs)
 
         return tree_map(_as_interleaved, func(*args, **kwargs))
-
-    def __enter__(self) -> Self:
-        # Note (debugging ops): This block sets the debugging mode
-        if self._debug:
-            self._debug_token = DEBUG_SET.set(set())
-        return super().__enter__()
-
-    def __exit__(self, type_, val, tb):
-        # Note (debugging ops): This block resets the debugging mode
-        if self._debug_token is not None:
-            debug_set = DEBUG_SET.get()
-            assert debug_set is not None
-            print("\n".join([str(op) for op in debug_set]))
-            DEBUG_SET.reset(self._debug_token)
-            self._debug_token = None
-        return super().__exit__(type_, val, tb)
