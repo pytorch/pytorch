@@ -155,7 +155,8 @@ class C10_API SymInt {
 
   // Distinguish actual symbolic values from constants stored on the heap
   bool is_symbolic() const {
-    return !maybe_as_int().has_value();
+    return is_heap_allocated() &&
+        !toSymNodeImplUnowned()->constant_int().has_value();
   }
 
   // N.B. It's important to keep this definition in the header

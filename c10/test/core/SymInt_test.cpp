@@ -10,7 +10,6 @@ using namespace c10;
 static void check(int64_t value) {
   const auto i = SymInt(value);
   EXPECT_EQ(i.maybe_as_int(), std::make_optional(value));
-  EXPECT_EQ(i.is_symbolic(), !i.maybe_as_int().has_value()) << value;
 }
 
 TEST(SymIntTest, ConcreteInts) {
@@ -139,29 +138,7 @@ void test_operator() {
     }
   }
 }
-
-// Here we have a SymNodeImpl for which constant_int() is nullopt, but
-// maybe_as_int().has_value() and therefore is not symbolic.
-class ConstantIntPretendingToBeNonConstantSymNodeImpl
-    : public ConstantSymNodeImpl<int64_t> {
- public:
-  using ConstantSymNodeImpl<int64_t>::ConstantSymNodeImpl;
-  std::optional<int64_t> constant_int() override {
-    return std::nullopt;
-  }
-  std::optional<int64_t> maybe_as_int() override {
-    return ConstantSymNodeImpl<int64_t>::constant_int();
-  }
-};
 } // namespace
-
-TEST(SymIntTest, MaybeAsIntHasValueImpliesNonSymbolic) {
-  auto i = SymInt(
-      SymNode(c10::make_intrusive<ConstantIntPretendingToBeNonConstantSymNodeImpl>(
-          1234)));
-  ASSERT_TRUE(i.maybe_as_int().has_value());
-  EXPECT_FALSE(i.is_symbolic());
-}
 
 TEST(SymIntTest, BinaryPlus) {
   test_operator<std::plus>();
