@@ -13,8 +13,6 @@ from torch._library.utils import fill_defaults
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
-    is_inplace_op,
-    is_out_variant_op,
     OpInfo,
     OpSchema,
     OutputSharding,
@@ -316,6 +314,8 @@ class OpDispatcher:
         output_sharding: OutputSharding,
         local_results: object,
         participating: bool,
+        is_inplace_op: bool,
+        is_out_variant_op: bool,
     ) -> object:
         """
         Tail of main dispatching logic, called from C++ fast path.
@@ -334,7 +334,7 @@ class OpDispatcher:
                 dist.all_reduce(r, op=dist.ReduceOp.MIN)
                 local_results = bool(r.item())
 
-        if is_inplace_op(op_call):
+        if is_inplace_op:
             # inplace op should return self instead of re-wrapping
             if output_sharding.output_spec is not None:
                 # NOTE: aten.squeeze_.dim is an inplace op but it also may change
@@ -353,7 +353,7 @@ class OpDispatcher:
                     return args[0]
             else:
                 return None
-        elif is_out_variant_op(op_call):
+        elif is_out_variant_op:
             # out variant could possibly have multiple out args (i.e. lu_unpack.out)
             output_specs = (
                 (output_sharding.output_spec,)
@@ -372,6 +372,7 @@ class OpDispatcher:
             assert len(out_dts) >= 1, "out variant should have at least one out arg"
             return tuple(out_dts) if len(out_dts) > 1 else out_dts[0]
         else:
+            assert op_call == aten.equal.default, op_call
             ret = self.wrap(local_results, output_sharding.output_spec)  # type: ignore[possibly-undefined]
             if participating and op_call._schema._is_view_op():
                 return return_and_correct_aliasing(op_call, args, kwargs, ret)

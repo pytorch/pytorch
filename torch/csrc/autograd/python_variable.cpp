@@ -1,5 +1,6 @@
 #include <ATen/DTensorState.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/Resize.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/impl/GPUTrace.h>
@@ -959,6 +960,13 @@ DEFINE_CACHING_PYTHON_IMPORT_GETTER(
         .attr("_dispatch_fast_path_python_tail"))
 
 DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_dtensor_dispatcher_wrap,
+    py::module::import("torch.distributed.tensor")
+        .attr("DTensor")
+        .attr("_op_dispatcher")
+        .attr("wrap"))
+
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
     get_dtensor_get_local_results_slow_path,
     py::module::import("torch")
         .attr("distributed")
@@ -1442,6 +1450,30 @@ static bool get_local_results(
   return true;
 }
 
+static void functionalize_unsafe_set(at::Tensor& dst, const at::Tensor& src) {
+  at::native::checkSetStorage(
+      dst,
+      src.storage(),
+      dst.sym_storage_offset(),
+      dst.sym_sizes(),
+      dst.sym_strides(),
+      /*check_offset_in_bounds=*/false);
+}
+
+static bool sets_intersect(
+    const std::unordered_set<Symbol>& smaller,
+    const std::unordered_set<Symbol>& bigger) {
+  if (smaller.size() > bigger.size()) {
+    return sets_intersect(bigger, smaller);
+  }
+  for (const auto& item : smaller) {
+    if (bigger.find(item) != bigger.end()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 py::object dispatchDTensorOp(
     const c10::OperatorHandle& op,
     py::handle py_op,
@@ -1468,6 +1500,7 @@ py::object dispatchDTensorOp(
     }
   }
 
+  torch::jit::Stack saved_args = *stack;
   NativeShardingPropagatorCache* native_sharding_propagator_cache = nullptr;
   auto opt_native_op_schema = create_native_op_schema(op, py_op, stack);
   if (opt_native_op_schema.has_value()) {
@@ -1547,7 +1580,96 @@ py::object dispatchDTensorOp(
         py_op_info.ptr());
   }
 
-  const auto dispatch = get_dtensor_dispatch();
+  const auto& operator_name = op.operator_name();
+  // Simple analysis of function schema to determine if this is an
+  // inplace variant. It might not be entirely correct, but it's good
+  // enough for now.
+  const bool is_inplace_op =
+      !operator_name.name.empty() && operator_name.name.back() == '_';
+  // Simple analysis of function schema to determine if this is an
+  // ou variant. It might not be entirely correct, but it's good
+  // enough for now.
+  const bool is_out_variant_op = !is_inplace_op &&
+      operator_name.overload_name.find("out") != std::string::npos;
+
+  // Fast path for default or view ops.
+  const auto output_spec =
+      cached_sharding.attr(dtensor_interned_strings.output_spec);
+  if (!is_inplace_op && !is_out_variant_op &&
+      !(output_spec.is_none() &&
+        (op.operator_name().name == "aten::equal" &&
+         is_default_overload(op.operator_name().overload_name)))) {
+    const auto wrap = get_dtensor_dispatcher_wrap();
+    auto wrapped_result = checked_vectorcall(
+        wrap.ptr(), py_local_results.ptr(), output_spec.ptr());
+    if (!participating) {
+      stack->clear();
+      return wrapped_result;
+    }
+
+    // Direct C++ implementation of return_and_correct_aliasing for view ops.
+
+    // py::tuple's default constructor allocates a size-0 tuple, so we
+    // wrap in optional to get a detectable empty state.
+    std::optional<py::tuple> wrapped_result_tuple;
+    if (PyTuple_Check(wrapped_result.ptr())) {
+      wrapped_result_tuple = py::reinterpret_borrow<py::tuple>(wrapped_result);
+    }
+    const auto& returns = op.schema().returns();
+    const auto num_arguments = op.schema().arguments().size();
+    for (const auto arg_idx : c10::irange(num_arguments)) {
+      const auto& arg_schema = op.schema().arguments()[arg_idx];
+      const auto* arg_alias_info = arg_schema.alias_info();
+      if (!arg_alias_info || arg_alias_info->isWrite()) {
+        continue;
+      }
+      // If we ever get here, it's a view op. Therefore, it does not
+      // have mutable output aliases, so we skip that portion of
+      // return_and_correct_aliasing. Furthermore, we *only* want to
+      // return_and_correct_aliasing if it's a view op, so we do not
+      // need to port the mutable output aliases portion of
+      // return_and_correct_aliasing at all.
+      const c10::IValue& arg_iv =
+          saved_args.at(saved_args.size() - num_arguments + arg_idx);
+      if (!arg_iv.isTensor()) {
+        continue;
+      }
+      const auto& arg = arg_iv.toTensor();
+      int ret_idx = 0;
+      for (const auto& ret_schema : returns) {
+        const auto* ret_alias_info = ret_schema.alias_info();
+        if (!ret_alias_info) {
+          ret_idx++;
+          continue;
+        }
+        if (sets_intersect(
+                arg_alias_info->beforeSets(), ret_alias_info->beforeSets())) {
+          py::object ret;
+          if (wrapped_result_tuple.has_value()) {
+            ret = wrapped_result_tuple.value()[ret_idx];
+          } else {
+            TORCH_INTERNAL_ASSERT(ret_idx == 0);
+            ret = wrapped_result;
+          }
+          if (PyList_Check(ret.ptr())) {
+            py::list ret_list = py::reinterpret_borrow<py::list>(ret);
+            for (const auto& r : ret_list) {
+              auto tensor = py::cast<at::Tensor>(r);
+              functionalize_unsafe_set(tensor, arg);
+            }
+          } else {
+            auto tensor = py::cast<at::Tensor>(ret);
+            functionalize_unsafe_set(tensor, arg);
+          }
+        }
+        ret_idx++;
+      }
+    }
+    stack->clear();
+    return wrapped_result;
+  }
+
+  auto dispatch = get_dtensor_dispatch();
   auto result = checked_vectorcall(
       dispatch.ptr(),
       py_op.ptr(),
@@ -1556,7 +1678,9 @@ py::object dispatchDTensorOp(
       compute_mesh.ptr(),
       cached_sharding.ptr(),
       py_local_results.ptr(),
-      participating ? Py_True : Py_False);
+      participating ? Py_True : Py_False,
+      is_inplace_op ? Py_True : Py_False,
+      is_out_variant_op ? Py_True : Py_False);
   stack->clear();
   return result;
 }
