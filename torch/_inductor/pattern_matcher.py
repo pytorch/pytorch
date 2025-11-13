@@ -2079,8 +2079,7 @@ def fx_to_pattern(
             n = next(argnum)
             if n < len(argnames):
                 name = argnames[n]
-            elif argnames:
-                assert target.startswith("tangent")
+            elif argnames and target.startswith("tangent"):
                 name = target
             else:
                 target = re.sub(r"_\d+$", "", target)  # de-mangle arg name

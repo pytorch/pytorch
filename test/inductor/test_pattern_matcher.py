@@ -1832,6 +1832,53 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(len(sigmoid_nodes), 1)
         self.assertTrue("original_aten" in sigmoid_nodes[0].meta)
 
+    def test_list_tensor_pattern_replacement(self):
+        @torch.library.custom_op("custom::list_op", mutates_args=())
+        def list_op(xs: list[torch.Tensor]) -> list[torch.Tensor]:
+            return [x + 1 for x in xs]
+
+        @list_op.register_fake
+        def list_op_fake(xs: list[torch.Tensor]) -> list[torch.Tensor]:
+            return xs
+
+        def src_pattern(xs: list[torch.Tensor]):
+            return torch.ops.custom.list_op(xs)
+
+        def target_pattern(xs: list[torch.Tensor]):
+            return xs
+
+        class Backend:
+            def __init__(self, example_inputs) -> None:
+                self.pm = PatternMatcherPass()
+                register_replacement(
+                    src_pattern,
+                    target_pattern,
+                    example_inputs,
+                    fwd_only,
+                    self.pm,
+                )
+
+            def __call__(
+                self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
+            ):
+                self.pm.apply(gm.graph)
+                return gm.forward
+
+        def run_test(example_inputs, expected_length):
+            def test_function():
+                xs = [torch.randn(4, 5) for _ in range(expected_length)]
+                return torch.ops.custom.list_op(xs)
+
+            backend = Backend([example_inputs])
+            compiled_fn = torch.compile(test_function, backend=backend)
+            result = compiled_fn()
+            self.assertEqual(len(result), expected_length)
+            for i in range(expected_length):
+                self.assertEqual(result[i].shape, torch.Size([4, 5]))
+
+        run_test([torch.empty(4, 5), torch.empty(4, 5)], expected_length=2)
+        run_test([torch.empty(4, 5)], expected_length=1)
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
