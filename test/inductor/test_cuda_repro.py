@@ -2637,8 +2637,8 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         actual = compiled(*example_inputs)
         self.assertEqual(actual, correct)
 
-    @config.patch({"emulate_divison_rounding": True})
-    def test_truediv_emulate_divison_rounding(self):
+    @config.patch({"eager_numerics.division_rounding": True})
+    def test_truediv_emulate_division_rounding(self):
         from decimal import Decimal
 
         y, x = 7.0, 11.0
@@ -2663,7 +2663,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
                 self.assertEqual(eager_div, compiled_div)
 
-    @config.patch({"emulate_divison_rounding": False})
+    @config.patch({"eager_numerics.division_rounding": False})
     def test_truediv_base_not_bitwise_equivalent(self):
         from decimal import Decimal
 
@@ -2682,6 +2682,30 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertNotEqual(eager_div, compiled_div)
         self.assertTrue("div_rn" not in code)
+
+    @config.patch({"eager_numerics.disable_ftz": True})
+    def test_disabling_ftz_yields_subnormals(self):
+        from decimal import Decimal
+
+        x = -127.0
+        x_ten = torch.tensor([x], dtype=torch.float32, device="cuda")
+        fn = lambda x: 2**x
+        compile_out = torch.compile(fn)(x_ten)
+        compile_decimal = Decimal(compile_out.item())
+
+        self.assertTrue(compile_decimal > Decimal(0))
+
+    @config.patch({"eager_numerics.disable_ftz": False})
+    def test_not_disabling_ftz_yields_zero(self):
+        from decimal import Decimal
+
+        x = -128.0
+        x_ten = torch.tensor([x], dtype=torch.float32, device="cuda")
+        fn = lambda x: 2.0**x
+        compile_out = torch.compile(fn)(x_ten)
+        compile_decimal = Decimal(compile_out.item())
+
+        self.assertEqual(compile_decimal, Decimal(0))
 
 
 if __name__ == "__main__":
