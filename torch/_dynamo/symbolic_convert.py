@@ -4166,6 +4166,25 @@ class InstructionTranslatorBase(
             self.instructions[self.instruction_pointer - 1],
         )
 
+    def _get_frame_loc_chain(
+        self, frame_loc: tuple[str, int]
+    ) -> tuple[tuple[str, int], ...]:
+        frame_loc_chain: tuple[tuple[str, int], ...] = (frame_loc,)
+
+        if config.nested_graph_breaks:
+            current_tx: Optional[InstructionTranslatorBase] = self.parent
+            while current_tx is not None:
+                parent_frame_loc = (
+                    current_tx.f_code.co_filename,
+                    current_tx.lineno
+                    if current_tx.lineno >= 0
+                    else current_tx.f_code.co_firstlineno,
+                )
+                frame_loc_chain = (parent_frame_loc,) + frame_loc_chain
+                current_tx = current_tx.parent
+
+        return frame_loc_chain
+
     def log_graph_break(
         self,
         code_options: dict[str, Any],
@@ -4176,14 +4195,15 @@ class InstructionTranslatorBase(
             user_stack = torch._guards.TracingContext.extract_stack()
 
         try:
-            frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+            lineno = user_stack[-1].lineno
+            frame_loc = (user_stack[-1].filename, lineno if lineno is not None else 0)
         except IndexError:
             # first instruction
             frame_loc = (
                 code_options["co_filename"],
                 code_options["co_firstlineno"],
             )
-
+        frame_loc_chain = self._get_frame_loc_chain(frame_loc)
         stack_above_dynamo_formatted = ""
         if config.verbose:
             stack_above_dynamo = get_stack_above_dynamo()
@@ -4228,7 +4248,7 @@ class InstructionTranslatorBase(
         if (
             graph_break_log.isEnabledFor(logging.DEBUG)
             and not explain
-            and graph_break_dup_warning_checker.add(frame_loc)
+            and graph_break_dup_warning_checker.add(frame_loc_chain)  # type: ignore[arg-type]
         ):
             # This log line MUST contain the string "Graph break in user code",
             # This log line is exercised from
