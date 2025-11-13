@@ -913,7 +913,7 @@ class CppGemmTemplate(CppTemplate):
                         )
                     )
                 is_horizental &= num_threads and Mt_blocks * Nt_blocks >= 8 and Mt_blocks * Nt_blocks < 256
-                return is_horizental
+                return bool(is_horizental)
 
             def _get_cache_block_of_vertical_transverse() -> Tuple[int, int, int]:
                 # NOTE [CPP GEMM Cache Blocking Algorithm]
