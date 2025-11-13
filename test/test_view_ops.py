@@ -1111,6 +1111,9 @@ class TestViewOps(TestCase):
 class TestOldViewOps(TestCase):
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2358")
     def test_ravel(self, device):
+        if "xpu" in device:
+            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/2358")
+
         def _test_ravel(tensors, size, nc=False):
             for src in tensors:
                 # Continuous Tensor -> View
@@ -1273,6 +1276,8 @@ class TestOldViewOps(TestCase):
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2358")
     def test_flatten(self, device):
         # Test that flatten returns 1-dim tensor when given a 0-dim tensor
+        if "xpu" in device:
+            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/2358")
         zero_dim_tensor = torch.tensor(123, device=device)
         flat0 = zero_dim_tensor.flatten()
         one_dim_tensor = torch.tensor([123], device=device)
