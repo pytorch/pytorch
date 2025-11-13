@@ -83,6 +83,7 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     is_traceable_wrapper_subclass_type,
 )
+from torch.utils._pytree import is_constant_class
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils.weak import TensorWeakRef
 
@@ -1454,7 +1455,13 @@ class VariableBuilder:
                 )
 
             if is_opaque_type(type(value)):
-                self.install_guards(GuardBuilder.TYPE_MATCH)
+                # Check if this is a value-type opaque object (registered as both opaque type and constant)
+                if is_constant_class(type(value)):
+                    # Value-type: guard on equality (will use __eq__)
+                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                else:
+                    # Reference-type: guard only on type/identity
+                    self.install_guards(GuardBuilder.TYPE_MATCH)
 
             elif not hasattr(value, "__obj_flatten__"):
                 # This exists to allow a smoother transition.

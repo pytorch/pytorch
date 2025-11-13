@@ -5,7 +5,7 @@ from contextlib import ExitStack
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.testing import AotEagerAndRecordGraphs
+from torch._dynamo.testing import AotEagerAndRecordGraphs, CompileCounter
 from torch._dynamo.utils import counters as dynamo_counters
 from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
@@ -69,10 +69,22 @@ class Moodule(torch.nn.Module):
         return x * y
 
 
+class ValueConfig:
+    def __init__(self, mode: str):
+        self.mode = mode
+
+    def __eq__(self, other):
+        return isinstance(other, ValueConfig) and self.mode == other.mode
+
+    def __hash__(self):
+        return hash(self.mode)
+
+
 register_opaque_type(OpaqueQueue)
 register_opaque_type(RNGState)
 register_opaque_type(Counter)
 register_opaque_type(Moodule)
+register_opaque_type(ValueConfig)
 
 
 class TestOpaqueObject(TestCase):
@@ -165,6 +177,37 @@ class TestOpaqueObject(TestCase):
         @increment_counter_impl.register_fake
         def increment_counter_fake(c: Counter, prev: torch.Tensor) -> torch.Tensor:
             return torch.empty_like(prev)
+
+        torch.library.define(
+            "_TestOpaqueObject::process_with_config",
+            f"(Tensor x, {get_opaque_type_name(ValueConfig)} config) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::process_with_config",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def process_with_config_impl(
+            x: torch.Tensor, config: ValueConfig
+        ) -> torch.Tensor:
+            assert isinstance(config, ValueConfig)
+            if config.mode == "square":
+                return x * x
+            elif config.mode == "double":
+                return x + x
+            else:
+                return x
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::process_with_config", lib=self.lib
+        )
+        def process_with_config_fake(
+            x: torch.Tensor, config: ValueConfig
+        ) -> torch.Tensor:
+            return torch.empty_like(x)
 
         super().setUp()
 
@@ -520,6 +563,50 @@ def forward(self, primals, tangents):
                 compiled_fn = aot_compile_joint_with_descriptors(joint)
 
         self.assertEqual(compiled_fn(*inp), M()(*inp))
+
+    def test_value_type_opaque_object(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def foo(x, cfg):
+            return torch.ops._TestOpaqueObject.process_with_config(x, cfg)
+
+        x = torch.randn(3, 3)
+
+        res = foo(x, ValueConfig("square"))
+        self.assertEqual(res, x * x)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # No recompilation since ValueConfig is by default a reference-type
+        res = foo(x, ValueConfig("double"))
+        self.assertEqual(res, x + x)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Register ValueConfig as a constant to make it a value-type
+        torch.utils._pytree.register_constant(ValueConfig)
+
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def foo(x, cfg):
+            return torch.ops._TestOpaqueObject.process_with_config(x, cfg)
+
+        x = torch.randn(3, 3)
+
+        res = foo(x, ValueConfig("square"))
+        self.assertEqual(res, x * x)
+        self.assertEqual(cnt.frame_count, 1)
+
+        res = foo(x, ValueConfig("square"))
+        self.assertEqual(res, x * x)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Recompilation!
+        res = foo(x, ValueConfig("double"))
+        self.assertEqual(res, x + x)
+        self.assertEqual(cnt.frame_count, 2)
+
+        torch.utils._pytree._deregister_pytree_node(ValueConfig)
 
 
 instantiate_parametrized_tests(TestOpaqueObject)
