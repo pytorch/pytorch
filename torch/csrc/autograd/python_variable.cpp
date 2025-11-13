@@ -1033,6 +1033,7 @@ struct DTensorInternedStrings {
 
 static DTensorInternedStrings dtensor_interned_strings;
 
+#ifdef USE_DISTRIBUTED
 static bool intern_dtensor_strings() {
 #define INTERN_DTENSOR_STRING(s)                                           \
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dtensor_interned_strings.s == nullptr); \
@@ -1045,6 +1046,7 @@ static bool intern_dtensor_strings() {
 #undef INTERN_DTENSOR_STRING
   return true;
 }
+#endif
 
 static bool checked_not(PyObject* obj) {
   int result = PyObject_Not(obj);
