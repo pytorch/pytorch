@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -24,7 +25,7 @@ from torch._inductor.debug import (
 )
 from torch._inductor.fx_passes.post_grad import post_grad_passes
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import run_and_get_code, run_and_get_cpp_code
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
@@ -32,8 +33,12 @@ from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 try:
     from .test_aot_inductor_utils import AOTIRunnerUtil
+    from .test_torchinductor import copy_tests
 except ImportError:
     from test_aot_inductor_utils import AOTIRunnerUtil
+    from test_torchinductor import (
+        copy_tests,  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+    )
 
 
 trace_log = logging.getLogger("torch.__trace")
@@ -804,6 +809,136 @@ class TestProvenanceTracingStackTraces(TestCase):
 
             keys = [k.split(":")[0] for k in data]
             self.assertTrue("aoti_torch_cpu_convolution" in keys)
+
+
+class ProvenanceTracingKernelContextTemplate:
+    def test_jit_inductor_with_flag(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(10, 16)
+                self.relu = torch.nn.ReLU()
+                self.sigmoid = torch.nn.Sigmoid()
+
+            def forward(self, x, a, b, c):
+                x = self.fc1(x)
+                x = self.relu(x)
+                x = self.sigmoid(x)
+                d = a * 3.14
+                y = torch.addmm(c, d, b)
+                z = torch.nn.functional.gelu(y)
+                return x, z
+
+        model = Model().to(self.device)
+        x = torch.randn(8, 10).to(self.device)
+        a = torch.randn(10, 20).to(self.device)
+        b = torch.randn(20, 30).to(self.device)
+        c = torch.randn(10, 30).to(self.device)
+        example_inputs = (x, a, b, c)
+
+        with config.patch(
+            {
+                "cpp.enable_kernel_profile": True,
+            }
+        ):
+            torch.compile(model)(*example_inputs)
+
+    @unittest.skipIf(sys.platform == "darwin", "Different kernel names on MacOS")
+    def test_aoti_python_stack_traces(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(10, 16)
+                self.relu = torch.nn.ReLU()
+                self.sigmoid = torch.nn.Sigmoid()
+
+            def forward(self, x, a, b, c):
+                x = self.fc1(x)
+                x = self.relu(x)
+                x = self.sigmoid(x)
+                d = a * 3.14
+                y = torch.addmm(c, d, b)
+                z = torch.nn.functional.gelu(y)
+                return x, z
+
+        x = torch.randn(8, 10).to(self.device)
+        a = torch.randn(10, 20).to(self.device)
+        b = torch.randn(20, 30).to(self.device)
+        c = torch.randn(10, 30).to(self.device)
+        example_inputs = (x, a, b, c)
+        model = Model().to(self.device)
+
+        ep = torch.export.export(model, example_inputs)
+        _, code = run_and_get_cpp_code(torch._inductor.aoti_compile_and_package, ep)
+
+        self.assertTrue("KernelContextGuard" not in code)
+
+        with config.patch(
+            {
+                "trace.provenance_tracking_level": 1,
+                "cpp.enable_kernel_profile": True,
+            }
+        ):
+            package_path, code = run_and_get_cpp_code(
+                torch._inductor.aoti_compile_and_package, ep
+            )
+
+            FileCheck().check(
+                "#include <torch/csrc/inductor/aoti_runtime/kernel_context_tls.h>"
+            ).check("thread_local KernelContext* tls_kernel_context = nullptr;").run(
+                code
+            )
+
+            if self.device == "cuda":
+                FileCheck().check(
+                    """KernelContextGuard _ctx("aoti_torch_cuda_mm_out", R"("""
+                ).check("AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda_mm_out(").check(
+                    """KernelContextGuard _ctx("triton_poi_fused_addmm_relu_sigmoid_0", R"("""
+                ).check("call_triton_poi_fused_addmm_relu_sigmoid_0(").check(
+                    """KernelContextGuard _ctx("triton_poi_fused_mul_1", R"("""
+                ).check("call_triton_poi_fused_mul_1(").check(
+                    """KernelContextGuard _ctx("aoti_torch_cuda_mm_out", R"("""
+                ).check("AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda_mm_out(").check(
+                    """ KernelContextGuard _ctx("triton_poi_fused_addmm_gelu_2", R"("""
+                ).check("call_triton_poi_fused_addmm_gelu_2(").run(code)
+            else:
+                FileCheck().check(
+                    """KernelContextGuard _ctx("aoti_torch_cpu_addmm_out", R"("""
+                ).check("AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cpu_addmm_out(").check(
+                    """KernelContextGuard _ctx("cpp_fused_mul_relu_sigmoid_0", R"("""
+                ).check("cpp_fused_mul_relu_sigmoid_0(").check(
+                    """KernelContextGuard _ctx("aoti_torch_cpu_addmm_out", R"("""
+                ).check("AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cpu_addmm_out(").check(
+                    """ KernelContextGuard _ctx("cpp_fused_gelu_1", R"("""
+                ).check("cpp_fused_gelu_1(").run(code)
+
+            compiled_model = torch._inductor.aoti_load_package(package_path)
+            result = compiled_model(*example_inputs)
+            self.assertEqual(result, model(*example_inputs))
+
+
+class TestProvenanceTracingKernelContextCpu(TestCase):
+    device = "cpu"
+
+
+copy_tests(
+    ProvenanceTracingKernelContextTemplate,
+    TestProvenanceTracingKernelContextCpu,
+    "cpu",
+)
+
+
+@unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
+@unittest.skipIf(not torch.cuda.is_available(), "No CUDA")
+class TestProvenanceTracingKernelContextGpu(TestCase):
+    device = "cuda"
+
+
+copy_tests(
+    ProvenanceTracingKernelContextTemplate,
+    TestProvenanceTracingKernelContextGpu,
+    "cuda",
+)
 
 
 if __name__ == "__main__":
