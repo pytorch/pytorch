@@ -260,6 +260,11 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
             self.assertEqual(k1, k2)
             self.assertEqual(type(v1), DTensor)
             self.assertEqual(type(v2), DTensor)
+
+            # in order to do ops on DTensor that require redistribution, we need to move
+            # DTensors back to the gpu
+            v1 = v1.to("cuda")
+            v2 = v2.to("cuda")
             # check whether DTensor are the same
             self.assertEqual(v1, v2)
 
