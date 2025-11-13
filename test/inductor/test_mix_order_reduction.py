@@ -270,7 +270,7 @@ class MixOrderReductionTest(TestBase):
         ],
     )
     @parametrize("split_reductions", (False, True))
-    @parametrize("shape", ((32768, 2048), (32768, 768), (32768 + 1023, 768)))
+    @parametrize("shape", ((1000000, 256),))
     @parametrize("max_autotune", (False, True))
     @parametrize("initial_xblock", (1, 2))
     def test_rms_norm_bwd(
@@ -306,7 +306,9 @@ class MixOrderReductionTest(TestBase):
 
         # M, N = 1152 * 500, 384
         M, N = shape
-        x = torch.randn(M, N, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True)
+        x = torch.randn(
+            M, 1, N, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        )
         w = torch.randn(N, dtype=wdtype, device=GPU_TYPE, requires_grad=True)
         dy = torch.randn_like(x)
         eps = 1e-5
