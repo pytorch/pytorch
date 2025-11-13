@@ -169,17 +169,6 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
     def autoheuristic_id(self) -> str:
         return f"subgraph_{self.name}"
 
-    def supports_collective_benchmarking(self) -> bool:
-        """Check if this choice supports collective benchmarking.
-
-        SubgraphChoiceCaller supports collective benchmarking since it has
-        a graph module that can be benchmarked with barrier synchronization.
-
-        Returns:
-            True, indicating support for collective benchmarking
-        """
-        return True
-
 
 class SubgraphTemplate(KernelTemplate):
     """

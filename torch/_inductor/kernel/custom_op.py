@@ -21,6 +21,36 @@ from torch.utils._ordered_set import OrderedSet
 log = logging.getLogger(__name__)
 
 
+def _detect_collective_ops(choices: list) -> bool:
+    """
+    Detect if choices contain collective operations.
+
+    For distributed training with collective ops, CollectiveBenchmarker will
+    automatically use the default process group for synchronization.
+
+    Args:
+        choices: List of algorithm choices to check
+
+    Returns:
+        True if any choice contains collective ops, False otherwise
+    """
+    from torch._inductor.utils import is_collective_op
+
+    for choice in choices:
+        if not hasattr(choice, "gm") or choice.gm is None:
+            continue
+
+        for node in choice.gm.graph.nodes:
+            if node.op == "call_function" and node.target is not None:
+                op_name = str(node.target)
+
+                # Check if this is a collective operation
+                if is_collective_op(op_name) or is_collective_op(f"torch.ops.{op_name}"):
+                    return True
+
+    return False
+
+
 class CustomOpConfig:
     """Config for custom op autotuning.
 
@@ -322,66 +352,7 @@ def autotune_custom_op(
         input_gen_fns = _adapt_user_input_gen_fns(inputs, arg_names, user_input_gen_fns)
 
     # Detect collective operations for specialized benchmarking
-    is_collective = False
-    process_group = None
-
-    def check_graph_for_collective_ops(gm: torch.fx.GraphModule) -> bool:
-        """Check if a GraphModule contains any collective operations."""
-        from torch._inductor.utils import is_collective_op
-
-        for node in gm.graph.nodes:
-            if node.op == "call_function" and node.target is not None:
-                # node.target can be either a string or an OpOverload object
-                # Convert to string and check both with and without torch.ops. prefix
-                op_name = str(node.target)
-
-                # Try exact match first
-                if is_collective_op(op_name):
-                    return True
-
-                # Also try with torch.ops. prefix
-                full_op_name = f"torch.ops.{op_name}"
-                if is_collective_op(full_op_name):
-                    return True
-        return False
-
-    # Check if any choice contains collective ops
-    for choice in choices:
-        if hasattr(choice, "gm") and choice.gm is not None:
-            if check_graph_for_collective_ops(choice.gm):
-                is_collective = True
-                break
-
-    if is_collective:
-        # Extract process_group from non_tensor_args
-        for kwargs_dict in non_tensor_args:
-            if "group" in kwargs_dict:
-                process_group = kwargs_dict["group"]
-                break
-            elif "process_group" in kwargs_dict:
-                process_group = kwargs_dict["process_group"]
-                break
-
-        # Log collective op detection for debugging
-        import torch.distributed as dist
-
-        if dist.is_initialized():
-            rank = dist.get_rank(process_group)
-            world_size = dist.get_world_size(process_group)
-            log.info(
-                "[COLLECTIVE AUTOTUNE] autotune_custom_op: Detected collective op in subgraph on rank %d/%d (process_group=%s)",
-                rank,
-                world_size,
-                "default" if process_group is None else "custom",
-            )
-            log.info(
-                "[COLLECTIVE AUTOTUNE] autotune_custom_op: Will use collective benchmarking path for %d choices",
-                len(choices),
-            )
-        else:
-            log.debug(
-                "Detected collective op in subgraph (distributed not initialized)"
-            )
+    is_collective = _detect_collective_ops(choices)
 
     # Run autotuning and get both result and winning choice
     selected_result, winning_choice = autotune_select_algorithm(
@@ -392,7 +363,6 @@ def autotune_custom_op(
         input_gen_fns=input_gen_fns,
         return_choice=True,
         is_collective=is_collective,
-        process_group=process_group,
     )
 
     # Apply inlining for fusion if winning_choice has graph; otherwise return result as-is(default fallback impl)

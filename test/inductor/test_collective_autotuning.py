@@ -40,6 +40,9 @@ class TestCollectiveAutotuning(MultiProcessTestCase):
             rank=self.rank,
         )
 
+        # Add barrier to ensure all ranks are synchronized
+        dist.barrier()
+
         rank = dist.get_rank()
         device = f"cuda:{rank}"
 
@@ -65,7 +68,7 @@ class TestCollectiveAutotuning(MultiProcessTestCase):
             return torch.ops._c10d_functional.all_reduce_(result, "sum", "default")
 
         # Implementation 2: Simulate chunked (for testing multiple choices)
-        def allreduce_chunked(x, chunk_size=1024):
+        def allreduce_nccl2(x):
             # For now, just call the regular allreduce
             result = x.clone()
             return torch.ops._c10d_functional.all_reduce_(result, "sum", "default")
@@ -80,7 +83,7 @@ class TestCollectiveAutotuning(MultiProcessTestCase):
             my_allreduce,
             configs=[
                 CustomOpConfig(allreduce_nccl),
-                CustomOpConfig(allreduce_chunked, chunk_size=1024),
+                CustomOpConfig(allreduce_nccl2),
             ],
         )
 
@@ -91,18 +94,14 @@ class TestCollectiveAutotuning(MultiProcessTestCase):
 
         model = torch.compile(SimpleModel()).to(device)
 
-        # Run
         x = torch.randn(128, 128, device=device)
         x_copy = x.clone()
         y = model(x)
-
-        # Verify: sum across 2 ranks
         expected = x_copy * 2
         torch.testing.assert_close(y, expected, rtol=1e-3, atol=1e-3)
 
-        if rank == 0:
-            print("Single allreduce test passed!")
-
+        # Ensure all ranks finish and then cleanup
+        dist.barrier()
         dist.destroy_process_group()
 
 
