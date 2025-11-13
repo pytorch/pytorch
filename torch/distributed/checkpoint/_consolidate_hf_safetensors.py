@@ -261,7 +261,7 @@ def _process_output_file(
                 file_metadata = input_files_data[safetensors_file].metadata
                 input_metadata_size = input_files_data[safetensors_file].metadata_size
 
-                if tensor_fqn not in file_metadata.keys():
+                if tensor_fqn not in file_metadata:
                     continue
 
                 metadata = file_metadata[tensor_fqn]

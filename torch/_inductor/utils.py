@@ -58,6 +58,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._inductor.analysis.device_info import datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
+from torch.fx.passes.regional_inductor import _needs_inductor_compile
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map_only
@@ -547,70 +548,6 @@ def is_pointwise_use(
         return all(is_pointwise_use(u, is_pointwise_fn) for u in use.users)
 
     return torch.Tag.pointwise in target.tags or is_pointwise_fn(target)
-
-
-class LogicalConnective(enum.Enum):
-    OR = enum.auto()
-    AND = enum.auto()
-
-
-def has_uses(
-    target: Node,
-    use_selector_fn: Callable[[torch._ops.OpOverload], bool] = lambda _: False,
-    use_aggregate_type: LogicalConnective = LogicalConnective.OR,
-) -> bool:
-    """
-    Given a target, explore the uses of `target` by applying `use_selector_fn`
-    on them, and then aggregate these booleans with the `use_aggregate_type`
-    logical connective.
-
-    Uses in view ops will follow the views uses.
-    """
-
-    def get_use_aggregate_fn(
-        use_aggregate_type: LogicalConnective,
-    ) -> Callable[[Iterator[Any]], bool]:
-        match use_aggregate_type:
-            case LogicalConnective.AND:
-                return all
-            case LogicalConnective.OR:
-                return any
-            case _:
-                return any
-
-    use_aggregate_fn = get_use_aggregate_fn(use_aggregate_type)
-
-    def has_uses_impl(use: Node) -> bool:
-        if use.op != "call_function":
-            return False
-        if not (
-            isinstance(use.target, torch._ops.OpOverload)
-            or use.target is operator.getitem
-        ):
-            return False
-
-        target = cast(torch._ops.OpOverload, use.target)
-        # Process getitem and view
-        if target is operator.getitem or is_view(target):
-            return use_aggregate_fn(has_uses_impl(user) for user in use.users)
-
-        return use_selector_fn(target)
-
-    return use_aggregate_fn(has_uses_impl(user) for user in target.users)
-
-
-def has_uses_tagged_as(
-    target: Node,
-    use_tags: Collection[torch.Tag],
-    use_aggregate_type: LogicalConnective = LogicalConnective.OR,
-) -> bool:
-    """
-    Is there a use with given tags?
-    """
-
-    return has_uses(
-        target, lambda use: any(tag in use_tags for tag in use.tags), use_aggregate_type
-    )
 
 
 def gen_gm_and_inputs(
@@ -1290,7 +1227,7 @@ def unload_xpu_triton_pyds() -> None:
         if not module_name.startswith("torch._inductor.runtime.compile_tasks."):
             continue
         m = sys.modules[module_name]
-        for attr_name in m.__dict__.keys():
+        for attr_name in m.__dict__:
             if attr_name.startswith("triton_"):
                 kernel = getattr(m, attr_name)
                 if isinstance(
@@ -2793,7 +2730,6 @@ def pass_execution_and_save(
     with tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
-        delete=False,
     ) as f:
         before_io = io.StringIO()
         after_io = io.StringIO()
@@ -4101,3 +4037,40 @@ def load_template(name: str, template_dir: Path) -> str:
     """Load a template file and return its content."""
     with open(template_dir / f"{name}.py.jinja") as f:
         return f.read()
+
+
+def should_fallback_by_default(node: torch.fx.Node) -> bool:
+    """Decide whether fallback for a node. This is only used in inductor lite mode."""
+    target = node.target
+
+    assert isinstance(
+        target, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+    ), f"Expected OpOverload or HigherOrderOperator, but found {type(target)}"
+
+    if not config.fallback_by_default:
+        return False
+
+    # some ops need special handle due to dynamic shapes. we can avoid
+    # fallback if they do not impact numerics.
+    skip_fallback_due_to_dynamic_shape = OrderedSet(
+        [
+            torch.ops.aten._assert_scalar.default,
+            torch.ops.aten.lift_fresh_copy.default,
+        ]
+    )
+
+    if target in skip_fallback_due_to_dynamic_shape:
+        return False
+
+    # Most hops have registered lowering. We should follow the lowering and not fallback.
+    # However, in rare cases, hops may not register lowering, such as
+    # torch.ops.higher_order.triton_kernel_wrapper_functional. We should fallback for
+    # these hops.
+    fallback_hops = OrderedSet(
+        [torch.ops.higher_order.triton_kernel_wrapper_functional]
+    )
+
+    if isinstance(target, torch._ops.HigherOrderOperator):
+        return target in fallback_hops
+
+    return not _needs_inductor_compile(node)

@@ -219,6 +219,9 @@ class MixOrderReduction:
     # TODO add a cache
     @classmethod
     def can_fuse(cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
+        """
+        Check whether we can fuse two reductions with mix loop orders.
+        """
         if not config.triton.mix_order_reduction:
             return False
 
@@ -246,6 +249,13 @@ class MixOrderReduction:
         nrow = sympy.Max(g1[0], g1[1])
         ncol = sympy.Min(g1[0], g1[1])
 
+        # the fused version has worse perf than non-fused version for
+        # small workload. When a workload is small enough, data can be
+        # fully cached by L2
+        size_thres = 5 * 2**20
+        if not V.graph.sizevars.statically_known_geq(nrow * ncol, size_thres):
+            return False
+
         # We require more more row than columns since
         # 1, we prefer doing persistent reduction for each row
         # 2, we will split the reduction across the rows
@@ -262,8 +272,19 @@ class MixOrderReduction:
             (node1, node2) if g1[1] == ncol else (node2, node1)
         )
 
+        # We previously only check the contiguous_node has contiguous
+        # access to common_reads. But that turns out to be not enough.
+        # The contiguous node may access a buffer that's node use by
+        # other_ndoe. If that ascess is non-contiugous, generating
+        # mix-order reduction can be inefficient especially when we
+        # force XBLOCK to be 1
+        # if not all(
+        #     cls.is_contiguous_load(buf, contiguous_node) for buf in common_reads
+        # ):
+        #     return False
         if not all(
-            cls.is_contiguous_load(buf, contiguous_node) for buf in common_reads
+            cls.is_contiguous_load(dep.name, contiguous_node)
+            for dep in contiguous_node.read_writes.reads
         ):
             return False
 
@@ -306,7 +327,6 @@ class MixOrderReduction:
     def is_contiguous_load(cls, buf: str, parent_node: BaseSchedulerNode) -> bool:
         from torch._inductor.loop_body import MemoryUsageType
 
-        n_congituous_read = 0
         for node in parent_node.get_nodes():
             assert isinstance(node, SchedulerNode)
             loop_body = node._body
@@ -328,10 +348,11 @@ class MixOrderReduction:
                     var_symbols,
                     var_symbols,
                 )
-                n_congituous_read += stride_vars[-1] == 1
-                if n_congituous_read > 0:
-                    return True
-        return False
+
+                # stride==0 means a broadcast
+                if not (stride_vars[-1] == 0 or stride_vars[-1] == 1):
+                    return False
+        return True
 
 
 @dataclasses.dataclass
@@ -2721,8 +2742,9 @@ class Scheduler:
         self.process_grouped_nodes()
 
         if (
-            torch._inductor.config.graph_partition
-            and torch._inductor.config.triton.cudagraphs
+            config.graph_partition
+            and config.triton.cudagraphs
+            and config.triton.reorder_for_reducing_graph_partitions
         ):
             self.nodes = self.maybe_reorder_for_minimizing_partition(self.nodes)
             self.nodes = self.reorder_for_partition_with_simple_dependency(self.nodes)
@@ -2899,7 +2921,7 @@ class Scheduler:
                         list1 = name_to_users[buf1_name]
                         list2 = name_to_users[buf2_name]
                         combined = list1 + list2
-                        for key in name_to_users.keys():
+                        for key in name_to_users:
                             if (
                                 name_to_users[key] is list1
                                 or name_to_users[key] is list2
@@ -3170,6 +3192,9 @@ class Scheduler:
         """
         Remove any nodes without users
         """
+        if not config.use_dce:
+            return
+
         # self.nodes is in topological order, so by iterating in reverse order
         # we have visited (and potentially removed) all users before visiting a
         # given node.
