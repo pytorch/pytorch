@@ -16,11 +16,14 @@ from torch.distributed.elastic.control_plane import (
     TORCH_WORKER_SERVER_SOCKET,
     worker_main,
 )
+
 from torch.monitor import _WaitCounter
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
+    MI200_ARCH,
     requires_cuda,
     run_tests,
+    skipIfRocmArch,
     TestCase,
 )
 
@@ -159,6 +162,7 @@ class WorkerServerTest(TestCase):
             )
             self.assertEqual(resp.status, 200)
 
+    @skipIfRocmArch(MI200_ARCH)
     def test_tcp(self) -> None:
         import requests
 

@@ -23,7 +23,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     run_tests,
-    skipIfRocm,
     TEST_WITH_TSAN,
     TestCase,
 )
