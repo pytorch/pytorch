@@ -566,7 +566,8 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
   }
 
   if (size1 > 0 && THPVariable_Check(args[i])) {
-    return std::vector<c10::SymInt>(size1, THPVariable_Unpack(args[i]).item().toSymInt());
+    return std::vector<c10::SymInt>(
+        size1, THPVariable_Unpack(args[i]).item().toSymInt());
   }
 
   PyObject* arg = args[i];
@@ -729,6 +730,9 @@ inline c10::OptionalArray<c10::SymInt> PythonArgs::symintlistOptional(int i) {
 inline std::vector<double> PythonArgs::getDoublelist(int i) {
   PyObject* arg = args[i];
   auto tuple = PyTuple_Check(arg);
+  if (!tuple) {
+    TORCH_INTERNAL_ASSERT(PyList_Check(arg), "expected tuple or list");
+  }
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<double> res(size);
@@ -902,6 +906,9 @@ inline at::Dimname PythonArgs::dimname(int i) {
 
 inline std::vector<at::Dimname> parseDimnameList(PyObject* arg) {
   auto tuple = PyTuple_Check(arg);
+  if (!tuple) {
+    TORCH_INTERNAL_ASSERT(PyList_Check(arg), "expected tuple or list");
+  }
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<at::Dimname> res;
