@@ -7,12 +7,11 @@ class TestQuantizeOp(unittest.TestCase):
     
     def test_basic_fp8_quantization(self):
         input_tensor = torch.randn(128, dtype=torch.float32)
-        output, scale = torch.quantize(
+        output, scale = torch.quantize_mx(
             input_tensor,
             block_size=32,
             dtype=torch.float8_e4m3fn,
-            quant_type=0,
-            rounding_mode=0
+            scale_calculation_mode=0
         )
         
         self.assertEqual(output.dtype, torch.float8_e4m3fn)
@@ -22,8 +21,7 @@ class TestQuantizeOp(unittest.TestCase):
         golden_output, golden_scale = quantize_python(input_tensor,
             block_size=32,
             dtype=torch.float8_e4m3fn,
-            quant_type=0,
-            rounding_mode=0
+            scale_calculation_mode=0
         )
 
         # print(output)
@@ -33,12 +31,11 @@ class TestQuantizeOp(unittest.TestCase):
     
     def test_mxfp8_quantization(self):
         input_tensor = torch.randn(1024, 1024 , dtype=torch.float32)
-        output, scale = torch.quantize(
+        output, scale = torch.quantize_mx(
             input_tensor,
             block_size=32,
             dtype=torch.float8_e4m3fn,
-            quant_type=0,
-            rounding_mode=0
+            scale_calculation_mode=0
         )
         
         self.assertEqual(output.dtype, torch.float8_e4m3fn)
@@ -48,8 +45,7 @@ class TestQuantizeOp(unittest.TestCase):
             input_tensor,
             block_size=32,
             dtype=torch.float8_e4m3fn,
-            quant_type=0,
-            rounding_mode=0
+            scale_calculation_mode=0
         )
 
         # print(output)
@@ -59,12 +55,11 @@ class TestQuantizeOp(unittest.TestCase):
     
     def test_per_tensor_quantization(self):
         input_tensor = torch.randn(64, 64, dtype=torch.float32)
-        output, scale = torch.quantize(
+        output, scale = torch.quantize_mx(
             input_tensor,
             block_size=64*64,
             dtype=torch.float8_e4m3fn,
-            quant_type=0,
-            rounding_mode=0
+            scale_calculation_mode=0
         )
         
         self.assertEqual(scale.shape[0], 64)
@@ -72,8 +67,7 @@ class TestQuantizeOp(unittest.TestCase):
         golden_output, golden_scale = quantize_python(input_tensor,
             block_size=64*64,
             dtype=torch.float8_e4m3fn,
-            quant_type=0,
-            rounding_mode=0
+            scale_calculation_mode=0
         )
 
         # print(output)
@@ -86,12 +80,11 @@ class TestQuantizeOp(unittest.TestCase):
         block_size = 32
         @torch.compile
         def quantize_model(x):
-            output, scale = torch.quantize(
+            output, scale = torch.quantize_mx(
                 x, 
                 block_size=block_size,
                 dtype=torch.float8_e4m3fn,
-                quant_type=0,
-                rounding_mode=0
+                scale_calculation_mode=0
             )
             return output, scale
         
@@ -105,8 +98,7 @@ class TestQuantizeOp(unittest.TestCase):
             x,
             block_size=block_size,
             dtype=torch.float8_e4m3fn,
-            quant_type=0,
-            rounding_mode=0
+            scale_calculation_mode=0
         )
 
         # print(output)
@@ -142,7 +134,7 @@ def quantize_mxfp8_python(
     input: torch.Tensor,
     block_size: int,
     dtype: torch.dtype,
-    rounding_mode: int
+    scale_calculation_mode: int
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Pure Python implementation of MXFP8 quantization.
@@ -151,7 +143,7 @@ def quantize_mxfp8_python(
         input: 2D tensor [rows, cols]
         block_size: Block size for quantization
         dtype: Target FP8 dtype
-        rounding_mode: 0=floor, 1=round_even
+        scale_calculation_mode: 0=floor, 1=round_even
     
     Returns:
         output: Quantized tensor [rows, cols]
@@ -193,9 +185,9 @@ def quantize_mxfp8_python(
                 extracted_pow2 = ((max_abs_int32 >> MBITS_F32) & 0xFF) - F32_EXP_BIAS
                 
                 # Calculate E8M0 scale
-                if rounding_mode ==0:
+                if scale_calculation_mode ==0:
                     scale_e8m0_unbiased = extracted_pow2 - target_max_pow2
-                elif rounding_mode ==1:
+                elif scale_calculation_mode ==1:
                     mantissa_gt_one = (max_abs_int32 & 0x7FFFFF) > 0
                     extracted_pow2 += mantissa_gt_one
                     scale_e8m0_unbiased = extracted_pow2 - target_max_pow2 + 1
@@ -240,8 +232,7 @@ def quantize_python(
     input: torch.Tensor,
     block_size: int = 32,
     dtype: torch.dtype = torch.float8_e4m3fn,
-    quant_type: int = 0,
-    rounding_mode: int = 0
+    scale_calculation_mode: int = 0
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Pure Python quantization (matches C++ behavior).
@@ -253,12 +244,11 @@ def quantize_python(
     # Validate
     assert input_2d.dim() == 2, "Input must be 2D"
     assert block_size > 0, "Block size must be positive"
-    assert quant_type in (0, 1), "quant_type must be 0 or 1"
-    assert rounding_mode in (0, 1), "rounding_mode must be 0 or 1"
+    assert scale_calculation_mode in (0, 1), "scale_calculation_mode must be 0 or 1"
     
     # Quantize
-    if quant_type == 0:
-        output_2d, scale_2d = quantize_mxfp8_python(input_2d, block_size, dtype, rounding_mode)
+    if dtype == torch.float8_e4m3fn or dtype == torch.float8_e5m2:
+        output_2d, scale_2d = quantize_mxfp8_python(input_2d, block_size, dtype, scale_calculation_mode)
     else:
         raise NotImplementedError("quant_type=1 not implemented in Python reference")
     

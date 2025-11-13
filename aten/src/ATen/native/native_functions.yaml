@@ -16101,11 +16101,11 @@
 - func: _propagate_xla_data(Tensor input, Tensor output) -> ()
   variants: function
 
-- func: quantize(Tensor self, int block_size, ScalarType dtype, int quant_type, int rounding_mode) -> (Tensor output, Tensor scale)
+- func: quantize_mx(Tensor self, int block_size, ScalarType dtype, int scale_calculation_mode) -> (Tensor output, Tensor scale)
   variants: function, method
   dispatch:
-    CPU: quantize_cpu
-    Meta: quantize_meta
+    CPU: quantize_mx_cpu
+    Meta: quantize_mx_meta
   tags: [
     core,                 # Include in all builds
     pt2_compliant_tag    # Works with torch.compile()

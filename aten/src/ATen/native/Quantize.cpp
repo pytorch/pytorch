@@ -5,34 +5,11 @@
 #include <c10/util/Exception.h>
 #include <cmath>
 #include <tuple>
-#include <iostream>
 
 namespace at {
 namespace native {
 
 namespace {
-
-// // Helper function for rounding
-// template <typename scalar_t>
-// inline scalar_t apply_rounding(scalar_t value, int64_t rounding_mode, uint32_t* rand_state = nullptr) {
-//   switch (rounding_mode) {
-//     case 0: // floor
-//       return std::floor(value);
-//     case 1: // round to nearest even
-//       return std::rint(value);
-//     case 2: // stochastic (simplified)
-//       if (rand_state) {
-//         float frac = value - std::floor(value);
-//         // Simple LCG random number generator
-//         *rand_state = (*rand_state * 1103515245 + 12345) & 0x7fffffff;
-//         float rand_val = static_cast<float>(*rand_state) / 0x7fffffff;
-//         return (rand_val < frac) ? std::ceil(value) : std::floor(value);
-//       }
-//       return std::rint(value);
-//     default:
-//       return std::rint(value);
-//   }
-// }
 
 // FP8 quantization parameters
 constexpr float FP8_E4M3_MAX = 448.0f;
@@ -67,47 +44,6 @@ inline int get_fp8_max_pow2(at::ScalarType dtype) {
   return 0;
 }
 
-// template <typename input_t, typename output_t>
-// void quantize_fp8_impl(
-//     const input_t* input_data,
-//     output_t* output_data,
-//     uint8_t* scale_data,
-//     int64_t dim0_size,
-//     int64_t dim1_size,
-//     int64_t block_size,
-//     float fp8_max,
-//     int64_t rounding_mode) {
-  
-//   int64_t num_blocks = (dim1_size + block_size - 1) / block_size;
-  
-//   at::parallel_for(0, num_blocks, 0, [&](int64_t begin, int64_t end) {
-//     uint32_t rand_state = begin + 12345; // Simple seed
-    
-//     for (int64_t block_idx = begin; block_idx < end; ++block_idx) {
-//       int64_t start = block_idx * block_size;
-//       int64_t block_end = std::min(start + block_size, dim1_size);
-      
-//       // Find max absolute value in block
-//       float amax = 0.0f;
-//       for (int64_t i = start; i < block_end; ++i) {
-//         float abs_val = std::abs(static_cast<float>(input_data[i]));
-//         amax = std::max(amax, abs_val);
-//       }
-      
-//       // Compute scale
-//       float scale = (amax == 0.0f) ? 1.0f : (fp8_max / amax);
-//       scale_data[block_idx] = 1.0f / scale; // Store inverse scale for dequant
-      
-//       // Quantize block
-//       for (int64_t i = start; i < block_end; ++i) {
-//         float val = static_cast<float>(input_data[i]) * scale;
-//         val = std::max(-fp8_max, std::min(val, fp8_max));
-//         output_data[i] = static_cast<output_t>(val);
-//       }
-//     }
-//   });
-// }
-
 template <typename input_t, typename output_t>
 void quantize_mxfp8_impl(
     const input_t* input_data,
@@ -117,7 +53,7 @@ void quantize_mxfp8_impl(
     int64_t dim1_size,
     int64_t block_size,
     float fp8_max,
-    int64_t rounding_mode, 
+    int64_t scale_calculation_mode, 
     at::ScalarType fp8_dtype
   ) {
   
@@ -158,11 +94,11 @@ void quantize_mxfp8_impl(
         int32_t scale_e8m0_unbiased = 0;
         
         
-        if (rounding_mode ==0){
+        if (scale_calculation_mode ==0){
           // Floor the scale 
           scale_e8m0_unbiased = extracted_pow2 - target_max_pow2;
         }
-        else if(rounding_mode == 1){
+        else if(scale_calculation_mode == 1){
           // Ceil the scale
           int32_t mantissa_gt_one = (max_abs_int32 & 0x7FFFFF) > 0 ;
           extracted_pow2 += mantissa_gt_one;
@@ -198,7 +134,6 @@ void quantize_mxfp8_impl(
           float val = static_cast<float>(input_data[idx]) / scale_fp32;
           
           // Apply rounding
-          
           val = std::nearbyint(val);
           val = std::max(-fp8_max, std::min(val, fp8_max));
           output_data[idx] = static_cast<output_t>(val);
@@ -210,21 +145,18 @@ void quantize_mxfp8_impl(
 
 } // anonymous namespace
 
-std::tuple<Tensor, Tensor> quantize_cpu(
+std::tuple<Tensor, Tensor> quantize_mx_cpu(
     const Tensor& self,
     int64_t block_size,
     at::ScalarType dtype,
-    int64_t quant_type,
-    int64_t rounding_mode) {
+    int64_t scale_calculation_mode) {
   
   bool is_1d = (self.dim() == 1);
   const Tensor input = is_1d ? self.unsqueeze(0) : self;
 
   TORCH_CHECK(input.dim() == 2, "Input tensor must be 2D");
   TORCH_CHECK(block_size > 0, "Block size must be positive");
-  TORCH_CHECK(quant_type >= 0 && quant_type <= 1, "quant_type must be 0 (FP8) or 1 (MXFP8)");
-  TORCH_CHECK(rounding_mode >= 0 && rounding_mode <= 1, "rounding_mode must be 0, 1");
-  
+  TORCH_CHECK(scale_calculation_mode >= 0 && scale_calculation_mode <= 1, "scale_calculation_mode must be 0, 1");
   
   // Get dimensions
   int64_t dim0_size = input.size(0);  // Number of rows
@@ -237,30 +169,22 @@ std::tuple<Tensor, Tensor> quantize_cpu(
   int64_t num_blocks_per_row = (dim1_size + block_size - 1) / block_size;
   auto scale = at::empty({dim0_size, num_blocks_per_row}, input.options().dtype(at::kByte));
   
-  float fp8_max = get_fp8_max(dtype);
-  
   AT_DISPATCH_FLOATING_TYPES_AND2(at::kBFloat16, at::kHalf, input.scalar_type(), "quantize_cpu", [&] {
     const scalar_t* input_data = input.data_ptr<scalar_t>();
     uint8_t* scale_data = scale.data_ptr<uint8_t>();
     
     if (dtype == at::kFloat8_e4m3fn) {
+
+      float fp8_max = get_fp8_max(dtype);
       auto* output_data = output.data_ptr<at::Float8_e4m3fn>();
-      if (quant_type == 0) {
-        quantize_mxfp8_impl(input_data, output_data, scale_data, dim0_size, dim1_size, block_size, fp8_max, rounding_mode, dtype);
-      }
-        // quantize_fp8_impl(input_data, output_data, scale_data, dim0_size, dim1_size, block_size, fp8_max, rounding_mode);
-      // } else {
-      //   quantize_mxfp8_impl(input_data, output_data, scale_data, dim0_size, dim1_size, block_size, fp8_max, rounding_mode);
-      // }
+      quantize_mxfp8_impl(input_data, output_data, scale_data, dim0_size, dim1_size, block_size, fp8_max, scale_calculation_mode, dtype);
+
     } else if (dtype == at::kFloat8_e5m2) {
+
+      float fp8_max = get_fp8_max(dtype);
       auto* output_data = output.data_ptr<at::Float8_e5m2>();
-      if (quant_type == 0) {
-        quantize_mxfp8_impl(input_data, output_data, scale_data, dim0_size, dim1_size, block_size, fp8_max, rounding_mode, dtype);
-      }
-        // quantize_fp8_impl(input_data, output_data, scale_data, dim0_size, dim1_size, block_size, fp8_max, rounding_mode);
-      // } else {
-      //   quantize_mxfp8_impl(input_data, output_data, scale_data, dim0_size, dim1_size, block_size, fp8_max, rounding_mode);
-      // }
+      quantize_mxfp8_impl(input_data, output_data, scale_data, dim0_size, dim1_size, block_size, fp8_max, scale_calculation_mode, dtype);
+
     } else {
       TORCH_CHECK(false, "Unsupported dtype for quantization");
     }
@@ -273,12 +197,11 @@ std::tuple<Tensor, Tensor> quantize_cpu(
 }
 
 // Meta kernel: Only computes shapes, no actual computation
-std::tuple<Tensor, Tensor> quantize_meta(
+std::tuple<Tensor, Tensor> quantize_mx_meta(
     const Tensor& self,
     int64_t block_size,
     at::ScalarType dtype_opt,
-    int64_t quant_type,
-    int64_t rounding_mode) {
+    int64_t scale_calculation_mode) {
   
   // Apply default
   at::ScalarType dtype = dtype_opt;

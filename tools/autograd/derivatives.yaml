@@ -3241,5 +3241,5 @@
   self: norm_backward(grads[i], self[i], ord, result[i])
   result: norm_jvp(self_p, self_t, ord, result[i])
 
-- name: quantize(Tensor self, int block_size, ScalarType dtype, int quant_type, int rounding_mode) -> (Tensor output, Tensor scale)
+- name: quantize_mx(Tensor self, int block_size, ScalarType dtype, int scale_calculation_mode) -> (Tensor output, Tensor scale)
   self: grad_output
