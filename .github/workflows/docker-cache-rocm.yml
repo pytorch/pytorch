@@ -3,8 +3,7 @@ name: docker-cache-rocm
 on:
   workflow_run:
     workflows: [docker-builds]
-    # TODO: Uncomment before merging
-    #branches: [main, release]
+    branches: [main, release]
     types:
       - completed
   workflow_dispatch:
@@ -98,9 +97,7 @@ jobs:
           elif [[ $ref_name == "main" ]]; then
             ref_suffix="main"
           else
-            # TODO: Remove below
-            ref_suffix="main"
-            # echo "Unexpected branch in ref_name: ${ref_name}" && exit 1
+            echo "Unexpected branch in ref_name: ${ref_name}" && exit 1
           fi
           docker tag ${{ steps.ghcr-io-tag.outputs.ghcr_image }} ${{ matrix.docker-image }}
           # mv is atomic operation, so we use intermediate tar.tmp file to prevent read-write contention
