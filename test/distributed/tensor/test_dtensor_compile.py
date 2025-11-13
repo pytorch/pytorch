@@ -994,6 +994,96 @@ def forward(self, primals_1):
         out_dt = torch.matmul(tmp_dt, y_dt)
         out_dt.sum().backward()
 
+    def test_dtensor_broadcast_to_replicate(self):
+        """Test broadcast_to operation with DTensor under compilation."""
+        mesh = init_device_mesh(self.device_type, (self.world_size, 1))
+        placement = [Replicate(), Replicate()]
+
+        def fn(input):
+            return torch.broadcast_to(input, (888, 12, 888, 12))
+
+        big_tensor = torch.randn(888, 12)
+        d_tensor = distribute_tensor(big_tensor, device_mesh=mesh, placements=placement)
+
+        # Test eager execution
+        result = fn(d_tensor)
+        self.assertEqual(result.shape, torch.Size([888, 12, 888, 12]))
+
+        # Test compiled execution
+        jitted_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        jitted_result = jitted_fn(d_tensor)
+        self.assertEqual(jitted_result.shape, torch.Size([888, 12, 888, 12]))
+        self.assertEqual(result.full_tensor(), jitted_result.full_tensor())
+
+    def test_dtensor_reshape_replicate(self):
+        """Test reshape operation with DTensor under compilation."""
+        mesh = init_device_mesh(self.device_type, (self.world_size, 1))
+        placement = [Replicate(), Replicate()]
+
+        def fn(input):
+            return input.reshape((1, 888, 6, 2))
+
+        big_tensor = torch.randn(888, 12)
+        d_tensor = distribute_tensor(big_tensor, device_mesh=mesh, placements=placement)
+
+        # Test eager execution
+        result = fn(d_tensor)
+        self.assertEqual(result.shape, torch.Size([1, 888, 6, 2]))
+
+        # Test compiled execution
+        jitted_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        jitted_result = jitted_fn(d_tensor)
+        self.assertEqual(jitted_result.shape, torch.Size([1, 888, 6, 2]))
+        self.assertEqual(result.full_tensor(), jitted_result.full_tensor())
+
+    def test_dtensor_indexing_replicate(self):
+        """Test tensor indexing with Ellipsis with DTensor under compilation."""
+        mesh = init_device_mesh(self.device_type, (self.world_size, 1))
+        placement = [Replicate(), Replicate()]
+
+        def fn(input):
+            return input[(Ellipsis, 1)]
+
+        big_tensor = torch.randn(1, 888, 12)
+        d_tensor = distribute_tensor(big_tensor, device_mesh=mesh, placements=placement)
+
+        # Test eager execution
+        result = fn(d_tensor)
+        self.assertEqual(result.shape, torch.Size([1, 888]))
+
+        # Test compiled execution
+        jitted_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        jitted_result = jitted_fn(d_tensor)
+        self.assertEqual(jitted_result.shape, torch.Size([1, 888]))
+        self.assertEqual(result.full_tensor(), jitted_result.full_tensor())
+
+    def test_dtensor_tensor_split_replicate(self):
+        """Test tensor_split operation with DTensor under compilation."""
+        mesh = init_device_mesh(self.device_type, (self.world_size, 1))
+        placement = [Replicate(), Replicate()]
+
+        def fn(input):
+            return torch.tensor_split(input, 3, dim=-1)
+
+        big_tensor = torch.randn(1, 1, 9216)
+        d_tensor = distribute_tensor(big_tensor, device_mesh=mesh, placements=placement)
+
+        # Test eager execution
+        t1, t2, t3 = fn(d_tensor)
+        self.assertEqual(t1.shape, torch.Size([1, 1, 3072]))
+        self.assertEqual(t2.shape, torch.Size([1, 1, 3072]))
+        self.assertEqual(t3.shape, torch.Size([1, 1, 3072]))
+
+        # Test compiled execution
+        jitted_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        jitted_t1, jitted_t2, jitted_t3 = jitted_fn(d_tensor)
+        self.assertEqual(jitted_t1.shape, torch.Size([1, 1, 3072]))
+        self.assertEqual(jitted_t2.shape, torch.Size([1, 1, 3072]))
+        self.assertEqual(jitted_t3.shape, torch.Size([1, 1, 3072]))
+        self.assertEqual(t1.full_tensor(), jitted_t1.full_tensor())
+        self.assertEqual(t2.full_tensor(), jitted_t2.full_tensor())
+        self.assertEqual(t3.full_tensor(), jitted_t3.full_tensor())
+
     @unittest.skipIf(
         torch._inductor.config.triton.native_matmul, "Matmul is now generated"
     )

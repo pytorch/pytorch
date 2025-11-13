@@ -967,7 +967,7 @@ static PyObject* THPVariable_dtensor_new(
   Tensor tensor = make_tensor_for_subclass_helper(
       /*sym_sizes=*/tuple_to_symintlist(sizes.ptr()),
       /*sym_strides=*/tuple_to_symintlist(stride.ptr()),
-      /*sym_storage_offset=*/std::nullopt,
+      /*sym_storage_offset=*/local_tensor.sym_storage_offset(),
       options,
       /*storage_size=*/std::nullopt,
       extra_dispatch_keys);
