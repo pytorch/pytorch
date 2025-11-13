@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy  # noqa: TC002
 
 import torch  # noqa: TC001
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._pallas import has_tpu_pallas
 
 from .. import config
 from ..runtime.runtime_utils import torch_dtype_to_jax
@@ -886,7 +888,13 @@ class PallasKernel(SIMDKernel):
 
         kernel_name = name or "<KERNEL_NAME>"
         interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu"
-        interpret_literal = "True" if interpret_is_cpu else "False"
+        is_tpu = os.environ.get("PALLAS_TARGET_TPU") == "1"
+        if is_tpu and not has_tpu_pallas():
+            raise RuntimeError(
+                "PALLAS_TARGET_TPU is set, but no TPU device was found. "
+                "Please make sure that you have a TPU available and that JAX is configured correctly."
+            )
+        interpret_literal = "True" if interpret_is_cpu or is_tpu else "False"
 
         # For GPU (Triton backend), import pltriton for masked loads/stores
         # Import math at module level if we'll use it for masked ops
@@ -920,7 +928,9 @@ class PallasKernel(SIMDKernel):
             is_contiguous = buffer_name is not None and self._buffer_is_contiguous(
                 buffer_name
             )
-            aliasable_flags[param] = (not interpret_is_cpu) and is_contiguous
+            aliasable_flags[param] = (
+                not interpret_is_cpu and not is_tpu
+            ) and is_contiguous
         alias_params = [
             f"{param}_alias" for param in pure_out_params if aliasable_flags[param]
         ]
@@ -1068,15 +1078,18 @@ class PallasKernel(SIMDKernel):
                     code.writeline(
                         f"{alias_name}_jax = jax.dlpack.from_dlpack({alias_name})"
                     )
+            device_str = ", device=jax.devices('tpu')[0]" if is_tpu else ""
             code.writeline("# Convert Torch -> JAX for in-place tensors")
             for ptr in pointer_tail:
                 if ptr.startswith("in_out_ptr"):
-                    code.writeline(f"{ptr}_jax = jax.dlpack.from_dlpack({ptr})")
+                    code.writeline(
+                        f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}{device_str})"
+                    )
             code.writeline("# Convert Torch -> JAX for inputs")
             for ptr in pointer_tail:
                 if ptr.startswith("in_ptr"):
                     code.writeline(
-                        f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.contiguous())"
+                        f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.contiguous(){device_str})"
                     )
 
             code.writeline("# Prepare output metadata from PyTorch tensor")
@@ -1116,9 +1129,15 @@ class PallasKernel(SIMDKernel):
                 )
                 for idx in copy_output_indices:
                     name = output_params[idx]
-                    code.writeline(
-                        f"{name}.copy_(torch.from_dlpack(result_values[{idx}]))"
-                    )
+                    if is_tpu:
+                        code.writeline(
+                            f"res_cpu = jax.device_get(result_values[{idx}])"
+                        )
+                        code.writeline(f"{name}.copy_(torch.from_dlpack(res_cpu))")
+                    else:
+                        code.writeline(
+                            f"{name}.copy_(torch.from_dlpack(result_values[{idx}]))"
+                        )
 
         return code.getvalue()
 

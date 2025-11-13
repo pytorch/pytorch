@@ -1,0 +1,15 @@
+--requirement requirements.txt
+
+# Index for JAX nightly builds for v7x TPUs
+--pre
+-i https://us-python.pkg.dev/ml-oss-artifacts-published/jax/simple/
+-f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+
+# Newer v7x versions
+jax==0.8.0.dev20251013
+jaxlib==0.8.0.dev20251013
+libtpu==0.0.25.dev20251012+nightly
+
+tpu-info==0.6.0
+
+setuptools==78.1.0
