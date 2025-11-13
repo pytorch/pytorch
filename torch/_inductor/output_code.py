@@ -52,6 +52,8 @@ from torch._inductor.utils import (
 )
 from torch.autograd.profiler import record_function
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._python_dispatch import is_in_torch_dispatch_mode
+from torch._higher_order_ops.wrap import inductor_compiled_code
 
 from . import config
 from .runtime.autotune_cache import AutotuneCacheBundler
@@ -616,8 +618,15 @@ class CompiledFxGraph(OutputCode):
                 with record_function(
                     f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"
                 ):
+                    if is_in_torch_dispatch_mode():
+                        return inductor_compiled_code(self.current_callable, inputs)
                     return self.current_callable(inputs)
             else:
+                # TODO: optimize this some more
+                # NB: Tensor dispatch is NOT supported
+                # TODO: deal with boxed calling convention
+                if is_in_torch_dispatch_mode():
+                    return inductor_compiled_code(self.current_callable, inputs)
                 return self.current_callable(inputs)
         finally:
             get_runtime_metrics_context().finish()
