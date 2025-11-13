@@ -3,7 +3,6 @@ import os
 import re
 import warnings
 from collections.abc import Callable
-from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
 from functools import partial, wraps
@@ -878,24 +877,6 @@ class MemTracker(TorchDispatchMode):
         """
         self.memory_tracking.clear()
 
-    def _track_dtensor_dispatch(self) -> None:
-        def track_dtensor_dispatch(
-            op_call: torch._ops.OpOverload,
-            args: tuple[object, ...],
-            kwargs: dict[str, object],
-        ) -> object:
-            with (
-                self
-                if op_call in DTensor._op_dispatcher._custom_op_handlers
-                else nullcontext()
-            ):
-                return self._orig_dtensor_dispatch(op_call, args, kwargs)
-
-        DTensor._op_dispatcher.dispatch = track_dtensor_dispatch  # type: ignore[method-assign, assignment]
-
-    def _restore_dtensor_dispatch(self) -> None:
-        DTensor._op_dispatcher.dispatch = self._orig_dtensor_dispatch  # type: ignore[method-assign]
-
     def __enter__(self) -> "MemTracker":
         if self._depth == 0:
             self._register_global_optimizer_hook()
@@ -906,7 +887,6 @@ class MemTracker(TorchDispatchMode):
                 self._post_bw_hook,
             )
             self._track_resize()
-            self._track_dtensor_dispatch()
             self._peak_mem_snap = self.get_tracker_snapshot()
             self._peak_mem = {
                 dev: dev_snap[_TOTAL_KEY]
@@ -924,11 +904,16 @@ class MemTracker(TorchDispatchMode):
             self._deregister_param_and_optimizer_hooks()
             self._mod_tracker.clear_user_hooks()
             self._restore_resize()
-            self._restore_dtensor_dispatch()
             self._mod_tracker.__exit__(*args)
         super().__exit__(*args)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):  # type: ignore[no-untyped-def]
+        # When running this mode with DTensor, ordinarily all modes will
+        # run **before** subclasses get a chance to run.
+        # Returning NotImplemented here gives us a chance to let DTensor
+        # run and desugar into local tensor ops, before `MemTracker` sees them.
+        if any(t == DTensor for t in types):
+            return NotImplemented
         if (
             func is torch.ops._c10d_functional.wait_tensor.default
             and active_fake_mode()
