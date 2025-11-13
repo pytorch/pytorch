@@ -27,7 +27,7 @@ def pytree_register_structseq(cls):
         cls,
         structseq_flatten,
         structseq_unflatten,
-        flatten_with_keys_fn=structseq_flatten_with_keys,
+        flatten_with_keys_func=structseq_flatten_with_keys,
     )
 
 
