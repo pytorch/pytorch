@@ -30,14 +30,15 @@ struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
     return attr.type == orMemoryTypeHost;
   }
 
-  const at::Generator& getDefaultGenerator(
-      c10::DeviceIndex device_index) const override {
+  // LITERALINCLUDE START: OPENREG GENERATOR HOOKS
+  const at::Generator& getDefaultGenerator(c10::DeviceIndex device_index) const override {
     return getDefaultOpenRegGenerator(device_index);
   }
 
   at::Generator getNewGenerator(c10::DeviceIndex device_index) const override {
-    return at::make_generator<OpenRegGeneratorImpl>(device_index);
+    return createOpenRegGenerator(device_index);
   }
+  // LITERALINCLUDE END: OPENREG GENERATOR HOOKS
 };
 
 } // namespace c10::openreg
