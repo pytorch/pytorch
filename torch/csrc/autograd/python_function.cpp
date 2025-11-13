@@ -51,6 +51,13 @@ using at::Tensor;
 PyObject* THPFunctionClass = nullptr;
 PyObject* THPGradientEdgeClass = nullptr;
 
+// CDataOwner: A simple object that holds a shared_ptr to PyNode to keep it alive
+// This provides an "ownership token" for cdata
+struct THPCDataOwner {
+  PyObject_HEAD
+  std::shared_ptr<PyNode> cdata;
+};
+
 #define THPFunction_assert(condition, ...) \
   if (!(condition)) {                      \
     THPUtils_setError(__VA_ARGS__);        \
@@ -1785,6 +1792,96 @@ static struct PyMethodDef THPFunction_methods[] = {
      nullptr},
     {nullptr}};
 
+// Forward declarations for CDataOwner
+static void THPCDataOwner_dealloc(THPCDataOwner* self);
+static PyObject* THPCDataOwner_new(
+    PyTypeObject* type,
+    PyObject* args,
+    PyObject* kwargs);
+
+// CDataOwner type implementation
+static void THPCDataOwner_dealloc(THPCDataOwner* self) {
+  self->cdata.~shared_ptr<PyNode>();
+  Py_TYPE(self)->tp_free((PyObject*)self);
+}
+
+static PyObject* THPCDataOwner_new(
+    PyTypeObject* type,
+    PyObject* args,
+    PyObject* kwargs) {
+  PyObject* obj = type->tp_alloc(type, 0);
+  if (!obj)
+    return nullptr;
+  THPCDataOwner* self = (THPCDataOwner*)obj;
+  new (&self->cdata) std::shared_ptr<PyNode>();
+  return obj;
+}
+
+static PyTypeObject THPCDataOwnerType = {
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._CDataOwner", /* tp_name */
+    sizeof(THPCDataOwner), /* tp_basicsize */
+    0, /* tp_itemsize */
+    (destructor)THPCDataOwner_dealloc, /* tp_dealloc */
+    0, /* tp_vectorcall_offset */
+    nullptr, /* tp_getattr */
+    nullptr, /* tp_setattr */
+    nullptr, /* tp_reserved */
+    nullptr, /* tp_repr */
+    nullptr, /* tp_as_number */
+    nullptr, /* tp_as_sequence */
+    nullptr, /* tp_as_mapping */
+    nullptr, /* tp_hash  */
+    nullptr, /* tp_call */
+    nullptr, /* tp_str */
+    nullptr, /* tp_getattro */
+    nullptr, /* tp_setattro */
+    nullptr, /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT, /* tp_flags */
+    "Ownership token for C++ autograd Node data", /* tp_doc */
+    nullptr, /* tp_traverse */
+    nullptr, /* tp_clear */
+    nullptr, /* tp_richcompare */
+    0, /* tp_weaklistoffset */
+    nullptr, /* tp_iter */
+    nullptr, /* tp_iternext */
+    nullptr, /* tp_methods */
+    nullptr, /* tp_members */
+    nullptr, /* tp_getset */
+    nullptr, /* tp_base */
+    nullptr, /* tp_dict */
+    nullptr, /* tp_descr_get */
+    nullptr, /* tp_descr_set */
+    0, /* tp_dictoffset */
+    nullptr, /* tp_init */
+    nullptr, /* tp_alloc */
+    THPCDataOwner_new /* tp_new */
+};
+
+// Function to create an ownership token from a grad_fn
+PyObject* THPFunction_create_ownership_token(PyObject* grad_fn) {
+  // Return None if not a THPFunction (e.g., C++ defined nodes don't need tokens)
+  if (!THPFunction_Check(grad_fn)) {
+    Py_RETURN_NONE;
+  }
+
+  auto* thp_fn = (THPFunction*)grad_fn;
+  auto cdata = thp_fn->cdata.lock();
+
+  TORCH_CHECK(
+      cdata,
+      "Cannot create ownership token: the underlying PyNode has already been deallocated");
+
+  PyObject* obj = THPCDataOwnerType.tp_alloc(&THPCDataOwnerType, 0);
+  if (!obj)
+    throw python_error();
+
+  THPCDataOwner* owner = (THPCDataOwner*)obj;
+  new (&owner->cdata) std::shared_ptr<PyNode>(std::move(cdata));
+
+  return obj;
+}
+
 PyTypeObject THPFunctionType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._FunctionBase", /* tp_name */
@@ -1833,5 +1930,12 @@ bool THPFunction_initModule(PyObject* module) {
     return false;
   Py_INCREF(&THPFunctionType);
   PyModule_AddObject(module, "_FunctionBase", (PyObject*)&THPFunctionType);
+
+  // Initialize CDataOwner type
+  if (PyType_Ready(&THPCDataOwnerType) < 0)
+    return false;
+  Py_INCREF(&THPCDataOwnerType);
+  PyModule_AddObject(module, "_CDataOwner", (PyObject*)&THPCDataOwnerType);
+
   return true;
 }
