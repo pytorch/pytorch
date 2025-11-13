@@ -29,8 +29,14 @@ class Print(HigherOrderOperator):
         from torch._higher_order_ops.schema import HopSchemaGenerator
 
         schema_gen = HopSchemaGenerator(self)
-        schema_gen.add_output(None)
+        schema_gen.add_arg("format_str", format_str[0])
+
+        # Add each kwarg as a keyword-only argument
+        for key, value in kwargs.items():
+            schema_gen.add_arg(key, value, kw_only=True)
+
         schema_gen.add_schema_tree_spec(format_str, **kwargs)
+        schema_gen.add_output(None)
 
         return schema_gen.gen_schema()
 

@@ -158,27 +158,39 @@ x = add_1, y = add_2);  getitem = None
     def test_print_gen_schema(self):
         from torch._higher_order_ops.print import print as print_op
 
-        # Test basic schema generation with simple kwargs
+        # Test basic schema generation with simple kwargs int
         format_str = "Hello {x} {y}"
         schema = print_op.gen_schema(format_str, x=1, y=2)
+        self.assertExpectedInline(
+            str(schema),
+            """print(str format_str, *, int x, int y) -> ((NoneType))""",
+        )
+        # Test schema generation with different types of inputs
 
-        # Check that the schema is a torch.FunctionSchema
-        self.assertIsInstance(schema, torch.FunctionSchema)
+        # Tensor input
+        tensor = torch.randn(2, 2)
+        schema_tensor = print_op.gen_schema("Tensor: {x}", x=tensor)
+        self.assertExpectedInline(
+            str(schema_tensor),
+            """print(str format_str, *, Tensor x) -> ((NoneType))""",
+        )
 
-        # Check that the schema name is correct
-        self.assertEqual(schema.name, "print")
+        # List of booleans input
+        bool_list = [True, False, True]
+        for b in bool_list:
+            schema_bool_list = print_op.gen_schema("Bools: {lst}", lst=b)
+            self.assertExpectedInline(
+                str(schema_bool_list),
+                """print(str format_str, *, bool lst) -> ((NoneType))""",
+            )
 
-        # Check that the output is None
-        self.assertEqual(len(schema.returns), 1)
-        self.assertEqual(schema.returns[0].type.kind(), "TupleType")
 
-        # Test schema generation with no kwargs
+        # No kwargs
         schema_no_kwargs = print_op.gen_schema("Simple message")
-
-        self.assertIsInstance(schema_no_kwargs, torch.FunctionSchema)
-        self.assertEqual(schema_no_kwargs.name, "print")
-        self.assertEqual(len(schema_no_kwargs.returns), 1)
-        self.assertEqual(schema_no_kwargs.returns[0].type.kind(), "TupleType")
+        self.assertExpectedInline(
+            str(schema_no_kwargs),
+            """print(str format_str) -> ((NoneType))""",
+        )
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
