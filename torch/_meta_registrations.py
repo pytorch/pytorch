@@ -1973,6 +1973,15 @@ def meta_replication_pad2d(input, padding):
 
 
 @register_meta(
+    aten._weight_norm_interface_backward.default,
+)
+def meta_weight_norm_backward(grad_w, saved_v, saved_g, saved_norms, dim):
+    grad_v = torch.empty_like(saved_v)
+    grad_g = torch.empty_like(saved_g)
+    return grad_v, grad_g
+
+
+@register_meta(
     [
         aten.reflection_pad2d_backward.default,
         aten.reflection_pad2d_backward.grad_input,
