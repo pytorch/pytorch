@@ -30,11 +30,13 @@ def set_stream(node: Node, ind: int) -> None:
 def assign_backward_streams(gm: torch.fx.GraphModule) -> None:
     """Assigns backward streams to gradient accumulation nodes"""
 
-    for node in gm.graph.nodes:
+    # NB: iterate in reverse order to more closely match eager
+    # the user node stream will be populated first
+    for node in reversed(list(gm.graph.nodes)):
         if is_gradient_acc(node):
             # Accumulation stream selection. Follow the rules from top to bottom to determine the accumulation stream:
-            # 1. Match first stream assignment encountered in the args from left to right
-            # 2. Match first stream assignment of the first user
+            # 1. Match first stream assignment of the first user with a stream
+            # 2. Match first stream assignment encountered in the args from left to right
             # This differs from eager in some cases:
             # Specifically the eager code uses the autograd node to determine the stream,
             # crucially this does not necessarily correspond to the FX graph node. For example,
