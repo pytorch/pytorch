@@ -1300,7 +1300,33 @@ def perload_icx_libomp_win(cpp_compiler: str) -> None:
     for lib_name in preload_list:
         _load_icx_built_in_lib_by_name(cpp_compiler, lib_name)
 
+def perload_gcc_libgomp_linux(cflags, ldflags, libs, lib_dir_paths):
 
+    torch_root = Path(torch.__file__).resolve().parent
+    for d in [torch_root / "lib", (torch_root / ".." / "torch.libs").resolve()]:
+        torch_libgomp = glob.glob(str(d / "libgomp-*.so*"))
+        if not torch_libgomp:
+            continue
+        path = Path(torch_libgomp[0]).resolve()
+
+        ldflags.append(f"L{path.parent}")
+        ldflags.append(f"Wl,-rpath,{path.parent}")
+        ldflags.append(f"Wl,-rpath-link,{path.parent}")
+        ldflags.append("Wl,--as-needed")
+
+        libs.append(f":{path.name}")
+
+        # Track the directory so it's prioritized
+        lib_dir_paths.append(str(path.parent))
+
+        print(f"[DEBUG] Prioritizing TORCH libgomp: {path}")
+        return True
+
+    # fallback to system gomp
+    libs.append("gomp")
+    print("[WARN] Falling back to system libgomp")
+    return False
+    
 def _get_openmp_args(
     cpp_compiler: str,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str]]:
@@ -1407,24 +1433,8 @@ def _get_openmp_args(
             else:
                 # GCC on Linux
                 # Explicitly control OpenMP linkage and prefer torch libgomp if available
-                cflags += ["fopenmp", "Wno-unknown-pragmas"]
-                torch_root = Path(torch.__file__).resolve().parent
-                for d in [torch_root / "lib", (torch_root / ".." / "torch.libs").resolve()]:
-                    torch_libgomp = glob.glob(str(d / "libgomp-*.so*"))
-                    if torch_libgomp:
-                        path = Path(torch_libgomp[0]).resolve()
-                        ldflags += [
-                            f"-L{path.parent}",
-                            f"-Wl,-rpath,{path.parent}",
-                            "-Wl,--disable-new-dtags",
-                            "-Wl,--no-as-needed",
-                        ]
-                        libs.append(f":{path.name}")
-                        lib_dir_paths.append(str(path.parent))
-                        print(f"[DEBUG] Using torch libgomp from: {path}")
-                        break
-                else:
-                    libs.append("gomp")
+                perload_gcc_libgomp_linux(cflags, ldflags, libs, lib_dir_paths)
+                cflags += ["fopenmp"]
 
     return cflags, ldflags, include_dir_paths, lib_dir_paths, libs, passthrough_args
 
@@ -2106,29 +2116,6 @@ class CppBuilder:
             passthrough_args=self._passthrough_parameters_args,
             output=self._output,
         )
-        # Begin torch libgomp preference (Linux/aarch64)
-        try:
-            if platform.system() == "Linux" and platform.machine().lower() in ("aarch64", "arm64"):
-                torch_root = Path(torch.__file__).resolve().parent
-                for d in [torch_root / "lib", (torch_root / ".." / "torch.libs").resolve()]:
-                    torch_libgomp = glob.glob(str(d / "libgomp-*.so*"))
-                    if torch_libgomp:
-                        path = Path(torch_libgomp[0]).resolve()
-                        os.environ["LD_PRELOAD"] = str(path)
-                        print(f"[DEBUG] LD_PRELOAD set to {path}")
-                        break
-        except Exception as e:
-            print(f"[DEBUG] torch libgomp handling failed: {e}")
-
-        # Fix malformed flags (e.g., '--L' instead of '-L')
-        command_line = (
-            command_line.replace("--L", "-L")
-                        .replace("--Wl,", "-Wl,")
-                        .replace("--Wl", "-Wl,")
-                        .replace("-Wl-", "-Wl,")
-        )
-
-        print(f"[DEBUG] Final command line: {command_line}")
         return command_line
 
     def get_target_file_path(self) -> str:
