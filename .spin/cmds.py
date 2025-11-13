@@ -281,19 +281,23 @@ def lazy_setup_lint(ctx, parent_callback, **kwargs):
 
 
 @click.command()
+@click.option("-a", "--apply-patches", is_flag=True)
 @click.pass_context
-def lint(ctx, **kwargs):
+def lint(ctx, apply_patches, **kwargs):
     """Lint all files."""
     ctx.invoke(lazy_setup_lint)
     all_files_linters = VERY_FAST_LINTERS | FAST_LINTERS
     changed_files_linters = SLOW_LINTERS
-    all_files_cmd = LINTRUNNER_BASE_CMD + [
+    cmd = LINTRUNNER_BASE_CMD
+    if apply_patches:
+        cmd += ["--apply-patches"]
+    all_files_cmd = cmd + [
         "--take",
         ",".join(all_files_linters),
         "--all-files",
     ]
     spin.util.run(all_files_cmd)
-    changed_files_cmd = LINTRUNNER_BASE_CMD + [
+    changed_files_cmd = cmd + [
         "--take",
         ",".join(changed_files_linters),
     ]
@@ -302,10 +306,20 @@ def lint(ctx, **kwargs):
 
 @click.command()
 @click.pass_context
-def quicklint(ctx, **kwargs):
+def fixlint(ctx, **kwargs):
+    """Autofix all files."""
+    ctx.invoke(lint, apply_patches=True)
+
+
+@click.command()
+@click.option("-a", "--apply-patches", is_flag=True)
+@click.pass_context
+def quicklint(ctx, apply_patches, **kwargs):
     """Lint changed files."""
     ctx.invoke(lazy_setup_lint)
     cmd = LINTRUNNER_BASE_CMD
+    if apply_patches:
+        cmd += ["--apply-patches"]
     spin.util.run(cmd)
 
 
@@ -313,6 +327,4 @@ def quicklint(ctx, **kwargs):
 @click.pass_context
 def quickfix(ctx, **kwargs):
     """Autofix changed files."""
-    ctx.invoke(lazy_setup_lint)
-    cmd = LINTRUNNER_BASE_CMD + ["--apply-patches"]
-    spin.util.run(cmd)
+    ctx.invoke(quicklint, apply_patches=True)
