@@ -56,6 +56,7 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
+from torch._library.opaque_object import is_opaque_type
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
 from torch.export.dynamic_shapes import _ConstraintTarget
@@ -2604,6 +2605,8 @@ class OutputGraph(OutputGraphCommon):
                                     lambda t: update_used_symbols(used_symbols, t),
                                     fake_attr_val,
                                 )
+                        continue
+                    if is_opaque_type(type(node.meta["grapharg"].example)):
                         continue
                     fake = (
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
