@@ -3660,6 +3660,16 @@
   ],
   "GB0362": [
     {
+      "Gb_type": "Attempted to access attributes/methods on an OpaqueObject",
+      "Context": "value={self.value}, attr={name}",
+      "Explanation": "Attribute/method access of OpaqueObjects is not supported.",
+      "Hints": [
+        "Use custom operators instead of direct attribute/method access."
+      ]
+    }
+  ],
+  "GB0363": [
+    {
       "Gb_type": "Unsupported input type in backward graph of autograd.Function",
       "Context": "Unsupported node type {type(example_value)}",
       "Explanation": "Node {node} has example_value {example_value} which is not a Tensor/Symint/None",
