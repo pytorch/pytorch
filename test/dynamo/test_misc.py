@@ -14036,6 +14036,48 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         except Exception as e:
             self.fail(f"torch.compile failed with error: {e}")
 
+    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
+    def test_module_to_with_shared_weights_compile(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
+
+            def forward(self, x):
+                token_ids = torch.randint(0, 10, (4,), device=x.device)
+                embedded = self.embedding(token_ids).sum()
+                return x.sum() + embedded.sum()
+
+        class Container(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = Model()
+
+            def forward(self, x):
+                if "cuda" in str(x.device):
+                    mod = self.mod.to(x.device)
+                    return mod(x)
+                else:
+                    return x.sum()
+
+        container = Container()
+        container_eager = copy.deepcopy(container)
+        with torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False):
+            compiled = torch.compile(container, backend="eager", fullgraph=True)
+
+            inp1 = torch.randn(4, 4, 4, device="cuda")
+
+            # First call with CUDA input
+            compiled_result1 = compiled(inp1)
+            eager_result1 = container_eager(inp1)
+            same(compiled_result1, eager_result1)
+
+            # Second call - weights are now on CUDA from first call
+            # This tests that .to(cuda) on already-cuda weights doesn't fail
+            compiled_result2 = compiled(inp1)
+            eager_result2 = container_eager(inp1)
+            same(compiled_result2, eager_result2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
