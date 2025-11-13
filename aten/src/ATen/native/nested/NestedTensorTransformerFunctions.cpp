@@ -276,14 +276,15 @@ Tensor _jagged_to_padded_dense_forward_cpu(
   // We must clamp infinite sentinels to dtype min/max and use the typed value
   // directly to avoid double->int overflow (e.g., int64_max as double overflows).
   Tensor padded;
-  if (std::isinf(padding_value) && !values.is_floating_point()) {
-    AT_DISPATCH_INTEGRAL_TYPES(values.scalar_type(), "_jagged_to_padded_dense_forward_cpu", [&] {
-      scalar_t fill_value = _get_padding_value<scalar_t>(padding_value, values.is_floating_point());
-      padded = values.new_full(padded_shape, fill_value);
-    });
-  } else {
-    padded = values.new_full(padded_shape, padding_value);
-  }
+  AT_DISPATCH_ALL_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      values.scalar_type(),
+      "_jagged_to_padded_dense_forward_cpu",
+      [&] {
+        scalar_t fill_value = _get_padding_value<scalar_t>(padding_value, values.is_floating_point());
+        padded = values.new_full(padded_shape, fill_value);
+      });
 
   // copy data to padded tensor
   for (auto i : c10::irange(batch_size)) {
