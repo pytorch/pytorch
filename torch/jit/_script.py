@@ -14,8 +14,8 @@ import functools
 import inspect
 import pickle
 import warnings
-from collections.abc import Callable
-from typing import Any, Mapping, Sequence, TypeVar, Union
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from typing import Any, TypeVar, Union
 from typing_extensions import deprecated, Self
 
 import torch
@@ -797,16 +797,16 @@ if _enabled:
             )
             return self._c._save_to_buffer_for_mobile(*args, **kwargs)
 
-        def save_to_buffer(self, *args, **kwargs):
+        def save_to_buffer(self, *args: Any, **kwargs: Any) -> Any:
             return self._c.save_to_buffer(*args, **kwargs)
 
-        def get_debug_state(self, *args, **kwargs):
+        def get_debug_state(self, *args: Any, **kwargs: Any) -> Any:
             return self._c.get_debug_state()
 
         def extra_repr(self) -> str:
             return f"original_name={self.original_name}"
 
-        def graph_for(self, *args, **kwargs):
+        def graph_for(self, *args: Any, **kwargs: Any) -> Any:
             return self.forward.graph_for(self, *args, **kwargs)  # type: ignore[attr-defined]
 
         @property
@@ -861,7 +861,7 @@ if _enabled:
                 self._c.setattr(attr, value)
             elif (
                 hasattr(self, "_concrete_type")
-                and attr in self._concrete_type.get_constants().keys()
+                and attr in self._concrete_type.get_constants()
             ):
                 # TODO: we don't have _concrete_type set after load(), and in general we lose constant information.
                 # We should encode constants as class type attributes (or something) so it persists across save/load.
@@ -888,7 +888,9 @@ if _enabled:
         # the method defines on the class instance. In order to continue to expose the magic methods
         # of builtin-containers (ModuleList, Sequential, ModuleDict) to Python, we
         # define magic methods here as a shim to the correct attribute.
-        def forward_magic_method(self, method_name, *args, **kwargs):
+        def forward_magic_method(
+            self, method_name: str, *args: Any, **kwargs: Any
+        ) -> Any:
             self_method = getattr(self, method_name)
             if getattr(self_method, "__func__", None) == getattr(
                 RecursiveScriptModule, method_name
@@ -896,10 +898,10 @@ if _enabled:
                 raise NotImplementedError
             return self_method(*args, **kwargs)
 
-        def __iter__(self):
+        def __iter__(self) -> Iterator[Any]:
             return self.forward_magic_method("__iter__")
 
-        def __getitem__(self, idx):
+        def __getitem__(self, idx: int) -> Any:
             return self.forward_magic_method("__getitem__", idx)
 
         def __len__(self):

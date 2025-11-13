@@ -23,7 +23,6 @@ import weakref
 from typing import (  # noqa: UP035, F401  # (Dict, List, Tuple) imported by torch.jit.annotations
     Any,
     Callable,
-    Class,
     Dict,
     Final,
     ForwardRef,
@@ -567,7 +566,7 @@ def get_type_hint_captures(fn):
     return annotation_to_type
 
 
-def createResolutionCallbackForClassMethods(cls: Class) -> Callable[[str], Any]:
+def createResolutionCallbackForClassMethods(cls: type) -> Callable[[str], Any]:
     """
     This looks at all the methods defined in a class and pulls their closed-over
     variables into a dictionary and uses that to resolve variables.

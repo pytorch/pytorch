@@ -1,9 +1,11 @@
 # Owner(s): ["module: dynamo"]
 
+import copy
 import functools
 import inspect
 import os
 import pickle
+import unittest
 from contextlib import contextmanager
 from unittest.mock import patch
 
@@ -13,13 +15,16 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._dynamo.aot_compile import ModelInput, SerializableCallable
+from torch._dynamo.aot_compile import AOTCompiledModel, ModelInput, SerializableCallable
 from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.package import DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.fx._graph_pickler import GraphPickler
-from torch.testing._internal.common_utils import instantiate_parametrized_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    TEST_CUDA,
+)
 
 
 MY_LAMBDA = lambda x: x + 1  # noqa: E731
@@ -598,6 +603,92 @@ from user code:
             compiled_fn = torch.compiler.load_compiled_function(f)
         actual = compiled_fn(*inputs)
         self.assertEqual(expected, actual)
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_aot_compile_with_aoti(self):
+        with torch.device("cuda"):
+            from torch._dynamo.hooks import Hooks
+
+            def fn(x, y):
+                return x + y
+
+            def make_inputs():
+                return (torch.randn(3, 4), torch.randn(3, 4))
+
+            compiled_fn = torch._dynamo.aot_compile.aot_compile_fullgraph(
+                fn,
+                (make_inputs(), {}),
+                Hooks(),
+                torch._TorchCompileAOTInductorWrapper(None, None, None),
+            )
+
+            test_inputs = make_inputs()
+            expected = fn(*test_inputs)
+            actual = compiled_fn(*test_inputs)
+            self.assertEqual(expected, actual)
+            compiled_fn.save_compiled_function(self.path())
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+            actual = compiled_fn(*test_inputs)
+            self.assertEqual(expected, actual)
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_aot_compile_with_aoti_module(self):
+        with torch.device("cuda"):
+            from torch._dynamo.hooks import Hooks
+
+            mod = SimpleLinearModule()
+
+            def make_inputs():
+                return (torch.randn(4, 3),)
+
+            compiled_mod = torch._dynamo.aot_compile.aot_compile_module(
+                mod,
+                [ModelInput(make_inputs(), {}, [])],
+                Hooks(),
+                torch._TorchCompileAOTInductorWrapper(None, None, None),
+            )
+
+            def get_grads(m: torch.nn.Module):
+                return {name: p.grad for name, p in m.named_parameters()}
+
+            original_mod = copy.deepcopy(mod)
+            test_inputs = make_inputs()
+            expected = mod(*test_inputs)
+            expected.sum().backward()
+            expected_grads = get_grads(mod)
+
+            actual = compiled_mod(*test_inputs)
+            self.assertEqual(expected, actual)
+            serialized = compiled_mod.serialize()
+            compiled_fn = AOTCompiledModel.deserialize(original_mod, serialized)
+            actual = compiled_fn(*test_inputs)
+            actual.sum().backward()
+            self.assertEqual(get_grads(original_mod), expected_grads)
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_aot_compile_with_aoti_torch_compile(self):
+        with torch.device("cuda"):
+
+            def fn(x, y):
+                return x + y
+
+            def make_inputs():
+                return (torch.randn(3, 4), torch.randn(3, 4))
+
+            compiled_fn = torch.compile(
+                fn, fullgraph=True, options={"use_aoti": True}
+            ).aot_compile((make_inputs(), {}))
+            test_inputs = make_inputs()
+            expected = fn(*test_inputs)
+            actual = compiled_fn(*test_inputs)
+            self.assertEqual(expected, actual)
+            compiled_fn.save_compiled_function(self.path())
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+            actual = compiled_fn(*test_inputs)
+            self.assertEqual(compiled_fn._artifacts.backend_name, "aotinductor")
+            self.assertEqual(expected, actual)
 
 
 if __name__ == "__main__":
