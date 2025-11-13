@@ -70,6 +70,7 @@ from ..source import (
     DataclassFieldsSource,
     DictGetItemSource,
     GetItemSource,
+    NamedTupleFieldsSource,
     RandomValueSource,
     TypeDictSource,
     TypeMROSource,
@@ -2857,6 +2858,39 @@ class NamedTupleVariable(UserDefinedTupleVariable):
                 new_items, self.tuple_cls, self.dynamic_attributes
             )
         return super().call_method(tx, name, args, kwargs)
+
+    def python_type(self) -> type:
+        """Return the namedtuple/structseq class type.
+
+        Returns:
+            The tuple_cls type.
+        """
+        return self.tuple_cls
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+        """Handle attribute access on the namedtuple/structseq.
+
+        Args:
+            tx: InstructionTranslator instance.
+            name: Attribute name to access.
+
+        Returns:
+            VariableTracker for the attribute value.
+        """
+
+        if name == "_fields":
+            source = NamedTupleFieldsSource(self.source) if self.source else None
+            return VariableTracker.build(tx, self.fields(), source=source)
+
+        if name in self.dynamic_attributes:
+            return self.dynamic_attributes[name]
+
+        fields = self.fields()
+        if name in fields:
+            field_index = fields.index(name)
+            return self._tuple_vt.items[field_index]
+
+        return super().var_getattr(tx, name)
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):
