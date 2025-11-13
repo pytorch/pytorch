@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-from typing import Any, Optional, Union
+from typing import Any, Union
 from typing_extensions import deprecated
 
 import torch
@@ -165,8 +165,8 @@ def _reparametrize_module(
 def functional_call(
     module: "torch.nn.Module",
     parameters_and_buffers: dict[str, Tensor],
-    args: Optional[Union[Any, tuple]] = None,
-    kwargs: Optional[dict[str, Any]] = None,
+    args: Union[Any, tuple] | None = None,
+    kwargs: dict[str, Any] | None = None,
     *,
     tie_weights: bool = True,
     strict: bool = False,
@@ -243,8 +243,8 @@ def functional_call(
 def _functional_call(
     module: "torch.nn.Module",
     parameters_and_buffers: dict[str, Tensor],
-    args: Optional[Union[Any, tuple]] = None,
-    kwargs: Optional[dict[str, Any]] = None,
+    args: Union[Any, tuple] | None = None,
+    kwargs: dict[str, Any] | None = None,
     *,
     tie_weights: bool = True,
     strict: bool = False,
