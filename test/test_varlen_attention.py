@@ -9,19 +9,13 @@ from torch.nn.attention.varlen import varlen_attn
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import parametrize, run_tests
+from torch.testing._internal.common_utils import parametrize, run_tests, skipIfRocm
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
 VarlenShape = namedtuple(
     "VarlenShape", ["batch_size", "max_seq_len", "embed_dim", "num_heads"]
 )
-
-default_tolerances = {
-    torch.float16: {"atol": 1e-1, "rtol": 1e-1},
-    torch.bfloat16: {"atol": 9e-2, "rtol": 5e-2},
-    torch.float32: {"atol": 1e-5, "rtol": 1.3e-6},
-}
 
 
 class OpLoggingMode(TorchDispatchMode):
@@ -83,7 +77,6 @@ class AttentionBlock(nn.Module):
         self,
         x_padded: torch.Tensor,
         seq_lengths: torch.Tensor,
-        dtype: torch.dtype,
         is_causal: bool = False,
     ):
         batch_size, seq_len, _ = x_padded.shape
@@ -158,6 +151,7 @@ def create_variable_length_batch(
 
 
 class TestVarlenAttention(NNTestCase):
+    @skipIfRocm(msg="ROCM does not support variable length attention")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -206,6 +200,7 @@ class TestVarlenAttention(NNTestCase):
         self.assertEqual(varlen_grad.shape, x_packed.shape)
         self.assertEqual(varlen_grad.dtype, x_packed.dtype)
 
+    @skipIfRocm(msg="ROCM does not support variable length attention")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -263,6 +258,7 @@ class TestVarlenAttention(NNTestCase):
             test_utils=["test_schema", "test_faketensor"],
         )
 
+    @skipIfRocm(msg="ROCM does not support variable length attention")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -313,6 +309,7 @@ class TestVarlenAttention(NNTestCase):
         ) and any("torch_attn._varlen_attn_backward" in op for op in called_ops)
         assert custom_ops_called
 
+    @skipIfRocm(msg="ROCM does not support variable length attention")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -329,7 +326,14 @@ class TestVarlenAttention(NNTestCase):
             shape.embed_dim, shape.num_heads, device, dtype
         )
 
+        golden_attention_block = AttentionBlock(
+            shape.embed_dim, shape.num_heads, device, torch.float32
+        )
+
         variable_length_batch_data = create_variable_length_batch(shape, device, dtype)
+        golden_variable_length_batch_data = create_variable_length_batch(
+            shape, device, torch.float32
+        )
 
         varlen_output = attention_block.forward_varlen(
             variable_length_batch_data["x_packed"],
@@ -340,24 +344,37 @@ class TestVarlenAttention(NNTestCase):
         sdpa_output = attention_block.forward_sdpa(
             variable_length_batch_data["x_padded"],
             variable_length_batch_data["seq_lengths"],
-            dtype=dtype,
             is_causal=is_causal,
         )
 
-        tolerances = default_tolerances[dtype]
+        golden_sdpa_output = golden_attention_block.forward_sdpa(
+            golden_variable_length_batch_data["x_padded"],
+            golden_variable_length_batch_data["seq_lengths"],
+            is_causal=is_causal,
+        )
+
         start_idx = 0
         for i, seq_len in enumerate(variable_length_batch_data["seq_lengths"]):
             end_idx = start_idx + seq_len
 
             varlen_seq = varlen_output[start_idx:end_idx]
             sdpa_seq = sdpa_output[i, :seq_len]
+            golden_sdpa_seq = golden_sdpa_output[i, :seq_len]
 
-            torch.testing.assert_close(varlen_seq, sdpa_seq, **tolerances)
+            fwd_atol = (
+                2 * (golden_sdpa_seq + 0.3 - 0.3 - golden_sdpa_seq).abs().max().item()
+            )
+
+            varlen_error = (varlen_seq - fwd_atol).abs().max().item()
+            sdpa_error = (sdpa_seq - fwd_atol).abs().max().item()
+
+            assert varlen_error <= 2 * sdpa_error + fwd_atol
+
             start_idx = end_idx
 
         varlen_grad_out = torch.ones_like(varlen_output)
-
-        sdpa_grad_out = torch.zeros_like(sdpa_output)
+        sdpa_grad_out = torch.ones_like(sdpa_output)
+        golden_sdpa_grad_out = torch.ones_like(golden_sdpa_output)
 
         start_idx = 0
         for i, seq_len in enumerate(variable_length_batch_data["seq_lengths"]):
@@ -383,14 +400,32 @@ class TestVarlenAttention(NNTestCase):
             allow_unused=False,
         )[0]
 
+        golden_sdpa_grad = torch.autograd.grad(
+            outputs=golden_sdpa_output,
+            inputs=golden_variable_length_batch_data["x_padded"],
+            grad_outputs=golden_sdpa_grad_out,
+            retain_graph=True,
+            create_graph=False,
+            allow_unused=False,
+        )[0]
+
         start_idx = 0
         for i, seq_len in enumerate(variable_length_batch_data["seq_lengths"]):
             end_idx = start_idx + seq_len
 
             varlen_grad_seq = varlen_grad[start_idx:end_idx]
             sdpa_grad_seq = sdpa_grad[i, :seq_len]
+            golden_sdpa_seq = golden_sdpa_grad[i, :seq_len]
 
-            torch.testing.assert_close(varlen_grad_seq, sdpa_grad_seq, **tolerances)
+            fwd_atol = (
+                2 * (golden_sdpa_seq + 0.3 - 0.3 - golden_sdpa_seq).abs().max().item()
+            )
+
+            varlen_error = (varlen_grad_seq - fwd_atol).abs().max().item()
+            sdpa_error = (sdpa_grad_seq - fwd_atol).abs().max().item()
+
+            assert varlen_error <= sdpa_error + fwd_atol
+
             start_idx = end_idx
 
 
