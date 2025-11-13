@@ -4007,7 +4007,14 @@ class InstructionTranslatorBase(
         assert isinstance(fn, NestedUserFunctionVariable)
         attr = self.pop()
 
-        if flags & 0x08:
+        if flags & 0x10:
+            assert sys.version_info >= (3, 14)
+
+            # maybe use Format.VALUE_WITH_FAKE_GLOBALS instead?
+            # https://docs.python.org/3/library/annotationlib.html#annotationlib.Format.VALUE_WITH_FAKE_GLOBALS
+            attr = attr.call_function(self, [ConstantVariable.create(1)], {})
+            fn.annotations = attr
+        elif flags & 0x08:
             fn.closure = attr
         elif flags & 0x04:
             fn.annotations = attr
