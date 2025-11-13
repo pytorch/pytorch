@@ -319,7 +319,7 @@ Trees, we don’t want to add unintended dependencies between iterations that wo
 to prematurely free memory from a prior invocation. Our heuristics are in inference we start a new iteration on each invocation for
 torch.compile, and in training we do the same so long as there is not a pending backward that has not been invoked. If those heuristics
 are wrong, you can mark the start of a new iteration with
-[torch.compiler.mark_step_begin()](https://pytorch.org/docs/stable/generated/torch.compiler.cudagraph_mark_step_begin.html), or clone
+[torch.compiler.cudagraph_mark_step_begin()](https://pytorch.org/docs/stable/generated/torch.compiler.cudagraph_mark_step_begin.html), or clone
 tensors of a prior iteration (outside of torch.compile) before you begin the next run.
 
 ### Comparisons
