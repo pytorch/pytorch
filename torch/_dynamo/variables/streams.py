@@ -14,6 +14,7 @@ from ..graph_bytecode_inputs import (
     get_external_object_by_index,
     register_graph_created_object,
 )
+from ..source import CurrentStreamSource
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import FxTracebackAnnotateVariable
@@ -48,6 +49,13 @@ def new_stream(*args: tuple[Any], **kwargs: Any) -> int:
         StreamVariable.make_construct_in_graph_stream_fn(
             TupleVariable([]), ConstDictVariable({})
         ),
+    )
+
+
+def get_current_stream(device: torch.device) -> int:
+    stream = torch.accelerator.current_stream()
+    return register_graph_created_object(
+        stream, lambda _, cg: cg(CurrentStreamSource(device))
     )
 
 
