@@ -1832,6 +1832,71 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(len(sigmoid_nodes), 1)
         self.assertTrue("original_aten" in sigmoid_nodes[0].meta)
 
+    @inductor_config.patch(is_predispatch=True)
+    def test_remove_noop_pass_with_remove_passes(self):
+        def fn_with_noop(x):
+            batch_size, dim = x.shape
+            y = x.view(batch_size, dim)
+            return y + 1
+
+        def count_view_ops(graph_module):
+            count = 0
+            for node in graph_module.graph.nodes:
+                if node.op == "call_function" and node.target in [
+                    torch.ops.aten.view.default,
+                    torch.ops.aten.reshape.default,
+                ]:
+                    count += 1
+            return count
+
+        device = "cuda" if HAS_GPU else "cpu"
+        input_tensor = torch.randn(8, 16, device=device)
+
+        with inductor_config.patch(remove_pre_grad_passes=None):
+            compiled_fn_default = torch.compile(fn_with_noop, fullgraph=True)
+            result_default = compiled_fn_default(input_tensor)
+
+        with inductor_config.patch(remove_pre_grad_passes="remove_noop"):
+            compiled_fn_skip_noop = torch.compile(fn_with_noop, fullgraph=True)
+            result_skip_noop = compiled_fn_skip_noop(input_tensor)
+
+        expected = fn_with_noop(input_tensor)
+        torch.testing.assert_close(result_default, expected)
+        torch.testing.assert_close(result_skip_noop, expected)
+
+        from torch._inductor.fx_passes.pre_grad import pre_grad_passes
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        with inductor_config.patch(
+            is_predispatch=True, pattern_matcher=True, remove_pre_grad_passes=None
+        ):
+            gm_default = make_fx(fn_with_noop)(input_tensor)
+            gm_default_processed = pre_grad_passes(
+                gm_default, [input_tensor], add_passes=None, remove_passes=None
+            )
+            view_count_default = count_view_ops(gm_default_processed)
+
+        with inductor_config.patch(
+            is_predispatch=True,
+            pattern_matcher=True,
+            remove_pre_grad_passes="remove_noop",
+        ):
+            gm_skip_noop = make_fx(fn_with_noop)(input_tensor)
+            gm_skip_noop_processed = pre_grad_passes(
+                gm_skip_noop,
+                [input_tensor],
+                add_passes=None,
+                remove_passes="remove_noop",
+            )
+            view_count_skip_noop = count_view_ops(gm_skip_noop_processed)
+
+        self.assertGreaterEqual(
+            view_count_skip_noop,
+            view_count_default,
+            f"Expected view count with remove_noop disabled ({view_count_skip_noop}) "
+            f"to be >= view count with remove_noop enabled ({view_count_default})",
+        )
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
