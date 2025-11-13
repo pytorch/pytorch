@@ -7373,19 +7373,14 @@ class ShapeEnv:
             if insts[cur].opname in ("TO_BOOL", "COMPARE_OP"):
                 # Peek 1 instruction further.
                 cur += 1
-        inst = insts[cur]
 
-        if inst.opname == "POP_JUMP_IF_TRUE" and inst.arg is not None:
-            first = insts[cur + 1]
+        assert_insts = torch._dynamo.symbolic_convert.get_assert_bytecode_sequence(
+            False
+        )
 
-            starts_with_assert = (
-                first.opname == "LOAD_GLOBAL"
-                and first.argval == "AssertionError"
-                or first.opname == "LOAD_ASSERTION_ERROR"
-            )
-            if starts_with_assert and insts[cur + 2].opname == "RAISE_VARARGS":
-                return True
-        return False
+        cur_insts = insts[cur + 1 : cur + 1 + len(assert_insts)]
+        cur_insts = [inst.opname for inst in cur_insts]
+        return cur_insts == assert_insts
 
     def _log_real_tensor_propagation(
         self, orig_expr: sympy.Basic, unsound_result: sympy.Basic
