@@ -50,13 +50,15 @@ def _shape_to_offset(size, device: torch.device) -> int:
 
 
 def _reserve_state(device: torch.device, used_offset: int) -> tuple[int, int]:
-    dev_index = device.index if isinstance(device, torch.device) else int(device)
-    gen = torch.cuda.default_generators[dev_index]
-    seed = int(gen.initial_seed())
-    old_off = int(gen.get_offset())
-    gen.set_offset(old_off + used_offset)
-    base = old_off // 4
-    return seed, base
+    if device.type == "cuda":
+        dev_index = device.index if isinstance(device, torch.device) else int(device)
+        gen = torch.cuda.default_generators[dev_index]
+        seed = int(gen.initial_seed())
+        old_off = int(gen.get_offset())
+        gen.set_offset(old_off + used_offset)
+        base = old_off // 4
+        return seed, base
+    return 0, 0   # _reserve_state is only valid for CUDA devices
 
 
 @custom_op("custom_op::rand_eager_offset", mutates_args={})
