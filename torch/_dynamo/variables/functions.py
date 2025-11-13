@@ -391,6 +391,12 @@ class BaseUserFunctionVariable(VariableTracker):
     def closure_vars(self, tx: "InstructionTranslator") -> dict[str, VariableTracker]:
         return {}
 
+    # Override to set whether or not nested graph breaks should be allowed
+    # if we create an inlining tx for this BaseUserFunctionVariable.
+    # See symbolic_convert.py for where this function is called.
+    def should_allow_nested_graph_breaks(self):
+        return True
+
 
 class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
@@ -800,6 +806,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
             except ObservedUserStopIteration:
                 handle_observed_exception(tx)
                 break
+
+    # no nested graph breaks in generators
+    def should_allow_nested_graph_breaks(self):
+        return False
 
     def _setup_exception(
         self, tx: "InstructionTranslator", exc: VariableTracker

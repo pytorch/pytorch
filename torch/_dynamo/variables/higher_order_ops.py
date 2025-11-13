@@ -2743,6 +2743,9 @@ class FunctorchHigherOrderVariable(UserFunctionVariable):
     ) -> "VariableTracker":
         return super().call_function(tx, args, kwargs)
 
+    def should_allow_nested_graph_breaks(self):
+        return False
+
 
 class FunctionalCallVariable(FunctorchHigherOrderVariable):
     def call_function(
