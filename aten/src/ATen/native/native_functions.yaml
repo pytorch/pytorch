@@ -16100,3 +16100,13 @@
 # This op is ONLY used by pytorch/XLA in functionalization, and should never show up in vanilla eager mode or in any pytorch tracing contexts.
 - func: _propagate_xla_data(Tensor input, Tensor output) -> ()
   variants: function
+
+- func: quantize(Tensor self, int block_size, ScalarType dtype, int quant_type, int rounding_mode) -> (Tensor output, Tensor scale)
+  variants: function, method
+  dispatch:
+    CPU: quantize_cpu
+    Meta: quantize_meta
+  tags: [
+    core,                 # Include in all builds
+    pt2_compliant_tag    # Works with torch.compile()
+  ]
