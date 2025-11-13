@@ -15295,12 +15295,12 @@ graph():
             def forward(self, block):
                 return block.a + block.b
 
-        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError, "It looks like one of the inputs with type"
         ):
-            _dynamo_graph_capture_for_export(Foo())(
+            dynamo_graph_capture_for_export(Foo())(
                 Block(torch.randn(4, 4), torch.randn(4, 4))
             )
 
