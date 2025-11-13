@@ -354,58 +354,41 @@ def _generate_dynamic_configs(
     tensor_inputs: list[Buffer],
     config_generator: Callable,
     default_impl: Callable,
-    name: str,
+    operation_name: str,
 ) -> list[CustomOpConfig]:
     """Generate configs dynamically based on input shapes at lowering time.
 
-    Args:
-        tensor_inputs: List of input tensors (IR Buffers)
-        config_generator: User-provided config generator function
-        default_impl: Default implementation function
-        name: Operation name for error messages
-
-    Returns:
-        List of dynamically generated CustomOpConfig objects
-
-    Raises:
-        TypeError: If config_generator returns invalid type
-        ValueError: If config_generator returns empty list
+    Converts IR Buffer nodes to fake tensors and constructs a dict mapping
+    parameter names to fake tensors, then passes it to the user-provided config_generator.
     """
     import inspect
 
-    from torch._inductor.virtualized import V
-
-    # Extract parameter names from custom op signature
     sig = inspect.signature(default_impl)
     param_names = list(sig.parameters.keys())
 
-    # Build shape dict using parameter names
-    shapes_dict = {}
-    tensor_arg_idx = 0
-    for param_name in param_names:
-        if tensor_arg_idx < len(tensor_inputs):
-            node = tensor_inputs[tensor_arg_idx]
-            raw_shape = node.get_size()
+    with V.fake_mode:
+        fake_tensors = []
+        for inp in tensor_inputs:
+            raw_shape = inp.get_size()
             concrete_shape = V.graph.sizevars.size_hints(
                 raw_shape, fallback=config.unbacked_symint_fallback
             )
-            shapes_dict[param_name] = tuple(concrete_shape)
-            tensor_arg_idx += 1
+            fake_tensor = torch.empty(
+                concrete_shape, dtype=inp.get_dtype(), device=inp.get_device()
+            )
+            fake_tensors.append(fake_tensor)
 
-    # Call user's config generator with shape dict
-    configs = config_generator(shapes_dict)
+    fake_tensors_dict = dict(zip(param_names, fake_tensors))
 
-    # Validate return value
+    configs = config_generator(fake_tensors_dict)
+
     if not isinstance(configs, (list, tuple)):
         raise TypeError(
             f"config_generator must return a list or tuple of CustomOpConfig, "
             f"got {type(configs)}"
         )
     if not configs:
-        raise ValueError(
-            f"config_generator returned empty list for {name}. "
-            f"Input shapes: {shapes_dict}"
-        )
+        raise ValueError(f"config_generator returned empty list for {operation_name}. ")
 
     return list(configs)
 
@@ -414,7 +397,7 @@ def register_custom_op_autotuning(
     custom_op: torch._library.custom_ops.CustomOpDef,
     configs: Optional[Union[list[CustomOpConfig], list[Callable[..., Any]]]] = None,
     config_generator: Optional[
-        Callable[[dict[str, tuple[int, ...]]], list[CustomOpConfig]]
+        Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
     ] = None,
     name: Optional[str] = None,
     input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]] = None,
@@ -425,9 +408,9 @@ def register_custom_op_autotuning(
     Args:
         custom_op: Custom operation (decorated function from @torch.library.custom_op)
         configs: List of CustomOpConfig objects for static inputs. Mutually exclusive with config_generator.
-        config_generator: Dynamic config generator function that takes shape dict mapping
-                          parameter names to shape tuples, and returns list[CustomOpConfig]
-                          based on input shapes. Mutually exclusive with configs.
+        config_generator: Dynamic config generator function that takes a dict mapping
+                          parameter names to fake tensors, and returns list[CustomOpConfig]
+                          based on input tensor properties. Mutually exclusive with configs.
         name: Operation name (default: "{op_name}_autotuned")
         input_gen_fns: Custom input generators for benchmarking
 
@@ -451,9 +434,12 @@ def register_custom_op_autotuning(
             },
         )
 
-        # Dynamic config generation
-        def generate_k_split_configs(shapes: dict[str, tuple]) -> list[CustomOpConfig]:
-            k_splits = ... # all posisble k splits for the given shapes
+        # Dynamic config generation based on input tensor properties
+        def generate_k_split_configs(fake_tensors: dict[str, torch.Tensor]) -> list[CustomOpConfig]:
+            # Access tensor shapes, dtypes, devices, etc.
+            m, k = fake_tensors["mat1"].shape
+            _, n = fake_tensors["mat2"].shape
+            k_splits = ... # compute possible k splits based on tensor properties
             return [CustomOpConfig(k_splits=k) for k in k_splits]
 
         register_custom_op_autotuning(

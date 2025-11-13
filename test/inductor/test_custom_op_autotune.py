@@ -284,13 +284,15 @@ class TestCustomOpAutoTune(TestCase):
             return torch.empty(a.shape[0], b.shape[1], device=a.device, dtype=a.dtype)
 
         # Define dynamic config generator using get_k_splits
-        def generate_k_split_configs(shapes: dict[str, tuple]) -> list[CustomOpConfig]:
+        def generate_k_split_configs(
+            fake_tensors: dict[str, torch.Tensor],
+        ) -> list[CustomOpConfig]:
             """Generate k_split configs based on input matrix dimensions."""
             from torch._inductor.utils import get_k_splits
 
-            # Extract matrix dimensions using parameter names (matches input_gen_fns)
-            m, k = shapes["a"][-2:]
-            _, n = shapes["b"][-2:]
+            # Extract matrix dimensions from fake arg tensor shapes
+            m, k = fake_tensors["a"].shape[-2:]
+            _, n = fake_tensors["b"].shape[-2:]
 
             # Use get_k_splits to automatically determine optimal k_split candidates
             k_splits_list = get_k_splits(m, n, k)
