@@ -95,11 +95,11 @@ template <typename scalar_t, typename index_t>
 __global__ void max_pool_forward_nchw(
     const index_t nthreads,
     const scalar_t* bottom_data,
-    const index_t channels,
-    const index_t height,
-    const index_t width,
-    const index_t pooled_height,
-    const index_t pooled_width,
+    const int64_t channels,
+    const int64_t height,
+    const int64_t width,
+    const int pooled_height,
+    const int pooled_width,
     const int kernel_h, const int kernel_w,
     const int stride_h, const int stride_w,
     const int pad_h, const int pad_w,
@@ -120,10 +120,10 @@ __global__ void max_pool_forward_nchw(
     while(wstart < 0)
       wstart += dilation_w;
     scalar_t maxval = at::numeric_limits<scalar_t>::lower_bound(); // -Infinity
-    index_t  maxidx = hstart * width + wstart;
+    index_t maxidx = hstart * width + wstart;
     const scalar_t* btm_data = bottom_data + (n * channels + c) * height * width;
-    for (index_t h = hstart; h < hend; h += dilation_h) {
-      for (index_t w = wstart; w < wend; w += dilation_w) {
+    for (int h = hstart; h < hend; h += dilation_h) {
+      for (int w = wstart; w < wend; w += dilation_w) {
         scalar_t val = btm_data[h * width + w];
         if ((val > maxval) || at::_isnan(val)) {
           maxidx = h * width + w;
@@ -458,6 +458,7 @@ bool ceil_mode,
 const Tensor& output,
 const Tensor& indices) {
   NoNamesGuard guard;
+  std::cout << "CAME HERE" << std::endl;
 
   TensorArg output_arg{ output, "output", 1 };
   TensorArg indices_arg{ indices, "indices", 2 };
@@ -748,13 +749,11 @@ const Tensor& gradInput) {
           const int threads = std::min(
               at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
               BLOCK_THREADS);
-          const int64_t imgcount = inputWidth * inputHeight;
+          const int imgcount = inputWidth * inputHeight;
           const int maxGridX = at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
           const int maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
           const int maxGridZ = at::cuda::getCurrentDeviceProperties()->maxGridSize[2];
-          const int blocks_x = static_cast<int>(std::min<int64_t>(
-              ceil_div(imgcount, static_cast<int64_t>(threads)),
-              static_cast<int64_t>(maxGridX)));
+          const int blocks_x = std::min(ceil_div(imgcount, threads), maxGridX);
           dim3 grid(blocks_x, static_cast<unsigned>(std::min<int64_t>(nbatch, maxGridY)), static_cast<unsigned>(std::min<int64_t>(nInputPlane, maxGridZ)));
           bool use_int32 = can_use_int32_nchw(
               nbatch, nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth);
