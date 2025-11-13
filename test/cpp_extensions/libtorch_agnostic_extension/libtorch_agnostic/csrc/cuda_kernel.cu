@@ -3,7 +3,6 @@
 #include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/tensor.h>
 #include <torch/csrc/stable/ops.h>
-#include <c10/cuda/CUDAException.h>
 #include <cuda_runtime.h>
 
 using torch::stable::Tensor;
@@ -23,7 +22,6 @@ Tensor mv_tensor_accessor_cuda(Tensor m, Tensor v) {
                     mv_tensor_accessor_kernel<Accessor_cuda, scalar_t><<<1, 1, 0, 0>>>(resa, ma, va);
                   })),
                   AT_FLOATING_TYPES);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
   return res;
 }
 
