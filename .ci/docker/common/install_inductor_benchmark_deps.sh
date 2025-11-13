@@ -5,9 +5,7 @@ set -ex
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
 function install_huggingface() {
-  local version
-  commit=$(get_pinned_commit huggingface)
-  pip_install "git+https://github.com/huggingface/transformers@${commit}"
+  pip_install -r huggingface-requirements.txt
 }
 
 function install_timm() {
@@ -26,15 +24,12 @@ function install_torchbench() {
 
   python install.py --continue_on_fail
 
-  # TODO (huydhn): transformers-4.44.2 added by https://github.com/pytorch/benchmark/pull/2488
-  # is regressing speedup metric. This needs to be investigated further
-  pip install transformers==4.38.1
-
   echo "Print all dependencies after TorchBench is installed"
   python -mpip freeze
   popd
 
   chown -R jenkins torchbench
+  chown -R jenkins /opt/conda
 }
 
 # Pango is needed for weasyprint which is needed for doctr
@@ -48,4 +43,4 @@ install_huggingface
 install_timm
 
 # Clean up
-conda_run pip uninstall -y torch torchvision torchaudio triton
+conda_run pip uninstall -y torch torchvision torchaudio triton torchao

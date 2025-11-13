@@ -63,6 +63,13 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--benchmark-name",
+        "--benchmark_name",
+        help="Name of the benchmark to store results to",
+        default="PyTorch operator benchmark",
+    )
+
+    parser.add_argument(
         "--list-tests",
         "--list_tests",
         help="List all test cases without running them",
@@ -136,6 +143,16 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--use-compile",
+        "--use_compile",
+        type=benchmark_utils.str2bool,
+        nargs="?",
+        const=True,
+        default=False,
+        help="Run operators with PyTorch Compile mode",
+    )
+
+    parser.add_argument(
         "--forward-only",
         "--forward_only",
         type=benchmark_utils.str2bool,
@@ -162,7 +179,7 @@ def parse_args():
         "--output-json-for-dashboard",
         "--output_json_for_dashboard",
         help="Save results in JSON format for display on the OSS dashboard",
-        default="False",
+        default="benchmark-results.json",
     )
 
     args, _ = parser.parse_known_args()

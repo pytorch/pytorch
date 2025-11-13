@@ -8,6 +8,16 @@ from typing_extensions import deprecated
 import torch
 
 from ._utils import _device_t, _get_device_index
+from .memory import (
+    empty_cache,
+    max_memory_allocated,
+    max_memory_reserved,
+    memory_allocated,
+    memory_reserved,
+    memory_stats,
+    reset_accumulated_memory_stats,
+    reset_peak_memory_stats,
+)
 
 
 __all__ = [
@@ -15,9 +25,17 @@ __all__ = [
     "current_device_idx",  # deprecated
     "current_device_index",
     "current_stream",
+    "empty_cache",
     "device_count",
     "device_index",
     "is_available",
+    "max_memory_allocated",
+    "max_memory_reserved",
+    "memory_allocated",
+    "memory_reserved",
+    "memory_stats",
+    "reset_accumulated_memory_stats",
+    "reset_peak_memory_stats",
     "set_device_idx",  # deprecated
     "set_device_index",
     "set_stream",
@@ -73,7 +91,7 @@ def is_available() -> bool:
     return mod.is_available()
 
 
-def current_accelerator(check_available: bool = False) -> Optional[torch.device]:
+def current_accelerator(check_available: bool = False) -> torch.device | None:
     r"""Return the device of the accelerator available at compilation time.
     If no accelerator were available at compilation time, returns None.
     See :ref:`accelerator<accelerators>` for details.
@@ -241,7 +259,7 @@ class device_index:
         ...     pass
     """
 
-    def __init__(self, device: Optional[int], /) -> None:
+    def __init__(self, device: int | None, /) -> None:
         self.idx = device
         self.prev_idx = -1
 

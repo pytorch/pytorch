@@ -115,13 +115,14 @@ void Executor::maybeRunConstantFolding(
       weights->updateFoldedConst(value->name(), outputs.at(idx));
     }
   }
+  // runtime constant folding after the run_const_graph HOPs, if applicable
+  if (constantFolder_.has_value()) {
+    constantFolder_->evaluate(*weights);
+  }
 }
 
 void Executor::processWeights(const std::shared_ptr<Weights>& weights) {
   maybeRunConstantFolding(weights);
-  if (constantFolder_.has_value()) {
-    constantFolder_->evaluate(*weights);
-  }
   for (auto& delegateExecutor : delegateExecutors_) {
     delegateExecutor->processWeights(weights);
   }
@@ -129,9 +130,6 @@ void Executor::processWeights(const std::shared_ptr<Weights>& weights) {
 
 void Executor::initWeights(const std::shared_ptr<Weights>& weights) {
   maybeRunConstantFolding(weights);
-  if (constantFolder_.has_value()) {
-    constantFolder_->evaluate(*weights);
-  }
 
   weights_.withLock([&](auto& w) { w = std::move(weights); });
 
