@@ -98,7 +98,7 @@ class TestCase(PytorchTestCase):
             result_a = None
             exception_a = e
 
-        if ((exception_e is None) != (exception_a is None)):
+        if (exception_e is None) != (exception_a is None):
             if exception_a is not None and exception_e is None:
                 raise exception_a
             self.assertIs(
@@ -151,9 +151,7 @@ class TestCase(PytorchTestCase):
         for sample_input in sample_inputs:
 
             def expected(sample_input=sample_input):
-                return op(
-                    sample_input.input, *sample_input.args, **sample_input.kwargs
-                )
+                return op(sample_input.input, *sample_input.args, **sample_input.kwargs)
 
             subclass_sample = sample_input.transform(transform_fn)
 
