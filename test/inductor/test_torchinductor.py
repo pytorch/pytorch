@@ -3954,9 +3954,9 @@ class CommonTemplate:
             return torch.addmv(a, b, c)
 
         cfn = torch.compile(backend="inductor")(fn)
-        input = torch.tensor([2], dtype=torch.float32)
-        mat = torch.tensor(np.random.randn(0, 0), dtype=torch.float32)
-        vec = torch.tensor([])
+        input = torch.tensor([2], dtype=torch.int32)
+        mat = torch.tensor(np.random.randn(0, 0), dtype=torch.int32)
+        vec = torch.tensor([], dtype=torch.int32)
         with torch.no_grad():
             self.assertEqual(cfn(input, mat, vec), fn(input, mat, vec))
 
