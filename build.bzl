@@ -82,7 +82,7 @@ def define_targets(rules):
     gen_aten_outs_mtia = GENERATED_H_MTIA + GENERATED_CPP_MTIA
 
     gen_aten_outs = (
-        GENERATED_H + GENERATED_H_CORE + GENERATED_H_HEADERONLY +
+        GENERATED_H + GENERATED_H_CORE +
         GENERATED_CPP + GENERATED_CPP_CORE +
         GENERATED_AOTI_CPP +
         aten_ufunc_generated_cpu_sources() +
@@ -93,7 +93,7 @@ def define_targets(rules):
 
     rules.genrule(
         name = "gen_aten",
-        srcs = gen_aten_srcs,
+        srcs = gen_aten_srcs + ["//torch/headeronly:enum_tag_h"],  # Depend on enum_tag.h from torch/headeronly
         outs = gen_aten_outs,
         cmd = gen_aten_cmd,
         tools = ["//torchgen:gen"],
@@ -187,10 +187,6 @@ GENERATED_H_CORE = [
     "MethodOperators.h",
     "core/aten_interned_strings.h",
     "core/enum_tag.h",
-]
-
-GENERATED_H_HEADERONLY = [
-    "torch/headeronly/core/enum_tag.h",
 ]
 
 GENERATED_H_CUDA = [

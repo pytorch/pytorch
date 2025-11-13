@@ -2825,7 +2825,7 @@ def main() -> None:
         "--generate",
         type=str,
         nargs="*",
-        choices=["headers", "sources", "declarations_yaml"],
+        choices=["headers", "sources", "declarations_yaml", "headeronly"],
         default=["headers", "sources", "declarations_yaml"],
         help="Generate only a subset of files",
     )
@@ -3036,6 +3036,13 @@ def main() -> None:
             rocm=options.rocm,
             per_operator_headers=options.per_operator_headers,
         )
+
+    if "headeronly" in options.generate:
+        # Generate only the headeronly files (enum_tag.h)
+        def gen_tags_enum() -> dict[str, str]:
+            return {"enum_of_valid_tags": (",\n".join(sorted(valid_tags)))}
+
+        headeronly_fm.write("enum_tag.h", gen_tags_enum)
 
     if "declarations_yaml" in options.generate:
         gen_declarations_yaml(native_functions=native_functions, cpu_fm=cpu_fm)
