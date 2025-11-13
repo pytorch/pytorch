@@ -14,6 +14,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any, Optional, TYPE_CHECKING, Union
+import warnings
 
 import torch
 import torch._inductor.inductor_prims
@@ -1044,7 +1045,20 @@ def default_partition(
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
     if graph_has_recomputable_ops:
-        assert_functional_graph(joint_module.graph)
+        if not assert_functional_graph(joint_module.graph):
+            # Fall-back to previous behavior to avoid bc-breaking, although can
+            # eventually flip the switch to make this a hard error.
+            warnings.warn(
+                "Trying to unsafely apply AC to a non-functional graph with the"
+                "default partitioner. Falling back to min-cut partitioner."
+            )
+            return min_cut_rematerialization_partition(
+                joint_module,
+                _joint_inputs,
+                num_fwd_outputs=num_fwd_outputs,
+                static_lifetime_input_indices=static_lifetime_input_indices,
+            )
+
         joint_module = cleanup_recompute_tags(joint_module, is_default_partition=True)
 
     if not config.unsafe_allow_optimization_of_collectives:
@@ -1064,6 +1078,15 @@ def default_partition(
     for node in joint_module.graph.nodes:
         if node.name not in forward_node_names:
             continue
+        if (
+            "tensor_meta" not in node.meta
+            and node.op == "call_function"
+            and not isinstance(node.meta.get("val"), torch._subclasses.FakeTensor)
+        ):
+            # Must be ordered before MUST_SAVE tags are handled to avoid saving
+            # tuples.
+            assert all(user.target == operator.getitem for user in node.users)
+            continue
         if is_sym_node(node):
             # Symints must be kept separate from tensors so that PythonFunction only calls
             # save_for_backward on tensors and stashes symints in autograd .ctx
@@ -1075,8 +1098,11 @@ def default_partition(
         if node.is_impure(impure_random=False) and node.op not in (
             "placeholder",
             "output",
-        ):
-            # See is_impure in torch/fx/node.py
+        ) and node.target is not torch.ops._c10d_functional.wait_tensor.default:
+            # wait tensor is an "impure" op according to DCE's definition of impure
+            # (see is_impure in torch/fx/node.py), but it survives past
+            # functionalization and can be safely dup'd and reordered under the
+            # assumption SPMD.
             assert not graph_has_recomputable_ops, (
                 "Trying to apply AC on a graph with impure op",
                 node,
@@ -1095,13 +1121,6 @@ def default_partition(
             # then we would be obligated to clone the input before saving it to appease autograd.
             # (This is how we originally found this bug).
             saved_sym_nodes.extend(backward_usages)
-            continue
-        if (
-            "tensor_meta" not in node.meta
-            and node.op == "call_function"
-            and not isinstance(node.meta.get("val"), torch._subclasses.FakeTensor)
-        ):
-            assert all(user.target == operator.getitem for user in node.users)
             continue
         if not must_recompute(node):
             saved_values.append(node)
@@ -1634,6 +1653,16 @@ def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
             break
 
 
+def is_getitem_of_multi_output(node):
+    if node.target != operator.getitem:
+        return False
+    parent = node.args[0]
+    return (
+        "tensor_meta" not in parent.meta
+        and node.op == "call_function"
+    )
+
+
 def cleanup_recompute_tags(
     joint_module: fx.GraphModule, *, is_default_partition: bool
 ) -> fx.GraphModule:
@@ -1676,6 +1705,11 @@ def cleanup_recompute_tags(
         elif (
             "ac_graph_id" not in node.meta
             and any(must_recompute(user) for user in node.users)
+            and not (
+                # Avoid saving getitem nodes which are not labeled with "ac_graph_id"
+                is_getitem_of_multi_output(node)
+                and "ac_graph_id" in node.args[0].meta
+            )
             and is_default_partition
         ):
             # This node is not part of the AC region and a user is marked as recompute.
