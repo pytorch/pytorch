@@ -462,6 +462,10 @@ test_inductor_core() {
               inductor/test_cpu_cpp_wrapper \
               inductor/test_cpu_repro \
               inductor/test_cpu_select_algorithm \
+              inductor/test_torchinductor_dynamic_shapes \
+              inductor/test_torchinductor \
+              inductor/test_mkldnn_pattern_matcher \
+              inductor/test_torchinductor_codegen_dynamic_shapes \
     --verbose \
     --upload-artifacts-while-running
   assert_git_not_dirty
