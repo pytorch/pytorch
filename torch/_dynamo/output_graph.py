@@ -2314,17 +2314,9 @@ class OutputGraph(OutputGraphCommon):
                         "store_user_object_weakrefs",
                     )
                 )
-                tmp_vars = []
+
                 for constructor in index_to_bytecode_constructor.values():
                     constructor(cg)
-                    var_name = (
-                        self.new_var()
-                    )  # keep alive any temp objects for the rest of the frame
-                    cg.store(var_name)
-                    tmp_vars.append(var_name)
-
-                for var_name in tmp_vars:
-                    cg.append_output(cg.create_load(var_name))
 
                 cg.call_function(len(index_to_bytecode_constructor), False)
                 cg.pop_top()
