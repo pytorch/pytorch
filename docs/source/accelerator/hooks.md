@@ -6,7 +6,11 @@ OpenReg hooks provide a mechanism for integrating custom accelerator devices int
 
 ## Design
 
-The following tables list all hooks that accelerator vendors need to implement when integrating a new device backend:
+The following tables list all hooks that accelerator vendors need to implement when integrating a new device backend. These hooks are categorized into two priority levels:
+
+- **High Priority Hooks**: Core APIs that PyTorch runtime directly depends on. Accelerator vendors are recommended to implement all high priority hooks to ensure full PyTorch compatibility and enable basic device functionality.
+
+- **Low Priority Hooks**: Device management and utility APIs that PyTorch does not directly depend on. These hooks enhance user experience and multi-device support but are *optional*. Accelerator vendors can choose to implement them based on their specific requirements and use cases.
 
 ### High Priority Hooks
 
