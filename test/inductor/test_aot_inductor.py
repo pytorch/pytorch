@@ -7491,6 +7491,60 @@ class AOTInductorTestsTemplate:
                         for lib in torch_libs:
                             self.assertTrue(lib not in line)
 
+    @unittest.skipIf(not IS_MACOS, "Mac only test")
+    def test_openmp_free_dylib(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+
+        model = Model().to(self.device)
+        ep = torch.export.export(model, example_inputs)
+
+        package_path = torch._inductor.aoti_compile_and_package(
+            ep,
+            inductor_configs={
+                "aot_inductor.link_openmp": False,
+            },
+        )
+
+        openmp_libs = {
+            "libomp",
+            "libgomp",
+            "libiomp",
+            'libiomp5',
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Unpack
+            with zipfile.ZipFile(package_path, "r") as zf:
+                zf.extractall(tmpdir)
+
+            dylib_files = list(pathlib.Path(tmpdir).rglob("*.dylib"))
+            self.assertTrue(len(dylib_files) > 0)
+
+            for dylib_file in dylib_files:
+                dylib_copy = pathlib.Path(tmpdir) / f"{dylib_file.name}.checkcopy"
+                dylib_copy.write_bytes(dylib_file.read_bytes())
+
+                result = subprocess.run(
+                    ["otool", "-L", str(dylib_copy)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                for line in result.stdout.splitlines():
+                    for lib in openmp_libs:
+                        self.assertNotIn(lib, line)
+
     def test_unbounded_expr_substitutions(self):
         class Model(torch.nn.Module):
             def forward(self, x, y, a, b):

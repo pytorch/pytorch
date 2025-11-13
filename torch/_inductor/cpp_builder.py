@@ -1310,7 +1310,10 @@ def _get_openmp_args(
     libs: list[str] = []
     passthrough_args: list[str] = []
 
-    if (config.aot_inductor.cross_target_platform == "windows" or not config.aot_inductor.link_openmp):
+    if (
+        config.aot_inductor.cross_target_platform == "windows"
+        or not config.aot_inductor.link_openmp
+    ):
         return cflags, ldflags, include_dir_paths, lib_dir_paths, libs, passthrough_args
     if _IS_MACOS:
         # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
