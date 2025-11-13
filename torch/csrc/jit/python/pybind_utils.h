@@ -795,6 +795,24 @@ inline std::string friendlyTypeName(py::handle obj) {
     }
     ss << "))";
     return ss.str();
+  } else if (py::isinstance<py::iterable>(obj)) {
+    std::stringstream ss;
+    ss << py::str(py::type::handle_of(obj).attr("__name__"));
+    try {
+      ss << "(";
+      bool first = true;
+      for (const auto& item : obj) {
+        if (!first) {
+          ss << ", ";
+        }
+        ss << py::str(py::type::handle_of(item).attr("__name__"));
+        first = false;
+      }
+      ss << ")";
+    } catch (const py::error_already_set& e) {
+      ss << "empty)";
+    }
+    return ss.str();
   } else {
     return py::str(py::type::handle_of(obj).attr("__name__"));
   }
