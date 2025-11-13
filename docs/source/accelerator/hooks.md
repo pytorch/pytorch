@@ -4,31 +4,37 @@
 
 OpenReg hooks provide a mechanism for integrating custom accelerator devices into PyTorch's runtime system. OpenReg (Open Registration) is PyTorch's extensibility framework that allows accelerator vendors to register custom device backends without modifying PyTorch core code.
 
-This design allows accelerator vendors to build PyTorch extensions that seamlessly integrate with PyTorch's device abstraction layer, enabling users to run PyTorch operations on custom hardware accelerators with minimal code changes.
-
 ## Design
 
-The following table lists all hooks that accelerator vendors need to implement when integrating a new device backend:
+The following tables list all hooks that accelerator vendors need to implement when integrating a new device backend:
 
-| Hook Method                        | Description                                                                  | Application Scenario                                                             |
-| ---------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `hasPrimaryContext(DeviceIndex)`   | Checks if a primary context exists for the device                            | Determine if device initialization has occurred                                  |
-| `isBuilt()`                        | Returns whether the accelerator backend is built/compiled into the extension | Check if the accelerator library is available at compile time                    |
-| `isAvailable()`                    | Returns whether the accelerator hardware is available at runtime             | Verify if accelerator devices can be detected and initialized                    |
-| `deviceCount()`                    | Returns the number of available accelerator devices                          | Enumerate all available accelerator devices for device selection                 |
-| `setCurrentDevice(DeviceIndex)`    | Sets the active device for the current thread                                | Switch the current thread's context to a specific accelerator device             |
-| `getCurrentDevice()`               | Returns the currently active device index                                    | Query which accelerator device is active in the current thread                   |
-| `exchangeDevice(DeviceIndex)`      | Atomically exchanges the current device and returns the previous one         | Temporarily switch devices and restore the previous device afterward             |
-| `maybeExchangeDevice(DeviceIndex)` | Conditionally exchanges device only if the index is valid                    | Safely attempt device switching with validation                                  |
-| `getPinnedMemoryAllocator()`       | Returns an allocator for pinned (page-locked) host memory                    | Allocate host memory that can be efficiently transferred to/from the accelerator |
-| `isPinnedPtr(void*)`               | Checks if a pointer points to pinned memory                                  | Validate memory types before performing operations                               |
-| `getDeviceFromPtr(void*)`          | Determines which device a memory pointer belongs to                          | Identify the accelerator device associated with a memory allocation              |
-| `getDefaultGenerator(DeviceIndex)` | Returns the default random number generator for a device                     | Access the device's primary RNG for reproducible random operations               |
-| `getNewGenerator(DeviceIndex)`     | Creates a new independent random number generator                            | Create isolated RNG instances for parallel operations                            |
+### High Priority Hooks
+
+| Hook Method                        | Description                                               | Application Scenario                                                             |
+| ---------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `init()`                           | Initializes the accelerator runtime and device contexts   | Set up necessary state when PyTorch first accesses the device                    |
+| `hasPrimaryContext(DeviceIndex)`   | Checks if a primary context exists for the device         | Determine whether device initialization has occurred                             |
+| `getDefaultGenerator(DeviceIndex)` | Returns the default random number generator for a device  | Access the device's primary RNG for reproducible random operations               |
+| `getNewGenerator(DeviceIndex)`     | Creates a new independent random number generator         | Create isolated RNG instances for parallel operations                            |
+| `getDeviceFromPtr(void*)`          | Determines which device a memory pointer belongs to       | Identify the accelerator device associated with a memory allocation              |
+| `getPinnedMemoryAllocator()`       | Returns an allocator for pinned (page-locked) host memory | Allocate host memory that can be efficiently transferred to/from the accelerator |
+| `isPinnedPtr(void*)`               | Checks if a pointer points to pinned memory               | Validate memory types before performing operations                               |
+
+### Low Priority Hooks
+
+| Hook Method                        | Description                                                                  | Application Scenario                                                 |
+| ---------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `isBuilt()`                        | Returns whether the accelerator backend is built/compiled into the extension | Check whether the accelerator library is available at compile time   |
+| `isAvailable()`                    | Returns whether the accelerator hardware is available at runtime             | Verify whether accelerator devices can be detected and initialized   |
+| `deviceCount()`                    | Returns the number of available accelerator devices                          | Enumerate all available accelerator devices for device selection     |
+| `setCurrentDevice(DeviceIndex)`    | Sets the active device for the current thread                                | Switch the current thread's context to a specific accelerator device |
+| `getCurrentDevice()`               | Returns the currently active device index                                    | Query which accelerator device is active in the current thread       |
+| `exchangeDevice(DeviceIndex)`      | Atomically exchanges the current device and returns the previous one         | Temporarily switch devices and restore the previous device afterward |
+| `maybeExchangeDevice(DeviceIndex)` | Conditionally exchanges device only if the index is valid                    | Safely attempt device switching with validation                      |
 
 ## Implementation
 
-Here's an example of implementing the `getDefaultGenerator` hook in OpenReg:
+We can just take `getDefaultGenerator` as an implementation example:
 
 ```{eval-rst}
 .. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/csrc/runtime/OpenRegHooks.h
@@ -85,6 +91,7 @@ The C++ extension exposes `_getDefaultGenerator` to Python, which bridges to PyT
     :start-after: LITERALINCLUDE START: OPENREG GET DEFAULT GENERATOR
     :end-before: LITERALINCLUDE END: OPENREG GET DEFAULT GENERATOR
     :linenos:
+    :emphasize-lines: 10-11
 ```
 
 ```{eval-rst}

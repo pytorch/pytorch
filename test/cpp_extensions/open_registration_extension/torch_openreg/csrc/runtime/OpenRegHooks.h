@@ -16,6 +16,11 @@ struct OPENREG_EXPORT OpenRegHooksInterface : public at::PrivateUse1HooksInterfa
   OpenRegHooksInterface() {};
   ~OpenRegHooksInterface() override = default;
 
+  void init() const override {
+    // Initialize OpenReg runtime if needed
+    // This is called when PyTorch first accesses the device
+  }
+
   bool hasPrimaryContext(DeviceIndex device_index) const override {
     return true;
   }
