@@ -277,6 +277,13 @@ def _is_tangent(node: fx.Node) -> bool:
     return node.op == "placeholder" and "tangents" in str(node.target)
 
 
+def _is_blackwell_or_triton(node: fx.Node) -> bool:
+    return node.target in [
+        torch.ops.higher_order.triton_kernel_wrapper_functional,
+        torch.ops.blackwell_gdpa.gdpa_fwd.default,
+    ]
+
+
 def _is_bwd_seed_offset(node: fx.Node) -> bool:
     return node.op == "placeholder" and (
         "bwd_seed" in str(node.target) or "bwd_base_offset" in str(node.target)
@@ -1661,6 +1668,13 @@ def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
     return joint_module
 
 
+def _include_blackwell_and_triton_ops(node: fx.Node) -> bool:
+    return (
+        config.include_blackwell_and_triton_kernel_wrappers_in_recompute
+        and _is_blackwell_or_triton(node)
+    )
+
+
 def solve_min_cut(
     joint_graph: fx.Graph,
     node_info: NodeInfo,
@@ -1765,7 +1779,11 @@ def solve_min_cut(
             if not op_types.is_recomputable(node):
                 return True
         else:
-            if op_types.is_random(node) or op_types.is_compute_intensive(node):
+            if (
+                op_types.is_random(node)
+                or op_types.is_compute_intensive(node)
+                or _include_blackwell_and_triton_ops(node)
+            ):
                 return True
 
         # If a node *must* be materialized in the backwards pass, then we
@@ -2449,7 +2467,10 @@ def choose_saved_values_set(
             if (
                 # Only allow recomputing nodes that are actually required for BW
                 i.dist_from_bw < int(1e9)  # type: ignore[attr-defined]
-                and get_node_storage(i) not in input_storages
+                and (
+                    get_node_storage(i) not in input_storages
+                    or _include_blackwell_and_triton_ops(i)
+                )
             )
         ]
 
