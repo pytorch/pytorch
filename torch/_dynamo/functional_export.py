@@ -11,6 +11,7 @@ import sympy
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.convert_frame import CaptureOutput, fullgraph_capture, get_traced_fn
 from torch._dynamo.eval_frame import argument_names, check_user_input_output
 from torch._dynamo.exc import UserErrorType
@@ -579,9 +580,10 @@ def pytreeify(
     fake_mode = torch._dynamo.utils.detect_fake_mode(flat_out_shuffle_args)
     if fake_mode and fake_mode.shape_env is None:
         fake_mode.shape_env = ShapeEnv()
-    out_shuffle_graph = make_fx(
-        out_shuffle, tracing_mode="symbolic", proxy_module_inputs=True
-    )(*flat_out_shuffle_args)
+    with enable_python_dispatcher():
+        out_shuffle_graph = make_fx(
+            out_shuffle, tracing_mode="real", proxy_module_inputs=True
+        )(*flat_out_shuffle_args)
     _normalize_shuffle_graph(out_shuffle_graph)
 
     assert out_shuffle.out_spec is not None
