@@ -1193,6 +1193,8 @@ autotune_lookup_table: dict[str, dict[str, Any]] = {}
 
 file_lock_timeout: int = int(os.environ.get("TORCHINDUCTOR_FILE_LOCK_TIMEOUT", "600"))
 
+enable_autograd_for_aot: bool = False
+
 
 def get_worker_log_path() -> Optional[str]:
     log_loc = None
