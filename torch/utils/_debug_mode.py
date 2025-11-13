@@ -891,19 +891,19 @@ class DebugMode(TorchDispatchMode):
                 norm_hash_fn if hash_type == "norm" else hash_tensor_fn, use_scalar=True
             )
 
-        def _tree_hash(obj):
-            if callable(hash_fn):
-                fn = hash_fn
-            elif isinstance(hash_fn, str):
-                fn = hash_fn_option(hash_fn)
-            elif isinstance(hash_fn, list):
-                fns = [hash_fn_option(fn) for fn in hash_fn]
-                fn = lambda x: tuple(fn(x) for fn in fns)  # noqa: E731
-            else:
-                raise NotImplementedError(
-                    f"log_tensor_hashes() expected hash_fn to be callable, str, or list[str], but found {type(hash_fn)}"
-                )
+        if callable(hash_fn):
+            fn = hash_fn
+        elif isinstance(hash_fn, str):
+            fn = hash_fn_option(hash_fn)
+        elif isinstance(hash_fn, list):
+            fns = [hash_fn_option(fn) for fn in hash_fn]
+            fn = lambda x: tuple(fn(x) for fn in fns)  # noqa: E731
+        else:
+            raise NotImplementedError(
+                f"log_tensor_hashes() expected hash_fn to be callable, str, or list[str], but found {type(hash_fn)}"
+            )
 
+        def _tree_hash(obj):
             return tree_map(
                 lambda x: fn(x) if isinstance(x, torch.Tensor) else None, obj
             )
@@ -925,9 +925,9 @@ class DebugMode(TorchDispatchMode):
         try:
             if hash_inputs:
                 _old_input_hfn = _TRITON_INPUT_HASH_FN
-                _TRITON_INPUT_HASH_FN = hash_fn
+                _TRITON_INPUT_HASH_FN = fn
             _old_output_hfn = _TRITON_OUTPUT_HASH_FN
-            _TRITON_OUTPUT_HASH_FN = hash_fn
+            _TRITON_OUTPUT_HASH_FN = fn
             with DebugMode.dispatch_hooks(log_hook=_dispatch_hash_hook):
                 yield
         finally:
