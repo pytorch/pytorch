@@ -1892,6 +1892,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
 
         # to manage autograd graph lifetime
         self.ownership_tokens = {}
+        self.ac_graph_execution_context: Optional[torch.utils.checkpoint.GraphExecGroup] = None
 
     def register_custom_function(
         self,
@@ -2222,12 +2223,14 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     )
                     _wait_batch_p2p(self.bwd_recv_ops.pop((stage_idx, mb_index)))
                 loss = self._maybe_get_loss(stage, mb_index)
-                stage.backward_one_chunk(
-                    mb_index,
-                    loss=loss,
-                    full_backward=False,
-                    last_backward=False,
-                )
+                self.ac_graph_exec_group = torch.utils.checkpoint.GraphExecGroup()
+                with self.ac_graph_exec_group:
+                    stage.backward_one_chunk(
+                        mb_index,
+                        loss=loss,
+                        full_backward=False,
+                        last_backward=False,
+                    )
                 # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
                 # see [Note: V-schedule special case]
                 if is_prev_stage_on_this_rank:
@@ -2240,10 +2243,12 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 last_backward = self.backward_counter[stage_idx] == self._n_microbatches
                 key = f"{stage.stage_index}_{mb_index}"
                 assert key in self.ownership_tokens
-                stage.backward_weight_one_chunk(
-                    mb_index,
-                    last_backward=last_backward,
-                )
+                assert self.ac_graph_exec_group, "expect dI to be executed before dW"
+                with self.ac_graph_exec_group:
+                    stage.backward_weight_one_chunk(
+                        mb_index,
+                        last_backward=last_backward,
+                    )
                 del self.ownership_tokens[key]
             elif comp_type == REDUCE_GRAD:
                 grad_scale_factor = self._n_microbatches if self.scale_grads else 1
