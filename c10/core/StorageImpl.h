@@ -61,7 +61,6 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       bool resizable)
       : data_ptr_(std::move(data_ptr)),
         size_bytes_(std::move(size_bytes)),
-        size_bytes_is_heap_allocated_(size_bytes_.is_heap_allocated()),
         resizable_(resizable),
         received_cuda_(false),
         allocator_(allocator) {
@@ -96,7 +95,6 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   void reset() {
     data_ptr_.clear();
     size_bytes_ = 0;
-    size_bytes_is_heap_allocated_ = false;
   }
 
   // Destructor doesn't call release_resources because it's
@@ -107,8 +105,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   size_t nbytes() const {
     // OK to do this instead of maybe_as_int as nbytes is guaranteed positive
-    TORCH_CHECK(!size_bytes_is_heap_allocated_);
-    return size_bytes_.as_int_unchecked();
+    return size_bytes_.maybe_as_int().value_or(0);
   }
 
   SymInt sym_nbytes() const {
@@ -127,6 +124,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   void set_nbytes(c10::SymInt size_bytes) {
+    TORCH_CHECK(!size_bytes.is_symbolic() || nbytes() == 0);
     size_bytes_ = std::move(size_bytes);
   }
 
