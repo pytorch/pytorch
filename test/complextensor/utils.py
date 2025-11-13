@@ -60,7 +60,6 @@ class Descriptor:
     variant: Variant | None
     device: torch.device | None = field(default=None)
     dtype: torch.dtype | None = field(default=None)
-    compile: bool | None = field(default=None)
 
     def matches(self, other: Descriptor) -> bool:
         fields1 = fields(self)
@@ -82,7 +81,6 @@ class TestCase(PytorchTestCase):
         self,
         expected: Callable[[], Any],
         actual: Callable[[], Any],
-        ignore_exc_types: bool = False,
         *args,
         **kwargs,
     ) -> None:
@@ -99,8 +97,8 @@ class TestCase(PytorchTestCase):
         except Exception as e:  # noqa: BLE001
             result_a = None
             exception_a = e
-        # Special case: compiled versions don't match the error type exactly.
-        if ((exception_e is None) != (exception_a is None)) or not ignore_exc_types:
+
+        if ((exception_e is None) != (exception_a is None)):
             if exception_a is not None and exception_e is None:
                 raise exception_a
             self.assertIs(
@@ -125,7 +123,7 @@ class TestCase(PytorchTestCase):
                 self.assertEqual(value_e, value_a, *args, **kwargs)
 
     def check_consistency(
-        self, device: torch.device, dtype, op: OpInfo, compile: bool, variant: Variant
+        self, device: torch.device, dtype, op: OpInfo, variant: Variant
     ) -> None:
         try:
             from .test_complextensor import EXTRA_KWARGS, SKIPS
@@ -135,7 +133,6 @@ class TestCase(PytorchTestCase):
             op=get_overload_packet_from_name(op.name),
             device=device,
             dtype=dtype,
-            compile=compile,
             variant=variant,
         )
         for xfail_info, reason in SKIPS.items():
@@ -149,16 +146,12 @@ class TestCase(PytorchTestCase):
                 break
 
         sample_inputs = op.sample_inputs(device, dtype)
-        op_eager = op
-        if compile:
-            op = torch.compile(op, fullgraph=True)
-
         transform_fn = TRANSFORM_FUNCS[variant]
 
         for sample_input in sample_inputs:
 
             def expected(sample_input=sample_input):
-                return op_eager(
+                return op(
                     sample_input.input, *sample_input.args, **sample_input.kwargs
                 )
 
@@ -171,7 +164,7 @@ class TestCase(PytorchTestCase):
                     **subclass_sample.kwargs,
                 )
 
-            self.assertSameResult(expected, actual, ignore_exc_types=compile, **kwargs)
+            self.assertSameResult(expected, actual, **kwargs)
 
 
 aten = torch.ops.aten

@@ -49,13 +49,6 @@ aten = torch.ops.aten
 
 SKIPS = {
     Descriptor(op=aten.empty_like, variant=None): "Non-deterministic output",
-    # This passes with `PYTORCH_OPINFO_SAMPLE_INPUT_INDEX=35 ...
-    # but when the whole test is run, it fails with this exact
-    # sample.
-    Descriptor(op=aten.repeat, compile=True, variant=None): "Heisenbug",
-    Descriptor(
-        op=aten.allclose, compile=True, variant=None
-    ): "`aten.allclose` requires data-dependent control-flow",
     Descriptor(op=aten.randn_like, variant=None): "Non-deterministic output",
     Descriptor(op=aten.angle, variant=Variant.GradCheck): "Numerical inconsistency",
     Descriptor(op=aten.asinh, variant=Variant.GradCheck): "Numerical inconsistency",
@@ -190,18 +183,18 @@ class TestComplexTensor(TestCase):
         allowed_dtypes=list(COMPLEX_DTYPES),
     )
     def test_consistency(self, device, dtype, op: OpInfo):
-        self.check_consistency(device, dtype, op, False, Variant.Op)
+        self.check_consistency(device, dtype, op, Variant.Op)
 
     @ops(force_test_op_db, allowed_dtypes=list(COMPLEX_DTYPES))
     def test_maybe_error(self, device, dtype, op: OpInfo):
-        self.check_consistency(device, dtype, op, False, Variant.Op)
+        self.check_consistency(device, dtype, op, Variant.Op)
 
 
 @unMarkDynamoStrictTest
 class TestComplexDistributed(TestCase, MultiProcessTestCase):
     @ops(implemented_op_db, allowed_dtypes=list(COMPLEX_DTYPES))
     def test_distributed(self, device, dtype, op: OpInfo):
-        self.check_consistency(device, dtype, op, False, Variant.Distributed)
+        self.check_consistency(device, dtype, op, Variant.Distributed)
 
 
 @unMarkDynamoStrictTest
@@ -220,7 +213,6 @@ class TestComplexBwdGradients(TestGradients):
             op=get_overload_packet_from_name(op.name),
             device=device,
             dtype=dtype,
-            compile=False,
             variant=Variant.GradCheck,
         )
         for xfail_info, reason in SKIPS.items():
