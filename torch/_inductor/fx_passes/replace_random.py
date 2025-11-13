@@ -21,6 +21,7 @@ patterns = PatternMatcherPass(subsystem="joint_graph_passes")
 aten = torch.ops.aten
 
 from torch.library import custom_op
+from torch._inductor.lowering import make_fallback
 
 def _shape_to_offset(size, device: torch.device) -> int:
     nelem = 1
@@ -84,6 +85,12 @@ def _(offset: int, device: torch.device):
 @rand_eager_offsets.register_fake
 def _(offsets: list[int], device: torch.device):
     return torch.empty((len(offsets), 2), dtype=torch.int64, device=device)
+
+
+rand_eager_offset_op = torch.ops.custom_op.rand_eager_offset.default
+rand_eager_offsets_op = torch.ops.custom_op.rand_eager_offsets.default
+make_fallback(rand_eager_offset_op)
+make_fallback(rand_eager_offsets_op)
 
 
 def replace_random_passes(gm: torch.fx.GraphModule):
