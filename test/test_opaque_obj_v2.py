@@ -433,6 +433,8 @@ Opaque object were created in the middle of the program and passed to a custom o
   Hint: Please create the opaque object before calling torch.compile and pass it in as an argument or as a global variable.
 
   Developer debug context: Opaque object types: [<class '__main__.Counter'>]. Function: _TestOpaqueObject.increment_counter
+
+  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0363.html
 """,  # noqa: B950
         )
 
