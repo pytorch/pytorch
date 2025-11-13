@@ -2726,20 +2726,8 @@ class AlgorithmSelectorCache(PersistentCache):
             N = input_nodes[-1].get_size()[-1]
             append_to_log(mm_file_name, {"invoke": str((M, K, N))})
 
-        def create_no_valid_choices(reason: str) -> NoValidChoicesError:
-            backend_config = (
-                "max_autotune_gemm_backends"
-                if name != "convolution"
-                else "max_autotune_conv_backends"
-            )
-            return NoValidChoicesError(
-                f"No choices to select. Provided reason: {reason} "
-                f"please consider adding ATEN into {backend_config} "
-                "config (defined in torch/_inductor/config.py) to allow at least one choice. "
-            )
-
         if len(choices) == 0:
-            raise create_no_valid_choices("No choices exist for backend.")
+            raise self.create_no_valid_choices(name, "No choices exist for backend.")
         log.debug("Max autotune selects from %s choices.", str(len(choices)))
 
         if len(choices) == 1:
@@ -2802,8 +2790,8 @@ class AlgorithmSelectorCache(PersistentCache):
             # Prune anything that failed to compile
             choices = [c for c in choices if not c.failed]
             if len(choices) == 0:
-                raise create_no_valid_choices(
-                    "All choices failed to compile for backend."
+                raise self.create_no_valid_choices(
+                    name, "All choices failed to compile for backend."
                 )
 
             candidates = self.prescreen_choices(
@@ -2997,6 +2985,18 @@ class AlgorithmSelectorCache(PersistentCache):
         if return_choice:
             return node, choice
         return node
+
+    def create_no_valid_choices(self, name: str, reason: str) -> NoValidChoicesError:
+        backend_config = (
+            "max_autotune_gemm_backends"
+            if name != "convolution"
+            else "max_autotune_conv_backends"
+        )
+        return NoValidChoicesError(
+            f"No choices to select. Provided reason: {reason} "
+            f"please consider adding ATEN into {backend_config} "
+            "config (defined in torch/_inductor/config.py) to allow at least one choice. "
+        )
 
     def make_precompile_fn(
         self,
