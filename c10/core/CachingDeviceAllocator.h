@@ -101,7 +101,7 @@ struct C10_API DeviceAllocator : public c10::Allocator {
   // specified device.
   virtual std::pair<size_t, size_t> getMemoryInfo(c10::DeviceIndex device) {
     TORCH_CHECK_NOT_IMPLEMENTED(
-        false, "getMemoryInfo is not implemented for this allocator");
+        false, "getMemoryInfo is not implemented for this allocator yet.");
   }
 };
 
