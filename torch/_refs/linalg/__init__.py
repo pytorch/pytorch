@@ -224,9 +224,9 @@ def matrix_norm(
         len(dim) == 2, lambda: f"linalg.matrix_norm: dim must be a 2-tuple. Got {dim}"
     )
     torch._check(
-        # pyrefly: ignore  # index-error
+        # pyrefly: ignore [index-error]
         dim[0] != dim[1],
-        # pyrefly: ignore  # index-error
+        # pyrefly: ignore [index-error]
         lambda: f"linalg.matrix_norm: dims must be different. Got ({dim[0]}, {dim[1]})",
     )
     # dtype arg
@@ -248,7 +248,7 @@ def matrix_norm(
         else:  # ord == "nuc"
             if dtype is not None:
                 A = _maybe_convert_to_dtype(A, dtype)  # type: ignore[assignment]
-            # pyrefly: ignore  # index-error
+            # pyrefly: ignore [index-error]
             perm = _backshift_permutation(dim[0], dim[1], A.ndim)
             result = torch.sum(svdvals(prims.transpose(A, perm)), -1, keepdim)
             if keepdim:
@@ -272,7 +272,7 @@ def matrix_norm(
         if abs_ord == 2.0:
             if dtype is not None:
                 A = _maybe_convert_to_dtype(A, dtype)  # type: ignore[assignment]
-            # pyrefly: ignore  # index-error
+            # pyrefly: ignore [index-error]
             perm = _backshift_permutation(dim[0], dim[1], A.ndim)
             result = max_min(svdvals(prims.transpose(A, perm)), dim=-1)
             if keepdim:
@@ -280,7 +280,7 @@ def matrix_norm(
                 result = prims.transpose(torch.unsqueeze(result, -1), inv_perm)
             return result
         else:  # 1, -1, inf, -inf
-            # pyrefly: ignore  # bad-unpacking
+            # pyrefly: ignore [bad-unpacking]
             dim0, dim1 = dim
             if abs_ord == float("inf"):
                 dim0, dim1 = dim1, dim0

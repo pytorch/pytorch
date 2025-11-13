@@ -17,8 +17,6 @@
 #include <ATen/ops/ge_native.h>
 #include <ATen/ops/gt_native.h>
 #include <ATen/ops/le_native.h>
-#include <ATen/ops/logaddexp2_native.h>
-#include <ATen/ops/logaddexp_native.h>
 #include <ATen/ops/logical_and_native.h>
 #include <ATen/ops/logical_or_native.h>
 #include <ATen/ops/logical_xor_native.h>
@@ -275,30 +273,6 @@ TORCH_IMPL_FUNC(pow_Scalar_out_mps)(const Scalar& base, const Tensor& exp, const
   } else {
     at::pow_out(const_cast<Tensor&>(out), mps::wrapped_scalar_tensor_mps(base, exp.device()), exp); // redispatch!
   }
-}
-
-TORCH_IMPL_FUNC(logaddexp_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
-  mps::BinaryOpBlock logaddexp_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
-    MPSGraphTensor* sumTensor =
-        [mpsGraph additionWithPrimaryTensor:[mpsGraph exponentWithTensor:primaryCastTensor name:nil]
-                            secondaryTensor:[mpsGraph exponentWithTensor:secondaryCastTensor name:nil]
-                                       name:nil];
-    return [mpsGraph logarithmWithTensor:sumTensor name:nil];
-  };
-  mps::binaryOpTensor(self, other, output, "logaddexp_out_mps", logaddexp_op_block);
-}
-
-TORCH_IMPL_FUNC(logaddexp2_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
-  mps::BinaryOpBlock logaddexp2_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
-    MPSGraphTensor* sumTensor =
-        [mpsGraph additionWithPrimaryTensor:[mpsGraph exponentBase2WithTensor:primaryCastTensor name:nil]
-                            secondaryTensor:[mpsGraph exponentBase2WithTensor:secondaryCastTensor name:nil]
-                                       name:nil];
-    return [mpsGraph logarithmBase2WithTensor:sumTensor name:nil];
-  };
-  mps::binaryOpTensor(self, other, output, "logaddexp2_out_mps", logaddexp2_op_block);
 }
 
 TORCH_IMPL_FUNC(xlogy_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {

@@ -398,7 +398,7 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             nsplits, dtype=torch.int64, device=self.device
         ).copy_(inp_splits)
         # 2 rows: output splits, output offsets
-        # Initiallizing all values to -1 to check if they are updated
+        # Initializing all values to -1 to check if they are updated
         out_splits_offsets = symm_mem.empty(
             (2, nsplits), dtype=torch.int64, device=self.device
         ).fill_(-1)
@@ -503,7 +503,7 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             (2, nsplits), dtype=torch.int64, device=self.device
         )
         # 2 rows: output splits, output offsets
-        # Initiallizing all values to -1 to check if they are updated
+        # Initializing all values to -1 to check if they are updated
         out_splits_offsets = symm_mem.empty(
             (2, nsplits), dtype=torch.int64, device=self.device
         ).fill_(-1)
@@ -617,7 +617,7 @@ def dispatch_then_combine(device, align: int, group) -> None:
         inp_splits
     )
     # 2 rows: output splits, output offsets
-    # Initiallizing all values to -1 to check if they are updated
+    # Initializing all values to -1 to check if they are updated
     out_splits_offsets = symm_mem.empty(
         (2, nsplits), dtype=torch.int64, device=device
     ).fill_(-1)
@@ -625,7 +625,7 @@ def dispatch_then_combine(device, align: int, group) -> None:
     # Buffers for combine
     combine_out = symm_mem.empty(max_out_numel, dtype=dtype, device=device).fill_(-1)
     # 2 rows: output splits, output offsets
-    # Initiallizing all values to -1 to check if they are updated
+    # Initializing all values to -1 to check if they are updated
     combine_out_splits_offsets = symm_mem.empty(
         (2, nsplits), dtype=torch.int64, device=device
     ).fill_(-1)

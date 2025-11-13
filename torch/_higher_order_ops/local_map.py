@@ -7,9 +7,9 @@
 
 import contextlib
 import functools
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
-from typing import Any, Optional, Sequence, TypeAlias
+from typing import Any, Optional, TypeAlias
 
 import torch
 import torch.utils._pytree as pytree
@@ -387,7 +387,7 @@ def create_hop_fw_bw(
 
 class LocalMapAutogradOp(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(
         ctx: Any,
         fw_gm: GraphModule,
@@ -440,7 +440,7 @@ class LocalMapAutogradOp(torch.autograd.Function):
             )
 
             for i, meta in ctx.expected_tangent_metadata.items():
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 grads[i] = coerce_to_expected_memory_format(grads[i], meta)
 
             grad_ins = local_map_hop(ctx.bw_gm, *saved_activations, *grads)

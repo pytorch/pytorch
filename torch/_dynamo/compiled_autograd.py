@@ -147,7 +147,7 @@ class NaNChecker:
             # so Compiled Autograd will always lift the param and
             # this should always be true
             assert (
-                param_node.target == operator.getitem
+                param_node.target is operator.getitem
                 and param_node.args[0] is inputs_node  # type: ignore[possibly-undefined]
                 and isinstance(param_node.args[1], int)
             )
@@ -573,7 +573,7 @@ class AutogradCompilerInstance:
                     result.name = make_unique(node.name)
                     value_remap[node] = result
                 elif node.op == "call_function":
-                    if node.target == torch.ops.aten.view.default:
+                    if node.target is torch.ops.aten.view.default:
                         # this aot bwd graph is being lazily compiled
                         # we must manually apply the view_to_reshape post grad pass
                         # since it was already applied to the aot fwd, and baked into the gradients
@@ -755,7 +755,6 @@ class AutogradCompilerInstance:
         self, fn: Callable[..., Any], args: Any, output_metadata: Sequence[Any]
     ) -> Sequence[torch.Tensor]:
         """Proxies a call to fn(*args) into the graph"""
-        flat_args, _ = pytree.tree_flatten(args)
         proxy_args = pytree.tree_map(lambda e: self.to_proxy(e), args)
         proxy_out = self.fx_tracer.create_proxy(
             "call_function", fn, args=proxy_args, kwargs={}
@@ -969,7 +968,8 @@ class AutogradCompilerInstance:
 
         # Dynamo guards will error instead of creating aliasing guards unless we unpack them in the graph
         unpack_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
-        for i, node in enumerate(self.fx_tracer.graph.find_nodes(op="placeholder")):
+        i: int | None = None
+        for i, node in enumerate(self.fx_tracer.graph.find_nodes(op="placeholder")):  # noqa: B007
             unpack_nodes.update(node.users.keys())
         assert i == len(_graph_placeholders) - 1
 
@@ -995,8 +995,8 @@ class AutogradCompilerInstance:
         sizes_node = next(it)
         assert sizes_node.name == "sizes"
 
-        for getitem_node in sizes_node.users.keys():
-            assert getitem_node.target == operator.getitem
+        for getitem_node in sizes_node.users:
+            assert getitem_node.target is operator.getitem
             if getitem_node.users:
                 used_sizes.append(getitem_node)
             else:
@@ -1158,7 +1158,7 @@ class AutogradCompilerInstance:
     def is_placeholder(node: torch.fx.Node) -> bool:
         if node.op == "placeholder" or (
             node.op == "call_function"
-            and node.target == operator.getitem
+            and node.target is operator.getitem
             and node.args[0].op == "placeholder"  # type: ignore[union-attr, arg-type]
         ):
             return True
@@ -1175,7 +1175,7 @@ class AutogradCompilerInstance:
         ):
             param_node, grad_node = node.args[0], node.args[1]
             getitem_node = None
-            if grad_node.target == operator.getitem:
+            if grad_node.target is operator.getitem:
                 getitem_node = grad_node
                 grad_node = getitem_node.args[0]
 
@@ -1240,7 +1240,7 @@ class AutogradCompilerInstance:
             to_append = []
             hook_block = [node]  # contain the hook and hook args getitem
             for n in input_nodes:
-                if n.op == "call_function" and n.target == operator.getitem:
+                if n.op == "call_function" and n.target is operator.getitem:
                     to_append.append(n.args[0])
                     to_remove.append(n)
                     hook_block.append(n)
@@ -1278,7 +1278,7 @@ class AutogradCompilerInstance:
 
             # users are all getitem ops and they are used by same registered node
             assert all(
-                user.op == "call_function" and user.target == operator.getitem
+                user.op == "call_function" and user.target is operator.getitem
                 for user in users
             )
             registered_node = next(iter(users[0].users.keys()))
@@ -1313,7 +1313,7 @@ class AutogradCompilerInstance:
             # find the corresponding acc_grad node
             acc_grad_node = None
             for n in list(param_node.users.keys()):
-                if n.op == "call_function" and n.target == call_accumulate_grad:
+                if n.op == "call_function" and n.target is call_accumulate_grad:
                     acc_grad_node = n
                     break
 
@@ -1356,19 +1356,19 @@ class AutogradCompilerInstance:
                     for user in list(input_node.users.keys())
                     if not (
                         user.op == "call_function"
-                        and user.target == call_hook
+                        and user.target is call_hook
                         and node.kwargs.get("hook_type", None) == "post_hook"
                     )
                 )
 
             arg = max(input_nodes_and_users)  # last input users
-            if arg.op == "call_function" and arg.target == call_accumulate_grad:
+            if arg.op == "call_function" and arg.target is call_accumulate_grad:
                 param_node = arg.args[0]
                 post_acc_grad_hook_node = None
                 for n in list(param_node.users.keys()):
                     if (
                         n.op == "call_function"
-                        and n.target == call_hook
+                        and n.target is call_hook
                         and n.kwargs.get("hook_type", None) == "post_acc_grad_hook"
                     ):
                         post_acc_grad_hook_node = n
