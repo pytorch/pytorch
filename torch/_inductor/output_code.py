@@ -773,9 +773,83 @@ class CompiledAOTI(OutputCode):
     """
 
     filename: Union[str, list[Union[str, Weights]], torch.fx.GraphModule]
+    device_type: str
+    current_callable: Optional[Callable[..., Any]] = None
+    _cached_files: dict[str, bytes] = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self):
+        if not config.aot_inductor.link_libtorch:
+            return
+
+        if (
+            torch._inductor.cpp_builder._IS_MACOS
+            or torch._inductor.cpp_builder._IS_WINDOWS
+        ):
+            return
+
+        if config.aot_inductor.cross_target_platform == "windows":
+            return
+
+        if config.aot_inductor.package_cpp_only:
+            return
+
+        if isinstance(self.filename, list):
+            current_callable = next(
+                fn for fn in self.filename if isinstance(fn, str) and fn.endswith(".so")
+            )
+        else:
+            current_callable = self.filename
+
+        if isinstance(current_callable, torch.fx.GraphModule):
+            self.current_callable = current_callable
+            return
+
+        if self.device_type.startswith("cuda"):
+            current_callable = (
+                torch._C._aoti.AOTIModelContainerRunnerCuda(  # type: ignore[call-arg]
+                    current_callable,
+                    1,
+                    self.device_type,
+                    "",
+                    True,
+                ).run  # type: ignore[attr-defined]
+            )  # type: ignore[attr-defined]
+        elif self.device_type == "cpu":
+            current_callable = (
+                torch._C._aoti.AOTIModelContainerRunnerCpu(  # type: ignore[call-arg]
+                    current_callable, 1
+                ).run  # type: ignore[attr-defined]
+            )  # type: ignore[attr-defined]
+        else:
+            raise RuntimeError(f"unsupported device type {self.device_type}")
+        self.current_callable = current_callable
+        self._boxed_call = True
+        for file in self._cached_files:
+            if not os.path.exists(file):
+                with open(file, "wb") as f:
+                    f.write(self._cached_files[file])
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
-        raise NotImplementedError("NYI")
+        if self.current_callable is None:
+            raise RuntimeError("AOTInductor compiled so is not loaded")
+        return self.current_callable(inputs)
+
+    def prepare_for_serialization(self) -> None:
+        self.current_callable = None
+        self._cached_files = {}
+        filenames: list[str] = []
+        if isinstance(self.filename, list):
+            filenames = self.filename  # type: ignore[assignment]
+        elif isinstance(self.filename, str):
+            filenames = [self.filename]
+        for name in filenames:
+            with open(name, "rb") as f:
+                self._cached_files[name] = f.read()
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["current_callable"] = None
+        return state
 
     def post_compile(
         self,
@@ -783,10 +857,8 @@ class CompiledAOTI(OutputCode):
         constants: CompiledFxGraphConstants,
         graph_kwargs: _CompileFxKwargs,
     ) -> None:
-        pass
-
-    def prepare_for_serialization(self) -> None:
-        pass
+        if self.current_callable is None:
+            self.__post_init__()
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         pass
