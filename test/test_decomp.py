@@ -548,6 +548,9 @@ comprehensive_failures = {
     xfail(
         "nn.functional.upsample_bilinear", "", dtypes=(torch.uint8,)
     ),  # off by one error
+    xfail(
+        "torch._scaled_mm", "", device_type="cuda", dtypes=(torch.float8_e4m3fn,)
+    ),  # xfail until nullptr issue is fixed
 }
 
 

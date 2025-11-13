@@ -1117,7 +1117,6 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
-    @xfailIfSM89
     @parametrize("dense_input_shape", [(256, 128)])
     def test_sparse_fp8fp8_mm(self, dense_input_shape, device):
         if torch.backends.cusparselt.version() < 602:
