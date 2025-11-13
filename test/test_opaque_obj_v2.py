@@ -350,8 +350,8 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         torch.compile(foo, fullgraph=True, backend=backend)(rng, x)
         self.assertExpectedInline(
             backend.graphs[0].code.strip(),
-            """\
-def forward(self, L_x_ : torch.Tensor, L_rng_state_ : __main___RNGState):
+            f"""\
+def forward(self, L_x_ : torch.Tensor, L_rng_state_ : {get_opaque_type_name(RNGState)}):
     l_x_ = L_x_
     l_rng_state_ = L_rng_state_
     x = torch.ops._TestOpaqueObject.noisy_inject(l_x_, l_rng_state_);  l_x_ = None
