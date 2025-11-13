@@ -2049,8 +2049,8 @@ class InstructionTranslatorBase(
     def FOR_ITER(self, inst: Instruction) -> None:
         it = self.pop().realize()
         try:
-            val = it.next_variable(self)
             self.push(it)
+            val = it.next_variable(self)
             self.push(val)
         except (StopIteration, exc.ObservedUserStopIteration) as e:
             if isinstance(e, exc.ObservedUserStopIteration):
@@ -2062,7 +2062,6 @@ class InstructionTranslatorBase(
                 # and performs the action of END_FOR as part of FOR_ITER. We jump
                 # to the END_FOR and run it, so we need to make sure 2 values are
                 # on the stack for it to pop.
-                self.push(it)
                 self.push(ConstantVariable.create(None))
             self.jump(inst)
 
