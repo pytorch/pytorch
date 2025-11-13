@@ -96,7 +96,6 @@ function pip_build_and_install() {
     python3 -m pip wheel \
       --no-build-isolation \
       --no-deps \
-      --no-use-pep517 \
       -w "${wheel_dir}" \
       "${build_target}"
   fi
