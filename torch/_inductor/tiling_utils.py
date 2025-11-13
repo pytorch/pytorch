@@ -152,14 +152,27 @@ def find_broadcast_var(
     A broadcast pattern is one where consecutive values of a variable
     access the same memory location (e.g., x // 10).
     """
-    for v in var_ranges:
+    # Approximate analysis by evaluating at 1 and 0
+    variables: dict[sympy.Symbol, int] = {}
+    for v in index.free_symbols:
+        if v in var_ranges:
+            variables[v] = 0
+        else:
+            variables[v] = get_hint(v)
+
+    zero_index = sympy_subs(index, variables)
+    for v in var_ranges.keys():
+        variables[v] = 1
         try:
-            val_0 = sympy_subs(index, {v: 0})
-            val_1 = sympy_subs(index, {v: 1})
-            if val_0 == val_1:
-                return v
-        except (ZeroDivisionError, ValueError):
-            pass
+            new_val = sympy_subs(index, variables)
+        except ZeroDivisionError:
+            loop_tiling_log.info("zero division error %s %s", index, variables)
+            continue
+        # Broadcast means the value doesn't change when the variable increments
+        if new_val == zero_index:
+            return v
+        variables[v] = 0
+
     return None
 
 
