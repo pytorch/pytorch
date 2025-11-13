@@ -585,6 +585,10 @@ class GraphModule(torch.nn.Module):
         # Annotation: {'stream': 1}
         mul_3: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_1, 2);  tangents_1 = None
 
+        # No stacktrace found for following nodes
+        record_event_default = torch.ops.streams.record_event.default(2, 1);  record_event_default = None
+        wait_event_default = torch.ops.streams.wait_event.default(2, 0);  wait_event_default = None
+
         # Annotation: {'stream': 0}
         add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = mul_3 = None
         return (add_3, add_2)
