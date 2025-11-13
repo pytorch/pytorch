@@ -37,7 +37,7 @@ import functools
 import traceback
 import weakref
 from collections.abc import Callable
-from typing import Any, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING  # noqa: F401
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
