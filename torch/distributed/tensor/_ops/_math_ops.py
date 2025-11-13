@@ -73,17 +73,19 @@ class _NormPartial(Partial):
 
     norm_type: Union[int, float, str] = 2
 
-    def __post_init__(self):
-        """Set the appropriate reduce op based on the norm type."""
-        # Use `object.__setattr__` to bypass frozen checks
-        if self.norm_type in (float("inf"), "inf"):
-            object.__setattr__(self, "reduce_op", "max")
-        elif self.norm_type in (float("-inf"), "-inf"):
-            object.__setattr__(self, "reduce_op", "min")
-        elif isinstance(self.norm_type, (int, float)):
-            object.__setattr__(self, "reduce_op", "sum")
+    def __init__(self, norm_type: Union[int, float, str] = 2):
+        reduce_op = None
+        if norm_type in (float("inf"), "inf"):
+            reduce_op = "max"
+        elif norm_type in (float("-inf"), "-inf"):
+            reduce_op = "min"
+        elif isinstance(norm_type, (int, float)):
+            reduce_op = "sum"
         else:
-            raise NotImplementedError(f"Unsupported norm type: {self.norm_type}")
+            raise NotImplementedError(f"Unsupported norm type: {norm_type}")
+
+        super().__init__(reduce_op)
+        object.__setattr__(self, "norm_type", norm_type)
 
     def _partition_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
@@ -138,7 +140,7 @@ class _NormPartial(Partial):
                     f"Expected int or float, got {type(self.norm_type)}"
                 )
             if self.norm_type != 0 and self.norm_type != 1:
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 return tensor**self.norm_type
         return tensor
 
@@ -149,7 +151,7 @@ class _NormPartial(Partial):
                     f"Expected int or float, got {type(self.norm_type)}"
                 )
             if self.norm_type != 0 and self.norm_type != 1:
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 return tensor ** (1.0 / self.norm_type)
         return tensor
 
@@ -291,6 +293,13 @@ def common_reduction_strategy(
                     reduction_linear = False
                     break
 
+        for p in op_spec.output_spec.placements:
+            # when the partial reduction op matches the global reduction op,
+            # we can delay redistribution (i.e max, max)
+            if isinstance(p, Partial) and p.reduce_op != reduction_op:
+                reduction_linear = False
+                break
+
         if not reduction_linear:
             # input placements for this strategy should clear out pending sum and sharding
             # on the reduction dimension
@@ -326,8 +335,8 @@ def common_reduction_strategy(
 
 
 LINEAR_REDUCTION_OP_MAP = {
-    aten.all.default: "sum",
-    aten.all.dim: "sum",
+    aten.all.default: "product",
+    aten.all.dim: "product",
     aten.sum.default: "sum",
     aten.sum.dim_IntList: "sum",
     aten.any.default: "sum",

@@ -34,7 +34,7 @@ import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Optional, TYPE_CHECKING, TypeVar
 
 import torch
 import torch._prims_common as utils
@@ -47,11 +47,11 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
 from . import config
-from .utils import clone_inputs, get_debug_dir
+from .utils import clone_inputs, get_debug_dir, warn_once
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch.hub import tqdm
     from torch.storage import UntypedStorage
@@ -455,7 +455,7 @@ def cast_dtype_args_to_fp64(model: torch.fx.GraphModule) -> torch.fx.GraphModule
     for node in model.graph.nodes:
         if (
             node.op == "call_function"
-            and node.target == torch.ops.prims.convert_element_type.default
+            and node.target is torch.ops.prims.convert_element_type.default
         ):
             assert len(node.args) == 2
             if is_float_dtype(node.args[1]) and node.args[1] != torch.float64:
@@ -617,7 +617,7 @@ class InputReader:
                     # way would be very mysterious!  Would have been better
                     # not to store device in the serialized format...
                 return storage
-        log.warning("could not load %s, generating random data instead", storage_hash)
+        warn_once(f"could not load {storage_hash}, generating random data instead")
         shape = (nbytes // dtype_hint.itemsize,)
         stride = _stride_or_default(None, shape=shape)
         return rand_strided(shape, stride, dtype_hint, device).untyped_storage()
@@ -879,7 +879,7 @@ def aot_graph_input_parser(
             data_type, shape_str = match.groups()
             shape = tuple(shape_str.split(","))
             dtype = dtype_map[data_type]
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             kwargs[param] = gen_tensor(shape, dtype)
 
         match = re.search(sym_shape_regex, annotation)
@@ -893,7 +893,7 @@ def aot_graph_input_parser(
             attr_name, data_type, shape_str, _ = match.groups()
             shape = tuple(shape_str.split(","))
             dtype = dtype_map[data_type]
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             setattr(container, attr_name, gen_tensor(shape, dtype))
 
     return kwargs

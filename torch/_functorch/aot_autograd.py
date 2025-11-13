@@ -26,6 +26,7 @@ from torch._dynamo.utils import (
 from torch._guards import detect_fake_mode
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.utils import BoxedBool
+from torch._library.autograd import autograd_fallback_mode
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -528,6 +529,9 @@ def create_aot_state(
     stack.enter_context(
         torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing()
     )
+    # Make it an error to backprop through PT2 compliant ops that silently
+    # detach autograd
+    stack.enter_context(autograd_fallback_mode("error"))
 
     from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 
@@ -573,7 +577,6 @@ def create_aot_state(
                     keep_input_mutations=aot_config.keep_inference_input_mutations,
                     is_train=needs_autograd,
                     pre_dispatch=aot_config.pre_dispatch,
-                    is_export=aot_config.is_export,
                 )(*_dup_fake_script_obj(fake_flat_args))
 
             req_subclass_dispatch = requires_subclass_dispatch(
@@ -905,6 +908,7 @@ def prepare_aot_module_simplified(
     *,
     force_non_lazy_backward_lowering: bool = False,
     disable_functionalization: bool = False,
+    _record_nn_module_stack: bool = False,
 ):
     if not flatten:
         assert kwargs is None
@@ -931,7 +935,13 @@ def prepare_aot_module_simplified(
     # NB: This doesn't change the in/out convention, except adding the
     # parameters as explicit arguments
     functional_call = create_functional_call(
-        mod, params_buffers_spec, params_len + buffers_len, strict_out_tuple=not flatten
+        mod,
+        params_buffers_spec,
+        params_len + buffers_len,
+        strict_out_tuple=not flatten,
+        # We need this for export to run ModuleStackTracer
+        # instead of PythonKeyTracer
+        store_orig_mod=_record_nn_module_stack,
     )
 
     full_args = [*params_flat, *buffers_flat, *args]
@@ -969,7 +979,9 @@ def prepare_aot_module_simplified(
     (
         aot_autograd_arg_pos_to_source,
         static_input_indices,
-    ) = _try_get_metadata_from_dynamo(mod, params_buffers.keys(), len(full_args))
+    ) = _try_get_metadata_from_dynamo(
+        mod, params_buffers.keys(), len(full_args), full_args_descs
+    )
 
     dynamic_shapes = False
     for x in full_args:
@@ -1175,6 +1187,7 @@ def aot_export_joint_with_descriptors(
     keep_inference_input_mutations=False,
     ignore_shape_env=False,
     disable_functionalization=False,
+    _record_nn_module_stack=False,
 ) -> JointWithDescriptors:
     """
     This API captures the joint graph for an nn.Module.  However, unlike
@@ -1265,6 +1278,7 @@ def aot_export_joint_with_descriptors(
         # context.
         force_non_lazy_backward_lowering=True,
         disable_functionalization=disable_functionalization,
+        _record_nn_module_stack=_record_nn_module_stack,
     )
 
     # TODO: Maybe this should be in create_aot_state?  Not sure, that would
@@ -1582,7 +1596,7 @@ def aot_export_joint_simple(
             decompositions=decompositions,
             trace_joint=trace_joint,
         )
-        in_spec, _kw_in_spec = in_spec.children_specs
+        in_spec, _kw_in_spec = in_spec.children()
     # At this point, we can just directly return the (joint or inference graph) that we traced.
     # First though: a bunch of assertions to make sure that our graph doesn't require
     # any calling convention changes compared to the original function.
@@ -1609,7 +1623,7 @@ def aot_export_joint_simple(
         raise RuntimeError(
             f"aot_export_joint_simple requires inputs to be a single list/tuple. in_spec={str(in_spec)}"
         )
-    if not all(child.is_leaf() for child in in_spec.children_specs):
+    if not all(child.is_leaf() for child in in_spec.children()):
         raise RuntimeError(
             f"aot_export_joint_simple requires individual inputs not to be pytrees. in_spec={str(in_spec)}"
         )
@@ -1617,7 +1631,7 @@ def aot_export_joint_simple(
         raise RuntimeError(
             f"aot_export_joint_simple requires outputs to be a single list/tuple. out_spec={str(out_spec)}"
         )
-    if not all(child.is_leaf() for child in out_spec.children_specs):
+    if not all(child.is_leaf() for child in out_spec.children()):
         raise RuntimeError(
             f"aot_export_joint_simple requires individual outputs not to be pytrees. out_spec={str(out_spec)}"
         )

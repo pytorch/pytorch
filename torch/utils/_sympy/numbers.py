@@ -9,7 +9,7 @@ from sympy.core.parameters import global_parameters
 from sympy.core.singleton import S, Singleton
 
 
-# pyrefly: ignore  # invalid-inheritance
+# pyrefly: ignore [invalid-inheritance]
 class IntInfinity(Number, metaclass=Singleton):
     r"""Positive integer infinite quantity.
 
@@ -42,7 +42,7 @@ class IntInfinity(Number, metaclass=Singleton):
     def __new__(cls):
         return AtomicExpr.__new__(cls)
 
-    def _sympystr(self, printer):
+    def _sympystr(self, printer) -> str:
         return "int_oo"
 
     def _eval_subs(self, old, new):
@@ -204,7 +204,7 @@ class IntInfinity(Number, metaclass=Singleton):
 int_oo = S.IntInfinity
 
 
-# pyrefly: ignore  # invalid-inheritance
+# pyrefly: ignore [invalid-inheritance]
 class NegativeIntInfinity(Number, metaclass=Singleton):
     """Negative integer infinite quantity.
 
@@ -237,7 +237,7 @@ class NegativeIntInfinity(Number, metaclass=Singleton):
         if self == old:
             return new
 
-    def _sympystr(self, printer):
+    def _sympystr(self, printer) -> str:
         return "-int_oo"
 
     """

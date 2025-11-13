@@ -29,7 +29,7 @@
                                                             secondaryTensor:(MPSGraphTensor*)secondaryTensor
                                                                        name:(NSString*)name {
   // As of MacOS-15.1 m..imumWithNanPropagation is only defined for floating types and calling it with integral
-  // agruments results in
+  // arguments results in
   //  /AppleInternal/Library/BuildRoots/c7c74b64-74b4-11ef-aeda-9635a580fe0d/Library/Caches/com.apple.xbs/Sources/MetalPerformanceShaders/MPSCore/Utility/MPSKernelDAG.mm:805:
   //  failed assertion `Error getting visible function: (null) Function isNaN_u8_i8 was not found in the library'
   if (([primaryTensor dataType] & MPSDataTypeFloatBit) == 0) {
@@ -42,7 +42,7 @@
                                                             secondaryTensor:(MPSGraphTensor*)secondaryTensor
                                                                        name:(NSString*)name {
   // As of MacOS-15.1 m..imumWithNanPropagation is only defined for floating types and calling it with integral
-  // agruments results in
+  // arguments results in
   //  /AppleInternal/Library/BuildRoots/c7c74b64-74b4-11ef-aeda-9635a580fe0d/Library/Caches/com.apple.xbs/Sources/MetalPerformanceShaders/MPSCore/Utility/MPSKernelDAG.mm:805:
   //  failed assertion `Error getting visible function: (null) Function isNaN_u8_i8 was not found in the library'
   if (([primaryTensor dataType] & MPSDataTypeFloatBit) == 0) {
@@ -53,21 +53,6 @@
 @end
 
 namespace at::native::mps {
-
-void dispatch_sync_with_rethrow(dispatch_queue_t queue, void (^block)()) {
-  __block std::optional<std::exception_ptr> block_exception;
-  dispatch_sync(queue, ^() {
-    try {
-      block();
-    } catch (...) {
-      block_exception = std::current_exception();
-    }
-  });
-  if (block_exception) {
-    std::rethrow_exception(*block_exception);
-  }
-}
-
 /**
  * Computes distance from lowest to highest element offset in given tensor.
  */
@@ -539,7 +524,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
 
   static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
   // Use gather kernel to solve strides for macOS < 15.0
-  // Starting with macOS 15.0, MPS supports native strides direclty in the kernels
+  // Starting with macOS 15.0, MPS supports native strides directly in the kernels
   if (!is_macOS_15_0_or_newer || !useMPSStridedAPI) {
     if ((!src.is_contiguous() || src.storage_offset()) && gatherTensorData) {
       Tensor emptyShell = Tensor();

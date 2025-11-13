@@ -551,7 +551,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 # Pull out the bag's indices from indices_1D, and fill any
                 # remaining space with padding indices
                 indices_in_bag = []
-                for item_pos in range(0, max_indices_per_bag):
+                for item_pos in range(max_indices_per_bag):
                     if (start + item_pos) < end:
                         indices_in_bag.append(indices_1D[start + item_pos])
                     else:

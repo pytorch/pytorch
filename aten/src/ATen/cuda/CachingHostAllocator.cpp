@@ -137,7 +137,7 @@ struct CUDACachingHostAllocatorImpl
   void free_block_slowpath(Block* block) {
     auto start = std::chrono::steady_clock::now();
     // Users may change the allocator config at will. torch unit tests do this.
-    // However, allocations using cudaHostRegister should use corresonding
+    // However, allocations using cudaHostRegister should use corresponding
     // cudaHostUnregister and similarly for cudaHostAlloc / cudaFreeHost.
     void* ptr = block->ptr_;
     bool use_register = false;
@@ -181,11 +181,6 @@ struct CUDACachingHostAllocatorImpl
       C10_CUDA_CHECK(err);
     }
     return true;
-  }
-
-  bool pinned_use_background_threads() override {
-    return c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
-        pinned_use_background_threads();
   }
 
   EventPool::Event create_event_internal(DeviceIndex idx) {

@@ -469,7 +469,7 @@ def _flatten_optim_state_dict(
             for fqn in fqns:
                 if not unflat_osd_state[fqn]:
                     continue
-                for state_name in unflat_osd_state[fqn].keys():
+                for state_name in unflat_osd_state[fqn]:
                     unflat_osd_state[fqn][state_name] = _broadcast_state(
                         fsdp_state, unflat_osd_state[fqn][state_name], group=group
                     )
@@ -506,7 +506,8 @@ def _flatten_optim_state_dict(
                         flat_osd_state[key] = copy.deepcopy(state)
                     else:
                         warnings.warn(
-                            f"optim_state[{key}] is not on rank{fsdp_state.rank}."
+                            f"optim_state[{key}] is not on rank{fsdp_state.rank}.",
+                            stacklevel=2,
                         )
 
             else:
@@ -612,7 +613,7 @@ def _flatten_optim_state(
     ]
     # Check that the unflattened parameters have the same state names
     state_names = None
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     for unflat_param_state in unflat_param_states:
         if unflat_param_state is None:
             continue
@@ -936,7 +937,7 @@ def _rekey_sharded_optim_state_dict(
         flat_param_key = unflat_param_names_to_flat_param_key.get(
             key.unflat_param_names, key.unflat_param_names
         )
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         rekeyed_osd_state[flat_param_key] = param_state
 
     # Only process param_groups if it exists in sharded_osd
@@ -999,7 +1000,8 @@ def _get_param_id_to_param_from_optim_input(
     if optim_input is None:
         return dict(enumerate(model.parameters()))
     try:
-        # pyrefly: ignore  # no-matching-overload
+        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore [redundant-cast]
         params = cast(list[nn.Parameter], list(optim_input))
     except TypeError as e:
         raise TypeError(
@@ -1375,9 +1377,7 @@ def _convert_all_state_info(
 
     for fqn, gathered_state in output_states.items():
         state_info = [s[fqn] for s in gathered_state_info]
-        all_tensor_states = sorted(
-            {n for state in state_info for n in state.tensors.keys()}
-        )
+        all_tensor_states = sorted({n for state in state_info for n in state.tensors})
         empty_ranks: set[int] = set()
         dtype: Optional[torch.dtype] = None
         # First check all the non-scalar states and get the information of
@@ -1547,7 +1547,7 @@ def _allgather_orig_param_states(
             fsdp_state._device_handle.memory_summary(),
         )
 
-    output_states: dict[str, dict[str, Any]] = {fqn: {} for fqn in input_states.keys()}
+    output_states: dict[str, dict[str, Any]] = {fqn: {} for fqn in input_states}
 
     dtype, state_buffers = _convert_all_state_info(
         fsdp_param_info, gathered_state_info, input_states, output_states
@@ -2051,7 +2051,8 @@ def _optim_state_dict(
             "most cases, this is a user-defined state that is not "
             "associated with any particular parameter. Another possible "
             "case is this state is managed by TorchRec. Otherwise, there may "
-            " be a mismatched assumption of optim_state_dict of this mode."
+            " be a mismatched assumption of optim_state_dict of this mode.",
+            stacklevel=2,
         )
         fsdp_osd_state[key] = value
 

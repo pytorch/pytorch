@@ -130,7 +130,7 @@ class MpsMemoryLeakCheck:
 
         discrepancy_detected = True
         # Query memory multiple items to ensure leak was not transient
-        for n in range(3):
+        for _ in range(3):
             caching_allocator_mem_allocated = torch.mps.current_allocated_memory()
             driver_mem_allocated = torch.mps.driver_allocated_memory()
 
@@ -515,6 +515,11 @@ class TestPixelShuffle(TestCaseMPS):
             _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, downscale_factor=0)
             _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, downscale_factor=-2)
 
+        def test_pixel_shuffle_large_upscale_factor():
+            with self.assertRaises(ValueError):
+                ps = nn.PixelShuffle(545460846592)
+                ps(torch.randn(2, 16, 9, 3))
+
         def test_pixel_shuffle_unshuffle_1D():
             _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=1)
 
@@ -530,6 +535,7 @@ class TestPixelShuffle(TestCaseMPS):
         def test_pixel_shuffle_unshuffle_5D():
             _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=5)
 
+        test_pixel_shuffle_large_upscale_factor()
         test_pixel_shuffle_unshuffle_1D()
         test_pixel_shuffle_unshuffle_2D()
         test_pixel_shuffle_unshuffle_3D()
@@ -628,10 +634,11 @@ class MatmulTest(TestCaseMPS):
     def test_batched_matrix_x_broadcasted_matrix(self):
         self._helper((10, 3, 4), (4, 5))
 
+    @serialTest()
     def test_large_matmul(self):
         # Issue: #141909
-        tensor1_mps = torch.randn(1, 1, 72250, dtype=torch.half)
-        tensor2_mps = torch.randn(1, 72250, 1, dtype=torch.half)
+        tensor1_mps = torch.randn(1, 1, 72250, dtype=torch.half, device="mps")
+        tensor2_mps = torch.randn(1, 72250, 1, dtype=torch.half, device="mps")
         matmul_mps = torch.matmul(tensor1_mps, tensor2_mps)
 
         tensor1_cpu = tensor1_mps.to("cpu")
@@ -639,6 +646,11 @@ class MatmulTest(TestCaseMPS):
         matmul_cpu = torch.matmul(tensor1_cpu, tensor2_cpu)
 
         self.assertEqual(matmul_cpu, matmul_mps.to("cpu"))
+
+    def test_empty_matmul_vec(self):
+        tensor_1 = torch.rand((0, 100), device="mps")
+        tensor_2 = torch.rand((100, ), device="mps")
+        self.assertEqual((tensor_1 @ tensor_2).cpu(), tensor_1.cpu() @ tensor_2.cpu())
 
 class MPSLeakyReluTest(TestCaseMPS):
     def _npLeakyRelu(self, np_features, negative_slope=0.1):
@@ -1755,13 +1767,13 @@ class TestMPS(TestCaseMPS):
                             continue
                         # Running stats must be tracked in eval mode
                         if (track_running_stats):
-                            helper(shape, eps=0, momentum=1, channels_last=channels_last,
+                            helper(shape, eps=1e-5, momentum=1, channels_last=channels_last,
                                    track_running_stats=track_running_stats, test_module=test_module)
                             helper(shape, channels_last=channels_last,
                                    track_running_stats=track_running_stats, test_module=test_module)
                             helper(shape, eps=1e-05, momentum=0.1, wts=False, training=False, channels_last=channels_last,
                                    track_running_stats=track_running_stats, test_module=test_module)
-                            helper(shape, eps=0, momentum=1.0, wts=False, training=False, channels_last=channels_last,
+                            helper(shape, eps=1e-5, momentum=1.0, wts=False, training=False, channels_last=channels_last,
                                    track_running_stats=track_running_stats, test_module=test_module)
                             helper(shape, eps=1, momentum=1, wts=True, training=False, channels_last=channels_last,
                                    track_running_stats=track_running_stats, test_module=test_module)
@@ -1769,7 +1781,7 @@ class TestMPS(TestCaseMPS):
                                    track_running_stats=track_running_stats, test_module=test_module)
                         helper(shape, eps=1e-05, momentum=0.1, wts=False, training=True, channels_last=channels_last,
                                track_running_stats=track_running_stats, test_module=test_module)
-                        helper(shape, eps=0, momentum=1.0, wts=False, training=True, channels_last=channels_last,
+                        helper(shape, eps=1e-5, momentum=1.0, wts=False, training=True, channels_last=channels_last,
                                track_running_stats=track_running_stats, test_module=test_module)
                         helper(shape, eps=1, momentum=1, wts=True, training=True, channels_last=channels_last,
                                track_running_stats=track_running_stats, test_module=test_module)
@@ -1900,7 +1912,7 @@ class TestMPS(TestCaseMPS):
         res_cpu = torch.linalg.vector_norm(B_cpu, ord=3.5)
         self.assertEqual(res_mps, res_cpu)
 
-        for dim in range(0, B_mps.dim()):
+        for dim in range(B_mps.dim()):
             res_mps = torch.linalg.vector_norm(B_mps, ord=3.5, dim=dim)
             res_cpu = torch.linalg.vector_norm(B_cpu, ord=3.5, dim=dim)
             self.assertEqual(res_mps, res_cpu)
@@ -1936,6 +1948,13 @@ class TestMPS(TestCaseMPS):
         run_lu_factor_ex_test(32, 2, 2, 10, 10, check_errors=True)
         # big matrix check with batch size > 1
         run_lu_factor_ex_test(256, 2, check_errors=False, atol=3e-5, rtol=5e-6)
+
+    def test_linalg_lu_factor_singular(self):
+        # Explicit singular matrix
+        A = torch.tensor([[1.0, 2.0], [2.0, 4.0]], device="mps")
+
+        with self.assertRaisesRegex(RuntimeError, "result in a division by zero"):
+            torch.linalg.lu_factor(A)
 
     def test_linalg_solve(self):
         from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
@@ -1977,6 +1996,16 @@ class TestMPS(TestCaseMPS):
         # test >3D matrices
         run_linalg_solve_test(32, 10, 10)
         run_linalg_solve_test(32, 2, 2, 2, 2, 10, 10)
+
+    def test_linalg_solve_singular(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/163962
+
+        # Explicit singular matrix
+        A = torch.tensor([[1.0, 2.0], [2.0, 4.0]], device="mps")
+        b = torch.rand_like(A)
+
+        with self.assertRaisesRegex(RuntimeError, "input matrix is singular"):
+            torch.linalg.solve(A, b)
 
     def test_linalg_solve_with_broadcasting(self):
         from functools import partial
@@ -2861,8 +2890,8 @@ class TestMPS(TestCaseMPS):
 
     def test_contiguous_slice_2d(self):
         def helper(shape):
-            for i in range(0, shape[0]):
-                for j in range(0, shape[1]):
+            for i in range(shape[0]):
+                for j in range(shape[1]):
                     t_mps = torch.randn(shape, device="mps")
                     t_cpu = t_mps.detach().clone().cpu()
 
@@ -3422,12 +3451,12 @@ class TestMPS(TestCaseMPS):
         elems = torch.arange(n_tensors * n_tensor_elems, dtype=torch.float32)
 
         tensor_list = []
-        for i in range(0, n_tensors - 1):
+        for i in range(n_tensors - 1):
             # create a list of contiguous view tensors (view tensor created by the slice op)
             t = elems[n_tensor_elems * i : n_tensor_elems * (i + 1)]
             tensor_list.append(t)
 
-        for i in range(0, n_tensors - 1):
+        for i in range(n_tensors - 1):
             t = tensor_list[i].view(1, n_tensor_elems)
             t_mps = t.to("mps")
             self.assertEqual(t, t_mps.cpu(), f"i={i}")
@@ -4446,6 +4475,14 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(out1, out2)
 
+    def test_bce_backward_with_no_reduction_and_one_in_shape(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/166746
+        output = torch.zeros(3, 2, 1, requires_grad=True, device='mps')
+        target = torch.zeros(3, 2, 1, device='mps')
+        torch.sum(nn.BCELoss(reduction='none')(output, target)).backward()
+        expected_grad = torch.zeros(3, 2, 1, device='mps')
+        self.assertEqual(output.grad, expected_grad)
+
     def test_cross_entropy_loss(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/116095
         loss = nn.CrossEntropyLoss()
@@ -4878,7 +4915,7 @@ class TestMPS(TestCaseMPS):
             input_xs.append(torch.ones(prod, dtype=torch.int).reshape(shape).bool())
             input_xs.append(torch.zeros(prod, dtype=torch.int).reshape(shape).bool())
 
-            for i, cpu_x in enumerate(input_xs):
+            for cpu_x in input_xs:
                 x = cpu_x.detach().clone().to('mps')
                 y = torch.any(x)
                 ref_y = torch.any(cpu_x)
@@ -4932,7 +4969,7 @@ class TestMPS(TestCaseMPS):
             x_mps = fn(torch.zeros(shape, device="mps"), dim=dim)
             self.assertEqual(x_cpu, x_mps.cpu())
         for fn in [torch.any, torch.all]:
-            for dim in range(0, 4):
+            for dim in range(4):
                 helper(fn, dim)
 
         # 6D tensor reductions
@@ -4960,7 +4997,7 @@ class TestMPS(TestCaseMPS):
             input_xs.append(torch.ones(prod, dtype=torch.int).reshape(shape).bool())
             input_xs.append(torch.zeros(prod, dtype=torch.int).reshape(shape).bool())
 
-            for i, cpu_x in enumerate(input_xs):
+            for cpu_x in input_xs:
                 x = cpu_x.detach().clone().to('mps')
                 y = torch.all(x)
                 ref_y = torch.all(cpu_x)
@@ -7818,9 +7855,48 @@ class TestMPS(TestCaseMPS):
         shape = (2, 3, 4, 5, 6)
         x = torch.rand(shape, device="mps")
         self.assertNotEqual(x[0], x[1])
-        # Check that normal distributino is not affected by the same
+        # Check that normal distributions is not affected by the same
         y = torch.normal(torch.zeros(shape, device="mps"), torch.ones(shape, device="mps"))
         self.assertNotEqual(y[0], y[1])
+
+    def test_random_ops_noncontiguous(self):
+        """Test random in-place operations on non-contiguous tensors.
+
+        All random in-place operations should work on non-contiguous tensors.
+        See issues #165257 and #124029.
+        """
+        # Test each random in-place operation
+        ops = [
+            ("normal_", lambda t: t.normal_(0, 1)),
+            ("uniform_", lambda t: t.uniform_(0, 1)),
+            ("exponential_", lambda t: t.exponential_(1.0)),
+            ("bernoulli_", lambda t: t.bernoulli_(0.5)),
+            ("random_", lambda t: t.random_()),
+            ("random_with_to", lambda t: t.random_(10)),
+            ("random_with_range", lambda t: t.random_(0, 10)),
+        ]
+
+        for name, op_func in ops:
+            with self.subTest(operation=name):
+                # Create non-contiguous tensor via transpose
+                t_mps = torch.zeros(50, 50, device='mps').T.clone()
+                self.assertFalse(t_mps.is_contiguous(),
+                                 f"{name}: tensor should be non-contiguous")
+
+                # Apply operation
+                op_func(t_mps)
+
+                # Verify tensor was modified (not all zeros)
+                max_val = t_mps.max().item()
+                self.assertNotEqual(max_val, 0.0,
+                                    f"{name}: operation failed to modify non-contiguous tensor")
+
+        # Test rand_like specifically (issue #124029)
+        t = torch.ones((3, 2, 2), device='mps').permute(2, 0, 1)
+        self.assertFalse(t.is_contiguous(), "rand_like input should be non-contiguous")
+        result = torch.rand_like(t)
+        self.assertFalse(result.is_contiguous(), "rand_like result should be non-contiguous")
+        self.assertNotEqual(result.max().item(), 0.0, "rand_like should generate non-zero values")
 
     # Test exponential
     @unittest.skip("This does not test anything")
@@ -9389,7 +9465,7 @@ class TestSDPA(TestCaseMPS):
         torch.manual_seed(1729)
         causal_mask = torch.tril(torch.ones(S, S, dtype=torch.bool, device='mps'))
         with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
-            i = 42
+            i = 42 if S > 42 else S // 2
 
             q = torch.randn([1, NH, L, HS], dtype=dtype, device="mps")
             k = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
@@ -9538,7 +9614,7 @@ class TestSDPA(TestCaseMPS):
         key = torch.randn(batch_size, num_heads, seq_len, head_dim, device="mps", dtype=torch.float32)
         value = torch.randn(batch_size, num_heads, seq_len, head_dim, device="mps", dtype=torch.float32)
         memory_footprints = []
-        for i in range(100):
+        for _ in range(100):
             output = F.scaled_dot_product_attention(query, key, value)
             current_mem, driver_mem = get_mps_memory_usage()
             memory_footprints.append((current_mem, driver_mem))
@@ -9740,7 +9816,7 @@ class TestGatherScatter(TestCaseMPS):
         self.assertEqual(x_cpu, x_mps)
 
     def test_cast_gather_scatter(self):
-        for _ in range(0, 50):
+        for _ in range(50):
             input = np.random.randint(0, 255, size=(5, 5, 4), dtype=np.uint8)
             with torch.no_grad():
                 s = torch.tensor(input, dtype=torch.uint8, device="mps").unsqueeze(0)
@@ -10128,7 +10204,7 @@ class TestViewOpsMPS(TestCaseMPS):
         assert_is_nonview(t, nv)
 
         # flatten returns the original object if start_dim=end_dim
-        t = t = torch.ones(2, 2, device=device)
+        t = torch.ones(2, 2, device=device)
         nv = t.flatten(1, 1)
         self.assertIs(t, nv)
 
@@ -12581,7 +12657,7 @@ class TestConsistency(TestCaseMPS):
         self.assertEqual(out_mps, out_cpu)
 
     def test_fmax_mixed_dtypes(self, device):
-        # Regression tesing for https://github.com/pytorch/pytorch/issues/149951
+        # Regression testing for https://github.com/pytorch/pytorch/issues/149951
         # fmax and fmin are implemented as binary metal shaders and they were implemented
         # with the assumption that both args have the same dtype
         x = torch.rand((3, 3), device=device, dtype=torch.float32)
@@ -12626,6 +12702,12 @@ class TestErrorInputs(TestCase):
 
             with self.assertRaisesRegex(error_type, error_regex):
                 op(*mps_args, **mps_kwargs)
+
+    def test_index_put_out_of_bounds(self, device):
+        x = torch.rand(10, 1, 10, device=device)
+        with self.assertRaises(torch.AcceleratorError):
+            y = x[:, [1]]
+            torch.mps.synchronize()
 
 class TestComplex(TestCase):
     def test_tensor_scalar_binops(self):
