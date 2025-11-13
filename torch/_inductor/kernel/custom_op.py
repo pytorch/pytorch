@@ -356,11 +356,7 @@ def _generate_dynamic_configs(
     default_impl: Callable,
     operation_name: str,
 ) -> list[CustomOpConfig]:
-    """Generate configs dynamically based on input shapes at lowering time.
-
-    Converts IR Buffer nodes to fake tensors and constructs a dict mapping
-    parameter names to fake tensors, then passes it to the user-provided config_generator.
-    """
+    """Generate configs dynamically based on input tensors at lowering time."""
     import inspect
 
     sig = inspect.signature(default_impl)

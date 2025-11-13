@@ -218,12 +218,9 @@ class TestCustomOpAutoTune(TestCase):
 
     def _create_decompose_k_inputs(self, m=256, k=65536, n=1024):
         """Create test inputs for decompose_k matrix multiplication.
-
-        Returns:
-            Tuple of (a, b, bias) where:
-            - a: Input matrix of shape (m, k)
-            - b: Weight matrix of shape (k, n)
-            - bias: Bias vector of shape (n,)
+        Tensor a: Input matrix of shape (m, k)
+        Tensor b: Weight matrix of shape (k, n)
+        Tensor bias: Bias vector of shape (n,)
         """
         # Ensure k is divisible by all k_splits values: [2, 32, 64, 128, 256]
         k = ((k + 255) // 256) * 256  # Round up to nearest multiple of 256
@@ -290,16 +287,13 @@ class TestCustomOpAutoTune(TestCase):
             """Generate k_split configs based on input matrix dimensions."""
             from torch._inductor.utils import get_k_splits
 
-            # Extract matrix dimensions from fake arg tensor shapes
             m, k = fake_tensors["a"].shape[-2:]
             _, n = fake_tensors["b"].shape[-2:]
 
-            # Use get_k_splits to automatically determine optimal k_split candidates
             k_splits_list = get_k_splits(m, n, k)
 
             return [CustomOpConfig(k_splits=k) for k in k_splits_list]
 
-        # Register autotuning with dynamic config generator
         register_custom_op_autotuning(
             matmul_relu_epilogue_dynamic_op,
             config_generator=generate_k_split_configs,
@@ -330,7 +324,6 @@ class TestCustomOpAutoTune(TestCase):
             # Use helper function to create test inputs
             a, b, bias = self._create_decompose_k_inputs(m, k, n)
 
-            # Compile the model using the custom op
             @torch.compile
             def test_model(a, b, bias):
                 return matmul_relu_epilogue_dynamic_op(a, b, bias)
@@ -343,7 +336,6 @@ class TestCustomOpAutoTune(TestCase):
             ):
                 compiled_result = test_model(a, b, bias)
 
-            # Reference implementation
             def reference_model(a, b, bias):
                 matmul_result = a @ b
                 biased = matmul_result + bias
