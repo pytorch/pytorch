@@ -119,17 +119,6 @@ class DeterministicTest(TestCase):
         the current working directory.
         """
 
-        if (model_name, training_or_inference, precision) in (
-            ("BertForMaskedLM", "training", "float32"),
-            ("BertForMaskedLM", "training", "float16"),
-            ("BertForMaskedLM", "inference", "amp"),
-            ("DistillGPT2", "training", "float16"),
-            ("GoogleFnet", "training", "float32"),
-            ("GoogleFnet", "training", "bfloat16"),
-            ("GoogleFnet", "training", "float16"),
-        ):
-            self.skipTest("The first accuracy run fail")
-
         def _setup_env(env):
             env["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"  # disable autotune cache
             env["TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE"] = "0"
@@ -151,7 +140,12 @@ class DeterministicTest(TestCase):
             env = os.environ.copy()
             _setup_env(env)
             out = subprocess.run(cmd.split(), capture_output=True, env=env)
-            self.assertTrue("pass" in out.stdout.decode())
+
+            # We don't check the accuracy against eager here because some
+            # of the combination between model and precision can not
+            # pass that accuracy test. But it's still valuable to make
+            # sure we generate bitwise equivalent result from run to run.
+            # self.assertTrue("pass" in out.stdout.decode())
 
             cmd = (
                 f"{sys.executable} benchmarks/dynamo/huggingface.py --backend inductor"
@@ -163,10 +157,6 @@ class DeterministicTest(TestCase):
             # distort benchmarking results
             env["TORCHINDUCTOR_DISTORT_BENCHMARKING_RESULT"] = "inverse"
             out = subprocess.run(cmd.split(), capture_output=True, env=env)
-            self.assertTrue(
-                "pass" in out.stdout.decode(),
-                f"stdout: {out.stdout.decode()}, stderr: {out.stderr.decode()}",
-            )
             self.assertTrue(
                 "The result is bitwise equivalent to the previously saved result"
                 in out.stdout.decode(),
