@@ -16,6 +16,7 @@ from torch.distributed.tensor import (
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     skip_if_lt_x_gpu,
     with_comms,
@@ -203,34 +204,42 @@ class DistConvolutionOpsTest(DTensorTestBase):
         self.assertTrue(b_dt.grad is not None)
         self.assertTrue(x_dt.grad is None)
 
+    def _run_single_arg_fwd(
+        self, model, arg, placements=None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Given model and arg, runs fwd model local and distbuted given device_mesh"""
+        device_mesh = self.build_device_mesh()
+        model_copy = copy.deepcopy(model).to(device=self.device_type)
+        dist_model = distribute_module(model, device_mesh, _conv_fn)
+        arg_dt = DTensor.from_local(arg, device_mesh, placements)
+        out_dt = dist_model(arg_dt.to(device=self.device_type))
+        out = model_copy(arg_dt.full_tensor())
+        return (out_dt.full_tensor(), out)
+
     @with_comms
     def test_conv1d(self):
-        device_mesh = self.build_device_mesh()
         model = nn.Conv1d(64, 64, 3, padding=1)
-        model_gt = copy.deepcopy(model)
-        x = torch.randn(1, 64, 8)
-        x_dt = DTensor.from_local(x, device_mesh, [Replicate()])
-        model_dt = distribute_module(
-            model, device_mesh, _conv_fn, input_fn=None, output_fn=None
-        )
-        out_dt = model_dt(x_dt)
-        out = model_gt(x)
-        self.assertEqual(out_dt.shape, out.shape)
+        x = torch.randn(1, 64, 8, device=self.device_type)
+        out_dt, out = self._run_single_arg_fwd(model, x)
+        self.assertEqual(out_dt, out)
 
     @with_comms
     def test_conv3d(self):
-        device_mesh = self.build_device_mesh()
         model = nn.Conv3d(64, 64, 3, padding=1)
-        model_gt = copy.deepcopy(model).to(device=self.device_type)
         x = torch.randn(1, 64, 8, 8, 8, device=self.device_type)
-        x_dt = DTensor.from_local(x, device_mesh, [Replicate()])
-        model_dt = distribute_module(
-            model, device_mesh, _conv_fn, input_fn=None, output_fn=None
-        )
-        out_dt = model_dt(x_dt)
-        out = model_gt(x)
-        self.assertEqual(out_dt.shape, out.shape)
+        out_dt, out = self._run_single_arg_fwd(model, x, [Shard(0)])
+        self.assertEqual(out_dt, out)
 
+
+DistConvolutionOpsTestWithLocalTensor = create_local_tensor_test_class(
+    DistConvolutionOpsTest,
+    # Send / recv ops are not supported
+    skipped_tests=[
+        "test_conv_backward_none_grad_inp",
+        "test_depthwise_convolution",
+        "test_downsampling_convolution",
+    ],
+)
 
 if __name__ == "__main__":
     run_tests()

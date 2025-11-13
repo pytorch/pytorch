@@ -481,7 +481,7 @@ class TestFFT(TestCase):
             torch.fft.ifft2,
         ]:
             inp = make_tensor((10, 10), device=device, dtype=dtype)
-            out = torch.fft.fftn(inp, dim=[])
+            out = op(inp, dim=[])
 
             expect_dtype = RESULT_TYPE.get(inp.dtype, inp.dtype)
             expect = inp.to(expect_dtype)
@@ -1315,7 +1315,7 @@ class TestFFT(TestCase):
             istft_kwargs = stft_kwargs.copy()
             del istft_kwargs['pad_mode']
             for sizes in data_sizes:
-                for i in range(num_trials):
+                for _ in range(num_trials):
                     original = torch.randn(*sizes, dtype=dtype, device=device)
                     stft = torch.stft(original, return_complex=True, **stft_kwargs)
                     inversed = torch.istft(stft, length=original.size(1), **istft_kwargs)
@@ -1386,7 +1386,7 @@ class TestFFT(TestCase):
             del stft_kwargs['size']
             istft_kwargs = stft_kwargs.copy()
             del istft_kwargs['pad_mode']
-            for i in range(num_trials):
+            for _ in range(num_trials):
                 original = torch.randn(*sizes, dtype=dtype, device=device)
                 stft = torch.stft(original, return_complex=True, **stft_kwargs)
                 with self.assertWarnsOnceRegex(UserWarning, "The length of signal is shorter than the length parameter."):
@@ -1501,7 +1501,7 @@ class TestFFT(TestCase):
         complex_dtype = corresponding_complex_dtype(dtype)
 
         def _test(data_size, kwargs):
-            for i in range(num_trials):
+            for _ in range(num_trials):
                 tensor1 = torch.randn(data_size, device=device, dtype=complex_dtype)
                 tensor2 = torch.randn(data_size, device=device, dtype=complex_dtype)
                 a, b = torch.rand(2, dtype=dtype, device=device)

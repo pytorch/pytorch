@@ -2520,7 +2520,7 @@ def forward(self, x_1):
                 self.last_args = args
                 return func(*args, **kwargs)
 
-        # Value that could not be intepreted as signed int64
+        # Value that could not be interpreted as signed int64
         uarg = 2**63 + 1
         with DummyMode() as m:
             a = torch.full((3, 3), uarg, dtype=torch.uint64)

@@ -39,6 +39,7 @@ import types
 import unittest
 import warnings
 import weakref
+from collections.abc import Sized
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
@@ -77,7 +78,7 @@ from torch.export.dynamic_shapes import (
     _RelaxedConstraint,
     Constraint,
 )
-from torch.fx import GraphModule
+from torch.fx import GraphModule, traceback as fx_traceback
 from torch.fx.experimental._dynamism import (
     clone_and_convert_to_meta,
     track_dynamism_across_examples,
@@ -394,6 +395,13 @@ class OptimizedModule(torch.nn.Module):
         self.dynamo_ctx = dynamo_ctx
         self._initialize()
         self.training = self._orig_mod.training
+
+    def __len__(self) -> int:
+        # Proxy the len call to the original module
+        if isinstance(self._orig_mod, Sized):
+            return len(self._orig_mod)
+        # Mimic python's default behavior for objects without a length
+        raise TypeError(f"{type(self._orig_mod).__name__} does not support len()")
 
     def _initialize(self) -> None:
         # Do this stuff in constructor to lower overhead slightly
@@ -1126,6 +1134,17 @@ class DisableContext(_TorchDynamoContext):
             try:
                 _maybe_set_eval_frame(_callback_from_stance(self.callback))
                 try:
+                    if torch.compiler.is_exporting():
+                        with fx_traceback.annotate(
+                            {
+                                "_torchdynamo_disable": True,
+                                "_torchdynamo_disable_recursive": True,
+                                "_torchdynamo_disable_method": getattr(
+                                    fn, "__name__", type(fn).__name__
+                                ),
+                            }
+                        ):
+                            return fn(*args, **kwargs)
                     return fn(*args, **kwargs)
                 finally:
                     set_eval_frame(None)
@@ -1146,6 +1165,8 @@ class DisableContext(_TorchDynamoContext):
         # Save the function pointer to find the original callable while nesting
         # of decorators.
         _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+
+        _fn._torchdynamo_disable_recursive = True  # type: ignore[attr-defined]
 
         return _fn
 
@@ -1764,16 +1785,21 @@ def rewrite_signature(
         # Check if function has optional input.
         for name, param in f_sig.parameters.items():
             if param.default is not inspect.Parameter.empty:
-                from torch._dynamo.exc import Unsupported
+                import torch._dynamo.graph_break_hints as graph_break_hints
+                from torch._dynamo.exc import unimplemented
 
                 log.error(
                     "Parameter %s is optional with a default value of %s",
                     name,
                     param.default,
                 )
-                raise Unsupported(
-                    "Tracing through optional input is not supported yet",
-                    case_name="optional_input",
+                unimplemented(
+                    gb_type="rewrite_signature: cannot trace optional function input",
+                    context="",
+                    explanation=f"Parameter {name} is optional with a default value of {param.default}. This is not supported yet.",
+                    hints=[
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
                 )
 
     def produce_matching(
@@ -1784,7 +1810,7 @@ def rewrite_signature(
         for i, val in enumerate(sources):
             dict_of_source_vals[id(val)] = i
 
-        for i, val in enumerate(candidates):
+        for val in candidates:
             if isinstance(val, tuple(common_constant_types)):
                 matched_elements_positions.append(None)
             elif id(val) not in dict_of_source_vals:
@@ -2130,7 +2156,7 @@ def export(
 
             # Error if we have any constraints on static values
 
-            for k in shape_env.var_to_range.keys():
+            for k in shape_env.var_to_range:
                 if isinstance(k, sympy.Integer):
                     constraint_violation_error = ConstraintViolationError(
                         f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"
