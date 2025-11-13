@@ -458,7 +458,6 @@ bool ceil_mode,
 const Tensor& output,
 const Tensor& indices) {
   NoNamesGuard guard;
-  std::cout << "CAME HERE" << std::endl;
 
   TensorArg output_arg{ output, "output", 1 };
   TensorArg indices_arg{ indices, "indices", 2 };
