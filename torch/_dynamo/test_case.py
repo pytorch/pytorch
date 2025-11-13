@@ -60,7 +60,9 @@ def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
                 importlib.import_module(need)
             except ImportError:
                 return
-    run_tests()
+
+    with torch._dynamo.config.patch(nested_graph_breaks=True):
+        run_tests()
 
 
 class TestCase(TorchTestCase):
@@ -122,21 +124,6 @@ class TestCase(TorchTestCase):
         if config.debug_disable_compile_counter:
             return
         return super().assertExpectedInline(*args, **kwargs)
-
-
-# NB: multiple inheritance with LoggingTestCase is possible - this should be fine
-# since there is no overlap in overridden methods.
-class TestCaseWithNestedGraphBreaks(TestCase):
-    def setUp(self) -> None:
-        super().setUp()
-        self.prev_nested_graph_breaks = torch._dynamo.config.nested_graph_breaks
-        # pyrefly: ignore [bad-assignment]
-        torch._dynamo.config.nested_graph_breaks = True
-
-    def tearDown(self) -> None:
-        super().tearDown()
-        # pyrefly: ignore [bad-assignment]
-        torch._dynamo.config.nested_graph_breaks = self.prev_nested_graph_breaks
 
 
 class CPythonTestCase(TestCase):

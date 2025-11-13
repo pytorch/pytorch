@@ -23,7 +23,7 @@ class CustomizedCtxManager:
         pass
 
 
-class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
     def test_single_graph_break(self):
         # NOTE marking f1, f2, f3 as global
         # prevents them from being freevars
