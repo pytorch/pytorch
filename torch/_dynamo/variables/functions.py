@@ -1794,6 +1794,10 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
             )
 
         if self.fn == dist.batch_isend_irecv:
+            from ..distributed_utils import p2p_compile_guard
+
+            p2p_compile_guard()
+
             ops = list()
             peers = list()
             tags = list()
@@ -1821,6 +1825,10 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
             return self.replacement_var.call_function(tx, new_args, new_kwargs)
 
         if self.fn in (dist.isend, dist.irecv):
+            from ..distributed_utils import p2p_compile_guard
+
+            p2p_compile_guard()
+
             return self.replacement_var.call_function(tx, args, kwargs)
 
         if self.fn in (

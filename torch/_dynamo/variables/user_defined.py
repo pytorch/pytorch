@@ -465,6 +465,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         constant_args = check_constant_args(args, kwargs)
 
         if self.value is torch.distributed.P2POp:
+            from ..distributed_utils import p2p_compile_guard
+
+            p2p_compile_guard()
+
             from .distributed import P2POpVariable
 
             return P2POpVariable.create(

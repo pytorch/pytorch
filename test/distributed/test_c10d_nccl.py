@@ -4861,6 +4861,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
     )
     @parametrize("timing_enabled", [True, False])
     def test_batched_send_recv_compiled(self, op_sizes_per_coalesce, timing_enabled):
+        os.environ["TORCHDYNAMO_ENABLE_P2P_COMPILATION"] = "1"
+
         def _pattern(op_sizes_per_coalesce):
             ops = list()
             for input_sizes in op_sizes_per_coalesce:
@@ -4958,7 +4960,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
     def test_compiled_isend_with_wait(self):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-
+        os.environ["TORCHDYNAMO_ENABLE_P2P_COMPILATION"] = "1"
         pg = self._create_process_group_nccl()
         device = torch.device(f"cuda:{self.rank}")
 
@@ -4979,6 +4981,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @skip_if_lt_x_gpu(2)
     @unittest.expectedFailure
     def test_compiled_with_reduce_overhead(self):
+        os.environ["TORCHDYNAMO_ENABLE_P2P_COMPILATION"] = "1"
         pg = self._create_process_group_nccl()
         device = torch.device(f"cuda:{self.rank}")
 
@@ -4992,7 +4995,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
     def test_compiled_paired_isend_irecv_with_waits(self, tensor_size):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-
+        os.environ["TORCHDYNAMO_ENABLE_P2P_COMPILATION"] = "1"
         pg = self._create_process_group_nccl()
         device = torch.device(f"cuda:{self.rank}")
 
@@ -5017,7 +5020,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
     def test_compiled_multiple_isend_with_waits(self, num_tensors):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-
+        os.environ["TORCHDYNAMO_ENABLE_P2P_COMPILATION"] = "1"
         pg = self._create_process_group_nccl()
         device = torch.device(f"cuda:{self.rank}")
 
@@ -5056,7 +5059,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
     def test_compiled_iterative_communication_with_waits(self, num_iterations):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-
+        os.environ["TORCHDYNAMO_ENABLE_P2P_COMPILATION"] = "1"
         pg = self._create_process_group_nccl()
         device = torch.device(f"cuda:{self.rank}")
 
@@ -5074,7 +5077,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
     def test_compiled_isend_irecv_timing_stress_with_waits(self):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-
+        os.environ["TORCHDYNAMO_ENABLE_P2P_COMPILATION"] = "1"
         pg = self._create_process_group_nccl()
         pg._enable_collectives_timing()
         device = torch.device(f"cuda:{self.rank}")
@@ -5098,6 +5101,82 @@ class NCCLTraceTest(NCCLTraceTestBase):
         time.sleep(1)
 
         self.assertTrue(True)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_p2p_interleave(self):
+        os.environ["TORCHDYNAMO_ENABLE_P2P_COMPILATION"] = "1"
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+        pg = self._create_process_group_nccl()
+        torch.cuda.set_device(self.rank)
+        device = self.local_device
+
+        def _kernel(x0, x1, y0, y1):
+            r = dist.get_rank()
+            w = dist.get_world_size()
+            nxt = (r + 1) % w
+            prv = (r - 1) % w
+            work = dist.batch_isend_irecv(
+                [
+                    dist.P2POp(
+                        dist.isend,
+                        x0,
+                        nxt,
+                    ),
+                    dist.P2POp(
+                        dist.irecv,
+                        y0,
+                        prv,
+                    ),
+                ]
+            )
+            t0 = x0 * 2 + 1
+            for ww in work:
+                ww.wait()
+            a = y0 + t0
+            work = dist.batch_isend_irecv(
+                [
+                    dist.P2POp(
+                        dist.isend,
+                        a,
+                        nxt,
+                    ),
+                    dist.P2POp(
+                        dist.irecv,
+                        y1,
+                        prv,
+                    ),
+                ]
+            )
+            t1 = a * 1.000244140625
+            for ww in work:
+                ww.wait()
+            return y1 + t1
+
+        r = self.rank
+        M, N = 1024, 1024
+        x0_e = torch.full((M, N), r + 1, device="cuda", dtype=torch.float32)
+        x1_e = torch.full((M, N), r + 2, device="cuda", dtype=torch.float32)
+        y0_e = torch.zeros_like(x0_e)
+        y1_e = torch.zeros_like(x0_e)
+        out_e = _kernel(x0_e, x1_e, y0_e, y1_e)
+
+        x0_c = x0_e.clone()
+        x1_c = x1_e.clone()
+        y0_c = torch.zeros_like(x0_c)
+        y1_c = torch.zeros_like(x0_c)
+
+        kernel_compiled = torch.compile(_kernel)
+        _ = kernel_compiled(x0_c, x1_c, y0_c, y1_c)
+        y0_c.zero_()
+        y1_c.zero_()
+        out_c = kernel_compiled(x0_c, x1_c, y0_c, y1_c)
+
+        diff = (out_e - out_c).abs()
+        local_max = diff.max()
+        dist.all_reduce(local_max, op=dist.ReduceOp.MAX)
+        self.assertLess(float(local_max.item()), 1e-5)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")

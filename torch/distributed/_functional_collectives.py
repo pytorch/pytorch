@@ -935,7 +935,7 @@ def _irecv_meta(self, *args):
 
 
 def _batch_p2p_ops_meta(op_list, peer_list, tag_list, tensors, group_name):
-    return [torch.empty_like(t) for t in tensors]
+    return list(tensors)
 
 
 def _all_gather_into_tensor_meta(shard, tag, rankset, group_size):
@@ -1318,3 +1318,15 @@ traceable_collective_remaps = {
     legacy_irecv: irecv_inplace,
     legacy_batch_p2p_ops: batch_p2p_ops_inplace,
 }
+
+# We register p2p funcols as side-effect-ful to not break dependencies in inductor.
+from torch._higher_order_ops.effects import (
+    _EffectType,
+    _register_effectful_op,
+)
+
+_register_effectful_op(torch.ops._c10d_functional.isend.default, _EffectType.ORDERED)
+_register_effectful_op(torch.ops._c10d_functional.irecv.default, _EffectType.ORDERED)
+_register_effectful_op(
+    torch.ops._c10d_functional.batch_p2p_ops.default, _EffectType.ORDERED
+)
