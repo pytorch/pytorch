@@ -38,7 +38,7 @@ struct CUDAEvent {
       : device_index_(device_index) {
     CUDAGuard guard(device_index_);
 
-    C10_CUDA_CHECK(cudaIpcOpenEventHandle(&event_, *handle));
+    AT_CUDA_CHECK(cudaIpcOpenEventHandle(&event_, *handle));
     is_created_ = true;
   }
 
@@ -60,11 +60,11 @@ struct CUDAEvent {
   CUDAEvent& operator=(const CUDAEvent&) = delete;
 
   CUDAEvent(CUDAEvent&& other) noexcept {
-    moveHelper(other);
+    moveHelper(std::move(other));
   }
   CUDAEvent& operator=(CUDAEvent&& other) noexcept {
     if (this != &other) {
-      moveHelper(other);
+      moveHelper(std::move(other));
     }
     return *this;
   }
@@ -147,9 +147,9 @@ struct CUDAEvent {
                           external_)
         ? cudaEventRecordExternal
         : cudaEventRecordDefault;
-    C10_CUDA_CHECK(cudaEventRecordWithFlags(event_, stream, flags));
+    AT_CUDA_CHECK(cudaEventRecordWithFlags(event_, stream, flags));
 #else
-    C10_CUDA_CHECK(cudaEventRecord(event_, stream));
+    AT_CUDA_CHECK(cudaEventRecord(event_, stream));
 #endif
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
@@ -174,9 +174,9 @@ struct CUDAEvent {
                             external_)
           ? cudaEventWaitExternal
           : cudaEventWaitDefault;
-      C10_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, flags));
+      AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, flags));
 #else
-      C10_CUDA_CHECK(cudaStreamWaitEvent(stream, event_));
+      AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_));
 #endif
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
@@ -207,7 +207,7 @@ struct CUDAEvent {
     // create a new cuda context, which will consume a lot of memory.
     CUDAGuard guard(device_index_);
     // raise cudaErrorNotReady if either event is recorded but not yet completed
-    C10_CUDA_CHECK(cudaEventElapsedTime(&time_ms, event_, other.event_));
+    AT_CUDA_CHECK(cudaEventElapsedTime(&time_ms, event_, other.event_));
     return time_ms;
   }
 
@@ -219,7 +219,7 @@ struct CUDAEvent {
         (*interp)->trace_gpu_event_synchronization(
             c10::kCUDA, reinterpret_cast<uintptr_t>(event_));
       }
-      C10_CUDA_CHECK(cudaEventSynchronize(event_));
+      AT_CUDA_CHECK(cudaEventSynchronize(event_));
     }
   }
 
@@ -231,7 +231,7 @@ struct CUDAEvent {
       createEvent(getCurrentCUDAStream().device_index());
     }
     CUDAGuard guard(device_index_);
-    C10_CUDA_CHECK(cudaIpcGetEventHandle(handle, event_));
+    AT_CUDA_CHECK(cudaIpcGetEventHandle(handle, event_));
   }
 
  private:
@@ -250,7 +250,7 @@ struct CUDAEvent {
     flags_ &= ~cudaEventExternal;
     device_index_ = device_index;
     CUDAGuard guard(device_index_);
-    C10_CUDA_CHECK(cudaEventCreateWithFlags(&event_, flags_));
+    AT_CUDA_CHECK(cudaEventCreateWithFlags(&event_, flags_));
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_creation(
@@ -259,12 +259,19 @@ struct CUDAEvent {
     is_created_ = true;
   }
 
-  void moveHelper(CUDAEvent& other) {
-    std::swap(flags_, other.flags_);
-    std::swap(is_created_, other.is_created_);
-    std::swap(was_recorded_, other.was_recorded_);
-    std::swap(device_index_, other.device_index_);
-    std::swap(event_, other.event_);
+  void moveHelper(CUDAEvent&& other) {
+    // Transfer ownership of all state from other to this
+    flags_ = other.flags_;
+    is_created_ = other.is_created_;
+    was_recorded_ = other.was_recorded_;
+    external_ = other.external_;
+    device_index_ = other.device_index_;
+    event_ = other.event_;
+
+    // Reset other to a valid empty state to prevent double-free
+    // The moved-from object must not attempt to destroy the event
+    other.is_created_ = false;
+    other.event_ = cudaEvent_t{};
   }
 };
 
