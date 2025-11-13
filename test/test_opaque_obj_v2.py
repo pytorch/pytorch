@@ -13,7 +13,7 @@ from torch._functorch.aot_autograd import (
 )
 from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import register_opaque_type
+from torch._library.opaque_object import get_opaque_type_name, register_opaque_type
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -63,9 +63,15 @@ class Counter:
         self.counter += 1
 
 
-register_opaque_type(OpaqueQueue, "_TestOpaqueObject_OpaqueQueue")
-register_opaque_type(RNGState, "_TestOpaqueObject_RNGState")
-register_opaque_type(Counter, "_TestOpaqueObject_Counter")
+class Moodule(torch.nn.Module):
+    def forward(self, x, y):
+        return x * y
+
+
+register_opaque_type(OpaqueQueue)
+register_opaque_type(RNGState)
+register_opaque_type(Counter)
+register_opaque_type(Moodule)
 
 
 class TestOpaqueObject(TestCase):
@@ -74,7 +80,7 @@ class TestOpaqueObject(TestCase):
 
         torch.library.define(
             "_TestOpaqueObject::queue_push",
-            "(_TestOpaqueObject_OpaqueQueue a, Tensor b) -> ()",
+            f"({get_opaque_type_name(OpaqueQueue)} a, Tensor b) -> ()",
             tags=torch.Tag.pt2_compliant_tag,
             lib=self.lib,
         )
@@ -91,7 +97,7 @@ class TestOpaqueObject(TestCase):
             pass
 
         self.lib.define(
-            "queue_pop(_TestOpaqueObject_OpaqueQueue a) -> Tensor",
+            f"queue_pop({get_opaque_type_name(OpaqueQueue)} a) -> Tensor",
         )
 
         def pop_impl(queue: OpaqueQueue) -> torch.Tensor:
@@ -126,7 +132,7 @@ class TestOpaqueObject(TestCase):
 
         torch.library.define(
             "_TestOpaqueObject::noisy_inject",
-            "(Tensor x, _TestOpaqueObject_RNGState obj) -> Tensor",
+            f"(Tensor x, {get_opaque_type_name(RNGState)} obj) -> Tensor",
             tags=torch.Tag.pt2_compliant_tag,
             lib=self.lib,
         )
@@ -227,7 +233,7 @@ def forward(self, arg0_1, arg1_1):
     def test_bad_fake(self, make_fx_tracing_mode):
         torch.library.define(
             "_TestOpaqueObject::bad_fake",
-            "(Tensor x, _TestOpaqueObject_RNGState obj) -> Tensor",
+            f"(Tensor x, {get_opaque_type_name(RNGState)} obj) -> Tensor",
             tags=torch.Tag.pt2_compliant_tag,
             lib=self.lib,
         )
@@ -430,15 +436,9 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             torch.compile(bar)(counter, torch.ones(2, 3))
 
     def test_export_joint(self):
-        class Moo(torch.nn.Module):
-            def forward(self, x, y):
-                return x * y
-
-        register_opaque_type(Moo, "_TestOpaqueObject_Moo")
-
         torch.library.define(
             "_TestOpaqueObject::module_mul",
-            "(_TestOpaqueObject_Moo a, Tensor b, SymInt c) -> Tensor",
+            f"({get_opaque_type_name(Moodule)} a, Tensor b, SymInt c) -> Tensor",
             tags=torch.Tag.pt2_compliant_tag,
             lib=self.lib,
         )
@@ -446,12 +446,12 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         @torch.library.impl(
             "_TestOpaqueObject::module_mul", "CompositeExplicitAutograd", lib=self.lib
         )
-        def module_mul_impl(m: Moo, a: torch.Tensor, b: int) -> torch.Tensor:
-            assert isinstance(m, Moo)
+        def module_mul_impl(m: Moodule, a: torch.Tensor, b: int) -> torch.Tensor:
+            assert isinstance(m, Moodule)
             return m(a, b)
 
         @torch.library.register_fake("_TestOpaqueObject::module_mul", lib=self.lib)
-        def module_mul_fake(m: Moo, a: torch.Tensor, b: int) -> torch.Tensor:
+        def module_mul_fake(m: Moodule, a: torch.Tensor, b: int) -> torch.Tensor:
             return torch.empty_like(a)
 
         def module_mul_setup_context(ctx, inputs, output):
@@ -471,7 +471,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.moo = Moo()
+                self.moo = Moodule()
 
             def forward(self, x, y):
                 b = y.item()
