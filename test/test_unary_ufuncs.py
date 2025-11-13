@@ -1887,9 +1887,9 @@ class TestUnaryUfuncs(TestCase):
                 # Ensure we are notified when NumPy changes its behavior
                 self.compare_with_numpy(torch.exp, np.exp, nan_real_inf_imag_in)
 
-
     # test for issue #161871 where mvlgamma_ should handle integer input gracefully
     # with a clear error message on all architectures (not crash with FPE on x86)
+
     @onlyNativeDeviceTypes
     @dtypes(torch.int32, torch.int64)
     def test_mvlgamma_inplace_integer_error(self, device, dtype):
