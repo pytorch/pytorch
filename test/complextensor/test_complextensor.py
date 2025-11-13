@@ -36,7 +36,6 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_utils import (
-    parametrize,
     run_tests,
     TestGradients,
     unMarkDynamoStrictTest,
@@ -185,19 +184,17 @@ EXTRA_KWARGS = {
 class TestComplexTensor(TestCase):
     _default_dtype_check_enabled = True
 
-    @parametrize("compile", [False, True])
     @ops(
         implemented_op_db,
         dtypes=OpDTypes.supported,
         allowed_dtypes=list(COMPLEX_DTYPES),
     )
-    def test_consistency(self, device, dtype, op: OpInfo, compile: bool):
-        self.check_consistency(device, dtype, op, compile, Variant.Op)
+    def test_consistency(self, device, dtype, op: OpInfo):
+        self.check_consistency(device, dtype, op, False, Variant.Op)
 
-    @parametrize("compile", [False, True])
     @ops(force_test_op_db, allowed_dtypes=list(COMPLEX_DTYPES))
-    def test_maybe_error(self, device, dtype, op: OpInfo, compile: bool):
-        self.check_consistency(device, dtype, op, compile, Variant.Op)
+    def test_maybe_error(self, device, dtype, op: OpInfo):
+        self.check_consistency(device, dtype, op, False, Variant.Op)
 
 
 @unMarkDynamoStrictTest

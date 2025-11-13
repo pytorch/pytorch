@@ -20,7 +20,7 @@ class ComplexTensor(Tensor):
 
     def __new__(cls, real: Tensor, imag: Tensor) -> Self:
         """Initialize a ComplexTensor from its real and imaginary parts."""
-        from .ops.common import REAL_TO_COMPLEX
+        from ._ops.common import REAL_TO_COMPLEX
 
         shape = real.shape
         device = real.device
@@ -105,7 +105,7 @@ class ComplexTensor(Tensor):
         args: tuple = (),
         kwargs: dict | None = None,
     ):
-        from .ops.common import DEBUG_SET, lookup_complex
+        from ._ops.common import DEBUG_SET, lookup_complex
 
         kwargs = {} if kwargs is None else kwargs
 
@@ -124,7 +124,7 @@ class ComplexTensor(Tensor):
         ):
             from torch.utils._pytree import tree_flatten, tree_map
 
-            from .ops.common import _as_interleaved
+            from ._ops.common import _as_interleaved
 
             args_ref, kwargs_ref = tree_map(_as_interleaved, (args, kwargs))
             ret_ref = func(*args_ref, **kwargs_ref)

@@ -174,9 +174,6 @@ class TestCase(PytorchTestCase):
             self.assertSameResult(expected, actual, ignore_exc_types=compile, **kwargs)
 
 
-torch._dynamo.config.recompile_limit = float("inf")
-torch._dynamo.config.accumulated_recompile_limit = float("inf")
-
 aten = torch.ops.aten
 
 complex_op_db = tuple(
