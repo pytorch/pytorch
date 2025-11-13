@@ -4862,6 +4862,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     "orig_graphmodule"
                 ] = weakref.ref(module)
 
+        assert not isinstance(func, SkipFunctionVariable)
         tracer: InliningInstructionTranslator
         if is_generator(code):
             tracer = InliningGeneratorInstructionTranslator(
@@ -4874,8 +4875,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 func,
             )
         else:
-            # need the line below to make MyPy happy
-            assert not isinstance(func, LocalGeneratorObjectVariable)
             tracer = InliningInstructionTranslator(
                 parent,
                 code,
@@ -4883,7 +4882,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 parent.symbolic_globals,
                 parent.symbolic_torch_function_state,
                 parent.symbolic_stream_state,
-                # pyrefly: ignore [bad-argument-type]
                 func,
             )
         return tracer
@@ -4967,9 +4965,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
         symbolic_stream_state: SymbolicStreamState,
-        funcvar: BaseUserFunctionVariable,
+        funcvar: BaseUserFunctionVariable | LocalGeneratorObjectVariable,
     ) -> None:
-        f_globals = funcvar.get_globals()  # type: ignore[attr-defined]
+        f_globals = funcvar.get_globals()
         f_builtins = f_globals["__builtins__"]
         if not isinstance(f_builtins, dict):
             f_builtins = f_builtins.__dict__

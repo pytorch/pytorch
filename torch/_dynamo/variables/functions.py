@@ -365,6 +365,9 @@ class BaseUserFunctionVariable(VariableTracker):
     def get_name(self) -> str:
         return self.get_code().co_name  # type: ignore[attr-defined]
 
+    def get_globals(self):
+        raise NotImplementedError
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -384,9 +387,6 @@ class BaseUserFunctionVariable(VariableTracker):
             if name == "__name__" and isinstance(self, NestedUserFunctionVariable):
                 result = True
         return variables.ConstantVariable.create(result)
-
-    def inspect_parameter_names(self) -> list[str]:
-        return list(inspect.signature(self.get_function()).parameters)  # type: ignore[attr-defined]
 
     def closure_vars(self, tx: "InstructionTranslator") -> dict[str, VariableTracker]:
         return {}
@@ -1044,6 +1044,9 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
             return getattr(self, name)
         return getattr(self.vt, name)
 
+    def get_globals(self) -> dict[str, Any]:
+        return self.vt.get_globals()  # type: ignore[attr-defined]
+
     def _build_inline_tracer(
         self,
         tx: "InstructionTranslatorBase",
@@ -1222,9 +1225,6 @@ class UserMethodVariable(UserFunctionVariable):
             fn = getattr(self.obj.value, self.fn.__name__)  # type: ignore[attr-defined]
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
         return super().call_function(tx, args, kwargs)
-
-    def inspect_parameter_names(self) -> list[str]:
-        return super().inspect_parameter_names()[1:]
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "__self__":
