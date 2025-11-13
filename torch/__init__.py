@@ -321,32 +321,32 @@ def _preload_cuda_lib(lib_folder: str, lib_name: str, required: bool = True) -> 
 
 
 def _preload_cuda_deps(err: _Optional[OSError] = None) -> None:
-    cuda_libs: dict[str, str] = {
-        "cublas": "libcublas.so.*[0-9]",
-        "cudnn": "libcudnn.so.*[0-9]",
-        "cuda_nvrtc": "libnvrtc.so.*[0-9]",
-        "cuda_runtime": "libcudart.so.*[0-9]",
-        "cuda_cupti": "libcupti.so.*[0-9]",
-        "cufft": "libcufft.so.*[0-9]",
-        "curand": "libcurand.so.*[0-9]",
-        "nvjitlink": "libnvJitLink.so.*[0-9]",
-        "cusparse": "libcusparse.so.*[0-9]",
-        "cusparselt": "libcusparseLt.so.*[0-9]",
-        "cusolver": "libcusolver.so.*[0-9]",
-        "nccl": "libnccl.so.*[0-9]",
-        "nvshmem": "libnvshmem_host.so.*[0-9]",
-        "cufile": "libcufile.so.*[0-9]",
-    }
-
+    cuda_libs: list[tuple[str, str]] = [
+        ("cublas", "libcublas.so.*[0-9]"),
+        ("cudnn", "libcudnn.so.*[0-9]"),
+        ("cuda_nvrtc", "libnvrtc.so.*[0-9]"),
+        ("cuda_nvrtc", "libnvrtc-builtins.so.*[0-9]"),
+        ("cuda_runtime", "libcudart.so.*[0-9]"),
+        ("cuda_cupti", "libcupti.so.*[0-9]"),
+        ("cufft", "libcufft.so.*[0-9]"),
+        ("curand", "libcurand.so.*[0-9]"),
+        ("nvjitlink", "libnvJitLink.so.*[0-9]"),
+        ("cusparse", "libcusparse.so.*[0-9]"),
+        ("cusparselt", "libcusparseLt.so.*[0-9]"),
+        ("cusolver", "libcusolver.so.*[0-9]"),
+        ("nccl", "libnccl.so.*[0-9]"),
+        ("nvshmem", "libnvshmem_host.so.*[0-9]"),
+        ("cufile", "libcufile.so.*[0-9]"),
+    ]
     # If error is passed, re-raise it if it's not about one of the abovementioned
     # libraries
     if err is not None and [
-        lib for lib in cuda_libs.values() if lib.split(".", 1)[0] in err.args[0]
+        lib for _, lib in cuda_libs if lib.split(".", 1)[0] in err.args[0]
     ]:
         raise err
 
     # Otherwise, try to preload dependencies from site-packages
-    for lib_folder, lib_name in cuda_libs.items():
+    for lib_folder, lib_name in cuda_libs:
         _preload_cuda_lib(lib_folder, lib_name)
 
     # libnvToolsExt is Optional Dependency
@@ -2439,6 +2439,35 @@ class _TorchCompileInductorWrapper:
                 reset_cudagraph_trees()
 
 
+class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
+    compiler_name = "aotinductor"
+
+    def __init__(self, mode, options, dynamic):
+        super().__init__(mode, options, dynamic)
+        self.apply_options({"cpp_wrapper": True})
+        self.apply_options({"aot_inductor.package": True})
+
+    def __call__(self, model_, inputs_):
+        from contextlib import nullcontext
+        from unittest import mock
+
+        from torch._guards import detect_fake_mode
+        from torch._inductor.virtualized import V
+
+        fake_mode = detect_fake_mode(inputs_)
+        ctx = (
+            mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
+            if fake_mode
+            else nullcontext()
+        )
+        with (
+            V.set_aot_compilation(True),
+            ctx,
+            torch._inductor.config.patch("enable_autograd_for_aot", True),
+        ):
+            return super().__call__(model_, inputs_)
+
+
 class _TorchCompileWrapper:
     def __init__(self, backend, mode, options, dynamic):
         from torch._dynamo.backends.registry import lookup_backend
@@ -2672,8 +2701,10 @@ def compile(
             backend = bisect_backend
 
     guard_filter_fn = None
+    use_aoti = False
     if options and isinstance(options, dict):
         guard_filter_fn = options.pop("guard_filter_fn", None)
+        use_aoti = options.pop("use_aoti", False)
 
     if torch.compiler.is_exporting():
         warnings.warn(
@@ -2700,7 +2731,10 @@ def compile(
         return export_wrapped_fn
 
     if backend == "inductor":
-        backend = _TorchCompileInductorWrapper(mode, options, dynamic)
+        if use_aoti:
+            backend = _TorchCompileAOTInductorWrapper(mode, options, dynamic)
+        else:
+            backend = _TorchCompileInductorWrapper(mode, options, dynamic)
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic)
 

@@ -213,15 +213,23 @@ LINTRUNNER_CACHE_INFO = (
 )
 
 
+LINTRUNNER_BASE_CMD = [
+    "uvx",
+    "--python",
+    "3.10",
+    "lintrunner@0.12.7",
+]
+
+
 @click.command()
 def setup_lint():
     """Set up lintrunner with current CI version."""
-    cmd = ["uvx", "--python", "3.10", "lintrunner@0.12.7", "init"]
+    cmd = LINTRUNNER_BASE_CMD + ["init"]
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
 def _check_linters():
-    cmd = ["uvx", "lintrunner", "list"]
+    cmd = LINTRUNNER_BASE_CMD + ["list"]
     ret = spin.util.run(cmd, output=False, stderr=subprocess.PIPE)
     linters = {l.strip() for l in ret.stdout.decode().strip().split("\n")[1:]}
     unknown_linters = linters - ALL_LINTERS
@@ -282,17 +290,13 @@ def lint(ctx, **kwargs):
     ctx.invoke(lazy_setup_lint)
     all_files_linters = VERY_FAST_LINTERS | FAST_LINTERS
     changed_files_linters = SLOW_LINTERS
-    all_files_cmd = [
-        "uvx",
-        "lintrunner",
+    all_files_cmd = LINTRUNNER_BASE_CMD + [
         "--take",
         ",".join(all_files_linters),
         "--all-files",
     ]
     spin.util.run(all_files_cmd)
-    changed_files_cmd = [
-        "uvx",
-        "lintrunner",
+    changed_files_cmd = LINTRUNNER_BASE_CMD + [
         "--take",
         ",".join(changed_files_linters),
     ]
@@ -304,7 +308,7 @@ def lint(ctx, **kwargs):
 def quicklint(ctx, **kwargs):
     """Lint changed files."""
     ctx.invoke(lazy_setup_lint)
-    cmd = ["uvx", "lintrunner"]
+    cmd = LINTRUNNER_BASE_CMD
     spin.util.run(cmd)
 
 
@@ -313,7 +317,7 @@ def quicklint(ctx, **kwargs):
 def quickfix(ctx, **kwargs):
     """Autofix changed files."""
     ctx.invoke(lazy_setup_lint)
-    cmd = ["uvx", "lintrunner", "--apply-patches"]
+    cmd = LINTRUNNER_BASE_CMD + ["--apply-patches"]
     spin.util.run(cmd)
 
 
