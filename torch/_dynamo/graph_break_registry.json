@@ -3657,5 +3657,15 @@
       "Explanation": "Encountered triton kernel unsupported feature: {msg}",
       "Hints": []
     }
+  ],
+  "GB0362": [
+    {
+      "Gb_type": "Attempted to access attributes/methods on an OpaqueObject",
+      "Context": "value={self.value}, attr={name}",
+      "Explanation": "Attribute/method access of OpaqueObjects is not supported.",
+      "Hints": [
+        "Use custom operators instead of direct attribute/method access."
+      ]
+    }
   ]
 }
