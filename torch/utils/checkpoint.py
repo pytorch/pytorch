@@ -1300,6 +1300,10 @@ SAC_IGNORED_OPS = {
 
 
 class _CachingTorchDispatchMode(TorchDispatchMode):
+    @classmethod
+    def ignore_compile_internals(cls):
+        return True
+
     # Used together with _CachedTorchDispatchMode to implement SAC.
     def __init__(self, policy_fn, storage):
         self.policy_fn = policy_fn
@@ -1336,6 +1340,10 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         return out
 
 class _CachedTorchDispatchMode(TorchDispatchMode):
+    @classmethod
+    def ignore_compile_internals(cls):
+        return True
+
     # Used together with _CachedTorchDispatchMode to implement SAC.
     def __init__(self, policy_fn, storage, allow_cache_entry_mutation):
         self.policy_fn = policy_fn
