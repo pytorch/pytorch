@@ -13,6 +13,7 @@ import os
 import re
 import sys
 import textwrap
+import threading
 import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
@@ -73,7 +74,8 @@ from .exc import CUDACompileError
 from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
-from .runtime.benchmarking import benchmarker
+from .runtime.benchmarking import benchmarker, _lock_gpu
+from .runtime.caching import FileLockTimeoutError
 from .runtime.hints import DeviceProperties
 from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
@@ -92,7 +94,7 @@ from .utils import (
     triton_type_to_torch,
     unique,
 )
-from .virtualized import V
+from .virtualized import threadlocal, V
 
 
 log = logging.getLogger(__name__)
@@ -2785,7 +2787,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                 return benchmark_results
 
-        if config.autotune_in_subproc:
+        if config.autotune_in_subproc or config.async_autotuning:
             # Initialize the suprocess pool so it will warmup early.
             torch._inductor.autotune_process.get_tuning_process_pool()
 
@@ -2917,17 +2919,51 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
+            # priority event to single to the future that it can obtain priority
+            pevent: threading.Event = threading.Event()
 
-            def get_timings(hint_override: Optional[int] = None):
+            def get_timings(
+                hint_override: Optional[int] = None,
+                graph=None,
+                debug=None,
+            ):
+                # both graph and debug are virtualized and stored in threadlocal memory
+                # so we may need to copy these over if this method is running in a new thread
+                if graph:
+                    setattr(threadlocal, "__torchinductor_graph", graph)
+                if debug:
+                    setattr(threadlocal, "__torchinductor_debug", debug)
                 filtered_choices = [
                     c
                     for c in choices
                     if not hasattr(c, "hint_override")
                     or c.hint_override == hint_override
                 ]
-                timings = do_autotuning(
-                    filtered_choices, precompile_fn, hint_override=hint_override
-                )
+                while True:
+                    try:
+                        # we'll try to obtain the lock ahead of time for the entire autotuning
+                        # block; we know we have priority if pevent has been signaled
+                        with (
+                            _lock_gpu(timeout=1.0, priority=pevent.is_set()),
+                            config.patch(autotune_in_subproc=True),
+                        ):
+                            # signal to the thread that we've obtained the lock and subsequent
+                            # locking calls can be safely ignored; this is also passed to subproc
+                            # autotuning, which is safe considering in-process and subproc autotuning
+                            # are triggered sequentially and as such they will never overlap
+                            setattr(threadlocal, "__torchinductor_bypass_gpu_lock", True)
+                            timings = do_autotuning(
+                                filtered_choices, precompile_fn, hint_override=hint_override
+                            )
+                        # avoid unsetting the lock bypass until we've released the lock,
+                        # otherwise it is possible to enter a deadlock situation
+                        setattr(threadlocal, "__torchinductor_bypass_gpu_lock", False)
+                        # we can now fully exit the autotuning block
+                        break
+                    except FileLockTimeoutError:
+                        # we couldn't acquire the lock in time, we'll try again later
+                        continue
+
                 min_extern_choice = float("inf")
                 for choice, timing in timings.items():
                     if isinstance(choice, ExternKernelCaller):
@@ -2943,6 +2979,39 @@ class AlgorithmSelectorCache(PersistentCache):
                 }
 
                 return timings
+            
+            if config.async_autotuning:
+                # we only need a single thread, since we'll only be submitting one future
+                executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=1)
+                # we need to pass graph and debug info to the new thread as well
+                get_timings_future = executor.submit(
+                    get_timings,
+                    graph=getattr(threadlocal, "__torchinductor_graph"),
+                    debug=getattr(threadlocal, "__torchinductor_debug"),
+                )
+
+                def async_get_timings(hint_override: Optional[int] = None):
+                    try:
+                        # signal that this thread now has priority
+                        pevent.set()
+                        if hint_override:
+                            # we only trigger get_timings async for
+                            # hint_override=None, the default case,
+                            # if another option is passed we need to
+                            # call synchronously
+                            timings = get_timings(hint_override)
+                        else:
+                            # the default case, for which we've already
+                            # triggered the autotuning to occur async
+                            timings = get_timings_future.result()
+                            # and we know that we can now cleanup the executor
+                            executor.shutdown()
+                        return timings
+                    finally:
+                        # this thread no longer needs priority
+                        pevent.clear()
+            else:
+                async_get_timings = get_timings
 
             # We take the union of allowed prologue inputs from all choices,
             # and, within benchmark fusion, don't allow prologue fusion for
@@ -2956,7 +3025,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 torch._inductor.ir.MultiTemplateBuffer(
                     layout,
                     input_nodes,
-                    get_timings,
+                    async_get_timings,
                     choices,
                     allowed_prologue_inps,
                 )
