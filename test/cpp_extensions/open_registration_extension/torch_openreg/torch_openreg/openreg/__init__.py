@@ -45,6 +45,8 @@ def current_device():
 def set_device(device) -> None:
     if device >= 0:
         torch_openreg._C._set_device(device)
+
+
 # LITERALINCLUDE END: PYTHON SET DEVICE FUNCTION
 
 
