@@ -147,7 +147,7 @@ __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
         has_invalid_index = has_invalid_index || (input_idx < 0 || input_idx >= numRows);
       }
       CUDA_KERNEL_ASSERT(!has_invalid_index && "Invalid input index in EmbeddingBag: index out of range [0, numRows)");
-      
+
       for (int64_t emb = begin; emb < end; emb++) {
         index_t input_idx = input[emb];
         bool pad = (input_idx == padding_idx);
