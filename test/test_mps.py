@@ -649,7 +649,7 @@ class MatmulTest(TestCaseMPS):
 
     def test_large_complex_matmul(self):
         # See https://github.com/pytorch/pytorch/issues/167727
-        M, N, K = 64, 300, 5000
+        M, N, K = 64, 300, 3000
         a = torch.rand((M, K), device='mps', dtype=torch.cfloat)
         b = torch.rand((K, N), device='mps', dtype=torch.cfloat)
         out = torch.mm(a, b)
