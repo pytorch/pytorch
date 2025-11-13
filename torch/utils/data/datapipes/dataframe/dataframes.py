@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Optional
+from typing import Any, NoReturn
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.dataframe.structures import DataChunkDF
@@ -33,7 +33,7 @@ __all__ = [
 ]
 
 
-def disable_capture():
+def disable_capture() -> None:
     CaptureControl.disabled = True
 
 
@@ -42,7 +42,7 @@ class CaptureControl:
 
 
 class DataFrameTracedOps(DFIterDataPipe):
-    def __init__(self, source_datapipe, output_var):
+    def __init__(self, source_datapipe, output_var) -> None:
         self.source_datapipe = source_datapipe
         self.output_var = output_var
 
@@ -72,15 +72,15 @@ UNIMPLEMENTED_ATTR = ["__deepcopy__", "__setstate__", "is_shardable", "apply_sha
 class Capture:
     # TODO: All operations are shared across entire InitialCapture, need to figure out what if we join two captures
 
-    def __init__(self, schema_df=None):
+    def __init__(self, schema_df=None) -> None:
         self.ctx = {"operations": [], "variables": [], "schema_df": schema_df}
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self._ops_str()
 
     def _ops_str(self):
         res = ""
-        # pyrefly: ignore  # not-iterable
+        # pyrefly: ignore [not-iterable]
         for op in self.ctx["operations"]:
             if len(res) > 0:
                 res += "\n"
@@ -90,7 +90,7 @@ class Capture:
     def __getstate__(self):
         # TODO(VitalyFedyunin): Currently can't pickle (why?)
         self.ctx["schema_df"] = None
-        # pyrefly: ignore  # not-iterable
+        # pyrefly: ignore [not-iterable]
         for var in self.ctx["variables"]:
             var.calculated_value = None
         state = {}
@@ -113,14 +113,14 @@ class Capture:
     def __getitem__(self, key):
         return CaptureGetItem(self, key, ctx=self.ctx)
 
-    def __setitem__(self, key, value):
-        # pyrefly: ignore  # missing-attribute
+    def __setitem__(self, key, value) -> None:
+        # pyrefly: ignore [missing-attribute]
         self.ctx["operations"].append(CaptureSetItem(self, key, value, ctx=self.ctx))
 
     def __add__(self, add_val):
         res = CaptureAdd(self, add_val, ctx=self.ctx)
         var = CaptureVariable(res, ctx=self.ctx)
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         self.ctx["operations"].append(
             CaptureVariableAssign(variable=var, value=res, ctx=self.ctx)
         )
@@ -129,7 +129,7 @@ class Capture:
     def __sub__(self, add_val):
         res = CaptureSub(self, add_val, ctx=self.ctx)
         var = CaptureVariable(res, ctx=self.ctx)
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         self.ctx["operations"].append(
             CaptureVariableAssign(variable=var, value=res, ctx=self.ctx)
         )
@@ -139,19 +139,19 @@ class Capture:
         res = CaptureMul(self, add_val, ctx=self.ctx)
         var = CaptureVariable(res, ctx=self.ctx)
         t = CaptureVariableAssign(variable=var, value=res, ctx=self.ctx)
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         self.ctx["operations"].append(t)
         return var
 
     def _is_context_empty(self):
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         return len(self.ctx["operations"]) == 0 and len(self.ctx["variables"]) == 0
 
-    def apply_ops_2(self, dataframe):
+    def apply_ops_2(self, dataframe) -> None:
         # TODO(VitalyFedyunin): Make this calculation thread safe (as currently it updates pointer)
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         self.ctx["variables"][0].calculated_value = dataframe
-        # pyrefly: ignore  # not-iterable
+        # pyrefly: ignore [not-iterable]
         for op in self.ctx["operations"]:
             op.execute()
 
@@ -184,13 +184,13 @@ class Capture:
         res = CaptureCall(self, ctx=self.ctx, args=args, kwargs=kwargs)
         var = CaptureVariable(None, ctx=self.ctx)
         t = CaptureVariableAssign(ctx=self.ctx, variable=var, value=res)
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         self.ctx["operations"].append(t)
         return var
 
 
 class CaptureF(Capture):
-    def __init__(self, ctx=None, **kwargs):
+    def __init__(self, ctx=None, **kwargs) -> None:
         if ctx is None:
             self.ctx = {"operations": [], "variables": []}
         else:
@@ -199,7 +199,7 @@ class CaptureF(Capture):
 
 
 class CaptureA(CaptureF):
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.kwargs['name']}"
 
     def execute(self):
@@ -208,7 +208,7 @@ class CaptureA(CaptureF):
 
 
 class CaptureLikeMock:
-    def __init__(self, name):
+    def __init__(self, name) -> None:
         import unittest.mock as mock
 
         # TODO(VitalyFedyunin): Do not use private function here, copy own implementation instead.
@@ -227,7 +227,7 @@ class CaptureLikeMock:
 
 
 class CaptureCall(Capture):
-    def __init__(self, callable, ctx=None, **kwargs):
+    def __init__(self, callable, ctx=None, **kwargs) -> None:
         if ctx is None:
             self.ctx = {"operations": [], "variables": []}
         else:
@@ -235,7 +235,7 @@ class CaptureCall(Capture):
         self.kwargs = kwargs
         self.callable = callable
 
-    def __str__(self):
+    def __str__(self) -> str:
         return "{callable}({args},{kwargs})".format(
             callable=self.callable, **self.kwargs
         )
@@ -253,12 +253,12 @@ class CaptureCall(Capture):
 
 
 class CaptureVariableAssign(CaptureF):
-    def __str__(self):
+    def __str__(self) -> str:
         variable = self.kwargs["variable"]
         value = self.kwargs["value"]
         return f"{variable} = {value}"
 
-    def execute(self):
+    def execute(self) -> None:
         self.kwargs["variable"].calculated_value = self.kwargs["value"].execute()
 
 
@@ -266,7 +266,7 @@ class CaptureVariable(Capture):
     # TODO(VitalyFedyunin): This should be atomic and thread safe
     names_idx = 0
 
-    def __init__(self, value, ctx):
+    def __init__(self, value, ctx) -> None:
         if CaptureControl.disabled:
             raise RuntimeError("Attempting to create capture variable with capture off")
         self.ctx = ctx
@@ -275,7 +275,7 @@ class CaptureVariable(Capture):
         CaptureVariable.names_idx += 1
         self.ctx["variables"].append(self)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
     def execute(self):
@@ -283,21 +283,21 @@ class CaptureVariable(Capture):
 
     def apply_ops(self, dataframe):
         # TODO(VitalyFedyunin): Make this calculation thread safe (as currently it updates pointer)
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         self.ctx["variables"][0].calculated_value = dataframe
-        # pyrefly: ignore  # not-iterable
+        # pyrefly: ignore [not-iterable]
         for op in self.ctx["operations"]:
             op.execute()
         return self.calculated_value
 
 
 class CaptureGetItem(Capture):
-    def __init__(self, left, key, ctx):
+    def __init__(self, left, key, ctx) -> None:
         self.ctx = ctx
         self.left = left
         self.key = key
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.left}[{get_val(self.key)}]"
 
     def execute(self):
@@ -306,28 +306,28 @@ class CaptureGetItem(Capture):
 
 
 class CaptureSetItem(Capture):
-    def __init__(self, left, key, value, ctx):
+    def __init__(self, left, key, value, ctx) -> None:
         self.ctx = ctx
         self.left = left
         self.key = key
         self.value = value
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.left}[{get_val(self.key)}] = {self.value}"
 
-    def execute(self):
+    def execute(self) -> None:
         left = self.left.execute()
         value = self.value.execute()
         left[self.key] = value
 
 
 class CaptureAdd(Capture):
-    def __init__(self, left, right, ctx):
+    def __init__(self, left, right, ctx) -> None:
         self.ctx = ctx
         self.left = left
         self.right = right
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.left} + {self.right}"
 
     def execute(self):
@@ -335,12 +335,12 @@ class CaptureAdd(Capture):
 
 
 class CaptureMul(Capture):
-    def __init__(self, left, right, ctx):
+    def __init__(self, left, right, ctx) -> None:
         self.ctx = ctx
         self.left = left
         self.right = right
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.left} * {self.right}"
 
     def execute(self):
@@ -348,12 +348,12 @@ class CaptureMul(Capture):
 
 
 class CaptureSub(Capture):
-    def __init__(self, left, right, ctx):
+    def __init__(self, left, right, ctx) -> None:
         self.ctx = ctx
         self.left = left
         self.right = right
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.left} - {self.right}"
 
     def execute(self):
@@ -361,12 +361,12 @@ class CaptureSub(Capture):
 
 
 class CaptureGetAttr(Capture):
-    def __init__(self, src, name, ctx):
+    def __init__(self, src, name, ctx) -> None:
         self.ctx = ctx
         self.src = src
         self.name = name
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.src}.{self.name}"
 
     def execute(self):
@@ -384,8 +384,8 @@ def get_val(capture):
 
 
 class CaptureInitial(CaptureVariable):
-    def __init__(self, schema_df=None):
-        # pyrefly: ignore  # bad-assignment
+    def __init__(self, schema_df=None) -> None:
+        # pyrefly: ignore [bad-assignment]
         new_ctx: dict[str, list[Any]] = {
             "operations": [],
             "variables": [],
@@ -401,7 +401,7 @@ class CaptureDataFrame(CaptureInitial):
 
 class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
     def as_datapipe(self):
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         return DataFrameTracedOps(self.ctx["variables"][0].source_datapipe, self)
 
     def raw_iterator(self):
@@ -441,7 +441,7 @@ class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
     def filter(self, *args, **kwargs):
         return self._dataframes_filter(*args, **kwargs)
 
-    def collate(self, *args, **kwargs):
+    def collate(self, *args, **kwargs) -> NoReturn:
         raise RuntimeError("Can't collate unbatched DataFrames stream")
 
     def __getattr__(self, attrname):  # ?
@@ -454,17 +454,17 @@ class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
 
 @functional_datapipe("trace_as_dataframe")
 class DataFrameTracer(CaptureDataFrameWithDataPipeOps, IterDataPipe):  # type: ignore[misc]
-    source_datapipe: Optional[Any] = None
+    source_datapipe: Any | None = None
 
     # TODO(VitalyFedyunin): Must implement all special functions of datapipes
 
-    def set_shuffle_settings(self, *args, **kwargs):
+    def set_shuffle_settings(self, *args, **kwargs) -> None:
         pass
 
-    def is_shardable(self):
+    def is_shardable(self) -> bool:
         return False
 
-    def __init__(self, source_datapipe, schema_df=None):
+    def __init__(self, source_datapipe, schema_df=None) -> None:
         self.source_datapipe = source_datapipe
         if schema_df is None:
             schema_df = next(iter(self.source_datapipe))

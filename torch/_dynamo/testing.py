@@ -23,8 +23,8 @@ import re
 import sys
 import types
 import unittest
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, overload, TypeVar, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, overload, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -85,6 +85,12 @@ def extract_graph_and_tracker(fn, *args, **kwargs):  # type: ignore[no-untyped-d
 
     torch.compile(backend=extract_graph_backend, fullgraph=True)(fn)(*args, **kwargs)
     return gm.graph, region_tracker  # type: ignore[union-attr]
+
+
+def extract_graph(fn, *args, **kwargs):  # type: ignore[no-untyped-def]
+    backend = AotEagerAndRecordGraphs()
+    result = torch.compile(backend=backend)(fn)(*args, **kwargs)
+    return result, backend.graphs, backend.fw_graphs, backend.bw_graphs
 
 
 def collect_results(
@@ -496,7 +502,7 @@ def make_test_cls_with_patches(
 def skipIfNotPy311(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 11):
         return fn
-    # pyrefly: ignore  # bad-return, bad-argument-type
+    # pyrefly: ignore [bad-return, bad-argument-type]
     return unittest.skip(fn)
 
 

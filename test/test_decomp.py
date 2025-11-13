@@ -945,7 +945,7 @@ def forward(self, scores_1, mask_1, value_1):
             # not exercised in test_ops_gradients atm.  The problem is not
             # complex32 per-se (which is supported by data movement only ops)
             # but that when we do backwards we expect other ops like add to work
-            and not dtype == torch.complex32
+            and dtype != torch.complex32
         )
         samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
 
@@ -1338,7 +1338,7 @@ class HasDecompTest(TestCase):
         # operators, which never appear in AOTAutograd's graph so are never used.
         useful_decomps = {
             op
-            for op in decomposition_table.keys()
+            for op in decomposition_table
             if isinstance(op, torch._ops.OpOverload) and self._can_appear_in_trace(op)
         }
         core_decomps = torch._decomp.core_aten_decompositions().keys()

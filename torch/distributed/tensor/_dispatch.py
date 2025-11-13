@@ -9,6 +9,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
+from torch._library.utils import fill_defaults
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpInfo, OpSchema, OutputSpecType
@@ -19,7 +20,10 @@ from torch.distributed.tensor._tp_conv import (
     convolution_backward_handler,
     convolution_handler,
 )
-from torch.distributed.tensor._utils import try_find_mesh_from_args
+from torch.distributed.tensor._utils import (
+    ExplicitRedistributionContext,
+    try_find_mesh_from_args,
+)
 from torch.distributed.tensor.placement_types import Partial, Placement, Replicate
 from torch.utils._debug_mode import get_active_debug_mode
 from torch.utils._python_dispatch import return_and_correct_aliasing
@@ -32,6 +36,23 @@ except ImportError:
 
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
+
+
+def as_strided_handler(
+    op_call: torch._ops.OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+):
+    args, kwargs = fill_defaults(op_call._schema, args, kwargs)
+    assert not kwargs
+    tensor, size, stride, storage_offset = args
+    if (
+        tensor.size() == tuple(size)
+        and tensor.stride() == tuple(stride)
+        and (storage_offset is None or tensor.storage_offset() == storage_offset)
+    ):
+        return torch.ops.aten.alias.default(tensor)
+    raise RuntimeError("as_strided not supported with DTensor")
 
 
 def is_same_size_handler(
@@ -78,8 +99,11 @@ def found_inf_reduce_handler(
             dtype=target_tensor.dtype,
         ),
     )
+    # pyrefly: ignore [bad-argument-type]
     found_inf_dtensor = dtensor.DTensor(
-        local_tensor=target_tensor, spec=spec, requires_grad=False
+        local_tensor=target_tensor,  # pyrefly: ignore [unexpected-keyword]
+        spec=spec,  # pyrefly: ignore [unexpected-keyword]
+        requires_grad=False,  # pyrefly: ignore [unexpected-keyword]
     )
     found_inf = found_inf_dtensor.full_tensor()
     target_tensor.copy_(found_inf)
@@ -118,6 +142,7 @@ class OpDispatcher:
             aten.convolution.default: convolution_handler,
             aten.convolution_backward.default: convolution_backward_handler,
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
+            aten.as_strided.default: as_strided_handler,
         }
 
     # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
@@ -189,7 +214,7 @@ class OpDispatcher:
             local_tensor_args = (
                 pytree.tree_unflatten(
                     cast(list[object], op_info.local_args),
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     op_info.args_tree_spec,
                 )
                 if op_info.args_tree_spec
@@ -361,12 +386,19 @@ class OpDispatcher:
                         if debug_mode is not None
                         else contextlib.nullcontext()
                     )
-
+                    if not ExplicitRedistributionContext.is_redistribute_allowed(
+                        arg_spec,
+                        # pyrefly: ignore [bad-argument-type]
+                        reshard_arg_spec,
+                    ):
+                        raise RuntimeError(
+                            f"Implicit redistribution occurred for {op_info.schema} while ExplicitRedistributionContext was active"
+                        )
                     with redistribute_context:
                         resharded_local_tensor = redistribute_local_tensor(
                             local_tensor,
                             arg_spec,
-                            # pyrefly: ignore  # bad-argument-type
+                            # pyrefly: ignore [bad-argument-type]
                             reshard_arg_spec,
                         )
                     new_local_args.append(resharded_local_tensor)
@@ -439,7 +471,7 @@ class OpDispatcher:
                 kwargs_schema[k] = self._try_replicate_spec_for_scalar_tensor(
                     op_call,
                     v,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     compute_mesh,
                 )
                 local_kwargs[k] = v
@@ -456,7 +488,7 @@ class OpDispatcher:
             OpSchema(
                 op_call,
                 (
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     pytree.tree_unflatten(args_schema, args_spec)
                     if args_spec
                     else tuple(args_schema)
@@ -478,6 +510,7 @@ class OpDispatcher:
                 assert isinstance(spec, DTensorSpec), (
                     f"output spec does not match with output! Expected DTensorSpec, got {spec}."
                 )
+                # pyrefly: ignore [bad-argument-type, bad-argument-count, unexpected-keyword]
                 return dtensor.DTensor(res, spec, requires_grad=res.requires_grad)
             else:
                 # if output does not have a DTensorSpec due to specific ops, it must be a scalar tensor
@@ -509,7 +542,8 @@ class OpDispatcher:
                 "Found a non-scalar tensor with numel=1 and ndim!=0, "
                 "we are implicitly creating a replicated DTensor for it. "
                 "However, please consider changing it to a scalar tensor "
-                "or explicitly create a DTensor under distributed environment."
+                "or explicitly create a DTensor under distributed environment.",
+                stacklevel=2,
             )
 
         if tensor_arg.numel() == 1 or self._allow_implicit_replication:

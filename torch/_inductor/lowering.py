@@ -12,8 +12,8 @@ import os
 import textwrap
 import warnings
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable, Iterable, Sequence
+from typing import Any, cast, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -27,7 +27,7 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.utils import get_layout_constraint_tag
-from torch._prims_common import (  # pyrefly: ignore  # deprecated
+from torch._prims_common import (  # pyrefly: ignore  # deprecated; pyrefly: ignore [deprecated]
     canonicalize_dim,
     canonicalize_dims,
     check,
@@ -160,7 +160,7 @@ def group_foreach_args(arg_pairs: Iterable[Union[tuple[Any, Any], Any]]):
                 break
         assert device is not None, "foreach op should have at least one tensor arg"
         if unpack_args:
-            # pyrefly: ignore  # bad-unpacking
+            # pyrefly: ignore [bad-unpacking]
             (args,) = args
         out[(device, use_foreach)].append((i, args))
     return out
@@ -263,7 +263,7 @@ def decode_dtype(dtype: int):
     if not isinstance(dtype, int):
         return dtype
     assert dtype in DTYPE_ID_LOOKUP, f"id {dtype} missing from DTYPE_ID_LOOKUP"
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     dtype = DTYPE_ID_LOOKUP[dtype]
     return dtype
 
@@ -482,9 +482,7 @@ def _register_lowering(
             (fn in fallbacks or in_namespace(fn, "_c10d_functional")) for fn in aten_fn
         ):
             # explicitly assert for "out=" ops for better error messages
-            assert not any(x == "out" for x in kwargs.keys()), (
-                "out= ops aren't yet supported"
-            )
+            assert not any(x == "out" for x in kwargs), "out= ops aren't yet supported"
 
         args, kwargs = transform_args(
             args, kwargs, broadcast, type_promotion_kind, convert_input_to_bool
@@ -561,7 +559,7 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
     if all(isinstance(x, (int, float, sympy.Basic)) for x in inputs):
         dtype = override_return_dtype or get_promoted_dtype(
             *inputs,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             type_promotion_kind=type_promotion_kind,
         )
 
@@ -619,9 +617,9 @@ def make_pointwise(
         inputs = promote_constants(inputs, override_return_dtype)
         if allow_alpha:
             if alpha is not None and alpha != 1:
-                # pyrefly: ignore  # bad-assignment
+                # pyrefly: ignore [bad-assignment]
                 inputs = list(inputs)
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 inputs[-1] = mul(inputs[-1], alpha)
         else:
             assert alpha is None
@@ -671,14 +669,14 @@ def make_pointwise(
         if not override_device:
             device = None
             for i in inputs:
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 if is_gpu(i.get_device().type):
                     device = i.get_device()
                     break
             if not device:
                 device = inputs[0].get_device()
 
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         device = override_device or device
 
         return Pointwise.create(
@@ -733,7 +731,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 outputs[output_ind] = output
 
                 if (
-                    # pyrefly: ignore  # unbound-name
+                    # pyrefly: ignore [unbound-name]
                     V.graph.has_feature(device, BackendFeature.FOREACH)
                     and use_foreach
                     and realize_outputs
@@ -742,7 +740,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                     operation_list.append(output.get_operation_name())
 
             if operation_list:
-                # pyrefly: ignore  # unbound-name
+                # pyrefly: ignore [unbound-name]
                 V.graph.register_operation_list(operation_list)
 
         assert all(x is not None for x in outputs)
@@ -1301,6 +1299,10 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
     b_size.name = V.graph.register_buffer(b_size)
     V.graph.register_operation(b_size)
     new_size = sym_size
+
+    if x.maybe_get_layout() is None:
+        # realize tensor before accessing layout
+        x.realize()
 
     if start_index is not None:
         # we shouldn't have allocated storage offset symbol if start index was determinable
@@ -1956,6 +1958,9 @@ def select(x, dim, idx):
             # Additionally, we want to avoid accidental unbacked unsqueeze semantics. To resolve this,
             # we use as_strided instead.
             # Removing this branch will cause test_unbacked_select_index_with_check to fail.
+
+            # before accessing size, stride, and offset we need to realize.
+            x.realize()
             new_size = x.get_size()
             new_stride = x.get_stride()
             new_storage_offset = x.get_layout().offset + new_stride[dim] * actual_index
@@ -1979,6 +1984,8 @@ def select(x, dim, idx):
     assert len(unbacked_bindings) == 1, unbacked_bindings
     unbacked_offset_sym, _ = next(iter(unbacked_bindings.items()))
 
+    # before accessing size, stride, and offset we need to realize.
+    x.realize()
     new_size = x.get_size()
     new_stride = x.get_stride()
     new_storage_offset = unbacked_offset_sym
@@ -2375,6 +2382,10 @@ fallback_randn_default = fallback_handler(aten.randn.default)
 fallback_randn_generator = fallback_handler(aten.randn.generator)
 make_fallback(aten.randint)
 
+# TODO: mlazos reevaluate if we want to codegen something different
+make_fallback(torch.ops.streams.record_event.default)
+make_fallback(torch.ops.streams.wait_event.default)
+
 
 @register_lowering(aten.rand)
 def rand(*args, **kwargs):
@@ -2484,11 +2495,18 @@ def inductor_randint(
 
 
 def _boundaries_helper(tb: TensorBox) -> tuple[str, sympy.Expr, sympy.Expr, sympy.Expr]:
+    # Calculate the maximum offset for the boundaries tensor
+    # For a strided tensor, this is sum((size[i] - 1) * stride[i]) + stride[-1]
+    # This ensures the mask check in bucketize_binary_search works correctly
+    # for both contiguous and non-contiguous tensors.
+    size = tb.get_size()
+    stride = tb.get_stride()
+    max_offset = sum((s - 1) * st for s, st in zip(size, stride)) + stride[-1]
     return (
         tb.get_name(),
-        tb.get_size()[-1],
-        tb.get_size()[0] * tb.get_stride()[0],
-        tb.get_stride()[-1],
+        size[-1],
+        max_offset,
+        stride[-1],
     )
 
 
@@ -2692,9 +2710,7 @@ def constrain_to_fake_tensor(arg, fake_arg):
         ]
         return ir.ExternKernel.require_exact_strides(arg, meta_stride_expr)
     if isinstance(arg, dict):
-        return {
-            key: constrain_to_fake_tensor(arg[key], fake_arg[key]) for key in arg.keys()
-        }
+        return {key: constrain_to_fake_tensor(arg[key], fake_arg[key]) for key in arg}
     elif isinstance(arg, (tuple, list)):
         return type(arg)(
             constrain_to_fake_tensor(a, f_a) for (a, f_a) in zip(arg, fake_arg)
@@ -2719,7 +2735,7 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
             )
             return ir.ExternKernel.require_stride_order(arg, stride_order)
         if isinstance(arg, dict):
-            return {key: apply_constraint(arg[key], fx_arg[key]) for key in arg.keys()}
+            return {key: apply_constraint(arg[key], fx_arg[key]) for key in arg}
         return arg
 
     args = tuple(
@@ -3085,10 +3101,10 @@ def copy(self, src, non_blocking=False):
         src = tensor(src, dtype=self.get_dtype(), device=self.get_device())
     x = src
     if self.get_device() != src.get_device():
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         x = to_device(x, self.get_device())
     if self.get_dtype() != src.get_dtype():
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         x = to_dtype(x, self.get_dtype())
 
     if self.get_size() != src.get_size():
@@ -3112,7 +3128,7 @@ def clone_preserve_reinterpret_view(x):
     reinterpret_view_layouts = []
     if isinstance(x, TensorBox) and isinstance(x.data, ir.ReinterpretView):
         x = x.data  # unwrap TensorBox
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         while isinstance(x, ir.ReinterpretView):
             reinterpret_view_layouts.append(x.get_layout())
             x = x.data
@@ -3159,8 +3175,14 @@ def select_scatter(x, src, dim: int, index: int):
     assert x.get_dtype() == src.get_dtype()
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
-    if V.graph.sizevars.evaluate_expr(sympy.Lt(index, 0)):
+    if V.graph.sizevars.guard_or_false(sympy.Lt(index, 0)):
         index = index + x.get_size()[dim]
+    elif V.graph.sizevars.guard_or_false(sympy.Ge(index, 0)):
+        pass
+    else:
+        # unbacked index
+        return fallback_handler(aten.select_scatter.default)(x, src, dim, index)
+
     V.graph.sizevars.check_leq(0, index)  # type: ignore[arg-type]
     V.graph.sizevars.check_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
     src = expand(unsqueeze(src, dim), x.get_size())
@@ -3191,7 +3213,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
 
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     start, end = ir.SliceView.normalize_start_end(x, dim, start, end)
 
     src_size = list(x.get_size())
@@ -3514,7 +3536,7 @@ def new_constant(fill_value):
         assert isinstance(size, (list, tuple))
         assert_nyi(not pin_memory, "pin_memory")
         assert_nyi(layout in (None, torch.strided), f"layout={layout}")
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         dtype = decode_dtype(dtype) or x.get_dtype()
         device = device or x.get_device()
         size = [sympy.Integer(s) for s in size]
@@ -3547,7 +3569,7 @@ def empty_strided(
     assert isinstance(stride, (list, tuple, type(None)))
     assert_nyi(not pin_memory, "pin_memory")
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
     device = device or torch.tensor(0.0).device
     device = decode_device(device)
@@ -3910,7 +3932,7 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
                     isinstance(indice, ir.StorageBox)
                     and isinstance(indice.data, ir.ExternKernel)
                     and getattr(indice.data, "fx_node", None)
-                    and indice.data.fx_node.target == torch.ops.aten.randperm.default
+                    and indice.data.fx_node.target is torch.ops.aten.randperm.default
                 )
             return False
 
@@ -4206,7 +4228,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
             return src_loader(idx)
         else:
             # src is a scalar
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             return ops.constant(src, self.get_dtype())
 
     def backend_reduce_str(reduce):
@@ -4560,7 +4582,7 @@ def constant_boundary_condition(
 ):
     h = x.get_size()[-dim:]
     x_loader = x.make_loader()
-    # pyrefly: ignore  # unsupported-operation
+    # pyrefly: ignore [unsupported-operation]
     padding_h = padding or [0] * dim
 
     def load(index):
@@ -4569,7 +4591,7 @@ def constant_boundary_condition(
 
         mask = functools.reduce(
             ops.and_,
-            # pyrefly: ignore  # no-matching-overload
+            # pyrefly: ignore [no-matching-overload]
             [range_mask(ih[i], h[i] + padding_h[i], -padding_h[i]) for i in range(dim)],
         )
         return (
@@ -5451,7 +5473,7 @@ def upsample_nearest2d_backward(
     inp_h = V.graph.sizevars.guard_int(inp_h)
     inp_w = V.graph.sizevars.guard_int(inp_w)
 
-    # pyrefly: ignore  # not-iterable
+    # pyrefly: ignore [not-iterable]
     *_batch, out_h, out_w = input_size
 
     if inp_h % out_h == 0 and inp_w % out_w == 0:
@@ -5484,7 +5506,7 @@ def upsample_nearest2d_backward(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=fn,
-        # pyrefly: ignore  # no-matching-overload
+        # pyrefly: ignore [no-matching-overload]
         ranges=list(input_size),
     )
 
@@ -6059,7 +6081,9 @@ def _validate_reduction_axis(x, axis):
     return axis
 
 
-def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
+def _make_reduction_inner(
+    x, *, axis, keepdims, dtype, override_return_dtype, reduction_type=None
+):
     if dtype is not None:
         x = to_dtype(x, dtype)
     size = x.get_size()
@@ -6077,6 +6101,23 @@ def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
             kept_idx.append(i)
             kept_sizes.append(size[i])
 
+    # For argmax/argmin compute logical indices when the tensor has non-contiguous layout.
+    should_compute_logical_index = False
+    if (
+        reduction_type in ("argmax", "argmin")
+        and len(reduced_sizes) > 1
+        and is_triton(x)
+    ):
+        if isinstance(x.data, PermuteView):
+            should_compute_logical_index = True
+        elif isinstance(x.data, ir.ReinterpretView) or (
+            isinstance(x.data, ir.StorageBox) and isinstance(x.data.data, ir.Buffer)
+        ):
+            layout = x.get_layout()
+            should_compute_logical_index = (
+                layout.is_transposed() or not layout.is_contiguous()
+            )
+
     def loader(index, reduction_index):
         assert len(reduction_index) == len(reduced_idx)
         if keepdims:
@@ -6088,7 +6129,21 @@ def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
             zip(kept_idx, index), zip(reduced_idx, reduction_index)
         ):
             new_index[idx] = var
-        return inner_loader(new_index)
+        value = inner_loader(new_index)
+
+        # For argmax/argmin, return tuple with logical linear index if needed
+        if should_compute_logical_index:
+            rindex = [sympy.expand(i) for i in reduction_index]
+
+            # Compute linear index in row-major order
+            # For reduction_ranges = [4, 6]: linear_index = r0 * 6 + r1
+            linear_idx = rindex[0]
+            for i in range(1, len(rindex)):
+                linear_idx = linear_idx * reduced_sizes[i] + rindex[i]
+
+            return (value, ops.index_expr(linear_idx, torch.int64))
+
+        return value
 
     if keepdims:
         new_size = list(size)
@@ -6116,6 +6171,7 @@ def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
             keepdims=keepdims,
             dtype=dtype,
             override_return_dtype=override_return_dtype,
+            reduction_type=reduction_type,
         )
         result = Reduction.create(reduction_type=reduction_type, input_node=x, **kwargs)
         if isinstance(
@@ -6340,7 +6396,7 @@ def pow(a, b):
     if isinstance(a, Number):
         if a == 1:
             return full_like(b, 1)
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         if a == 2 and is_float_dtype(b.get_dtype()):
             return exp2(b)
 
@@ -6488,12 +6544,10 @@ def div_prim(a, b):
     # see https://github.com/pytorch/pytorch/issues/157959
     if (divisor := get_constant_value(b)) is not None and a.get_device().type != "cpu":
         # Replace divide by constant with multiply by reciprocal
-        # pyrefly: ignore  # unbound-name
+
         if divisor.value == 0:
-            # pyrefly: ignore  # unbound-name
             reciprocal = math.copysign(float("inf"), divisor.value)
         else:
-            # pyrefly: ignore  # unbound-name
             reciprocal = 1.0 / divisor.value
         return mul(a, reciprocal)
 
@@ -7045,30 +7099,19 @@ def sym_constrain_range(a, min=None, max=None):
 @register_lowering(aten.sym_size.int)
 def sym_size(a, dim):
     val = V.graph.current_node.meta["val"]
-    # Note [Can val be an int?]
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~
-    # In principle, someone could construct an FX graph where
-    # a call to size/stride has a val that is a plain int (not
-    # SymInt).  However, we will maintain the invariant that
-    # this is not possible: if you are constructing an FX graph
-    # where there is a call to size/stride that returns an
-    # int, but you KNOW that int must always be a constant,
-    # then you do not need trace that call at all (and just
-    # constant propagate the integer as is.)
-    assert isinstance(val, torch.SymInt), (
-        f"Expect val to be torch.SymInt but got val={val}"
-    )
-    return val.node.expr
+    if isinstance(val, torch.SymInt):
+        return val.node.expr
+    else:
+        return int(val)
 
 
 @register_lowering(aten.sym_stride.int)
 def sym_stride(a, dim):
     val = V.graph.current_node.meta["val"]
-    # See Note [Can val be an int?]
-    assert isinstance(val, torch.SymInt), (
-        f"Expect val to be torch.SymInt but got val={val}"
-    )
-    return val.node.expr
+    if isinstance(val, torch.SymInt):
+        return val.node.expr
+    else:
+        return int(val)
 
 
 @register_lowering(aten.sym_numel)
@@ -7256,6 +7299,35 @@ def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, *operands):
     return list(map(TensorBox.create, result))  # type: ignore[call-overload]
 
 
+def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
+    """Process nodes from a FX graph by executing them through V.graph.
+
+    This is a common pattern for executing a subgraph's nodes:
+    - Placeholder nodes are mapped to the provided args
+    - Output nodes return their result
+    - Other nodes are executed via V.graph.run_node
+
+    """
+    output = None
+
+    for i, node in enumerate(graph_module.graph.nodes):
+        if node.op == "placeholder":
+            assert node not in V.graph.env
+            V.graph.env[node] = args[i]
+            continue
+        elif node.op == "output":
+            output_args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
+            output = torch.fx.Interpreter.output(V.graph, node, output_args, kwargs)
+        else:
+            assert node not in V.graph.env
+            V.graph.env[node] = V.graph.run_node(node)
+
+    if output is None:
+        raise RuntimeError("No output node found in graph")
+
+    return output
+
+
 # Import the control_deps_op HOP for lowering
 from torch._inductor.fx_passes.control_dependencies import control_deps
 
@@ -7283,21 +7355,11 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     arg_offset = 2  # first two args (additional_deps, subgraph)
     assert len(args) + arg_offset == len(original_args)
 
-    output = None
-
     operation_len = len(V.graph.operations)
     assert len(subgraph_fn.graph_module.graph.find_nodes(op="placeholder")) == len(args)
-    for i, node in enumerate(subgraph_fn.graph_module.graph.nodes):
-        if node.op == "placeholder":
-            assert node not in V.graph.env
-            V.graph.env[node] = args[i]
-            continue
-        elif node.op == "output":
-            args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
-            output = torch.fx.Interpreter.output(V.graph, node, args, kwargs)
-        else:
-            assert node not in V.graph.env
-            V.graph.env[node] = V.graph.run_node(node)
+
+    # Process subgraph nodes using the shared helper
+    output = process_subgraph_nodes(subgraph_fn.graph_module, list(args))
 
     assert output is not None and additional_deps
 

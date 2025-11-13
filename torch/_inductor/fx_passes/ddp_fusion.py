@@ -4,10 +4,10 @@ import inspect
 import logging
 import math
 import operator
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 import torch
 import torch.fx as fx
@@ -92,12 +92,12 @@ def get_comm_block(comm_node: fx.Node) -> CommBlock | None:
     first_user = next(iter(comm_node.users))
     if (
         len(comm_node.users) == 1
-        and first_user.target == torch.ops._c10d_functional.wait_tensor.default
+        and first_user.target is torch.ops._c10d_functional.wait_tensor.default
     ):
         # Collective with only one output
         node_list = [comm_node, first_user]
         wait_nodes.append(first_user)
-    elif len(comm_node.users) > 1 and first_user.target == operator.getitem:
+    elif len(comm_node.users) > 1 and first_user.target is operator.getitem:
         # Collective with only more than one output
         node_list.append(comm_node)
         for user in comm_node.users:
@@ -215,7 +215,7 @@ def _fuse_allreduce_by_concat(
 
     # Move the fused all_reduce and its args to right after the input node
     nodes_to_move = cat_inputs + [cat_node, div_node, fused_comm_node, fused_wait_node]
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     move_block_after(nodes_to_move, last_input_node)
 
     return CommBlock(
@@ -308,7 +308,7 @@ def _scatter_fused_allreduce_waits(
     # in orig_comm_blocks. This index will be later used to determine what users
     # nodes need to be move to maintain a correct topological sort order.
     last_wait_node_idx = 0
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     for node in graph.nodes:
         last_wait_node_idx = max(
             node_indices.get(node, last_wait_node_idx), last_wait_node_idx
@@ -348,7 +348,7 @@ def _scatter_fused_allreduce_waits(
         # Some descendant users of the orig_comm_blocks may be scheduled before
         # the fused all_reduce. For example, the user nodes of the very first
         # all_reduce may be scheduled before the second all_reduce. Since the
-        # fused all_reduce is inserted right after the last all_reudce, the
+        # fused all_reduce is inserted right after the last all_reduce, the
         # order can be wrong.
         # `incorrect_order_nodes` records these nodes.
 
@@ -358,7 +358,7 @@ def _scatter_fused_allreduce_waits(
             user_node = nodes.popleft()
             if not isinstance(user_node, fx.Node):
                 continue
-            # pyrefly: ignore  # unsupported-operation
+            # pyrefly: ignore [unsupported-operation]
             if node_indices[user_node] < last_wait_node_idx:
                 incorrect_order_nodes.append(user_node)
                 nodes.extend(list(user_node.users))

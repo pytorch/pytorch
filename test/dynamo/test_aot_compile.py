@@ -84,6 +84,21 @@ class RepeatInterleaveModule(torch.nn.Module):
         return y_repeat
 
 
+class MultiModalMixin(torch.nn.Module):
+    def forward(self, x):
+        return super().forward(x)
+
+
+class TextModel(torch.nn.Module):
+    def forward(self, x):
+        return x + 1
+
+
+class TestVLLMModel(MultiModalMixin, TextModel):
+    def forward(self, x):
+        return super().forward(x)
+
+
 @torch._dynamo.config.patch("enable_aot_compile", True)
 @instantiate_parametrized_tests
 class TestAOTCompile(torch._inductor.test_case.TestCase):
@@ -470,6 +485,119 @@ from user code:
         )
         assert hasattr(backend_result.compiled_fn, "serialize")
         self.assertIsNotNone(backend_result.compiled_fn.serialize)
+
+    def test_fullgraph_capture_with_pytree_module(self):
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.linear2 = torch.nn.Linear(3, 3)
+                self.linear3 = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return {
+                    "y": self.linear2(x[2] + 1),
+                    "z": self.linear3(x[1] - 1),
+                    "w": self.linear(x[0]["b"] + 2),
+                    "v": self.linear1(x[0]["a"] - 2),
+                }
+
+        mod = Module()
+        compiled_mod = dynamo_graph_capture_for_export(mod)(
+            (
+                {"a": torch.randn(3, 3), "b": torch.randn(3, 3)},
+                torch.randn(3, 3),
+                torch.randn(3, 3),
+            )
+        )
+
+        inputs = (
+            {"a": torch.randn(3, 3), "b": torch.randn(3, 3)},
+            torch.randn(3, 3),
+            torch.randn(3, 3),
+        )
+        self.assertEqual(compiled_mod(inputs), mod(inputs))
+
+    def test_fullgraph_capture_with_pytree_func(self):
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+
+        def foo(x):
+            return {
+                "y": x[2] + 1,
+                "z": x[1] - 1,
+                "w": x[0]["b"] + 2,
+                "v": x[0]["a"] - 2,
+            }
+
+        compiled_foo = dynamo_graph_capture_for_export(foo)(
+            (
+                {"a": torch.randn(4, 3), "b": torch.randn(3, 2)},
+                torch.randn(2, 3),
+                torch.randn(3, 4),
+            )
+        )
+
+        inputs = (
+            {"a": torch.randn(4, 3), "b": torch.randn(3, 2)},
+            torch.randn(2, 3),
+            torch.randn(3, 4),
+        )
+        self.assertEqual(compiled_foo(inputs), foo(inputs))
+
+    def test_aot_compile_with_closure_save_and_load(self):
+        tmp = 2
+
+        def fn(x, y):
+            return x + y + tmp
+
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+            ((torch.randn(3, 4), torch.randn(3, 4)), {})
+        )
+        inputs = (torch.randn(3, 4), torch.randn(3, 4))
+        expected = fn(*inputs)
+        actual = compiled_fn(*inputs)
+        self.assertEqual(expected, actual)
+        compiled_fn.save_compiled_function(self.path())
+        with open(self.path(), "rb") as f:
+            compiled_fn = torch.compiler.load_compiled_function(f)
+        actual = compiled_fn(*inputs)
+        self.assertEqual(expected, actual)
+
+    def test_aot_compile_with_super_call(self):
+        fn = TestVLLMModel()
+        compiled_fn = torch.compile(fn.forward, fullgraph=True).aot_compile(
+            ((torch.randn(3, 4),), {})
+        )
+        self.assertEqual(fn.forward.__code__.co_freevars, ("__class__",))
+        inputs = (torch.randn(3, 4),)
+        expected = fn(*inputs)
+        actual = compiled_fn(fn, *inputs)
+        self.assertEqual(expected, actual)
+        compiled_fn.save_compiled_function(self.path())
+        with open(self.path(), "rb") as f:
+            compiled_fn = torch.compiler.load_compiled_function(f)
+        actual = compiled_fn(fn, *inputs)
+        self.assertEqual(expected, actual)
+
+    def test_aot_compile_with_default_args(self):
+        def fn(x, y=1):
+            return x + x
+
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+            ((torch.randn(3, 4),), {})
+        )
+        inputs = (torch.randn(3, 4),)
+        expected = fn(*inputs)
+        actual = compiled_fn(*inputs)
+        self.assertEqual(expected, actual)
+        compiled_fn.save_compiled_function(self.path())
+        with open(self.path(), "rb") as f:
+            compiled_fn = torch.compiler.load_compiled_function(f)
+        actual = compiled_fn(*inputs)
+        self.assertEqual(expected, actual)
 
 
 if __name__ == "__main__":

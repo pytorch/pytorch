@@ -303,7 +303,7 @@ class StreamSynchronizations:
 
     def all_streams_wait_for_event(self, event: EventId) -> None:
         self._ensure_event_exists(event)
-        for stream in self.current_sync_states.keys():
+        for stream in self.current_sync_states:
             self.stream_wait_for_event(stream, event)
 
         self._state_wait_for_other(
