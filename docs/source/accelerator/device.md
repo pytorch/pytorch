@@ -34,17 +34,17 @@ Wrap the device runtime's API and add error handling. The `SetDevice` function s
 ```{eval-rst}
 .. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/csrc/runtime/OpenRegFunctions.cpp
     :language: c++
-    :start-after: LITERALINCLUDE START: OPENREG SET DEVICE FUNCTION
-    :end-before: LITERALINCLUDE END: OPENREG SET DEVICE FUNCTION
+    :start-after: LITERALINCLUDE START: OPENREG SetDevice FUNCTION
+    :end-before: LITERALINCLUDE END: OPENREG SetDevice FUNCTION
     :linenos:
 ```
-
-**Key points:**
-
-1. **Error Checking**: Wrap all runtime calls with error checking (like `OPENREG_CHECK`)
-2. **Optimization**: Skip redundant operations (e.g., don't set device if already current)
-3. **Validation**: Check device indices are valid before calling runtime
-4. **Caching**: Cache values like device count to avoid repeated system calls
+```{eval-rst}
+.. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/csrc/runtime/OpenRegFunctions.cpp
+    :language: c++
+    :start-after: LITERALINCLUDE START: OPENREG set_device FUNCTION
+    :end-before: LITERALINCLUDE END: OPENREG set_device FUNCTION
+    :linenos:
+```
 
 ### Binding
 
@@ -56,6 +56,14 @@ Expose the C++ functions to Python using pybind11:
     :start-after: LITERALINCLUDE START: MODULE SET DEVICE HELPER
     :end-before: LITERALINCLUDE END: MODULE SET DEVICE HELPER
     :linenos:
+```
+```{eval-rst}
+.. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/torch_openreg/csrc/Module.cpp
+    :language: c++
+    :start-after: LITERALINCLUDE START: OPENREG MODULE METHODS
+    :end-before: LITERALINCLUDE END: OPENREG MODULE METHODS
+    :linenos:
+    :emphasize-lines: 5
 ```
 
 ### Python Side

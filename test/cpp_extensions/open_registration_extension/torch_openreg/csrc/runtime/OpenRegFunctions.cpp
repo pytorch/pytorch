@@ -16,7 +16,7 @@ orError_t GetDevice(DeviceIndex* device) {
   *device = static_cast<DeviceIndex>(tmp_device);
   return err;
 }
-// LITERALINCLUDE START: OPENREG SET DEVICE FUNCTION
+// LITERALINCLUDE START: OPENREG SetDevice FUNCTION
 orError_t SetDevice(DeviceIndex device) {
   int cur_device = -1;
   OPENREG_CHECK(orGetDevice(&cur_device));
@@ -25,6 +25,7 @@ orError_t SetDevice(DeviceIndex device) {
   }
   return orSetDevice(device);
 }
+// LITERALINCLUDE END: OPENREG SetDevice FUNCTION
 
 int device_count_impl() {
   int count = 0;
@@ -32,7 +33,6 @@ int device_count_impl() {
   return count;
 }
 
-// LITERALINCLUDE END: OPENREG SET DEVICE FUNCTION
 OPENREG_EXPORT DeviceIndex device_count() noexcept {
   // initialize number of devices only once
   static int count = []() {
@@ -58,10 +58,12 @@ OPENREG_EXPORT DeviceIndex current_device() {
   return cur_device;
 }
 
+// LITERALINCLUDE START: OPENREG set_device FUNCTION
 OPENREG_EXPORT void set_device(DeviceIndex device) {
   check_device_index(device);
   OPENREG_CHECK(SetDevice(device));
 }
+// LITERALINCLUDE END: OPENREG set_device FUNCTION
 
 OPENREG_EXPORT DeviceIndex ExchangeDevice(DeviceIndex device) {
   int current_device = -1;
