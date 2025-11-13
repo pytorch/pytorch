@@ -838,7 +838,6 @@ class DistTensorOpsTest(DTensorTestBase):
         )
 
         item_without_redistribute = dt.item()
-        dt.redistribute(dt.device_mesh, placements=[Replicate()])
         self.assertEqual(item_without_redistribute, 6)
 
         mesh_2d = DeviceMesh(self.device_type, torch.arange(4).reshape(2, 2))
