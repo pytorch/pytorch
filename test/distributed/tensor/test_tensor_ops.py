@@ -511,7 +511,7 @@ class DistTensorOpsTest(DTensorTestBase):
         # case 2 input sharding: input sharded, index replicated, output mask partial
         # only works when index has size 1 on the gather dimension and
         # input is sharded on the gather dimension
-        from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
+        from torch.distributed.tensor.placement_types import MaskPartial
 
         gather_dim = 1
         global_input = torch.randn(12, 8, 16)
@@ -522,7 +522,7 @@ class DistTensorOpsTest(DTensorTestBase):
         with comm_mode:
             output_dt = torch.gather(input_dt, gather_dim, index_dt)
             self.assertEqual(comm_mode.get_total_counts(), 0)
-        self.assertIsInstance(output_dt.placements[0], _MaskPartial)
+        self.assertIsInstance(output_dt.placements[0], MaskPartial)
         self.assertEqual(output_dt.full_tensor(), global_output)
 
         # case 3 index sharding: input replicated, index sharded, output sharded
@@ -706,11 +706,11 @@ class DistTensorOpsTest(DTensorTestBase):
     @with_comms
     def test_dtensor_dtype_conversion(self):
         from torch.distributed.tensor.debug import (
-            _clear_sharding_prop_cache,
-            _get_sharding_prop_cache_info,
+            _clear_fast_path_sharding_prop_cache,
+            _get_fast_path_sharding_prop_cache_stats,
         )
 
-        _clear_sharding_prop_cache()
+        _clear_fast_path_sharding_prop_cache()
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         # by default we start from bf16 dtype
@@ -730,13 +730,13 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(bf16_sharded_dtensor1.to_local().dtype, torch.bfloat16)
 
         # by this point we only have cache misses
-        hits, misses, _, _ = _get_sharding_prop_cache_info()
+        hits, misses = _get_fast_path_sharding_prop_cache_stats()
         self.assertEqual(hits, 0)
         self.assertEqual(misses, 2)
 
         # convert to fp32 again and see if there's cache hit
         bf16_sharded_dtensor1.float()
-        hits, misses, _, _ = _get_sharding_prop_cache_info()
+        hits, misses = _get_fast_path_sharding_prop_cache_stats()
         # by now we should have cache hit
         self.assertEqual(hits, 1)
         self.assertEqual(misses, 2)

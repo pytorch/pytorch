@@ -7,24 +7,20 @@ appropriate locking mechanisms.
 """
 
 from abc import ABC, abstractmethod
-from contextlib import _GeneratorContextManager, contextmanager
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
 from io import BufferedReader, BufferedWriter
 from os import PathLike
 from pathlib import Path
 from threading import Lock
-from typing import Any, Callable, Generator
-from typing_extensions import override, TypeAlias
+from typing import Any
+from typing_extensions import override
 
 from filelock import FileLock
 
 from . import locks, utils
-
-
-_LockContextManager: TypeAlias = (
-    Generator[None, None, None] | _GeneratorContextManager[None, None, None]
-)
 
 
 @dataclass
@@ -71,7 +67,7 @@ class _CacheImpl(ABC):
         self._lock: Lock = Lock()
 
     @property
-    def lock(self) -> Callable[[float | None], _LockContextManager]:
+    def lock(self) -> locks._LockProtocol:
         """Get a context manager for acquiring the cache lock.
 
         Locking of the cache is not done by the implementation itself, but by the
@@ -88,7 +84,7 @@ class _CacheImpl(ABC):
 
         def _lock_with_timeout(
             timeout: float | None = None,
-        ) -> _LockContextManager:
+        ) -> locks._LockContextManager:
             return locks._acquire_lock_with_timeout(self._lock, timeout)
 
         return _lock_with_timeout
@@ -247,7 +243,7 @@ class _OnDiskCacheImpl(_CacheImpl):
 
     @override
     @property
-    def lock(self) -> Callable[[float | None], _LockContextManager]:
+    def lock(self) -> locks._LockProtocol:
         """Get a context manager for acquiring the file lock.
 
         Uses file locking to ensure thread safety across processes.
@@ -261,7 +257,7 @@ class _OnDiskCacheImpl(_CacheImpl):
 
         def _lock_with_timeout(
             timeout: float | None = None,
-        ) -> _LockContextManager:
+        ) -> locks._LockContextManager:
             return locks._acquire_flock_with_timeout(self._flock, timeout)
 
         return _lock_with_timeout
@@ -371,7 +367,7 @@ except ModuleNotFoundError:
 
         @override
         @property
-        def lock(self) -> Callable[[float | None], _LockContextManager]:
+        def lock(self) -> locks._LockProtocol:
             """Get a pseudo lock that does nothing.
 
             Most remote cache implementations don't have an ability to implement

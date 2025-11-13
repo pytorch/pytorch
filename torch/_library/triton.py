@@ -215,7 +215,7 @@ def triton_op(
             # the exported program to be high-level and serializable. If we decompose
             # the custom op to a functional hop and make it a node in exported program,
             # we need to figure out ways of serializing the hop and its arguments, which can be triton.jited
-            # functions and triton dtypes. This is undesireble because:
+            # functions and triton dtypes. This is undesirable because:
             # - it can be tedious to maintain a layer that serializes the jited function (e.g. with a string) and dtypes.
             # - exported program will contain the implementation detail (e.g. triton source code) for a specific
             #   backend (GPU), which is probably at a wrong level of abstraction.

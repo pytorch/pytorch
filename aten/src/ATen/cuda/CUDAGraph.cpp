@@ -1,6 +1,7 @@
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/Exceptions.h>
+#include <ATen/cuda/MemPool.h>
 #include <ATen/Functions.h>
 #include <c10/cuda/CUDAFunctions.h>
 
@@ -13,7 +14,7 @@ static bool _cuda_graphs_debug = false;
 MempoolId_t graph_pool_handle() {
   // Sets just the second value, to distinguish it from MempoolId_ts created from
   // cudaStreamGetCaptureInfo id_s in capture_begin.
-  return c10::cuda::MemPool::graph_pool_handle();
+  return at::cuda::MemPool::graph_pool_handle();
 }
 
 /**
@@ -90,7 +91,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   } else {
     // User did not ask us to share a mempool. Create graph pool handle using is_user_created=false.
     // Sets just the first value, to distinguish it from MempoolId_ts created by graph_pool_handle().
-    mempool_id_ = c10::cuda::MemPool::graph_pool_handle(false);
+    mempool_id_ = at::cuda::MemPool::graph_pool_handle(false);
     TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
   }
 
@@ -307,7 +308,7 @@ CUDAGraph::~CUDAGraph() {
 // There are recent HIP changes where hipGraphExecDestroy doesn't immediately free memory.
 // They wait for next sync point in order to free the memory, this is to ensure that all
 // hipGraphLaunch are finished before we release any memory. This feature was enabled in rocm6.2.
-// We need to ensure all async opreations finish before deleting the object.
+// We need to ensure all async operations finish before deleting the object.
 #if (defined(USE_ROCM) && ROCM_VERSION >= 60200)
   if (capture_dev_ != UNDEFINED_DEVICE) // check if capture_dev_ contains the real device id
   {

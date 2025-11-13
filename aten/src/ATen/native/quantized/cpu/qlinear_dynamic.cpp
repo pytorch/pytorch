@@ -414,7 +414,6 @@ at::Tensor& PackedLinearWeightFp16::apply_dynamic_impl(
   TORCH_CHECK(input.size(input.dim() - 1) == packed_weight_fp16.numRows())
   TORCH_CHECK(input.dim() >= 2);
 
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
   const int64_t N = packed_weight_fp16.numCols();
   std::vector<int64_t> output_sizes = input.sizes().vec();
