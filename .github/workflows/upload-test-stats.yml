@@ -5,6 +5,7 @@ on:
     workflows:
       - pull
       - trunk
+      - trunk-rocm-mi300
       - periodic
       - periodic-rocm-mi200
       - periodic-rocm-mi300
