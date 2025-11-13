@@ -389,6 +389,37 @@ class <lambda>(torch.nn.Module):
         fn(torch.ones(2, 2, device="cuda:0"))
 
     @requires_cuda
+    def test_current_stream_api(self) -> None:
+        from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
+        from torch._dynamo.variables.streams import get_current_stream
+
+        cur_stream = torch.accelerator.current_stream()
+        s0 = None
+
+        def stream_generation_backend(gm, *args, **kwargs):  # type: ignore[no-untyped-def]
+            nonlocal s0
+            s0_ind = get_current_stream(torch.device("cuda:0"))
+            self.assertEqual(get_external_object_by_index(s0_ind), cur_stream)
+            with gm.graph.inserting_after(next(iter(gm.graph.nodes))):
+                gm.graph.call_function(
+                    get_external_object_by_index, args=(s0_ind,), kwargs={}
+                )
+                gm.graph.call_function(
+                    lambda x: self.assertEqual(
+                        cur_stream, get_external_object_by_index(x)
+                    ),
+                    args=(s0_ind,),
+                    kwargs={},
+                )
+            return gm
+
+        @torch.compile(backend=stream_generation_backend)
+        def fn(x):
+            return x + 1
+
+        fn(torch.ones(2, 2, device="cuda:0"))
+
+    @requires_cuda
     def test_stream_with_mutation(self):
         def fn(x, y):
             s2 = torch.Stream()
