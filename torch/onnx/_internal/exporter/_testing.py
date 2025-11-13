@@ -71,6 +71,9 @@ def assert_onnx_program(
     # ONNX outputs are always real, so we need to convert torch complex outputs to real representations
     torch_outputs_adapted = []
     for output in torch_outputs:
+        # ONNX graph does not support None outputs, so we skip them
+        if output is None:
+            continue
         if not isinstance(output, torch.Tensor):
             torch_outputs_adapted.append(torch.tensor(output))
         elif torch.is_complex(output):

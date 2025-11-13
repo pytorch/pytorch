@@ -91,7 +91,7 @@ def reduced_f32_on_and_off(bf32_precision=1e-2, tf32_precision=1e-5):
 
         @functools.wraps(f)
         def wrapped(*args, **kwargs):
-            kwargs.update(zip(arg_names, args))
+            kwargs.update(zip(arg_names, args, strict=False))
             cond = True
             if "device" in kwargs:
                 cond = cond and (torch.device(kwargs["device"]).type == "cpu")

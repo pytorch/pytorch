@@ -269,7 +269,8 @@ bool THPException_init(PyObject* module);
 namespace torch {
 
 // Set python current exception from a C++ exception
-TORCH_PYTHON_API void translate_exception_to_python(const std::exception_ptr&);
+TORCH_PYTHON_API void translate_exception_to_python(
+    const std::exception_ptr& /*e_ptr*/);
 
 TORCH_PYTHON_API std::string processErrorMsg(std::string str);
 
@@ -358,8 +359,8 @@ using Arg = typename invoke_traits<Func>::template arg<i>::type;
 template <typename Func, size_t... Is, bool release_gil>
 auto wrap_pybind_function_impl_(
     Func&& f,
-    std::index_sequence<Is...>,
-    std::bool_constant<release_gil>) {
+    std::index_sequence<Is...> /*unused*/,
+    std::bool_constant<release_gil> /*unused*/) {
   namespace py = pybind11;
 
   // f=f is needed to handle function references on older compilers
@@ -371,7 +372,7 @@ auto wrap_pybind_function_impl_(
   };
 }
 
-PyObject* _new_accelerator_error_object(const c10::AcceleratorError&);
+PyObject* _new_accelerator_error_object(const c10::AcceleratorError& /*e*/);
 } // namespace detail
 
 // Wrap a function with TH error and warning handling.

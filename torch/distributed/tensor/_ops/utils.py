@@ -3,8 +3,8 @@
 import functools
 import itertools
 import operator
-from collections.abc import Iterable, Sequence
-from typing import Callable, cast, Optional, TypeVar, Union
+from collections.abc import Callable, Iterable, Sequence
+from typing import cast, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -150,7 +150,7 @@ def normalize_dims(dims: DimsType, ndim: int) -> DimsSequenceType:
     elif isinstance(dims, list):
         dims = [normalize_dim(dim, ndim) for dim in dims]
     elif isinstance(dims, tuple):
-        dims = tuple([normalize_dim(dim, ndim) for dim in dims])
+        dims = tuple(normalize_dim(dim, ndim) for dim in dims)
     return dims
 
 
@@ -192,6 +192,22 @@ def is_tensor_evenly_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
             return False
 
     return True
+
+
+def is_tensor_evenly_shardable_on_dim(
+    shape: Sequence[int], spec: DTensorSpec, dim: int
+) -> bool:
+    """Check if the shape is evenly shardable according to the spec on dim."""
+    dim = normalize_dim(dim, len(shape))
+
+    num_shards = 1
+    for i, placement in enumerate(spec.placements):
+        if placement.is_shard():
+            shard_dim = cast(Shard, placement).dim
+            if shard_dim == dim:
+                num_shards *= spec.mesh.size(i)
+
+    return shape[dim] % num_shards == 0
 
 
 def is_tensor_dim_sharded(spec: DTensorSpec, dim: int) -> bool:
@@ -320,6 +336,7 @@ def expand_to_full_mesh_op_strategy(
         for specs in zip(*strategy_comb):
             if specs[0] is not None:
                 # TODO: we should fill in tensor_meta here.  If nothing else, it helps the filter strategy callback
+                # pyrefly: ignore [bad-argument-type]
                 spec_list.append(DTensorSpec(mesh, specs))
             else:
                 spec_list.append(None)
@@ -370,3 +387,27 @@ def expand_to_full_mesh_op_strategy(
         )
         all_strategies.append(strategy)
     return OpStrategy(all_strategies)
+
+
+def shift_shard_dims_after_insert(
+    placements: Sequence[Placement], insert_dim: int = 0
+) -> Sequence[Placement]:
+    normalized_placements: list[Placement] = []
+    for placement in placements:
+        if isinstance(placement, Shard) and placement.dim >= insert_dim:
+            normalized_placements.append(Shard(placement.dim + 1))
+        else:
+            normalized_placements.append(placement)
+    return normalized_placements
+
+
+def shift_shard_dims_after_remove(
+    placements: Sequence[Placement], remove_dim: int = 0
+) -> Sequence[Placement]:
+    normalized_placements: list[Placement] = []
+    for placement in placements:
+        if isinstance(placement, Shard) and placement.dim > remove_dim:
+            normalized_placements.append(Shard(placement.dim - 1))
+        else:
+            normalized_placements.append(placement)
+    return normalized_placements

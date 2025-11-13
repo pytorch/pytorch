@@ -261,7 +261,7 @@ static PyObject* THXPModule_resetAccumulatedMemoryStats(
 // XPU module initialization
 
 static void registerXpuDeviceProperties(PyObject* module) {
-  // Add _xpuDevicePropertires class to torch._C
+  // Add _xpuDeviceProperties class to torch._C
   using namespace c10::xpu;
   auto get_device_type = [](const DeviceProp& prop) {
     std::ostringstream stream;
@@ -295,7 +295,22 @@ static void registerXpuDeviceProperties(PyObject* module) {
     return static_cast<int64_t>(prop.architecture);
   };
 #endif
+  // Wrapper class for XPU UUID
+  struct XPUuuid {
+    XPUuuid(const std::array<unsigned char, 16>& uuid) : bytes(uuid) {}
+    const std::array<unsigned char, 16>& bytes{};
+  };
   auto m = py::handle(module).cast<py::module>();
+
+  py::class_<XPUuuid>(m, "_XPUuuid")
+      .def_property_readonly(
+          "bytes",
+          [](const XPUuuid& uuid) {
+            return std::vector<uint8_t>(uuid.bytes.begin(), uuid.bytes.end());
+          })
+      .def("__str__", [](const XPUuuid& uuid) {
+        return uuid_to_string(reinterpret_cast<const char*>(uuid.bytes.data()));
+      });
 
 #define DEFINE_READONLY_MEMBER(member) \
   def_readonly(#member, &DeviceProp::member)
@@ -328,6 +343,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
       .def_property_readonly("architecture", get_device_architecture)
 #endif
       .def_property_readonly("type", get_device_type)
+      .def_property_readonly(
+          "uuid",
+          [](const DeviceProp& prop) -> XPUuuid { return XPUuuid(prop.uuid); })
       .def(
           "__repr__",
           [&get_device_type, &gpu_subslice_count](const DeviceProp& prop) {
@@ -335,7 +353,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
             stream << "_XpuDeviceProperties(name='" << prop.name
                    << "', platform_name='" << prop.platform_name << "', type='"
                    << get_device_type(prop) << "', device_id=0x" << std::hex
-                   << std::uppercase << prop.device_id << std::dec
+                   << std::uppercase << prop.device_id << std::dec << ", uuid="
+                   << uuid_to_string(
+                          reinterpret_cast<const char*>(prop.uuid.data()))
                    << ", driver_version='" << prop.driver_version
                    << "', total_memory="
                    << prop.global_mem_size / (1024ull * 1024) << "MB"
@@ -395,6 +415,17 @@ static void initXpuMethodBindings(PyObject* module) {
         return std::make_tuple(
             stream.id(), stream.device_index(), stream.device_type());
       });
+  m.def(
+      "_xpu_canDeviceAccessPeer",
+      [](c10::DeviceIndex device, c10::DeviceIndex peer) {
+        return at::xpu::canDeviceAccessPeer(device, peer);
+      });
+  m.def("_xpu_getMemoryFraction", [](c10::DeviceIndex device) {
+    return c10::xpu::XPUCachingAllocator::getMemoryFraction(device);
+  });
+  m.def("_xpu_setMemoryFraction", [](double fraction, c10::DeviceIndex device) {
+    c10::xpu::XPUCachingAllocator::setMemoryFraction(fraction, device);
+  });
 }
 
 // Callback for python part. Used for additional initialization of python

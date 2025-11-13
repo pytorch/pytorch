@@ -1,22 +1,43 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
+from contextlib import nullcontext
+from typing import Any
 
 import torch
+import torch.distributed as dist
+from torch.distributed._local_tensor import (
+    local_tensor_mode,
+    LocalTensor,
+    LocalTensorMode,
+)
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import distribute_tensor, DTensor
+from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._utils import (
     _compute_local_shape_and_global_offset,
     _explicit_order_placements,
+    compute_global_tensor_info,
     compute_global_tensor_shape,
     compute_local_shape_and_global_offset,
+    compute_local_tensor_info,
+    ExplicitRedistributionContext,
 )
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.distributed.tensor.placement_types import _StridedShard, Replicate, Shard
+from torch.distributed.tensor.placement_types import (
+    _StridedShard,
+    Partial,
+    Placement,
+    Replicate,
+    Shard,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
+    generate_shard_orders,
+    LocalDTensorTestBase,
+    patched_distribute_tensor as _distribute_tensor,
+    shard_order_to_placement,
     with_comms,
 )
 
@@ -442,6 +463,105 @@ class UtilTest(DTensorTestBase):
             )
 
 
+class UtilSingleDeviceTest(TestCase):
+    def test_compute_global_tensor_info_unsupported_placement(self):
+        class MockDeviceMesh:
+            def size(self, x):
+                return x
+
+        class FakePlacement(Placement):
+            pass
+
+        device_mesh: Any = MockDeviceMesh()
+        local_tensor = torch.tensor([1])
+        with self.assertRaises(RuntimeError):
+            compute_global_tensor_info(local_tensor, device_mesh, [FakePlacement()])
+
+    def test_compute_global_tensor_info_non_shard_placements(self):
+        class MockDeviceMesh:
+            def size(self, x):
+                return x
+
+        device_mesh: Any = MockDeviceMesh()
+        local_tensor = torch.tensor([[1], [2]])
+        global_size, global_stride = compute_global_tensor_info(
+            local_tensor, device_mesh, [Replicate(), Partial()]
+        )
+        self.assertEqual(global_size, local_tensor.size())
+        self.assertEqual(global_stride, local_tensor.stride())
+
+    def test_compute_global_tensor_info_shard_placement(self):
+        class MockDeviceMesh:
+            def size(self, dim):
+                return dim + 2
+
+        device_mesh: Any = MockDeviceMesh()
+        local_tensor = torch.tensor([[[1], [2], [3]], [[4], [5], [6]]])
+        global_size, global_stride = compute_global_tensor_info(
+            local_tensor, device_mesh, [Shard(0), Shard(1), Shard(2)]
+        )
+        self.assertEqual(
+            global_size, [(i + 2) * x for (i, x) in enumerate(local_tensor.size())]
+        )
+        self.assertEqual(global_stride[0], local_tensor.stride()[0] * 3 * 4)
+        self.assertEqual(global_stride[1], local_tensor.stride()[1])
+        self.assertEqual(global_stride[2], local_tensor.stride()[2] * 3)
+
+    def test_compute_tensor_info(self):
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        world_size = 256
+        fake_store = FakeStore()
+        torch.distributed.init_process_group(
+            "fake", store=fake_store, rank=0, world_size=world_size
+        )
+        mesh = torch.distributed.device_mesh.init_device_mesh(
+            "cpu",
+            (8, 8, 4),
+            mesh_dim_names=(
+                "dp",
+                "tp",
+                "cp",
+            ),
+        )
+        assert world_size == mesh.shape[0] * mesh.shape[1] * mesh.shape[2]
+
+        # Add Partial() when we are allowed to redistribute to it
+        options = [Shard(0), Shard(1), Shard(2), Replicate()]
+        all_placements = [tuple(p) for p in itertools.product(options, repeat=3)]
+        for placements in all_placements:
+            local_tensor = torch.empty_strided(
+                (4, 4, 4),
+                (16, 4, 1),
+            )
+            local_dt = DTensor.from_local(local_tensor, mesh, placements)
+
+            global_shape, global_stride = compute_global_tensor_info(
+                local_tensor, mesh, placements
+            )
+            global_dt = local_dt.redistribute(mesh, [Replicate()] * mesh.ndim)
+            self.assertEqual(global_shape, global_dt.size())
+            self.assertEqual(global_stride, global_dt.stride())
+
+            global_tensor = torch.empty_strided(
+                global_shape,
+                global_stride,
+            )
+            new_local_shape, new_local_stride = compute_local_tensor_info(
+                global_tensor,
+                mesh,
+                placements,
+            )
+            self.assertEqual(new_local_shape, local_tensor.size())
+            self.assertEqual(new_local_stride, local_tensor.stride())
+
+            new_local_dt = global_dt.redistribute(mesh, placements)
+            self.assertEqual(new_local_shape, new_local_dt.to_local().size())
+            self.assertEqual(new_local_stride, new_local_dt.to_local().stride())
+
+        torch.distributed.destroy_process_group()
+
+
 class TestStridedSharding(DTensorTestBase):
     @property
     def world_size(self):
@@ -638,6 +758,82 @@ class TestStridedSharding(DTensorTestBase):
         )
         self.assertEqual(full_tensor, x)
 
+    @with_comms
+    def test_2d_mesh_uneven_strided_shard(self):
+        mesh = init_device_mesh(
+            self.device_type,
+            (self.world_size // 2, 2),
+            mesh_dim_names=("fsdp", "tp"),
+        )
+
+        for size in (2, 3, 5, 11):
+            tensor = torch.arange(size, device=self.device_type).view(1, -1)
+            dtensor = distribute_tensor(
+                tensor,
+                device_mesh=mesh,
+                placements=(Replicate(), Replicate()),
+            ).redistribute(
+                mesh, placements=(_StridedShard(dim=1, split_factor=2), Shard(1))
+            )
+            self.assertEqual(dtensor.full_tensor(), tensor)
+
+
+class Test_StridedShard_with_shard_order(LocalDTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 32
+
+    @with_comms
+    def test_StridedShard_to_shard_order(self):
+        with LocalTensorMode(ranks=self.world_size):
+            mesh = DeviceMesh("cpu", torch.arange(self.world_size).view(2, 2, 2, 2, 2))
+            shard_iter = generate_shard_orders(mesh, 3)
+            # It takes ~4.8h to complete total 2520 shard order combinations here
+            # using LocalTensor. So we only randomly pick 25 shard orders to test.
+            all_shard_order = list(shard_iter)
+            import random
+
+            random.seed(42)
+            shard_order_choices = random.sample(
+                all_shard_order, min(25, len(all_shard_order))
+            )
+
+            x = torch.randn(32, 32, 32)
+            for shard_order in shard_order_choices:
+                a = _distribute_tensor(x, mesh, None, shard_order)
+
+                placement_without_stridedshard = shard_order_to_placement(
+                    shard_order, mesh
+                )
+                placements_with_stridedshard = (
+                    DTensorSpec._convert_shard_order_to_StridedShard(
+                        shard_order, placement_without_stridedshard, mesh
+                    )
+                )
+                b = distribute_tensor(x, mesh, placements_with_stridedshard)
+                shard_order_from_stridedshard = (
+                    DTensorSpec._maybe_convert_StridedShard_to_shard_order(
+                        placements_with_stridedshard, mesh
+                    )
+                )
+                self.assertEqual(shard_order, shard_order_from_stridedshard)
+                self.assertEqual(a.to_local(), b.to_local())
+
+    @with_comms
+    def test_StridedShard_not_convertible_to_shard_order(self):
+        with LocalTensorMode(ranks=self.world_size):
+            mesh = DeviceMesh("cpu", torch.arange(self.world_size).view(4, 8))
+            unconvertible_placements_list = [
+                [_StridedShard(0, split_factor=2), _StridedShard(1, split_factor=2)],
+                [_StridedShard(0, split_factor=2), Shard(1)],
+                [_StridedShard(1, split_factor=16), Shard(1)],
+            ]
+            for placements in unconvertible_placements_list:
+                shard_order = DTensorSpec._maybe_convert_StridedShard_to_shard_order(
+                    tuple(placements), mesh
+                )
+                self.assertIsNone(shard_order)
+
 
 class Test2DStridedLocalShard(DTensorTestBase):
     @property
@@ -722,6 +918,106 @@ class Test2DStridedLocalShard(DTensorTestBase):
         )
 
         self.assertEqual(global_tensor, dtensor_2d.full_tensor())
+
+
+class LocalTensorTestBase(TestCase):
+    def assertEqual(self, lhs, rhs, **kwargs):
+        mode = local_tensor_mode()
+        with nullcontext() if mode is None else mode.disable():
+            if isinstance(lhs, LocalTensor) and isinstance(rhs, LocalTensor):
+                assert isinstance(lhs, LocalTensor) and isinstance(rhs, LocalTensor)
+                super().assertEqual(lhs._ranks, rhs._ranks)
+                for r in lhs._ranks:
+                    super().assertEqual(
+                        lhs._local_tensors[r],
+                        rhs._local_tensors[r],
+                        lambda m: f"rank {r}: {m}",
+                    )
+            elif isinstance(lhs, LocalTensor) or isinstance(rhs, LocalTensor):
+                lhs, rhs = (lhs, rhs) if isinstance(lhs, LocalTensor) else (rhs, lhs)
+                for r in lhs._ranks:
+                    super().assertEqual(
+                        lhs._local_tensors[r], rhs, lambda m: f"rank {r}: {m}"
+                    )
+            else:
+                return super().assertEqual(lhs, rhs, **kwargs)
+
+    @property
+    def world_size(self):
+        raise NotImplementedError("override world-size in your subclass")
+
+    def build_device_mesh(self) -> DeviceMesh:
+        return init_device_mesh("cpu", (self.world_size,))
+
+    def setUp(self):
+        super().setUp()
+        torch.distributed.init_process_group(
+            # TODO: test other ranks too
+            "fake",
+            rank=0,
+            world_size=self.world_size,
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            dist.destroy_process_group()
+        except AssertionError:
+            pass
+
+
+class TestExplicitRedistribute(LocalTensorTestBase):
+    @property
+    def world_size(self):
+        return 4
+
+    def test_explicit_matmul(self):
+        with LocalTensorMode(self.world_size):
+            device_mesh = self.build_device_mesh()
+            dim = 128
+            x = torch.randn(8, dim, requires_grad=True)
+            A = torch.randn(dim, dim, requires_grad=True)
+
+            # Prepare DTensors
+            dx = distribute_tensor(x, device_mesh, [Shard(0)])
+            dA = distribute_tensor(A, device_mesh, [Shard(0)])
+
+            # implicit redistribute works as usual by default
+            with CommDebugMode() as comm_mode:
+                torch.matmul(dx, dA)
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+
+            # explicit redistribute works too
+            with ExplicitRedistributionContext():
+                with self.assertRaisesRegex(RuntimeError, "Implicit redistribution"):
+                    torch.matmul(dx, dA)
+
+            # explicit redistribute allows manual redistribute
+            with ExplicitRedistributionContext():
+                dA_repl = dA.redistribute(device_mesh, [Replicate()])
+                torch.matmul(dx, dA_repl)
+
+            dx = distribute_tensor(x, device_mesh, [Shard(0)])
+            dA = distribute_tensor(A, device_mesh, [Replicate()])
+            with ExplicitRedistributionContext(strict=True):
+                dY = torch.matmul(dx, dA_repl)
+                loss = dY.sum()
+
+                # we now see the error during backwards
+                with self.assertRaisesRegex(RuntimeError, "Implicit redistribution"):
+                    loss.backward(retain_graph=True)
+
+                with ExplicitRedistributionContext(strict=False):
+                    # but since it's a 'free' redistribute, we can still do it under non-strict mode
+                    loss.backward(retain_graph=True)
+
+                with ExplicitRedistributionContext(enable=False):
+                    # and we can disable
+                    loss.backward(retain_graph=True)
+
+                # and re-enable
+                with self.assertRaisesRegex(RuntimeError, "Implicit redistribution"):
+                    loss.backward(retain_graph=True)
 
 
 if __name__ == "__main__":

@@ -101,5 +101,16 @@ void THCPGraph_init(PyObject* module) {
             // compile error.
             return reinterpret_cast<uintptr_t>(graph);
           },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "raw_cuda_graph_exec",
+          [](::at::cuda::CUDAGraph& self) {
+            cudaGraphExec_t graph_exec = self.raw_cuda_graph_exec();
+            // We return a raw int here, since otherwise pybind11 will
+            // try to return the underlying struct of cudaGraphExec_t
+            // points to, which is opaque and therefore causes a
+            // compile error.
+            return reinterpret_cast<uintptr_t>(graph_exec);
+          },
           py::call_guard<py::gil_scoped_release>());
 }
