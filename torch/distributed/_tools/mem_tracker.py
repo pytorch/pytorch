@@ -391,7 +391,6 @@ class MemTracker(TorchDispatchMode):
         # Weak references to the topmost AC module currently active
         self._ac_mod: Optional[weakref.ref] = None
         self._orig_resize = torch.UntypedStorage.resize_
-        self._orig_dtensor_dispatch = DTensor._op_dispatcher.dispatch
         self._depth = 0
 
     def _update_snap(
