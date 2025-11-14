@@ -690,9 +690,7 @@ def _gen_transform_infos_non_cached(
         for order in (src_shard_order, dst_shard_order)
     )
 
-    if has_non_default_order:
-        use_graph_based_transform = True
-    elif _FORCE_MIN_COST_REDISTRIBUTION_PLAN is True:
+    if has_non_default_order or _FORCE_MIN_COST_REDISTRIBUTION_PLAN is True:
         use_graph_based_transform = True
     else:
         use_graph_based_transform = False
