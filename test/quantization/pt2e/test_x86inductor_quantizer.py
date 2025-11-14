@@ -1548,7 +1548,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             return annot._annotated, annot._is_output_of_quantized_pattern
 
         for node in gm.graph.nodes:
-            if node.target in expected_stat_dict.keys():
+            if node.target in expected_stat_dict:
                 annotated, is_quant_out = _check_annotation(node)
                 expected_stat_dict[node.target]["annotated"] -= annotated
                 expected_stat_dict[node.target]["is_quant_out"] -= is_quant_out
