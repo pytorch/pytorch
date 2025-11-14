@@ -2363,6 +2363,34 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(output, expected))
         assert cnt.frame_count == 1
 
+    @unittest.skipIf(sys.version_info < (3, 13), "math.fma introduced in python 3.13")
+    def test_math_fma(self):
+        def fma_func(a, b, c):
+            return math.fma(a, b, c)
+
+        # Test with scalar constants (constant folding path)
+        cnt = torch._dynamo.testing.CompileCounter()
+        cfma_scalars = torch._dynamo.optimize_assert(cnt)(fma_func)
+
+        assert cnt.frame_count == 0
+        expected = fma_func(2.0, 3.0, 4.0)
+        output = cfma_scalars(2.0, 3.0, 4.0)
+        self.assertEqual(output, expected)
+        assert cnt.frame_count == 0
+
+        # Test with tensors (Inductor path)
+        cnt2 = torch._dynamo.testing.CompileCounter()
+        cfma_tensors = torch._dynamo.optimize_assert(cnt2)(fma_func)
+
+        assert cnt2.frame_count == 0
+        x = torch.tensor(2.0)
+        y = torch.tensor(3.0)
+        z = torch.tensor(4.0)
+        expected_tensors = x * y + z
+        output_tensors = cfma_tensors(x, y, z)
+        torch.testing.assert_close(output_tensors, expected_tensors)
+        assert cnt2.frame_count == 1
+
     @make_test
     def test_numpy_meshgrid(x, y):
         r1, r2 = np.meshgrid(x.numpy(), y.numpy())

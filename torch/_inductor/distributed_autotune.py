@@ -204,7 +204,7 @@ def _sync(autotune_results: list[_SerializedChoice]) -> Sequence[_SerializedChoi
     choices_by_index: list[_SerializedChoice] = [None] * node_count  # type: ignore[list-item]
 
     check_count = 0
-    for i, other_results in enumerate(all_states):
+    for other_results in all_states:
         for choice in other_results:
             assert isinstance(choice, _SerializedChoice)
             assert choices_by_index[choice.index] is None

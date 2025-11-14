@@ -35,7 +35,6 @@ from . import constants
 from .cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
 from .cuda_to_hip_mappings import MATH_TRANSPILATIONS
 
-from typing import Optional
 from collections.abc import Iterator
 from collections.abc import Mapping, Iterable
 from enum import Enum
@@ -1115,7 +1114,7 @@ def hipify(
     hip_clang_launch: bool = False,
     is_pytorch_extension: bool = False,
     hipify_extra_files_only: bool = False,
-    clean_ctx: Optional[GeneratedFileCleaner] = None
+    clean_ctx: GeneratedFileCleaner | None = None
 ) -> HipifyFinalResult:
     if project_directory == "":
         project_directory = os.getcwd()
