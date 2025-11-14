@@ -725,7 +725,82 @@ class VariableBuilder:
             ):
                 return self.wrap_tensor(value)
 
-        if is_namedtuple(value):
+        if TorchScriptObjectVariable.is_matching_cls(type(value)):
+            from ..source import (
+                FlattenScriptObjectSource,
+                ScriptObjectQualifiedNameSource,
+            )
+
+            if torch._library.fake_class_registry.tracing_with_real(value):
+                proxy = self.tx.output.root_tracer.create_graph_input(
+                    re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                    type(value),
+                    value,
+                    source=self.source,
+                )
+
+                # setting is_unspecialized=False to not insert a as_tensor call in reconstruct by default
+                # setting example to be real value because these example values will be used
+                # as example_inputs for user compiler.
+                proxy.node.meta["grapharg"] = GraphArg(
+                    self.source, value, False, None, False, value
+                )
+                return TorchScriptObjectVariable.create(
+                    proxy,
+                    value,
+                    source=self.source,
+                )
+
+            if is_opaque_type(type(value)):
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+
+            elif not hasattr(value, "__obj_flatten__"):
+                # This exists to allow a smoother transition.
+                # The implications are:
+                # The script objects won't be tracked as proxies.
+                # Methods on these objects won't show up in the graph.
+                # The original script object might be mutated.
+                return self.wrap_user_defined(value)
+            else:
+                # Install the guards on the fully qualified name of the script object
+                LazyVariableTracker.realize_all(
+                    VariableBuilder(
+                        self.tx, ScriptObjectQualifiedNameSource(self.source)
+                    )(
+                        value._type().qualified_name()  # type: ignore[attr-defined]
+                    )
+                )
+                # Install the guards on the content of the script object by setting the source
+                # to be FlattenScriptObjectSource, which calls __obj_flatten__() to get the contents.
+                LazyVariableTracker.realize_all(
+                    VariableBuilder(self.tx, FlattenScriptObjectSource(self.source))(
+                        value.__obj_flatten__()
+                    )
+                )
+
+            fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
+                self.tx.output.fake_mode, value
+            )
+
+            proxy = self.tx.output.root_tracer.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(value),
+                fake_script_obj,
+                source=self.source,
+            )
+
+            # setting is_unspecialized=False to not insert a as_tensor call in reconstruct by default
+            # setting example to be real value because these example values will be used
+            # as example_inputs for user compiler.
+            proxy.node.meta["grapharg"] = GraphArg(
+                self.source, value, False, None, False, fake_script_obj
+            )
+            return TorchScriptObjectVariable.create(
+                proxy,
+                fake_script_obj,
+                source=self.source,
+            )
+        elif is_namedtuple(value):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
             output = [
                 LazyVariableTracker.create(
@@ -1425,81 +1500,6 @@ class VariableBuilder:
 
             return UserDefinedClassVariable(
                 value,
-                source=self.source,
-            )
-        elif TorchScriptObjectVariable.is_matching_cls(type(value)):
-            from ..source import (
-                FlattenScriptObjectSource,
-                ScriptObjectQualifiedNameSource,
-            )
-
-            if torch._library.fake_class_registry.tracing_with_real(value):
-                proxy = self.tx.output.root_tracer.create_graph_input(
-                    re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
-                    type(value),
-                    value,
-                    source=self.source,
-                )
-
-                # setting is_unspecialized=False to not insert a as_tensor call in reconstruct by default
-                # setting example to be real value because these example values will be used
-                # as example_inputs for user compiler.
-                proxy.node.meta["grapharg"] = GraphArg(
-                    self.source, value, False, None, False, value
-                )
-                return TorchScriptObjectVariable.create(
-                    proxy,
-                    value,
-                    source=self.source,
-                )
-
-            if is_opaque_type(type(value)):
-                self.install_guards(GuardBuilder.TYPE_MATCH)
-
-            elif not hasattr(value, "__obj_flatten__"):
-                # This exists to allow a smoother transition.
-                # The implications are:
-                # The script objects won't be tracked as proxies.
-                # Methods on these objects won't show up in the graph.
-                # The original script object might be mutated.
-                return self.wrap_user_defined(value)
-            else:
-                # Install the guards on the fully qualified name of the script object
-                LazyVariableTracker.realize_all(
-                    VariableBuilder(
-                        self.tx, ScriptObjectQualifiedNameSource(self.source)
-                    )(
-                        value._type().qualified_name()  # type: ignore[attr-defined]
-                    )
-                )
-                # Install the guards on the content of the script object by setting the source
-                # to be FlattenScriptObjectSource, which calls __obj_flatten__() to get the contents.
-                LazyVariableTracker.realize_all(
-                    VariableBuilder(self.tx, FlattenScriptObjectSource(self.source))(
-                        value.__obj_flatten__()
-                    )
-                )
-
-            fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
-                self.tx.output.fake_mode, value
-            )
-
-            proxy = self.tx.output.root_tracer.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
-                type(value),
-                fake_script_obj,
-                source=self.source,
-            )
-
-            # setting is_unspecialized=False to not insert a as_tensor call in reconstruct by default
-            # setting example to be real value because these example values will be used
-            # as example_inputs for user compiler.
-            proxy.node.meta["grapharg"] = GraphArg(
-                self.source, value, False, None, False, fake_script_obj
-            )
-            return TorchScriptObjectVariable.create(
-                proxy,
-                fake_script_obj,
                 source=self.source,
             )
         elif (

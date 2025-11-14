@@ -11,6 +11,8 @@ from torch._functorch.aot_autograd import (
     aot_export_joint_with_descriptors,
     aot_export_module,
 )
+from torch._guards import tracing, TracingContext
+from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import register_opaque_type
@@ -123,6 +125,42 @@ class TestOpaqueObject(TestCase):
             u0 = ctx.new_dynamic_size()
             torch._check_is_size(u0)
             return u0
+
+        torch.library.define(
+            "_TestOpaqueObject::queue_mutate_add",
+            "(_TestOpaqueObject_OpaqueQueue queue, Tensor(a!) x) -> ()",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::queue_mutate_add",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def queue_mutate_add_impl(queue: OpaqueQueue, x: torch.Tensor) -> None:
+            assert isinstance(queue, OpaqueQueue)
+            x.add_(1)
+            queue.push(x)
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::queue_mutate_add", lib=self.lib
+        )
+        def queue_mutate_add_fake(q: OpaqueQueue, x: torch.Tensor) -> None:
+            x.add_(1)
+
+        # @torch.library.custom_op(
+        #     "_TestOpaqueObject::queue_mutate_add",
+        #     mutates_args=["x"],
+        # )
+        # def queue_mutate_add_impl(queue: OpaqueQueue, x: torch.Tensor) -> None:
+        #     assert isinstance(queue, OpaqueQueue)
+        #     x.add_(1)
+        #     queue.push(x)
+
+        # @queue_mutate_add_impl.register_fake
+        # def queue_mutate_add_fake(q: OpaqueQueue, x: torch.Tensor) -> None:
+        #     x.add_(1)
 
         torch.library.define(
             "_TestOpaqueObject::noisy_inject",
@@ -266,6 +304,24 @@ def forward(self, arg0_1, arg1_1):
             "Tried to call __setattr__ with attr",
         ):
             make_fx(f, tracing_mode=make_fx_tracing_mode)(RNGState(0), torch.ones(3))
+
+    def test_mutation(self):
+        class M(torch.nn.Module):
+            def forward(self, queue, x):
+                torch.ops._TestOpaqueObject.queue_mutate_add(queue, x.tan())
+                pop = torch.ops._TestOpaqueObject.queue_pop(queue)
+                return (x + pop,)
+
+        queue = OpaqueQueue([], torch.empty(0).fill_(-1))
+        x = torch.randn(3)
+
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode(shape_env=ShapeEnv())
+        fake_rng = torch._library.fake_class_registry.maybe_to_fake_obj(
+            fake_mode, queue
+        )
+        fake_x = fake_mode.from_tensor(x)
+        gm = aot_export_module(M(), (fake_rng, fake_x), trace_joint=False)[0]
+        gm.print_readable()
 
     def test_aot_export(self):
         class Model(torch.nn.Module):
@@ -478,8 +534,12 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return torch.ops._TestOpaqueObject.module_mul(self.moo, x, b)
 
         inp = (torch.randn(3, requires_grad=True), torch.tensor(4))
-        with ExitStack() as stack:
-            with FakeTensorMode(shape_env=ShapeEnv()):
+
+        gm = _dynamo_graph_capture_for_export(M())(*inp)
+        print(gm)
+        fake_mode = gm.meta.get("fake_mode", None)
+        with tracing(TracingContext(fake_mode)):
+            with ExitStack() as stack:
                 joint = aot_export_joint_with_descriptors(stack, M(), inp)
                 self.assertExpectedInline(
                     joint.graph_module.code.strip(),
