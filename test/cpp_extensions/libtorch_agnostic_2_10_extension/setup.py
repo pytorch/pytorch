@@ -9,7 +9,7 @@ from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtensio
 
 
 ROOT_DIR = Path(__file__).parent
-CSRC_DIR = ROOT_DIR / "libtorch_agnostic" / "csrc"
+CSRC_DIR = ROOT_DIR / "libtorch_agnostic_2_10" / "csrc"
 
 
 class clean(distutils.command.clean.clean):
@@ -18,13 +18,13 @@ class clean(distutils.command.clean.clean):
         distutils.command.clean.clean.run(self)
 
         # Remove extension
-        for path in (ROOT_DIR / "libtorch_agnostic").glob("**/*.so"):
+        for path in (ROOT_DIR / "libtorch_agnostic_2_10").glob("**/*.so"):
             path.unlink()
         # Remove build and dist and egg-info directories
         dirs = [
             ROOT_DIR / "build",
             ROOT_DIR / "dist",
-            ROOT_DIR / "libtorch_agnostic.egg-info",
+            ROOT_DIR / "libtorch_agnostic_2_10.egg-info",
         ]
         for path in dirs:
             if path.exists():
@@ -33,7 +33,11 @@ class clean(distutils.command.clean.clean):
 
 def get_extension():
     extra_compile_args = {
-        "cxx": ["-fdiagnostics-color=always", "-DTORCH_STABLE_ONLY"],
+        "cxx": [
+            "-fdiagnostics-color=always",
+            "-DTORCH_STABLE_ONLY",
+            "-DTORCH_TARGET_VERSION=0x020a000000000000",
+        ],
     }
 
     extension = CppExtension
@@ -46,7 +50,7 @@ def get_extension():
 
     return [
         extension(
-            "libtorch_agnostic._C",
+            "libtorch_agnostic_2_10._C",
             sources=sorted(str(s) for s in sources),
             py_limited_api=True,
             extra_compile_args=extra_compile_args,
@@ -56,12 +60,12 @@ def get_extension():
 
 
 setup(
-    name="libtorch_agnostic",
+    name="libtorch_agnostic_2_10",
     version="0.0",
     author="PyTorch Core Team",
     description="Example of libtorch agnostic extension",
     packages=find_packages(exclude=("test",)),
-    package_data={"libtorch_agnostic": ["*.dll", "*.dylib", "*.so"]},
+    package_data={"libtorch_agnostic_2_10": ["*.dll", "*.dylib", "*.so"]},
     install_requires=[
         "torch",
     ],

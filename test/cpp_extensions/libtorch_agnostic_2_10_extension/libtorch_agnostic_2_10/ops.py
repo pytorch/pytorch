@@ -20,7 +20,7 @@ def sgd_out_of_place(param, grad, weight_decay, lr, maximize) -> Tensor:
         a 1D float Tensor the same shape as param
 
     """
-    return torch.ops.libtorch_agnostic.sgd_out_of_place.default(
+    return torch.ops.libtorch_agnostic_2_10.sgd_out_of_place.default(
         param, grad, weight_decay, lr, maximize
     )
 
@@ -35,7 +35,7 @@ def identity(t) -> Tensor:
     Returns:
         a Tensor, the same as input.
     """
-    return torch.ops.libtorch_agnostic.identity.default(t)
+    return torch.ops.libtorch_agnostic_2_10.identity.default(t)
 
 
 def my_abs(t) -> Tensor:
@@ -48,7 +48,7 @@ def my_abs(t) -> Tensor:
     Returns:
         a Tensor
     """
-    return torch.ops.libtorch_agnostic.my_abs.default(t)
+    return torch.ops.libtorch_agnostic_2_10.my_abs.default(t)
 
 
 def my_is_cpu(t) -> bool:
@@ -61,7 +61,7 @@ def my_is_cpu(t) -> bool:
     Returns:
         a bool
     """
-    return torch.ops.libtorch_agnostic.my_is_cpu.default(t)
+    return torch.ops.libtorch_agnostic_2_10.my_is_cpu.default(t)
 
 
 def my_ones_like(tensor, device) -> Tensor:
@@ -76,7 +76,7 @@ def my_ones_like(tensor, device) -> Tensor:
         a ones Tensor with the same dtype and shape and other attributes
         like the input tensor
     """
-    return torch.ops.libtorch_agnostic.my_ones_like.default(tensor, device)
+    return torch.ops.libtorch_agnostic_2_10.my_ones_like.default(tensor, device)
 
 
 def exp_neg_is_leaf(t1, t2, t3) -> tuple[Tensor, Tensor, bool]:
@@ -92,7 +92,7 @@ def exp_neg_is_leaf(t1, t2, t3) -> tuple[Tensor, Tensor, bool]:
     Returns:
         (exp(t1), neg(t2), is_leaf(t3))
     """
-    return torch.ops.libtorch_agnostic.exp_neg_is_leaf.default(t1, t2, t3)
+    return torch.ops.libtorch_agnostic_2_10.exp_neg_is_leaf.default(t1, t2, t3)
 
 
 def neg_exp(t) -> Tensor:
@@ -104,7 +104,7 @@ def neg_exp(t) -> Tensor:
 
     Returns: neg(exp(t))
     """
-    return torch.ops.libtorch_agnostic.neg_exp.default(t)
+    return torch.ops.libtorch_agnostic_2_10.neg_exp.default(t)
 
 
 def divide_neg_exp(t) -> Tensor:
@@ -116,7 +116,7 @@ def divide_neg_exp(t) -> Tensor:
 
     Returns: divide(neg(t), exp(t))
     """
-    return torch.ops.libtorch_agnostic.divide_neg_exp.default(t)
+    return torch.ops.libtorch_agnostic_2_10.divide_neg_exp.default(t)
 
 
 def is_contiguous(t) -> bool:
@@ -128,7 +128,7 @@ def is_contiguous(t) -> bool:
 
     Returns: is_contiguous(t)
     """
-    return torch.ops.libtorch_agnostic.is_contiguous.default(t)
+    return torch.ops.libtorch_agnostic_2_10.is_contiguous.default(t)
 
 
 def my_transpose(t, dim0, dim1) -> Tensor:
@@ -140,7 +140,7 @@ def my_transpose(t, dim0, dim1) -> Tensor:
 
     Returns: my_transpose(t, dim0, dim1)
     """
-    return torch.ops.libtorch_agnostic.my_transpose.default(t, dim0, dim1)
+    return torch.ops.libtorch_agnostic_2_10.my_transpose.default(t, dim0, dim1)
 
 
 def my_empty_like(t) -> Tensor:
@@ -152,7 +152,7 @@ def my_empty_like(t) -> Tensor:
 
     Returns: my_empty_like(t)
     """
-    return torch.ops.libtorch_agnostic.my_empty_like.default(t)
+    return torch.ops.libtorch_agnostic_2_10.my_empty_like.default(t)
 
 
 def my_zero_(t) -> Tensor:
@@ -164,7 +164,7 @@ def my_zero_(t) -> Tensor:
 
     Returns: my_zero_(t)
     """
-    return torch.ops.libtorch_agnostic.my_zero_.default(t)
+    return torch.ops.libtorch_agnostic_2_10.my_zero_.default(t)
 
 
 def my_amax(t) -> Tensor:
@@ -176,7 +176,7 @@ def my_amax(t) -> Tensor:
 
     Returns: amax(t)
     """
-    return torch.ops.libtorch_agnostic.my_amax.default(t)
+    return torch.ops.libtorch_agnostic_2_10.my_amax.default(t)
 
 
 def my_amax_vec(t) -> Tensor:
@@ -188,7 +188,7 @@ def my_amax_vec(t) -> Tensor:
 
     Returns: amax(t)
     """
-    return torch.ops.libtorch_agnostic.my_amax_vec.default(t)
+    return torch.ops.libtorch_agnostic_2_10.my_amax_vec.default(t)
 
 
 def fill_infinity(t) -> Tensor:
@@ -200,7 +200,7 @@ def fill_infinity(t) -> Tensor:
 
     Returns: The modified tensor (same as input)
     """
-    return torch.ops.libtorch_agnostic.fill_infinity.default(t)
+    return torch.ops.libtorch_agnostic_2_10.fill_infinity.default(t)
 
 
 def test_default_constructor(defined) -> bool:
@@ -212,7 +212,7 @@ def test_default_constructor(defined) -> bool:
 
     Returns: bool - result of calling .defined() on the tensor
     """
-    return torch.ops.libtorch_agnostic.test_default_constructor.default(defined)
+    return torch.ops.libtorch_agnostic_2_10.test_default_constructor.default(defined)
 
 
 def test_tensor_device(t):
@@ -224,7 +224,7 @@ def test_tensor_device(t):
 
     Returns: Device - device of the tensor
     """
-    return torch.ops.libtorch_agnostic.test_tensor_device.default(t)
+    return torch.ops.libtorch_agnostic_2_10.test_tensor_device.default(t)
 
 
 def my_pad(t) -> Tensor:
@@ -236,7 +236,7 @@ def my_pad(t) -> Tensor:
 
     Returns: Padded tensor with padding [1, 2, 2, 1], mode "constant", value 0.0
     """
-    return torch.ops.libtorch_agnostic.my_pad.default(t)
+    return torch.ops.libtorch_agnostic_2_10.my_pad.default(t)
 
 
 def my_narrow(t, dim, start, length) -> Tensor:
@@ -251,7 +251,7 @@ def my_narrow(t, dim, start, length) -> Tensor:
 
     Returns: Narrowed tensor
     """
-    return torch.ops.libtorch_agnostic.my_narrow.default(t, dim, start, length)
+    return torch.ops.libtorch_agnostic_2_10.my_narrow.default(t, dim, start, length)
 
 
 def my_copy_(dst, src, non_blocking) -> Tensor:
@@ -265,7 +265,7 @@ def my_copy_(dst, src, non_blocking) -> Tensor:
 
     Returns: Updated tensor
     """
-    return torch.ops.libtorch_agnostic.my_copy_.default(dst, src, non_blocking)
+    return torch.ops.libtorch_agnostic_2_10.my_copy_.default(dst, src, non_blocking)
 
 
 def my_clone(t) -> Tensor:
@@ -277,7 +277,7 @@ def my_clone(t) -> Tensor:
 
     Returns: Cloned tensor
     """
-    return torch.ops.libtorch_agnostic.my_clone.default(t)
+    return torch.ops.libtorch_agnostic_2_10.my_clone.default(t)
 
 
 def test_device_guard(device_index) -> int:
@@ -289,7 +289,7 @@ def test_device_guard(device_index) -> int:
 
     Returns: result of cudaGetDevice() as an integer after using the guard
     """
-    return torch.ops.libtorch_agnostic.test_device_guard.default(device_index)
+    return torch.ops.libtorch_agnostic_2_10.test_device_guard.default(device_index)
 
 
 def test_device_guard_set_index() -> int:
@@ -299,7 +299,7 @@ def test_device_guard_set_index() -> int:
 
     Returns: result of cudaGetDevice() as an integer after using set_index
     """
-    return torch.ops.libtorch_agnostic.test_device_guard_set_index.default()
+    return torch.ops.libtorch_agnostic_2_10.test_device_guard_set_index.default()
 
 
 def test_stream(device_index) -> int:
@@ -311,7 +311,7 @@ def test_stream(device_index) -> int:
 
     Returns: Stream ID as an integer
     """
-    return torch.ops.libtorch_agnostic.test_stream.default(device_index)
+    return torch.ops.libtorch_agnostic_2_10.test_stream.default(device_index)
 
 
 def test_get_current_device_index() -> int:
@@ -320,7 +320,7 @@ def test_get_current_device_index() -> int:
 
     Returns: Current device index as an integer
     """
-    return torch.ops.libtorch_agnostic.test_get_current_device_index.default()
+    return torch.ops.libtorch_agnostic_2_10.test_get_current_device_index.default()
 
 
 def my_new_empty_dtype_variant(t) -> Tensor:
@@ -332,7 +332,7 @@ def my_new_empty_dtype_variant(t) -> Tensor:
 
     Returns: New empty tensor with shape [2, 5] and dtype bfloat16
     """
-    return torch.ops.libtorch_agnostic.my_new_empty_dtype_variant.default(t)
+    return torch.ops.libtorch_agnostic_2_10.my_new_empty_dtype_variant.default(t)
 
 
 def my_new_zeros_dtype_variant(t) -> Tensor:
@@ -344,7 +344,7 @@ def my_new_zeros_dtype_variant(t) -> Tensor:
 
     Returns: New zeros tensor
     """
-    return torch.ops.libtorch_agnostic.my_new_zeros_dtype_variant.default(t)
+    return torch.ops.libtorch_agnostic_2_10.my_new_zeros_dtype_variant.default(t)
 
 
 def my__foreach_mul_(tensors, others) -> ():
@@ -357,7 +357,7 @@ def my__foreach_mul_(tensors, others) -> ():
 
     Returns: nothing, tensors is updated in place.
     """
-    torch.ops.libtorch_agnostic.my__foreach_mul_.default(tensors, others)
+    torch.ops.libtorch_agnostic_2_10.my__foreach_mul_.default(tensors, others)
 
 
 def my__foreach_mul(tensors, others) -> list[Tensor]:
@@ -371,7 +371,7 @@ def my__foreach_mul(tensors, others) -> list[Tensor]:
 
     Returns: list of multiplied tensors
     """
-    return torch.ops.libtorch_agnostic.my__foreach_mul.default(tensors, others)
+    return torch.ops.libtorch_agnostic_2_10.my__foreach_mul.default(tensors, others)
 
 
 def make_tensor_clones_and_call_foreach(t1, t2) -> list[Tensor]:
@@ -384,7 +384,7 @@ def make_tensor_clones_and_call_foreach(t1, t2) -> list[Tensor]:
 
     Returns: list of [t1^2, t2^2]
     """
-    return torch.ops.libtorch_agnostic.make_tensor_clones_and_call_foreach.default(
+    return torch.ops.libtorch_agnostic_2_10.make_tensor_clones_and_call_foreach.default(
         t1, t2
     )
 
@@ -400,7 +400,7 @@ def test_device_constructor(is_cuda, index, use_str):
 
     Returns: Device - A device with the specified type and index
     """
-    return torch.ops.libtorch_agnostic.test_device_constructor.default(
+    return torch.ops.libtorch_agnostic_2_10.test_device_constructor.default(
         is_cuda, index, use_str
     )
 
@@ -415,7 +415,7 @@ def test_device_equality(d1, d2) -> bool:
 
     Returns: bool - True if devices are equal
     """
-    return torch.ops.libtorch_agnostic.test_device_equality.default(d1, d2)
+    return torch.ops.libtorch_agnostic_2_10.test_device_equality.default(d1, d2)
 
 
 def test_device_set_index(device, index):
@@ -428,7 +428,7 @@ def test_device_set_index(device, index):
 
     Returns: Device - device with updated index
     """
-    return torch.ops.libtorch_agnostic.test_device_set_index.default(device, index)
+    return torch.ops.libtorch_agnostic_2_10.test_device_set_index.default(device, index)
 
 
 def test_device_index(device) -> int:
@@ -440,7 +440,7 @@ def test_device_index(device) -> int:
 
     Returns: int - device index
     """
-    return torch.ops.libtorch_agnostic.test_device_index.default(device)
+    return torch.ops.libtorch_agnostic_2_10.test_device_index.default(device)
 
 
 def test_device_is_cuda(device) -> bool:
@@ -452,7 +452,7 @@ def test_device_is_cuda(device) -> bool:
 
     Returns: bool - True if device is CUDA
     """
-    return torch.ops.libtorch_agnostic.test_device_is_cuda.default(device)
+    return torch.ops.libtorch_agnostic_2_10.test_device_is_cuda.default(device)
 
 
 def test_device_is_cpu(device) -> bool:
@@ -464,7 +464,7 @@ def test_device_is_cpu(device) -> bool:
 
     Returns: bool - True if device is CPU
     """
-    return torch.ops.libtorch_agnostic.test_device_is_cpu.default(device)
+    return torch.ops.libtorch_agnostic_2_10.test_device_is_cpu.default(device)
 
 
 def test_parallel_for(size, grain_size) -> Tensor:
@@ -476,7 +476,7 @@ def test_parallel_for(size, grain_size) -> Tensor:
     Returns: Tensor - a 1D int64 tensor where each element contains its index
         (if multiple threads are used the threadid will be encoded in the upper 32 bits)
     """
-    return torch.ops.libtorch_agnostic.test_parallel_for.default(size, grain_size)
+    return torch.ops.libtorch_agnostic_2_10.test_parallel_for.default(size, grain_size)
 
 
 def test_get_num_threads() -> int:
@@ -486,7 +486,7 @@ def test_get_num_threads() -> int:
 
     Returns: int - the number of threads for the parallel backend
     """
-    return torch.ops.libtorch_agnostic.test_get_num_threads.default()
+    return torch.ops.libtorch_agnostic_2_10.test_get_num_threads.default()
 
 
 def my_empty(size, dtype=None, device=None, pin_memory=None) -> Tensor:
@@ -501,7 +501,9 @@ def my_empty(size, dtype=None, device=None, pin_memory=None) -> Tensor:
 
     Returns: Tensor - an uninitialized tensor with the specified properties
     """
-    return torch.ops.libtorch_agnostic.my_empty.default(size, dtype, device, pin_memory)
+    return torch.ops.libtorch_agnostic_2_10.my_empty.default(
+        size, dtype, device, pin_memory
+    )
 
 
 def my_flatten(t, start_dim=0, end_dim=-1) -> Tensor:
@@ -515,7 +517,7 @@ def my_flatten(t, start_dim=0, end_dim=-1) -> Tensor:
 
     Returns: Tensor - flattened tensor
     """
-    return torch.ops.libtorch_agnostic.my_flatten.default(t, start_dim, end_dim)
+    return torch.ops.libtorch_agnostic_2_10.my_flatten.default(t, start_dim, end_dim)
 
 
 def my_reshape(t, shape) -> Tensor:
@@ -528,7 +530,7 @@ def my_reshape(t, shape) -> Tensor:
 
     Returns: Tensor - reshaped tensor
     """
-    return torch.ops.libtorch_agnostic.my_reshape.default(t, shape)
+    return torch.ops.libtorch_agnostic_2_10.my_reshape.default(t, shape)
 
 
 def my_view(t, size) -> Tensor:
@@ -541,4 +543,4 @@ def my_view(t, size) -> Tensor:
 
     Returns: Tensor - tensor with new view
     """
-    return torch.ops.libtorch_agnostic.my_view.default(t, size)
+    return torch.ops.libtorch_agnostic_2_10.my_view.default(t, size)
