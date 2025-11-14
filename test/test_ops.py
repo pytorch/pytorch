@@ -21,7 +21,7 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_utils import outputs_alias_inputs
 from torch.testing import make_tensor
 from torch.testing._internal import composite_compliance, opinfo
-from torch.testing._internal.common_cuda import with_tf32_off
+from torch.testing._internal.common_cuda import with_tf32_off, _get_torch_cuda_version
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     instantiate_device_type_tests,
@@ -937,6 +937,12 @@ class TestCommon(TestCase):
             if torch.float32 in supported_dtypes
             else next(iter(supported_dtypes))
         )
+
+        # Skip torch._scaled_mm on CUDA 13.0+ with float8
+        if device == "cuda" and op.name in ("torch._scaled_mm", "_scaled_mm"):
+            if dtype == torch.float8_e4m3fn:
+                if _get_torch_cuda_version() >= (13, 0):
+                    self.skipTest("Skip on CUDA 13.0+ due to known issues with FP8")
 
         # Ops from python_ref_db point to python decomps that are potentially
         # wrapped with `torch._prims_common.wrappers.out_wrapper`. Unwrap these
