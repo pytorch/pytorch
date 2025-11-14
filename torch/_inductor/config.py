@@ -1161,6 +1161,12 @@ decompose_mem_bound_mm: bool = False
 # In the common case, most inputs will be aligned.
 assume_aligned_inputs: bool = False
 
+# assume_32bit_indexing means that we assume 32-bit indexing is always safe; we always
+# use 32-bit indices regardless of tensor sizes. If assume_32bit_indexing contradicts
+# with example inputs we throw. This is useful when all dynamic shapes are unbacked and
+# you know you only operate with 32-bit sizes.
+assume_32bit_indexing: bool = False
+
 # For the user-written Triton kernels compiled with the model, ignore the unsupported
 # arguments passed to the @triton.autotune in the user's code; this is unsafe, as
 # ignoring the unsupported args may lead to unexpected autotuning behavior: don't
