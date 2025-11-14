@@ -3099,8 +3099,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return False
         if isinstance(V.kernel, torch._inductor.select_algorithm.TritonTemplateKernel):
             return False
-        major, _ = torch.cuda.get_device_capability(torch.cuda.current_device())
-        return major >= 9
+        return (
+            V.graph.get_current_device_or_throw().type == "cuda"
+            and torch.cuda.get_device_capability()[0] >= 9
+        )
 
     def _handle_pdl_before_access(
         self, wait_buffer, *dependencies, consider_reads=False
