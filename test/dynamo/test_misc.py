@@ -14036,6 +14036,44 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         except Exception as e:
             self.fail(f"torch.compile failed with error: {e}")
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tensorify_track_item_symint(self):
+        def _random_resize(image: torch.Tensor):
+            image_metanet = image
+            default_patch_size = 14
+            rand_cnn_resolution = (224, 256)
+            min_nump = rand_cnn_resolution[0] // default_patch_size
+            max_nump = rand_cnn_resolution[1] // default_patch_size
+            new_nump = torch.randint(min_nump, max_nump + 1, (1,)).item()
+            torch._check(new_nump > 0)
+            torch._check(new_nump * default_patch_size > 1)
+
+            image_metanet = F.interpolate(
+                image_metanet,
+                size=(new_nump * default_patch_size, new_nump * default_patch_size),
+                mode="bilinear",
+                align_corners=True,
+            )
+            img_h_new, img_w_new = image_metanet.shape[2:]
+
+            return (img_h_new, img_w_new), image_metanet
+
+        _random_resize_compiled = torch.compile(fullgraph=True)(_random_resize)
+
+        # Test the function
+        input_tensor = torch.rand(1, 3, 224, 224)
+        (h, w), output = _random_resize_compiled(input_tensor)
+
+        # Verify output properties
+        self.assertEqual(output.shape[0], 1)
+        self.assertEqual(output.shape[1], 3)
+        self.assertEqual(output.shape[2], h)
+        self.assertEqual(output.shape[3], w)
+        self.assertTrue(h % 14 == 0)
+        self.assertTrue(w % 14 == 0)
+        self.assertTrue(224 <= h <= 256)
+        self.assertTrue(224 <= w <= 256)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
