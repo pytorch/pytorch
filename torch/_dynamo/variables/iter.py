@@ -522,12 +522,18 @@ class MapVariable(ZipVariable):
         )
         codegen(self.fn)
         self.reconstruct_items(codegen)
-        codegen.extend_output(
-            [
-                create_build_tuple(len(self.iterables) + 1),
-                *create_call_function_ex(False, False),
-            ]
-        )
+        codegen.append_output(create_build_tuple(len(self.iterables) + 1))
+        if self.strict:
+            codegen.extend_output(
+                [
+                    codegen.create_load_const("strict"),
+                    codegen.create_load_const(self.strict),
+                    create_instruction("BUILD_MAP", arg=1),
+                    *create_call_function_ex(True, False),
+                ]
+            )
+        else:
+            codegen.extend_output(create_call_function_ex(False, False))
 
 
 class FilterVariable(IteratorVariable):

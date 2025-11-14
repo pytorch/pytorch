@@ -2474,8 +2474,22 @@ class BuiltinVariable(VariableTracker):
         return None
 
     def call_map(
-        self, tx: "InstructionTranslator", fn: VariableTracker, *seqs: VariableTracker
+        self,
+        tx: "InstructionTranslator",
+        fn: VariableTracker,
+        *seqs: VariableTracker,
+        **kwargs: VariableTracker,
     ) -> VariableTracker:
+        if kwargs:
+            if not (len(kwargs) == 1 and "strict" in kwargs):
+                raise_args_mismatch(
+                    tx,
+                    "map",
+                    "1 kwargs (`strict`)",
+                    f"{len(kwargs)} kwargs",
+                )
+        strict = kwargs.pop("strict", False)
+
         seq_list = [
             seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
             for seq in seqs
@@ -2483,6 +2497,7 @@ class BuiltinVariable(VariableTracker):
         return variables.MapVariable(
             fn,
             seq_list,  # type: ignore[arg-type]
+            strict=strict,  # type: ignore[arg-type]
             mutation_type=ValueMutationNew(),
         )
 
