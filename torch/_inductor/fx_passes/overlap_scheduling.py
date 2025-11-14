@@ -4,9 +4,9 @@ import itertools
 import logging
 import sys
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass
-from typing import Any
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from typing import Any, Callable
 
 import torch
 import torch.fx as fx
@@ -188,7 +188,7 @@ class CollectiveInfo:
     size_bytes: int
     estimated_time_ms: float
     exposed_time_ms: float  # How much of this collective is still exposed
-    hiding_node: fx.Node | None = None  # Node that hides this collective
+    hiding_nodes: OrderedSet[fx.Node] = field(default_factory=OrderedSet)
 
     @property
     def is_exposed(self) -> bool:
@@ -419,6 +419,8 @@ class OverlapScheduler:
                 self._handle_collective_start(node)
             elif is_wait_tensor(node):
                 self._handle_wait(node)
+            elif node.op == "placeholder":
+                self._schedule(node)
             else:
                 self._handle_other(node)
 
@@ -447,11 +449,13 @@ class OverlapScheduler:
         additional_deps: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
 
         for start_node, info in self.collective_info.items():
-            if info.hiding_node and not info.is_exposed:
+            if info.is_exposed:
+                continue
+            for hn in info.hiding_nodes:
                 # Compute depends on collective start (compute must wait for collective to start)
-                additional_deps[info.hiding_node].add(start_node)
+                additional_deps[hn].add(start_node)
                 # Wait depends on compute (wait must wait for compute to finish)
-                additional_deps[info.wait_node].add(info.hiding_node)
+                additional_deps[info.wait_node].add(hn)
 
         # Apply effect tokens to preserve these dependencies
         if additional_deps:
@@ -592,9 +596,8 @@ class OverlapScheduler:
             overlap_amount = min(info.exposed_time_ms, available_compute)
             info.exposed_time_ms -= overlap_amount
             available_compute -= overlap_amount
-            if info.exposed_time_ms == 0:
-                info.hiding_node = node
-            elif available_compute == 0:
+            info.hiding_nodes.add(node)
+            if available_compute == 0:
                 break
 
         # Then, look for unscheduled collectives we can overlap
@@ -687,8 +690,7 @@ class OverlapScheduler:
             # after scheduling, which will account for latency reduction of bucketing
             overlap_amount = min(available_compute_time, info.exposed_time_ms)
             info.exposed_time_ms -= overlap_amount
-            if info.exposed_time_ms == 0:
-                info.hiding_node = compute_node
+            info.hiding_nodes.add(compute_node)
             available_compute_time -= overlap_amount
 
     def _find_schedulable_path(
@@ -715,7 +717,7 @@ class OverlapScheduler:
             # it's fine to schedule it
             if is_wait_tensor(node):
                 info = self.collective_info[self.wait_to_start[node]]
-                if info.hiding_node and info.hiding_node != curr_compute_node:
+                if info.hiding_nodes and curr_compute_node not in info.hiding_nodes:
                     continue
                 elif node not in self.potentially_hidden_waits:
                     continue
@@ -751,7 +753,7 @@ class OverlapScheduler:
     ) -> bool:
         assert is_wait_tensor(wait_node)
         info = self.collective_info[self.wait_to_start[wait_node]]
-        return not info.is_exposed and info.hiding_node != compute_node
+        return not info.is_exposed and compute_node not in info.hiding_nodes
 
     def _schedule_path_to_collective(
         self, path: OrderedSet[fx.Node], curr_compute_node: fx.Node
@@ -770,7 +772,7 @@ class OverlapScheduler:
                     continue
 
                 info = self.collective_info[self.wait_to_start[node]]
-                assert info.hiding_node != curr_compute_node
+                assert curr_compute_node not in info.hiding_nodes
                 self._handle_wait(node)
                 continue
 
