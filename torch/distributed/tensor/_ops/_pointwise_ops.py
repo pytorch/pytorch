@@ -533,8 +533,10 @@ def common_pointwise_strategy(
                 new_shard_dim = common_ndim - len(spec_to_follow.shape) + shard_dim
                 out_placements.append(Shard(new_shard_dim))
             elif isinstance(placement, Partial):
+                # partial + scalar doesn't work
                 addition_ops = [aten.add.Tensor, aten.add_.Tensor]
 
+                # note that only partial-sum and partial-avg are supported for linearity
                 partial_supports_linearity = (
                     placement.is_partial("sum") or placement.is_partial("avg")
                 ) and not (
