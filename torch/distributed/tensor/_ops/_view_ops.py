@@ -387,17 +387,21 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
             from_group_dim = []
         else:
             # produces ([1], [1]),  ([2], [2]), ([2,3], [6])
+            exit_from_f = False
             while f != t:
                 if f < t:
                     nf = from_size[from_idx]
                     from_group_dim.append(from_idx)
                     from_idx += 1
+                    exit_from_f = True
                     f *= nf
                 else:
                     nt = to_size[to_idx]
                     to_group_shape.append(nt)
                     to_idx += 1
+                    exit_from_f = False
                     t *= nt
+            # from_idx = include_singletons_in_from(f, from_idx if exit_from_f, from_size, from_len, from_group_dim, t)
 
         if len(to_group_shape) > 0:
             flattened = Flatten.new(
@@ -410,6 +414,29 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
 
     return tuple(result_pp)
 
+
+def update_ft(f, from_idx, from_size, from_group_dim, t, to_idx, to_size, to_group_shape):
+    nf = None
+    nt = None
+    new_from_idx = None
+    new_to_idx = None
+    if f < t:
+        nf = from_size[from_idx]
+        from_group_dim.append(from_idx)
+        new_from_idx = from_idx + 1
+    else:
+        nt = to_size[to_idx]
+        to_group_shape.append(nt)
+        new_to_idx = to_idx + 1
+    return nf, nt, new_from_idx, new_to_idx
+
+def include_singletons_in_from(f, from_idx, from_size, from_len, from_group_dim, t):
+    new_from_idx = from_idx + 1
+    while new_from_idx < from_len and from_size[new_from_idx] == 1:
+        from_idx = new_from_idx
+        from_group_dim.append(from_idx)
+        new_from_idx += 1
+    return from_idx
 
 def dim_tile(ndim: int, dims: tuple[int, ...]) -> DimMap:
     if len(dims) < ndim:

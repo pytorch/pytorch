@@ -44,6 +44,11 @@ class TestViewOps(DTensorTestBase):
         return 6
 
     def test_view_groups(self):
+        # result = view_groups([3, 4, 1, 5], [12, 5])
+        # self.assertEqual(
+        #     result,
+        #     (Flatten((InputDim(0), InputDim(1), InputDim(2))), InputDim(3))
+        # )
         self.assertEqual(
             view_groups([2, 3], [3, 2]),
             (
@@ -51,6 +56,7 @@ class TestViewOps(DTensorTestBase):
                 Split(Flatten((InputDim(0), InputDim(1))), (3, 2), 1),
             ),
         )
+        view_groups([3, 4, 5], [12, 5])
         self.assertEqual(
             view_groups([3, 4, 5], [12, 5]),
             (Flatten((InputDim(0), InputDim(1))), InputDim(2)),
