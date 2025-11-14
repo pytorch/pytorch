@@ -525,6 +525,41 @@
   - Lint
   - pull
 
+- name: typechecking
+  patterns:
+  - 'pyrefly.toml'
+  - 'mypy.ini'
+  - 'mypy-strict.ini'
+  approved_by:
+  - lolpack
+  - maggiemoss
+  - ndmitchell
+  - kinto0
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: PrivateUse1
+  patterns:
+  - torch/accelerator/**
+  - torch/utils/backend_registration.py
+  - torch/csrc/acc/**
+  - torch/csrc/DeviceAccelerator.*
+  - torch/csrc/profiler/standalone/privateuse1_observer.*
+  - aten/src/ATen/DeviceAccelerator.*
+  - aten/src/ATen/core/GeneratorForPrivateuseone.*
+  - aten/src/ATen/detail/PrivateUse1HooksInterface.*
+  - docs/source/accelerator/**
+  - test/cpp_extensions/open_registration_extension/torch_openreg/**
+  approved_by:
+  - albanD
+  - fffrog
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: superuser
   patterns:
   - '*'

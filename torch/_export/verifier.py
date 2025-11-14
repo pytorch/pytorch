@@ -216,6 +216,7 @@ class Verifier(metaclass=_VerifierMeta):
                 torch.sym_not,
                 torch.sym_sqrt,
                 torch.sym_sum,
+                torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch,
                 # TODO (tmanlaibaatar)
                 # Predispatch export is able to contain autograd ops.
                 # These will be modeled as HOO later
@@ -223,6 +224,11 @@ class Verifier(metaclass=_VerifierMeta):
                 torch.amp.autocast_mode._enter_autocast,
                 torch.amp.autocast_mode._exit_autocast,
                 torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless,
+                torch._functorch.predispatch._add_batch_dim,
+                torch._functorch.predispatch._remove_batch_dim,
+                torch._functorch.predispatch._vmap_increment_nesting,
+                torch._functorch.predispatch._vmap_decrement_nesting,
+                torch._functorch.predispatch.lazy_load_decompositions,
             )
 
             if not isinstance(op, _allowed_op_types()):
@@ -275,6 +281,13 @@ class Verifier(metaclass=_VerifierMeta):
                             return isinstance(getattr(attr, name, None), ty)
 
                         if type(attr).__name__ == "LoweredBackendModule":
+                            if (
+                                _is_type("backend_id", str)
+                                and hasattr(attr, "original_module")
+                                and hasattr(attr, "module_name")
+                                and getattr(attr, "backend_id", None) == "aoti"
+                            ):
+                                continue
                             if (
                                 _is_type("backend_id", str)
                                 and _is_type("processed_bytes", bytes)

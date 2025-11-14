@@ -19,12 +19,9 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/irange.h>
 
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-#include <c10/cuda/driver_api.h>
-#endif
-
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
+#include <cudnn_frontend.h>
 #endif
 
 #if AT_MAGMA_ENABLED()
@@ -93,29 +90,6 @@ void CUDAHooks::init() const {
   // have a chance to enable vitals.
   at::vitals::VitalsAPI.setVital("CUDA", "used", "true", /* force = */ true);
 
-  // Sets the CUDA_MODULE_LOADING environment variable
-  // if it's not set by the user.
-  // CUDA_MODULE_LOADING="LAZY" is default for all drivers released for CUDA 12.2+.
-  // Check the driver version and only set the env variable if needed.
-  bool set_lazy_module_loading = true;
-  #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  auto driver_api = c10::cuda::DriverAPI::get();
-  // Initialize NVML
-  if (driver_api->nvmlInit_v2_() == NVML_SUCCESS) {
-    // Get the driver version
-    int version = -1;
-    auto res = driver_api->nvmlSystemGetCudaDriverVersion_v2_(&version);
-    if (res == NVML_SUCCESS) {
-      // Check if driver is sufficiently new
-      if (version >= 12020) {
-        set_lazy_module_loading = false;
-      }
-    }
-  }
-  #endif
-  if (set_lazy_module_loading) {
-    c10::utils::set_env("CUDA_MODULE_LOADING", "LAZY", false);
-  }
   const auto num_devices = c10::cuda::device_count_ensure_non_zero();
   c10::cuda::CUDACachingAllocator::init(num_devices);
   at::cuda::detail::init_p2p_access_cache(num_devices);
@@ -308,6 +282,9 @@ bool CUDAHooks::compiledWithMIOpen() const {
 
 bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {
 #if AT_CUDNN_ENABLED()
+  if (!hasCUDA()) {
+    return false;
+  }
   // NOTE: extra parenthesis around numbers disable clang warnings about
   // dead code
   return true;
@@ -318,6 +295,9 @@ bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {
 
 bool CUDAHooks::supportsDepthwiseConvolutionWithCuDNN() const {
 #if AT_CUDNN_ENABLED()
+  if (!hasCUDA()) {
+    return false;
+  }
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   // Check for Volta cores
   if (prop->major >= 7) {
@@ -332,6 +312,26 @@ bool CUDAHooks::supportsDepthwiseConvolutionWithCuDNN() const {
 
 bool CUDAHooks::supportsBFloat16ConvolutionWithCuDNNv8() const {
 #if AT_CUDNN_ENABLED()
+  if (!hasCUDA()) {
+    return false;
+  }
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  // Check for Volta cores
+  if (prop->major >= 8) {
+    return true;
+  } else {
+    return false;
+  }
+#else
+  return false;
+#endif
+}
+
+bool CUDAHooks::supportsBFloat16RNNWithCuDNN() const {
+#if AT_CUDNN_ENABLED() && (CUDNN_VERSION >= 91300)
+  if (!hasCUDA()) {
+    return false;
+  }
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   // Check for Volta cores
   if (prop->major >= 8) {
@@ -349,6 +349,26 @@ long CUDAHooks::versionCuDNN() const {
   return CUDNN_VERSION;
 #else
   TORCH_CHECK(false, "Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
+#endif
+}
+
+long CUDAHooks::versionRuntimeCuDNN() const {
+#if AT_CUDNN_ENABLED()
+#ifndef USE_STATIC_CUDNN
+  return cudnnGetVersion();
+#else
+  return CUDNN_VERSION;
+#endif
+#else
+  TORCH_CHECK(false, "Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
+#endif
+}
+
+long CUDAHooks::versionCuDNNFrontend() const {
+#if AT_CUDNN_ENABLED()
+  return CUDNN_FRONTEND_VERSION;
+#else
+  TORCH_CHECK(false, "Cannot query CuDNN Frontend version if ATen_cuda is not built with CuDNN");
 #endif
 }
 

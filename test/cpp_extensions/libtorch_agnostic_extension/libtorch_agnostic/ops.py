@@ -167,6 +167,30 @@ def my_zero_(t) -> Tensor:
     return torch.ops.libtorch_agnostic.my_zero_.default(t)
 
 
+def my_amax(t) -> Tensor:
+    """
+    Returns t.amax()
+
+    Args:
+        t: Tensor
+
+    Returns: amax(t)
+    """
+    return torch.ops.libtorch_agnostic.my_amax.default(t)
+
+
+def my_amax_vec(t) -> Tensor:
+    """
+    Returns t.amax()
+
+    Args:
+        t: Tensor
+
+    Returns: amax(t)
+    """
+    return torch.ops.libtorch_agnostic.my_amax_vec.default(t)
+
+
 def fill_infinity(t) -> Tensor:
     """
     Fills the tensor with inf.
@@ -189,6 +213,18 @@ def test_default_constructor(defined) -> bool:
     Returns: bool - result of calling .defined() on the tensor
     """
     return torch.ops.libtorch_agnostic.test_default_constructor.default(defined)
+
+
+def test_tensor_device(t):
+    """
+    Tests Tensor device() method.
+
+    Args:
+        t: Tensor - tensor to get device from
+
+    Returns: Device - device of the tensor
+    """
+    return torch.ops.libtorch_agnostic.test_tensor_device.default(t)
 
 
 def my_pad(t) -> Tensor:
@@ -216,6 +252,32 @@ def my_narrow(t, dim, start, length) -> Tensor:
     Returns: Narrowed tensor
     """
     return torch.ops.libtorch_agnostic.my_narrow.default(t, dim, start, length)
+
+
+def my_copy_(dst, src, non_blocking) -> Tensor:
+    """
+    Returns tensor dst that is updated with src elements.
+
+    Args:
+        dst: Destination tensor
+        src: Source tensor
+        non_blocking: bool
+
+    Returns: Updated tensor
+    """
+    return torch.ops.libtorch_agnostic.my_copy_.default(dst, src, non_blocking)
+
+
+def my_clone(t) -> Tensor:
+    """
+    Returns a clone of input tensor.
+
+    Args:
+        t: Input tensor
+
+    Returns: Cloned tensor
+    """
+    return torch.ops.libtorch_agnostic.my_clone.default(t)
 
 
 def test_device_guard(device_index) -> int:
@@ -259,3 +321,169 @@ def test_get_current_device_index() -> int:
     Returns: Current device index as an integer
     """
     return torch.ops.libtorch_agnostic.test_get_current_device_index.default()
+
+
+def my_new_empty_dtype_variant(t) -> Tensor:
+    """
+    Returns a new empty tensor with shape [2, 5] and dtype bfloat16
+
+    Args:
+        t: Input tensor used as a reference for device and other properties
+
+    Returns: New empty tensor with shape [2, 5] and dtype bfloat16
+    """
+    return torch.ops.libtorch_agnostic.my_new_empty_dtype_variant.default(t)
+
+
+def my_new_zeros_dtype_variant(t) -> Tensor:
+    """
+    Returns a new tensor filled with 0s with shape [2, 5] and dtype Float
+
+    Args:
+        t: Input tensor used as a reference for device and other properties
+
+    Returns: New zeros tensor
+    """
+    return torch.ops.libtorch_agnostic.my_new_zeros_dtype_variant.default(t)
+
+
+def my__foreach_mul_(tensors, others) -> ():
+    """
+    Updates tensors to be the result of pointwise multiplying with others.
+
+    Args:
+        tensors: list of tensors
+        others: list of tensors (with the same corresponding shapes as tensors)
+
+    Returns: nothing, tensors is updated in place.
+    """
+    torch.ops.libtorch_agnostic.my__foreach_mul_.default(tensors, others)
+
+
+def my__foreach_mul(tensors, others) -> list[Tensor]:
+    """
+    Returns a list of tensors that are the results of pointwise multiplying
+    tensors and others.
+
+    Args:
+        tensors: list of tensors
+        others: list of tensors (with the same corresponding shapes as tensors)
+
+    Returns: list of multiplied tensors
+    """
+    return torch.ops.libtorch_agnostic.my__foreach_mul.default(tensors, others)
+
+
+def make_tensor_clones_and_call_foreach(t1, t2) -> list[Tensor]:
+    """
+    Returns a list of 2 tensors corresponding to the square of the inputs.
+
+    Args:
+        t1: Tensor
+        t2: Tensor
+
+    Returns: list of [t1^2, t2^2]
+    """
+    return torch.ops.libtorch_agnostic.make_tensor_clones_and_call_foreach.default(
+        t1, t2
+    )
+
+
+def test_device_constructor(is_cuda, index, use_str):
+    """
+    Tests creating a Device from DeviceType and index, or from a string.
+
+    Args:
+        is_cuda: bool - if True, creates CUDA device; if False, creates CPU device
+        index: int - device index
+        use_str: bool - if True, constructs from string; if False, constructs from DeviceType
+
+    Returns: Device - A device with the specified type and index
+    """
+    return torch.ops.libtorch_agnostic.test_device_constructor.default(
+        is_cuda, index, use_str
+    )
+
+
+def test_device_equality(d1, d2) -> bool:
+    """
+    Tests Device equality operator.
+
+    Args:
+        d1: Device - first device
+        d2: Device - second device
+
+    Returns: bool - True if devices are equal
+    """
+    return torch.ops.libtorch_agnostic.test_device_equality.default(d1, d2)
+
+
+def test_device_set_index(device, index):
+    """
+    Tests Device set_index() method.
+
+    Args:
+        device: Device - device to modify
+        index: int - new device index
+
+    Returns: Device - device with updated index
+    """
+    return torch.ops.libtorch_agnostic.test_device_set_index.default(device, index)
+
+
+def test_device_index(device) -> int:
+    """
+    Tests Device index() method.
+
+    Args:
+        device: Device - device to query
+
+    Returns: int - device index
+    """
+    return torch.ops.libtorch_agnostic.test_device_index.default(device)
+
+
+def test_device_is_cuda(device) -> bool:
+    """
+    Tests Device is_cuda() method.
+
+    Args:
+        device: Device - device to check
+
+    Returns: bool - True if device is CUDA
+    """
+    return torch.ops.libtorch_agnostic.test_device_is_cuda.default(device)
+
+
+def test_device_is_cpu(device) -> bool:
+    """
+    Tests Device is_cpu() method.
+
+    Args:
+        device: Device - device to check
+
+    Returns: bool - True if device is CPU
+    """
+    return torch.ops.libtorch_agnostic.test_device_is_cpu.default(device)
+
+
+def test_parallel_for(size, grain_size) -> Tensor:
+    """
+    Tests the parallel_for functionality by using it to fill a tensor with indices.
+    Args:
+        size: int - size of the tensor to create
+        grain_size: int - grain size for parallel_for
+    Returns: Tensor - a 1D int64 tensor where each element contains its index
+        (if multiple threads are used the threadid will be encoded in the upper 32 bits)
+    """
+    return torch.ops.libtorch_agnostic.test_parallel_for.default(size, grain_size)
+
+
+def test_get_num_threads() -> int:
+    """
+    Tests the get_num_threads functionality by returning the number of threads
+    for the parallel backend.
+
+    Returns: int - the number of threads for the parallel backend
+    """
+    return torch.ops.libtorch_agnostic.test_get_num_threads.default()
