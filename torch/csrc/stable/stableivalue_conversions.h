@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/c/shim.h>
 #include <torch/csrc/stable/device_struct.h>
@@ -120,7 +119,7 @@ struct FromImpl<ScalarType> {
       case ScalarType::UInt64:
         return from(aoti_torch_dtype_uint64());
       default:
-        TORCH_CHECK(
+        STD_TORCH_CHECK(
             false,
             "Not yet supported ScalarType, please file an issue describing your use case.");
     }
@@ -151,7 +150,7 @@ struct FromImpl<DeviceType> {
       case DeviceType::PrivateUse1:
         return from(aoti_torch_device_type_privateuse1());
       default:
-        TORCH_CHECK(
+        STD_TORCH_CHECK(
             false,
             "Not yet supported DeviceType, please file an issue describing your use case.");
     }
@@ -379,7 +378,7 @@ struct ToImpl<ScalarType> {
     } else if (shim_scalartype == aoti_torch_dtype_uint64()) {
       return ScalarType::UInt64;
     } else {
-      TORCH_CHECK(
+      STD_TORCH_CHECK(
           false,
           "Not yet supported ScalarType ",
           std::to_string(shim_scalartype),
@@ -409,7 +408,7 @@ struct ToImpl<DeviceType> {
     } else if (shim_devicetype == aoti_torch_device_type_privateuse1()) {
       return DeviceType::PrivateUse1;
     } else {
-      TORCH_CHECK(
+      STD_TORCH_CHECK(
           false,
           "Not yet supported DeviceType ",
           std::to_string(shim_devicetype),

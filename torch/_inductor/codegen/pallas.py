@@ -469,6 +469,12 @@ class PallasKernel(SIMDKernel):
         index_str, _ = self._get_index_expr(index)
         self.stores.writeline(f"{out}[{index_str}] = {value}")
 
+    @staticmethod
+    def _buffer_is_contiguous(buffer_name: str) -> bool:
+        buf = V.graph.get_buffer(buffer_name)
+        layout = buf.get_layout()
+        return layout.is_contiguous()
+
     def codegen_kernel(self, name: Optional[str] = None) -> str:  # type: ignore[override]
         """
         Generate the complete Pallas kernel code as a Python string.
@@ -491,11 +497,6 @@ class PallasKernel(SIMDKernel):
                 "Pallas backend currently supports single-output elementwise kernels only"
             )
 
-        # Get output dtype at compile time
-        output_name = live_outs[0]
-        output_dtype = V.graph.get_dtype(output_name)
-        output_dtype_jax = torch_dtype_to_jax(output_dtype)
-
         code = IndentedBuffer()
         code.splice(
             """
@@ -510,89 +511,195 @@ class PallasKernel(SIMDKernel):
 
         # Define the Pallas kernel: accepts refs, uses broadcasted expressions
         arg_defs, _, _, _ = self.args.python_argdefs()
-        # Order: inputs (in_ptr*), then outputs (out_ptr*), then sizes/workspaces
         kernel_params = [a.name for a in arg_defs]
+        pure_out_params = [p for p in kernel_params if p.startswith("out_ptr")]
+        output_params = [
+            p for p in kernel_params if p.startswith(("out_ptr", "in_out_ptr"))
+        ]
+        if not output_params:
+            raise RuntimeError("Pallas backend requires at least one output buffer")
+
+        output_buffer_lookup = {
+            inner: outer
+            for outer, inner in self.args.output_buffers.items()
+            if isinstance(inner, str)
+        }
 
         kernel_name = name or "<KERNEL_NAME>"
-        interpret_literal = (
-            "True" if V.graph.get_current_device_or_throw().type == "cpu" else "False"
+        interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu"
+        interpret_literal = "True" if interpret_is_cpu else "False"
+
+        aliasable_flags: dict[str, bool] = {}
+        for param in pure_out_params:
+            buffer_name = output_buffer_lookup.get(param)
+            is_contiguous = buffer_name is not None and self._buffer_is_contiguous(
+                buffer_name
+            )
+            aliasable_flags[param] = (not interpret_is_cpu) and is_contiguous
+        alias_params = [
+            f"{param}_alias" for param in pure_out_params if aliasable_flags[param]
+        ]
+        pointer_tail = [
+            p for p in kernel_params if p.startswith(("in_out_ptr", "in_ptr"))
+        ]
+        kernel_input_params = alias_params + pointer_tail
+        full_kernel_params = alias_params + kernel_params
+        non_alias_out_set = OrderedSet(
+            [name for name, flag in aliasable_flags.items() if not flag]
         )
-        code.writeline(f"def {kernel_name}_kernel({', '.join(kernel_params)}):")
+        copy_output_indices = [
+            idx for idx, name in enumerate(output_params) if name in non_alias_out_set
+        ]
+        self.aliasable_out_ptrs = aliasable_flags
+        code.writeline(f"def {kernel_name}_kernel({', '.join(full_kernel_params)}):")
         with code.indent():
-            # Emit compute (CSE) and store lines; they reference *_ptr[index] directly
-            # The iteration variables are implicitly handled by JAX's vectorization
-            # When using [...], it processes the whole array
-            # When using explicit indices, they should be JAX-traced values
+            # Emit compute (CSE) and store lines; they reference *_ptr[index] directly.
+            # Iteration variables are implicitly handled by JAX vectorization, so
+            # explicit indices should be JAX-traced values.
             for line in self.compute._lines:
                 code.writeline(str(line))
             for line in self.stores._lines:
                 code.writeline(str(line))
 
         jit_wrapper_name = f"{kernel_name}_jit_wrapper"
-        code.writeline("@functools.partial(jax.jit, static_argnums=(0, 1))")
-        code.writeline(f"def {jit_wrapper_name}(out_shape, out_dtype, *kernel_refs):")
+        donate_indices = []
+        for idx, name in enumerate(kernel_input_params):
+            if (name in alias_params) or name.startswith("in_out_ptr"):
+                donate_indices.append(idx + 2)
+        if donate_indices:
+            donate_literal = "(" + ", ".join(str(x) for x in donate_indices) + ",)"
+        else:
+            donate_literal = "()"
+        code.writeline(
+            "@functools.partial("
+            "jax.jit, static_argnums=(0, 1), donate_argnums="
+            f"{donate_literal})"
+        )
+        code.writeline(
+            f"def {jit_wrapper_name}(out_shapes, out_dtypes, {', '.join(kernel_input_params)}):"
+        )
         with code.indent():
-            code.writeline("out_spec = jax.ShapeDtypeStruct(out_shape, out_dtype)")
+            code.writeline("out_specs = tuple(")
+            code.writeline("    jax.ShapeDtypeStruct(shape, dtype)")
+            code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
+            code.writeline(")")
+            alias_pairs: list[tuple[int, int]] = []
+            for out_idx, name in enumerate(output_params):
+                if name.startswith("out_ptr"):
+                    if aliasable_flags.get(name, False):
+                        alias_name = f"{name}_alias"
+                        input_idx = kernel_input_params.index(alias_name)
+                        alias_pairs.append((input_idx, out_idx))
+                else:
+                    input_idx = kernel_input_params.index(name)
+                    alias_pairs.append((input_idx, out_idx))
+            alias_map_literal = ", ".join(f"{i}: {o}" for (i, o) in alias_pairs)
             code.writeline("return pl.pallas_call(")
             code.writeline(f"    {kernel_name}_kernel,")
-            code.writeline("    out_shape=out_spec,")
+            code.writeline("    out_shape=out_specs,")
             code.writeline(f"    interpret={interpret_literal},")
             code.writeline("    grid=(1,),")
-            code.writeline(")(*kernel_refs)")
+            code.writeline(
+                f"    input_output_aliases={{ {alias_map_literal} }},"
+                if alias_pairs
+                else "    input_output_aliases={},"
+            )
+            code.writeline(")(")
+            code.writeline(f"    {', '.join(kernel_input_params)},")
+            code.writeline(")")
 
-        # Host entry: convert torch tensors <-> jax, call pallas_call and copy back
         main_name = f"{kernel_name}_main"
-        code.writeline(f"def {main_name}({', '.join(kernel_params)}, stream=None):")
+        code.writeline(
+            f"def {main_name}({', '.join(full_kernel_params)}, stream=None):"
+        )
         with code.indent():
-            # Enable JAX x64 mode to support float64/int64 types
             code.writeline("# Enable JAX x64 mode for float64/int64 support")
             code.writeline("jax.config.update('jax_enable_x64', True)")
-            # Identify inputs (in_ptr*) and output (out_ptr*)
-            input_params = [
-                p for p in kernel_params if p.startswith(("in_ptr", "in_out_ptr"))
-            ]
-            output_params = [p for p in kernel_params if p.startswith("out_ptr")]
+            if alias_params:
+                code.writeline("# Convert Torch -> JAX for donated outputs")
+                for alias_name in alias_params:
+                    code.writeline(
+                        f"{alias_name}_jax = jax.dlpack.from_dlpack({alias_name})"
+                    )
+            code.writeline("# Convert Torch -> JAX for in-place tensors")
+            for ptr in pointer_tail:
+                if ptr.startswith("in_out_ptr"):
+                    code.writeline(f"{ptr}_jax = jax.dlpack.from_dlpack({ptr})")
+            code.writeline("# Convert Torch -> JAX for inputs")
+            for ptr in pointer_tail:
+                if ptr.startswith("in_ptr"):
+                    code.writeline(
+                        f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.contiguous())"
+                    )
 
-            if len(output_params) != 1:
-                raise RuntimeError(
-                    f"Expected exactly 1 output, got {len(output_params)}"
-                )
-
-            output_param = output_params[0]
-
-            # Convert inputs to JAX arrays
-            for inp in input_params:
-                code.writeline(
-                    f"{inp}_jax = jax.dlpack.from_dlpack({inp}.contiguous())"
-                )
-
-            # Get output metadata from PyTorch tensor
             code.writeline("# Prepare output metadata from PyTorch tensor")
-            code.writeline(f"out_shape = tuple({output_param}.shape)")
-            code.writeline(f"out_dtype = {output_dtype_jax}")
+            code.writeline("# Map PyTorch dtype to JAX dtype")
+            code.writeline("_torch_dtype_to_jax = {")
+            code.writeline(
+                "    torch.float32: jnp.float32, torch.float64: jnp.float64, torch.float16: jnp.float16,"
+            )
+            code.writeline(
+                "    torch.int32: jnp.int32, torch.int64: jnp.int64, torch.int16: jnp.int16, torch.int8: jnp.int8,"
+            )
+            code.writeline("    torch.uint8: jnp.uint8, torch.bool: jnp.bool_,")
+            code.writeline("}")
+            code.writeline(
+                "out_shapes = ("
+                + ", ".join([f"tuple({name}.shape)" for name in output_params])
+                + ",)"
+            )
+            code.writeline(
+                "out_dtypes = ("
+                + ", ".join(
+                    [f"_torch_dtype_to_jax[{name}.dtype]" for name in output_params]
+                )
+                + ",)"
+            )
+            arg_name_map: dict[str, str] = {}
+            for alias_name in alias_params:
+                arg_name_map[alias_name] = f"{alias_name}_jax"
+            for ptr in pointer_tail:
+                arg_name_map[ptr] = f"{ptr}_jax"
 
-            call_args = ["out_shape", "out_dtype"] + [
-                f"{inp}_jax" for inp in input_params
-            ]
-            call_arg_str = ", ".join(call_args)
-            code.writeline(f"res = {jit_wrapper_name}({call_arg_str})")
-
-            # Copy result back
-            code.writeline("# Copy result back into the provided torch output tensor")
-            code.writeline("res_t = torch.from_dlpack(res)")
-            code.writeline(f"{output_param}.copy_(res_t)")
+            if kernel_input_params:
+                alias_args_str = ", ".join(
+                    arg_name_map[name] for name in kernel_input_params
+                )
+                code.writeline(
+                    f"res = {jit_wrapper_name}(out_shapes, out_dtypes, {alias_args_str})"
+                )
+            else:
+                code.writeline(f"res = {jit_wrapper_name}(out_shapes, out_dtypes)")
+            if copy_output_indices:
+                code.writeline(
+                    "result_values = res if isinstance(res, tuple) else (res,)"
+                )
+                for idx in copy_output_indices:
+                    name = output_params[idx]
+                    code.writeline(
+                        f"{name}.copy_(torch.from_dlpack(result_values[{idx}]))"
+                    )
 
         return code.getvalue()
 
     def call_kernel(self, name: str, node: Optional[IRNode] = None) -> None:  # type: ignore[override]
         """Generate the Python code that calls this Pallas kernel."""
         wrapper = V.graph.wrapper_code
-        _, call_args, _, arg_types = self.args.python_argdefs()
+        arg_defs, call_args, _, _ = self.args.python_argdefs()
+        kernel_param_names = [a.name for a in arg_defs]
+        pure_out_params = [p for p in kernel_param_names if p.startswith("out_ptr")]
+        call_arg_strs = list(map(str, call_args))
+        aliasable = getattr(self, "aliasable_out_ptrs", {})
+        alias_call_args = [
+            call_arg_strs[kernel_param_names.index(p)]
+            for p in pure_out_params
+            if aliasable.get(p, False)
+        ]
 
         # Generate kernel call: kernel_name.run(arg1, arg2, ...)
         # Note: async_compile.pallas loads {name}_main function and wraps it in PallasKernelWrapper
         # which exposes a run() method
-        kernel_call = f"{name}.run({', '.join(map(str, call_args))})"
+        kernel_call = f"{name}.run({', '.join(alias_call_args + call_arg_strs)})"
         wrapper.writeline(kernel_call)
 
 
