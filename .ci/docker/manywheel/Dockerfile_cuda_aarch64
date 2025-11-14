@@ -2,6 +2,7 @@ FROM quay.io/pypa/manylinux_2_28_aarch64 as base
 
 # Cuda ARM build needs gcc 11
 ARG DEVTOOLSET_VERSION=13
+ARG NPROC
 
 # Language variables
 ENV LC_ALL=en_US.UTF-8
@@ -88,6 +89,7 @@ RUN bash ./install_nvpl.sh && rm install_nvpl.sh
 
 # Install Arm Compute Library
 FROM base as arm_compute
+ARG ACL_VERSION
 # use python3.9 to install scons
 RUN python3.9 -m pip install scons==4.7.0
 RUN ln -sf /opt/python/cp39-cp39/bin/scons /usr/local/bin
