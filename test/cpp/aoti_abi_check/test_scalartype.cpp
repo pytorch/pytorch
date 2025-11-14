@@ -14,7 +14,7 @@ TEST(TestScalarType, ScalarTypeToCPPTypeT) {
 }
 
 TEST(TestScalarType, CppTypeToScalarType) {
-  using c10::CppTypeToScalarType;
+  using torch::headeronly::CppTypeToScalarType;
   using torch::headeronly::ScalarType;
 
 #define DEFINE_CHECK(TYPE, SCALARTYPE) \
