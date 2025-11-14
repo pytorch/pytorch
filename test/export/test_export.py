@@ -740,18 +740,26 @@ class TestExport(TestCase):
                 dynamic_shapes={"x": {0: Dim("b")}, "y": None},
             )
 
+        # clean up _torchdynamo related meta data as it could vary depending on the caller
+        # https://github.com/pytorch/pytorch/issues/167432
+        for node in ep.graph.nodes:
+            if "custom" in node.meta:
+                node.meta["custom"] = {
+                    k: v
+                    for k, v in node.meta["custom"].items()
+                    if "_torchdynamo_disable" not in k
+                }
+
         custom_metadata = torch.fx.traceback._get_custom_metadata(ep.module())
+
         self.assertExpectedInline(
             str(custom_metadata),
             """\
-('placeholder', 'x', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace'})
-('placeholder', 'y', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace'})
-('call_function', 'cat', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
-('call_function', 'item', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
-('call_function', 'ge_1', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
-('call_function', '_assert_scalar_default', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
-('call_function', 'mul', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
-('output', 'output', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace'})""",
+('call_function', 'cat', {'moo': 0})
+('call_function', 'item', {'moo': 0})
+('call_function', 'ge_1', {'moo': 0})
+('call_function', '_assert_scalar_default', {'moo': 0})
+('call_function', 'mul', {'moo': 0})""",
         )
 
     @requires_gpu
