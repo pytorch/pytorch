@@ -45,11 +45,12 @@ def get_group_name(n: fx.Node) -> str:
 def get_custom_estimation(
     n: fx.Node,
     custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
+    override_size=None,
 ) -> float | None:
     if custom_runtime_estimation is None:
         return None
 
-    return custom_runtime_estimation(n)
+    return custom_runtime_estimation(n, override_size)
 
 
 def estimate_collective_time(
@@ -58,7 +59,9 @@ def estimate_collective_time(
     custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
 ) -> float:
     """Estimate the runtime of a collective operation, optionally with an overridden size."""
-    if (est := get_custom_estimation(n, custom_runtime_estimation)) is not None:
+    if (
+        est := get_custom_estimation(n, custom_runtime_estimation, override_size)
+    ) is not None:
         return est
 
     return torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
@@ -67,13 +70,28 @@ def estimate_collective_time(
 
 
 def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
-    size = 0
-    for node in fx_node.all_input_nodes:
-        if (t := node.meta.get("val")) is not None:
-            # todo - symbolic
-            size += t.numel() * t.element_size()
+    """Estimate the size of a collective operation in bytes.
 
-    return size
+    For all_gather and reduce_scatter, both input and output buffers are needed.
+    For all_reduce, it can typically be done in-place, so only one buffer is needed.
+    """
+    from torch._inductor.fx_passes.bucketing import (
+        is_all_reduce_tensor as is_all_reduce,
+    )
+
+    input_node = fx_node.args[0]
+    input_tensor = input_node.meta.get("val")
+    input_size = input_tensor.numel() * input_tensor.element_size()
+
+    output_tensor = fx_node.meta.get("val")
+    output_size = output_tensor.numel() * output_tensor.element_size()
+
+    # all_reduce can be in-place, so only needs one buffer
+    if is_all_reduce(fx_node):
+        return max(input_size, output_size)
+
+    # otherwise assume both live concurrently
+    return input_size + output_size
 
 
 def is_compute_node(n: fx.Node) -> bool:
