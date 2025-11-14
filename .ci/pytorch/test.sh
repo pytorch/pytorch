@@ -1310,7 +1310,7 @@ test_libtorch_agnostic_targetting() {
 
     # Install test dependencies
     echo "Installing test dependencies..."
-    pip install expecttest numpy xmlrunner
+    pip install expecttest numpy unittest-xml-reporting
 
     # Install the pre-built wheel
     echo ""
