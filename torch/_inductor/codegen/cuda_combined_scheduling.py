@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     _IntLike: TypeAlias = Union[int, Expr]
 
 
-class CombinedScheduling(BaseScheduling):
+class CUDACombinedScheduling(BaseScheduling):
     """
     Scheduler for CUDA Kernels, which delegates calls as appropriate
     to the CUDA-C++ and Triton Schedulers, which both work for CUDA devices
