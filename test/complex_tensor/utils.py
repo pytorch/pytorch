@@ -6,7 +6,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
-from torch.complextensor._ops.common import (
+from torch._subclasses.complex_tensor._ops.common import (
     _as_complex_tensor,
     _as_interleaved,
     _get_op_name,
@@ -126,9 +126,9 @@ class TestCase(PytorchTestCase):
         self, device: torch.device, dtype, op: OpInfo, variant: Variant
     ) -> None:
         try:
-            from .test_complextensor import EXTRA_KWARGS, SKIPS
+            from .test_complex_tensor import EXTRA_KWARGS, SKIPS
         except ImportError:
-            from test_complextensor import EXTRA_KWARGS, SKIPS
+            from test_complex_tensor import EXTRA_KWARGS, SKIPS
         test_info = Descriptor(
             op=get_overload_packet_from_name(op.name),
             device=device,

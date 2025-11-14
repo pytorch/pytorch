@@ -29,7 +29,7 @@ except ImportError:
         Variant,
     )
 
-from torch.complextensor._ops.common import ComplexTensorMode
+from torch._subclasses.complex_tensor._ops.common import ComplexTensorMode
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     OpDTypes,
