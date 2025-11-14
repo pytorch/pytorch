@@ -40,7 +40,7 @@ inline c10::metal::opmath_t<T> matmul_inner(
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
     for (uint k = 0; k < TILE_DIM; k++) {
-      sum += A_tile[tid.y][k] * B_tile[k][tid.x];
+      sum += c10::metal::mul(A_tile[tid.y][k], B_tile[k][tid.x]);
     }
 
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -831,6 +831,10 @@ kernel void orgqr(
 INSTANTIATE_MM_OPS(float);
 INSTANTIATE_MM_OPS(half);
 INSTANTIATE_MM_OPS(bfloat);
+
+// Complex MM
+INSTANTIATE_MM_OPS(float2);
+INSTANTIATE_MM_OPS(half2);
 
 // Integral MM
 INSTANTIATE_MM_OPS(long);

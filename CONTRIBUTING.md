@@ -11,7 +11,6 @@ aspects of contributing to PyTorch.
 <!-- toc -->
 
 - [Developing PyTorch](#developing-pytorch)
-  - [Setup the development environment](#setup-the-development-environment)
   - [Tips and Debugging](#tips-and-debugging)
 - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
@@ -19,7 +18,7 @@ aspects of contributing to PyTorch.
   - [Python Unit Testing](#python-unit-testing)
   - [Better local unit tests with `pytest`](#better-local-unit-tests-with-pytest)
   - [Local linting](#local-linting)
-    - [Running `mypy`](#running-mypy)
+    - [Running `pyrefly`](#running-pyrefly)
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
 - [Merging your Change](#merging-your-change)
@@ -66,23 +65,6 @@ aspects of contributing to PyTorch.
 ## Developing PyTorch
 
 Follow the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source). If you get stuck when developing PyTorch on your machine, check out the [tips and debugging](#tips-and-debugging) section below for common solutions.
-
-### Setup the development environment
-
-First, you need to [fork the PyTorch project on GitHub](https://github.com/pytorch/pytorch/fork) and follow the instructions at [Connecting to GitHub with SSH](https://docs.github.com/en/authentication/connecting-to-github-with-ssh) to setup your SSH authentication credentials.
-
-Then clone the PyTorch project and setup the development environment:
-
-```bash
-git clone git@github.com:<USERNAME>/pytorch.git
-cd pytorch
-git remote add upstream git@github.com:pytorch/pytorch.git
-
-make setup-env
-# Or run `make setup-env-cuda` for pre-built CUDA binaries
-# Or run `make setup-env-rocm` for pre-built ROCm binaries
-source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
-```
 
 ### Tips and Debugging
 
@@ -299,7 +281,7 @@ dependencies as well as the nightly binaries into the repo directory.
 **Prerequisites**:
 The following packages should be installed with `pip`:
 - `expecttest` and `hypothesis` - required to run tests
-- `mypy` - recommended for linting
+- `pyrefly` - recommended for type checking. [Pyrefly](https://pyrefly.org/)
 - `pytest` - recommended to run tests more selectively
 Running
 ```
@@ -368,15 +350,32 @@ make lint
 
 Learn more about the linter on the [lintrunner wiki page](https://github.com/pytorch/pytorch/wiki/lintrunner)
 
-#### Running `mypy`
+#### Running `pyrefly`
 
-`mypy` is an optional static type checker for Python. We have multiple `mypy`
-configs for the PyTorch codebase that are automatically validated against whenever the linter is run.
+[Pyrefly](https://pyrefly.org/) is a high-performance static type checker for Python. It provides fast type checking along with IDE features like autocomplete and instant error feedback.
+
+PyTorch uses Pyrefly for type checking across the codebase. The configuration is managed in `pyrefly.toml` at the root of the repository.
+
+**Getting Started with Pyrefly:**
+
+To run type checking on the PyTorch codebase:
+```bash
+pyrefly check
+```
+
+For more detailed error information with summaries:
+```bash
+pyrefly check --summarize-errors
+```
+
+**Learn More:**
+- [Pyrefly Configuration](https://pyrefly.org/en/docs/configuration/) - Detailed configuration options
+- [Pyrefly IDE Features](https://pyrefly.org/en/docs/IDE-features/) - Set up Pyrefly in your editor for real-time type checking
+- [Python Typing Tutorial](https://pyrefly.org/en/docs/typing-for-python-developers/) - Learn about Python type annotations
 
 See [Guide for adding type annotations to
 PyTorch](https://github.com/pytorch/pytorch/wiki/Guide-for-adding-type-annotations-to-PyTorch)
-for more information on how to set up `mypy` and tackle type annotation
-tasks.
+for PyTorch-specific guidance on how to set up `pyrefly` and tackle type annotation tasks in this codebase.
 
 ### C++ Unit Testing
 
