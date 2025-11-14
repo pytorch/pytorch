@@ -4166,24 +4166,32 @@ class InstructionTranslatorBase(
             self.instructions[self.instruction_pointer - 1],
         )
 
+    def _make_frame_loc(
+        self, filename: str, lineno: Optional[int], fallback_lineno: int
+    ) -> tuple[str, int]:
+        if lineno is None or lineno < 0:
+            return (filename, fallback_lineno)
+        return (filename, lineno)
+
     def _get_frame_loc_chain(
         self, frame_loc: tuple[str, int]
     ) -> tuple[tuple[str, int], ...]:
-        frame_loc_chain: tuple[tuple[str, int], ...] = (frame_loc,)
+        frame_loc_chain_list: list[tuple[str, int]] = []
 
         if config.nested_graph_breaks:
             current_tx: Optional[InstructionTranslatorBase] = self.parent
             while current_tx is not None:
-                parent_frame_loc = (
+                parent_frame_loc = self._make_frame_loc(
                     current_tx.f_code.co_filename,
-                    current_tx.lineno
-                    if current_tx.lineno >= 0
-                    else current_tx.f_code.co_firstlineno,
+                    current_tx.lineno,
+                    current_tx.f_code.co_firstlineno,
                 )
-                frame_loc_chain = (parent_frame_loc,) + frame_loc_chain
+                frame_loc_chain_list.append(parent_frame_loc)
                 current_tx = current_tx.parent
 
-        return frame_loc_chain
+        frame_loc_chain_list.reverse()
+        frame_loc_chain_list.append(frame_loc)
+        return tuple(frame_loc_chain_list)
 
     def log_graph_break(
         self,
@@ -4195,8 +4203,11 @@ class InstructionTranslatorBase(
             user_stack = torch._guards.TracingContext.extract_stack()
 
         try:
-            lineno = user_stack[-1].lineno
-            frame_loc = (user_stack[-1].filename, lineno if lineno is not None else 0)
+            frame_loc = self._make_frame_loc(
+                user_stack[-1].filename,
+                user_stack[-1].lineno,
+                0,
+            )
         except IndexError:
             # first instruction
             frame_loc = (
