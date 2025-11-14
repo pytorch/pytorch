@@ -5,7 +5,7 @@ set -x
 
 # can be a named ref or SHA
 ACL_VERSION=${ACL_VERSION:-"v52.6.0"}
-NPROC=${NPROC:-$(( $(nproc) - 2 ))}
+MAX_JOBS=${MAX_JOBS:-$(( $(nproc) - 2 ))}
 
 ACL_CHECKOUT_DIR="ComputeLibrary"
 ACL_INSTALL_DIR="/acl"
@@ -22,7 +22,7 @@ mkdir -p "$ACL_CHECKOUT_DIR"
   git checkout -f FETCH_HEAD
 
   # Build with scons
-  scons -j${NPROC}  Werror=0 debug=0 neon=1 opencl=0 embed_kernels=0 \
+  scons -j${MAX_JOBS}  Werror=0 debug=0 neon=1 opencl=0 embed_kernels=0 \
     os=linux arch=armv8a build=native multi_isa=1 \
     fixed_format_kernels=1 openmp=1 cppthreads=0
 )

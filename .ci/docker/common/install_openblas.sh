@@ -5,7 +5,7 @@ set -x
 
 # can be a named ref or SHA
 OPENBLAS_VERSION=${OPENBLAS_VERSION:-"v0.3.30"}
-NPROC=${NPROC:-$(( $(nproc) - 2 ))}
+MAX_JOBS=${MAX_JOBS:-$(( $(nproc) - 2 ))}
 
 OPENBLAS_CHECKOUT_DIR="OpenBLAS"
 OPENBLAS_REPO_URL="https://github.com/OpenMathLib/OpenBLAS.git"
@@ -32,7 +32,7 @@ CFLAGS=-O3
 BUILD_BFLOAT16=1
 "
 
-make -j${NPROC} ${OPENBLAS_BUILD_FLAGS} -C $OPENBLAS_CHECKOUT_DIR
+make -j${MAX_JOBS} ${OPENBLAS_BUILD_FLAGS} -C $OPENBLAS_CHECKOUT_DIR
 sudo make install -C $OPENBLAS_CHECKOUT_DIR
 
 # Clean up checkout

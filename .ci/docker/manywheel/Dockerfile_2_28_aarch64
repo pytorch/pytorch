@@ -1,7 +1,7 @@
 FROM quay.io/pypa/manylinux_2_28_aarch64 as base
 
 ARG GCCTOOLSET_VERSION=13
-ARG NPROC
+ARG MAX_JOBS
 
 # Language variables
 ENV LC_ALL=en_US.UTF-8

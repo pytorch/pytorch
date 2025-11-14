@@ -119,7 +119,7 @@ DOCKER_BUILDKIT=1 docker build  \
     --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
     --build-arg "OPENBLAS_VERSION=${OPENBLAS_VERSION:-}" \
     --build-arg "ACL_VERSION=${ACL_VERSION:-}" \
-    --build-arg "NPROC=${NPROC:-}" \
+    --build-arg "MAX_JOBS=${MAX_JOBS:-}" \
     --target "${TARGET}" \
     -t "${tmp_tag}" \
     $@ \
