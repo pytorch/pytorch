@@ -45,13 +45,13 @@ c10::ScalarType out_dtype
     if (b_is_2d) {
       out_size = {offs->size(0), mat_a.size(0), mat_b.size(1)};
     } else {
-      TORCH_CHECK(offs->size(0) == mat_b.size(0), "matrix batch sizes have to match");
+      TORCH_CHECK(offs->size(0) == mat_b.size(0) || offs->size(0) == mat_b.size(0) + 1, "matrix batch sizes have to match");
       out_size = {mat_a.size(0), mat_b.size(-1)};
     }
   } else {
     if (b_is_2d) {
       // this case is not actually encountered for MoE gemms
-      TORCH_CHECK(offs->size(0) == mat_a.size(0), "matrix batch sizes have to match");
+      TORCH_CHECK(offs->size(0) == mat_a.size(0) || offs->size(0) == mat_a.size(0) + 1, "matrix batch sizes have to match");
       out_size = {mat_a.size(1), mat_b.size(1)};
     } else { // regular bmm
       TORCH_CHECK(mat_a.size(0) == mat_b.size(0), "batched dimension has to match");

@@ -31,6 +31,7 @@ __global__ void prepare_grouped_gemm_data(
     StrideB* stride_B,
     StrideOutput* stride_output,
     const int32_t* offs,
+    const int32_t* offs_start,
     int32_t M,
     int32_t N,
     int32_t K,
@@ -48,7 +49,7 @@ __global__ void prepare_grouped_gemm_data(
   int32_t delta = 0;
   int32_t offset = 0;
   if (offs != nullptr) {
-    int32_t start = tid == 0 ? 0 : offs[tid - 1];
+    int32_t start = tid == 0 ? offs_start ? *offs_start : 0 : offs[tid - 1];
     offset = offs[tid];
     delta = offset - start;
     CUDA_KERNEL_ASSERT(delta >=0 && "expected gemm dimension to be greater or equal 0\n");

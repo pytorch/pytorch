@@ -194,6 +194,8 @@ void bf16bf16_grouped_gemm_impl_sm90_sm100(
     // regular bmm
     group_count = mat_a.size(0);
   }
+  // Indicate where 1st slice always starts with 0 or not
+  const int32_t has_zero_offs = offs.has_value() && offs->size(0) == group_count + 1 ? 1 : 0;
 
   TORCH_CHECK(group_count < 1024, "Can't process more than 1024 groups");
   const int64_t problem_shape_size =
@@ -259,7 +261,8 @@ void bf16bf16_grouped_gemm_impl_sm90_sm100(
       stride_A,
       stride_B,
       stride_output,
-      offs.has_value() ? offs->const_data_ptr<int32_t>() : nullptr,
+      offs.has_value() ? offs->const_data_ptr<int32_t>() + zero_offs: nullptr,
+      zero_offs ? offs->const_data_ptr<int32_t>() : nullptr,
       M,
       N,
       K,

@@ -322,6 +322,7 @@ void f8f8bf16_grouped_gemm_impl_sm90(
       stride_B,
       stride_output,
       offs.has_value() ? offs->const_data_ptr<int32_t>() : nullptr,
+      nullptr,
       M,
       N,
       K,
