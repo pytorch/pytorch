@@ -2,12 +2,12 @@
 from torch._functorch._activation_checkpointing.graph_info_provider import (
     GraphInfoProvider,
 )
-from torch._functorch._activation_checkpointing.knapsack_evaluator import (
-    KnapsackEvaluator,
-)
 from torch._functorch._activation_checkpointing.knapsack import (
     dp_knapsack,
     dp_knapsack_sliding_hirschberg,
+)
+from torch._functorch._activation_checkpointing.knapsack_evaluator import (
+    KnapsackEvaluator,
 )
 from torch.fx.graph import Graph
 from torch.testing._internal.common_utils import run_tests, TestCase
