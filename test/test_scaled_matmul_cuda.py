@@ -14,6 +14,7 @@ import torch
 from torch.nn.functional import pad, scaled_mm, scaled_grouped_mm, ScalingType, SwizzleType
 from torch.testing._internal.common_cuda import (
     IS_SM90,
+    IS_SM100,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
@@ -53,11 +54,9 @@ from torch.testing._internal.common_quantized import (
 
 
 _IS_SM8X = False
-_IS_B200 = False
 
 if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
-    _IS_B200 = torch.cuda.get_device_capability(0) == (10, 0)
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
 f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300+ devices"
@@ -740,7 +739,7 @@ class TestFP8Matmul(TestCase):
     def test_mxfp8_nvfp4_scaled_grouped_mm_2d_2d(self, G, M, N, K, format):
         torch.manual_seed(42)
 
-        if format == "mxfp4" and not _IS_B200:
+        if format == "mxfp4" and not IS_SM100:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200")
 
         total_K = K  # Alias for clarity, communicating this consists of several groups along this dim
@@ -807,7 +806,7 @@ class TestFP8Matmul(TestCase):
     def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format):
         torch.manual_seed(42)
 
-        if format == "mxfp4" and not _IS_B200:
+        if format == "mxfp4" and not IS_SM100:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200")
 
         # Simulate 2d-3d grouped gemm `out = input @ weight.t()`
@@ -1881,7 +1880,7 @@ class TestFP8Matmul(TestCase):
             raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
         if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
             raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
-        if recipe == "mxfp4" and not _IS_B200:
+        if recipe == "mxfp4" and not IS_SM100:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200")
 
         device = "cuda"
@@ -2103,7 +2102,7 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     @parametrize("recipe", ["mxfp8", "mxfp4" if torch.version.hip else "nvfp4"])
     def test_blockwise_mxfp8_nvfp4_error_messages(self, device, recipe) -> None:
-        if recipe == "mxfp4" and not _IS_B200:
+        if recipe == "mxfp4" and not IS_SM100:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200")
         M, K, N = (1024, 512, 2048)
         BLOCK_SIZE_K = 16 if recipe == "nvfp4" else 32
