@@ -463,11 +463,13 @@ def all_reduce_merge_fn_to_trace(
 
 # List of all torch dtypes for serialization through custom ops
 # TODO: custom ops support list[dtype] input
-_ALL_DTYPES = tuple([
-    getattr(torch, attr)
-    for attr in dir(torch)
-    if isinstance(getattr(torch, attr), torch.dtype)
-])
+_ALL_DTYPES = tuple(
+    [
+        getattr(torch, attr)
+        for attr in dir(torch)
+        if isinstance(getattr(torch, attr), torch.dtype)
+    ]
+)
 
 
 @torch.library.custom_op("bucketing::_pre_bucket_all_gather", mutates_args={})
@@ -480,11 +482,10 @@ def _pre_bucket_all_gather(
     rank: int,
 ) -> torch.Tensor:
     # Convert int indices back to torch.dtype
-    assert len(ag_ins) == len(out_dtype_ints)
     out_dtypes = [_ALL_DTYPES[d] for d in out_dtype_ints]
     ins_split_sizes_bytes = [
         ag_in.numel() * out_dtype.itemsize
-        for ag_in, out_dtype in zip(ag_ins, out_dtypes)
+        for ag_in, out_dtype in zip(ag_ins, out_dtypes, strict=True)
     ]
     bucket_dtype_size_bytes = dtype.itemsize
     ins_split_sizes = [
@@ -498,7 +499,8 @@ def _pre_bucket_all_gather(
     # View each destination slice as its output dtype, then copy
     # The copy operation handles dtype conversion from input dtype to output dtype
     foreach_copy_dsts_typed = [
-        dst.view(out_dtype) for dst, out_dtype in zip(foreach_copy_dsts, out_dtypes)
+        dst.view(out_dtype)
+        for dst, out_dtype in zip(foreach_copy_dsts, out_dtypes, strict=True)
     ]
     ag_ins_flattened = [ag_in.reshape(-1) for ag_in in ag_ins]
     torch._foreach_copy_(foreach_copy_dsts_typed, ag_ins_flattened)
@@ -516,7 +518,7 @@ def _pre_bucket_all_gather_fake(
     out_dtypes = [_ALL_DTYPES[d] for d in out_dtype_ints]
     ins_split_sizes_bytes = [
         ag_in.numel() * out_dtype.itemsize
-        for ag_in, out_dtype in zip(ag_ins, out_dtypes)
+        for ag_in, out_dtype in zip(ag_ins, out_dtypes, strict=True)
     ]
     bucket_dtype_size_bytes = dtype.itemsize
     ins_split_sizes = [
