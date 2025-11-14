@@ -3244,7 +3244,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         V_sliced = V[:, :, :-128]
 
         out_eager = flex_attention(Q, K_sliced, V_sliced)
-        out_compiled = func(Q, K_sliced, V_sliced)
+
+        out_compiled, code = run_and_get_code(func, Q, K_sliced, V_sliced)
+
+        # Make sure flex attention kernels have flex_attention in name
+        FileCheck().check_regex("triton_tem_fused_flex_attention.*").run(code[0])
+        FileCheck().check_regex("triton_tem_fused_flex_attention_backward.*").run(
+            code[1]
+        )
 
         grad = torch.rand_like(out_eager)
 
@@ -5802,11 +5809,11 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
         from torch.utils._pytree import GetAttrKey
 
-        for key, tensor in tensors_with_keys:
+        for key, _tensor in tensors_with_keys:
             self.assertIsInstance(key, GetAttrKey)
             self.assertIsNotNone(key)
 
-        for key, value in context_with_keys:
+        for key, _value in context_with_keys:
             self.assertIsInstance(key, GetAttrKey)
             self.assertIsNotNone(key)
 
