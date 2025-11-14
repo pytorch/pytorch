@@ -85,9 +85,9 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     MI200_ARCH,
+    parametrize,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
-    skipIfRocm,
     skipIfRocmArch,
     TemporaryFileName,
 )
@@ -4785,13 +4785,15 @@ class DistributedTest:
             optim_cls,
             optim_kwargs,
             init_before,
+            hardcoded_cpu_seed=False,
+            hardcoded_gpu_seed=False,
             gradient_as_bucket_view=True,
         ):
             # Need to seed to ensure inputs are unique across rank. Otherwise,
             # allreduce won't have any effect.
             my_seed = 123
-            torch.manual_seed(my_seed)
-            torch.cuda.manual_seed(my_seed)
+            torch.manual_seed(my_seed if hardcoded_cpu_seed else self.rank)
+            torch.cuda.manual_seed(my_seed if hardcoded_gpu_seed else self.rank)
             torch.cuda.set_device(self.rank)
 
             # Test a simple linear as well as a ResNet model.
@@ -4869,44 +4871,68 @@ class DistributedTest:
                         optim.zero_grad(set_to_none=True)
 
         @skip_if_lt_x_gpu(2)
-        def test_ddp_apply_optim_in_backward_SGD_init_before(self):
-            optim_cls=torch.optim.SGD
+        @parametrize("hardcoded_cpu_seed", [True, False])
+        @parametrize("hardcoded_gpu_seed", [True, False])
+        def test_ddp_apply_optim_in_backward_SGD_init_before(
+            self, hardcoded_cpu_seed, hardcoded_gpu_seed
+        ):
+            optim_cls = torch.optim.SGD
             with self.subTest(optim_cls=optim_cls):
-                    self._test_ddp_apply_optim_in_backward(
-                        optim_cls=optim_cls,
-                        optim_kwargs={"lr": 0.03},
-                        init_before=True,
-                    )
+                self._test_ddp_apply_optim_in_backward(
+                    optim_cls=optim_cls,
+                    optim_kwargs={"lr": 0.03},
+                    init_before=True,
+                    hardcoded_cpu_seed=hardcoded_cpu_seed,
+                    hardcoded_gpu_seed=hardcoded_gpu_seed,
+                )
 
         @skip_if_lt_x_gpu(2)
-        def test_ddp_apply_optim_in_backward_SGD_no_init_before(self):
-            optim_cls=torch.optim.SGD
+        @parametrize("hardcoded_cpu_seed", [True, False])
+        @parametrize("hardcoded_gpu_seed", [True, False])
+        def test_ddp_apply_optim_in_backward_SGD_no_init_before(
+            self, hardcoded_cpu_seed, hardcoded_gpu_seed
+        ):
+            optim_cls = torch.optim.SGD
             with self.subTest(optim_cls=optim_cls):
-                    self._test_ddp_apply_optim_in_backward(
-                        optim_cls=optim_cls,
-                        optim_kwargs={"lr": 0.03},
-                        init_before=False,
-                    )
+                self._test_ddp_apply_optim_in_backward(
+                    optim_cls=optim_cls,
+                    optim_kwargs={"lr": 0.03},
+                    init_before=False,
+                    hardcoded_cpu_seed=hardcoded_cpu_seed,
+                    hardcoded_gpu_seed=hardcoded_gpu_seed,
+                )
 
         @skip_if_lt_x_gpu(2)
-        def test_ddp_apply_optim_in_backward_Adam_init_before(self):
-            optim_cls=torch.optim.Adam
+        @parametrize("hardcoded_cpu_seed", [True, False])
+        @parametrize("hardcoded_gpu_seed", [True, False])
+        def test_ddp_apply_optim_in_backward_Adam_init_before(
+            self, hardcoded_cpu_seed, hardcoded_gpu_seed
+        ):
+            optim_cls = torch.optim.Adam
             with self.subTest(optim_cls=optim_cls):
-                    self._test_ddp_apply_optim_in_backward(
-                        optim_cls=optim_cls,
-                        optim_kwargs={"lr": 0.03},
-                        init_before=True,
-                    )
+                self._test_ddp_apply_optim_in_backward(
+                    optim_cls=optim_cls,
+                    optim_kwargs={"lr": 0.03},
+                    init_before=True,
+                    hardcoded_cpu_seed=hardcoded_cpu_seed,
+                    hardcoded_gpu_seed=hardcoded_gpu_seed,
+                )
 
         @skip_if_lt_x_gpu(2)
-        def test_ddp_apply_optim_in_backward_Adam_no_init_before(self):
-            optim_cls=torch.optim.Adam
+        @parametrize("hardcoded_cpu_seed", [True, False])
+        @parametrize("hardcoded_gpu_seed", [True, False])
+        def test_ddp_apply_optim_in_backward_Adam_no_init_before(
+            self, hardcoded_cpu_seed, hardcoded_gpu_seed
+        ):
+            optim_cls = torch.optim.Adam
             with self.subTest(optim_cls=optim_cls):
-                    self._test_ddp_apply_optim_in_backward(
-                        optim_cls=optim_cls,
-                        optim_kwargs={"lr": 0.03},
-                        init_before=False,
-                    )
+                self._test_ddp_apply_optim_in_backward(
+                    optim_cls=optim_cls,
+                    optim_kwargs={"lr": 0.03},
+                    init_before=False,
+                    hardcoded_cpu_seed=hardcoded_cpu_seed,
+                    hardcoded_gpu_seed=hardcoded_gpu_seed,
+                )
 
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward_grad_as_bucket_view_false(self):
