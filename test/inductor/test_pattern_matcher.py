@@ -1415,10 +1415,10 @@ class TestPatternMatcher(TestCase):
         out, code = run_and_get_code(test_c, x, y)
         FileCheck().check_not(".run").run(code[0])
         self.assertEqual(out, test(x, y))
-    
+
     def test_randperm_index_scalar_workaround(self):
         x = torch.randn(3, device=GPU_TYPE)
-        
+
         def func(x):
             twos = torch.ones(3, device=x.device) * 2
             x = twos * x
@@ -1848,6 +1848,7 @@ class TestPatternMatcher(TestCase):
         )
         self.assertEqual(len(sigmoid_nodes), 1)
         self.assertTrue("original_aten" in sigmoid_nodes[0].meta)
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
