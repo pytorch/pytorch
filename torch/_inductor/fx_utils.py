@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import operator
+import warnings
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -251,10 +252,21 @@ class FakeTensorUpdater:
         def node_invokes_subgraph(
             node: torch.fx.Node, *args: Any, **kwargs: Any
         ) -> bool:
-            return node.op == "call_function" and pytree.tree_any_only(
-                torch.fx.GraphModule,
-                lambda s: s in self.subgraph_updaters,
-                (args, kwargs),
+            return (
+                node.op == "call_function"
+                and node.target
+                not in (
+                    # auto_functionalized doesn't call a subgraph, but the pytree call
+                    # below can return subgraphs if the functionalized call itself
+                    # invokes a subgraph.
+                    torch.ops.higher_order.auto_functionalized,
+                    torch.ops.higher_order.auto_functionalized_v2,
+                )
+                and pytree.tree_any_only(
+                    torch.fx.GraphModule,
+                    lambda s: s in self.subgraph_updaters,
+                    (args, kwargs),
+                )
             )
 
         def extract_subgraphs_and_args(
@@ -270,48 +282,51 @@ class FakeTensorUpdater:
 
             If the second return value is None, this function was unable to determine
             what args to pass to the subgraph(s)."""
-            if node.target is torch.ops.higher_order.invoke_subgraph:
-                return ((args[0],), tuple(args[2:]))
             if node.target is torch.ops.higher_order.cond:
-                return (tuple(args[1:3]), tuple(args[3]))
+                return tuple(args[1:3]), tuple(args[3])
+            if node.target is torch.ops.higher_order.foreach_map:
+                return (args[0],), tuple(args[1:])
             if node.target in (
                 torch.ops.higher_order.invoke_quant_packed,
                 torch.ops.higher_order.invoke_quant,
             ):
-                return ((args[0],), tuple(args[1:]))
+                return (args[0],), tuple(args[1:])
+            if node.target is torch.ops.higher_order.invoke_subgraph:
+                return (args[0],), tuple(args[2:])
+            if node.target is torch.ops.higher_order.map_impl:
+                # map is applied over slices from the first dimension of each value in
+                # args[1].
+                return (args[0],), (*(a[0] for a in args[1]), *args[2:])
+            if node.target in (
+                torch.ops.higher_order.while_loop,
+                torch.ops.higher_order.while_loop_stack_output,
+            ):
+                return tuple(args[:2]), (*args[2], *args[3])
             if node.target is control_deps:
                 assert not kwargs, (
                     "Subgraph arguments can be renamed, so we cannot consistently "
                     "handle kwargs at this point in the stack."
                 )
-                return ((args[1],), tuple(args[2:]))
-            if node.target is torch.ops.higher_order.map_impl:
-                # args[1][0] represents the first value in the list of values being
-                # mapped over.  We assume it's representative of the whole list, since
-                # Dynamo should have provided us multiple subgraphs otherwise.
-                return ((args[0],), (args[1][0], *args[2:]))
-            if node.target in (
-                torch.ops.higher_order.while_loop,
-                torch.ops.higher_order.while_loop_stack_output,
+                return (args[1],), tuple(args[2:])
+            # These functions don't have clean mappings from node arguments to subgraph
+            # inputs, since those mappings are dependent on details of the original
+            # invocation that are not preserved.  Skip them intentionally.
+            if node.target not in (
+                torch.ops.higher_order.associative_scan,
+                torch.ops.higher_order.flex_attention,
+                torch.ops.higher_order.scan,
             ):
-                return (tuple(args[:2]), (*args[2], *args[3]))
-            if node.target is torch.ops.higher_order.scan:
-                # Similarly to map_impl, we assume the first elements of init and xs
-                # must be representative of the whole list.
-                return ((args[0],), (args[1][0], args[2][0][0]))
-            if node.target is torch.ops.higher_order.flex_attention:
-                # The flex attention transformation is complicated, and a mapping from
-                # args to subgraph inputs is inconsistent at best.  We'll skip for now.
-                return tuple(
-                    s
-                    for s in pytree.tree_flatten(args)
-                    if isinstance(s, torch.fx.GraphModule)
-                    and s in self.subgraph_updaters
-                ), None
+                warnings.warn(
+                    f"Please add support for subgraph args to function {node.target}!"
+                )
 
-            raise RuntimeError(
-                f"Please add support for subgraph args to function {node.target}!"
-            )
+            # By default, just return the detected list of subgraphs so that we can run
+            # updates on all of them.
+            return tuple(
+                s
+                for s in pytree.tree_flatten(args)
+                if isinstance(s, torch.fx.GraphModule) and s in self.subgraph_updaters
+            ), None
 
         @dataclass
         class SubgraphUpdating:

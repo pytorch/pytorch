@@ -84,7 +84,7 @@ if TYPE_CHECKING:
 
     from torch._ops import OpOverload
     from torch.fx._symbolic_trace import PHBase
-    from torch.types import IntLikeType
+    from torch.types import BoolLikeType, FloatLikeType, IntLikeType
 
 __all__ = [
     "PythonKeyTracer",
@@ -458,7 +458,7 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
 
 def _build_proxy_for_sym_expr(
     tracer: _ProxyTracer, expr: sympy.Expr, out: PySymType | None = None
-) -> PySymType | None:
+) -> IntLikeType | FloatLikeType | BoolLikeType | None:
     """
     Decompose `expr` and look for the pieces as inputs. If `out` is provided
     then that will be the resulting SymNode (and `out.expr` must be the same as
@@ -531,6 +531,13 @@ def _build_proxy_for_sym_expr(
     if (value := tracer.sympy_expr_tracker.get(expr)) is not None:
         assert not out
         return value.value
+
+    if isinstance(expr, (int, float, bool)):
+        return expr
+    if expr.is_Integer:
+        return int(expr)
+    if expr.is_Float:
+        return float(expr)
 
     args = []
     for arg in expr.args:
@@ -1536,7 +1543,9 @@ ORIGINAL_ATEN: Optional[object] = None
 
 
 @contextmanager
-def set_original_aten_op(func: OpOverload) -> Generator[None, None, None]:
+def set_original_aten_op(
+    func: OpOverload | torch._ops.HigherOrderOperator,
+) -> Generator[None, None, None]:
     global ORIGINAL_ATEN
     if ORIGINAL_ATEN is None and fx_traceback.has_preserved_node_meta():
         ORIGINAL_ATEN = func

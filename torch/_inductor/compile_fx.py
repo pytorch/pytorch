@@ -91,6 +91,7 @@ from torch._inductor.utils import (
     tensor_is_aligned,
 )
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch._logging import trace_structured
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
@@ -2745,7 +2746,9 @@ def _compile_fx_main(
                             node.meta["val"] = fake_mode.from_tensor(
                                 target, static_shapes=True
                             )
-                        elif isinstance(target, torch.ScriptObject):
+                        elif isinstance(target, torch.ScriptObject) or is_opaque_type(
+                            type(target)
+                        ):
                             node.meta["val"] = (
                                 torch._library.fake_class_registry.maybe_to_fake_obj(
                                     fake_mode, target
