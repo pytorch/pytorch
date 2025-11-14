@@ -9,10 +9,94 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import run_tests
 
 
-class TestCollectiveAutotuning(MultiProcessTestCase):
+class TestCollectiveAutotuning2Ranks(MultiProcessTestCase):
+    """Test collective autotuning with 2 ranks"""
+
     @property
     def world_size(self):
         return 2
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    @skip_if_lt_x_gpu(2)
+    def test_equivalent_allreduce_strategies(self):
+        """
+        Test autotuning between mathematically equivalent all_reduce strategies.
+
+        Strategy 1: sum all_reduce
+        Strategy 2: avg all_reduce * world_size
+        """
+        dist.init_process_group(
+            backend="nccl",
+            init_method=f"file:///tmp/test_equiv_allreduce_{self.id()}",
+            world_size=self.world_size,
+            rank=self.rank,
+        )
+
+        dist.barrier()
+
+        rank = dist.get_rank()
+        device = f"cuda:{rank}"
+
+        from torch._C._distributed_c10d import _register_process_group
+
+        _register_process_group("default", dist.group.WORLD)
+
+        @torch.library.custom_op("test::equiv_ar", mutates_args=())
+        def equiv_ar(x: torch.Tensor) -> torch.Tensor:
+            result = x.clone()
+            return torch.ops._c10d_functional.all_reduce_(result, "sum", "default")
+
+        @equiv_ar.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        def sum_allreduce(x: torch.Tensor) -> torch.Tensor:
+            result = x.clone()
+            return torch.ops._c10d_functional.all_reduce_(result, "sum", "default")
+
+        def avg_allreduce_scaled(x: torch.Tensor) -> torch.Tensor:
+            result = x.clone()
+            result = torch.ops._c10d_functional.all_reduce_(result, "avg", "default")
+            return result * self.world_size
+
+        from torch._inductor.kernel.custom_op import (
+            CustomOpConfig,
+            register_custom_op_autotuning,
+        )
+
+        register_custom_op_autotuning(
+            equiv_ar,
+            configs=[
+                CustomOpConfig(sum_allreduce),
+                CustomOpConfig(avg_allreduce_scaled),
+            ],
+        )
+
+        class EquivAllReduceModel(torch.nn.Module):
+            def forward(self, x):
+                return equiv_ar(x)
+
+        model = torch.compile(EquivAllReduceModel()).to(device)
+
+        torch.manual_seed(42)
+        x = torch.randn(128, 128, device=device)
+        dist.broadcast(x, src=0)
+
+        _ = model(x)
+
+        dist.barrier()
+        dist.destroy_process_group()
+
+
+class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
+    """Test collective autotuning with 4 ranks"""
+
+    @property
+    def world_size(self):
+        return 4
 
     def setUp(self):
         super().setUp()
@@ -39,25 +123,28 @@ class TestCollectiveAutotuning(MultiProcessTestCase):
         @torch.library.custom_op("test::my_allgather_4ranks", mutates_args=())
         def my_allgather(x: torch.Tensor) -> torch.Tensor:
             output = torch.ops._c10d_functional.all_gather_into_tensor(
-                x.contiguous(), 4, "default"
+                x.contiguous(), self.world_size, "default"
             )
             return output
 
         @my_allgather.register_fake
         def _(x):
             return torch.empty(
-                x.size(0) * 4, *x.size()[1:], dtype=x.dtype, device=x.device
+                x.size(0) * self.world_size,
+                *x.size()[1:],
+                dtype=x.dtype,
+                device=x.device,
             )
 
         def allgather_impl(x):
             output = torch.ops._c10d_functional.all_gather_into_tensor(
-                x.contiguous(), 4, "default"
+                x.contiguous(), self.world_size, "default"
             )
             return output
 
         def allgather_impl2(x):
             output = torch.ops._c10d_functional.all_gather_into_tensor(
-                x.contiguous(), 4, "default"
+                x.contiguous(), self.world_size, "default"
             )
             return output
 
@@ -86,77 +173,6 @@ class TestCollectiveAutotuning(MultiProcessTestCase):
         expected_shape = (32 * 4, 64)
         self.assertEqual(y.shape, expected_shape)
 
-        dist.destroy_process_group()
-
-    @skip_if_lt_x_gpu(2)
-    def test_equivalent_allreduce_strategies(self):
-        """
-        Test autotuning between mathematically equivalent all_reduce strategies.
-
-        Strategy 1: sum all_reduce
-        Strategy 2: avg all_reduce * world_size
-        """
-        dist.init_process_group(
-            backend="nccl",
-            init_method=f"file:///tmp/test_equiv_allreduce_{self.id()}",
-            world_size=self.world_size,
-            rank=self.rank,
-        )
-
-        dist.barrier()
-
-        rank = dist.get_rank()
-        world_size = dist.get_world_size()
-        device = f"cuda:{rank}"
-
-        from torch._C._distributed_c10d import _register_process_group
-
-        _register_process_group("default", dist.group.WORLD)
-
-        @torch.library.custom_op("test::equiv_ar", mutates_args=())
-        def equiv_ar(x: torch.Tensor) -> torch.Tensor:
-            result = x.clone()
-            return torch.ops._c10d_functional.all_reduce_(result, "sum", "default")
-
-        @equiv_ar.register_fake
-        def _(x):
-            return torch.empty_like(x)
-
-        def sum_allreduce(x: torch.Tensor) -> torch.Tensor:
-            result = x.clone()
-            return torch.ops._c10d_functional.all_reduce_(result, "sum", "default")
-
-        def avg_allreduce_scaled(x: torch.Tensor) -> torch.Tensor:
-            result = x.clone()
-            result = torch.ops._c10d_functional.all_reduce_(result, "avg", "default")
-            return result * world_size
-
-        from torch._inductor.kernel.custom_op import (
-            CustomOpConfig,
-            register_custom_op_autotuning,
-        )
-
-        register_custom_op_autotuning(
-            equiv_ar,
-            configs=[
-                CustomOpConfig(sum_allreduce),
-                CustomOpConfig(avg_allreduce_scaled),
-            ],
-        )
-
-        class EquivAllReduceModel(torch.nn.Module):
-            def forward(self, x):
-                return equiv_ar(x)
-
-        model = torch.compile(EquivAllReduceModel()).to(device)
-
-        torch.manual_seed(42)
-        x = torch.randn(128, 128, device=device)
-        dist.broadcast(x, src=0)
-
-        _ = model(x)
-
-        dist.barrier()
         dist.destroy_process_group()
 
 
