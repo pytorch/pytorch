@@ -50,6 +50,40 @@ static py::handle _callback_from_action(
   return callback;
 }
 
+#if IS_PYTHON_3_12_PLUS && !IS_PYTHON_3_14_PLUS
+
+// c_recursion_remaining only defined in 3.12 and 3.13
+
+struct CRecursionLimitRAII {
+  PyThreadState* tstate;
+  int old_recursion_remaining;
+  CRecursionLimitRAII(PyThreadState* tstate) : tstate{tstate} {
+    auto limit = get_c_recursion_limit();
+    auto& remaining = tstate->c_recursion_remaining;
+    this->old_recursion_remaining = remaining;
+    if (limit < 0) {
+      // no change to limit
+      return;
+    }
+    if (limit < remaining) {
+      throw std::runtime_error(
+          "new c_recursion limit is lower than thread's current c_recursion_remaining.");
+    }
+    remaining = limit;
+  }
+  ~CRecursionLimitRAII() {
+    this->tstate->c_recursion_remaining = this->old_recursion_remaining;
+  }
+};
+
+#else
+
+struct CRecursionLimitRAII {
+  CRecursionLimitRAII(PyThreadState* tstate) {}
+};
+
+#endif
+
 // frame and callback are borrowed references.
 // Returns new reference.
 PyObject* dynamo__custom_eval_frame(
@@ -258,6 +292,8 @@ PyObject* dynamo__custom_eval_frame(
   bool apply_to_code = false;
   PyObject* guarded_code = nullptr;
   try {
+    CRecursionLimitRAII tmp(tstate); // increase C recursion limit to the given
+                                     // value during compilation
     callback_result = dynamo_call_callback(
         callback, frame, locals.get(), cache_entry, frame_state);
     new_strategy =

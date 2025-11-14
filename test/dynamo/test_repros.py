@@ -7456,6 +7456,32 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             msg,
         )
 
+    def test_set_c_recursion_limit(self):
+        old_recursion_limit = sys.getrecursionlimit()
+        try:
+
+            def fn(x, n):
+                if n == 0:
+                    return x
+                return fn(x, n - 1) + 1
+
+            sys.setrecursionlimit(100)
+
+            with self.assertRaises(RecursionError):
+                fn(torch.ones(3), 1000)
+
+            sys.setrecursionlimit(2000)
+
+            fn(torch.ones(3), 1000)
+            opt_fn = torch.compile(fn, backend="eager", dynamic=False)
+            with self.assertRaises(Exception):
+                opt_fn(torch.ones(3), 1000)
+
+            torch._C._dynamo.eval_frame.set_c_recursion_limit(100000)
+            self.assertEqual(fn(torch.ones(3), 1000), opt_fn(torch.ones(3), 1000))
+        finally:
+            sys.setrecursionlimit(old_recursion_limit)
+
     @expectedFailureDynamic
     def test_dynamo_default_lru_cache_behavior(self):
         @torch.compile(backend="eager")
