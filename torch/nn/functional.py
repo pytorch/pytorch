@@ -1104,7 +1104,13 @@ def lp_pool3d(
             stride=stride,
             ceil_mode=ceil_mode,
         )
+    if math.isinf(norm_type):
+        if stride is None:
+            stride = kernel_size
+        return max_pool3d(input, kernel_size, stride, 0, 1, ceil_mode)
+
     kd, kw, kh = _triple(kernel_size)
+    
     if stride is not None:
         out = avg_pool3d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
@@ -1145,6 +1151,12 @@ def lp_pool2d(
             stride=stride,
             ceil_mode=ceil_mode,
         )
+
+    if math.isinf(norm_type):
+        if stride is None:
+            stride = kernel_size
+        return max_pool2d(input, kernel_size, stride, 0, 1, ceil_mode)
+
     kw, kh = _pair(kernel_size)
     if stride is not None:
         out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
@@ -1183,6 +1195,12 @@ def lp_pool1d(
             stride=stride,
             ceil_mode=ceil_mode,
         )
+        
+    if math.isinf(norm_type):
+        if stride is None:
+            stride = kernel_size
+        return max_pool1d(input, kernel_size, stride, 0, 1, ceil_mode)
+
     if stride is not None:
         out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
