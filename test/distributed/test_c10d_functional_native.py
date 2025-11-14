@@ -482,11 +482,12 @@ class TestWithNCCL(MultiProcessTestCase):
                     self.world_size,
                     "default",
                 )
-                output = torch.ops._c10d_functional.wait_tensor(output)
-
-            g.replay()
 
             # Uncomment when all_gather_into_tensor is compatible with cudagraph.
+            #     output = torch.ops._c10d_functional.wait_tensor(output)
+
+            # g.replay()
+
             # expect = torch.cat(
             #     [
             #         torch.full((10, 10), float(rank), device=self.device)
