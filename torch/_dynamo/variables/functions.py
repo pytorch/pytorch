@@ -42,6 +42,7 @@ from torch._guards import Source
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
+    format_skip_frame_message,
     get_dynamo_observed_exception,
     handle_observed_exception,
     InfiniteGeneratorError,
@@ -365,6 +366,9 @@ class BaseUserFunctionVariable(VariableTracker):
     def get_name(self) -> str:
         return self.get_code().co_name  # type: ignore[attr-defined]
 
+    def get_globals(self):
+        raise NotImplementedError
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -385,11 +389,14 @@ class BaseUserFunctionVariable(VariableTracker):
                 result = True
         return variables.ConstantVariable.create(result)
 
-    def inspect_parameter_names(self) -> list[str]:
-        return list(inspect.signature(self.get_function()).parameters)  # type: ignore[attr-defined]
-
     def closure_vars(self, tx: "InstructionTranslator") -> dict[str, VariableTracker]:
         return {}
+
+    # Override to set whether or not nested graph breaks should be allowed
+    # if we create an inlining tx for this BaseUserFunctionVariable.
+    # See symbolic_convert.py for where this function is called.
+    def should_allow_nested_graph_breaks(self):
+        return True
 
 
 class UserFunctionVariable(BaseUserFunctionVariable):
@@ -801,6 +808,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 handle_observed_exception(tx)
                 break
 
+    # no nested graph breaks in generators
+    def should_allow_nested_graph_breaks(self):
+        return False
+
     def _setup_exception(
         self, tx: "InstructionTranslator", exc: VariableTracker
     ) -> None:
@@ -1044,6 +1055,9 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
             return getattr(self, name)
         return getattr(self.vt, name)
 
+    def get_globals(self) -> dict[str, Any]:
+        return self.vt.get_globals()  # type: ignore[attr-defined]
+
     def _build_inline_tracer(
         self,
         tx: "InstructionTranslatorBase",
@@ -1222,9 +1236,6 @@ class UserMethodVariable(UserFunctionVariable):
             fn = getattr(self.obj.value, self.fn.__name__)  # type: ignore[attr-defined]
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
         return super().call_function(tx, args, kwargs)
-
-    def inspect_parameter_names(self) -> list[str]:
-        return super().inspect_parameter_names()[1:]
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "__self__":
@@ -1642,8 +1653,13 @@ class SkipFunctionVariable(VariableTracker):
             skip_frame_msg = kwargs.get("msg")
             if skip_frame_msg:
                 skip_frame_msg = skip_frame_msg.as_python_constant()
+            else:
+                skip_frame_msg = ""
             raise SkipFrame(
-                f"Skip frame due to `torch._dynamo.skip_frame()`. Message: {skip_frame_msg}"
+                format_skip_frame_message(
+                    tx.f_code,
+                    f"Skip frame due to `torch._dynamo.skip_frame()`. Message: {skip_frame_msg}",
+                )
             )
         elif self.value is torch._dynamo.step_unsupported:
             raise StepUnsupported
