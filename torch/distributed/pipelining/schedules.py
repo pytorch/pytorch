@@ -1890,6 +1890,9 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         self.unshard_ops: dict[int, list[UnshardHandle]] = defaultdict(list)
         self.unsharded_stages = set()
 
+        # to manage autograd graph lifetime
+        self.ownership_tokens = {}
+
     def register_custom_function(
         self,
         computation_type: _ComputationType,
@@ -2057,6 +2060,9 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
         self._initialize_stages(arg_mbs[0], kwarg_mbs[0])
 
+        # TODO: we should assert its empty, and be cleaning it up as we go
+        self.ownership_tokens.clear()
+
         # Based on the plan in Step 1 created in __init__:
         # 2. Perform communication based on the pipeline_order
         stage_index_to_stage: dict[int, _PipelineStageBase] = {
@@ -2162,6 +2168,9 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     kwarg_mbs[mb_index],  # type: ignore[index]
                     save_forward_output=return_outputs,
                 )
+                key = f"{stage.stage_index}_{mb_index}"
+                assert key not in self.ownership_tokens
+                self.ownership_tokens[key] = output.view_as(output).grad_fn
                 self._maybe_compute_loss(stage, output, target_mbs, mb_index)
 
                 # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
@@ -2229,10 +2238,13 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 self._assert_unsharded(stage)
                 self.backward_counter[stage_idx] += 1
                 last_backward = self.backward_counter[stage_idx] == self._n_microbatches
+                key = f"{stage.stage_index}_{mb_index}"
+                assert key in self.ownership_tokens
                 stage.backward_weight_one_chunk(
                     mb_index,
                     last_backward=last_backward,
                 )
+                del self.ownership_tokens[key]
             elif comp_type == REDUCE_GRAD:
                 grad_scale_factor = self._n_microbatches if self.scale_grads else 1
                 stage.perform_reduce_grad(grad_scale_factor)
