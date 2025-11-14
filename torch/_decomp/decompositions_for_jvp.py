@@ -84,7 +84,7 @@ def _register_jit_decomposition_for_jvp(decomp, use_python=False):
         # Thanks copilot!
         def get_function_def(sig):
             param_def = [f"{param_str}" for param_str in sig.parameters.values()]
-            param_use = [f"{param_str}" for param_str in sig.parameters.keys()]
+            param_use = [f"{param_str}" for param_str in sig.parameters]
 
             return f"def wrapped_decomp({', '.join(param_def)}):\n  return decomp_fn({', '.join(param_use)})\n"
 
