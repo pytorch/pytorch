@@ -1413,6 +1413,23 @@ class TestPatternMatcher(TestCase):
         out, code = run_and_get_code(test_c, x, y)
         FileCheck().check_not(".run").run(code[0])
         self.assertEqual(out, test(x, y))
+    
+    def test_randperm_index_scalar_workaround(self):
+        x = torch.randn(3, device=GPU_TYPE)
+        
+        def func(x):
+            twos = torch.ones(3, device=x.device) * 2
+            x = twos * x
+            x = x + 1
+            perm = torch.randperm(x.numel(), device=x.device)
+            return x.view(-1)[perm].view_as(x)
+
+        torch.manual_seed(40)
+        result = func(x)
+        cm = torch.compile(func)
+        torch.manual_seed(40)
+        result_compiled = cm(x)
+        torch.testing.assert_close(result, result_compiled)
 
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations2(self):
