@@ -467,13 +467,15 @@ class TestWithNCCL(MultiProcessTestCase):
     def test_cudagraph_all_gather(self) -> None:
         self._init_process_group()
 
-
         input = torch.full((10, 10), float(self.rank), device=self.device)
 
         g = torch.cuda.CUDAGraph()
 
         # ncclUnhandledCudaError: Call to CUDA function failed.
-        with self.assertRaisesRegex(RuntimeError, "CUDA error: operation failed due to a previous error during capture"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "CUDA error: operation failed due to a previous error during capture",
+        ):
             with torch.cuda.graph(g):
                 output = torch.ops._c10d_functional.all_gather_into_tensor(
                     input,
@@ -493,7 +495,6 @@ class TestWithNCCL(MultiProcessTestCase):
             # )
             # assert torch.allclose(output, expect)
             # assert output.eq(expect).all()
-
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
