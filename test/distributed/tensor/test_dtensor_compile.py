@@ -266,6 +266,41 @@ def forward(self, b_parametrizations_buffer_original0, x):
         compiled_out = compiled_fn(mesh)
         self.assertEqual(opt_fn, compiled_out)
 
+    def test_get_local_rank_compile(self):
+        mesh = init_device_mesh(
+            self.device_type, (self.world_size,), mesh_dim_names=("dp",)
+        )
+
+        def fn_with_str_arg(x):
+            local_rank = x.device_mesh.get_local_rank("dp")
+            return x * local_rank
+
+        x = DTensor.from_local(torch.rand(4, 4), mesh, [Shard(0)], run_check=False)
+        ref = fn_with_str_arg(x)
+
+        opt_fn = torch.compile(fn_with_str_arg, backend="aot_eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
+        def fn_with_int_arg(x):
+            local_rank = x.device_mesh.get_local_rank(0)
+            return x * local_rank
+
+        ref2 = fn_with_int_arg(x)
+        opt_fn2 = torch.compile(fn_with_int_arg, backend="aot_eager", fullgraph=True)
+        res2 = opt_fn2(x)
+        self.assertEqual(res2, ref2)
+
+        def fn_without_arg(x):
+            # will fail if device_mesh.ndim > 1
+            local_rank = x.device_mesh.get_local_rank()
+            return x + local_rank
+
+        ref3 = fn_without_arg(x)
+        opt_fn3 = torch.compile(fn_without_arg, backend="aot_eager", fullgraph=True)
+        res3 = opt_fn3(x)
+        self.assertEqual(res3, ref3)
+
     def test_fakify_dtensor(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -427,6 +462,25 @@ def forward(self, b_parametrizations_buffer_original0, x):
         run(g, 8, 8)
         self.assertEqual(cnt.frame_count, 1)
         run(g, 64, 8)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_dtensor_requires_grad_recompile(self):
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def f(x):
+            y = x * x
+            return y.to_local()
+
+        full_x = torch.randn(8, 8, requires_grad=False)
+        x = distribute_tensor(full_x, mesh, [Shard(0)])
+        f(x)
+
+        full_x = torch.randn(8, 8, requires_grad=True)
+        x = distribute_tensor(full_x, mesh, [Shard(0)])
+        f(x)
+
         self.assertEqual(cnt.frame_count, 2)
 
     def test_dtensor_attribute_access_on_intermediate(self):

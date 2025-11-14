@@ -205,7 +205,7 @@ class TestNumPyInterop(TestCase):
                             x = x.conj()
                             y = x.resolve_conj()
                         expect_error = (
-                            requires_grad or sparse or conj or not device == "cpu"
+                            requires_grad or sparse or conj or device != "cpu"
                         )
                         error_msg = r"Use (t|T)ensor\..*(\.numpy\(\))?"
                         if not force and expect_error:
@@ -682,6 +682,16 @@ class TestNumPyInterop(TestCase):
             torch._dynamo.exc.Unsupported, "ndarray.astype\\(object\\)"
         ):
             f(xs)
+
+    def test_copy_mode(self):
+        def f(x):
+            return np.array(x, copy=np._CopyMode.IF_NEEDED)
+
+        opt_f = torch.compile(backend="eager", fullgraph=True)(f)
+        x = np.array([1, 2, 3])
+        # Should run without throwing an exception
+        y = opt_f(x)
+        self.assertEqual(y, f(x))
 
 
 instantiate_device_type_tests(TestNumPyInterop, globals())

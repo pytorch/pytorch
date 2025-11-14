@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Callable
+from collections.abc import Callable
 
 
 """
@@ -20,7 +20,7 @@ from torch.utils._config_module import Config, install_config_module
 
 # [@compile_ignored: debug]
 _save_config_ignore = [
-    # callable not serializeable
+    # callable not serializable
     "joint_custom_pass",
 ]
 
@@ -312,6 +312,9 @@ graphsafe_rng_functionalization = True
 # through compile_fx, we can remove this
 force_non_lazy_backward_lowering = False
 
+# only for testing, used to turn functionalization off in AOTDispatcher
+_test_disable_functionalization = True
+
 # Error on BypassAOTAutogradCache instead of just a warning
 # Used for tests
 strict_autograd_cache = False
@@ -370,6 +373,13 @@ saved_tensors_hooks_filtering_mode = "donated"
 
 # This callback is invoked on the joint graph before partitioning
 joint_custom_pass: Callable = None  # type: ignore[assignment]
+
+# Note [Selective Decomposition]
+# This config allows selective decomposition of certain operators in the graph.
+# When True, it does NOT decompose any nodes, except those nodes that users explicitly
+# annotated with regional inductor compile. Please read torch.fx.passes.regional_inductor
+# on to explicitly annotate. This is currently only used by inductor lite mode.
+selective_decompose: bool = False
 
 
 if TYPE_CHECKING:

@@ -4,7 +4,7 @@ import operator
 from collections import defaultdict
 from dataclasses import dataclass, field
 from math import prod
-from typing import Any, cast, Optional
+from typing import Any, cast
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -25,6 +25,10 @@ from ..pattern_matcher import (
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 patterns = PatternMatcherPass()
+
+
+def _is_last_dim(t: torch.Tensor, dim: int) -> bool:
+    return dim == t.ndim - 1 or dim == -1
 
 
 def _is_backward(graph: torch.fx.Graph) -> bool:
@@ -374,17 +378,17 @@ class _Matmul:
     arg_ancestor_nodes: OrderedSet[torch.fx.Node] = field(init=False)
     A_node: torch.fx.Node
     B_node: torch.fx.Node
-    pre_mm_reshape: Optional[torch.fx.Node]
-    post_mm_reshape: Optional[torch.fx.Node]
+    pre_mm_reshape: torch.fx.Node | None
+    post_mm_reshape: torch.fx.Node | None
 
     def __post_init__(self):
         assert len(self.nodes) in (1, 3)
         if len(self.nodes) == 1:
             assert self.nodes[0].target in (aten.mm.default, aten._scaled_mm.default)
         else:
-            assert self.nodes[0].target == aten.reshape.default
+            assert self.nodes[0].target is aten.reshape.default
             assert self.nodes[1].target in (aten.mm.default, aten._scaled_mm.default)
-            assert self.nodes[2].target == aten.reshape.default
+            assert self.nodes[2].target is aten.reshape.default
         self.arg_ancestor_nodes = _find_ancestors(self.B_node)
 
     def replace_with(self, new_node: torch.fx.Node) -> None:
@@ -411,7 +415,7 @@ class _Matmul:
         output_reshape_node = self.nodes[2]
 
         assert mm_node.target in (aten.mm.default, aten._scaled_mm.default)
-        assert output_reshape_node.target == aten.reshape.default
+        assert output_reshape_node.target is aten.reshape.default
 
         output_reshape_node.replace_all_uses_with(new_node)
         if len(mm_node.users) > 1:
@@ -450,12 +454,12 @@ class _Matmul:
 class _ScaledMatmul(_Matmul):
     A_scale_node: torch.fx.Node
     B_scale_node: torch.fx.Node
-    bias_node: Optional[torch.fx.Node]
-    result_scale_node: Optional[torch.fx.Node]
-    out_dtype: Optional[torch.dtype]
+    bias_node: torch.fx.Node | None
+    result_scale_node: torch.fx.Node | None
+    out_dtype: torch.dtype | None
     use_fast_accum: bool
-    pre_mm_reshape: Optional[torch.fx.Node]
-    post_mm_reshape: Optional[torch.fx.Node]
+    pre_mm_reshape: torch.fx.Node | None
+    post_mm_reshape: torch.fx.Node | None
 
     def __post_init__(self):
         super().__post_init__()
@@ -478,7 +482,7 @@ class _ScaledMatmul(_Matmul):
         # Use mm_node with 2D args for both A and B, even if this is a "reshape -> mm -> reshape" pattern.
         # We will store the reshapes in pre_mm_reshape and post_mm_reshape, to be referenced later to
         # produce the correct output shapes, reduce-scatter along the correct dimensions, etc.
-        is_reshape_mm_reshape_pattern = match[0].target == aten.reshape.default
+        is_reshape_mm_reshape_pattern = match[0].target is aten.reshape.default
         mm_node = match[1] if is_reshape_mm_reshape_pattern else match[0]
         pre_mm_reshape = match[0] if is_reshape_mm_reshape_pattern else None
         post_mm_reshape = match[-1] if is_reshape_mm_reshape_pattern else None
@@ -536,10 +540,10 @@ def _find_reshape_mm_reshape(node: torch.fx.Node) -> list[_Matmul]:
     matmuls = []
     for match in matches:
         mm_node = match[1]
-        if mm_node.target == aten.mm.default:
+        if mm_node.target is aten.mm.default:
             matmul = _Matmul.from_match(match)
             matmuls.append(matmul)
-        elif mm_node.target == aten._scaled_mm.default:
+        elif mm_node.target is aten._scaled_mm.default:
             matmul = _ScaledMatmul.from_match(match)
             matmuls.append(matmul)
         else:
@@ -557,13 +561,13 @@ def _find_consumer_matmuls(node: torch.fx.Node) -> list[_Matmul]:
     matmuls = []
     for user in node.users:
         # ND matmuls
-        if user.target == aten.reshape.default:
+        if user.target is aten.reshape.default:
             matmuls.extend(_find_reshape_mm_reshape(user))
         # 2D matmuls
-        elif user.target == aten.mm.default:
+        elif user.target is aten.mm.default:
             matmul = _Matmul.from_match(match=[user])
             matmuls.append(matmul)
-        elif user.target == aten._scaled_mm.default:
+        elif user.target is aten._scaled_mm.default:
             matmul = _ScaledMatmul.from_match([user])
             matmuls.append(matmul)
     return matmuls
@@ -645,9 +649,17 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     if not is_symm_mem_enabled_for_group(group_name):
         return
 
-    if gather_dim >= len(_get_tensor(shard_node).shape) - 1:
-        # Decomposing the matmul on the K dimension is not supported
-        return
+    filter_matmul = None
+    if _is_last_dim(_get_tensor(shard_node), gather_dim):
+        # Decomposed mms should not be too small
+        if _get_tensor(shard_node).shape[-1] < 1024:
+            return
+
+        # scaled_mm is not supported yet for last dim
+        def _filter_out_scaled_matmul(matmul: _Matmul):
+            return not isinstance(matmul, _ScaledMatmul)
+
+        filter_matmul = _filter_out_scaled_matmul
 
     # Find consumer matmuls
     matmuls = _find_consumer_matmuls(ag_res_node)
@@ -663,18 +675,29 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     if len(matmuls) == 0 or len(OrderedSet(map(type, matmuls))) != 1:
         return
 
+    if _is_last_dim(_get_tensor(shard_node), gather_dim) and len(
+        all_gather.res_node.users
+    ) > len(matmuls):
+        # The result of ag-split-cat is used not only in matmuls.
+        # Then it has to be materialized, which can have overhead.
+        return
+
+    if filter_matmul and not filter_matmul(matmuls[0]):
+        return
+
     # Fuse the all_gather_tensor with the eligible matmuls
     graph = ag_node.graph
     with graph.inserting_before(ag_node):
-        if "val" in shard_node.meta:
-            restrided = restride_A_shard_for_fused_all_gather_matmul(
-                _get_tensor(shard_node),
-                gather_dim,
-            )
-            shard_node = graph.call_function(
-                inductor_prims.force_stride_order,
-                args=(shard_node, restrided.stride()),
-            )
+        if not _is_last_dim(_get_tensor(shard_node), gather_dim):
+            if "val" in shard_node.meta:
+                restrided = restride_A_shard_for_fused_all_gather_matmul(
+                    _get_tensor(shard_node),
+                    gather_dim,
+                )
+                shard_node = graph.call_function(
+                    inductor_prims.force_stride_order,
+                    args=(shard_node, restrided.stride()),
+                )
 
         fused_node = _insert_fused_all_gather_matmul(
             graph, matmuls, shard_node, gather_dim, group_name
@@ -763,15 +786,15 @@ def _scatter_dim_after_reshape(
     return 0 if leading_dims_collapsed else 1
 
 
-def _find_producer_matmul(node: torch.fx.Node) -> Optional[_Matmul]:
+def _find_producer_matmul(node: torch.fx.Node) -> _Matmul | None:
     """
     Returns producer matmul node if found, otherwise returns None.
     """
-    if node.target == aten.mm.default:
+    if node.target is aten.mm.default:
         return _Matmul.from_match(match=[node])
-    elif node.target == aten._scaled_mm.default:
+    elif node.target is aten._scaled_mm.default:
         return _ScaledMatmul.from_match(match=[node])
-    elif node.target == aten.reshape.default:
+    elif node.target is aten.reshape.default:
         reshape_node_1 = node
 
         mm_node = reshape_node_1.args[0]
@@ -784,9 +807,9 @@ def _find_producer_matmul(node: torch.fx.Node) -> Optional[_Matmul]:
         if reshape_node_0.target != aten.reshape.default:
             return None
 
-        if mm_node.target == aten.mm.default:
+        if mm_node.target is aten.mm.default:
             return _Matmul.from_match(match=[reshape_node_0, mm_node, reshape_node_1])
-        elif mm_node.target == aten._scaled_mm.default:
+        elif mm_node.target is aten._scaled_mm.default:
             return _ScaledMatmul.from_match(
                 match=[reshape_node_0, mm_node, reshape_node_1]
             )
@@ -881,7 +904,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         return
 
     filter_matmul = None
-    if orig_scatter_dim == _get_tensor(input_node).ndim - 1:
+    if _is_last_dim(_get_tensor(input_node), orig_scatter_dim):
         # scaled_mm is not supported yet for last dim mm+rs
         def _filter_out_scaled_matmul(matmul: _Matmul):
             return not isinstance(matmul, _ScaledMatmul)

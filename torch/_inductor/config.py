@@ -1,12 +1,16 @@
 import os
 import sys
-from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
+from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.custom_graph_pass
 from torch._environment import is_fbcode
 from torch.utils._config_module import Config, get_tristate_env, install_config_module
 
+
+if TYPE_CHECKING:
+    from torch._inductor.choices import InductorChoices
 
 inplace_padding = os.environ.get("TORCHINDUCTOR_INPLACE_PADDING", "1") == "1"
 can_inplace_pad_graph_input = False  # ease testing
@@ -92,6 +96,7 @@ precompilation_timeout_seconds: int = 60 * 60
 # use fx aot graph codegen cache
 fx_graph_cache: bool = Config(
     justknob="pytorch/remote_cache:enable_local_fx_graph_cache",
+    env_name_default="TORCHINDUCTOR_FX_GRAPH_CACHE_DEFAULT",
     env_name_force="TORCHINDUCTOR_FX_GRAPH_CACHE",
     default=True,
 )
@@ -205,6 +210,9 @@ static_weight_shapes = True
 # put correctness assertions in generated code
 size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
+runtime_triton_nan_asserts = (
+    os.environ.get("TORCHINDUCTOR_RUNTIME_TRITON_NAN_ASSERTS") == "1"
+)
 scalar_asserts = os.environ.get("TORCHINDUCTOR_SCALAR_ASSERTS", "1") == "1"
 
 # Disable by default in fbcode
@@ -227,9 +235,6 @@ memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
 
 # Enable to allow using ftz variant of exponenet instruction in triton codegen.
 use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
-
-# Enable bfloat16 atomic adds (fbcode only until upstreamed to triton)
-bfloat16_atomic_adds_enabled = True
 
 # How to organize memory under memory_planning=True:
 # - "none": do not try to pool storage, just reuse
@@ -372,6 +377,15 @@ reorder_for_compute_comm_overlap = False
 # for built-in passes, use string name; for user-defined passes, pass in the function handle
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
 # hence custom IR passes built on top of it might break in the future.
+#
+# See aten_distributed_optimizations, it is recommended way for distributed optimizations.
+#
+# Recommended configuration for reorder_for_compute_comm_overlap_passes:
+# [
+#     "reorder_communication_preserving_peak_memory",
+#     "sink_waits_iterative",
+#     "reorder_communication_preserving_peak_memory",
+# ]
 reorder_for_compute_comm_overlap_passes: list[
     Union[
         str,
@@ -380,11 +394,7 @@ reorder_for_compute_comm_overlap_passes: list[
             list["torch._inductor.scheduler.BaseSchedulerNode"],
         ],
     ]
-] = [
-    "reorder_compute_for_overlap",
-    "sink_waits",
-    "raise_comms",
-]
+] = []
 
 # Maximum number of positions to advance a given collective, unlimited by default
 reorder_prefetch_limit: Optional[int] = None
@@ -400,16 +410,6 @@ reorder_for_peak_memory_debug = False
 # is zero, which turns off this optimization.
 size_threshold_for_succ_based_strategy: int = 0
 
-reorder_iterative_debug_memory_recompute: bool = False
-reorder_iterative_debug_limit_to_reorder: Optional[int] = (
-    None
-    if (env_str := os.getenv("PYTORCH_REORDER_COLLECTIVES_LIMIT")) is None
-    else int(env_str)
-)
-sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
-    # pyrefly: ignore  # unbound-name
-    None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
-)
 
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
@@ -445,6 +445,14 @@ use_experimental_benchmarker: bool = Config(
     justknob="pytorch/inductor:use_experimental_benchmarker",
 )
 
+# Enable distributed autotuning. When this is enabled we will distribute the
+# autotuning across distributed ranks in the same program group - so instead of
+# each rank autotuning every kernel they only autotune 1/world size kernels and
+# then share the results.
+distributed_max_autotune_gemm = (
+    os.environ.get("TORCHINDUCTOR_DISTRIBUTED_MAX_AUTOTUNE_GEMM") == "1"
+)
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
@@ -478,6 +486,11 @@ graph_partition: bool = (
     os.environ.get("TORCHINDUCTOR_GRAPH_PARTITION", "1" if not is_fbcode() else "0")
     == "1"
 )
+
+# register ops upon which inductor should partition the graph. name format should be
+# "namespace::kernel_name" (e.g., aten::mm) for op overload packet, or
+# "namespace::kernel_name.overload" (e.g., aten::mm.default).
+custom_should_partition_ops: list[str] = []
 
 # whether template autotuning should allow flexible layouts if possible (e.g. only extern choices)
 max_autotune_allow_flexible_layouts: bool = False
@@ -533,6 +546,36 @@ max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
 max_autotune_flex_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_FLEX_SEARCH_SPACE", "DEFAULT"
 ).upper()  # type: ignore[assignment]
+
+
+# Fall back to ATen for all ops by default, except those nodes that users explicitly
+# annotated with regional inductor compile. Please read torch.fx.passes.regional_inductor
+# on to explicitly annotate. This is currently only used by inductor lite mode.
+# Different from default inductor mode that fuses all nodes, this config enables an
+# opt-in mode that only fuse for user-specified nodes. The motivation is to provide
+# guaranteed numeric correctness and give full control to users.
+fallback_by_default: bool = False
+
+
+# This config allows selective decomposition of certain operators in the graph.
+# Currently the only use case is to patch the same-name config in functorch, for
+# inductor lite mode. See more details in [Note: Selective Decomposition]
+selective_decompose: bool = False
+
+
+# Use dead code elimination
+use_dce: bool = True
+
+
+# Use fx graph passes
+use_pre_grad_passes: bool = True
+use_joint_graph_passes: bool = True
+use_post_grad_passes: bool = True
+
+
+cutedsl_enable_autotuning: bool = (
+    os.environ.get("CUTEDSL_ENABLE_AUTOTUNING", "0") == "1"
+)
 
 # DEPRECATED. This setting is ignored.
 autotune_fallback_to_aten = False
@@ -644,6 +687,9 @@ assume_unaligned_fallback_output = (
     os.environ.get("TORCHINDUCTOR_ASSUME_UNALIGNED_FALLBACK_OUTPUT") == "1"
 )
 
+# Custom InductorChoices callable to use (can be a class or functools.partial with kwargs)
+inductor_choices_class: Optional[Callable[[], "InductorChoices"]] = None
+
 # fuse even in cases without common reads
 aggressive_fusion = False
 
@@ -658,6 +704,17 @@ loop_ordering_after_fusion: bool = (
     )
     == "1"
 )
+
+
+# When trying to fuse two nodes, one with:
+# a[contiguous_writes] = fn(...)
+# and another node:
+# b[contiguous_writes] = a[discontiguous_reads]
+# If b is unary, and we can figure out an inverse formula for
+# discontiguous writes, invert b as :
+# b[inverse(discontiguous_writes)] = a[contiguous_reads]
+# so that the nodes can fuse. for more details: https://gist.github.com/eellison/6f9f4a7ec10a860150b15b719f9285a9
+loop_index_inversion_in_fusion: bool = True
 
 # If fusing two nodes only save less then score_fusion_memory_threshold memory,
 # we should not bother fusing the nodes.
@@ -684,6 +741,10 @@ max_fusion_size = 64
 # how many nodes to attempt pairwise fusion with in a buffer group
 max_fusion_buffer_group_pairwise_attempts = 64
 
+# maximum number of unique input/output buffers allowed in fused kernels.
+# The check is disabled if set to None.
+max_fusion_unique_io_buffers: Optional[int] = None
+
 # max number of inputs to generate cat as a pointwise op with masked loads
 max_pointwise_cat_inputs = 8
 
@@ -705,7 +766,7 @@ conv_1x1_as_mm = False
 #   split_reductions: uses multiple kernels to gain more parallelism
 #   triton.cooperative_reductions: uses cross thread-block synchronization to gain more parallelism
 # enabling both of these will implicitly disable split_reductions
-split_reductions = True
+split_reductions = os.getenv("TORCHINDUCTOR_SPLIT_REDUCTIONS", "1") == "1"
 
 # A deterministic mode that skips any on device benchmarking in Inductor
 # if we know they affect numerics.  WARNING: Expect perf hit in this mode.
@@ -745,6 +806,8 @@ combo_kernels_autotune = 1
 combo_kernel_allow_mixed_sizes = 1
 # Enable dynamic shapes for foreach kernels
 combo_kernel_foreach_dynamic_shapes = True
+# Maximum number of arguments (read/write buffers) allowed in a combo kernel
+combo_kernel_max_num_args = 250
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -762,6 +825,13 @@ debug_index_asserts = False
 # emulate the eager numerics.
 emulate_precision_casts = (
     os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
+)
+
+# x / y in Triton is lowered to div.full which is approx
+# PyTorch eager uses the equivalent of Triton's div_rn, which can
+# come at a performance penalty
+emulate_divison_rounding = (
+    os.environ.get("TORCHINDUCTOR_EMULATE_DIVISION_ROUNDING", "0") == "1"
 )
 
 # warnings intended for PyTorch developers, disable for point releases
@@ -847,6 +917,36 @@ class _collective:
     one_shot_all_reduce_threshold_bytes: int = 128 * 1024
 
 
+class aten_distributed_optimizations:
+    """Configuration for distributed optimization passes on ATen FX graphs."""
+
+    # Enable overlap scheduling pass
+    enable_overlap_scheduling: bool = False
+
+    # Enable overlap-preserving collective bucketing
+    collective_bucketing: Optional[bool] = None
+
+    # Insert ordering dependencies to preserve overlap relationships. This should only be used if
+    # compiling with inductor, or for subsequent passes before removing the ops prior to execution
+    insert_overlap_deps: Optional[bool] = None
+
+    # Maximum compute node prefetch distance for overlap scheduling
+    max_compute_pre_fetch: Optional[int] = None
+
+    # Custom runtime estimation function for ops
+    # For user-defined estimation function, pass in the function handle
+    # None means use default estimations
+    # TODO - need estimated and profile based version
+    custom_runtime_estimation: Optional[Callable[[torch.fx.Node], Optional[float]]] = (
+        None
+    )
+
+    # Method for estimating collective runtime
+    # "analytical": Use bandwidth formulas (default)
+    # "benchmark": Use CUDA events with power-of-2 rounding and interpolation
+    collective_estimator: Literal["analytical", "benchmark"] = "analytical"
+
+
 def parallel_compile_enabled_internally() -> bool:
     """
     TODO: Remove when parallel compiled is fully enabled internally. For rollout, use a
@@ -905,6 +1005,11 @@ quiesce_async_compile_pool: bool = Config(
     justknob="pytorch/inductor:quiesce_async_compile_pool",
     env_name_force="TORCHINDUCTOR_QUIESCE_ASYNC_COMPILE_POOL",
     default=False,
+)
+
+# Time in seconds to wait before quiescing
+quiesce_async_compile_time: int = Config(
+    default=60,
 )
 
 # Whether or not to enable statically launching CUDA kernels
@@ -1291,6 +1396,10 @@ class triton:
         default=False,
     )
 
+    # reorder nodes to minimize the number of graph partitions while
+    # not incurring large memory overhead
+    reorder_for_reducing_graph_partitions: bool = True
+
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
 
@@ -1437,7 +1546,7 @@ class triton:
     # So far we see a fixed 8 spilled registers for kernels using sin/cos.
     # Raise the threshold to 16 to be safe.
     # We should revisit this once we understand more of the source of register spills.
-    spill_threshold: int = 16
+    spill_threshold: int = 32 if torch.version.hip else 16
 
     # Generate code containing the newer tl.make_block_ptr() API for loads/store
     use_block_ptr = False
@@ -1498,6 +1607,18 @@ class triton:
     # If set to false, will never generate PDL code.
     enable_pdl = False
 
+    mix_order_reduction = (
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0" if is_fbcode() else "1")
+        == "1"
+    )
+    mix_order_reduction_initial_xblock = 1
+
+    mix_order_reduction_split_size: Optional[int] = None
+    mix_order_reduction_autotune_split_size = (
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_AUTOTUNE_SPLIT_SIZE", "0")
+        == "1"
+    )
+
 
 class aot_inductor:
     """
@@ -1513,6 +1634,7 @@ class aot_inductor:
     output_path = ""
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
+    debug_symbols = os.environ.get("AOT_INDUCTOR_DEBUG_SYMBOLS", "0") == "1"
 
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
     # to use which cpp compiler optimization level, default to O1
@@ -1663,7 +1785,7 @@ class aot_inductor:
 
     # If link_libtorch is False and cross_target_platform is windows,
     # a library needs to be provided to provide the shim implementations.
-    aoti_shim_library: Optional[str] = None
+    aoti_shim_library: Optional[str | list[str]] = None
     aoti_shim_library_path: Optional[str] = None
 
 
@@ -1882,11 +2004,15 @@ class rocm:
     contiguous_threshold: int = 16
 
 
-# Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental)
-cpu_backend: Literal["cpp", "triton", "halide"] = "cpp"
+# Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental) or "pallas" (experimental)
+cpu_backend: Literal["cpp", "triton", "halide", "pallas"] = "cpp"
 
-# Backend to use for CUDA codegen either "triton" or "halide" (experimental)
-cuda_backend: Literal["triton", "halide"] = "triton"
+# Backend to use for CUDA codegen either
+# "triton", "halide" (experimental) or "pallas" (experimental)
+cuda_backend: Literal["triton", "halide", "pallas"] = "triton"
+
+# Backend to use for XPU codegen either "triton"
+xpu_backend: Literal["triton"] = "triton"
 
 
 class halide:
@@ -2041,6 +2167,17 @@ write_are_deterministic_algorithms_enabled = (
 )
 
 
+class lookup_table:
+    # Lookup table for template config overrides
+    table: Optional[dict[str, list[dict[str, Any]]]] = None
+
+    # Enable template src_hash checking in lookup table to prevent using stale configs.
+    # If True, configs with 'template_hash' field will be compared against the template's
+    # src_hash at runtime and filtered out if they don't match. If False, no
+    # hash checking is performed.
+    check_src_hash: bool = True
+
+
 class test_configs:
     force_extern_kernel_in_multi_template: bool = False
 
@@ -2063,22 +2200,8 @@ class test_configs:
     # for unit testing
     use_libtorch = False
 
-    # to be migrated when ready for use
-    aten_fx_overlap_scheduling = False
-
-    # insert ordering deps for overlap
-    aten_fx_overlap_insert_overlap_deps = True
-
-    # to be migrated when ready for use
-    aten_fx_overlap_preserving_bucketing = False
-
-    # to be migrated when ready for use
-    # runtime estimation function for ops
-    # for user-defined estimation function, pass in the function handle
-    # TODO - need estimated and profile based version
-    estimate_aten_runtime: Union[
-        Literal["default"], Callable[[torch.fx.Node], Optional[float]]
-    ] = "default"
+    # Assume bucketing reduces latency (mostly for testing)
+    assume_bucketing_reduces_latency: bool = True
 
     # A test config to ease the test for perf of reduction config filtering
     force_filter_reduction_configs = (
@@ -2092,6 +2215,9 @@ class test_configs:
     distort_benchmarking_result = os.getenv(
         "TORCHINDUCTOR_DISTORT_BENCHMARKING_RESULT", ""
     )
+
+    bisect_pre_grad_graph = False
+    bisect_keep_custom_backend_for_inductor = False
 
 
 if TYPE_CHECKING:

@@ -5,10 +5,11 @@
 
 # NOTE: this file may be removed once we move to a dynamo frontend
 
+import contextlib
 import functools
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
-from typing import Any, Optional, Sequence, TypeAlias
+from typing import Any, Optional, TypeAlias
 
 import torch
 import torch.utils._pytree as pytree
@@ -241,9 +242,17 @@ def create_hop_fw_bw(
                 isinstance(t, (FakeTensor, int, torch.SymInt)) for t in fw_inputs
             ), f"Unexpected element in {fw_inputs=}"
 
+            ctx = (
+                fake_mode.shape_env.ignore_fresh_unbacked_symbols
+                if fake_mode.shape_env is not None
+                else contextlib.nullcontext
+            )
+            with ctx():
+                fw_outs = fw_gm(*fw_inputs)
+
             example_grads = pytree.tree_map(
                 _new_tensor,
-                fw_gm(*fw_inputs),
+                fw_outs,
             )
             if not isinstance(example_grads, (list, tuple)):
                 example_grads = [example_grads]
@@ -257,9 +266,14 @@ def create_hop_fw_bw(
             primals = primals_and_tangents[:num_fw_inputs]
             tangents = primals_and_tangents[num_fw_inputs:]
 
-            def prepare_fw_with_masks(fn: Callable[..., Any]) -> Callable[..., Any]:
+            def prepare_fw_with_masks(
+                fw_gm: torch.fx.GraphModule,
+            ) -> Callable[..., Any]:
                 def fw_with_masks(*args: Any) -> tuple[tuple[Any], list[bool]]:
-                    fw_out = fn(*args)
+                    # The Interpreter here is required to propagate metadata
+                    # from the dynamo graph body to the local_map graph body.
+                    # This is required for fx_traceback.annotate for work.
+                    fw_out = torch.fx.Interpreter(fw_gm).run(*args)
                     assert isinstance(fw_out, tuple), (
                         "Dynamo traced submodule should return tuple"
                     )
@@ -273,6 +287,11 @@ def create_hop_fw_bw(
             fw_outs, grads = create_joint(
                 prepare_fw_with_masks(fw_gm), aot_config=dummy_aot_config
             )(primals, tangents)
+            from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
+            assert not has_free_unbacked_symbols((*fw_outs, *grads)), (
+                "Unbacked symints leaking outside of the joint graph is not yet supported."
+            )
 
             maybe_clone = clone_outputs_aliasing_inputs(primals_and_tangents)
             # put grads first to work with existing hop utils
@@ -293,6 +312,11 @@ def create_hop_fw_bw(
             *[example_grads[i] for i in filtered_grads_idx],
         ]
         joint_hop_gm = make_fx(joint_f)(*primals_and_tangents)
+        from torch._functorch._aot_autograd.graph_capture import (
+            copy_fwd_metadata_to_bw_nodes,
+        )
+
+        copy_fwd_metadata_to_bw_nodes(joint_hop_gm)
 
         from torch._functorch._aot_autograd.graph_compile import prepare_for_partitioner
         from torch._inductor.compile_fx import partition_fn
@@ -301,13 +325,14 @@ def create_hop_fw_bw(
         prepped_joint_hop_gm = prepare_for_partitioner(
             joint_hop_gm, num_fw_inputs, num_fw_outputs
         )
-        # Also runs joint passes
-        new_fw_gm, new_bw_gm = partition_fn(
-            prepped_joint_hop_gm,
-            [],
-            num_fwd_outputs=num_fw_outputs,
-            static_lifetime_input_indices=[],
-        )
+        with disable_proxy_modes_tracing():
+            # Also runs joint passes
+            new_fw_gm, new_bw_gm = partition_fn(
+                prepped_joint_hop_gm,
+                [],
+                num_fwd_outputs=num_fw_outputs,
+                static_lifetime_input_indices=[],
+            )
 
         # Propagate meta onto fw/bw graphs, later will be set on proxied nodes
         new_fw_gm.meta["local_map_kwargs"] = local_map_kwargs
@@ -334,6 +359,7 @@ def create_hop_fw_bw(
         num_activations = (
             len(new_fw_gm.graph.find_nodes(op="output")[0].args[0]) - num_fw_outputs
         )
+        # tensors first, then symints
         assert num_activations >= 0
 
         # Validate Backward
@@ -361,7 +387,7 @@ def create_hop_fw_bw(
 
 class LocalMapAutogradOp(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(
         ctx: Any,
         fw_gm: GraphModule,
@@ -398,6 +424,12 @@ class LocalMapAutogradOp(torch.autograd.Function):
             coerce_to_expected_memory_format,
         )
 
+        assert ctx.pos == sorted(ctx.pos), (
+            "Interleaving saved tensor activations and symints is not expected from min-cut partitioner."
+        )
+        ctx.pos = list(
+            reversed(ctx.pos)
+        )  # make saved_tensors_and_symints return symints first
         saved_activations = saved_tensors_and_symints(ctx)
         with torch._C._AutoDispatchBelowAutograd():
             # Filter out grads that are None or do not require_grad.
@@ -408,7 +440,7 @@ class LocalMapAutogradOp(torch.autograd.Function):
             )
 
             for i, meta in ctx.expected_tangent_metadata.items():
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 grads[i] = coerce_to_expected_memory_format(grads[i], meta)
 
             grad_ins = local_map_hop(ctx.bw_gm, *saved_activations, *grads)
@@ -437,7 +469,8 @@ def autograd_key(
             fw_gm, bw_gm, num_fw_ins, num_fw_outs, filtered_grads_idx, *args, **kwargs
         )
 
-    return fw_gm(*args, **kwargs)
+    # TODO: get rid of this when we can install as a subgraph
+    return torch.fx.Interpreter(fw_gm).run(*args, **kwargs)
 
 
 @local_map_hop.py_functionalize_impl
@@ -512,6 +545,7 @@ def proxy_mode_key_common(
 
     # propagate local_map args to the call_function node
     out_proxy.node.meta["local_map_kwargs"] = local_map_kwargs
+
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
     )

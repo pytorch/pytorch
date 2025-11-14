@@ -256,7 +256,7 @@ def bmm_strategy(op_schema: OpSchema) -> OpStrategy:
 
 
 @register_op_strategy(aten.baddbmm.default)
-def baddmm_strategy(op_schema: OpSchema) -> OpStrategy:
+def baddbmm_strategy(op_schema: OpSchema) -> OpStrategy:
     mesh = op_schema.get_mesh_from_args()
     return _addmm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
@@ -1094,9 +1094,9 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
             )
             return TensorMeta(torch.Size(local_shape), local_stride, meta.dtype)
 
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         mat1_meta = local_meta(mat1_strategy.strategies[0], input_specs[0].placements)
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         mat2_meta = local_meta(mat2_strategy.strategies[0], input_specs[1].placements)
 
         def check_valid_strides(meta: TensorMeta) -> bool:
