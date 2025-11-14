@@ -337,19 +337,34 @@ class OpDispatcher:
         if is_inplace_op:
             # inplace op should return self instead of re-wrapping
             if output_sharding.output_spec is not None:
+                output_spec = output_sharding.output_spec
+                assert isinstance(output_spec, DTensorSpec)
+                assert isinstance(args[0], dtensor.DTensor)
+
                 # NOTE: aten.squeeze_.dim is an inplace op but it also may change
                 # the inplace argument's tensor meta. Here we choose to special case
                 # this op because as far as I know this is the only inplace op that
                 # has such as behavior. We can extend this special case if necessary.
                 if op_call == aten.squeeze_.dim:
-                    output_spec = output_sharding.output_spec
-                    assert isinstance(output_spec, DTensorSpec)
-                    assert isinstance(args[0], dtensor.DTensor)
+                    # update the spec to handle tensor meta changes
                     args[0]._spec = output_spec
                     # use return_and_correct_aliasing to match the outer and the inner
                     # aliasing. See https://github.com/pytorch/pytorch/pull/158954
                     return return_and_correct_aliasing(op_call, args, kwargs, args[0])
                 else:
+                    # For all other inplace ops, check if placement changes are required
+                    # Inplace operations that change placement are not supported because
+                    # they would require redistribution, which breaks aliasing semantics.
+                    # If there are views into the tensor, the views would not be updated.
+                    if args[0]._spec.placements != output_spec.placements:
+                        raise RuntimeError(
+                            f"{op_call}: in-place operations that require placement changes "
+                            f"are not supported. The operation would change placement from "
+                            f"{args[0]._spec.placements} to {output_spec.placements}, "
+                            f"which requires redistribution and breaks aliasing semantics. "
+                            f"Please use the out-of-place version of this operation instead."
+                        )
+                    # Most inplace ops don't change tensor meta, so no spec update needed
                     return args[0]
             else:
                 return None

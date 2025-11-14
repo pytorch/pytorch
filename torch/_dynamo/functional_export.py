@@ -499,6 +499,9 @@ def pytreeify(
         root = mod.__self__
 
     flat_real_args, in_spec = pytree.tree_flatten((args, kwargs))
+    torch._dynamo.eval_frame.check_user_input_output(
+        flat_real_args[1 if root else 0 :], UserErrorType.INVALID_INPUT
+    )
 
     class Yield(Exception):
         pass
