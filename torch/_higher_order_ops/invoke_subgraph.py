@@ -517,6 +517,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         ctx,
         *grad_outs,
     ):
+        breakpoint()
         from torch._dynamo.utils import dynamo_timed
 
         subgraph = ctx._subgraph

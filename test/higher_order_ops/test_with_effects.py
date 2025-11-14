@@ -1,6 +1,8 @@
 # Owner(s): ["module: functorch"]
 # ruff: noqa: F841
 # flake8: noqa: B950
+from contextlib import ExitStack
+import copy
 import unittest
 from collections import deque
 from functools import partial
@@ -17,7 +19,12 @@ from functorch.compile import (
     min_cut_rematerialization_partition,
     nop,
 )
-from torch._functorch.aot_autograd import aot_export_module
+from torch._functorch.aot_autograd import (
+    aot_export_module,
+    aot_export_joint_with_descriptors,
+    aot_compile_joint_with_descriptors,
+)
+from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.effects import (
     _EffectType,
@@ -1014,6 +1021,44 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         out2 = torch.compile(model)(x)
         self.assertEqual(len(recorded_list), 4)
         self.assertTrue(torch.allclose(model(x)[0], out2[0], atol=1e-7, rtol=1e-4))
+    
+    def test_blah(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + torch.tensor(1)
+
+        model = M()
+        from torch._inductor.lowering import make_fallback
+        import torch._inductor.config as inductor_config 
+
+        inductor_config.joint_graph_constant_folding = False
+        make_fallback(torch.ops.aten.lift_fresh_copy.default)
+        # make_fallback(torch.ops.aten.add.Tensor)
+
+        print(torch.compile(M())(torch.ones(3)))
+
+        # x = torch.randn(3)
+        # gm = _dynamo_graph_capture_for_export(model)(x)
+        # gm.print_readable()
+        # fake_mode = gm.meta.get("fake_mode", None)
+
+        # def fw_compiler(gm, *args, **kwargs):
+        #     breakpoint()
+        #     return gm
+
+        # with tracing(TracingContext(fake_mode)):
+        #     with ExitStack() as stack:
+        #         joint = aot_export_joint_with_descriptors(
+        #             stack,
+        #             gm,
+        #             (x,),
+        #         )
+        #         joint.graph_module.print_readable()
+
+        #     compiled_fn = aot_compile_joint_with_descriptors(joint, fw_compiler=fw_compiler)
+
+        # out = compiled_fn(x)
+        # print(out)
 
     def test_invoke_subgraph_joint(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:

@@ -277,6 +277,7 @@ def create_joint(
     aot_config: AOTConfig,
 ) -> Any:  # JointTraceFn
     joint_fn_handle = JointFnHandle()
+    breakpoint()
 
     # post_forward
     # NB: this type is inaccurate when primals_descs is None
@@ -350,6 +351,7 @@ def create_joint(
             PhiloxStateTracker.mark_beginning_of_backward()
         backward_out: tuple[Tensor, ...] = ()
         # Call the backwards pass
+        breakpoint()
         if grad_primals:
             functional_tensor_mode = torch.utils._python_dispatch._detect_infra_mode(
                 torch._C._TorchDispatchModeKey.FUNCTIONAL
@@ -388,6 +390,7 @@ def create_joint(
                         stack.enter_context(torch.amp.autocast(**kwargs))
 
                 # for full graph export, we always export a joint graph where we assume no tangents are needed.
+                breakpoint()
                 if aot_config.no_tangents:
                     assert len(needed_tangents) == 1 and needed_tangents[0].numel() == 1
                     backward_out = torch.autograd.grad(

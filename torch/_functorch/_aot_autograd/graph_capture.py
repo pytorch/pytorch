@@ -92,6 +92,9 @@ def _create_graph(
             pre_dispatch=aot_config.pre_dispatch,
         )(*args)
 
+        fx_g.print_readable()
+        breakpoint()
+
         if args_descs is not None:
             flat_args_descs, _ = pytree.tree_flatten(args_descs)
             flat_out_descs, _ = pytree.tree_flatten(out_descs)
