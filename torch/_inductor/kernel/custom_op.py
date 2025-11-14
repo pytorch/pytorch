@@ -24,15 +24,6 @@ log = logging.getLogger(__name__)
 def _detect_collective_ops(choices: list) -> bool:
     """
     Detect if choices contain collective operations.
-
-    For distributed training with collective ops, CollectiveBenchmarker will
-    automatically use the default process group for synchronization.
-
-    Args:
-        choices: List of algorithm choices to check
-
-    Returns:
-        True if any choice contains collective ops, False otherwise
     """
     from torch._inductor.utils import is_collective_op
 
@@ -44,7 +35,6 @@ def _detect_collective_ops(choices: list) -> bool:
             if node.op == "call_function" and node.target is not None:
                 op_name = str(node.target)
 
-                # Check if this is a collective operation
                 if is_collective_op(op_name) or is_collective_op(
                     f"torch.ops.{op_name}"
                 ):
@@ -353,7 +343,6 @@ def autotune_custom_op(
         )
         input_gen_fns = _adapt_user_input_gen_fns(inputs, arg_names, user_input_gen_fns)
 
-    # Detect collective operations for specialized benchmarking
     is_collective = _detect_collective_ops(choices)
 
     # Run autotuning and get both result and winning choice
