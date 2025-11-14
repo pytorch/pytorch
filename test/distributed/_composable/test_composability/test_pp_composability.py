@@ -29,8 +29,8 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
+    at_least_x_gpu,
     MultiProcessTestCase,
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
@@ -40,7 +40,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
-    TEST_XPU,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
@@ -107,11 +106,9 @@ class ComposabilityTest(MultiProcessTestCase):
     def device(self):
         return self.rank
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(8)
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIGPU and not TEST_XPU, "Test requires 4+ GPUs"
-    )
+    @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     def test_pp_and_dcp(self):
         """
         Test that pipeline parallelism and distributed checkpointing can be used together and
@@ -201,11 +198,9 @@ class ComposabilityTest(MultiProcessTestCase):
 
         _dcp_test(self)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(8)
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIGPU and not TEST_XPU, "Test requires 8+ GPUs"
-    )
+    @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     @parametrize(
         "ScheduleClass",
         [
@@ -355,11 +350,9 @@ class ComposabilityTest(MultiProcessTestCase):
 
         torch.distributed.destroy_process_group()
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(8)
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIGPU and not TEST_XPU, "Test requires 8+ GPUs"
-    )
+    @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     @parametrize(
         "ScheduleClass",
         [
@@ -550,11 +543,9 @@ class ComposabilityTest(MultiProcessTestCase):
 
         torch.distributed.destroy_process_group()
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(8)
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIGPU and not TEST_XPU, "Test requires 8+ GPUs"
-    )
+    @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     @parametrize(
         "ScheduleClass",
         [
