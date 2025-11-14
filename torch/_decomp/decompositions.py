@@ -5460,27 +5460,7 @@ def max_pool2d_with_indices_backward(
     ceil_mode: bool,
     indices: Tensor,
 ):
-    """
-    Decomposition of max_pool2d_with_indices_backward using gather + reduction.
-
-    This uses high-level PyTorch operations (scatter_add) instead of low-level
-    IR primitives, providing:
-    - Performance improvements for certain kernel configurations
-    - Generalizability (same pattern works for avg_pool)
-    - Maintainability (simple, clear code using standard PyTorch ops)
-    - Automatic optimization by Inductor
-
-    Algorithm:
-        For each input position, gather all gradient contributions from outputs
-        that selected it as the maximum, then sum them using scatter_add.
-
-    Note: Uses atomic operations (non-deterministic by default). When
-    torch.use_deterministic_algorithms(True) is enabled, falls back to the
-    native CUDA kernel which is deterministic without requiring atomics.
-
-    This is the "gather + reduction" approach suggested by @eellison in PR #166662.
-    """
-    # Use native kernel in deterministic mode (already deterministic, no atomics)
+    # Use native kernel in deterministic mode
     if torch.are_deterministic_algorithms_enabled():
         return NotImplemented
 
@@ -5514,7 +5494,7 @@ def max_pool2d_with_indices_backward(
     )
     indices_flat = indices.reshape(batch_size * channels, out_height * out_width)
 
-    # Use scatter_add to accumulate gradients (functional version for torch.compile)
+    # Use scatter_add to accumulate gradients
     grad_input_flat = grad_input_flat.scatter_add(1, indices_flat, grad_output_flat)
 
     # Reshape back to original input shape
