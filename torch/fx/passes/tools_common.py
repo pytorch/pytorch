@@ -245,9 +245,7 @@ class FxNetAccFusionsFinder:
 
 
 @compatibility(is_backward_compatible=False)
-def legalize_graph(
-    gm: torch.fx.GraphModule, stable_topo_sort: bool = False
-) -> torch.fx.GraphModule:
+def legalize_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     """
     Replace the graph of the given GraphModule with one that contains the same nodes as the
     original, but in topologically sorted order.
@@ -257,7 +255,6 @@ def legalize_graph(
 
     Arguments:
         gm: The graph module to topologically sort. It is modified in-place.
-        stable_topo_sort: when True, PRIORITIZED_OPS would be ignored.
 
     Returns:
         The graph module in-place sorted
@@ -307,11 +304,7 @@ def legalize_graph(
         for user in cur.users:
             indeg[user] -= 1
             if indeg[user] == 0:
-                if (
-                    not stable_topo_sort
-                    and user.op == "call_function"
-                    and user.target in PRIORITIZED_OPS
-                ):
+                if user.op == "call_function" and user.target in PRIORITIZED_OPS:
                     queue.appendleft(user)
                 else:
                     queue.append(user)
