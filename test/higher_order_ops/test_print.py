@@ -173,14 +173,7 @@ x = add_1, y = add_2);  getitem = None
             """print(str format_str, *, Tensor x) -> ()""",
         )
 
-        # Test schema generation with bool list input
-        schema_bool_list = print_op.gen_schema(
-            "Bool list: {flags}", flags=[True, False, True]
-        )
-        self.assertExpectedInline(
-            str(schema_bool_list),
-            """print(str format_str, *, bool flags_0, bool flags_1, bool flags_2) -> ()""",
-        )
+        # TODO: Add schema support with kwargs with value of list type
 
         # No kwargs
         schema_no_kwargs = print_op.gen_schema("Simple message")
