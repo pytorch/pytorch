@@ -4,12 +4,15 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import cli.lib.core.vllm as vllm
+import cli.lib.core.vllm.vllm_build as vllm_build
+
+
+_VLLM_BUILD_MODULE = "cli.lib.core.vllm.vllm_build"
 
 
 class TestVllmBuildParameters(unittest.TestCase):
-    @patch("cli.lib.core.vllm.local_image_exists", return_value=True)
-    @patch("cli.lib.core.vllm.is_path_exist", return_value=True)
+    @patch(f"{_VLLM_BUILD_MODULE}.local_image_exists", return_value=True)
+    @patch(f"{_VLLM_BUILD_MODULE}.is_path_exist", return_value=True)
     @patch(
         "cli.lib.common.envs_helper.env_path_optional",
         side_effect=lambda name, default=None, resolve=True: {
@@ -34,13 +37,13 @@ class TestVllmBuildParameters(unittest.TestCase):
     def test_params_success_normalizes_and_validates(
         self, mock_env_path, mock_is_path, mock_local_img
     ):
-        params = vllm.VllmBuildParameters()
+        params = vllm_build.VllmBuildParameters()
         self.assertEqual(params.torch_whls_path, Path("/abs/dist"))
         self.assertEqual(params.dockerfile_path, Path("/abs/vllm/Dockerfile"))
         self.assertEqual(params.output_dir, Path("/abs/shared"))
         self.assertEqual(params.base_image, "my/image:tag")
 
-    @patch("cli.lib.core.vllm.is_path_exist", return_value=False)
+    @patch(f"{_VLLM_BUILD_MODULE}.is_path_exist", return_value=False)
     @patch.dict(
         os.environ, {"USE_TORCH_WHEEL": "1", "TORCH_WHEELS_PATH": "dist"}, clear=True
     )
@@ -48,14 +51,14 @@ class TestVllmBuildParameters(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             os.chdir(td)
             with self.assertRaises(ValueError) as cm:
-                vllm.VllmBuildParameters(
+                vllm_build.VllmBuildParameters(
                     use_local_base_image=False,
                     use_local_dockerfile=False,
                 )
         err = cm.exception
         self.assertIn("TORCH_WHEELS_PATH", str(err))
 
-    @patch("cli.lib.core.vllm.local_image_exists", return_value=False)
+    @patch(f"{_VLLM_BUILD_MODULE}.local_image_exists", return_value=False)
     @patch.dict(
         os.environ, {"USE_LOCAL_BASE_IMAGE": "1", "BASE_IMAGE": "img:tag"}, clear=True
     )
@@ -63,14 +66,14 @@ class TestVllmBuildParameters(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             os.chdir(td)
             with self.assertRaises(ValueError) as cm:
-                vllm.VllmBuildParameters(
+                vllm_build.VllmBuildParameters(
                     use_torch_whl=False,
                     use_local_dockerfile=False,
                 )
         err = cm.exception
         self.assertIn("BASE_IMAGE", str(err))
 
-    @patch("cli.lib.core.vllm.is_path_exist", return_value=False)
+    @patch(f"{_VLLM_BUILD_MODULE}.is_path_exist", return_value=False)
     @patch.dict(
         os.environ,
         {"USE_LOCAL_DOCKERFILE": "1", "DOCKERFILE_PATH": "Dockerfile"},
@@ -80,14 +83,14 @@ class TestVllmBuildParameters(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             os.chdir(td)
             with self.assertRaises(ValueError) as cm:
-                vllm.VllmBuildParameters(
+                vllm_build.VllmBuildParameters(
                     use_torch_whl=False,
                     use_local_base_image=False,
                 )
         err = cm.exception
         self.assertIn("DOCKERFILE_PATH", str(err))
 
-    @patch("cli.lib.core.vllm.is_path_exist", return_value=False)
+    @patch(f"{_VLLM_BUILD_MODULE}.is_path_exist", return_value=False)
     @patch.dict(
         os.environ,
         {"OUTPUT_DIR": ""},
@@ -95,14 +98,13 @@ class TestVllmBuildParameters(unittest.TestCase):
     )
     def test_params_missing_output_dir(self, _is_path):
         with self.assertRaises(FileNotFoundError):
-            vllm.VllmBuildParameters()
+            vllm_build.VllmBuildParameters()
 
 
 class TestBuildCmdAndRun(unittest.TestCase):
-    @patch("cli.lib.core.vllm.local_image_exists", return_value=True)
+    @patch(f"{_VLLM_BUILD_MODULE}.local_image_exists", return_value=True)
     def test_generate_docker_build_cmd_includes_bits(self, _exists):
-        runner = vllm.VllmBuildRunner()
-        # Craft inputs that simulate a prepared build
+        runner = vllm_build.VllmBuildRunner()
         inputs = MagicMock()
         inputs.output_dir = Path("/abs/out")
         inputs.use_local_base_image = True
@@ -118,7 +120,7 @@ class TestBuildCmdAndRun(unittest.TestCase):
         inputs.tag_name = "vllm-wheels"
 
         cmd = runner._generate_docker_build_cmd(inputs)
-        squashed = " ".join(cmd.split())  # normalize whitespace for matching
+        squashed = " ".join(cmd.split())
 
         self.assertIn("--output type=local,dest=/abs/out", squashed)
         self.assertIn("-f docker/Dockerfile.nightly_torch", squashed)
@@ -136,18 +138,17 @@ class TestBuildCmdAndRun(unittest.TestCase):
         self.assertIn("--target export-wheels", squashed)
         self.assertIn("-t vllm-wheels", squashed)
 
-    @patch("cli.lib.core.vllm.run_command")
-    @patch("cli.lib.core.vllm.ensure_dir_exists")
-    @patch("cli.lib.core.vllm.clone_vllm")
+    @patch(f"{_VLLM_BUILD_MODULE}.run_command")
+    @patch(f"{_VLLM_BUILD_MODULE}.ensure_dir_exists")
+    @patch(f"{_VLLM_BUILD_MODULE}.clone_vllm")
     @patch.object(
-        vllm.VllmBuildRunner,
+        vllm_build.VllmBuildRunner,
         "_generate_docker_build_cmd",
         return_value="docker buildx ...",
     )
     @patch.dict(
         os.environ,
         {
-            # Make __post_init__ validations pass cheaply
             "USE_TORCH_WHEEL": "0",
             "USE_LOCAL_BASE_IMAGE": "0",
             "USE_LOCAL_DOCKERFILE": "0",
@@ -158,24 +159,18 @@ class TestBuildCmdAndRun(unittest.TestCase):
     def test_run_calls_clone_prepare_and_build(
         self, mock_gen, mock_clone, mock_ensure, mock_run
     ):
-        # Stub parameters instance so we avoid FS/Docker accesses in run()
         params = MagicMock()
         params.output_dir = Path("shared")
         params.use_local_dockerfile = False
         params.use_torch_whl = False
 
-        with patch("cli.lib.core.vllm.VllmBuildParameters", return_value=params):
-            runner = vllm.VllmBuildRunner()
+        with patch(f"{_VLLM_BUILD_MODULE}.VllmBuildParameters", return_value=params):
+            runner = vllm_build.VllmBuildRunner()
             runner.run()
 
         mock_clone.assert_called_once()
         mock_ensure.assert_called_once_with(Path("shared"))
         mock_gen.assert_called_once_with(params)
         mock_run.assert_called_once()
-        # ensure we run in vllm workdir
         _, kwargs = mock_run.call_args
         assert kwargs.get("cwd") == "vllm"
-
-
-if __name__ == "__main__":
-    unittest.main()

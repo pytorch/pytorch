@@ -190,7 +190,7 @@ if not IS_WINDOWS:
 
             deterministic = torch.are_deterministic_algorithms_enabled()
             try:
-                # set use_deterministic_algorithms to fill unintialized memory
+                # set use_deterministic_algorithms to fill uninitialized memory
                 torch.use_deterministic_algorithms(True)
 
                 t = torch.rand(2, 7, device=device)
@@ -208,6 +208,27 @@ if not IS_WINDOWS:
             out = libtorch_agnostic.ops.my_zero_(t)
             self.assertEqual(id(out), id(t))
             self.assertEqual(out, torch.zeros_like(t))
+
+        def test_my_amax(self, device):
+            import libtorch_agnostic
+
+            t = torch.rand(2, 7, device=device)
+            out = libtorch_agnostic.ops.my_amax(t)
+            self.assertEqual(out, torch.amax(t, 0))
+
+        def test_my_amax_vec(self, device):
+            import libtorch_agnostic
+
+            t = torch.rand(2, 7, 5, device=device)
+            out = libtorch_agnostic.ops.my_amax_vec(t)
+            self.assertEqual(out, torch.amax(t, (0, 1)))
+
+        def test_my_is_cpu(self, device):
+            import libtorch_agnostic
+
+            t = torch.rand(2, 7, device=device)
+            out = libtorch_agnostic.ops.my_is_cpu(t)
+            self.assertEqual(out, t.is_cpu)
 
         def test_fill_infinity(self, device):
             import libtorch_agnostic
@@ -300,6 +321,209 @@ if not IS_WINDOWS:
                 self.assertEqual(current_device, expected_device)
             finally:
                 torch.cuda.set_device(prev_device)
+
+        def test_my_new_empty_dtype_variant(self, device):
+            import libtorch_agnostic
+
+            deterministic = torch.are_deterministic_algorithms_enabled()
+            try:
+                # set use_deterministic_algorithms to fill uninitialized memory
+                torch.use_deterministic_algorithms(True)
+                t = torch.randn(3, 4, device=device)
+                out = libtorch_agnostic.ops.my_new_empty_dtype_variant(t)
+                ref_out = t.new_empty((2, 5), dtype=torch.bfloat16)
+
+                self.assertEqual(out, ref_out, exact_device=True)
+            finally:
+                torch.use_deterministic_algorithms(deterministic)
+
+        def test_my_new_zeros_dtype_variant(self, device):
+            import libtorch_agnostic
+
+            t = torch.randn(3, 4, device=device)
+            out = libtorch_agnostic.ops.my_new_zeros_dtype_variant(t)
+            ref_out = t.new_zeros((2, 5), dtype=torch.float)
+            self.assertEqual(out, ref_out, exact_device=True)
+
+        def test_my_copy_(self, device):
+            import libtorch_agnostic
+
+            dst = torch.empty(2, 5, device=device)
+            src = torch.randn(2, 5, device=device)
+
+            result = libtorch_agnostic.ops.my_copy_(dst, src, False)
+            expected = src
+            self.assertEqual(result, expected)
+            self.assertEqual(result.data_ptr(), dst.data_ptr())
+
+        def test_my_clone(self, device):
+            import libtorch_agnostic
+
+            t = torch.randn(2, 5, device=device)
+
+            result = libtorch_agnostic.ops.my_clone(t)
+            expected = t.clone()
+            self.assertEqual(result, expected)
+            self.assertNotEqual(result.data_ptr(), expected.data_ptr())
+            self.assertEqual(result.stride(), expected.stride())
+
+        def test_my__foreach_mul_(self, device):
+            import libtorch_agnostic
+
+            N = 5
+            tensors = [torch.rand(32, 16, device=device) for _ in range(N)]
+            tensors_c = [t.clone() for t in tensors]
+            others = [torch.rand(32, 16, device=device) for _ in range(N)]
+
+            libtorch_agnostic.ops.my__foreach_mul_(tensors, others)
+            expected_values = torch._foreach_mul(tensors_c, others)
+
+            for tensor_t, expected_t in zip(tensors, expected_values):
+                self.assertEqual(tensor_t, expected_t)
+
+        def test_my__foreach_mul(self, device):
+            import libtorch_agnostic
+
+            N = 5
+            tensors = [torch.rand(32, 16, device=device) for _ in range(N)]
+            others = [torch.rand(32, 16, device=device) for _ in range(N)]
+
+            result = libtorch_agnostic.ops.my__foreach_mul(tensors, others)
+            expected = torch._foreach_mul(tensors, others)
+
+            for result_t, expected_t in zip(result, expected):
+                self.assertEqual(result_t, expected_t)
+
+            def _make_cuda_tensors(prior_mem):
+                cuda_res = libtorch_agnostic.ops.my__foreach_mul(tensors, others)
+                self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
+
+                expected = torch._foreach_mul(tensors, others)
+                for result_t, expected_t in zip(cuda_res, expected):
+                    self.assertEqual(result_t, expected_t)
+
+            if tensors[0].is_cuda:
+                init_mem = torch.cuda.memory_allocated(device)
+                for _ in range(3):
+                    _make_cuda_tensors(init_mem)
+                    curr_mem = torch.cuda.memory_allocated(device)
+                    self.assertEqual(curr_mem, init_mem)
+
+        def test_make_tensor_clones_and_call_foreach(self, device):
+            import libtorch_agnostic
+
+            t1 = torch.rand(2, 5, device=device)
+            t2 = torch.rand(3, 4, device=device)
+            result = libtorch_agnostic.ops.make_tensor_clones_and_call_foreach(t1, t2)
+            self.assertEqual(result[0], t1 * t1)
+            self.assertEqual(result[1], t2 * t2)
+
+        @onlyCUDA
+        def test_device(self, device):
+            import libtorch_agnostic
+
+            cuda_device = libtorch_agnostic.ops.test_device_constructor(
+                is_cuda=True, index=1, use_str=False
+            )
+            self.assertEqual(cuda_device, torch.device("cuda:1"))
+            cuda_device = libtorch_agnostic.ops.test_device_constructor(
+                is_cuda=True, index=1, use_str=True
+            )
+            self.assertEqual(cuda_device, torch.device("cuda:1"))
+
+            self.assertEqual(libtorch_agnostic.ops.test_device_index(cuda_device), 1)
+            self.assertTrue(
+                libtorch_agnostic.ops.test_device_equality(
+                    cuda_device, torch.device("cuda:1")
+                )
+            )
+            self.assertFalse(
+                libtorch_agnostic.ops.test_device_equality(
+                    cuda_device, torch.device("cuda:0")
+                )
+            )
+            self.assertFalse(libtorch_agnostic.ops.test_device_is_cpu(cuda_device))
+            self.assertTrue(libtorch_agnostic.ops.test_device_is_cuda(cuda_device))
+
+            cuda_0_device = libtorch_agnostic.ops.test_device_set_index(cuda_device, 0)
+            self.assertEqual(cuda_0_device, torch.device("cuda:0"))
+
+            cpu_device = libtorch_agnostic.ops.test_device_constructor(False, 0, False)
+            self.assertEqual(cpu_device, torch.device("cpu"))
+            self.assertTrue(
+                libtorch_agnostic.ops.test_device_equality(
+                    cpu_device, torch.device("cpu")
+                )
+            )
+            self.assertTrue(libtorch_agnostic.ops.test_device_is_cpu(cpu_device))
+            self.assertFalse(libtorch_agnostic.ops.test_device_is_cuda(cpu_device))
+            self.assertFalse(
+                libtorch_agnostic.ops.test_device_equality(cpu_device, cuda_device)
+            )
+
+            with self.assertRaisesRegex(
+                RuntimeError, "Device index 129 is out of range for int8_t"
+            ):
+                libtorch_agnostic.ops.test_device_constructor(
+                    is_cuda=True, index=129, use_str=False
+                )
+
+            with self.assertRaisesRegex(
+                RuntimeError, "Device index 129 is out of range for int8_t"
+            ):
+                libtorch_agnostic.ops.test_device_set_index(cuda_device, 129)
+
+        @onlyCUDA
+        @deviceCountAtLeast(2)
+        def test_tensor_device(self, device):
+            import libtorch_agnostic
+
+            t = torch.randn(2, 3)
+            self.assertEqual(libtorch_agnostic.ops.test_tensor_device(t), t.device)
+
+            t_cuda = torch.randn(2, 3, device="cuda")
+            self.assertEqual(
+                libtorch_agnostic.ops.test_tensor_device(t_cuda), t_cuda.device
+            )
+
+            t_cuda_1 = torch.randn(2, 3, device="cuda:1")
+            self.assertEqual(
+                libtorch_agnostic.ops.test_tensor_device(t_cuda_1), t_cuda_1.device
+            )
+
+        @onlyCPU
+        # TODO: Debug this:
+        # Dynamo failed to run FX node with fake tensors:
+        # call_function libtorch_agnostic.test_parallel_for.default(*(100, 10), **{}):
+        # got RuntimeError('libtorch_agnostic::test_parallel_for() expected at most
+        # 2 argument(s) but received 3 argument(s).
+        # Declaration: libtorch_agnostic::test_parallel_for(int size, int grain_size) -> Tensor')
+        @xfailIfTorchDynamo
+        def test_parallel_for(self, device):
+            import libtorch_agnostic
+
+            num_threads = torch.get_num_threads()
+            size = 100
+            grain_size = 10
+            expected_num_threads_used = min(
+                (size + grain_size - 1) // grain_size, num_threads
+            )
+
+            result = libtorch_agnostic.ops.test_parallel_for(size, grain_size)
+            result_thread_ids = torch.unique(torch.bitwise_right_shift(result, 32))
+            result_values = torch.bitwise_and(result, 0xFFFFFFFF)
+            expected = torch.arange(size, dtype=torch.int64)
+
+            self.assertEqual(result_values, expected)
+            self.assertEqual(result_thread_ids, torch.arange(expected_num_threads_used))
+
+        @onlyCPU
+        def test_get_num_threads(self, device):
+            import libtorch_agnostic
+
+            num_threads = libtorch_agnostic.ops.test_get_num_threads()
+            expected_num_threads = torch.get_num_threads()
+            self.assertEqual(num_threads, expected_num_threads)
 
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 

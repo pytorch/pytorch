@@ -4,8 +4,9 @@ import functools
 import types
 import typing
 import warnings
-from typing import Callable, cast, Optional, TypeVar, Union
-from typing_extensions import deprecated, ParamSpec, TypeAlias
+from collections.abc import Callable
+from typing import cast, TypeAlias, TypeVar, Union
+from typing_extensions import deprecated, ParamSpec
 
 import torch
 from torch import Tensor
@@ -40,9 +41,11 @@ def _no_grad(func: Callable[_P, _R]) -> Callable[_P, _R]:
 
     def _no_grad_wrapper(*args, **kwargs):
         with torch.no_grad():
+            # pyrefly: ignore [invalid-param-spec]
             return func(*args, **kwargs)
 
     functools.update_wrapper(_no_grad_wrapper, func)
+    # pyrefly: ignore [bad-return]
     return _no_grad_wrapper
 
 
@@ -51,7 +54,7 @@ def _get_total_norm(
     tensors: _tensor_or_tensors,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
 ) -> torch.Tensor:
     r"""Compute the norm of an iterable of tensors.
 
@@ -122,7 +125,7 @@ def _clip_grads_with_norm_(
     parameters: _tensor_or_tensors,
     max_norm: float,
     total_norm: torch.Tensor,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
 ) -> None:
     r"""Scale the gradients of an iterable of parameters given a pre-calculated total norm and desired max norm.
 
@@ -188,7 +191,7 @@ def clip_grad_norm_(
     max_norm: float,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
 ) -> torch.Tensor:
     r"""Clip the gradient norm of an iterable of parameters.
 
@@ -243,7 +246,7 @@ def clip_grad_norm(
     max_norm: float,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
 ) -> torch.Tensor:
     r"""Clip the gradient norm of an iterable of parameters.
 
@@ -258,7 +261,7 @@ def clip_grad_norm(
 def clip_grad_value_(
     parameters: _tensor_or_tensors,
     clip_value: float,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
 ) -> None:
     r"""Clip the gradients of an iterable of parameters at specified value.
 
@@ -280,6 +283,7 @@ def clip_grad_value_(
     clip_value = float(clip_value)
 
     grads = [p.grad for p in parameters if p.grad is not None]
+    # pyrefly: ignore [bad-argument-type]
     grouped_grads = _group_tensors_by_device_and_dtype([grads])
 
     for (device, _), ([grads], _) in grouped_grads.items():

@@ -79,7 +79,7 @@ assert torch.get_default_dtype() is torch.float32
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
 
@@ -138,7 +138,7 @@ class TestTorchDeviceType(TestCase):
     # TODO: move all tensor creation to common ops
     def _rand_shape(self, dim, min_size, max_size):
         shape = []
-        for i in range(dim):
+        for _ in range(dim):
             shape.append(random.randint(min_size, max_size))
         return tuple(shape)
 
@@ -172,7 +172,7 @@ class TestTorchDeviceType(TestCase):
 
         element_size = torch._utils._element_size(dtype)
 
-        for i in range(10):
+        for _ in range(10):
             bytes_list = [rand_byte() for _ in range(element_size)]
             scalar = bytes_to_scalar(bytes_list, dtype, device)
             self.assertEqual(scalar.storage().untyped().tolist(), bytes_list)
@@ -1232,74 +1232,6 @@ class TestTorchDeviceType(TestCase):
             _test_in_place_broadcastable(small2, small_expanded, large_expanded)
             _test_in_place_broadcastable(small2, small, large)
 
-    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @onlyCUDA
-    @wrapDeterministicFlagAPITest
-    def test_cublas_config_nondeterministic_alert(self, device):
-        test_cases = [
-            # (function, (tensor sizes))
-            ('mm', ((2, 2), (2, 2),)),
-            ('mv', ((2, 2), (2,),)),
-            ('bmm', ((1, 2, 2), (1, 2, 2),))]
-
-        test_configs = [
-            # (CuBLAS workspace config, is deterministic)
-            ('garbage', False),
-            (None, False),
-            (':4096:8', True),
-            (':16:8', True)]
-
-        cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
-        is_cuda10_2_or_higher = (torch.version.cuda is not None)
-
-        def test_case_info(fn_name, config):
-            return f'function "{fn_name}" with config "{"" if config is None else config}"'
-
-        # Create processes to test each combination of test cases and config settings
-        for fn_name, arg_sizes in test_cases:
-            for config, is_config_deterministic in test_configs:
-                env = os.environ.copy()
-                if config is None:
-                    if env.get(cublas_var_name) is not None:
-                        del env[cublas_var_name]
-                else:
-                    env[cublas_var_name] = config
-                should_throw_error = is_cuda10_2_or_higher and not is_config_deterministic
-                script = f"""
-import torch
-torch.use_deterministic_algorithms(True)
-fn = torch.{fn_name}
-arg_sizes = {arg_sizes}
-device = '{device}'
-should_throw_error = {should_throw_error}
-args = []
-for arg_size in arg_sizes:
-    args.append(torch.randn(*arg_size, device=device))
-try:
-    fn(*args)
-except RuntimeError as e:
-    if not should_throw_error:
-        raise RuntimeError('Did not expect any error to be raised')
-    elif 'Deterministic behavior was enabled with either' not in str(e):
-        raise RuntimeError('Expected a CuBLAS nondeterministic error, but got a different error')
-else:
-    if should_throw_error:
-        raise RuntimeError('Expected a CuBLAS nondeterministic error, but it was not raised')
-
-"""
-                try:
-                    subprocess.check_output(
-                        [sys.executable, '-c', script],
-                        stderr=subprocess.STDOUT,
-                        # On Windows, opening the subprocess with the default CWD makes `import torch`
-                        # fail, so just set CWD to this script's directory
-                        cwd=os.path.dirname(os.path.realpath(__file__)),
-                        env=env)
-                except subprocess.CalledProcessError as e:
-                    self.fail(msg=(
-                        f'Subprocess exception while attempting to run {test_case_info(fn_name, config)}:\n'
-                        + e.output.decode("utf-8")))
-
     @onlyCPU
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @dtypes(*get_all_qint_dtypes())
@@ -1849,6 +1781,14 @@ else:
         self.assertEqual(b[0, :], d[0, :], atol=3e-5, rtol=3e-5)
         self.assertEqual(b[-1, :], d[-1, :], atol=3e-5, rtol=3e-5)
 
+    @onlyCUDA
+    @largeTensorTest('48GB')
+    def test_cumsum_outer_dim_64bit_indexing(self, device):
+        x = torch.zeros(309504, 1, 16384, device=device)
+        torch.exp(x)
+        cumsum = torch.cumsum(x, dim=1)
+        self.assertEqual(cumsum.max().item(), 0., atol=0., rtol=0.)
+
     @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
     @onlyNativeDeviceTypes
     def test_nondeterministic_alert_put(self, device):
@@ -1904,30 +1844,6 @@ else:
                 lambda: op_call(a),
                 '_bincount_cuda',
                 False)
-
-    # Ensures that kthvalue throws nondeterministic alerts in the correct cases
-    @dtypes(torch.double)
-    def test_nondeterministic_alert_kthvalue(self, device, dtype):
-        def test_func(call_type):
-            S = 10
-            k = 5
-            a = torch.randn(S, device=device)
-            if call_type == 'function':
-                torch.kthvalue(a, k)
-            elif call_type == 'method':
-                a.kthvalue(k)
-            elif call_type == 'out':
-                values = torch.empty_like(a)
-                indices = torch.empty((), device=device, dtype=torch.long)
-                torch.kthvalue(a, k, out=(values, indices))
-            else:
-                self.fail(f"'{call_type}' is not a valid call type")
-
-        for call_type in ['function', 'method', 'out']:
-            self.check_nondeterministic_alert(
-                lambda: test_func('function'),
-                'kthvalue CUDA',
-                torch.device(device).type == 'cuda')
 
     @skipIfMPS
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
@@ -2104,7 +2020,7 @@ else:
             res = x.scatter_add(dim, idx, src)
 
             # Checking if scatter_add is deterministic
-            for i in range(5):
+            for _ in range(5):
                 res_next = x.scatter_add(dim, idx, src)
                 self.assertEqual(res, res_next, atol=0, rtol=0)
                 res = res_next
@@ -2356,7 +2272,7 @@ else:
                 fweights = torch.randint(1, 10, (num_observations,), device=device)
                 aweights = make_tensor((num_observations,), dtype=torch.float, device=device, low=1)
                 for correction, fw, aw in product([0, 1, 2], [None, fweights], [None, aweights]):
-                    check(x, correction, fweights, aweights)
+                    check(x, correction, fw, aw)
 
     @skipIfNoSciPy
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
@@ -2571,7 +2487,8 @@ else:
                         self.assertEqual(x1.grad, x2.grad, rtol=0, atol=0.001)
                         self.assertEqual(y1.grad, y2.grad, rtol=0, atol=0.001)
 
-    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @skipIfRocmArch(MI300_ARCH)
+    @tf32_on_and_off(0.005)
     @reduced_f32_on_and_off(0.08)
     def test_cdist_large(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
@@ -2690,7 +2607,7 @@ else:
             dist_grad = torch.randn((1, 27, 27), device=device, dtype=torch.float)
             y = x.clone()
             x.requires_grad = True
-            d = torch.cdist(x, y)
+            d = torch.cdist(x, y, p=p)
             d.backward(dist_grad)
             # Check that the backward pass does not contain invalid
             # values such as nan or inf
@@ -3447,267 +3364,6 @@ else:
         expected = torch.narrow_copy(inp.contiguous(), 1, 0, 10)
         actual = torch.narrow_copy(inp, 1, 0, 10)
         self.assertEqual(expected, actual)
-
-    # FIXME: move to indexing test suite
-    @parametrize("reduce", ['prod', 'amin', 'amax', 'mean'])
-    @dtypes(*all_types_and(torch.half, torch.bfloat16))
-    def test_index_reduce(self, device, dtype, reduce):
-        size = (3, 4, 5)
-        index_dtypes = [torch.int, torch.long]
-        include_selfs = [True, False]
-        amin_init = float('inf') if dtype.is_floating_point else torch.iinfo(dtype).max
-        amax_init = -float('inf') if dtype.is_floating_point else torch.iinfo(dtype).min
-        reduction_init = {'prod': 1, 'mean': 0, 'amin': amin_init, 'amax': amax_init}
-
-        for dest_noncontig, src_noncontig, index_noncontig in product([True, False], repeat=3):
-            for idx_dtype, include_self in product(index_dtypes, include_selfs):
-                for dim in range(len(size)):
-                    num_src = np.random.randint(10)
-                    num_dest = size[dim]
-                    dest = make_tensor(size, device=device, dtype=dtype, noncontiguous=dest_noncontig)
-                    src_size = size[:dim] + (num_src,) + size[dim + 1:]
-                    src = make_tensor(src_size, device=device, dtype=dtype, noncontiguous=src_noncontig)
-                    idx = torch.testing.make_tensor(
-                        num_src, low=0, high=num_dest, dtype=idx_dtype, device=device, noncontiguous=index_noncontig
-                    )
-                    expected = dest.clone()
-                    dest.index_reduce_(dim, idx, src, reduce, include_self=include_self)
-                    # fill rows in idx with reduction inits if include_self=False
-                    if (not include_self):
-                        expected.index_fill_(dim, idx.long(), reduction_init[reduce])
-                    expected = expected.transpose(0, dim)
-                    src = src.transpose(0, dim)
-                    for i in range(num_src):
-                        if reduce == 'prod':
-                            expected[idx[i]] *= src[i]
-                        elif reduce == 'amin':
-                            torch.minimum(expected[idx[i]], src[i], out=expected[idx[i]])
-                        elif reduce == 'amax':
-                            torch.maximum(expected[idx[i]], src[i], out=expected[idx[i]])
-                        else:
-                            expected[idx[i]] += src[i]
-                    if reduce == 'mean':
-                        counts = torch.ones_like(expected) if include_self else torch.zeros_like(expected)
-                        counts.index_add_(0, idx, torch.ones_like(src))
-                        counts.masked_fill_(counts == 0, 1)
-                        if (dtype.is_floating_point):
-                            expected.div_(counts)
-                        else:
-                            expected.div_(counts, rounding_mode="floor")
-                    expected = expected.transpose(0, dim)
-
-                    self.assertEqual(dest, expected)
-
-    # FIXME: move to test indexing
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    def test_index_copy(self, device, dtype):
-        # We just test for num_copy <= num_dest, as otherwise there are repeated indices
-        # and the behavior is undefined
-        num_copy, num_dest = 3, 5
-
-        def make_arg(batch_sizes, n, dim, contig):
-            size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
-            return make_tensor(size_arg, dtype=dtype, device=device, low=None, high=None, noncontiguous=not contig)
-
-        def ref_index_copy(tgt, dim, idx, src):
-            for i in range(idx.size(0)):
-                idx_dest = dim * (slice(None),) + (idx[i],)
-                idx_src = dim * (slice(None),) + (i,)
-                tgt[idx_dest] = src[idx_src]
-
-        # More thorough testing as in index_add
-        for dest_contig, src_contig, index_contig in product([True, False], repeat=3):
-            for other_sizes in ((), (4, 5)):
-                for dim in range(len(other_sizes)):
-                    dest = make_arg(other_sizes, num_dest, dim, dest_contig)
-                    src = make_arg(other_sizes, num_copy, dim, src_contig)
-                    idx = torch.randperm(num_dest, dtype=torch.int64, device=device)[:num_copy]
-                    if not index_contig:
-                        idx = torch.repeat_interleave(idx, 2, dim=-1)
-                        idx = idx[..., ::2]
-                    dest2 = dest.clone()
-                    dest.index_copy_(dim, idx, src)
-                    ref_index_copy(dest2, dim, idx, src)
-                    self.assertEqual(dest, dest2)
-
-    # FIXME: move to test indexing
-    # onlyNativeDeviceTypes due to an XLA error:
-    # https://github.com/pytorch/pytorch/issues/53256
-    @onlyNativeDeviceTypes
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    def test_index_copy_scalars(self, device, dtype):
-        # Create the 8 possible combinations of scalar sizes for target / index / source
-        scalars = ((make_tensor(size_t, dtype=dtype, device=device, low=None, high=None),
-                    make_tensor(size_i, dtype=torch.int64, device=device, low=0, high=1),
-                    make_tensor(size_s, dtype=dtype, device=device, low=None, high=None))
-                   for size_t, size_i, size_s in product([(), (1,)], repeat=3))
-        for target, idx, source in scalars:
-            target.index_copy_(0, idx, source)
-            self.assertEqual(target.item(), source.item())
-
-    # FIXME: move to test indexing
-    @onlyCPU
-    def test_errors_index_copy(self, device):
-        # We do not test the GPU as the CUDA_ASSERT would break the CUDA context
-        idx_dim = 8
-        tgt_dim = 5
-        batch_dim = 3
-
-        # Too large of an index
-        a = torch.randn(batch_dim, tgt_dim, device=device)
-        idx = torch.full((idx_dim,), tgt_dim, device=device)
-        c = torch.zeros(batch_dim, idx_dim, device=device)
-        with self.assertRaises(IndexError):
-            a.index_copy_(1, idx, c)
-
-        # Too small (negative indices)
-        idx = torch.full((idx_dim,), -1, device=device)
-        with self.assertRaises(IndexError):
-            a.index_copy_(1, idx, c)
-
-        # Too small (very negative indices) - they should be unsupported even
-        # when support for negative indices is implemented for index_copy_
-        idx = torch.full((idx_dim,), -tgt_dim - 1, device=device)
-        with self.assertRaises(IndexError):
-            a.index_copy_(1, idx, c)
-
-    def _prepare_data_for_index_copy_and_add_deterministic(
-        self, dim: int, device: torch.device
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        assert (dim >= 0 and dim < 3)
-        a = [5, 4, 3]
-        a[dim] = 2000
-        x = torch.zeros(a, device=device)
-        b = a.copy()
-        elems = a[dim] * 20
-        b[dim] = elems
-        src = torch.rand(b, device=device)
-        index = torch.randint(a[dim], (elems,), device=device)
-        return (x, index, src)
-
-    # FIXME: move to test indexing
-    @onlyNativeDeviceTypes
-    def test_index_copy_deterministic(self, device: torch.device) -> None:
-        for dim in range(3):
-            x, index, src = self._prepare_data_for_index_copy_and_add_deterministic(dim, device)
-            with DeterministicGuard(True):
-                y0 = torch.index_copy(x, dim, index, src)
-
-            x0 = x.detach().clone()
-            index_list = index.tolist()
-            for i in range(len(index_list)):
-                if dim == 0:
-                    x0[index_list[i], :, :] = src[i, :, :]
-                elif dim == 1:
-                    x0[:, index_list[i], :] = src[:, i, :]
-                elif dim == 2:
-                    x0[:, :, index_list[i]] = src[:, :, i]
-
-            self.assertEqual(x0, y0, atol=0, rtol=0)
-
-    # FIXME: move to test indexing
-    @onlyNativeDeviceTypes
-    def test_index_add_deterministic(self, device: torch.device) -> None:
-        for dim in range(3):
-            x, index, src = self._prepare_data_for_index_copy_and_add_deterministic(dim, device)
-            alpha = random.random() + 1
-            # on CPU it should be deterministic regardless of the deterministic mode
-            with DeterministicGuard(True):
-                y0 = torch.index_add(x, dim, index, src, alpha=alpha)
-                for _ in range(3):
-                    y = torch.index_add(x, dim, index, src, alpha=alpha)
-                    self.assertEqual(y, y0, atol=0, rtol=0)
-
-            with DeterministicGuard(False):
-                for _ in range(3):
-                    y_nd = torch.index_add(x, dim, index, src, alpha=alpha)
-                    self.assertEqual(y_nd, y0, atol=1e-3, rtol=1e-5)
-
-    # FIXME: find a test suite for the put operator
-    @onlyNativeDeviceTypes
-    def test_index_put_non_accumulate_deterministic(self, device) -> None:
-        with DeterministicGuard(True):
-            for i in range(3):
-                m = random.randint(10, 20)
-                elems = random.randint(20000, 30000)
-                values = torch.rand(elems, device=device)
-                indices = torch.randint(m, (elems,), device=device)
-                input = torch.rand(m, device=device)
-                output = input.index_put((indices,), values, accumulate=False)
-
-                input_list = input.tolist()
-                indices_list = indices.tolist()
-                values_list = values.tolist()
-                for i, v in zip(indices_list, values_list):
-                    input_list[i] = v
-
-                self.assertEqual(output, input_list)
-
-    # FIXME: move to test indexing
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    @skipIfMPS
-    def test_index_fill(self, device, dtype):
-        x = torch.tensor([[1, 2], [4, 5]], dtype=dtype, device=device)
-        index = torch.tensor([0], device=device)
-        x.index_fill_(1, index, 0)
-        self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=dtype, device=device))
-        if not x.is_complex() and not device == "meta":
-            with self.assertRaisesRegex(RuntimeError, r"Scalar"):
-                x.index_fill_(1, index, 1 + 1j)
-        # Make sure that the result stays 0-dim while applied to
-        # a 0-dim input
-        x = torch.tensor(1, dtype=dtype, device=device)
-        self.assertEqual(0, x.index_fill(0, index, -1).dim())
-        self.assertEqual(0, x.index_fill_(0, index, -1).dim())
-
-    # FIXME: move to test indexing
-    # The test fails for zero-dimensional tensors on XLA
-    @onlyNativeDeviceTypes
-    @dtypes(*all_types_complex_float8_and(torch.half, torch.bool, torch.bfloat16))
-    def test_index_select(self, device, dtype):
-        num_src, num_out = 3, 5
-
-        def make_arg(batch_sizes, n, dim, contig):
-            size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
-            return make_tensor(size_arg, dtype=dtype, device=device, low=None, high=None, noncontiguous=not contig)
-
-        def ref_index_select(src, dim, idx):
-            # some types not supported on numpy
-            not_np_dtypes = (torch.bfloat16, torch.float8_e5m2, torch.float8_e5m2fnuz, torch.float8_e4m3fn, torch.float8_e4m3fnuz)
-            if dtype in not_np_dtypes:
-                src = src.float()
-            out = torch.from_numpy(np.take(src.cpu().numpy(), idx.cpu().numpy(), axis=dim))
-            if dtype in not_np_dtypes:
-                out = out.to(device=device, dtype=dtype)
-            return out
-
-        for src_contig, idx_contig in product([True, False], repeat=2):
-            for other_sizes in ((), (4, 5)):
-                for dim in range(len(other_sizes)):
-                    src = make_arg(other_sizes, num_src, dim, src_contig)
-                    idx = make_tensor(
-                        (num_out,), dtype=torch.int64, device=device, low=0, high=num_src, noncontiguous=not idx_contig
-                    )
-                    out = torch.index_select(src, dim, idx)
-                    out2 = ref_index_select(src, dim, idx)
-                    self.assertEqual(out, out2)
-
-        for idx_type in (torch.int32, torch.int64):
-            other_sizes = (3, 2)
-            dim = 1
-            src = make_arg(other_sizes, num_src, dim, True)
-            idx = make_tensor((num_out,), dtype=idx_type, device=device, low=0, high=num_src, noncontiguous=False)
-            out = torch.index_select(src, dim, idx)
-            out2 = ref_index_select(src, dim, idx)
-            self.assertEqual(out, out2)
-
-        # Create the 4 possible combinations of scalar sizes for index / source
-        scalars = ((make_tensor(size_s, dtype=dtype, device=device),
-                    torch.zeros(size_i, dtype=torch.int64, device=device))
-                   for size_s, size_i in product([(), (1,)], repeat=2))
-        for source, idx in scalars:
-            out = source.index_select(0, idx)
-            self.assertEqual(out.item(), source.item())
 
     # FIXME: find a test suite for the take operator
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
@@ -5504,7 +5160,7 @@ else:
         prob_dist = torch.rand(10000, 1000, device=device, dtype=dtype)
         n_sample = 1
 
-        for i in range(trials):
+        for _ in range(trials):
             gen.manual_seed(seed)
             samples_1 = torch.multinomial(prob_dist, n_sample, True, generator=gen)
 
@@ -5582,7 +5238,7 @@ else:
         # TODO copy _like constructors to stride permutation instead of just layout
         if not TEST_WITH_TORCHINDUCTOR:
             x = torch.randn((3, 4, 5, 6, 7, 8, 9), device=device)
-            for i in range(10):
+            for _ in range(10):
                 permutation = list(range(len(x.shape)))
                 random.shuffle(permutation)
                 x = x.permute(permutation)
@@ -8753,7 +8409,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_Size_iter(self):
         for sizes in [iter([1, 2, 3, 4, 5]), range(1, 6)]:
             x = torch.Size(sizes)
-            for i in range(0, 5):
+            for i in range(5):
                 self.assertEqual(x[i], i + 1)
 
     def test_t_not_2d_error(self):
@@ -10824,7 +10480,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_no_cuda_monkeypatch(self):
         # Note that this is not in test_cuda.py as this whole file is skipped when cuda
         # is not available.
-        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class Stream"):
+        with self.assertRaisesRegex(RuntimeError, "torch.cuda.Stream requires CUDA support"):
             torch.cuda.Stream()
 
         with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class Event"):

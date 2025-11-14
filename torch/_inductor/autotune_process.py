@@ -14,10 +14,10 @@ import subprocess
 import sys
 import time
 import warnings
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p, CDLL
-from typing import Any, Callable, IO, Optional, TYPE_CHECKING, Union
+from typing import Any, IO, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -44,7 +44,7 @@ from torch.utils._ordered_set import OrderedSet
 if TYPE_CHECKING:
     from types import ModuleType
 
-    from torch._inductor.select_algorithm import TritonTemplateCaller
+    from torch._inductor.select_algorithm import PartialRender, TritonTemplateCaller
 
 from . import config
 from .runtime.benchmarking import benchmarker
@@ -231,6 +231,13 @@ class TuningProcess:
             self.process.kill()
         self.close()
 
+    def restart(self) -> None:
+        """
+        Gracefully restarts the child process.
+        """
+        self.shutdown(wait=True)
+        self.start()
+
 
 class TuningProcessPool:
     """
@@ -311,11 +318,16 @@ class TuningProcessPool:
             )
             # Set to INF so this choice will be ignored
             return float("inf")
-        except Exception:
+        except Exception as process_exception:
             warnings.warn(
                 f"Failed to benchmark choice '{choice}'. It will be ignored. "
                 "Please debug the root cause in case the choice can bring perf gains."
             )
+            # An unspecified launch failure (cudaErrorLaunchFailure) corrupts the
+            # CUDA context, making it unrecoverable. All subsequent CUDA calls will
+            # fail as well. The process must be restarted to restore CUDA functionality.
+            if "cudaErrorLaunchFailure" in str(process_exception):
+                process.restart()
             # Set to INF so this choice will be ignored
             return float("inf")
         finally:
@@ -874,6 +886,55 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkMixin, BenchmarkRequest):
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}"
+
+
+class CuteDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
+    """Benchmark request for CuteDSL (CUTLASS Python DSL) kernels."""
+
+    def __init__(
+        self,
+        kernel_name: str,
+        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        extra_args: tuple[Any, ...],
+        source_code: PartialRender,
+    ) -> None:
+        super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
+
+        finalized_code = source_code.finalize_all()
+        self.module_cache_key, self.module_path = PyCodeCache.write(finalized_code)
+
+    def make_run_fn(
+        self, *input_tensors: torch.Tensor, out: torch.Tensor
+    ) -> Callable[[], None]:
+        """
+        Create a function to run the CuteDSL kernel with the given input and output tensors.
+        Similar to TritonBenchmarkRequest.make_run_fn but for CuteDSL kernels.
+        """
+        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
+
+        # Logic replicated async_compile
+        from .codegen.cutedsl.cutedsl_kernel import MAIN_SUFFIX
+
+        main_func_name = f"{self.kernel_name}_{MAIN_SUFFIX}"
+
+        if not hasattr(mod, main_func_name):
+            available = [name for name in dir(mod) if callable(getattr(mod, name))]
+            raise RuntimeError(
+                f"Could not find CuteDSL main kernel function '{main_func_name}'. Available callables: {available}"
+            )
+
+        kernel_func = getattr(mod, main_func_name)
+
+        def run_kernel():
+            device_interface = get_interface_for_device("cuda")
+            stream = device_interface.get_raw_stream(out.device.index)
+            return kernel_func(*input_tensors, out, stream=stream)
+
+        return run_kernel
+
+    def cleanup_run_fn(self) -> None:
+        """Clean up any resources used by the kernel."""
 
 
 @functools.cache

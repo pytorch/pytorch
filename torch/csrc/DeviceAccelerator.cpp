@@ -74,10 +74,6 @@ void initModule(PyObject* module) {
     return at::accelerator::maybeExchangeDevice(device_index);
   });
 
-  m.def("_accelerator_setAllocatorSettings", [](std::string env) {
-    c10::CachingAllocator::setAllocatorSettings(env);
-  });
-
   m.def("_accelerator_isAllocatorInitialized", []() {
     const auto device_type = at::accelerator::getAccelerator(true).value();
     return at::getDeviceAllocator(device_type)->initialized();
@@ -140,6 +136,17 @@ void initModule(PyObject* module) {
 
   m.def("_accelerator_resetPeakStats", [](c10::DeviceIndex device_index) {
     at::accelerator::resetPeakStats(device_index);
+  });
+
+  m.def("_accelerator_getMemoryInfo", [](c10::DeviceIndex device_index) {
+    const auto device_type = at::accelerator::getAccelerator(true).value();
+    torch::utils::maybe_initialize_device(device_type);
+    py::gil_scoped_release no_gil;
+    return at::accelerator::getMemoryInfo(device_index);
+  });
+
+  m.def("_accelerator_setAllocatorSettings", [](std::string env) {
+    c10::CachingAllocator::setAllocatorSettings(env);
   });
 }
 

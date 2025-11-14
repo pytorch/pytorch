@@ -1360,6 +1360,8 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 #endif
 
 
+#if !defined(__aarch64__) || AT_MKLDNN_ACL_ENABLED()
+// Used by default on x86 platforms and on AArch64+ACL
 static inline int64_t get_mkldnn_matmul_min_dim() {
   static auto value = [&] {
     const int64_t default_min_dim = [&] {
@@ -1393,8 +1395,7 @@ static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n) {
   const int64_t min_size = get_mkldnn_matmul_min_size();
   return at::globalContext().userEnabledMkldnn() && m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
 }
-
-
+#endif
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
@@ -1654,7 +1655,7 @@ static inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, 
   auto s0 = self.accessor<const scalar_t, 3>();
   auto m0 = mat2.accessor<const scalar_t, 3>();
 
-  int64_t grain_size = std::max(internal::GRAIN_SIZE / (is * js * ks), (int64_t)1);
+  int64_t grain_size = std::max(internal::GRAIN_SIZE / (is * js * ks), static_cast<int64_t>(1));
   using opmath_t = at::opmath_type<scalar_t>;
   parallel_for(0, bs, grain_size, [&](int64_t b_begin, int64_t b_end) {
       for (const auto b : c10::irange(b_begin, b_end)) {
@@ -1770,7 +1771,8 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
     return (strides[2] == 1 && (sizes[1] == 1 || strides[1] >= sizes[2])) ||
         (strides[1] == 1 && (sizes[2] == 1 || strides[2] >= sizes[1]));
   };
-
+#if !defined(__aarch64__) || AT_MKLDNN_ACL_ENABLED()
+  // Always apply mkldnn heuristic on x86 platform, but on ARM only if compiled with ACL
   bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
   if (apply_heur && use_mkldnn_matmul(batch1, batch2, self_or_result)) {
     try {
@@ -1781,7 +1783,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
       at::globalContext().setUserEnabledMkldnn(false);
     }
   }
-
+#endif
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, batch1.scalar_type(), "bmm", [&] {
@@ -1934,7 +1936,7 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
 
   // We order the tensors. t1 will be the larger tensor
   // We can always transpose tensor2 as the dimensions are always >= 1 (precondition from matmul)
-  // and tensor1_larger iff tensor2.dim() > tensor1.dim(9
+  // and tensor1_larger iff tensor2.dim() > tensor1.dim()
   const auto t1 = tensor1_larger ? MaybeOwned<Tensor>::borrowed(tensor1)
                                  : MaybeOwned<Tensor>::owned(tensor2.mT());
   const int64_t dim_t1 = t1->dim();
@@ -1946,20 +1948,11 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
     return false;
   }
 
-  // In this case we *do* incur in an extra copy to avoid creating an unnecessary large tensor in the backward
-  // Suppose we don't fold here. Let t1.shape = [b, m, n] t2.shape = [n, k] like in a transformer
-  // t2 will be expanded to a tensor of shape [b, n, k] and then we do t1.bmm(t2_expanded)
-  // The issue appears in the backward.
-  // The output gradient g of this operation would have shape [b, m, k]
-  // The backward wrt. t2 of bmm would be given by t1.mH @ g, which has shape [b, n, k]
-  // Then, the backward of expand is simply `sum(0)`. As such, we are instantiating a tensor
-  // of shape [b, n, k] unnecessarily, which may cause a large memory footprint, and in the
-  // worst case, an OOM
-  bool t2_requires_grad = tensor1_larger ? tensor2.requires_grad() : tensor1.requires_grad();
-  if (t2_requires_grad && !has_out) {
-    // We should be checking !at::GradMode::is_enabled(), but apparently
-    // this regresses performance in some cases:
-    // https://github.com/pytorch/pytorch/issues/118548#issuecomment-1916022394
+  // If we require a gradient, we should fold to minimize backward memory usage - even if this
+  // leads to a copy in forward because is needed in backward,
+  // only time we avoid this strict pre-allocated memory usage (has_out = True)
+  bool requires_grad = tensor1.requires_grad() || tensor2.requires_grad();
+  if (requires_grad && !has_out) {
     return true;
   }
 
@@ -2799,6 +2792,7 @@ Tensor matrix_exp(const Tensor& a) {
 // TODO This should be deprecated in favor of linalg_matrix_exp_differential
 //      in FunctionsManual.cpp
 Tensor matrix_exp_backward(const Tensor& self, const Tensor& grad) {
+  squareCheckInputs(self, "matrix_exp_backward");
   NoTF32Guard disable_tf32;
   return backward_analytic_function_of_a_matrix(
     self, grad,
@@ -3617,7 +3611,7 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
     try {
       mkldnn_matmul_i8i8i32(self, mat2, result);
       dispatched = true;
-    } catch (const std::exception& e) {
+    } catch ([[maybe_unused]] const std::exception& e) {
       TORCH_WARN(func_name, " failed, switching to BLAS gemm: ", e.what());
     }
   }

@@ -2,6 +2,9 @@ import torch
 
 import torch_openreg._C  # type: ignore[misc]
 
+from . import meta  # noqa: F401
+from .amp import get_amp_supported_dtype  # noqa: F401
+
 
 _initialized = False
 
@@ -38,8 +41,17 @@ def current_device():
     return torch_openreg._C._get_device()
 
 
+# LITERALINCLUDE START: PYTHON SET DEVICE FUNCTION
 def set_device(device) -> None:
-    return torch_openreg._C._set_device(device)
+    if device >= 0:
+        torch_openreg._C._set_device(device)
+
+
+# LITERALINCLUDE END: PYTHON SET DEVICE FUNCTION
+
+
+def init():
+    _lazy_init()
 
 
 def is_initialized():
@@ -64,6 +76,7 @@ __all__ = [
     "set_device",
     "initial_seed",
     "is_available",
+    "init",
     "is_initialized",
     "random",
     "manual_seed",

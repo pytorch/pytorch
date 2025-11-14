@@ -4,18 +4,20 @@ import unittest
 import sympy
 
 import torch
-import torch._inductor.config as config
 from torch._dynamo.test_case import TestCase
 from torch._inductor.codegen.cuda.cutlass_utils import (
     torch_dtype_to_cutlass_type,
     try_import_cutlass,
 )
-from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import ComputedBuffer, FixedLayout, PermuteView, Pointwise
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import OrderedSet
 from torch.testing._internal.common_cuda import SM90OrLater
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA_AND_TRITON
+from torch.testing._internal.inductor_utils import (
+    HAS_CPU,
+    HAS_CUDA_AND_TRITON,
+    MockGraphHandler,
+)
 
 
 if try_import_cutlass():
@@ -24,17 +26,13 @@ if try_import_cutlass():
 
     LayoutType = cutlass_lib.LayoutType
     DataType = cutlass_lib.DataType
+    from cutlass_cppgen.backend.evt.ir.tensor import Tensor as CutlassTensor
+
     from torch._inductor.codegen.cuda.cutlass_lib_extensions.evt_extensions import (
         _render_argument_type,
         _trace,
         trace,
     )
-
-    if config.is_fbcode():
-        import python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
-    else:
-        import cutlass as python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
-    CutlassTensor = python_cutlass.backend.evt.ir.tensor.Tensor
 
     BIAS_CODE = """def example_epilogue(accum, C, aux, bias):
         F = accum + C + aux
@@ -103,17 +101,6 @@ class MockComputedBuffer(ComputedBuffer):
     def num_reads(self):
         # Needed to not inline in ComputedBuffer
         return 1
-
-
-class MockGraphHandler(GraphLowering):
-    def __init__(self, name_to_buffer):
-        import torch._inductor.sizevars
-
-        self.sizevars = torch._inductor.sizevars.SizeVarAllocator()
-        self.name_to_buffer = name_to_buffer
-        self.graph_inputs = dict()
-        self.mutated_buffers = OrderedSet()
-        self.constants = dict()
 
 
 class TestCutlassEVT(TestCase):
@@ -345,29 +332,31 @@ return tmp_1, D""",
         from torch._inductor.codegen.cuda.cutlass_lib_extensions.evt_extensions import (
             create_example_tensors,
         )
+        from torch._inductor.virtualized import V
 
-        row_major_buf0 = MockComputedBuffer(
-            "buf0", None, torch.float32, (3, 4, 1), (4, 1, 0)
-        )
-        col_major_buf1 = MockComputedBuffer(
-            "buf1", None, torch.float32, (3, 2, 1), (1, 3, 0)
-        )
-        buffer_renames = {"buf0": "buf0", "buf1": "buf1", "acc": "buf0"}
-        name_to_buffer = {"buf0": row_major_buf0, "buf1": col_major_buf1}
-        result = create_example_tensors(
-            buffer_renames, name_to_buffer, lambda x: int(x)
-        )
-        self.assertEqual(result["acc"].shape, (3, 4, 1))
-        self.assertEqual(result["acc"].stride, (4, 1, 0))
-        self.assertEqual(
-            result["acc"].element, torch_dtype_to_cutlass_type(torch.float32)
-        )
+        with V.set_graph_handler(MockGraphHandler({})):
+            row_major_buf0 = MockComputedBuffer(
+                "buf0", None, torch.float32, (3, 4, 1), (4, 1, 0)
+            )
+            col_major_buf1 = MockComputedBuffer(
+                "buf1", None, torch.float32, (3, 2, 1), (1, 3, 0)
+            )
+            buffer_renames = {"buf0": "buf0", "buf1": "buf1", "acc": "buf0"}
+            name_to_buffer = {"buf0": row_major_buf0, "buf1": col_major_buf1}
+            result = create_example_tensors(
+                buffer_renames, name_to_buffer, lambda x: int(x)
+            )
+            self.assertEqual(result["acc"].shape, (3, 4, 1))
+            self.assertEqual(result["acc"].stride, (4, 1, 0))
+            self.assertEqual(
+                result["acc"].element, torch_dtype_to_cutlass_type(torch.float32)
+            )
 
-        self.assertEqual(result["buf1"].shape, (3, 2, 1))
-        self.assertEqual(result["buf1"].stride, (1, 3, 0))
-        self.assertEqual(
-            result["buf1"].element, torch_dtype_to_cutlass_type(torch.float32)
-        )
+            self.assertEqual(result["buf1"].shape, (3, 2, 1))
+            self.assertEqual(result["buf1"].stride, (1, 3, 0))
+            self.assertEqual(
+                result["buf1"].element, torch_dtype_to_cutlass_type(torch.float32)
+            )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")

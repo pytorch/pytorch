@@ -76,13 +76,7 @@ void _print_dispatch_trace(const std::string& label, const std::string& op_name,
 
 OpRegistrationListener::~OpRegistrationListener()= default;
 
-Dispatcher::Dispatcher()
-: operators_()
-, operatorLookupTable_()
-, backendFallbackKernels_()
-, listeners_(std::make_unique<detail::RegistrationListenerList>())
-, cond_var_()
-, guard_(std::make_shared<Guard>())
+Dispatcher::Dispatcher(): backendFallbackKernels_(), listeners_(std::make_unique<detail::RegistrationListenerList>()), guard_(std::make_shared<Guard>())
 {}
 
 Dispatcher::~Dispatcher() {
@@ -448,11 +442,17 @@ RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, Ker
 
   auto idx = getDispatchTableIndexForDispatchKey(dispatchKey);
   TORCH_CHECK(idx >= 0 && static_cast<uint64_t>(idx) < backendFallbackKernels_.size(), "idx=", idx);
+  // NB: Perserve BC for registering fallback for AutogradPrivateUse1 multiple time,
+  // refer to https://github.com/pytorch/pytorch/issues/163979 for more informations.
   TORCH_CHECK(
-    !backendFallbackKernels_[idx].kernel.isValid(),
-    "Tried to register multiple backend fallbacks for the same dispatch key ", dispatchKey, "; previous registration ",
-    backendFallbackKernels_[idx].debug, ", new registration ", debug
-  );
+      dispatchKey == DispatchKey::AutogradPrivateUse1 ||
+          !backendFallbackKernels_[idx].kernel.isValid(),
+      "Tried to register multiple backend fallbacks for the same dispatch key ",
+      dispatchKey,
+      "; previous registration ",
+      backendFallbackKernels_[idx].debug,
+      ", new registration ",
+      debug);
   // NB: inferred function schema is always nullptr for fallbacks, as fallbacks
   // cannot be unboxed
   backendFallbackKernels_[idx] = impl::AnnotatedKernel(std::move(kernel), nullptr, std::move(debug));
@@ -537,7 +537,7 @@ int64_t Dispatcher::sequenceNumberForRunningRecordFunction(DispatchKey dispatchK
 
   // Note: this records a sequence number for both Autograd keys, and for
   // non-Autograd keys where the dispatchKeySet still contains an autograd key.
-  // This means that we might collect the same sequence nubmer two different
+  // This means that we might collect the same sequence number two different
   // events if they all occurred above Autograd and still had the Autograd
   // dispatch key in the dispatch key set.
   // However, this usually doesn't happen: normally the first call will
