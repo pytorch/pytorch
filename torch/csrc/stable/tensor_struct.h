@@ -10,6 +10,7 @@
 #include <memory>
 
 #include <torch/csrc/stable/accelerator.h>
+#include <torch/csrc/stable/device_struct.h>
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
@@ -191,6 +192,9 @@ class Tensor {
 
   // defined in tensor-inl.h to avoid circular dependencies
   ScalarType scalar_type() const;
+
+  // defined in tensor-inl.h to avoid circular dependencies
+  Device device() const;
 
   // =============================================================================
   // END of C-shimified TensorBase APIs
