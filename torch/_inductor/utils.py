@@ -3276,7 +3276,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     has_hint = V.graph.sizevars.shape_env.has_hint
 
     if config.assume_32bit_indexing:
-        V.graph.sizevars.check_leq(e, int_max)  # type: ignore
+        V.graph.sizevars.check_leq(e, int_max)  # type: ignore[arg-type]
         return True
 
     # Allow for unhinted e as long as we can still statically prove
