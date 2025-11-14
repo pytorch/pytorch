@@ -12,6 +12,7 @@ from collections.abc import Callable
 from contextlib import contextmanager, ExitStack, nullcontext
 from itertools import chain
 from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
+from unittest import mock
 
 
 if TYPE_CHECKING:
@@ -139,6 +140,8 @@ class ExportDynamoConfig:
     capture_dynamic_output_shape_ops: bool = True
     capture_scalar_outputs: bool = True
     prefer_deferred_runtime_asserts_over_guards: bool = False
+    replay_side_effects: bool = False
+    side_effect_replay_policy: str = "warn"
 
 
 @dataclasses.dataclass
@@ -274,6 +277,24 @@ def _extract_fake_inputs(gm, args, kwargs):
         else:
             fake_vals.append(node.meta.get("example_value"))
 
+    if in_shuffle_graph := getattr(gm, "_in_shuffle_graph", None):
+        flat_args = pytree.tree_leaves((args, kwargs))
+        node_map = {
+            node: i
+            for i, node in enumerate(
+                next(iter(reversed(in_shuffle_graph.graph.nodes))).args[0]
+            )
+            if node.op == "placeholder"
+        }
+        new_fake_inps: list[Any] = []
+        for i, node in enumerate(
+            in_shuffle_graph.graph.find_nodes(op="placeholder")[1:]
+        ):
+            if node in node_map:
+                new_fake_inps.append(fake_inps[node_map[node]])
+            else:
+                new_fake_inps.append(flat_args[i])
+        fake_inps = new_fake_inps
     # We get both because now we might have a combination of symint and tensor
     # inputs, and we want to check that the shape env is consistent between
     # both. Unfortunately we can't see what fake mode is attached to the shape
@@ -798,6 +819,16 @@ def _export_to_torch_ir(
         prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
     )
 
+    def use_legacy_dynamo_graph_capture() -> bool:
+        return bool(
+            constraints  # dynamic shape
+            or dynamic_shapes  # dynamic shape
+            or isinstance(f, torch.fx.GraphModule)  # retracing
+            or preserve_module_call_signature  # unflatten
+            or torch._functorch.config.fake_tensor_propagate_real_tensors  # draft
+            or torch._export.config.use_legacy_dynamo_graph_capture
+        )
+
     with torch._dynamo.config.patch(dataclasses.asdict(dynamo_cfg)):
         try:
             module_call_specs: dict[str, dict[str, pytree.TreeSpec]] = (
@@ -812,11 +843,20 @@ def _export_to_torch_ir(
                 if torch._export.config.use_new_tracer_experimental:
                     from torch._dynamo.functional_export import (
                         _dynamo_graph_capture_for_export,
+                        dynamo_graph_capture_for_export,
                     )
 
-                    gm_torch_level = _dynamo_graph_capture_for_export(
-                        f, constraints=constraints, dynamic_shapes=dynamic_shapes
-                    )(*args, **kwargs)
+                    if use_legacy_dynamo_graph_capture():
+                        dynamo_graph_capture = _dynamo_graph_capture_for_export(
+                            f, constraints=constraints, dynamic_shapes=dynamic_shapes
+                        )
+                    else:
+                        dynamo_graph_capture = dynamo_graph_capture_for_export(f)
+                    # We can't serialize entire fake mode yet, so this is to make sure
+                    # things like copy.deepcopy(ep.graph_module) not crash.
+                    # see test_export.py::test_custom_tag_metadata_re_export
+                    # Once we delete the old strict export, we can use
+                    gm_torch_level = dynamo_graph_capture(*args, **kwargs)
                     # We can't serialize entire fake mode yet, so this is to make sure
                     # things like copy.deepcopy(ep.graph_module) not crash.
                     # see test_export.py::test_custom_tag_metadata_re_export
@@ -1568,7 +1608,11 @@ def _strict_export(
     }
 
     tx = TracingContext(dynamo_fake_mode)
-    with dynamo_fake_mode, tracing(tx):
+    with (
+        dynamo_fake_mode,
+        tracing(tx),
+        mock.patch.object(dynamo_fake_mode, "allow_non_fake_inputs", True),
+    ):
         aten_export_artifact = _to_aten_func(
             gm_torch_level,
             # NOTE: graph module expects only positional args
