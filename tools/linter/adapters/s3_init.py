@@ -195,8 +195,8 @@ if __name__ == "__main__":
         level=logging.INFO,
         stream=sys.stderr,
     )
-
-    config = json.load(open(args.config_json))
+    with open(args.config_json) as f:
+        config = json.load(f)
     config = config[args.linter]
 
     # Allow processor specific binaries for platform (namely Intel and M1 binaries for MacOS)

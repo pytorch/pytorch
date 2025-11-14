@@ -1217,6 +1217,43 @@ class TestPatternMatcher(TestCase):
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
+    def test_addmm_alpha_beta_with_pointwise(self):
+        # Test that addmm with alpha/beta != 1 is unfused correctly with pointwise ops
+        # See https://github.com/pytorch/pytorch/issues/167313
+        x = torch.rand(2, device=GPU_TYPE)
+        a = torch.rand(2, 3, device=GPU_TYPE)
+        b = torch.rand(3, 2, device=GPU_TYPE)
+
+        def f(x, a, b):
+            return torch.nn.functional.relu(torch.addmm(x, a, b, alpha=0.8, beta=0.2))
+
+        fc = torch.compile(f)
+
+        expected = f(x, a, b)
+        actual = fc(x, a, b)
+
+        # The compiled version should produce the same result as eager
+        torch.testing.assert_close(actual, expected)
+
+        # Verify that addmm is unfused (should not use extern_kernels.addmm)
+        # The pattern should be replaced with beta * x + alpha * (a @ b)
+        _, (code) = run_and_get_code(fc, x, a, b)
+        FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+        # Test with alpha=1, beta=1 (default) - should also unfuse
+        def f_default(x, a, b):
+            return torch.nn.functional.relu(torch.addmm(x, a, b))
+
+        fc_default = torch.compile(f_default)
+        expected_default = f_default(x, a, b)
+        actual_default = fc_default(x, a, b)
+
+        torch.testing.assert_close(actual_default, expected_default)
+
+        # Should unfuse and not use extern_kernels.addmm
+        _, (code) = run_and_get_code(fc_default, x, a, b)
+        FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
     def test_serialized_patterns_up_to_date(self):
         import torch.utils._pytree as pytree
         from torch._inductor.fx_passes import joint_graph
@@ -1794,6 +1831,71 @@ class TestPatternMatcher(TestCase):
         )
         self.assertEqual(len(sigmoid_nodes), 1)
         self.assertTrue("original_aten" in sigmoid_nodes[0].meta)
+
+    @inductor_config.patch(is_predispatch=True)
+    def test_remove_noop_pass_with_remove_passes(self):
+        def fn_with_noop(x):
+            batch_size, dim = x.shape
+            y = x.view(batch_size, dim)
+            return y + 1
+
+        def count_view_ops(graph_module):
+            count = 0
+            for node in graph_module.graph.nodes:
+                if node.op == "call_function" and node.target in [
+                    torch.ops.aten.view.default,
+                    torch.ops.aten.reshape.default,
+                ]:
+                    count += 1
+            return count
+
+        device = "cuda" if HAS_GPU else "cpu"
+        input_tensor = torch.randn(8, 16, device=device)
+
+        with inductor_config.patch(remove_pre_grad_passes=None):
+            compiled_fn_default = torch.compile(fn_with_noop, fullgraph=True)
+            result_default = compiled_fn_default(input_tensor)
+
+        with inductor_config.patch(remove_pre_grad_passes="remove_noop"):
+            compiled_fn_skip_noop = torch.compile(fn_with_noop, fullgraph=True)
+            result_skip_noop = compiled_fn_skip_noop(input_tensor)
+
+        expected = fn_with_noop(input_tensor)
+        torch.testing.assert_close(result_default, expected)
+        torch.testing.assert_close(result_skip_noop, expected)
+
+        from torch._inductor.fx_passes.pre_grad import pre_grad_passes
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        with inductor_config.patch(
+            is_predispatch=True, pattern_matcher=True, remove_pre_grad_passes=None
+        ):
+            gm_default = make_fx(fn_with_noop)(input_tensor)
+            gm_default_processed = pre_grad_passes(
+                gm_default, [input_tensor], add_passes=None, remove_passes=None
+            )
+            view_count_default = count_view_ops(gm_default_processed)
+
+        with inductor_config.patch(
+            is_predispatch=True,
+            pattern_matcher=True,
+            remove_pre_grad_passes="remove_noop",
+        ):
+            gm_skip_noop = make_fx(fn_with_noop)(input_tensor)
+            gm_skip_noop_processed = pre_grad_passes(
+                gm_skip_noop,
+                [input_tensor],
+                add_passes=None,
+                remove_passes="remove_noop",
+            )
+            view_count_skip_noop = count_view_ops(gm_skip_noop_processed)
+
+        self.assertGreaterEqual(
+            view_count_skip_noop,
+            view_count_default,
+            f"Expected view count with remove_noop disabled ({view_count_skip_noop}) "
+            f"to be >= view count with remove_noop enabled ({view_count_default})",
+        )
 
 
 if __name__ == "__main__":

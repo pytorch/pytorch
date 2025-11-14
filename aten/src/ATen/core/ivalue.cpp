@@ -601,8 +601,8 @@ std::ostream& IValue::repr(
       double d = v.toDouble();
       int c = std::fpclassify(d);
       if ((c == FP_NORMAL || c == FP_ZERO ) && std::abs(d) < 1e10) {
-        int64_t i = int64_t(d);
-        if (double(i) == d) {
+        int64_t i = static_cast<int64_t>(d);
+        if (static_cast<double>(i) == d) {
           // -0.0 (signed zero) needs to be parsed as -0.
           if (i == 0 && std::signbit(d)) {
             return out << "-" << i << ".";
@@ -799,8 +799,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       double d = v.toDouble();
       int c = std::fpclassify(d);
       if (c == FP_NORMAL || c == FP_ZERO) {
-        int64_t i = int64_t(d);
-        if (double(i) == d) {
+        int64_t i = static_cast<int64_t>(d);
+        if (static_cast<double>(i) == d) {
           return out << i << ".";
         }
       }
