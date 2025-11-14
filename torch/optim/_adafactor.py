@@ -32,7 +32,7 @@ class Adafactor(Optimizer):
         *,
         foreach: Optional[bool] = None,
         maximize: bool = False,
-    ):
+    ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -77,7 +77,7 @@ class Adafactor(Optimizer):
         col_vars,
         variances,
         state_steps,
-    ):
+    ) -> bool:
         for p in group["params"]:
             if p.grad is None:
                 continue
@@ -349,7 +349,7 @@ def _single_tensor_adafactor(
     eps2: float,
     maximize: bool,
     has_complex: bool,
-):
+) -> None:
     if grad_scale is not None or found_inf is not None:
         raise AssertionError("Grad scaling should occur outside of optimizer.step()")
 
@@ -473,7 +473,7 @@ def _multi_tensor_adafactor(
     eps2: float,
     maximize: bool,
     has_complex: bool,
-):
+) -> None:
     if len(params) == 0:
         return
 
@@ -532,7 +532,7 @@ def _multi_tensor_adafactor(
 
         alphas = [
             max(eps2, p.norm(2).item() / (p.numel() ** 0.5)) * r
-            for p, r in zip(device_params, rho_ts)
+            for p, r in zip(device_params, rho_ts, strict=True)
         ]
 
         # Perform stepweight decay
@@ -566,7 +566,9 @@ def _multi_tensor_adafactor(
 
             var_estimates = [
                 row_var @ col_var
-                for row_var, col_var in zip(device_row_vars, device_col_vars)
+                for row_var, col_var in zip(
+                    device_row_vars, device_col_vars, strict=True
+                )
             ]
             row_var_means = [
                 row_var.mean(dim=-2, keepdim=True) for row_var in device_row_vars
@@ -594,7 +596,7 @@ def _multi_tensor_adafactor(
 
         alphas = [
             -a / (max(1.0, update.norm(2).item() / ((update.numel() ** 0.5) * d)))
-            for a, update in zip(alphas, updates)
+            for a, update in zip(alphas, updates, strict=True)
         ]
         torch._foreach_mul_(updates, alphas)
         torch._foreach_add_(device_params, updates)
@@ -622,7 +624,7 @@ def adafactor(
     eps1: float,
     eps2: float,
     maximize: bool,
-):
+) -> None:
     r"""Functional API that performs Adafactor algorithm computation.
 
     See :class:`~torch.optim.Adafactor` for details.
