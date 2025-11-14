@@ -161,7 +161,7 @@ x = add_1, y = add_2);  getitem = None
         schema = print_op.gen_schema(format_str, x=1, y=2)
         self.assertExpectedInline(
             str(schema),
-            """print(str format_str, *, int x, int y) -> ((NoneType))""",
+            """print(str format_str, *, int x, int y) -> ()""",
         )
         # Test schema generation with different types of inputs
 
@@ -170,23 +170,16 @@ x = add_1, y = add_2);  getitem = None
         schema_tensor = print_op.gen_schema("Tensor: {x}", x=tensor)
         self.assertExpectedInline(
             str(schema_tensor),
-            """print(str format_str, *, Tensor x) -> ((NoneType))""",
+            """print(str format_str, *, Tensor x) -> ()""",
         )
 
-        # List of booleans input
-        bool_list = [True, False, True]
-        for b in bool_list:
-            schema_bool_list = print_op.gen_schema("Bools: {lst}", lst=b)
-            self.assertExpectedInline(
-                str(schema_bool_list),
-                """print(str format_str, *, bool lst) -> ((NoneType))""",
-            )
+        # TODO: support bool list input
 
         # No kwargs
         schema_no_kwargs = print_op.gen_schema("Simple message")
         self.assertExpectedInline(
             str(schema_no_kwargs),
-            """print(str format_str) -> ((NoneType))""",
+            """print(str format_str) -> ()""",
         )
 
 

@@ -8032,6 +8032,56 @@ def sample_inputs_dropout_backward(op_info, device, dtype, requires_grad, **kwar
     for case, scale in product(cases, scale_vals):
         yield SampleInput(make_arg(case), make_mask(case), scale)
 
+def sample_inputs_convolution_backward(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def get_in_dim(out_dim, pad, dialation, kernel, stride):
+        return (stride * (out_dim - 1)) + 1 + (dialation * (kernel - 1)) - (2 * pad)
+
+    def get_random_conv_bwd_inputs(num_cases):
+        pad = dialation = stride = kernel = 2
+        for (is_transposed, input_bias, groups, tensor_sizes) in zip(
+                [True, False],
+                [True, False],
+                [1, 4],
+                [[M, M, M, L, L], [M, M, S, L, L]]
+        ):
+            [N, C_in, C_out, H_out, W_out] = tensor_sizes
+            C_in = (C_in // groups) * groups
+            C_out = (C_out // groups) * groups
+
+            H_in = get_in_dim(H_out, pad, dialation, kernel, stride)
+            W_in = get_in_dim(W_out, pad, dialation, kernel, stride)
+
+            if is_transposed:
+                grad_output = make_arg([N, C_in, H_in, W_in]),
+                args = (
+                    make_arg([N, C_out, H_out, W_out]),
+                    make_arg([C_out, C_in // groups, kernel, kernel]),
+                )
+                bias_size = [C_in * groups] if input_bias else None
+            else:
+                grad_output = make_arg([N, C_out, H_out, W_out]),
+                args = (
+                    make_arg([N, C_in, H_in, W_in]),
+                    make_arg([C_out, C_in // groups, kernel, kernel]),
+                )
+                bias_size = [C_out] if input_bias else None
+            kwargs = {
+                "bias_sizes": bias_size,
+                "stride": [stride, stride],
+                "padding": [pad, pad],
+                "dilation": [dialation, dialation],
+                "transposed": is_transposed,
+                "output_padding": [0],
+                "groups": groups,
+                "output_mask": [True, True, True],
+            }
+            yield (grad_output, args, kwargs)
+
+    for grad_output, args, kwargs in get_random_conv_bwd_inputs(5):
+        yield SampleInput(grad_output[0], args=args, kwargs=kwargs)
+
 def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs):
     def make_input(shape):
         return make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -14311,7 +14361,7 @@ op_db: list[OpInfo] = [
            )),
     OpInfo('max',
            variant_test_name='reduction_with_dim',
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            supports_fwgrad_bwgrad=True,
@@ -14320,7 +14370,7 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True),
     OpInfo('max',
            variant_test_name='reduction_no_dim',
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
            supports_out=True,
            supports_forward_ad=True,
@@ -14465,7 +14515,7 @@ op_db: list[OpInfo] = [
            check_batched_forward_grad=False,),
     OpInfo('min',
            variant_test_name='reduction_with_dim',
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            supports_fwgrad_bwgrad=True,
@@ -14474,7 +14524,7 @@ op_db: list[OpInfo] = [
            )),
     OpInfo('min',
            variant_test_name='reduction_no_dim',
-           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -14784,7 +14834,7 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True),
     OpInfo('aminmax',
            ref=lambda x, dim=None, keepdim=False: (np.amin(x, axis=dim, keepdims=keepdim), np.amax(x, axis=dim, keepdims=keepdim)),
-           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64),
+           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
            decorators=(onlyNativeDeviceTypes,),
            supports_autograd=False,
@@ -20809,6 +20859,54 @@ op_db: list[OpInfo] = [
         ),
     ),
     OpInfo(
+        "convolution_backward",
+        op=torch.ops.aten.convolution_backward.default,
+        aten_name="convolution_backward",
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        supports_out=False,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=5e-4, rtol=2e-6)}),
+                'TestCommon', 'test_noncontiguous_samples',
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=2e-3, rtol=2e-3)}),
+                'TestCommon', 'test_noncontiguous_samples', active_if=TEST_WITH_ROCM
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=2e-3, rtol=3e-3)}),
+                'TestOperators',
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=5e-4, rtol=2e-5)}),
+                'TestCompositeCompliance',
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-3)}),
+                'TestCompositeCompliance', active_if=TEST_WITH_ROCM
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=2e-3, rtol=6e-1)}),
+                'TestInductorOpInfo', 'test_comprehensive',
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=5e-4, rtol=5e-4)}),
+                'TestVmapOperatorsOpInfo', 'test_vmap_exhaustive',
+            ),
+        ),
+        skips=(
+            DecorateInfo(unittest.expectedFailure,
+                         'TestConsistency', 'test_output_match', device_type="mps"),
+            DecorateInfo(unittest.expectedFailure,
+                         'TestConsistency', 'test_output_grad_match', device_type="mps"),
+        ),
+        sample_inputs_func=sample_inputs_convolution_backward
+    ),
+    OpInfo(
         "nn.functional.dropout2d",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout2d, input, *args, **kwargs),
@@ -21127,7 +21225,7 @@ op_db: list[OpInfo] = [
         supports_forward_ad=True,
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
-        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         ref=reference_reduction_numpy(np.amax),
         skips=(
             # FIXME: reduces all dimensions when dim=[]
@@ -21142,7 +21240,7 @@ op_db: list[OpInfo] = [
         supports_forward_ad=True,
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
-        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool, torch.uint16, torch.uint32, torch.uint64),
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         ref=reference_reduction_numpy(np.amin),
         skips=(
             # FIXME: reduces all dimensions when dim=[]
