@@ -6,6 +6,7 @@ static methods.
 """
 
 import collections
+import warnings
 import copy
 import queue
 
@@ -15,7 +16,15 @@ from torch._utils import ExceptionWrapper
 from . import MP_STATUS_CHECK_INTERVAL
 
 
-def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
+def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device=None):
+    if device is not None:
+        warnings.warn(
+            "The device argument to _pin_memory_loop has been deprecated "
+            "and will be removed in a future version of PyTorch.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
     # This setting is thread local, and prevents the copy in pin_memory from
     # consuming all CPU cores.
     torch.set_num_threads(1)
