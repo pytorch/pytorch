@@ -7,7 +7,7 @@ that calls into the optimized Flash Attention kernels.
 
 import logging
 from functools import lru_cache
-from typing import Any, NamedTuple, Optional, Union
+from typing import Any, NamedTuple, Union
 
 import torch
 
@@ -133,7 +133,7 @@ def varlen_attn(
     max_q: int,
     max_k: int,
     is_causal: bool = False,
-    return_aux: Optional[AuxRequest] = None,
+    return_aux: AuxRequest | None = None,
 ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
     """
     Compute variable-length attention using Flash Attention.
@@ -299,7 +299,7 @@ def _varlen_attn_backward_fake(
 
 def _backward(
     ctx: Any, grad_out: torch.Tensor, grad_lse: torch.Tensor, grad_rng: torch.Tensor
-) -> tuple[Optional[torch.Tensor], ...]:
+) -> tuple[torch.Tensor | None, ...]:
     query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state = ctx.saved_tensors
 
     max_q = ctx.max_q
