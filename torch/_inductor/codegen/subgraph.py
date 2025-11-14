@@ -81,8 +81,6 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         import torch._inductor.config as inductor_config
         from torch._inductor.graph import GraphLowering
 
-        # Sanitize name to be a valid Python identifier
-        # Replace :: and other invalid characters with _
         safe_name = self.name.replace("::", "_").replace(".", "_")
 
         bm_graph_lowering = GraphLowering(

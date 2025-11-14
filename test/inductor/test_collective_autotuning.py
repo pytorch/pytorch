@@ -22,7 +22,6 @@ class TestCollectiveAutotuning(MultiProcessTestCase):
     def test_all_gather_4ranks(self):
         """Test all_gather with 4 ranks"""
 
-        # Initialize distributed
         dist.init_process_group(
             backend="nccl",
             init_method=f"file:///tmp/test_collective_allgather_4ranks_{self.id()}",
@@ -33,12 +32,10 @@ class TestCollectiveAutotuning(MultiProcessTestCase):
         rank = dist.get_rank()
         device = f"cuda:{rank}"
 
-        # Register the default process group
         from torch._C._distributed_c10d import _register_process_group
 
         _register_process_group("default", dist.group.WORLD)
 
-        # Define custom all_gather op
         @torch.library.custom_op("test::my_allgather_4ranks", mutates_args=())
         def my_allgather(x: torch.Tensor) -> torch.Tensor:
             output = torch.ops._c10d_functional.all_gather_into_tensor(
@@ -46,21 +43,24 @@ class TestCollectiveAutotuning(MultiProcessTestCase):
             )
             return output
 
-        # Fake implementation
         @my_allgather.register_fake
         def _(x):
             return torch.empty(
                 x.size(0) * 4, *x.size()[1:], dtype=x.dtype, device=x.device
             )
 
-        # Implementation function
         def allgather_impl(x):
             output = torch.ops._c10d_functional.all_gather_into_tensor(
                 x.contiguous(), 4, "default"
             )
             return output
 
-        # Register autotuning
+        def allgather_impl2(x):
+            output = torch.ops._c10d_functional.all_gather_into_tensor(
+                x.contiguous(), 4, "default"
+            )
+            return output
+
         from torch._inductor.kernel.custom_op import (
             CustomOpConfig,
             register_custom_op_autotuning,
@@ -70,28 +70,21 @@ class TestCollectiveAutotuning(MultiProcessTestCase):
             my_allgather,
             configs=[
                 CustomOpConfig(allgather_impl),
+                CustomOpConfig(allgather_impl2),
             ],
         )
 
-        # Test model
         class GatherModel(torch.nn.Module):
             def forward(self, x):
                 return my_allgather(x)
 
         model = torch.compile(GatherModel()).to(device)
 
-        # Run
         x = torch.ones(32, 64, device=device) * (rank + 1)
         y = model(x)
 
-        # Verify shape
         expected_shape = (32 * 4, 64)
         self.assertEqual(y.shape, expected_shape)
-
-        if rank == 0:
-            print(
-                f"[4 ranks] All-gather test passed! Output shape: {y.shape}, World size: {self.world_size}"
-            )
 
         dist.destroy_process_group()
 
@@ -102,12 +95,10 @@ class TestCollectiveAutotuning(MultiProcessTestCase):
 
         Strategy 1: sum all_reduce
         Strategy 2: avg all_reduce * world_size
-
-        Both compute sum(x_i) but may have different performance characteristics.
         """
         dist.init_process_group(
             backend="nccl",
-            init_method=f"file:///tmp/test_equiv_ar_{self.id()}",
+            init_method=f"file:///tmp/test_equiv_allreduce_{self.id()}",
             world_size=self.world_size,
             rank=self.rank,
         )
