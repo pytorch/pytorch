@@ -518,7 +518,6 @@ def check_partial_support(op, arg_schema, placement):
     verified_partial_placements = [Partial, _NormPartial, MaskPartial]
     if (
         op in (addition_ops + multiplication_ops)
-        and isinstance(placement, Partial)
         and type(placement) not in verified_partial_placements
     ):
         warnings.warn(
@@ -533,6 +532,7 @@ def check_partial_support(op, arg_schema, placement):
     if not (placement.is_partial("sum") or placement.is_partial("avg")):
         return False
 
+    # fixing the case where we add scalar + Partial
     if op in addition_ops and any(isinstance(arg, _Number) for arg in arg_schema):
         return False
 
