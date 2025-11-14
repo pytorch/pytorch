@@ -660,8 +660,8 @@ class TestViewOps(DTensorTestBase):
         # cover uneven sharding with mesh size +/- 1
         # for seq_len in [mesh.size(0) - 1, mesh.size(0), mesh.size(0) + 1]:
         #     for dim1 in [mesh.size(1) - 1, mesh.size(1), mesh.size(1) + 1]:
-        for seq_len in [mesh.size(0)]:
-            for dim1 in [mesh.size(1)]:
+        for seq_len in [mesh.size(0) + 1]:
+            for dim1 in [mesh.size(1) + 1]:
                 self._test_dtensor_flatten_2d(mesh, seq_len, dim1)
 
     def _test_dtensor_flatten_2d(self, mesh, seq_len, dim1):
@@ -671,20 +671,20 @@ class TestViewOps(DTensorTestBase):
             batch_size, seq_len, dim1, dim2
         )
         inps = distribute_tensor(global_inps, mesh, (Shard(1), Shard(2)))
-        comm_mode = CommDebugMode()
-        with comm_mode:
-            inps_viewed = inps.view(batch_size * seq_len * dim1, dim2)
+        print(f"distribute_tensor: {torch.distributed.get_rank()=}", flush=True)
+        # comm_mode = CommDebugMode()
+        # with comm_mode:
+        inps_viewed = inps.view(batch_size * seq_len * dim1, dim2)
+        print(f"inps_viewed: {torch.distributed.get_rank()=}", flush=True)
         expected_placements = (
             _StridedShard(dim=0, split_factor=batch_size),
             _StridedShard(dim=0, split_factor=batch_size * math.ceil(seq_len * 1.0 / mesh.size(0))),
         )
-        try:
-            self.assertEqual(inps_viewed.placements, expected_placements)
-        except:
-            print(f"raised assertion {torch.distributed.get_rank()=}", flush=True)
-            import fbvscode
-            fbvscode.set_trace()
-        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(inps_viewed.placements, expected_placements)
+        # self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        # import fbvscode
+        # fbvscode.set_trace()
 
         # R, S2
         # global_inps = torch.arange(batch_size * seq_len * dim1 * dim2).view(

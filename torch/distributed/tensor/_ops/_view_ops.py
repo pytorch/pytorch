@@ -344,6 +344,8 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
     - in the above, input is flattened into a single dimension and then split
       into two separate dimensions with different sizes from the input.
     """
+    # import fbvscode
+    # fbvscode.set_trace()
     from_nelem = prod(from_size)
     to_size = infer_size(from_nelem, normalize_sizes(to_size))
 
@@ -680,6 +682,9 @@ def propagate_shape_and_sharding(
     # for each output dim, find the corresponding input dim in terms of sharding prop
     shard_dim_map = {}
     for dim, cmd in enumerate(rule):
+        # if torch.distributed.get_rank() == 2:
+        #     import fbvscode
+        #     fbvscode.set_trace()
         in_dims = get_in_dim_to_shard(cmd, shard_dim_map)
         if isinstance(in_dims, list) and len(in_dims) > 0:
             for in_dim in in_dims:
@@ -708,7 +713,7 @@ def propagate_shape_and_sharding(
             mesh_dim = input_src_spec.dim_map[tensor_dim]
             if mesh_dim >= 0:
                 local_tensor_size = math.ceil(
-                    global_tensor_size / input_src_spec.mesh.shape[mesh_dim]
+                    global_tensor_size * 1.0 / input_src_spec.mesh.shape[mesh_dim]
                 )
             else:
                 local_tensor_size = global_tensor_size
