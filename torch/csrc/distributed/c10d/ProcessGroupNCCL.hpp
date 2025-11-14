@@ -30,6 +30,7 @@
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/MemPool.h>
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -1023,11 +1024,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Performs NCCL user buffer registration for all buffers in
   // the given MemPool
-  void registerMemPool(c10::cuda::MemPool* pool, bool symm = false);
+  void registerMemPool(at::cuda::MemPool* pool, bool symm = false);
 
   // Performs NCCL user buffer de-registration for all buffers in
   // the given MemPool
-  void deregisterMemPool(c10::cuda::MemPool* pool);
+  void deregisterMemPool(at::cuda::MemPool* pool);
 
   // This method adds a temporary extension for the timeout period,
   // applying to all collectives between the calling of this API and
@@ -1491,7 +1492,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::optional<bool> useNonblocking_{std::nullopt};
 
   // Communication-optimized memory pool associated with this PG
-  std::unique_ptr<c10::cuda::MemPool> memPool_ = nullptr;
+  std::unique_ptr<at::cuda::MemPool> memPool_ = nullptr;
 };
 
 // Reset the flighrecorder recordings for the current rank.
