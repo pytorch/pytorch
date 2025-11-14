@@ -1608,7 +1608,7 @@ class triton:
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
     # If set to true, will generate PDL code on devices that support it.
     # If set to false, will never generate PDL code.
-    enable_pdl = False
+    enable_pdl = True
 
     mix_order_reduction = (
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0" if is_fbcode() else "1")
