@@ -683,17 +683,18 @@ def _gen_transform_infos_non_cached(
 
     # Determine which transform strategy to use:
     # 1. Non-standard device order → always use graph-based
-    # 2. Global flag False → use greedy
-    # 3. Default → use graph-based
+    # 2. Global flag or explicit parameter True → use graph-based
+    # 3. Otherwise → use greedy
     has_non_default_order = not all(
         DTensorSpec.is_default_device_order(order)
         for order in (src_shard_order, dst_shard_order)
     )
 
-    if has_non_default_order or _FORCE_MIN_COST_REDISTRIBUTION_PLAN is True:
-        use_graph_based_transform = True
-    else:
-        use_graph_based_transform = False
+    use_graph_based_transform = (
+        has_non_default_order
+        or _FORCE_MIN_COST_REDISTRIBUTION_PLAN is True
+        or use_graph_based_transform is True
+    )
 
     drp = get_redistribute_planner(device_mesh, len(src_spec.shape))
     if use_graph_based_transform:
