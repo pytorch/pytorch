@@ -1249,6 +1249,9 @@ test_libtorch_agnostic_targetting() {
     # Unset PYTORCH_TESTING_DEVICE_ONLY_FOR to test both CPU and CUDA
     unset PYTORCH_TESTING_DEVICE_ONLY_FOR
 
+    # avoid failure due to import xmlrunner
+    unset TEST_SAVE_XML
+
     REPO_DIR=$(pwd)
     WHEEL_DIR="${REPO_DIR}/test/cpp_extensions/.wheels"
 
