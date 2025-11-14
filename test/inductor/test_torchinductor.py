@@ -4902,6 +4902,21 @@ class CommonTemplate:
             (torch.randn(2, 4, 6, 6),),
         )
 
+    @skip_if_gpu_halide
+    @xfail_if_mps
+    @config.patch(combo_kernels=True)
+    def test_combo_kernel_cpu(self):
+        def fn(x):
+            return aten._adaptive_avg_pool2d(x, (6, 6)), aten._adaptive_avg_pool2d(
+                x + 1, (2, 5)
+            )
+
+        self.common(
+            fn,
+            (torch.randn(2, 4, 16, 16),),
+            check_lowp=False,
+        )
+
     @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     def test_adaptive_avg_pool2d2(self):
         # Big kernel size, use fallback
