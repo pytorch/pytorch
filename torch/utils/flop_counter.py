@@ -176,7 +176,7 @@ def infer_out_shape(x_shape, y_shape):
         return 1
     elif isinstance(x_shape, int):
         return y_shape
-    elif isinstance(y_shape, int:)
+    elif isinstance(y_shape, int):
         return x_shape
 
     return torch.broadcast_shapes(x_shape, y_shape)
@@ -203,9 +203,8 @@ def element_wise_flop(x_shape, y_shape, *args, out_shape=None, **kwargs) -> int:
     try:
         flops = prod(infer_out_shape(x_shape, y_shape))
         return flops
-    except Exception as e:
-        logger.error(f"Failed to infer out shape: {e}")
-    return 0
+    except Exception:
+        return 0
 
 
 @register_flop_formula(aten.convolution_backward)
