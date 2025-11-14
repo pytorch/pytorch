@@ -53,6 +53,7 @@ from ..utils import (
     get_all_devices,
     get_gpu_type,
     is_gpu,
+    get_current_backend,
     is_pointwise_use,
     OPTIMUS_EXCLUDE_POST_GRAD,
 )
@@ -365,7 +366,6 @@ def prepare_softmax_extra_check(match):
     """
     We only have triton online softmax kernels currently.
     """
-    from torch._inductor.utils import get_current_backend
     device_type = match.kwargs["x"].meta["val"].device.type
     return config.online_softmax and device_type in ("cuda", "xpu") and "triton" == get_current_backend(device_type)
 
