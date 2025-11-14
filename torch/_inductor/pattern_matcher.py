@@ -1441,6 +1441,10 @@ def register_replacement(
         extra_check: additional check to run on match(using real shapes)
     """
     argnames_static = [*inspect.signature(search_fn).parameters.keys()]
+    scalar_workaround_keys = set(scalar_workaround.keys() if scalar_workaround else [])
+    argnames_from_example_inputs = [
+        name for name in argnames_static if name not in scalar_workaround_keys
+    ]
 
     def check_fn(match: Match) -> bool:
         """
@@ -1450,7 +1454,7 @@ def register_replacement(
         Recheck the match with the correct shapes.
         """
         argnames = list(argnames_static)
-        for name in argnames:
+        for name in argnames_from_example_inputs:
             if name not in match.kwargs:
                 raise RuntimeError(
                     f"Not all inputs to pattern found in match.kwargs. Perhaps one "
@@ -1459,7 +1463,8 @@ def register_replacement(
 
         args = list(
             torch.fx.map_arg(
-                [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
+                [match.kwargs[name] for name in argnames_from_example_inputs],
+                lambda n: n.meta["val"],
             )
         )
 
@@ -1468,6 +1473,8 @@ def register_replacement(
         assert fake_mode is not None
         with fake_mode:
             for i, grad in enumerate(requires_grad):
+                if i >= len(args):
+                    break
                 if isinstance(args[i], torch.Tensor):
                     if grad and is_integer_dtype(args[i].dtype):
                         return False
