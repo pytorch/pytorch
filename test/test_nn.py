@@ -8525,6 +8525,30 @@ class TestNNDeviceType(NNTestCase):
         # reduce memory usage
         self.assertEqual(inp.grad.sum(), inp_cpu.grad.sum())
 
+    @onlyCUDA
+    @largeTensorTest("24GB", "cpu")
+    @largeTensorTest("24GB", "cuda")
+    def test_large_max_pool_contig(self, device):
+        # test for https://github.com/pytorch/pytorch/issues/167253
+        size = [74, 32, 24300, 40]
+        out_size = [74, 32, 24300, 20]
+        inp = torch.rand(size, device=device, dtype=torch.bfloat16, requires_grad=True)
+        inp_cpu = inp.detach().cpu()
+        inp_cpu.requires_grad = True
+        o = torch.nn.functional.max_pool2d(
+            inp, kernel_size=(1, 2), stride=(1, 2), ceil_mode=False, padding=0
+        )
+        o_cpu = torch.nn.functional.max_pool2d(
+            inp_cpu, kernel_size=(1, 2), stride=(1, 2), ceil_mode=False, padding=0
+        )
+        o.sum().backward()
+        o_cpu.sum().backward()
+        self.assertEqual(o.shape, out_size)
+        self.assertEqual(o_cpu.shape, out_size)
+        # reduce memory usage
+        self.assertEqual(o.sum(), o_cpu.sum())
+        self.assertEqual(inp.grad.sum(), inp_cpu.grad.sum())
+
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @skipIfRocmArch(MI300_ARCH)
