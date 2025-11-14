@@ -1640,9 +1640,7 @@ class _InProcessFxCompile(FxCompile):
                             # pyrefly: ignore [unbound-name]
                             (str, list, torch.fx.GraphModule),
                         ), type(compiled_fn)
-                        return CompiledAOTI(
-                            filename=compiled_fn, device_type=graph.device_type
-                        )
+                        return CompiledAOTI(compiled_fn)
 
                     # TODO: Hoist this above V.aot_compilation
                     # pyrefly: ignore [unbound-name]
@@ -2715,7 +2713,7 @@ def _compile_fx_main(
             or torch._guards.TracingContext(fake_mode)
         )
 
-        if V.aot_compilation and not config.enable_autograd_for_aot:
+        if V.aot_compilation:
             from .utils import is_valid_aoti_model_name
 
             is_valid_aoti_model_name()
