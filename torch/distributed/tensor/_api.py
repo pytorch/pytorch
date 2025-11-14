@@ -338,14 +338,11 @@ class DTensor(torch.Tensor):
         )
 
     @classmethod
-    @torch._disable_dynamo
-    # pyre-fixme[3]: Return type must be annotated.
-    # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
-        return DTensor._op_dispatcher.dispatch(
-            func,
-            args,
-            kwargs or {},
+        # We just need to have an implementation here; the __torch_dispatch__ machinery
+        # calls into a specific C++ fast path that doesn't call here.
+        raise NotImplementedError(
+            "DTensor.__torch_dispatch__ should not actually get called"
         )
 
     @staticmethod
@@ -671,6 +668,8 @@ class DTensor(torch.Tensor):
     def __metadata_guard__(
         cls, orig: tuple[DTensorSpec, bool], other: tuple[DTensorSpec, bool]
     ) -> bool:
+        # TODO - delete this - This is now unused after the PR -
+        # https://github.com/pytorch/pytorch/pull/165824
         orig_spec, orig_requires_grad = orig
         other_spec, other_requires_grad = other
         return (
@@ -1060,10 +1059,10 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     )
 
     # initialize the local tensor
-    if init_op == torch.full:
+    if init_op is torch.full:
         fill_value = kwargs.pop("fill_value", 0)
         local_tensor = init_op(local_shape, fill_value, **kwargs)
-    elif init_op == torch.rand or init_op == torch.randn:
+    elif init_op is torch.rand or init_op is torch.randn:
         # this tensor meta is not used except `shape`
         dtype = kwargs.get("dtype", torch.get_default_dtype())
 

@@ -1876,20 +1876,19 @@ class TestBinaryUfuncs(TestCase):
 
                     expected = python_op(a, b)
 
-                    for op in (operator.truediv, torch.true_divide):
-                        actual_scalar = torch_op(a, b)
+                    actual_scalar = torch_op(a, b)
 
-                        a_t = torch.tensor(a, device=device)
-                        b_t = torch.tensor(b, device=device)
+                    a_t = torch.tensor(a, device=device)
+                    b_t = torch.tensor(b, device=device)
 
-                        actual_tensor = torch_op(a_t, b_t)
-                        actual_first_tensor = torch_op(a_t, b)
-                        actual_second_tensor = torch_op(a, b_t)
+                    actual_tensor = torch_op(a_t, b_t)
+                    actual_first_tensor = torch_op(a_t, b)
+                    actual_second_tensor = torch_op(a, b_t)
 
-                        self.assertEqual(actual_scalar, expected)
-                        self.assertEqual(actual_tensor.item(), expected)
-                        self.assertEqual(actual_first_tensor, actual_tensor)
-                        self.assertEqual(actual_second_tensor, actual_tensor)
+                    self.assertEqual(actual_scalar, expected)
+                    self.assertEqual(actual_tensor.item(), expected)
+                    self.assertEqual(actual_first_tensor, actual_tensor)
+                    self.assertEqual(actual_second_tensor, actual_tensor)
 
         _scalar_helper(operator.truediv, operator.truediv)
         _scalar_helper(operator.truediv, torch.true_divide)

@@ -11795,7 +11795,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 elem = torch.matmul(x[0], y)
                 for i in range(x.size(0)):
                     res.append(torch.matmul(x[i], y))
-                for i in range(x.size(0)):
+                for _ in range(x.size(0)):
                     elem = res.pop()
                 for i in range(x.size(0)):
                     res.append(torch.matmul(x[i], y))
@@ -11815,7 +11815,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 elem = torch.matmul(x[0], y)
                 for i in range(x.size(0)):
                     res.append(torch.matmul(x[i], y))
-                for i in range(x.size(0)):
+                for _ in range(x.size(0)):
                     del res[0]
                 for i in range(x.size(0)):
                     res.append(torch.matmul(x[i], y))
