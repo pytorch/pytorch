@@ -647,6 +647,11 @@ class MatmulTest(TestCaseMPS):
 
         self.assertEqual(matmul_cpu, matmul_mps.to("cpu"))
 
+    def test_empty_matmul_vec(self):
+        tensor_1 = torch.rand((0, 100), device="mps")
+        tensor_2 = torch.rand((100, ), device="mps")
+        self.assertEqual((tensor_1 @ tensor_2).cpu(), tensor_1.cpu() @ tensor_2.cpu())
+
 class MPSLeakyReluTest(TestCaseMPS):
     def _npLeakyRelu(self, np_features, negative_slope=0.1):
         return np.maximum(np_features, negative_slope * np_features).astype(np_features.dtype)
@@ -4910,7 +4915,7 @@ class TestMPS(TestCaseMPS):
             input_xs.append(torch.ones(prod, dtype=torch.int).reshape(shape).bool())
             input_xs.append(torch.zeros(prod, dtype=torch.int).reshape(shape).bool())
 
-            for i, cpu_x in enumerate(input_xs):
+            for cpu_x in input_xs:
                 x = cpu_x.detach().clone().to('mps')
                 y = torch.any(x)
                 ref_y = torch.any(cpu_x)
@@ -9460,7 +9465,7 @@ class TestSDPA(TestCaseMPS):
         torch.manual_seed(1729)
         causal_mask = torch.tril(torch.ones(S, S, dtype=torch.bool, device='mps'))
         with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
-            i = 42
+            i = 42 if S > 42 else S // 2
 
             q = torch.randn([1, NH, L, HS], dtype=dtype, device="mps")
             k = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
@@ -12697,6 +12702,12 @@ class TestErrorInputs(TestCase):
 
             with self.assertRaisesRegex(error_type, error_regex):
                 op(*mps_args, **mps_kwargs)
+
+    def test_index_put_out_of_bounds(self, device):
+        x = torch.rand(10, 1, 10, device=device)
+        with self.assertRaises(torch.AcceleratorError):
+            y = x[:, [1]]
+            torch.mps.synchronize()
 
 class TestComplex(TestCase):
     def test_tensor_scalar_binops(self):
