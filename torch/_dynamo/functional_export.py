@@ -629,10 +629,15 @@ def dynamo_graph_capture_for_export(
             graph_module.graph._graph_namespace.create_name(f"_tree_leaf_{i}", None)
             for i in range(pyt.num_flat_args)
         ]
+        # Get the proper signature - for nn.Module use forward method
+        if isinstance(mod, torch.nn.Module):
+            sig = inspect.signature(mod.forward)
+        else:
+            sig = inspect.signature(mod)
+
         graph_module.graph._codegen = _ExportCodeGen(
             _PyTreeInfo(
-                # TODO we should be able to use the names from dynamo graph directly.
-                argument_names(inspect.signature(mod), args, kwargs),
+                argument_names(sig, args, kwargs),
                 pyt.in_spec,
                 pyt.out_spec,
             ),

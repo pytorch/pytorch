@@ -1359,7 +1359,6 @@ def forward(self, primals, tangents):
         # instead of the scripted function, so we get x.sin()
         self.assertEqual(res, x.sin())
 
-    @testing.expectedFailureStrictV2
     def test_no_tensor_computation_2(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -2689,7 +2688,6 @@ class GraphModule(torch.nn.Module):
             gm = export(m, (torch.rand(64, 64),))
             torch.export.unflatten(gm)
 
-    @testing.expectedFailureStrictV2
     def test_unflatten_closure(self):
         class Dummy(torch.nn.Module):
             def forward(self, fn, x):
@@ -4839,7 +4837,6 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
             table.materialize()
             self.assertFalse(torch.ops.mylib.foo123.default in table)
 
-    @testing.expectedFailureStrictV2
     def test_if_post_autograd_op_preserved(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -4858,8 +4855,8 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
 def forward(self, x):
     sin = torch.ops.aten.sin.default(x)
     sum_1 = torch.ops.aten.sum.default(x);  x = None
-    add = torch.ops.aten.add.Tensor(sin, sum_1);  sin = sum_1 = None
-    return (add,)""",
+    add_3 = torch.ops.aten.add.Tensor(sin, sum_1);  sin = sum_1 = None
+    return (add_3,)""",
         )
 
         ep_no_preserve_sum = ep.run_decompositions()
@@ -4869,8 +4866,8 @@ def forward(self, x):
 def forward(self, x):
     sin = torch.ops.aten.sin.default(x)
     sum_1 = torch.ops.aten.sum.dim_IntList(x, []);  x = None
-    add = torch.ops.aten.add.Tensor(sin, sum_1);  sin = sum_1 = None
-    return (add,)""",
+    add_3 = torch.ops.aten.add.Tensor(sin, sum_1);  sin = sum_1 = None
+    return (add_3,)""",
         )
 
     def test_set_grad_empty(self):
@@ -8838,6 +8835,7 @@ def forward(self, x):
         )
 
     @testing.expectedFailureStrictV2
+    # STRICT_V2_FAILURE: Guard constraint failed - expects x.item() >= 0 but gets -1
     def test_automatic_constrain_size(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -9834,6 +9832,7 @@ def forward(self, b_a_buffer, x):
         self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
 
     @testing.expectedFailureStrictV2
+    # STRICT_V2_FAILURE: Zero-argument tensor attribute access fails in strict export
     def test_tensor_attribute_zero_args(self):
         class Foo(torch.nn.Module):
             def __init__(self, value):
@@ -10017,7 +10016,6 @@ def forward(self, p_lin_weight, p_lin_bias, x):
         )
 
     @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
-    @testing.expectedFailureStrictV2
     def test_export_decomp_torture_case_2(self):
         class MyLinear(torch.nn.Module):
             def __init__(self) -> None:
@@ -10059,12 +10057,12 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
     permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
     matmul = torch.ops.aten.matmul.default(conv2d, permute);  conv2d = permute = None
-    mul = torch.ops.aten.mul.Tensor(c_linear_bias, 2);  c_linear_bias = None
-    add = torch.ops.aten.add.Tensor(matmul, mul);  matmul = mul = None
-    cos = torch.ops.aten.cos.default(add);  add = None
+    mul_30 = torch.ops.aten.mul.Tensor(c_linear_bias, 2);  c_linear_bias = None
+    add_36 = torch.ops.aten.add.Tensor(matmul, mul_30);  matmul = mul_30 = None
+    cos = torch.ops.aten.cos.default(add_36);  add_36 = None
     sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
-    add_1 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
-    return (add_1,)""",
+    add_47 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add_47,)""",
         )
 
     def test_export_decomps_dynamic(self):
@@ -10238,7 +10236,6 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             # expected >= 3, but got 2
             ep.module()(*test_inp)
 
-    @testing.expectedFailureStrictV2
     def test_nested_module(self):
         class M1(torch.nn.Module):
             def forward(self, x):
@@ -10276,7 +10273,6 @@ graph():
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
 
-    @testing.expectedFailureStrictV2
     def test_nested_module_with_init_buffer(self):
         class M1(torch.nn.Module):
             def __init__(self) -> None:
@@ -13005,7 +13001,6 @@ def forward(self, c_submod_params, x):
         ufm = torch.export.unflatten(ep)
         self.assertTrue(torch.allclose(ufm(*inp), epm(*inp)))
 
-    @testing.expectedFailureStrictV2
     def test_unflatten_multiple_graphs_shared_submodule(self):
         class N(torch.nn.Module):
             def forward(self, x, b):
@@ -14057,7 +14052,6 @@ def forward(self, x):
     return (foo_functional,)""",
         )
 
-    @testing.expectedFailureStrictV2
     def test_placeholder_naming_order(self):
         # See https://github.com/pytorch/pytorch/issues/143732
 
@@ -14109,7 +14103,6 @@ def forward(self, x):
         ).run_decompositions()
         ep.module()(torch.ones(4, 4), **kwargs)
 
-    @testing.expectedFailureStrictV2
     def test_placeholder_naming_order_variadic(self):
         class Mod(torch.nn.Module):
             def forward(self, a, b, c, **kwargs):
@@ -14134,7 +14127,6 @@ def forward(self, x):
         ):
             export(Foo(), (torch.randn(4, 4),), strict=False)
 
-    @testing.expectedFailureStrictV2
     def test_placeholder_naming_collisions(self):
         # test collisions between nested user inputs
         class Foo(torch.nn.Module):
@@ -14207,7 +14199,6 @@ def forward(self, x):
         self.assertEqual(expected_names_and_ops, real_names_and_ops)
 
     @skipIfCrossRef  # Dynamo changes the order of ops under Torch function modes
-    @testing.expectedFailureStrictV2
     def test_placeholder_naming_collisions_hoo_subgraphs(self):
         # test collisions between user inputs, top-level nodes, and HOO subgraph nodes
         class Foo(torch.nn.Module):
@@ -14285,7 +14276,6 @@ def forward(self, x):
         ]
         self.assertEqual(expected_getattr_names, real_getattr_names)
 
-    @testing.expectedFailureStrictV2
     def test_constant_input_naming(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y, div="floor"):
@@ -15312,7 +15302,6 @@ graph():
                 Block(torch.randn(4, 4), torch.randn(4, 4))
             )
 
-    @testing.expectedFailureStrictV2
     def test_enum_str(self):
         class TensorDim(str, enum.Enum):
             DDP = "ddp"
@@ -15344,10 +15333,10 @@ graph():
     %_guards_fn : [num_users=0] = call_module[target=_guards_fn](args = (%x,), kwargs = {})
     %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%x,), kwargs = {})
     %cos : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
-    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%sin, %cos), kwargs = {})
+    %add_12 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%sin, %cos), kwargs = {})
     %cos_1 : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
-    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %cos_1), kwargs = {})
-    return (add_1,)""",
+    %add_25 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_12, %cos_1), kwargs = {})
+    return (add_25,)""",
         )
 
         self.assertEqual(gm(inp), Foo()(inp))
@@ -15474,7 +15463,6 @@ def forward(self, x):
     return (getitem_3, cos_1)""",
             )
 
-    @testing.expectedFailureStrictV2
     def test_run_decompositions_keep_metadata(self):
         """Make sure the metadata is kept after exported program run_decompositions."""
 
@@ -15504,7 +15492,6 @@ def forward(self, x):
         for node in decomposed_program.graph.nodes:
             self.assertEqual(node.meta["custom"]["my_field"], "dummy")
 
-    @testing.expectedFailureStrictV2
     def test_run_decompositions_keep_tensor_constant_metadata(self):
         """Make sure the metadata of tensor constants are kept after run_decompositions."""
 
@@ -16711,7 +16698,6 @@ def forward(self, args_0):
     return (abs_1,)""",
         )
 
-    @testing.expectedFailureStrictV2
     def test_sdpa_gqa(self):
         from torch.nn.attention import sdpa_kernel, SDPBackend
 
@@ -16729,36 +16715,46 @@ def forward(self, args_0):
                 ep_math.graph_module.code.strip(),
                 """\
 def forward(self, q, k, v):
-    mul = torch.ops.aten.mul.Scalar(q, 0.29730177875068026);  q = None
+    sym_size_int_17 = torch.ops.aten.sym_size.int(q, 1)
+    sym_size_int_18 = torch.ops.aten.sym_size.int(q, 2)
+    sym_size_int_19 = torch.ops.aten.sym_size.int(q, 3)
+    sym_size_int_20 = torch.ops.aten.sym_size.int(k, 1)
+    sym_float = torch.sym_float(sym_size_int_19)
+    pow_1 = sym_float ** 0.5;  sym_float = None
+    truediv = 1.0 / pow_1;  pow_1 = None
+    pow_2 = truediv ** 0.5;  truediv = None
+    mul_39 = torch.ops.aten.mul.Scalar(q, pow_2);  q = None
+    floordiv_19 = sym_size_int_17 // sym_size_int_20
     unsqueeze = torch.ops.aten.unsqueeze.default(k, 2);  k = None
-    expand = torch.ops.aten.expand.default(unsqueeze, [1, 8, 4, 256, 128]);  unsqueeze = None
+    expand = torch.ops.aten.expand.default(unsqueeze, [1, sym_size_int_20, floordiv_19, sym_size_int_18, sym_size_int_19]);  unsqueeze = None
     clone = torch.ops.aten.clone.default(expand, memory_format = torch.contiguous_format);  expand = None
-    view = torch.ops.aten.view.default(clone, [1, 32, 256, 128]);  clone = None
+    mul_59 = sym_size_int_20 * floordiv_19
+    view = torch.ops.aten.view.default(clone, [1, mul_59, sym_size_int_18, sym_size_int_19]);  clone = None
     unsqueeze_1 = torch.ops.aten.unsqueeze.default(v, 2);  v = None
-    expand_1 = torch.ops.aten.expand.default(unsqueeze_1, [1, 8, 4, 256, 128]);  unsqueeze_1 = None
+    expand_1 = torch.ops.aten.expand.default(unsqueeze_1, [1, sym_size_int_20, floordiv_19, sym_size_int_18, sym_size_int_19]);  unsqueeze_1 = sym_size_int_20 = floordiv_19 = None
     clone_1 = torch.ops.aten.clone.default(expand_1, memory_format = torch.contiguous_format);  expand_1 = None
-    view_1 = torch.ops.aten.view.default(clone_1, [1, 32, 256, 128]);  clone_1 = None
+    view_1 = torch.ops.aten.view.default(clone_1, [1, mul_59, sym_size_int_18, sym_size_int_19]);  clone_1 = mul_59 = None
     permute = torch.ops.aten.permute.default(view, [0, 1, 3, 2]);  view = None
-    mul_1 = torch.ops.aten.mul.Scalar(permute, 0.29730177875068026);  permute = None
-    expand_2 = torch.ops.aten.expand.default(mul, [1, 32, 256, 128]);  mul = None
-    view_2 = torch.ops.aten.view.default(expand_2, [32, 256, 128]);  expand_2 = None
-    expand_3 = torch.ops.aten.expand.default(mul_1, [1, 32, 128, 256]);  mul_1 = None
-    view_3 = torch.ops.aten.view.default(expand_3, [32, 128, 256]);  expand_3 = None
+    mul_106 = torch.ops.aten.mul.Scalar(permute, pow_2);  permute = pow_2 = None
+    expand_2 = torch.ops.aten.expand.default(mul_39, [1, sym_size_int_17, sym_size_int_18, sym_size_int_19]);  mul_39 = None
+    view_2 = torch.ops.aten.view.default(expand_2, [sym_size_int_17, sym_size_int_18, sym_size_int_19]);  expand_2 = None
+    expand_3 = torch.ops.aten.expand.default(mul_106, [1, sym_size_int_17, sym_size_int_19, sym_size_int_18]);  mul_106 = None
+    view_3 = torch.ops.aten.view.default(expand_3, [sym_size_int_17, sym_size_int_19, sym_size_int_18]);  expand_3 = None
     bmm = torch.ops.aten.bmm.default(view_2, view_3);  view_2 = view_3 = None
-    view_4 = torch.ops.aten.view.default(bmm, [1, 32, 256, 256]);  bmm = None
+    view_4 = torch.ops.aten.view.default(bmm, [1, sym_size_int_17, sym_size_int_18, sym_size_int_18]);  bmm = None
     _softmax = torch.ops.aten._softmax.default(view_4, -1, False)
-    eq = torch.ops.aten.eq.Scalar(view_4, -inf);  view_4 = None
-    logical_not = torch.ops.aten.logical_not.default(eq);  eq = None
+    eq_99 = torch.ops.aten.eq.Scalar(view_4, -inf);  view_4 = None
+    logical_not = torch.ops.aten.logical_not.default(eq_99);  eq_99 = None
     any_1 = torch.ops.aten.any.dim(logical_not, -1, True);  logical_not = None
     logical_not_1 = torch.ops.aten.logical_not.default(any_1);  any_1 = None
     full_like = torch.ops.aten.full_like.default(_softmax, 0, pin_memory = False, memory_format = torch.preserve_format)
     where = torch.ops.aten.where.self(logical_not_1, full_like, _softmax);  logical_not_1 = full_like = _softmax = None
-    expand_4 = torch.ops.aten.expand.default(where, [1, 32, 256, 256]);  where = None
-    view_5 = torch.ops.aten.view.default(expand_4, [32, 256, 256]);  expand_4 = None
-    expand_5 = torch.ops.aten.expand.default(view_1, [1, 32, 256, 128]);  view_1 = None
-    view_6 = torch.ops.aten.view.default(expand_5, [32, 256, 128]);  expand_5 = None
+    expand_4 = torch.ops.aten.expand.default(where, [1, sym_size_int_17, sym_size_int_18, sym_size_int_18]);  where = None
+    view_5 = torch.ops.aten.view.default(expand_4, [sym_size_int_17, sym_size_int_18, sym_size_int_18]);  expand_4 = None
+    expand_5 = torch.ops.aten.expand.default(view_1, [1, sym_size_int_17, sym_size_int_18, sym_size_int_19]);  view_1 = None
+    view_6 = torch.ops.aten.view.default(expand_5, [sym_size_int_17, sym_size_int_18, sym_size_int_19]);  expand_5 = None
     bmm_1 = torch.ops.aten.bmm.default(view_5, view_6);  view_5 = view_6 = None
-    view_7 = torch.ops.aten.view.default(bmm_1, [1, 32, 256, 128]);  bmm_1 = None
+    view_7 = torch.ops.aten.view.default(bmm_1, [1, sym_size_int_17, sym_size_int_18, sym_size_int_19]);  bmm_1 = sym_size_int_17 = sym_size_int_18 = sym_size_int_19 = None
     return (view_7,)""",
             )
         with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
@@ -16768,36 +16764,46 @@ def forward(self, q, k, v):
                 ep_flash.graph_module.code.strip(),
                 """\
 def forward(self, q, k, v):
-    mul = torch.ops.aten.mul.Scalar(q, 0.29730177875068026);  q = None
+    sym_size_int_13 = torch.ops.aten.sym_size.int(q, 1)
+    sym_size_int_14 = torch.ops.aten.sym_size.int(q, 2)
+    sym_size_int_15 = torch.ops.aten.sym_size.int(q, 3)
+    sym_size_int_16 = torch.ops.aten.sym_size.int(k, 1)
+    sym_float = torch.sym_float(sym_size_int_15)
+    pow_1 = sym_float ** 0.5;  sym_float = None
+    truediv = 1.0 / pow_1;  pow_1 = None
+    pow_2 = truediv ** 0.5;  truediv = None
+    mul = torch.ops.aten.mul.Scalar(q, pow_2);  q = None
+    floordiv = sym_size_int_13 // sym_size_int_16
     unsqueeze = torch.ops.aten.unsqueeze.default(k, 2);  k = None
-    expand = torch.ops.aten.expand.default(unsqueeze, [1, 8, 4, 256, 128]);  unsqueeze = None
+    expand = torch.ops.aten.expand.default(unsqueeze, [1, sym_size_int_16, floordiv, sym_size_int_14, sym_size_int_15]);  unsqueeze = None
     clone = torch.ops.aten.clone.default(expand, memory_format = torch.contiguous_format);  expand = None
-    view = torch.ops.aten.view.default(clone, [1, 32, 256, 128]);  clone = None
+    mul_1 = sym_size_int_16 * floordiv
+    view = torch.ops.aten.view.default(clone, [1, mul_1, sym_size_int_14, sym_size_int_15]);  clone = None
     unsqueeze_1 = torch.ops.aten.unsqueeze.default(v, 2);  v = None
-    expand_1 = torch.ops.aten.expand.default(unsqueeze_1, [1, 8, 4, 256, 128]);  unsqueeze_1 = None
+    expand_1 = torch.ops.aten.expand.default(unsqueeze_1, [1, sym_size_int_16, floordiv, sym_size_int_14, sym_size_int_15]);  unsqueeze_1 = sym_size_int_16 = floordiv = None
     clone_1 = torch.ops.aten.clone.default(expand_1, memory_format = torch.contiguous_format);  expand_1 = None
-    view_1 = torch.ops.aten.view.default(clone_1, [1, 32, 256, 128]);  clone_1 = None
+    view_1 = torch.ops.aten.view.default(clone_1, [1, mul_1, sym_size_int_14, sym_size_int_15]);  clone_1 = mul_1 = None
     permute = torch.ops.aten.permute.default(view, [0, 1, 3, 2]);  view = None
-    mul_1 = torch.ops.aten.mul.Scalar(permute, 0.29730177875068026);  permute = None
-    expand_2 = torch.ops.aten.expand.default(mul, [1, 32, 256, 128]);  mul = None
-    view_2 = torch.ops.aten.view.default(expand_2, [32, 256, 128]);  expand_2 = None
-    expand_3 = torch.ops.aten.expand.default(mul_1, [1, 32, 128, 256]);  mul_1 = None
-    view_3 = torch.ops.aten.view.default(expand_3, [32, 128, 256]);  expand_3 = None
+    mul_9 = torch.ops.aten.mul.Scalar(permute, pow_2);  permute = pow_2 = None
+    expand_2 = torch.ops.aten.expand.default(mul, [1, sym_size_int_13, sym_size_int_14, sym_size_int_15]);  mul = None
+    view_2 = torch.ops.aten.view.default(expand_2, [sym_size_int_13, sym_size_int_14, sym_size_int_15]);  expand_2 = None
+    expand_3 = torch.ops.aten.expand.default(mul_9, [1, sym_size_int_13, sym_size_int_15, sym_size_int_14]);  mul_9 = None
+    view_3 = torch.ops.aten.view.default(expand_3, [sym_size_int_13, sym_size_int_15, sym_size_int_14]);  expand_3 = None
     bmm = torch.ops.aten.bmm.default(view_2, view_3);  view_2 = view_3 = None
-    view_4 = torch.ops.aten.view.default(bmm, [1, 32, 256, 256]);  bmm = None
+    view_4 = torch.ops.aten.view.default(bmm, [1, sym_size_int_13, sym_size_int_14, sym_size_int_14]);  bmm = None
     _softmax = torch.ops.aten._softmax.default(view_4, -1, False)
-    eq = torch.ops.aten.eq.Scalar(view_4, -inf);  view_4 = None
-    logical_not = torch.ops.aten.logical_not.default(eq);  eq = None
+    eq_44 = torch.ops.aten.eq.Scalar(view_4, -inf);  view_4 = None
+    logical_not = torch.ops.aten.logical_not.default(eq_44);  eq_44 = None
     any_1 = torch.ops.aten.any.dim(logical_not, -1, True);  logical_not = None
     logical_not_1 = torch.ops.aten.logical_not.default(any_1);  any_1 = None
     full_like = torch.ops.aten.full_like.default(_softmax, 0, pin_memory = False, memory_format = torch.preserve_format)
     where = torch.ops.aten.where.self(logical_not_1, full_like, _softmax);  logical_not_1 = full_like = _softmax = None
-    expand_4 = torch.ops.aten.expand.default(where, [1, 32, 256, 256]);  where = None
-    view_5 = torch.ops.aten.view.default(expand_4, [32, 256, 256]);  expand_4 = None
-    expand_5 = torch.ops.aten.expand.default(view_1, [1, 32, 256, 128]);  view_1 = None
-    view_6 = torch.ops.aten.view.default(expand_5, [32, 256, 128]);  expand_5 = None
+    expand_4 = torch.ops.aten.expand.default(where, [1, sym_size_int_13, sym_size_int_14, sym_size_int_14]);  where = None
+    view_5 = torch.ops.aten.view.default(expand_4, [sym_size_int_13, sym_size_int_14, sym_size_int_14]);  expand_4 = None
+    expand_5 = torch.ops.aten.expand.default(view_1, [1, sym_size_int_13, sym_size_int_14, sym_size_int_15]);  view_1 = None
+    view_6 = torch.ops.aten.view.default(expand_5, [sym_size_int_13, sym_size_int_14, sym_size_int_15]);  expand_5 = None
     bmm_1 = torch.ops.aten.bmm.default(view_5, view_6);  view_5 = view_6 = None
-    view_7 = torch.ops.aten.view.default(bmm_1, [1, 32, 256, 128]);  bmm_1 = None
+    view_7 = torch.ops.aten.view.default(bmm_1, [1, sym_size_int_13, sym_size_int_14, sym_size_int_15]);  bmm_1 = sym_size_int_13 = sym_size_int_14 = sym_size_int_15 = None
     permute_1 = torch.ops.aten.permute.default(view_7, [2, 0, 1, 3]);  view_7 = None
     clone_2 = torch.ops.aten.clone.default(permute_1, memory_format = torch.contiguous_format);  permute_1 = None
     permute_2 = torch.ops.aten.permute.default(clone_2, [1, 2, 0, 3]);  clone_2 = None
