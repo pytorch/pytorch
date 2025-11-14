@@ -236,9 +236,6 @@ memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
 # Enable to allow using ftz variant of exponenet instruction in triton codegen.
 use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
 
-# Enable bfloat16 atomic adds (fbcode only until upstreamed to triton)
-bfloat16_atomic_adds_enabled = True
-
 # How to organize memory under memory_planning=True:
 # - "none": do not try to pool storage, just reuse
 # - "intermediates": all non-outputs share storage, outputs each get unique storage
@@ -1192,8 +1189,6 @@ enable_caching_generated_triton_templates: bool = True
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
 
 file_lock_timeout: int = int(os.environ.get("TORCHINDUCTOR_FILE_LOCK_TIMEOUT", "600"))
-
-enable_autograd_for_aot: bool = False
 
 
 def get_worker_log_path() -> Optional[str]:

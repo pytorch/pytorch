@@ -1713,7 +1713,8 @@ class TestFP8Matmul(TestCase):
 
             prof.export_chrome_trace(f.name)
             if torch.version.hip:
-                events = [evt for evt in json.load(open(f.name))["traceEvents"] if evt.get("cat", "") == "kernel"]
+                with open(f.name) as file:
+                    events = [evt for evt in json.load(file)["traceEvents"] if evt.get("cat", "") == "kernel"]
                 # events were returned out of order; need to be sorted on "ts" timestamp
                 events = sorted(events, key=lambda x: x['ts'])
                 # ROCm carveout is invisible except for kernels running slower on fewer CUs
@@ -1736,11 +1737,12 @@ class TestFP8Matmul(TestCase):
                 self.assertTrue(no_carveout != carveout)
                 self.assertTrue(carveout_0 != carveout)
             else:
-                no_carveout, carveout_0, carveout_66, no_carveout_again = [
-                    math.prod(evt.get("args", {}).get("grid", []))
-                    for evt in json.load(open(f.name))["traceEvents"]
-                    if evt.get("cat", "") == "kernel"
-                ]
+                with open(f.name) as file:
+                    no_carveout, carveout_0, carveout_66, no_carveout_again = [
+                        math.prod(evt.get("args", {}).get("grid", []))
+                        for evt in json.load(file)["traceEvents"]
+                        if evt.get("cat", "") == "kernel"
+                    ]
 
                 self.assertEqual(no_carveout, no_carveout_again)
                 capability = torch.cuda.get_device_capability()
