@@ -398,6 +398,9 @@ def load(
         Under active development, saved files may not be usable in newer versions
         of PyTorch.
 
+    .. warning::
+        :func:`torch.export.load()` uses pickle under the hood to load models. **Never load data from an untrusted source.**
+
     Loads an :class:`ExportedProgram` previously saved with
     :func:`torch.export.save <torch.export.save>`.
 

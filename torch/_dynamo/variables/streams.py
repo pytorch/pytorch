@@ -10,7 +10,11 @@ from torch.fx import has_side_effect, Proxy
 from .. import graph_break_hints
 from ..bytecode_transformation import create_call_function
 from ..exc import TYPE_CHECKING, unimplemented
-from ..graph_bytecode_inputs import get_external_object_by_index
+from ..graph_bytecode_inputs import (
+    get_external_object_by_index,
+    register_graph_created_object,
+)
+from ..source import CurrentStreamSource
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import FxTracebackAnnotateVariable
@@ -26,6 +30,33 @@ from torch._library.custom_ops import custom_op
 
 
 Tensor = torch.Tensor
+
+
+def new_event(*args: Any, **kwargs: Any) -> int:
+    event = torch.Event(*args, **kwargs)
+    return register_graph_created_object(
+        event,
+        EventVariable.make_construct_in_graph_event_fn(
+            TupleVariable([]), ConstDictVariable({})
+        ),
+    )
+
+
+def new_stream(*args: tuple[Any], **kwargs: Any) -> int:
+    stream = torch.Stream(*args, **kwargs)  # type: ignore[no-matching-overload,call-overload]
+    return register_graph_created_object(
+        stream,
+        StreamVariable.make_construct_in_graph_stream_fn(
+            TupleVariable([]), ConstDictVariable({})
+        ),
+    )
+
+
+def get_current_stream(device: torch.device) -> int:
+    stream = torch.accelerator.current_stream()
+    return register_graph_created_object(
+        stream, lambda _, cg: cg(CurrentStreamSource(device))
+    )
 
 
 def _get_stream_by_index(index: int) -> torch.Stream:
@@ -113,6 +144,24 @@ def _(
 
 
 has_side_effect(torch.ops.streams.wait_event.default)
+
+
+@custom_op("streams::wait_stream", mutates_args=())
+def wait_stream(waiting_stream_index: int, waited_on_stream_index: int) -> None:
+    waiting = _get_stream_by_index(waiting_stream_index)
+    waited_on = _get_stream_by_index(waited_on_stream_index)
+    waiting.wait_stream(waited_on)
+
+
+@wait_stream.register_fake
+def _(
+    event_index: int,
+    stream_index: int,
+) -> None:
+    pass
+
+
+has_side_effect(torch.ops.streams.wait_stream.default)
 
 
 class SymbolicStreamState:
