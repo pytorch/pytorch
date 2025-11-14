@@ -147,13 +147,15 @@ Tensor& do_metal_addmm(const Tensor& self,
         std::array<int64_t, 2> i64;
         std::array<int32_t, 2> i32;
         std::array<float, 2> f32;
-      } alpha_beta;
+        std::array<c10::complex<float>, 2> c64;
+      } alpha_beta{};
       if (output.scalar_type() == kLong) {
         alpha_beta.i64 = {alpha.toLong(), beta.toLong()};
       } else if (c10::isIntegralType(output.scalar_type(), true)) {
         alpha_beta.i32 = {alpha.toInt(), beta.toInt()};
+      } else if (c10::isComplexType(self.scalar_type())) {
+        alpha_beta.c64 = {alpha.toComplexFloat(), beta.toComplexFloat()};
       } else {
-        TORCH_INTERNAL_ASSERT(c10::isFloatingType(output.scalar_type()));
         alpha_beta.f32 = {alpha.toFloat(), beta.toFloat()};
       }
       constexpr uint32_t TILE_DIM = 16; // fastest performance from tests on multiple macs
