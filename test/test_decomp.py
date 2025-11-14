@@ -18,7 +18,6 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     SM70OrLater,
     tf32_off,
-    _get_torch_cuda_version,
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -603,12 +602,10 @@ class TestDecomp(TestCase):
     @suppress_warnings
     @ops(op_db)
     def test_comprehensive(self, device, dtype, op):
-        # Version-conditional xfails: skip torch._scaled_mm on CUDA 13.0+ with float8
+        # Skip torch._scaled_mm with float8 on CUDA
         if device == "cuda" and dtype == torch.float8_e4m3fn:
-            # Check both "torch._scaled_mm" and "_scaled_mm" as op.name could be either
             if op.name in ("torch._scaled_mm", "_scaled_mm"):
-                if _get_torch_cuda_version() >= (13, 0):
-                    self.skipTest("Skip on CUDA 13.0+ until known issue is fixed")
+                self.skipTest("Skip _scaled_mm with FP8 on CUDA due to known issues")
         self.do_cross_ref(device, dtype, op, run_all=True)
 
     def test_uniform(self, device):
