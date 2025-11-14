@@ -87,9 +87,9 @@ class _MixedPrecision:
         would result in communication occurring in fp16.
     """
 
-    param_dtype: Optional[torch.dtype] = None
-    reduce_dtype: Optional[torch.dtype] = None
-    buffer_dtype: Optional[torch.dtype] = None
+    param_dtype: torch.dtype | None = None
+    reduce_dtype: torch.dtype | None = None
+    buffer_dtype: torch.dtype | None = None
     # TODO (rohan-varma): keep_low_precision_grads: bool = False
     # TODO (rohan-varma): APIs to allow users to run batchnorm and layernorm
     # in full precision. For DDP, this can be implemented by not performing the
@@ -666,7 +666,7 @@ class DistributedDataParallel(Module, Joinable):
         static_graph=False,
         delay_all_reduce_named_params=None,
         param_to_hook_all_reduce=None,
-        mixed_precision: Optional[_MixedPrecision] = None,
+        mixed_precision: _MixedPrecision | None = None,
         device_mesh=None,
         skip_all_reduce_unused_params=False,
     ):
@@ -675,7 +675,7 @@ class DistributedDataParallel(Module, Joinable):
         self._use_python_reducer = (
             torch._dynamo.utils.get_optimize_ddp_mode() == "python_reducer"
         )
-        self.logger: Optional[dist.Logger] = None
+        self.logger: dist.Logger | None = None
         if bool(delay_all_reduce_named_params is not None) != bool(
             param_to_hook_all_reduce is not None
         ):
@@ -839,7 +839,7 @@ class DistributedDataParallel(Module, Joinable):
         )
 
         # Initialize gradient buffers and register all reduce hook
-        self._delay_grad_buffer: Optional[torch.Tensor] = None
+        self._delay_grad_buffer: torch.Tensor | None = None
         self._delay_grad_views: list[torch.Tensor] = []
         self._delay_all_reduce_all_params = False
         if len(self._delay_all_reduce_params) != 0:
@@ -1626,7 +1626,7 @@ class DistributedDataParallel(Module, Joinable):
                 treespec,
                 output_is_rref,
             ) = _tree_flatten_with_rref(output)
-            output_placeholders: list[Optional[torch.Tensor]] = [
+            output_placeholders: list[torch.Tensor | None] = [
                 None for _ in range(len(output_tensor_list))
             ]
             # Do not touch tensors that have no grad_fn, which can cause issues
