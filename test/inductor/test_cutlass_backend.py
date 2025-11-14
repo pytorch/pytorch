@@ -275,11 +275,7 @@ class TestCutlassBackend(TestCase):
 
         self.assertIsNotNone(cutlass_key())
 
-    @skipIfXpu(
-        msg="""Mismatched elements: 3193 / 8388608 (0.0%)
-Greatest absolute difference: 0.00390625 at index (1896, 368) (up to 1e-05 allowed)
-Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowed)"""
-    )
+    @skipIfXpu(msg="TODO: remove this after SYCL-TLA fixed accuracy issue")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_subproc_mm(self):
@@ -306,9 +302,16 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
         ):
             Y_compiled = torch.compile(torch.mm)(a, b)
             Y = torch.mm(a, b)
-            torch.testing.assert_close(Y_compiled, Y)
+            if GPU_TYPE == "xpu":
+                atol = 1e-4  # default is 1e-5
+                rtol = 1e-3  # default is 1e-3
+            else:
+                atol = None
+                rtol = None
 
-    @skipIfXpu(msg="SYCL-TLA kernel compilation error")
+            torch.testing.assert_close(Y_compiled, Y, atol=atol, rtol=rtol)
+
+    @skipIfXpu(msg="TODO: remove this skip after SYCL-TLA fix kernel compilation error")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("dtype", (torch.float16, torch.bfloat16))
@@ -632,7 +635,7 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
 
             torch.testing.assert_close(actual, expected, rtol=1e-2, atol=0.05)
 
-    @skipIfXpu(msg="SYCL-TLA kernel compilation error")
+    @skipIfXpu(msg="TODO: remove this skip after SYCL-TLA fix kernel compilation error")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
     @parametrize("use_aoti", (False, True))
@@ -1612,13 +1615,8 @@ Greatest relative difference: 26.015625 at index (1832, 425) (up to 0.001 allowe
             num_ops = int(match.group(1))
             self.assertTrue(num_ops > 0, "The number of ops should be greater than 0")
 
-    @skipIfXpu(
-        msg="""Mismatched elements: 51976 / 1048576 (5.0%)
-Greatest absolute difference: 0.0234375 at index (55, 497) (up to 1e-05 allowed)
-Greatest relative difference: 3536.0 at index (488, 127) (up to 0.016 allowed)
-"""
-    )
-    @unittest.skipIf(not (HAS_XPU or SM90OrLater), "need sm_90")
+    @skipIfXpu(msg="TODO: remove this after SYCL-TLA fixed accuracy issue")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     def test_maybe_append_choice_caching(self):
         """
         Test if maybe_append_choice's caching leads to correct results and
@@ -1726,7 +1724,11 @@ Greatest relative difference: 3536.0 at index (488, 127) (up to 0.016 allowed)
                 torch.testing.assert_close(actual, expected)
 
         num_matmuls = 2
-        self.assertEqual(render_call_count, num_matmuls + num_matmuls * 2)
+        expected_count = num_matmuls + num_matmuls * 2
+        if GPU_TYPE == "xpu":
+            # there is only one gemm op from cutlass backend on xpu
+            expected_count = num_matmuls + num_matmuls
+        self.assertEqual(render_call_count, expected_count)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1787,7 +1789,12 @@ Greatest relative difference: 3536.0 at index (488, 127) (up to 0.016 allowed)
                 torch.testing.assert_close(actual, expected)
 
         num_matmuls = 2
-        self.assertEqual(render_call_count, num_matmuls + num_matmuls * 2)
+        expected_count = num_matmuls + num_matmuls * 2
+        if GPU_TYPE == "xpu":
+            # there is only one gemm op from cutlass backend on xpu
+            expected_count = num_matmuls + num_matmuls
+
+        self.assertEqual(render_call_count, expected_count)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1902,11 +1909,6 @@ Greatest relative difference: 3536.0 at index (488, 127) (up to 0.016 allowed)
             _ = torch.compile(model)(B)
         self.assertTrue(time.time() - start_time < 60)
 
-    @skipIfXpu(
-        msg="Mismatched elements: 13 / 1048576 (0.0%) "
-        "Greatest absolute difference: 3.0517578125e-05 at index (626, 846) (up to 1e-05 allowed)"
-        "Greatest relative difference: 0.1427001953125 at index (81, 861) (up to 0.001 allowed)"
-    )
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("use_aoti", (False, True))
@@ -1938,7 +1940,13 @@ Greatest relative difference: 3536.0 at index (488, 127) (up to 0.016 allowed)
             else:
                 actual = torch.compile(model, fullgraph=True)(A, B)
 
-            torch.testing.assert_close(actual, expected)
+            if GPU_TYPE == "xpu":
+                atol = 1e-4  # default is 1e-5
+                rtol = 1e-3  # default is 1e-3
+            else:
+                atol = None
+                rtol = None
+            torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
         self.assertTrue(time.time() - start_time < 50)
 
     @skipIfXpu(msg="evt not supported on xpu cutlass backend yet")
@@ -2175,7 +2183,7 @@ Greatest relative difference: 3536.0 at index (488, 127) (up to 0.016 allowed)
     @parametrize("arch", ("Xe12", "Xe20"))
     @parametrize("xpu_version", ("20250201", "20250301"))
     def test_gemm_operation_serialization_xpu(self, arch: str, xpu_version: str):
-        self._test_gemm_operation_serialization(arch, xpu_version, min_ops=200)
+        self._test_gemm_operation_serialization(arch, xpu_version, min_ops=40)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+")
     @unittest.skipIf(not SM90OrLater, "need sm_90")

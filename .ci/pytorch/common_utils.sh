@@ -340,3 +340,8 @@ function print_sccache_stats() {
     echo "env var OUR_GITHUB_JOB_ID not set, will not write sccache stats to json"
   fi
 }
+
+function clone_sycl_tla() {
+  rm -rf ./sycl-tla
+  git clone --depth 1 --single-branch -b v0.6 --quiet https://github.com/intel/sycl-tla.git
+}
