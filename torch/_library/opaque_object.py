@@ -22,7 +22,6 @@ OpaqueTypeStr = "__torch__.torch.classes.aten.OpaqueObject"
 
 OpaqueType = NewType("OpaqueType", torch._C.ScriptObject)
 
-
 _OPAQUE_TYPES: dict[Any, str] = {}
 
 
