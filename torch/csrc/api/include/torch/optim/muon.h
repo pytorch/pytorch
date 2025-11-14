@@ -27,7 +27,8 @@ struct TORCH_API MuonOptions : public OptimizerCloneableOptions<MuonOptions> {
   TORCH_ARG(double, momentum) = 0.95;
   TORCH_ARG(bool, nesterov) = true;
   typedef std::tuple<double, double, double> ns_coefficients_t;
-  TORCH_ARG(ns_coefficients_t, ns_coefficients) = std::make_tuple(DEFAULT_A, DEFAULT_B, DEFAULT_C);
+  TORCH_ARG(ns_coefficients_t, ns_coefficients) =
+      std::make_tuple(DEFAULT_A, DEFAULT_B, DEFAULT_C);
   TORCH_ARG(double, eps) = EPS;
   TORCH_ARG(int, ns_steps) = DEFAULT_NS_STEPS;
   TORCH_ARG(bool, match_rms_adamw) = true;
