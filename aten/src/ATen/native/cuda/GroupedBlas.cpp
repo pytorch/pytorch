@@ -78,9 +78,9 @@ _mx8_mx8_bf16_grouped_mm_fbgemm(
         const Tensor& mat_a,
         const Tensor& mat_b,
         const Tensor& scale_a,
-        const SwizzleType& swizzle_a,
+        const SwizzleType swizzle_a,
         const Tensor& scale_b,
-        const SwizzleType& swizzle_b,
+        const SwizzleType swizzle_b,
         const std::optional<at::Tensor>& offs,
         Tensor& out) {
     const bool a_is_2d = mat_a.dim() == 2;
@@ -607,6 +607,8 @@ _scaled_grouped_mm_cuda_v2(
       // scale shape checks
       _check_scales_blocked(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
       _check_scales_blocked(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
+      // swizze checks
+      TORCH_CHECK_VALUE(swizzle_a_enum.size() == 1 && swizzle_b_enum.size() == 1, "Expected single swizzle argument");
       return _mx8_mx8_bf16_grouped_mm_fbgemm(
           mat_a,
           mat_b,
