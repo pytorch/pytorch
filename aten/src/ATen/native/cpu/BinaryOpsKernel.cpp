@@ -825,9 +825,9 @@ void huber_kernel(TensorIterator& iter, double delta) {
         float af = static_cast<float>(a);
         float bf = static_cast<float>(b);
         float z = std::abs(af - bf);
-        float out = z < static_cast<float>(delta_val)
+        float out = z < delta_val
           ? 0.5f * z * z
-          : static_cast<float>(delta_val) * (z - 0.5f * static_cast<float>(delta_val));
+          : delta_val * (z - 0.5f * delta_val);
         return static_cast<at::Half>(out);
       },
       [&delta_vec, &point_five_vec] (Vectorized<Half> a, Vectorized<Half> b) {
