@@ -226,6 +226,8 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
                 # check whether keys are the same
                 self.assertEqual(k1, k2)
                 # check whether DTensor are the same
+                v1 = v1.to(device_type)
+                v2 = v2.to(device_type)
                 self.assertEqual(v1, v2)
 
                 if k1 != "step":
@@ -269,6 +271,8 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
             self.assertEqual(type(v1), DTensor)
             self.assertEqual(type(v2), DTensor)
             # check whether DTensor are the same
+            v1 = v1.to(device_type)
+            v2 = v2.to(device_type)
             self.assertEqual(v1, v2)
 
     @with_comms
