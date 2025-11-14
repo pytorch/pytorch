@@ -33,7 +33,7 @@ from torch.utils._debug_mode import get_active_debug_mode
 logger = logging.getLogger(__name__)
 
 # Global configuration flag to control transform_info generation strategy.
-_ENABLE_GRAPH_BASED_TRANSFORM = True
+_FORCE_MIN_COST_REDISTRIBUTION_PLAN = True
 
 
 @contextlib.contextmanager
@@ -50,13 +50,13 @@ def use_graph_based_transform(enabled: bool = True):
                        If False, force greedy transform regardless of device order.
                        Default: True
     """
-    global _ENABLE_GRAPH_BASED_TRANSFORM
-    old_value = _ENABLE_GRAPH_BASED_TRANSFORM
-    _ENABLE_GRAPH_BASED_TRANSFORM = enabled
+    global _FORCE_MIN_COST_REDISTRIBUTION_PLAN
+    old_value = _FORCE_MIN_COST_REDISTRIBUTION_PLAN
+    _FORCE_MIN_COST_REDISTRIBUTION_PLAN = enabled
     try:
         yield
     finally:
-        _ENABLE_GRAPH_BASED_TRANSFORM = old_value
+        _FORCE_MIN_COST_REDISTRIBUTION_PLAN = old_value
 
 
 class _TransformInfo(NamedTuple):
@@ -681,19 +681,21 @@ def _gen_transform_infos_non_cached(
     # no shard.
     assert src_shard_order is not None and dst_shard_order is not None
 
-    # Determine which transform strategy to use, priority order:
-    # 1. Global enable flag takes highest priority
-    # 2. Explicit parameter value if provided
-    # 3. Auto-detect based on device order (default for standard order, graph for non-standard)
-    if _ENABLE_GRAPH_BASED_TRANSFORM is False:
+    # Determine which transform strategy to use:
+    # 1. Non-standard device order → always use graph-based
+    # 2. Global flag False → use greedy
+    # 3. Default → use graph-based
+    has_non_default_order = not all(
+        DTensorSpec.is_default_device_order(order)
+        for order in (src_shard_order, dst_shard_order)
+    )
+
+    if has_non_default_order:
+        use_graph_based_transform = True
+    elif _FORCE_MIN_COST_REDISTRIBUTION_PLAN is True:
+        use_graph_based_transform = True
+    else:
         use_graph_based_transform = False
-    elif use_graph_based_transform is None:
-        # didn't set _ENABLE_GRAPH_BASED_TRANSFORM and se_graph_based_transform
-        # Auto-detect: use greedy for default device order, graph-based otherwise
-        use_graph_based_transform = not all(
-            DTensorSpec.is_default_device_order(order)
-            for order in (src_shard_order, dst_shard_order)
-        )
 
     drp = get_redistribute_planner(device_mesh, len(src_spec.shape))
     if use_graph_based_transform:

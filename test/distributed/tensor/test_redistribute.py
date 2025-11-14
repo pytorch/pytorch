@@ -885,7 +885,7 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             self.assertEqual(sharded_dt.to_local(), expected_dt.to_local())
 
     @with_comms
-    def test_graph_based_transform_control(self):
+    def test_force_min_cost_redistribution_plan(self):
         """
         Test that the disable_graph_based_transform context manager correctly controls
         the redistribution algorithm selection (graph-based vs greedy).
