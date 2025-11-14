@@ -7934,7 +7934,7 @@ class TestQuantizedConv(TestCase):
         # Assign weights
         dqW = _dequantize_fp8e4m3(W_q, W_scale)
         dqX = _dequantize_fp8e4m3(X_q, X_scale)
-        bias_float = bias.float() if use_bias else bias
+        bias_float = bias.float() if use_bias and bfloat16_output else bias
         conv_op.weight = torch.nn.Parameter(dqW, requires_grad=False)
         conv_op.bias = (
             torch.nn.Parameter(bias_float, requires_grad=False) if use_bias else None
@@ -8054,7 +8054,10 @@ class TestQuantizedConv(TestCase):
         if fp32_output or bfloat16_output:
             self.assertTrue(result.dtype == qconv_output_dtype)
 
-        self.assertEqual(result.float(), result_ref.float(), atol=1e-2, rtol=1e-2)
+        if bfloat16_output:
+            self.assertEqual(result.float(), result_ref.float(), atol=1e-2, rtol=1e-2)
+        else:
+            self.assertEqual(result.float(), result_ref.float(), atol=1e-6, rtol=1e-5)
         assert not torch.isnan(result).any()
 
     def _test_qconv_fp8_helper(self, nd, pointwise_post_op):

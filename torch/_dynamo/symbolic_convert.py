@@ -4007,7 +4007,14 @@ class InstructionTranslatorBase(
         assert isinstance(fn, NestedUserFunctionVariable)
         attr = self.pop()
 
-        if flags & 0x08:
+        if flags & 0x10:
+            assert sys.version_info >= (3, 14)
+
+            # maybe use Format.VALUE_WITH_FAKE_GLOBALS instead?
+            # https://docs.python.org/3/library/annotationlib.html#annotationlib.Format.VALUE_WITH_FAKE_GLOBALS
+            attr = attr.call_function(self, [ConstantVariable.create(1)], {})
+            fn.annotations = attr
+        elif flags & 0x08:
             fn.closure = attr
         elif flags & 0x04:
             fn.annotations = attr
@@ -4855,6 +4862,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     "orig_graphmodule"
                 ] = weakref.ref(module)
 
+        assert not isinstance(func, SkipFunctionVariable)
         tracer: InliningInstructionTranslator
         if is_generator(code):
             tracer = InliningGeneratorInstructionTranslator(
@@ -4867,8 +4875,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 func,
             )
         else:
-            # need the line below to make MyPy happy
-            assert not isinstance(func, LocalGeneratorObjectVariable)
             tracer = InliningInstructionTranslator(
                 parent,
                 code,
@@ -4876,7 +4882,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 parent.symbolic_globals,
                 parent.symbolic_torch_function_state,
                 parent.symbolic_stream_state,
-                # pyrefly: ignore [bad-argument-type]
                 func,
             )
         return tracer
@@ -4960,9 +4965,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
         symbolic_stream_state: SymbolicStreamState,
-        funcvar: BaseUserFunctionVariable,
+        funcvar: BaseUserFunctionVariable | LocalGeneratorObjectVariable,
     ) -> None:
-        f_globals = funcvar.get_globals()  # type: ignore[attr-defined]
+        f_globals = funcvar.get_globals()
         f_builtins = f_globals["__builtins__"]
         if not isinstance(f_builtins, dict):
             f_builtins = f_builtins.__dict__
@@ -5020,6 +5025,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def should_compile_partial_graph(self) -> bool:
         if config.nested_graph_breaks:
+            if not self.funcvar.should_allow_nested_graph_breaks():
+                return False
             if not self.parent.should_compile_partial_graph():
                 return False
             return super().should_compile_partial_graph()
