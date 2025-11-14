@@ -284,9 +284,11 @@ else:
             # create sub pgs base on the mesh argument specified
             for dim in range(len(layout)):
                 dim_name = mesh_dim_names[dim] if mesh_dim_names else f"dim_{dim}"
-                backend_cache = self.get_backend_from_cache(
-                    layout[dim], backend_override[dim][1]
-                )
+                backend_cache = None
+                if self.pg_cache_enabled:
+                    backend_cache = self.get_backend_from_cache(
+                        layout[dim], backend_override[dim][1]
+                    )
                 if backend_cache is not None:
                     dim_group_names.append(backend_cache)
                 else:
@@ -295,7 +297,7 @@ else:
                             layout[dim], dim_name, backend_override[dim]
                         )
                     )
-                if dim_group_names[-1] is not None:
+                if dim_group_names[-1] is not None and self.pg_cache_enabled:
                     self.update_backend_cache(
                         layout[dim], dim_group_names[-1], backend_override[dim][1]
                     )
@@ -354,6 +356,8 @@ else:
             >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
         """
 
+        # Flag to specify device save without backend info. This is a temporary variable
+        # We will remove this flag once we fully deprecate the behavior of save a device mesh with pg names.
         decouple_backend_at_save = False
         _mesh_dim_names: Optional[tuple[str, ...]]
         _layout: _MeshLayout
