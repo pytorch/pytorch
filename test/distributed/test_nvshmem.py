@@ -208,6 +208,21 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         )
         self.assertEqual(y, expected)
 
+    def test_get_remote_tensors(self) -> None:
+        """
+        Get all remote tensors
+        """
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        my_tensor = symm_mem.empty(1, device=self.device).fill_(self.rank)
+        remote_tensors = torch.ops.symm_mem.get_remote_tensors(my_tensor, group_name)
+        dist.barrier()
+
+        for peer, tensor in enumerate(remote_tensors):
+            self.assertEqual(tensor, peer)
+
     @skipIfRocm
     def test_nvshmem_put(self) -> None:
         self._init_device()
