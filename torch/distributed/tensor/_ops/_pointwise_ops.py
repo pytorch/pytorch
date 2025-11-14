@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import warnings
 from collections.abc import Sequence
 from typing import cast, Optional
 
@@ -12,6 +13,7 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
+from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor._ops.utils import (
     generate_redistribute_costs,
     infer_broadcast_dims_map,
@@ -20,11 +22,13 @@ from torch.distributed.tensor._ops.utils import (
     register_op_strategy,
 )
 from torch.distributed.tensor.placement_types import (
+    MaskPartial,
     Partial,
     Placement,
     Replicate,
     Shard,
 )
+from torch.types import _Number
 from torch.utils._typing_utils import not_none
 
 
@@ -465,6 +469,7 @@ def pointwise_strategy(op_schema: OpSchema, linearity: int = -1) -> OpStrategy:
         f"no strategy to follow for {op_schema}!"
     )
     return common_pointwise_strategy(
+        op_schema.op,
         op_schema.args_schema,
         followed_strategy,
         followed_strategy_index,
@@ -488,7 +493,54 @@ def linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
     return pointwise_strategy(op_schema, linearity=linearity_type)
 
 
+def check_partial_support(op, arg_schema, placement):
+    """
+    Check if a Partial placement is supported for the given operation.
+
+    Args:
+        op: The operation to check support for
+        arg_schema: Schema of the operation's arguments
+        placement: The placement to validate
+
+    Returns:
+        bool: True if the Partial placement is supported for the op, False otherwise.
+              When False is returned for unsupported custom Partials, a warning is issued.
+    """
+    addition_ops = [aten.add.Tensor, aten.add_.Tensor]
+    multiplication_ops = [
+        aten.div.Scalar,
+        aten.div_.Scalar,
+        aten.mul.Scalar,
+        aten.mul_.Scalar,
+        aten.mul.Tensor,
+        aten.mul_.Tensor,
+    ]
+    verified_partial_placements = [Partial, _NormPartial, MaskPartial]
+    if (
+        op in (addition_ops + multiplication_ops)
+        and isinstance(placement, Partial)
+        and type(placement) not in verified_partial_placements
+    ):
+        warnings.warn(
+            f"You're using a Partial whose reduce_op is not confirmed to work with {op}. "
+            f"We have redistributed {type(placement).__name__} to Replicate()",
+            UserWarning,
+            stacklevel=2,
+        )
+        return False
+
+    # note that only partial-sum and partial-avg are supported for linearity
+    if not (placement.is_partial("sum") or placement.is_partial("avg")):
+        return False
+
+    if op in addition_ops and any(isinstance(arg, _Number) for arg in arg_schema):
+        return False
+
+    return True
+
+
 def common_pointwise_strategy(
+    op,
     args_schema: Sequence[object],
     followed_strategy: OpStrategy,
     followed_strategy_index: int,
@@ -530,11 +582,7 @@ def common_pointwise_strategy(
                 new_shard_dim = common_ndim - len(spec_to_follow.shape) + shard_dim
                 out_placements.append(Shard(new_shard_dim))
             elif isinstance(placement, Partial):
-                # note that only partial-sum and partial-avg are supported for linearity
-                partial_supports_linearity = placement.is_partial(
-                    "sum"
-                ) or placement.is_partial("avg")
-                if linearity > 0 and partial_supports_linearity:
+                if linearity > 0 and check_partial_support(op, args_schema, placement):
                     # propagate the partial placement
                     out_placements.append(placement)
                 else:
@@ -748,6 +796,7 @@ def list_pointwise_strategy(
             for arg_strategy in args_strategies
         ]
         pointwise_strategy: OpStrategy = common_pointwise_strategy(
+            op_schema.op,
             args_schema,
             child_strtgy,
             linearity,

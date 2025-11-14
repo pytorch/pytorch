@@ -20,8 +20,12 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorOpTestBase,
+    DTensorTestBase,
+    map_local_for_rank,
     skip_unless_torch_gpu,
+    with_comms,
 )
 
 
@@ -331,6 +335,74 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(z.placements, (Replicate(),))
         self.assertEqual(z.to_local(), input)
 
+    def test_add_partial_scalar(self):
+        mesh = self.build_device_mesh()
+        rank = self.rank
+
+        local_tensor = torch.tensor([rank])
+
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("sum")]
+        )
+
+        res = dt + 1
+        self.assertEqual(res, 7)
+
+        local_tensor = torch.tensor([1.0, 1.0, 7.0, 7.0])
+        dt = distribute_tensor(local_tensor, mesh, [Shard(0)])
+
+        norm = dt.norm()
+        norm = norm + 1
+
+        self.assertEqual(norm, 11)
+
+
+class PointwiseOpsTest(DTensorTestBase):
+    @with_comms
+    def test_unverified_custom_partial(self):
+        """
+        This tests that for linear pointwise ops, we redistribute and sent out a warning if
+        user uses Partial placement not confirmed to work with op.
+        """
+        import warnings
+
+        class MyCustomPartial(Partial):
+            """Custom partial placement for specific use case"""
+
+            def __repr__(self) -> str:
+                return f"MyCustomPartial({self.reduce_op})"
+
+        mesh = self.build_device_mesh()
+        rank = self.rank
+
+        local_tensor = map_local_for_rank(rank, lambda rank: torch.tensor([rank]))
+
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[MyCustomPartial("sum")]
+        )
+        # Test that the warning is emitted
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            res = dt * 2  # Trigger the operation to generate the warning
+
+            # Check that a warning was raised
+            self.assertEqual(len(w), 1)
+            self.assertTrue(issubclass(w[0].category, UserWarning))
+            warning_message = str(w[0].message)
+            self.assertIn(
+                "You're using a Partial whose reduce_op is not confirmed to work with",
+                warning_message,
+            )
+            self.assertIn(
+                "We have redistributed MyCustomPartial to Replicate()", warning_message
+            )
+
+        self.assertTrue(type(res), Replicate)
+
+
+DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
+    PointwiseOpsTest,
+)
 
 if __name__ == "__main__":
     run_tests()
