@@ -951,7 +951,9 @@ class _LocalDeviceMesh:
 
         coords: list[dict[int, int]] = [{} for _ in range(self.ndim)]
         for r in lm.ranks:
-            rank_tensor = self._layout.remap_to_tensor(self._rank_map)
+            rank_tensor = self._layout.remap_to_tensor(
+                self._shared_state.get_rank_map()
+            )
             rank_coords = (rank_tensor == r).nonzero().tolist()
             assert len(rank_coords) == 1
             for d, c in enumerate(rank_coords[0][1:]):

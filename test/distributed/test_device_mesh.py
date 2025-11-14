@@ -1052,6 +1052,26 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         w.wait()
 
     @with_comms
+    def test_unflatten_mesh_3d_with_pg_cache(self):
+        # Turn on gate for not saving PG names for device mesh when it comes to torch.save.
+        # This also turns on pg cache
+        DeviceMesh.decouple_backend_at_save = True
+        # Test unflatten from a dummy world mesh, which is the case we need for Expert Parallelism(EP).
+        global_mesh = init_device_mesh(
+            self.device_type,
+            (8,),
+            mesh_dim_names=("world",),
+        )
+        non_ep_mesh = global_mesh._unflatten(0, (2, 2, 2), ("dp", "cp", "tp"))
+        ep_mesh = global_mesh._unflatten(0, (2, 2, 2), ("dp", "ep", "ep_tp"))
+        self.assertEqual(non_ep_mesh["cp"].mesh, ep_mesh["ep"].mesh)
+        self.assertEqual(non_ep_mesh["tp"].mesh, ep_mesh["ep_tp"].mesh)
+        # test pg caching when unflatten into same layout.
+        self.assertEqual(non_ep_mesh["dp"].get_group(), ep_mesh["dp"].get_group())
+        self.assertEqual(non_ep_mesh["tp"].get_group(), ep_mesh["ep_tp"].get_group())
+        DeviceMesh.decouple_backend_at_save = False
+
+    @with_comms
     def test_concatenate_2d(self):
         mesh_shape = (2, 4)
         mesh_dim_names = ("dp", "tp")
