@@ -4,6 +4,7 @@ import random
 from contextlib import ExitStack
 
 import torch
+from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._functorch.aot_autograd import (
@@ -12,13 +13,10 @@ from torch._functorch.aot_autograd import (
     aot_export_module,
 )
 from torch._guards import tracing, TracingContext
-from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import register_opaque_type
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,

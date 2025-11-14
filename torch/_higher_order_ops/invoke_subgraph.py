@@ -309,23 +309,45 @@ def get_output_metadata(subgraph, *operands):
     Extract metadata about the subgraph outputs WITHOUT executing the subgraph.
     This avoids running side-effectful operations twice (once here, once in forward).
     We analyze the graph structure statically to extract metadata.
+
+    IMPORTANT: When the subgraph has effects, the raw graph returns (token, *actual_outputs),
+    but the py_functionalize_impl strips the token before returning. So we need to account
+    for this and return metadata for the ACTUAL outputs (without token).
     """
     # Unwrap FunctionalizeCtxWrapper if present
+    original_subgraph = subgraph
     if isinstance(subgraph, FunctionalizeCtxWrapper):
         subgraph = subgraph.subgraph
 
     # If not a GraphModule, fall back to execution-based metadata extraction
     if not isinstance(subgraph, torch.fx.GraphModule):
-        return _get_output_metadata_by_execution(subgraph, *operands)
+        return _get_output_metadata_by_execution(original_subgraph, *operands)
+
+    # Check if subgraph has effects - this means functionalization will strip the token output
+    has_effects = bool(subgraph.meta.get("_effects", None))
 
     output_metadata = OutputMetadata()
 
     # Extract output arguments from the output node
     # The output node has args=(output_values,) where output_values is a tuple/list
     output_node = next(reversed(subgraph.graph.find_nodes(op="output")))
-    output_metadata.num_fw_outs = len(output_node.args[0])
+    output_args = output_node.args[0]
 
-    for idx, output_arg in enumerate(output_node.args[0]):
+    # If the subgraph has effects, the first output is a token that will be stripped by
+    # py_functionalize_impl. We need to exclude it from our metadata.
+    if has_effects and len(output_args) > 0:
+        # Check if first output is indeed a token (should be a scalar empty tensor)
+        first_output = output_args[0]
+        if isinstance(first_output, torch.fx.Node):
+            val = first_output.meta.get("val")
+            # Token is typically a scalar empty tensor (numel == 0)
+            if isinstance(val, torch.Tensor) and val.numel() == 0:
+                # Skip the token output, analyze the rest
+                output_args = output_args[1:]
+
+    output_metadata.num_fw_outs = len(output_args)
+
+    for idx, output_arg in enumerate(output_args):
         if not isinstance(output_arg, torch.fx.Node):
             if isinstance(output_arg, int):
                 output_metadata.indexes_with_symint.add(idx)
@@ -337,7 +359,7 @@ def get_output_metadata(subgraph, *operands):
             # If we don't have complete metadata for all outputs, fall back to execution
             # This is important for correctness (e.g., detecting SymInts) even though it
             # runs side-effectful operations
-            return _get_output_metadata_by_execution(subgraph, *operands)
+            return _get_output_metadata_by_execution(original_subgraph, *operands)
 
         val = output_arg.meta["val"]
         if isinstance(val, torch.SymInt):
@@ -668,6 +690,8 @@ def _(ctx, subgraph, identifier, *operands):
         functionalized_subgraph = FunctionalizeCtxWrapper(ctx, subgraph)
         out = invoke_subgraph(functionalized_subgraph, identifier, *unwrapped_operands)
 
+    # Only strip the token if we explicitly wrapped the subgraph to add it (i.e., effects was pre-existing)
+    # If effects were discovered during execution, FunctionalizeCtxWrapper already handled token threading
     if effects:
         (new_token, *out) = out
         ctx.mode._tokens[effects] = new_token
@@ -698,7 +722,20 @@ def _(subgraph, identifier, *operands):
     from torch._dynamo.utils import dynamo_timed
 
     with dynamo_timed("invoke_subgraph_fake_tensor", log_pt2_compile_event=True):
-        return subgraph(*operands)
+        out = subgraph(*operands)
+
+        # If the subgraph has effects, the first output is a token that will be stripped
+        # by py_functionalize_impl. We need to match that behavior here.
+        effects = getattr(subgraph, "meta", {}).get("_effects", None)
+        if effects:
+            # Check if first output is a token (scalar empty tensor)
+            if isinstance(out, (tuple, list)) and len(out) > 0:
+                first_out = out[0]
+                if isinstance(first_out, torch.Tensor) and first_out.numel() == 0:
+                    # Strip the token, return the rest
+                    out = out[1:] if len(out) > 1 else out[1]
+
+        return out
 
 
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)

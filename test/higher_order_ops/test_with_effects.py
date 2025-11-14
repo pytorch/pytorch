@@ -1015,6 +1015,84 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         self.assertEqual(len(recorded_list), 4)
         self.assertTrue(torch.allclose(model(x)[0], out2[0], atol=1e-7, rtol=1e-4))
 
+    def test_invoke_subgraph_joint(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            recorded_dict = []
+
+            @torch.library.custom_op("mylib::record_memory", mutates_args=())
+            def record_memory(prefix: str, module_name: str) -> None:
+                torch.cuda.synchronize()
+                mem_alloc = torch.cuda.memory_allocated() / 1024**2
+                mem_reserved = torch.cuda.memory_reserved() / 1024**2
+                memory_str = f"[{prefix}] {module_name}: allocated={mem_alloc:.2f} MB, reserved={mem_reserved:.2f} MB"
+                recorded_dict.append(memory_str)
+
+            @record_memory.register_fake
+            def record_memory_fake(prefix, module_name):
+                return
+
+            record_memory.register_effect(_EffectType.ORDERED)
+
+            class N(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear1 = torch.nn.Linear(1024, 1024)
+                    self.relu = torch.nn.ReLU()
+                    self.linear2 = torch.nn.Linear(1024, 1024)
+
+                @torch.compiler.nested_compile_region
+                def forward(self, x):
+                    torch.ops.mylib.record_memory("forward", "N")
+                    x = self.linear1(x)
+                    x = self.relu(x)
+                    x = self.linear2(x)
+                    return x
+
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.mod_list = torch.nn.ModuleList(N() for _ in range(3))
+
+                def forward(self, x):
+                    for m in self.mod_list:
+                        x = m(x)
+                    return x
+
+        model = M().to("cuda")
+        torch.cuda.reset_peak_memory_stats()
+
+        x = torch.randn(32, 1024, requires_grad=True, device="cuda")
+        out1 = model(x)
+        out1.sum().backward()
+
+        model2 = copy.deepcopy(model)
+        x2 = x.clone()
+
+        gm = _dynamo_graph_capture_for_export(model2)(x2)
+        fake_mode = gm.meta.get("fake_mode", None)
+        with tracing(TracingContext(fake_mode)):
+            with ExitStack() as stack:
+                joint = aot_export_joint_with_descriptors(
+                    stack,
+                    gm,
+                    (x2,),
+                )
+                joint.graph_module.print_readable()
+
+            compiled_fn = aot_compile_joint_with_descriptors(joint)
+
+        out2 = compiled_fn(
+            *dict(model2.named_parameters()).values(),
+            *dict(model2.named_buffers()).values(),
+            x2,
+        )
+        out2.sum().backward()
+
+        self.assertTrue(torch.allclose(out1, out2))
+
+    # Test nested invoke subclass
+    # test autofunctionalize invoke subclass?
+
 
 if __name__ == "__main__":
     run_tests()
