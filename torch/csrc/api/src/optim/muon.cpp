@@ -17,11 +17,13 @@ MuonOptions::MuonOptions(double lr) : lr_(lr) {}
 
 bool operator==(const MuonOptions& lhs, const MuonOptions& rhs) {
   return (lhs.lr() == rhs.lr()) &&
-      (std::get<0>(lhs.ns_coefficients()) == std::get<0>(rhs.ns_coefficients())) &&
-      (std::get<1>(lhs.ns_coefficients()) == std::get<1>(rhs.ns_coefficients())) &&
-      (std::get<2>(lhs.ns_coefficients()) == std::get<2>(rhs.ns_coefficients())) &&
-      (lhs.eps() == rhs.eps()) &&
-      (lhs.weight_decay() == rhs.weight_decay()) &&
+      (std::get<0>(lhs.ns_coefficients()) ==
+       std::get<0>(rhs.ns_coefficients())) &&
+      (std::get<1>(lhs.ns_coefficients()) ==
+       std::get<1>(rhs.ns_coefficients())) &&
+      (std::get<2>(lhs.ns_coefficients()) ==
+       std::get<2>(rhs.ns_coefficients())) &&
+      (lhs.eps() == rhs.eps()) && (lhs.weight_decay() == rhs.weight_decay()) &&
       (lhs.momentum() == rhs.momentum()) &&
       (lhs.nesterov() == rhs.nesterov()) &&
       (lhs.ns_steps() == rhs.ns_steps()) &&
@@ -63,8 +65,7 @@ bool operator==(const MuonParamState& lhs, const MuonParamState& rhs) {
       torch::equal(lhs.momentum_buffer(), rhs.momentum_buffer());
 }
 
-void MuonParamState::serialize(
-    torch::serialize::OutputArchive& archive) const {
+void MuonParamState::serialize(torch::serialize::OutputArchive& archive) const {
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(step);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(momentum_buffer);
 }
@@ -74,33 +75,40 @@ void MuonParamState::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(Tensor, momentum_buffer);
 }
 
-Tensor _zeropower_via_newtonschulz(Tensor grad, std::tuple<double, double, double> ns_coefficients, int ns_steps, double eps) {
-    TORCH_CHECK(ns_steps < 100, "Number of steps must be less than 100 for computational efficiency");
-    TORCH_CHECK(grad.dim() == 2, "Muon only supports 2D gradients");
+Tensor _zeropower_via_newtonschulz(
+    Tensor grad,
+    std::tuple<double, double, double> ns_coefficients,
+    int ns_steps,
+    double eps) {
+  TORCH_CHECK(
+      ns_steps < 100,
+      "Number of steps must be less than 100 for computational efficiency");
+  TORCH_CHECK(grad.dim() == 2, "Muon only supports 2D gradients");
 
-    auto a = std::get<0>(ns_coefficients);
-    auto b = std::get<1>(ns_coefficients);
-    auto c = std::get<2>(ns_coefficients);
+  auto a = std::get<0>(ns_coefficients);
+  auto b = std::get<1>(ns_coefficients);
+  auto c = std::get<2>(ns_coefficients);
 
-    auto ortho_grad = grad.to(torch::kBFloat16);
-    if (grad.size(0) > grad.size(1)) {
-        ortho_grad = ortho_grad.t();
-    }
+  auto ortho_grad = grad.to(torch::kBFloat16);
+  if (grad.size(0) > grad.size(1)) {
+    ortho_grad = ortho_grad.t();
+  }
 
-    // Ensure spectral norm is at most 1
-    ortho_grad.div_(ortho_grad.norm().clamp(eps));
+  // Ensure spectral norm is at most 1
+  ortho_grad.div_(ortho_grad.norm().clamp(eps));
 
-    // Perform the NS iterations
-    for (int i = 0; i < ns_steps; ++i) {
-        auto gram_matrix = ortho_grad.mm(ortho_grad.t());
-        auto gram_update = torch::addmm(gram_matrix, gram_matrix, gram_matrix, b, c);
-        ortho_grad = torch::addmm(ortho_grad, gram_update, ortho_grad, a);
-    }
+  // Perform the NS iterations
+  for (int i = 0; i < ns_steps; ++i) {
+    auto gram_matrix = ortho_grad.mm(ortho_grad.t());
+    auto gram_update =
+        torch::addmm(gram_matrix, gram_matrix, gram_matrix, b, c);
+    ortho_grad = torch::addmm(ortho_grad, gram_update, ortho_grad, a);
+  }
 
-    if (grad.size(0) > grad.size(1)) {
-        ortho_grad = ortho_grad.t();
-    }
-    return ortho_grad;
+  if (grad.size(0) > grad.size(1)) {
+    ortho_grad = ortho_grad.t();
+  }
+  return ortho_grad;
 }
 
 Tensor Muon::step(LossClosure closure) {
@@ -152,19 +160,20 @@ Tensor Muon::step(LossClosure closure) {
 
       auto update = buf;
       if (nesterov) {
-          update = grad.lerp(buf, momentum);
+        update = grad.lerp(buf, momentum);
       }
 
-      update = _zeropower_via_newtonschulz(update, ns_coefficients, ns_steps, eps);
+      update =
+          _zeropower_via_newtonschulz(update, ns_coefficients, ns_steps, eps);
 
       // Adjust learning rate
       double adjusted_lr, adjusted_ratio;
       double A = p.size(0);
       double B = p.size(1);
       if (match_rms_adamw) {
-          adjusted_ratio = 0.2 * std::sqrt(std::max(A, B));
+        adjusted_ratio = 0.2 * std::sqrt(std::max(A, B));
       } else {
-          adjusted_ratio = std::sqrt(std::max(1.0, A / B));
+        adjusted_ratio = std::sqrt(std::max(1.0, A / B));
       }
       adjusted_lr = lr * adjusted_ratio;
 
