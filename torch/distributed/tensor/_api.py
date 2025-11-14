@@ -4,7 +4,7 @@
 import inspect
 import warnings
 from collections.abc import Callable, Sequence
-from typing import Any, cast, Optional
+from typing import Any, Optional
 from typing_extensions import deprecated
 
 import torch
@@ -338,14 +338,11 @@ class DTensor(torch.Tensor):
         )
 
     @classmethod
-    @torch._disable_dynamo
-    # pyre-fixme[3]: Return type must be annotated.
-    # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
-        return DTensor._op_dispatcher.dispatch(
-            func,
-            args,
-            kwargs or {},
+        # We just need to have an implementation here; the __torch_dispatch__ machinery
+        # calls into a specific C++ fast path that doesn't call here.
+        raise NotImplementedError(
+            "DTensor.__torch_dispatch__ should not actually get called"
         )
 
     @staticmethod
@@ -426,7 +423,9 @@ class DTensor(torch.Tensor):
                     if placement.dim < 0:
                         normalized_dim = placement.dim + local_tensor.ndim
                         if type(placement) is _StridedShard:
-                            placements[idx] = _StridedShard(normalized_dim, split_factor=placement.split_factor)
+                            placements[idx] = _StridedShard(
+                                normalized_dim, split_factor=placement.split_factor
+                            )
                         elif type(placement) is Shard:
                             placements[idx] = Shard(normalized_dim)
 

@@ -1104,7 +1104,7 @@ ErrorType ProcessGroupNCCL::getError() {
   return error_;
 }
 
-void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool, bool symm) {
+void ProcessGroupNCCL::registerMemPool(at::cuda::MemPool* pool, bool symm) {
   const auto key = std::to_string(pool->device());
   LOG(INFO) << logPrefix()
             << "Performing NCCL user buffer registration for all buffers in "
@@ -1138,7 +1138,7 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool, bool symm) {
   }
 }
 
-void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
+void ProcessGroupNCCL::deregisterMemPool(at::cuda::MemPool* pool) {
   const auto key = std::to_string(pool->device());
   LOG(INFO) << logPrefix()
             << "Performing NCCL user buffer deregistration for all buffers in "
@@ -5826,7 +5826,7 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
         reinterpret_cast<c10::cuda::CUDACachingAllocator::CUDAAllocator*>(
             getMemAllocator().get());
     // Pool is created
-    memPool_ = std::make_unique<c10::cuda::MemPool>(allocator);
+    memPool_ = std::make_unique<at::cuda::MemPool>(allocator);
     // Register so that we call ncclCommRegister on all new allocations
     registerMemPool(memPool_.get(), /*symmetric*/ false);
     LOG(INFO) << logPrefix() << "Created memory pool";

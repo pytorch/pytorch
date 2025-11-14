@@ -71,8 +71,6 @@ class StridedShard : public Shard {
   std::int64_t split_factor;
   explicit StridedShard(std::int64_t dim, std::int64_t split_factor_)
       : Shard(dim), split_factor(split_factor_) {}
-  StridedShard(const StridedShard& other)
-      : StridedShard(other.dim, other.split_factor) {}
   // Override virtual equals to handle polymorphic comparison correctly
   // TODO(zpcore): once _StridedShard is not a subclass of Shard, we can clean
   // those up
