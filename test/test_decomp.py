@@ -600,11 +600,13 @@ class TestDecomp(TestCase):
     @ops(op_db)
     def test_comprehensive(self, device, dtype, op):
         # Version-conditional xfails: skip torch._scaled_mm on CUDA 13.0+ with float8
-        if (device == "cuda" and 
-            op.name == "torch._scaled_mm" and 
-            dtype == torch.float8_e4m3fn and
-            _get_torch_cuda_version() >= (13, 0)):
-            self.skipTest("xfail on CUDA 13.0+ until nullptr issue is fixed")
+        if device == "cuda" and dtype == torch.float8_e4m3fn:
+            # Check both "torch._scaled_mm" and "_scaled_mm" as op.name could be either
+            if op.name in ("torch._scaled_mm", "_scaled_mm"):
+                if torch.version.cuda is not None:
+                    cuda_version = tuple(int(x) for x in torch.version.cuda.split("."))
+                    if cuda_version >= (13, 0):
+                        self.skipTest("xfail on CUDA 13.0+ until nullptr issue is fixed")
 
         self.do_cross_ref(device, dtype, op, run_all=True)
 
