@@ -60,7 +60,7 @@ jobs:
     with:
       build-environment: linux-jammy-aarch64-py3.10
       runner: linux.arm64.m7g.4xlarge
-      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc13
       test-matrix: |
         { include: [
           { config: "cpu_operator_benchmark_short", shard: 1, num_shards: 1, runner: "linux.arm64.m8g.4xlarge" },

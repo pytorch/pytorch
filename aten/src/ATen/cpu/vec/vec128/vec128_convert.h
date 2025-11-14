@@ -6,9 +6,9 @@ namespace at::vec {
 inline namespace CPU_CAPABILITY {
 #if (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256))
 
-// Enable auto-vectorization for GCC-13+ and clang-17+
+// Enable auto-vectorization for clang-17+
 // GCC-12 has a bug: gcc.gnu.org/bugzilla/show_bug.cgi?id=117001
-#if __GNUC__ > 12 || (defined(__clang__) && (__clang_major__ >= 17))
+#if defined(__clang__) && (__clang_major__ >= 17)
 
 template <typename from_type, typename to_type>
 inline void convertImpl(
@@ -191,22 +191,93 @@ inline void convert(const at::Half* src, bool* dst, int64_t n) {
 }
 
 #endif
+
+template <typename to_type>
+inline void convertFromBf16Impl(
+    const c10::BFloat16* __restrict src,
+    to_type* __restrict dst,
+    int64_t n) {
+  const uint16_t* srcPtr = reinterpret_cast<const uint16_t*>(src);
+  uint64_t len = static_cast<uint64_t>(n);
+  for (uint64_t i = 0; i < len; i++) {
+    uint32_t tmp = static_cast<uint32_t>(srcPtr[i]) << 16;
+    float tmpF;
+    __builtin_memcpy(&tmpF, &tmp, sizeof(float));
+    dst[i] = static_cast<to_type>(tmpF);
+  }
+}
+#define CONVERT_FROM_BF16_TEMPLATE(to_type)                                \
+  template <>                                                              \
+  inline void convert(const c10::BFloat16* src, to_type* dst, int64_t n) { \
+    return convertFromBf16Impl<to_type>(src, dst, n);                      \
+  }
+
+CONVERT_FROM_BF16_TEMPLATE(uint8_t)
+CONVERT_FROM_BF16_TEMPLATE(int8_t)
+CONVERT_FROM_BF16_TEMPLATE(int16_t)
+CONVERT_FROM_BF16_TEMPLATE(int32_t)
+CONVERT_FROM_BF16_TEMPLATE(int64_t)
+CONVERT_FROM_BF16_TEMPLATE(float)
+CONVERT_FROM_BF16_TEMPLATE(double)
+#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
+CONVERT_FROM_BF16_TEMPLATE(float16_t)
+#endif
+
 #ifdef __ARM_FEATURE_BF16
-CONVERT_TEMPLATE(bfloat16_t, uint8_t)
-CONVERT_TEMPLATE(bfloat16_t, int8_t)
-CONVERT_TEMPLATE(bfloat16_t, int16_t)
-CONVERT_TEMPLATE(bfloat16_t, int32_t)
-CONVERT_TEMPLATE(bfloat16_t, int64_t)
-CONVERT_TEMPLATE(bfloat16_t, bfloat16_t)
-CONVERT_TEMPLATE(bfloat16_t, float)
-CONVERT_TEMPLATE(bfloat16_t, double)
-CONVERT_TEMPLATE(uint8_t, bfloat16_t)
-CONVERT_TEMPLATE(int8_t, bfloat16_t)
-CONVERT_TEMPLATE(int16_t, bfloat16_t)
-CONVERT_TEMPLATE(int32_t, bfloat16_t)
-CONVERT_TEMPLATE(int64_t, bfloat16_t)
-CONVERT_TEMPLATE(float, bfloat16_t)
-CONVERT_TEMPLATE(double, bfloat16_t)
+
+// clang-[17, 20] crashes when autovectorizing static cast to bf16
+// Below is a workaround to have some vectorization
+// Works decently well for smaller int types
+template <typename from_type>
+inline void convertToBf16Impl(
+    const from_type* __restrict src,
+    c10::BFloat16* __restrict dst,
+    uint64_t n) {
+  bfloat16_t* dstPtr = reinterpret_cast<bfloat16_t*>(dst);
+  uint64_t loopBound = n - (n % 16);
+  uint64_t i = 0;
+  for (; i < loopBound; i += 16) {
+    float32x4_t a, b, c, d;
+    a[0] = static_cast<float>(src[i]);
+    a[1] = static_cast<float>(src[i + 1]);
+    a[2] = static_cast<float>(src[i + 2]);
+    a[3] = static_cast<float>(src[i + 3]);
+    b[0] = static_cast<float>(src[i + 4]);
+    b[1] = static_cast<float>(src[i + 5]);
+    b[2] = static_cast<float>(src[i + 6]);
+    b[3] = static_cast<float>(src[i + 7]);
+    c[0] = static_cast<float>(src[i + 8]);
+    c[1] = static_cast<float>(src[i + 9]);
+    c[2] = static_cast<float>(src[i + 10]);
+    c[3] = static_cast<float>(src[i + 11]);
+    d[0] = static_cast<float>(src[i + 12]);
+    d[1] = static_cast<float>(src[i + 13]);
+    d[2] = static_cast<float>(src[i + 14]);
+    d[3] = static_cast<float>(src[i + 15]);
+
+    vst1q_bf16(dstPtr + i, vcvtq_high_bf16_f32(vcvtq_low_bf16_f32(a), b));
+    vst1q_bf16(dstPtr + i + 8, vcvtq_high_bf16_f32(vcvtq_low_bf16_f32(c), d));
+  }
+
+#pragma clang loop vectorize(disable) interleave(disable) unroll(disable)
+  for (; i < n; i++) {
+    float a = static_cast<float>(src[i]);
+    dstPtr[i] = vcvth_bf16_f32(a);
+  }
+}
+
+#define CONVERT_TO_BF16_TEMPLATE(from_type)                                  \
+  template <>                                                                \
+  inline void convert(const from_type* src, c10::BFloat16* dst, int64_t n) { \
+    return convertToBf16Impl<from_type>(src, dst, n);                        \
+  }
+
+CONVERT_TO_BF16_TEMPLATE(uint8_t)
+CONVERT_TO_BF16_TEMPLATE(int8_t)
+CONVERT_TO_BF16_TEMPLATE(int16_t)
+CONVERT_TO_BF16_TEMPLATE(int32_t)
+
+#endif
 
 inline void convertBoolToBfloat16Impl(
     const bool* __restrict src,
@@ -244,8 +315,6 @@ template <>
 inline void convert(const c10::BFloat16* src, bool* dst, int64_t n) {
   return convertBfloat16ToBoolImpl(src, dst, n);
 }
-
-#endif
 
 #endif
 
