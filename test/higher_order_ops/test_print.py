@@ -175,7 +175,14 @@ x = add_1, y = add_2);  getitem = None
             """print(str format_str, *, Tensor x) -> ()""",
         )
 
-        # TODO: support bool list input
+        # Test schema generation with bool list input
+        schema_bool_list = print_op.gen_schema(
+            "Bool list: {flags}", flags=[True, False, True]
+        )
+        self.assertExpectedInline(
+            str(schema_bool_list),
+            """print(str format_str, *, bool flags_0, bool flags_1, bool flags_2) -> ()""",
+        )
 
         # No kwargs
         schema_no_kwargs = print_op.gen_schema("Simple message")
