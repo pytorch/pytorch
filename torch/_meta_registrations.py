@@ -5016,6 +5016,7 @@ def max_pool2d_checks_and_compute_shape(
         aten.max_pool2d_with_indices_backward.grad_input,
     ]
 )
+@out_wrapper("grad_input")
 def meta_max_pool2d_with_indices_backward(
     grad_output,
     self,
@@ -5025,7 +5026,6 @@ def meta_max_pool2d_with_indices_backward(
     dilation,
     ceil_mode,
     indices,
-    grad_input=None,
 ):
     (
         nInputPlane,
@@ -5052,8 +5052,6 @@ def meta_max_pool2d_with_indices_backward(
     _check_dim_size(indices)
 
     memory_format = utils.suggest_memory_format(self)
-    if grad_input is not None:
-        return grad_input.resize_as_(self)
     return torch.empty(
         self.shape,
         dtype=self.dtype,
