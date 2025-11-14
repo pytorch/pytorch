@@ -18,6 +18,7 @@ Key classes include:
 """
 
 import dataclasses
+import enum
 import functools
 import inspect
 import itertools
@@ -1604,11 +1605,16 @@ class NumpyVariable(VariableTracker):
         return self.value
 
     def as_proxy(self):
-        if config.trace_numpy and isinstance(self.value, type):
-            # This handles numpy dtype attributes such as np.float32
-            # We return a string as we don't want to serialize non-PyTorch objects in the output FX graph
-            # In torch/_numpy we normalize strings to their dtypes when the input is a dtype, as NumPy does
-            return self.value.__name__
+        if config.trace_numpy:
+            # Can replace with EnumType once we drop 3.10 support
+            if isinstance(self.value, enum.EnumMeta):
+                # This is mostly for np._CopyMode
+                return self.value
+            if isinstance(self.value, type):
+                # This handles numpy dtype attributes such as np.float32
+                # We return a string as we don't want to serialize non-PyTorch objects in the output FX graph
+                # In torch/_numpy we normalize strings to their dtypes when the input is a dtype, as NumPy does
+                return self.value.__name__
 
         return super().as_proxy()
 

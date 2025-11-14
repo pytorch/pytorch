@@ -757,6 +757,7 @@ def _unlift_exported_program_lifted_states(
     }
 
     new_gm = torch.fx.GraphModule(ep.graph_module, copy.deepcopy(ep.graph))
+    new_gm.meta.update(ep.graph_module.meta)
     ep = copy.copy(ep)
     ep._graph_module = new_gm
 
