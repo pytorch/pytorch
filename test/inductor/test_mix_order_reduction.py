@@ -6,7 +6,6 @@ import torch.nn.functional as F
 from torch._dynamo.utils import same
 from torch._inductor import metrics, utils
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -66,20 +65,6 @@ class SkipPatternTest(TestBase):
         self.check_numeric(f, (x,))
         self.assertEqual(0, metrics.codegen_mix_order_reduction)
 
-    @inductor_config.patch(split_reductions=False)
-    def test_skip_due_to_non_persistent_reduction(self):
-        """
-        We only generate mix order reduction if one of the reduction is
-        persistent reduction.
-        """
-
-        def f(x):
-            return x.sum(dim=1), x.sum(dim=0)
-
-        x = torch.randn(32768, 2048, device=GPU_TYPE)
-        self.check_numeric(f, (x,))
-        self.assertEqual(0, metrics.codegen_mix_order_reduction)
-
 
 @instantiate_parametrized_tests
 class MixOrderReductionTest(TestBase):
@@ -92,35 +77,173 @@ class MixOrderReductionTest(TestBase):
         ],
     )
     @parametrize("swap", (False, True))
-    @parametrize("shape", ((32768, 768), (32769, 768)))
-    @inductor_config.patch(split_reductions=False)
-    def test_mix_order_reduction(self, name, swap, shape):
+    @parametrize("split_reductions", (False, True))
+    @parametrize("shape", ((32768, 768), (32769, 768), (32, 1024, 768)))
+    def test_mix_order_reduction(self, name, swap, split_reductions, shape):
+        # torch.prod does not accept tuple for dim argument
+        if name == "prod" and len(shape) == 3:
+            self.skipTest("Invalid combination")
+
         def f(x):
+            def outer_red():
+                if len(shape) == 3:
+                    return reduction_fn(x, dim=(0, 1))
+                else:
+                    assert len(shape) == 2
+                    return reduction_fn(x, dim=0)
+
             if swap:
-                return reduction_fn(x, dim=0), reduction_fn(x, dim=1)
+                return outer_red(), reduction_fn(x, dim=-1)
             else:
-                return reduction_fn(x, dim=1), reduction_fn(x, dim=0)
+                return reduction_fn(x, dim=-1), outer_red()
 
         reduction_fn = getattr(torch, name)
-        M, N = shape
         dtype = torch.float
-        x = torch.randn(M, N, dtype=dtype, device=GPU_TYPE)
+        x = torch.randn(shape, dtype=dtype, device=GPU_TYPE)
 
-        opt_f = torch.compile(f)
+        opt_f = torch.compile(
+            f,
+            options={
+                "split_reductions": split_reductions,
+            },
+        )
 
         ref = f(x)
         act = opt_f(x)
 
         self.assertTrue(same(ref, act, tol=1e-3), f"ref:\n{ref}\nact:\n{act}")
-
-        expected_num_kernel = 1 + (not inductor_config.triton.mix_order_reduction)
-        if name == "mean" and inductor_config.triton.mix_order_reduction:
-            # for mean we generate one more kernel to do the division
-            # this kernel should be very cheap since tensor size is small
-            expected_num_kernel = 2
         self.assertEqual(
-            expected_num_kernel,
-            metrics.generated_kernel_count,
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
+        )
+
+    def test_xmask(self):
+        """
+        Make sure xmask is setup properly
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            return x.sum(dim=0), x.sum(dim=1)
+
+        M, N = 32768 + 1023, 768
+        EXTRA_ROW = 1
+        buf = torch.randn(M + EXTRA_ROW, N, device=GPU_TYPE)
+        x = buf[:M, :]
+        # make sure wrong xmask error loud if read excess elements
+        buf[M:, :] = 1000000
+
+        opt_f = torch.compile(
+            f,
+            options={
+                "triton.mix_order_reduction_initial_xblock": 2,
+            },
+        )
+
+        ref = f(x)
+        act = opt_f(x)
+
+        self.assertTrue(same(ref, act, tol=1e-3), f"ref:\n{ref}\nact:\n{act}")
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
+        )
+
+    def test_avoid_non_coalesced_access(self):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x, y):
+            return (x + y).sum(dim=-1), x.sum(dim=(0, 1))
+
+        x = torch.randn(128, 256, 768, device=GPU_TYPE)
+        y = torch.randn(128, 768, 256, device=GPU_TYPE).transpose(1, 2)
+        self.check_numeric(f, (x, y))
+
+        # we skip mix order reduction for such kernel since
+        # we force XBLOCK to be 1, the access to tensor y would be
+        # very inefficient.
+        # TODO: support XBLOCK larger than 1. But in that case, we
+        # would have bigger restriction on rnumel to avoid exploding
+        # shared memory.
+        self.assertEqual(metrics.codegen_mix_order_reduction, 0)
+
+    @inductor_config.patch(coordinate_descent_tuning=True)
+    def test_XBLOCK_coordest_tuning(self):
+        """
+        We should skip XBLOCK coordinate descent tuning for
+        mix order reduction.
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            return x.sum(dim=-1), x.sum(dim=0)
+
+        x = torch.randn(32768, 256, dtype=torch.float, device=GPU_TYPE)
+        self.check_numeric(f, (x,))
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+
+    @inductor_config.patch(unroll_reductions_threshold=1)
+    def test_3layer_split_reduction(self):
+        """
+        Use a larger M and smaller N to trigger a 3 layer split reduction.
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            return x.sum(dim=-1), x.sum(dim=0)
+
+        x = torch.randn(32768 * 256, 2, dtype=torch.float, device=GPU_TYPE)
+        self.check_numeric(f, (x,))
+        # We don't do mix order reduction for split redutions
+        # with more than 2 layers
+        self.assertEqual(metrics.codegen_mix_order_reduction, 0)
+
+    def test_independent_split_size(self):
+        """
+        Make sure mix order reduction can pick the split size it wants
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            return x.sum(dim=-1), x.sum(dim=0)
+
+        def check_one_split_size(split_size):
+            torch._dynamo.reset()
+
+            with inductor_config.patch(
+                "triton.mix_order_reduction_split_size", split_size
+            ):
+                self.check_numeric(f, (x,))
+                self.assertEqual(
+                    inductor_config.triton.mix_order_reduction,
+                    metrics.codegen_mix_order_reduction,
+                )
+
+                _, (code,) = utils.run_and_get_code(torch.compile(f), x)
+                self.assertTrue(f"'RSPLIT_SIZE': {split_size}" in code)
+
+        x = torch.randn(32768, 768, dtype=torch.float, device=GPU_TYPE)
+
+        check_one_split_size(8)
+        check_one_split_size(16)
+
+    @inductor_config.patch(split_reductions=False)
+    def test_non_contiguous_input(self):
+        def f(x):
+            return x.sum(dim=-1), x.sum(dim=[0, 1])
+
+        x = torch.randn(1024, 32, 768, dtype=torch.float, device=GPU_TYPE).permute(
+            1, 0, 2
+        )
+        self.check_numeric(f, (x,))
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
         )
 
     @inductor_config.patch(split_reductions=False)
@@ -128,8 +251,8 @@ class MixOrderReductionTest(TestBase):
         def f(x, y):
             return x.sum(dim=0), x.sum(dim=1), y.sum(dim=0), y.sum(dim=1)
 
-        x = torch.randn(128 * 15, 128, device=GPU_TYPE)
-        y = torch.randn(256 * 15, 256, device=GPU_TYPE)
+        x = torch.randn(4096 * 64, 32, device=GPU_TYPE)
+        y = torch.randn(4098 * 64, 34, device=GPU_TYPE)
 
         self.check_numeric(f, (x, y))
         expected_mix_order_reduction = (
@@ -146,9 +269,24 @@ class MixOrderReductionTest(TestBase):
             torch.float,
         ],
     )
-    @parametrize("shape", ((32768, 768), (32769, 768)))
-    @inductor_config.patch(split_reductions=False)
-    def test_rms_norm_bwd(self, wdtype, shape):
+    @parametrize("split_reductions", (False, True))
+    @parametrize("shape", ((32768, 2048), (32768, 768), (32768 + 1023, 768)))
+    @parametrize("max_autotune", (False, True))
+    @parametrize("initial_xblock", (1, 2))
+    def test_rms_norm_bwd(
+        self, wdtype, split_reductions, shape, max_autotune, initial_xblock
+    ):
+        # max_autotune can be slow and cost resource, trim down the tests
+        # for max autotune
+        if max_autotune and not (
+            wdtype == torch.bfloat16
+            and not split_reductions
+            and shape in ((32768, 768), (32769, 768))
+            and initial_xblock == 1
+            and inductor_config.triton.mix_order_reduction
+        ):
+            self.skipTest("Skip non-critical tests to save resources.")
+
         def f(x, w, eps):
             orig_dtype = x.dtype
 
@@ -173,21 +311,30 @@ class MixOrderReductionTest(TestBase):
         dy = torch.randn_like(x)
         eps = 1e-5
 
-        opt_f = torch.compile(f)
+        opt_f = torch.compile(
+            f,
+            options={
+                "split_reductions": split_reductions,
+                "triton.mix_order_reduction_initial_xblock": initial_xblock,
+                **(
+                    {
+                        "max_autotune": True,
+                        "coordinate_descent_tuning": True,
+                    }
+                    if max_autotune
+                    else {}
+                ),
+            },
+        )
 
         ref = fwd_bwd(f)
         act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
 
         self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
-        expected_num_kernel = 1 + (not inductor_config.triton.mix_order_reduction)
-        if wdtype == torch.bfloat16 and inductor_config.triton.mix_order_reduction:
-            # one extra kernel for downcasting
-            expected_num_kernel = 2
-        FileCheck().check_count(
-            "@triton.jit",
-            expected_num_kernel,
-            exactly=True,
-        ).run(bwd_wrapper)
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
+        )
 
     @parametrize(
         "wbdtype",
@@ -196,9 +343,9 @@ class MixOrderReductionTest(TestBase):
             torch.float,
         ],
     )
+    @parametrize("split_reductions", (False, True))
     @parametrize("shape", ((32768, 768), (32769, 768)))
-    @inductor_config.patch(split_reductions=False)
-    def test_layer_norm_bwd_with_bias(self, wbdtype, shape):
+    def test_layer_norm_bwd_with_bias(self, wbdtype, split_reductions, shape):
         def f(x, w, b, eps):
             return F.layer_norm(x, x.shape[-1:], w.float(), b.float(), eps)
 
@@ -219,25 +366,25 @@ class MixOrderReductionTest(TestBase):
         dy = torch.randn_like(x)
         eps = 1e-5
 
-        opt_f = torch.compile(f)
+        opt_f = torch.compile(
+            f,
+            options={
+                "split_reductions": split_reductions,
+            },
+        )
 
         ref = fwd_bwd(f)
         act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
 
         self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
-        expected_num_kernel = 1 + (not inductor_config.triton.mix_order_reduction)
-        if wbdtype == torch.bfloat16 and inductor_config.triton.mix_order_reduction:
-            # one extra kernel for downcasting
-            expected_num_kernel = 2
-        FileCheck().check_count(
-            "@triton.jit",
-            expected_num_kernel,
-            exactly=True,
-        ).run(bwd_wrapper)
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
+        )
 
+    @parametrize("split_reductions", (False, True))
     @parametrize("shape", ((32768, 768), (32769, 768)))
-    @inductor_config.patch(split_reductions=False)
-    def test_layer_norm_bwd_no_bias(self, shape):
+    def test_layer_norm_bwd_no_bias(self, split_reductions, shape):
         def f(x, w, eps):
             return F.layer_norm(x, x.shape[-1:], w, bias=None, eps=eps)
 
@@ -257,17 +404,21 @@ class MixOrderReductionTest(TestBase):
         dy = torch.randn_like(x)
         eps = 1e-5
 
-        opt_f = torch.compile(f)
+        opt_f = torch.compile(
+            f,
+            options={
+                "split_reductions": split_reductions,
+            },
+        )
 
         ref = fwd_bwd(f)
         act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
 
         self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
-        FileCheck().check_count(
-            "@triton.jit",
-            1 + (not inductor_config.triton.mix_order_reduction),
-            exactly=True,
-        ).run(bwd_wrapper)
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
+        )
 
 
 @inductor_config.patch(

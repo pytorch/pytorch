@@ -876,15 +876,16 @@ class TestMaxAutotune(TestCase):
 
                 # Extract grid sizes from the trace events for TMA kernels
                 kernel_name = "triton_tem_fused"
-                kernel_events = [
-                    {
-                        "grid": evt.get("args", {}).get("grid", []),
-                        "grid_size": math.prod(evt.get("args", {}).get("grid", [])),
-                    }
-                    for evt in json.load(open(f.name))["traceEvents"]
-                    if evt.get("cat", "") == "kernel"
-                    and kernel_name in evt.get("name", "").lower()
-                ]
+                with open(f.name) as file:
+                    kernel_events = [
+                        {
+                            "grid": evt.get("args", {}).get("grid", []),
+                            "grid_size": math.prod(evt.get("args", {}).get("grid", [])),
+                        }
+                        for evt in json.load(file)["traceEvents"]
+                        if evt.get("cat", "") == "kernel"
+                        and kernel_name in evt.get("name", "").lower()
+                    ]
 
                 # We should have exactly 1 kernel event for this run
                 self.assertEqual(
@@ -1912,6 +1913,29 @@ class TestMaxAutotune(TestCase):
 
             # Check that contiguous transform was used
             FileCheck().check("contiguous_mm").run(code[0])
+
+    @unittest.skipIf(config.cpp_wrapper, "out_dtype override not supported for AOTI")
+    @unittest.skipIf(TEST_WITH_ROCM, "out_dtype override only available on NVIDIA")
+    def test_bmm_out_dtype(self):
+        def f(a, b):
+            return torch.bmm(a, b, out_dtype=torch.float32)
+
+        a = torch.randn(2, 3, 4, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(2, 4, 5, device=GPU_TYPE, dtype=torch.float16)
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="TRITON",
+        ):
+            compiled_f = torch.compile(f)
+            with self.assertRaisesRegex(
+                torch._inductor.exc.InductorError,
+                r"LoweringException: NoValidChoicesError: No choices to select",
+            ):
+                out, code = run_and_get_code(compiled_f, a, b)
+
+        compiled_f = torch.compile(f)
+        out, code = run_and_get_code(compiled_f, a, b)
+        FileCheck().check("extern_kernels.bmm_dtype").run(code[0])
 
     def test_triton_template_generated_code_cache_key(self):
         generate_and_load_args = len(

@@ -5,6 +5,7 @@ import functools
 import inspect
 import logging
 import math
+import sys
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
@@ -24,6 +25,7 @@ from torch._export.passes.lift_constants_pass import ConstantAttrMap
 from torch._export.utils import _fakify_params_buffers
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
@@ -421,6 +423,14 @@ def make_fake_inputs(
         if isinstance(nn_module.forward, functools.partial):
             # functools handles nesting by itself, no need to recurse
             code = nn_module.forward.func.__code__
+        elif (
+            sys.version_info >= (3, 14)
+            and (fwd := getattr(nn_module.forward, "__func__", None))
+            and isinstance(fwd, functools.partial)
+        ):
+            # functools.partial is now a method descriptor:
+            # https://docs.python.org/3/whatsnew/3.14.html#changes-in-the-python-api
+            code = fwd.func.__code__
         else:
             code = nn_module.forward.__code__
         co_fields = {
@@ -946,7 +956,9 @@ def _fakify_script_objects(
 
     try:
         for obj, fqns in constant_attrs.items():
-            if torch._library.fake_class_registry._is_script_object(obj):
+            if torch._library.fake_class_registry._is_script_object(
+                obj
+            ) or is_opaque_type(obj):
                 fake_script_obj = _maybe_fakify_obj(obj)
                 for fqn in fqns:
                     cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
