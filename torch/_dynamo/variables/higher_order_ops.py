@@ -2743,6 +2743,9 @@ class FunctorchHigherOrderVariable(UserFunctionVariable):
     ) -> "VariableTracker":
         return super().call_function(tx, args, kwargs)
 
+    def should_allow_nested_graph_breaks(self):
+        return False
+
 
 class FunctionalCallVariable(FunctorchHigherOrderVariable):
     def call_function(
@@ -3649,24 +3652,26 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # - lifted args from tracing subgraph: [score_mod_other_buffers, mask_fn_other_buffers]
         _, _, _, inp_arg_block_mask, inp_arg_scale, inp_arg_kernel_options = inp_args
         block_mask = tuple(inp_arg_block_mask + (mask_fn_node,))
-        return wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                self.value,
-                args=inp_args[:3]
-                + (
-                    score_mod_node,
-                    block_mask,
-                    inp_arg_scale,
-                    inp_arg_kernel_options,
-                    score_mod_lifted_args,
-                    mask_fn_lifted_args,
+        with torch.fx.experimental.proxy_tensor.set_original_aten_op(self.value):
+            proxy = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    self.value,
+                    args=inp_args[:3]
+                    + (
+                        score_mod_node,
+                        block_mask,
+                        inp_arg_scale,
+                        inp_arg_kernel_options,
+                        score_mod_lifted_args,
+                        mask_fn_lifted_args,
+                    ),
+                    kwargs={},
                 ),
-                kwargs={},
-            ),
-            example_value=None,
-        )
+                example_value=None,
+            )
+        return proxy
 
 
 class AutogradFunctionApplyVariable(VariableTracker):
