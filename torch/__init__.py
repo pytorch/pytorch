@@ -321,32 +321,32 @@ def _preload_cuda_lib(lib_folder: str, lib_name: str, required: bool = True) -> 
 
 
 def _preload_cuda_deps(err: _Optional[OSError] = None) -> None:
-    cuda_libs: dict[str, str] = {
-        "cublas": "libcublas.so.*[0-9]",
-        "cudnn": "libcudnn.so.*[0-9]",
-        "cuda_nvrtc": "libnvrtc.so.*[0-9]",
-        "cuda_runtime": "libcudart.so.*[0-9]",
-        "cuda_cupti": "libcupti.so.*[0-9]",
-        "cufft": "libcufft.so.*[0-9]",
-        "curand": "libcurand.so.*[0-9]",
-        "nvjitlink": "libnvJitLink.so.*[0-9]",
-        "cusparse": "libcusparse.so.*[0-9]",
-        "cusparselt": "libcusparseLt.so.*[0-9]",
-        "cusolver": "libcusolver.so.*[0-9]",
-        "nccl": "libnccl.so.*[0-9]",
-        "nvshmem": "libnvshmem_host.so.*[0-9]",
-        "cufile": "libcufile.so.*[0-9]",
-    }
-
+    cuda_libs: list[tuple[str, str]] = [
+        ("cublas", "libcublas.so.*[0-9]"),
+        ("cudnn", "libcudnn.so.*[0-9]"),
+        ("cuda_nvrtc", "libnvrtc.so.*[0-9]"),
+        ("cuda_nvrtc", "libnvrtc-builtins.so.*[0-9]"),
+        ("cuda_runtime", "libcudart.so.*[0-9]"),
+        ("cuda_cupti", "libcupti.so.*[0-9]"),
+        ("cufft", "libcufft.so.*[0-9]"),
+        ("curand", "libcurand.so.*[0-9]"),
+        ("nvjitlink", "libnvJitLink.so.*[0-9]"),
+        ("cusparse", "libcusparse.so.*[0-9]"),
+        ("cusparselt", "libcusparseLt.so.*[0-9]"),
+        ("cusolver", "libcusolver.so.*[0-9]"),
+        ("nccl", "libnccl.so.*[0-9]"),
+        ("nvshmem", "libnvshmem_host.so.*[0-9]"),
+        ("cufile", "libcufile.so.*[0-9]"),
+    ]
     # If error is passed, re-raise it if it's not about one of the abovementioned
     # libraries
     if err is not None and [
-        lib for lib in cuda_libs.values() if lib.split(".", 1)[0] in err.args[0]
+        lib for _, lib in cuda_libs if lib.split(".", 1)[0] in err.args[0]
     ]:
         raise err
 
     # Otherwise, try to preload dependencies from site-packages
-    for lib_folder, lib_name in cuda_libs.items():
+    for lib_folder, lib_name in cuda_libs:
         _preload_cuda_lib(lib_folder, lib_name)
 
     # libnvToolsExt is Optional Dependency
@@ -2620,8 +2620,8 @@ def compile(
     import sysconfig
 
     _C._log_api_usage_once("torch.compile")
-    if sys.version_info >= (3, 14):
-        raise RuntimeError("torch.compile is not supported on Python 3.14+")
+    if sys.version_info >= (3, 15):
+        raise RuntimeError("torch.compile is not supported on Python 3.15+")
     elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
         3,
         13,

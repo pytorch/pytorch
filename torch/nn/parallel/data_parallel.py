@@ -3,7 +3,7 @@ import operator
 import warnings
 from collections.abc import Sequence
 from itertools import chain
-from typing import Any, Generic, Optional, TypeVar, Union
+from typing import Any, Generic, TypeVar, Union
 
 import torch
 from torch._utils import (
@@ -136,8 +136,8 @@ class DataParallel(Module, Generic[T]):
     def __init__(
         self,
         module: T,
-        device_ids: Optional[Sequence[Union[int, torch.device]]] = None,
-        output_device: Optional[Union[int, torch.device]] = None,
+        device_ids: Sequence[Union[int, torch.device]] | None = None,
+        output_device: Union[int, torch.device] | None = None,
         dim: int = 0,
     ) -> None:
         super().__init__()
@@ -205,7 +205,7 @@ class DataParallel(Module, Generic[T]):
     def scatter(
         self,
         inputs: tuple[Any, ...],
-        kwargs: Optional[dict[str, Any]],
+        kwargs: dict[str, Any] | None,
         device_ids: Sequence[Union[int, torch.device]],
     ) -> Any:
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
@@ -224,10 +224,10 @@ class DataParallel(Module, Generic[T]):
 def data_parallel(
     module: Module,
     inputs: Any,
-    device_ids: Optional[Sequence[Union[int, torch.device]]] = None,
-    output_device: Optional[Union[int, torch.device]] = None,
+    device_ids: Sequence[Union[int, torch.device]] | None = None,
+    output_device: Union[int, torch.device] | None = None,
     dim: int = 0,
-    module_kwargs: Optional[Any] = None,
+    module_kwargs: Any | None = None,
 ) -> torch.Tensor:
     r"""Evaluate module(input) in parallel across the GPUs given in device_ids.
 
