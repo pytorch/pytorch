@@ -302,7 +302,7 @@ std::string getArrayRefString(const IntArrayRef s) {
 }
 
 std::string to_hex_key(float f) {
-    return fmt::format("{:a}", f);
+  return fmt::format("{:a}", f);
 }
 
 std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype, bool exclude_shape) {
