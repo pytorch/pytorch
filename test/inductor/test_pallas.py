@@ -257,6 +257,10 @@ class PallasTestsMixin:
         wrapper_block = code[start:end]
 
         self.assertIn("jax.jit", code)
+        self.assertIn("donate_argnums", code)
+        self.assertIn("input_output_aliases", wrapper_block)
+        if self.DEVICE == "cuda":
+            self.assertNotIn(".copy_(", code)
         self.assertNotIn("torch.", wrapper_block)
 
     def test_2d_tensor(self):
