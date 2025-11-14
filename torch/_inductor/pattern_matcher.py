@@ -1447,7 +1447,9 @@ def register_replacement(
         extra_check: additional check to run on match(using real shapes)
     """
     argnames_static = [*inspect.signature(search_fn).parameters.keys()]
-    scalar_workaround_keys = set(scalar_workaround.keys() if scalar_workaround else [])
+    scalar_workaround_keys = (
+        OrderedSet(scalar_workaround.keys()) if scalar_workaround else OrderedSet()
+    )
     argnames_from_example_inputs = [
         name for name in argnames_static if name not in scalar_workaround_keys
     ]
