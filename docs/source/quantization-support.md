@@ -134,6 +134,23 @@ Quantization to work with this as well.
     ObservationType
 ```
 
+## torch.ao.quantization.backend_config.utils
+```{eval-rst}
+.. currentmodule:: torch.ao.quantization.backend_config.utils
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    entry_to_pretty_str
+    pattern_to_human_readable
+    remove_boolean_dispatch_from_name
+
+```
+
 ## torch.ao.quantization.fx.custom_config
 
 This module contains a few CustomConfig classes that's used in both eager mode and FX graph mode quantization
@@ -152,6 +169,30 @@ This module contains a few CustomConfig classes that's used in both eager mode a
     PrepareCustomConfig
     ConvertCustomConfig
     StandaloneModuleConfigEntry
+```
+
+## torch.ao.quantization.fx.utils
+
+```{eval-rst}
+.. currentmodule:: torch.ao.quantization.fx.utils
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    all_node_args_except_first
+    all_node_args_have_no_tensors
+    collect_producer_nodes
+    create_getattr_from_value
+    create_node_from_old_node_preserve_meta
+    graph_module_from_producer_nodes
+    maybe_get_next_module
+    node_arg_is_bias
+    node_arg_is_weight
+    return_arg_list
 ```
 
 ## torch.ao.quantization.quantizer
@@ -253,7 +294,6 @@ regular full-precision tensor.
 .. autosummary::
     :toctree: generated
     :nosignatures:
-    :template: classtemplate.rst
 
     view
     as_strided

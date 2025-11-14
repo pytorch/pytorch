@@ -145,6 +145,7 @@ class GuardSource(enum.Enum):
     GLOBAL_UNSPECIALIZED_NN_MODULE = 13
     LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE = 14
     GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE = 15
+    TEMP_LOCAL = 16
 
     def is_fsdp_module(self) -> bool:
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
@@ -903,7 +904,7 @@ class TracingContext:
         prior = {}
         ctx = TracingContext.get()
 
-        for key in kwargs.keys():
+        for key in kwargs:
             # KeyError on invalid entry
             prior[key] = getattr(ctx, key)
         for key, val in kwargs.items():

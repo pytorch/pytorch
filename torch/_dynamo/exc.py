@@ -28,7 +28,6 @@ Error Formatting:
 
 import json
 import logging
-import os
 import re
 import textwrap
 import typing
@@ -452,44 +451,9 @@ exceptions_allowed_to_be_fallback = (
 
 
 def unimplemented_with_warning(
-    e: Exception, code: types.CodeType, msg: str
-) -> NoReturn:
-    # This function calls unimplemented internally and eventually graph breaks
-    # or falls to eager. unimplemented itself does not print any user warnings,
-    # i.e., its very silent. This helper function is intended when an error is
-    # encountered in the torch.compile stack which is worth showing as warning
-    # to the user. For example, if AOT Autograd backend fails with a fake tensor
-    # exception, its ok to fallback to eager but not silently. Here, we can use
-    # this function to log the message and the stack trace.
-    graph_break_msg = format_error_msg_verbose(e, code)
-    torch._logging.trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "dynamo_graph_break_reason",
-            "encoding": "string",
-        },
-        payload_fn=lambda: graph_break_msg,
-    )
-    graph_breaks_log.debug("%s", graph_break_msg)
-    log.warning(msg)
-    unimplemented(msg, from_exc=e)
-
-
-_NOTHING = object()
-
-
-def unimplemented(
-    msg: str, *, from_exc: Any = _NOTHING, case_name: Optional[str] = None
-) -> NoReturn:
-    assert msg != os.environ.get("BREAK", False)
-    if from_exc is not _NOTHING:
-        raise Unsupported(msg, case_name=case_name) from from_exc
-    raise Unsupported(msg, case_name=case_name)
-
-
-def unimplemented_v2_with_warning(
     e: Exception,
     code: types.CodeType,
+    *,
     gb_type: str,
     context: str,
     explanation: str,
@@ -512,7 +476,16 @@ def unimplemented_v2_with_warning(
         payload_fn=lambda: graph_break_msg,
     )
     graph_breaks_log.debug("%s", graph_break_msg)
-    unimplemented_v2(gb_type, context, explanation, hints, from_exc=e, log_warning=True)
+    _unimplemented = unimplemented
+    # to prevent a graph break registry entry
+    _unimplemented(
+        gb_type=gb_type,
+        context=context,
+        explanation=explanation,
+        hints=hints,
+        from_exc=e,
+        log_warning=True,
+    )
 
 
 def format_graph_break_message(
@@ -587,13 +560,15 @@ def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
     return None
 
 
-# TODO replace old unimplemented later
-def unimplemented_v2(
+_NOTHING = object()
+
+
+def unimplemented(
+    *,
     gb_type: str,
     context: str,
     explanation: str,
     hints: list[str],
-    *,
     from_exc: Any = _NOTHING,
     log_warning: bool = False,
 ) -> NoReturn:
@@ -817,6 +792,38 @@ def format_error_msg_verbose(
         msg += "=" * 10
 
     return msg
+
+
+def format_frame_info(code: types.CodeType) -> str:
+    return (
+        f"{getattr(code, 'co_name', '<unknown>')} "
+        f"({getattr(code, 'co_filename', '<unknown>')} "
+        f"line {getattr(code, 'co_firstlineno', 0)})"
+    )
+
+
+def format_skip_frame_message(code: Optional[types.CodeType], reason: str) -> str:
+    if code is not None:
+        frame_info = format_frame_info(code)
+        return (
+            f"torch.compile intentionally decided to skip the frame {frame_info} and fall back to eager.\n"
+            f"Reason: {reason}"
+        )
+    else:
+        return (
+            f"torch.compile intentionally decided to skip the frame and fall back to eager.\n"
+            f"Reason: {reason}"
+        )
+
+
+def format_loop_skip_frame_message(code: types.CodeType, frame_summary: str) -> str:
+    frame_info = format_frame_info(code)
+    return (
+        "Skipping frame because there is a graph break in a for/while loop\n"
+        f"torch.compile intentionally decided to skip the frame {frame_info} and fall back to eager.\n"
+        f"Reason: Skipping frame because there is a graph break in a for/while loop.\n"
+        f"{frame_summary}"
+    )
 
 
 def format_error_msg(
