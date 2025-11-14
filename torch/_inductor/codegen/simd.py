@@ -2800,7 +2800,6 @@ class SIMDScheduling(BaseScheduling):
         bad_size_additional_tiling_penalty = 1.025
         good_size_tiling_penalty = 1.005
 
-        # Calculate uncoalesced memory penalty
         total_uncoalesced = sum(coalesce_analysis.uncoalesced_addrs.values())
 
         def score_mod(t):
@@ -2827,7 +2826,6 @@ class SIMDScheduling(BaseScheduling):
             ):
                 # we always include default reduction numel == 1, dont include
                 tiling_len = len(cand.tiling) - (1 if reduction_numel == 1 else 0)
-
                 if tiling_len > get_max_tiles(default=3):
                     perf_hint_log.info(
                         "Found optimal tiling with %s tiles but torch._inductor.config.triton.max_tiles "

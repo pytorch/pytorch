@@ -604,9 +604,7 @@ def get_score(
 ) -> int:
     """
     Score addr according to its approximate size.
-    Constrained by the minimum buffer numel since the score can't be larger than the buffer.
     """
-
     # TODO - deduplicate with candidate_tilings
     var_sizes = []
     for v in addr.free_symbols:
