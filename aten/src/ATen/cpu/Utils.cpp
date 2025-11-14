@@ -132,20 +132,24 @@ uint32_t L2_cache_size() {
 
 bool is_amd_cpu() {
 #if !defined(__s390x__) && !defined(__powerpc__)
-    if (!cpuinfo_initialize()) {
-      return false;
-    }
-    const uint32_t num_cores = cpuinfo_get_cores_count();
-    if (num_cores <= 0) {
-      return false;
-    }
-    // Get first core information
-    const struct cpuinfo_core* core = cpuinfo_get_core(0);
-    if (!core) {
-      return false;
-    }
-    // Check AMD vendor support
-    return (core->vendor == cpuinfo_vendor_amd);
+    auto check_amd_vendor = []() -> bool {
+        if (!cpuinfo_initialize()) {
+          return false;
+        }
+        const uint32_t num_cores = cpuinfo_get_cores_count();
+        if (num_cores <= 0) {
+          return false;
+        }
+        // Get first core information
+        const struct cpuinfo_core* core = cpuinfo_get_core(0);
+        if (!core) {
+          return false;
+        }
+        // Check AMD vendor support
+        return (core->vendor == cpuinfo_vendor_amd);
+    };
+    static bool is_amd = check_amd_vendor();
+    return is_amd;
 #else
     return false;
 #endif
