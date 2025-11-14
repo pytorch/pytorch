@@ -33,7 +33,12 @@ class Print(HigherOrderOperator):
 
         # Add each kwarg as a keyword-only argument
         for key, value in kwargs.items():
-            schema_gen.add_arg(key, value, kw_only=True)
+            # If the value is a list of bool, explicitly add each element as a separate argument
+            if isinstance(value, list) and all(isinstance(v, bool) for v in value):
+                for i, v in enumerate(value):
+                    schema_gen.add_arg(f"{key}_{i}", v, kw_only=True)
+            else:
+                schema_gen.add_arg(key, value, kw_only=True)
 
         schema_gen.add_schema_tree_spec(format_str, **kwargs)
 
