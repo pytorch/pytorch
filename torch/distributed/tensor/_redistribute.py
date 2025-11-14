@@ -33,7 +33,7 @@ from torch.utils._debug_mode import get_active_debug_mode
 logger = logging.getLogger(__name__)
 
 # Global configuration flag to control transform_info generation strategy.
-_FORCE_MIN_COST_REDISTRIBUTION_PLAN = True
+_FORCE_MIN_COST_REDISTRIBUTION_PLAN = None
 
 
 @contextlib.contextmanager
