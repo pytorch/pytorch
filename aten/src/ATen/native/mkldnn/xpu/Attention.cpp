@@ -83,8 +83,7 @@ bool can_use_cudnn_attention(sdp::sdp_params const& params, bool debug) {
 }
 
 bool can_use_mem_efficient_attention(sdp::sdp_params const& params, bool debug) {
-  // Currently, XPU fallbacks memory efficient attention to overridable
-  return can_use_overrideable_attention(params, debug);
+  return true;
 }
 
 bool priority_order_init = false;
@@ -111,7 +110,7 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
   auto& ctx = at::globalContext();
   // use overridable linked to onednn as overridable implementation
   if (!ctx.userEnabledMathSDP() && !ctx.userEnabledOverrideableSDP() &&
-      !ctx.userEnabledFlashSDP()) {
+      !ctx.userEnabledFlashSDP() && !ctx.userEnabledMemEfficientSDP()) {
     return sdp::SDPBackend::error;
   }
 
@@ -150,8 +149,8 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
         if (ctx.userEnabledMemEfficientSDP() &&
             can_use_mem_efficient_attention(kernel_params, print_debug)) {
           TORCH_WARN_ONCE(
-              "SDPA Memory Efficient Attention backend is not supported on XPU, falling back to OVERRIDEABLE backend.");
-          return sdp::SDPBackend::overrideable;
+              "SDPA Memory Efficient Attention backend is not supported on XPU, falling back to math backend.");
+          return sdp::SDPBackend::math;
         }
         break;
       default:
@@ -172,7 +171,7 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
   TORCH_WARN("CuDNN attention kernel not used because:");
   can_use_cudnn_attention(kernel_params, print_debug);
   TORCH_WARN("Memory Efficient attention kernel not used because:");
-  can_use_mem_efficien_attention(kernel_params, print_debug);
+  can_use_mem_efficient_attention(kernel_params, print_debug);
   TORCH_CHECK(!print_debug, "No available kernel. Aborting execution.")
   return sdp::SDPBackend::error;
 }
