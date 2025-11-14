@@ -734,10 +734,7 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         """
 
         self.ensure_dll_loaded()
-        if not out.is_xpu:
-            # no need to update_workspace_size for XPU.
-            self.update_workspace_size()
-
+        self.update_workspace_size()
         args = [c_void_p(tensor.data_ptr()) for tensor in list(input_tensors) + [out]]
         autotuning_log.debug(
             "make_run_fn: self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",

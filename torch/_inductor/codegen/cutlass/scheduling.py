@@ -98,7 +98,7 @@ class CUTLASSScheduling(BaseScheduling):
 
             # use the original src_code as the key
             kernel_hash = hashlib.sha256(src_code.encode("utf-8")).hexdigest()[:8]
-            if fused_name == "fused":
+            if fused_name in ("fused", "fused_mm"):
                 # no EVT kernel, use the original kernel name
                 kernel_name = f"cutlass_{kernel_hash}"
             else:

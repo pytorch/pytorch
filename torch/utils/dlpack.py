@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import enum
@@ -58,8 +58,8 @@ The DLPack capsule shares the tensor's memory.
 def from_dlpack(
     ext_tensor: Any,
     *,
-    device: Optional[_Device] = None,
-    copy: Optional[bool] = None
+    device: _Device | None = None,
+    copy: bool | None = None
 ) -> 'torch.Tensor':
     """from_dlpack(ext_tensor) -> Tensor
 
