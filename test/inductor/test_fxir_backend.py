@@ -148,6 +148,24 @@ class FxirTestCase(InductorTestCase):
         args = [torch.randn(8, device=self.device) for _ in range(2)]
         self._compile_and_check(torch.add, args)
 
+    def test_device_type(self):
+        """
+        Test that we allocate on a device type instead of a specific index.
+        """
+        # Pass in a tensor on an indexed device.
+        device_runtime = getattr(torch, self.device)
+        indexed_device = torch.device(self.device, device_runtime.current_device())
+        args = [torch.randn(8, device=indexed_device) for _ in range(2)]
+        (gm,) = self._compile_and_check(torch.add, args)
+        (empty_strided,) = gm.graph.find_nodes(
+            op="call_function", target=torch.empty_strided
+        )
+
+        # Check that the device of the output allocation is not indexed.
+        output_device = torch.device(empty_strided.kwargs["device"])
+        self.assertIs(output_device.index, None)
+        self.assertEqual(output_device.type, indexed_device.type)
+
     def test_multiple_kernels(self):
         def foo(x, y):
             return x.sum() + y.sum()

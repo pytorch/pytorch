@@ -171,9 +171,14 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 side_effects = tx.output.side_effects
                 variable = side_effects.id_to_variable.get(id(p), None)
                 if variable and side_effects.has_pending_mutation(variable):
-                    from ..exc import Unsupported
+                    from ..exc import unimplemented
 
-                    raise Unsupported("Pending mutation on parameter")
+                    unimplemented(
+                        gb_type="optimizer: pending mutation on parameter",
+                        context=f"variable: {variable}, parameter: {p}",
+                        explanation="Pending mutations on a parameter (e.g. due to using closure) require a graph break.",
+                        hints=[],
+                    )
 
     def _set_capturable(self, tx: "InstructionTranslator") -> None:
         from . import LazyVariableTracker

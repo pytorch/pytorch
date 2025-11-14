@@ -577,7 +577,7 @@ class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
                 self.assertEqual(
                     comm_mode.get_comm_counts(),
                     {
-                        torch.ops.c10d_functional.all_gather_into_tensor: 4,
+                        torch.ops.c10d_functional.all_gather_into_tensor: self.world_size,
                     },
                 )
                 expected_cost = [
