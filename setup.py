@@ -1586,9 +1586,16 @@ def configure_extension_build() -> tuple[
 
     ext_modules: list[Extension] = []
     # packages that we want to install into site-packages and include them in wheels
-    includes = ["torch", "torch.*", "torchgen", "torchgen.*"]
+    includes = [
+        "torch",
+        "torch.*",
+        "torchgen",
+        "torchgen.*",
+        "tools",
+        "tools.flight_recorder",
+    ]
     # exclude folders that they look like Python packages but are not wanted in wheels
-    excludes = ["tools", "tools.*", "caffe2", "caffe2.*"]
+    excludes = ["caffe2", "caffe2.*"]
     if cmake_cache_vars["BUILD_FUNCTORCH"]:
         includes.extend(["functorch", "functorch.*"])
     else:

@@ -5,6 +5,15 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 from flask import Flask, render_template, request
 from jinja2 import DictLoader
+from tabulate import tabulate
+from tools.flight_recorder.components.builder import build_db
+from tools.flight_recorder.components.config_manager import JobConfig
+from tools.flight_recorder.components.types import (
+    Collective,
+    Group,
+    Membership,
+    NCCLCall,
+)
 
 from torch.distributed.debug._store import get_world_size, tcpstore_client
 
@@ -87,7 +96,9 @@ templates = {
     <a href="/">Home</a> <!--@lint-ignore-->
     <a href="/stacks">Python Stack Traces</a> <!--@lint-ignore-->
     <a href="/fr_trace">FlightRecorder</a> <!--@lint-ignore-->
+    <a href="/fr_trace_json">(JSON)</a> <!--@lint-ignore-->
     <a href="/fr_trace_nccl">FlightRecorder NCCL</a> <!--@lint-ignore-->
+    <a href="/fr_trace_nccl_json">(JSON)</a> <!--@lint-ignore-->
     <a href="/profile">torch profiler</a> <!--@lint-ignore-->
 </nav>
 
@@ -206,6 +217,22 @@ Hi
     {% endfor %}
 {% endblock %}
     """,
+    "fr_trace.html": """
+{% extends "base.html" %}
+{% block header %}
+    <h1>{% block title %}{{ title }}{% endblock %}</h1>
+{% endblock %}
+{% block content %}
+    <h2>Groups</h2>
+    {{ groups | safe }}
+    <h2>Memberships</h2>
+    {{ memberships | safe }}
+    <h2>Collectives</h2>
+    {{ collectives | safe }}
+    <h2>NCCL Calls</h2>
+    {{ ncclcalls | safe }}
+{% endblock %}
+    """,
 }
 
 app = Flask(__name__)
@@ -228,25 +255,63 @@ def _stacks_handler():
     return render_template("raw_resp.html", title="Stacks", addrs=addrs, resps=resps)
 
 
-@app.route("/fr_trace")
-def _fr_trace_handler():
+@app.route("/fr_trace_nccl")
+def _fr_trace_nccl_handler():
+    addrs, resps = fetch_all("dump_nccl_trace_json", "onlyactive=true")
+
+    config = JobConfig()
+    # pyrefly: ignore [bad-assignment]
+    args = config.parse_args(args=None)
+
+    details = {}
+    for rank, resp in enumerate(resps):
+        resp.raise_for_status()
+        dump = {
+            "rank": rank,
+            "host_name": addrs[rank],
+            **resp.json(),
+        }
+        if "entries" not in dump:
+            dump["entries"] = []
+        details[f"rank{rank}.json"] = dump
+
+    version = next(iter(details.values()))["version"]
+
+    db = build_db(details, args, version)
+
+    return render_template(
+        "fr_trace.html",
+        title="FlightRecorder",
+        groups=tabulate(db.groups, headers=Group._fields, tablefmt="html"),
+        memberships=tabulate(
+            db.memberships, headers=Membership._fields, tablefmt="html"
+        ),
+        collectives=tabulate(
+            db.collectives, headers=Collective._fields, tablefmt="html"
+        ),
+        ncclcalls=tabulate(db.ncclcalls, headers=NCCLCall._fields, tablefmt="html"),
+    )
+
+
+@app.route("/fr_trace_json")
+def _fr_trace_json_handler():
     addrs, resps = fetch_all("fr_trace_json")
 
     return render_template(
         "json_resp.html",
-        title="FlightRecorder",
+        title="FlightRecorder JSON",
         addrs=addrs,
         resps=resps,
     )
 
 
-@app.route("/fr_trace_nccl")
-def _fr_trace_nccl_handler():
+@app.route("/fr_trace_nccl_json")
+def _fr_trace_nccl_json_handler():
     addrs, resps = fetch_all("dump_nccl_trace_json", "onlyactive=true")
 
     return render_template(
         "json_resp.html",
-        title="FlightRecorder NCCL",
+        title="FlightRecorder NCCL JSON",
         addrs=addrs,
         resps=resps,
     )
