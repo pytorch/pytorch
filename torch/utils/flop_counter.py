@@ -160,12 +160,52 @@ def conv_flop(x_shape, w_shape, _bias, _stride, _padding, _dilation, transposed,
     return conv_flop_count(x_shape, w_shape, out_shape, transposed=transposed)
 
 
+def infer_out_shape(x_shape, y_shape):
+    """
+    Infer the output shape of an element-wise operation.
+
+    Args:
+        x_shape (torch.Size) | int: The shape of the first input tensor.
+        y_shape (torch.Size) | int: The shape of the second input tensor.
+
+    Returns:
+        torch.Size: The inferred output shape.
+    """
+    # Handle cases where one or both inputs are integers
+    if isinstance(x_shape, int) and isinstance(y_shape, int):
+        return 1
+    elif isinstance(x_shape, int):
+        return y_shape
+    elif isinstance(y_shape, int:)
+        return x_shape
+
+    return torch.broadcast_shapes(x_shape, y_shape)
+
+
 @register_flop_formula([aten.add, aten.sub, aten.mul, aten.div, aten.remainder, aten.add_, aten.sub_, aten.mul_, aten.div_, aten.remainder_])
 def element_wise_flop(x_shape, y_shape, *args, out_shape=None, **kwargs) -> int:
-    """Count flops for element-wise operations."""
+    """
+    Count flops for element-wise operations.
+
+    Args:
+        x_shape (torch.Size | int): The shape of the first input tensor or a scalar value.
+        y_shape (torch.Size | int): The shape of the second input tensor or a scalar value.
+        args: Additional positional arguments (not used).
+        out_shape (torch.Size, optional): The output shape if already known. Defaults to None.
+        kwargs: Additional keyword arguments (not used).
+
+    Returns:
+        int: The number of floating point operations for the element-wise operation.
+    """
     # pyrefly: ignore  # bad-argument-type
-    broadcasted_shape = torch.broadcast_shapes(x_shape, y_shape)
-    return prod(broadcasted_shape)
+    if out_shape is not None:
+        return prod(out_shape)
+    try:
+        flops = prod(infer_out_shape(x_shape, y_shape))
+        return flops
+    except Exception as e:
+        logger.error(f"Failed to infer out shape: {e}")
+    return 0
 
 
 @register_flop_formula(aten.convolution_backward)
