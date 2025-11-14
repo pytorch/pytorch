@@ -8901,8 +8901,8 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
 
     if dmajor == 9 and not torch.version.hip:
         # 1x128 x 1x128
-        scale1 = make_scale((M, K // 128))
-        scale2 = make_scale((K // 128, N))
+        scale1 = make_scale((K // 128, M)).t()
+        scale2 = make_scale((K // 128, N)).t()
         samples.append(
             SampleInput(
                 mat1,
@@ -8920,7 +8920,7 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
         # 128x128 x 1x128
         L4 = round_up(K // 128, 4)
         scale1 = make_scale((M // 128, L4)).t()
-        scale2 = make_scale((K // 128, N))
+        scale2 = make_scale((K // 128, N)).t()
         samples.append(
             SampleInput(
                 mat1,
@@ -8937,8 +8937,8 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
         )
         # 1x128 x 128x128
         L4 = round_up(K // 128, 4)
-        scale1 = make_scale((M, K // 128)).t()
-        scale2 = make_scale((N, L4)).t()
+        scale1 = make_scale((K // 128, M)).t()
+        scale2 = make_scale((N // 128, L4)).t()
         samples.append(
             SampleInput(
                 mat1,
