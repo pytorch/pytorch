@@ -172,9 +172,9 @@ ignore = [
     "SIM102", "SIM103", "SIM112", # flake8-simplify code styles
     "SIM105", # these ignores are from flake8-simplify. please fix or ignore with commented reason
     "SIM108", # SIM108 ignored because we prefer if-else-block instead of ternary expression
-    "SIM110",
+    "SIM110", # Checks for for loops that can be replaced with a builtin function, like any or all.
     "SIM114", # Combine `if` branches using logical `or` operator
-    "SIM115",
+    "SIM115", # Checks for cases where files are opened without using a context manager.
     "SIM116", # Disable Use a dictionary instead of consecutive `if` statements
     "SIM117",
     "SIM118",
@@ -184,7 +184,6 @@ ignore = [
     "TC006",
     # TODO: Remove Python-3.10 specific suppressions
     "B905",
-    "UP035",
 ]
 select = [
     "B",
@@ -261,6 +260,7 @@ select = [
     "TRY401", # verbose-log-message
     "UP",
     "YTT",
+    "S101",
 ]
 
 [tool.ruff.lint.pyupgrade]
@@ -339,6 +339,39 @@ keep-runtime-typing = true
 ]
 "tools/linter/**" = [
     "LOG015" # please fix
+]
+"benchmarks/**" = [
+    "S101"
+]
+"test/**" = [
+    "S101"
+]
+"torchgen/**" = [
+    "S101"
+]
+"torch/**" = [
+    "S101"
+]
+"tools/**" = [
+    "S101"
+]
+"setup.py" = [
+    "S101"
+]
+"functorch/**" = [
+    "S101"
+]
+"docs/**" = [
+    "S101"
+]
+"android/**" = [
+    "S101"
+]
+".github/**" = [
+    "S101"
+]
+".ci/**" = [
+    "S101"
 ]
 
 [tool.codespell]

@@ -236,9 +236,6 @@ memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
 # Enable to allow using ftz variant of exponenet instruction in triton codegen.
 use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
 
-# Enable bfloat16 atomic adds (fbcode only until upstreamed to triton)
-bfloat16_atomic_adds_enabled = True
-
 # How to organize memory under memory_planning=True:
 # - "none": do not try to pool storage, just reuse
 # - "intermediates": all non-outputs share storage, outputs each get unique storage
@@ -549,6 +546,36 @@ max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
 max_autotune_flex_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_FLEX_SEARCH_SPACE", "DEFAULT"
 ).upper()  # type: ignore[assignment]
+
+
+# Fall back to ATen for all ops by default, except those nodes that users explicitly
+# annotated with regional inductor compile. Please read torch.fx.passes.regional_inductor
+# on to explicitly annotate. This is currently only used by inductor lite mode.
+# Different from default inductor mode that fuses all nodes, this config enables an
+# opt-in mode that only fuse for user-specified nodes. The motivation is to provide
+# guaranteed numeric correctness and give full control to users.
+fallback_by_default: bool = False
+
+
+# This config allows selective decomposition of certain operators in the graph.
+# Currently the only use case is to patch the same-name config in functorch, for
+# inductor lite mode. See more details in [Note: Selective Decomposition]
+selective_decompose: bool = False
+
+
+# Use dead code elimination
+use_dce: bool = True
+
+
+# Use fx graph passes
+use_pre_grad_passes: bool = True
+use_joint_graph_passes: bool = True
+use_post_grad_passes: bool = True
+
+
+cutedsl_enable_autotuning: bool = (
+    os.environ.get("CUTEDSL_ENABLE_AUTOTUNING", "0") == "1"
+)
 
 # DEPRECATED. This setting is ignored.
 autotune_fallback_to_aten = False
@@ -1369,6 +1396,10 @@ class triton:
         default=False,
     )
 
+    # reorder nodes to minimize the number of graph partitions while
+    # not incurring large memory overhead
+    reorder_for_reducing_graph_partitions: bool = True
+
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
 
@@ -1603,6 +1634,7 @@ class aot_inductor:
     output_path = ""
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
+    debug_symbols = os.environ.get("AOT_INDUCTOR_DEBUG_SYMBOLS", "0") == "1"
 
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
     # to use which cpp compiler optimization level, default to O1
@@ -1972,8 +2004,8 @@ class rocm:
     contiguous_threshold: int = 16
 
 
-# Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental)
-cpu_backend: Literal["cpp", "triton", "halide"] = "cpp"
+# Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental) or "pallas" (experimental)
+cpu_backend: Literal["cpp", "triton", "halide", "pallas"] = "cpp"
 
 # Backend to use for CUDA codegen either
 # "triton", "halide" (experimental) or "pallas" (experimental)
