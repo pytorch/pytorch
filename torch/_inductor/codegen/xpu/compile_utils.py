@@ -33,6 +33,8 @@ def _sycl_lib_options() -> list[str]:
             # -rpath ensures the DLL can find its dependencies when loaded, even
             # if the library path is non-standard.
             extra_ldflags.extend([f"-L{path}", "-Xlinker", f"-rpath={path}"])
+
+        extra_ldflags.append("-lsycl")
     else:
         raise NotImplementedError(
             "Unsupported env, failed to find xpu libs! Currently only Linux is supported."
@@ -42,7 +44,8 @@ def _sycl_lib_options() -> list[str]:
 
 def _sycl_host_compiler_options() -> list[str]:
     return [
-        "-fPIC",
+        "-fsycl-host-compiler=gcc",
+        "-fsycl-host-compiler-options=-fPIC,-fno-strict-aliasing,-fvisibility=hidden,-Wconversion",
     ]
 
 
@@ -55,15 +58,12 @@ def _sycl_arch_as_compile_option() -> str:
 def _sycl_compiler_options() -> list[str]:
     options = [
         "-DCUTLASS_ENABLE_SYCL",
-        "-DCUTLASS_SYCL_PROFILING_ENABLED",
-        "-DSYCLCOMPAT_PROFILING_ENABLED",
         "-DSYCL_INTEL_TARGET",
         "-gline-tables-only",
         "-DCUTLASS_VERSIONS_GENERATED",
         "-O3",
         "-DNDEBUG",
-        "-std=c++20",
-        "-fPIE",
+        "-std=c++17",
         "-fPIC",
         "-fsycl",
         f"-fsycl-targets={_sycl_arch_as_compile_option()}",
@@ -92,11 +92,11 @@ def xpu_compile_command(
     sycl_host_compiler_options = _sycl_host_compiler_options()
     sycl_compiler_options = _sycl_compiler_options()
     options = (
-        ["-I" + path for path in include_paths]
-        + ["-isystem /include"]
-        + sycl_compiler_options
+        sycl_compiler_options
         + extra_args
         + sycl_host_compiler_options
+        + ["-I" + path for path in include_paths]
+        + ["-isystem /include"]
         + sycl_lib_options
     )
     src_file = " ".join(src_files)

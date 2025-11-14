@@ -997,6 +997,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             ):
                 return None
 
+        # `_procedural_name` is decorated with @functools.cached_property in cutlass, and its value is
+        # cached based on the key `self`. After we modify some attributes of
+        # `self` (e.g., layout or alignment), the `self` itself doesn’t change, so the
+        # cached value remains stale. We therefore need to clear the cached value so that
+        # `_procedural_name` can be recomputed with the updated attributes.
+        del op._procedural_name
         return op
 
     def gen_ops(self) -> "list[tuple[str, cutlass_gemm_op.GemmOperation]]":  # type: ignore[name-defined]  # noqa: F821
