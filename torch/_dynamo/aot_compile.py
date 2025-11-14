@@ -53,6 +53,7 @@ class CompileArtifacts:
     argdefs: Optional[tuple[Any, ...]]
     source_info: "SourceInfo"
     device_type: str
+    backend_name: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
 
     def check_compatibility(self) -> None:
@@ -166,7 +167,8 @@ class AOTCompiledFunction:
         state = pickle.loads(data)
         state["bytecode"] = SerializedCode.to_code_object(state["bytecode"])
         deserializer, compiled_fn_state = state["compiled_fn"]
-        state["compiled_fn"] = deserializer(compiled_fn_state)
+        with torch._inductor.config.patch(enable_autograd_for_aot=True):
+            state["compiled_fn"] = deserializer(compiled_fn_state)
         state["original_code"] = SerializedCode.to_code_object(state["original_code"])
 
         artifacts = CompileArtifacts(**state)
@@ -273,6 +275,7 @@ def aot_compile_fullgraph(
             argdefs=fn.__defaults__,
             source_info=source_info,
             device_type=device_type,
+            backend_name=getattr(backend, "compiler_name", "unknown"),
         )
         aot_compiled_fn = AOTCompiledFunction(_artifacts=artifacts)
 

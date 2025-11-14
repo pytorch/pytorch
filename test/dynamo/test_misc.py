@@ -19,6 +19,7 @@ import operator
 import os
 import pickle
 import random
+import re
 import sys
 import tempfile
 import threading
@@ -5635,6 +5636,115 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertTrue(same(res11, res12))
         self.assertTrue(same(res21, res22))
 
+    def test_replay_side_effects_config(self):
+        # Test that replay_side_effects config controls mutation replay
+        def fn(x, lst):
+            lst.append(x + 1)
+            return x * 2
+
+        x = torch.tensor([5.0])
+
+        # Test with replay enabled (default)
+        lst_with_replay = []
+        opt_fn_with_replay = torch.compile(fn, backend="eager")
+        result1 = opt_fn_with_replay(x, lst_with_replay)
+        self.assertEqual(len(lst_with_replay), 1)  # Mutation should be replayed
+        self.assertTrue(same(result1, x * 2))
+
+        torch._dynamo.reset()
+
+        # Test with replay disabled
+        lst_without_replay = []
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy="warn"
+        ):
+            opt_fn_without_replay = torch.compile(fn, backend="eager")
+            result2 = opt_fn_without_replay(x, lst_without_replay)
+            self.assertEqual(
+                len(lst_without_replay), 0
+            )  # Mutation should NOT be replayed
+            self.assertTrue(same(result2, x * 2))
+
+        torch._dynamo.reset()
+        lst_without_replay = []
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy="error"
+        ):
+            opt_fn_without_replay = torch.compile(fn, backend="eager")
+            with self.assertRaisesRegex(
+                RuntimeError,
+                re.escape(
+                    "While compiling, we found certain side effects happened in the model.forward. Here are the list of potential sources you can double check: [\"L['lst']\"]"
+                ),
+            ):
+                _ = opt_fn_without_replay(x, lst_without_replay)
+
+    def test_replay_side_effects_model_attr(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = 4
+
+            def forward(self, x):
+                return x.cos()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = 4
+                self.tensor = None
+                self.bar = Bar()
+
+            def forward(self, x):
+                self.const = 5
+                self.tensor = x.sin()
+                res = self.bar(x)
+                return x.cos() + res.sum() + self.tensor
+
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy="error"
+        ):
+            foo = Foo()
+            with self.assertRaisesRegex(
+                RuntimeError,
+                re.escape(
+                    "While compiling, we found certain side effects happened in the model.forward. Here are the list of potential sources you can double check: [\"L['self']\"]"
+                ),
+            ):
+                torch.compile(foo, fullgraph=True)(torch.randn(4, 4))
+
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy="silent"
+        ):
+            foo_v2_compile = Foo()
+            foo_v2_eager = Foo()
+            inp = torch.randn(4, 4)
+            res = torch.compile(foo_v2_compile, fullgraph=True)(torch.randn(4, 4))
+            self.assertEqual(foo_v2_compile.tensor, None)
+            self.assertEqual(foo_v2_compile.const, 4)
+            self.assertEqual(foo_v2_compile.bar.const, 4)
+            same(res, foo_v2_eager(inp))
+
+    def test_replay_side_effects_input_mut(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = 4
+                self.tensor = None
+
+            def forward(self, x):
+                x.add_(5)
+                return x.cos()
+
+        # This is ok because we actually capture the graph which
+        # has mutation. In export, we never retrace the actual
+        # gm so we won't see any mutation applied to inputs
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy="error"
+        ):
+            foo = Foo()
+            torch.compile(foo, fullgraph=True)(torch.randn(4, 4))
+
     def test_list_append_return_none(self):
         def fn(x):
             alist = []
@@ -5787,6 +5897,20 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         output = loss(input, target)
 
         self.assertTrue(torch.allclose(dynamo_output, output))
+
+    def test_repr(self):
+        class Config:
+            def __repr__(self):
+                return "Config()"
+
+        def forward(x, config):
+            return x * len(repr(config))
+
+        config = Config()
+        x = torch.randn(2, 2)
+
+        compiled = torch.compile(forward, fullgraph=True)
+        compiled(x, config)
 
     def test_nn_functional_reduction(self):
         def fn(loss, reduction):
@@ -13911,6 +14035,44 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
             compiled_program(*args)
         except Exception as e:
             self.fail(f"torch.compile failed with error: {e}")
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tensorify_track_item_symint(self):
+        def _random_resize(image: torch.Tensor):
+            image_metanet = image
+            default_patch_size = 14
+            rand_cnn_resolution = (224, 256)
+            min_nump = rand_cnn_resolution[0] // default_patch_size
+            max_nump = rand_cnn_resolution[1] // default_patch_size
+            new_nump = torch.randint(min_nump, max_nump + 1, (1,)).item()
+            torch._check(new_nump > 0)
+            torch._check(new_nump * default_patch_size > 1)
+
+            image_metanet = F.interpolate(
+                image_metanet,
+                size=(new_nump * default_patch_size, new_nump * default_patch_size),
+                mode="bilinear",
+                align_corners=True,
+            )
+            img_h_new, img_w_new = image_metanet.shape[2:]
+
+            return (img_h_new, img_w_new), image_metanet
+
+        _random_resize_compiled = torch.compile(fullgraph=True)(_random_resize)
+
+        # Test the function
+        input_tensor = torch.rand(1, 3, 224, 224)
+        (h, w), output = _random_resize_compiled(input_tensor)
+
+        # Verify output properties
+        self.assertEqual(output.shape[0], 1)
+        self.assertEqual(output.shape[1], 3)
+        self.assertEqual(output.shape[2], h)
+        self.assertEqual(output.shape[3], w)
+        self.assertTrue(h % 14 == 0)
+        self.assertTrue(w % 14 == 0)
+        self.assertTrue(224 <= h <= 256)
+        self.assertTrue(224 <= w <= 256)
 
 
 if __name__ == "__main__":

@@ -60,7 +60,7 @@ class TestSingleRankSaveLoad(TestCase):
         self.assertEqual(
             sorted(state_dict_to_save.keys()), sorted(state_dict_loaded.keys())
         )
-        for key in state_dict_to_save.keys():
+        for key in state_dict_to_save:
             self.assertTrue(
                 torch.equal(state_dict_to_save[key], state_dict_loaded[key])
             )
@@ -89,7 +89,7 @@ class TestSingleRankSaveLoad(TestCase):
         self.assertEqual(
             sorted(state_dict_to_save.keys()), sorted(state_dict_to_load.keys())
         )
-        for key in state_dict_to_save.keys():
+        for key in state_dict_to_save:
             self.assertTrue(
                 torch.equal(state_dict_to_save[key], state_dict_to_load[key])
             )
@@ -116,7 +116,7 @@ class TestSingleRankSaveLoad(TestCase):
         self.assertEqual(
             sorted(state_dict_to_save.keys()), sorted(state_dict_loaded.keys())
         )
-        for key in state_dict_to_save.keys():
+        for key in state_dict_to_save:
             self.assertTrue(
                 torch.equal(state_dict_to_save[key], state_dict_loaded[key])
             )
@@ -156,7 +156,7 @@ class TestSingleRankSaveLoad(TestCase):
         self.assertEqual(
             sorted(state_dict_to_save.keys()), sorted(state_dict_to_load.keys())
         )
-        for key in state_dict_to_save.keys():
+        for key in state_dict_to_save:
             self.assertTrue(
                 torch.equal(state_dict_to_save[key], state_dict_to_load[key])
             )
