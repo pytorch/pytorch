@@ -358,7 +358,8 @@ class NodeSplitGetter:
                     )
                     split_options[len(new_split)].add(new_split)
 
-        for total_splits in range(max_pw_split + max_red_split, 0, -1):
+        max_total_splits = max_pw_split + max_red_split
+        for curr_iter, total_splits in enumerate(range(max_total_splits, 0, -1)):
             for pw_split_len in range(total_splits, 0, -1):
                 for pw_split in self.pw_split_options[pw_split_len]:
                     for red_split in self.red_split_options[
@@ -367,9 +368,9 @@ class NodeSplitGetter:
                         if out := self.try_split(pw_split, red_split):
                             return out
 
-            add_combined_split_options(self.pw_split_options, pw_split_len)
+            add_combined_split_options(self.pw_split_options, max_pw_split - curr_iter)
             add_combined_split_options(
-                self.red_split_options, total_splits - pw_split_len
+                self.red_split_options, max_red_split - curr_iter
             )
 
         # if for whatever reason we couldn't split above, return default split
