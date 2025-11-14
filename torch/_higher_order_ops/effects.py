@@ -198,13 +198,16 @@ with_effects.fallthrough(DispatchKey.AutogradCPU)
 with_effects.fallthrough(DispatchKey.AutogradCUDA)
 
 
-def _get_schema(op, args) -> torch.FunctionSchema:
+def _get_schema(op, args, kwargs: Optional[dict] = None) -> torch.FunctionSchema:
     if isinstance(op, torch._ops.OpOverload):
         return op._schema
     elif op == call_torchbind:
         return getattr(args[0], args[1]).schema
     elif op == hop_print:
-        return op.gen_schema(args)
+        # hop_print expects (format_str, *args) as its arguments
+        format_str = args[0]
+        extra_kwargs = kwargs if kwargs is not None else {}
+        return op.gen_schema(format_str, **extra_kwargs)
     else:
         raise RuntimeError(f"Unable to get schema for op {op}")
 
@@ -277,7 +280,7 @@ def handle_effects(
             unwrapped_token, op, *unwrapped_args, **unwrapped_kwargs
         )
 
-    schema = _get_schema(op, unwrapped_args)
+    schema = _get_schema(op, unwrapped_args, unwrapped_kwargs)
     if len(schema.returns) == 0:
         assert unwrapped_outs[0] is None
         unwrapped_outs = None  # type: ignore[assignment]
