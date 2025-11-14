@@ -205,9 +205,8 @@ def _get_schema(op, args, kwargs: Optional[dict] = None) -> torch.FunctionSchema
         return getattr(args[0], args[1]).schema
     elif op == hop_print:
         # hop_print expects (format_str, *args) as its arguments
-        format_str = args[0]
-        extra_kwargs = kwargs if kwargs is not None else {}
-        return op.gen_schema(format_str, **extra_kwargs)
+        extra_kwargs = kwargs or {}
+        return op.gen_schema(*args, **extra_kwargs)
     else:
         raise RuntimeError(f"Unable to get schema for op {op}")
 
