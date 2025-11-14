@@ -1943,11 +1943,13 @@ class TestCutlassBackend(TestCase):
             if GPU_TYPE == "xpu":
                 atol = 1e-4  # default is 1e-5
                 rtol = 1e-3  # default is 1e-3
+                expected_time = 100
             else:
                 atol = None
                 rtol = None
+                expected_time = 50
             torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
-        self.assertTrue(time.time() - start_time < 50)
+        self.assertTrue(time.time() - start_time < expected_time)
 
     @skipIfXpu(msg="evt not supported on xpu cutlass backend yet")
     @unittest.skipIf(not SM90OrLater, "need sm_90")

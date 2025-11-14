@@ -3,17 +3,15 @@ from __future__ import annotations
 
 from typing import Any, Optional, TYPE_CHECKING, Union
 
-from ..scheduler import (
+from torch._inductor.scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
     FusedSchedulerNode,
     Scheduler,
     SchedulerNode,
 )
-from .cutedsl.cutedsl_scheduling import CuteDSLScheduling
-from .cutlass.scheduling import CUTLASSScheduling
-from .rocm.rocm_cpp_scheduling import ROCmCPPScheduling
-from .triton import TritonScheduling
+from ..cutlass.scheduling import CUTLASSScheduling
+from ..triton import TritonScheduling
 
 
 if TYPE_CHECKING:
@@ -30,13 +28,13 @@ if TYPE_CHECKING:
     _IntLike: TypeAlias = Union[int, Expr]
 
 
-class CombinedScheduling(BaseScheduling):
+class XPUCombinedScheduling(BaseScheduling):
     """
-    Scheduler for CUDA Kernels, which delegates calls as appropriate
-    to the CUDA-C++ and Triton Schedulers, which both work for CUDA devices
+    Scheduler for XPU Kernels, which delegates calls as appropriate
+    to the SYCL-C++ and Triton Schedulers, which both work for XPU devices
     and use a unified-wrapper for codegen.
 
-    If Scheduling code needs to be specialized for the case of mixed Triton / CUDA C++ code,
+    If Scheduling code needs to be specialized for the case of mixed Triton / SYCL C++ code,
     this would also be the place to do it.
     """
 
@@ -44,8 +42,6 @@ class CombinedScheduling(BaseScheduling):
         super().__init__(scheduler)
         self._triton_scheduling = TritonScheduling(scheduler)
         self._cutlass_scheduling = CUTLASSScheduling(scheduler)
-        self._rocm_cpp_scheduling = ROCmCPPScheduling(scheduler)
-        self._cutedsl_scheduling = CuteDSLScheduling(scheduler)
 
     def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
         return self._triton_scheduling.get_backend_features(device)
@@ -53,10 +49,6 @@ class CombinedScheduling(BaseScheduling):
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
         if self._cutlass_scheduling.is_cutlass_template(node):
             return self._cutlass_scheduling
-        if self._rocm_cpp_scheduling.is_rocm_cpp_template(node):
-            return self._rocm_cpp_scheduling
-        if self._cutedsl_scheduling.is_cutedsl_template(node):
-            return self._cutedsl_scheduling
         return self._triton_scheduling
 
     def can_fuse_vertical(
@@ -68,11 +60,6 @@ class CombinedScheduling(BaseScheduling):
             node1
         ) or self._cutlass_scheduling.is_cutlass_template(node2):
             return False
-        # CuteDSL doesn't support vertical fusion currently
-        elif self._cutedsl_scheduling.is_cutedsl_template(
-            node1
-        ) or self._cutedsl_scheduling.is_cutedsl_template(node2):
-            return False
         return self._triton_scheduling.can_fuse_vertical(node1, node2)
 
     def can_fuse_horizontal(
@@ -81,10 +68,6 @@ class CombinedScheduling(BaseScheduling):
         for node in (node1, node2):
             if self._cutlass_scheduling.is_cutlass_template(node):
                 return self._cutlass_scheduling.can_fuse_horizontal(
-                    node1, node2
-                )  # always False at the moment
-            if self._cutedsl_scheduling.is_cutedsl_template(node):
-                return self._cutedsl_scheduling.can_fuse_horizontal(
                     node1, node2
                 )  # always False at the moment
         return self._triton_scheduling.can_fuse_horizontal(node1, node2)
@@ -103,19 +86,6 @@ class CombinedScheduling(BaseScheduling):
         if self._cutlass_scheduling.is_cutlass_template(template_node):
             assert not prologue_nodes
             return self._cutlass_scheduling.codegen_template(
-                template_node, epilogue_nodes, prologue_nodes
-            )
-        elif self._rocm_cpp_scheduling.is_rocm_cpp_template(template_node):
-            assert not epilogue_nodes
-            assert not prologue_nodes
-            return self._rocm_cpp_scheduling.codegen_template(
-                template_node, epilogue_nodes, prologue_nodes
-            )
-        elif self._cutedsl_scheduling.is_cutedsl_template(template_node):
-            # TODO remove this when we add epilogue support
-            assert not epilogue_nodes
-            assert not prologue_nodes
-            return self._cutedsl_scheduling.codegen_template(
                 template_node, epilogue_nodes, prologue_nodes
             )
         else:
