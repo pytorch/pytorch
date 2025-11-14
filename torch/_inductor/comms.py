@@ -305,7 +305,7 @@ def coll_exposed_communication_time(
                 continue
         if contains_wait(snode):
             has_wait_for_collectives_found = False
-            for coll in collectives_found:
+            for _coll in collectives_found:
                 if is_corresponding_collective_wait(collective_snode, snode):
                     has_wait_for_collectives_found = True
                     break
@@ -1891,7 +1891,7 @@ def _sink_waits_iterative_internal(
                         )
                         # pyrefly: ignore[no-matching-overload]
                         -max(0, info.comm_time - info.comp_time - c_runtime)
-                        for gc, (gc_comm_time, gc_comp_time) in group_colls.items():
+                        for gc_comm_time, gc_comp_time in group_colls.values():
                             exposed_delta += max(0, gc_comm_time - gc_comp_time) - max(
                                 0, gc_comm_time - gc_comp_time + c_runtime
                             )

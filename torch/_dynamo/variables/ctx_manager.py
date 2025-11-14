@@ -22,8 +22,8 @@ import inspect
 import sys
 import warnings
 from collections.abc import Callable, Sequence, Sized
-from contextlib import ExitStack
-from typing import Any, ContextManager, Optional, TYPE_CHECKING, Union
+from contextlib import AbstractContextManager, ExitStack
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch._C
 from torch._guards import Guard
@@ -34,7 +34,7 @@ from ..bytecode_transformation import (
     create_instruction,
     create_setup_with,
 )
-from ..exc import unimplemented_v2
+from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalStateSource
 from ..utils import _get_error_on_graph_break, _set_error_on_graph_break
@@ -163,7 +163,7 @@ class ContextWrappingVariable(VariableTracker):
 class GenericContextWrappingVariable(UserDefinedObjectVariable):
     # Some methods in ContextWrappingVariable assumes the arguments are
     # python constants. Which might not always be the case here.
-    def __init__(self, cm_obj: ContextManager[Any], **kwargs: Any) -> None:
+    def __init__(self, cm_obj: AbstractContextManager[Any], **kwargs: Any) -> None:
         assert cm_obj is not None
         super().__init__(
             value=cm_obj,
@@ -1089,7 +1089,7 @@ class ProfilerContextVariable(ContextWrappingVariable):
         return "nullcontext"
 
     def reconstruct(self, cg: "PyCodegen") -> None:
-        unimplemented_v2(
+        unimplemented(
             gb_type="torch.profiler object escaped from compiled region",
             context=str(self),
             explanation="Dynamo doesn't support compiling a region that returns a torch.profiler context manager.",
@@ -1161,7 +1161,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
         ).call_function(tx, [self.tensors, self.prev_versions], {})
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        unimplemented_v2(
+        unimplemented(
             gb_type="torch.autograd._unsafe_preserve_version_counter escaped from compiled region",
             context=str(self),
             explanation=(
@@ -1376,7 +1376,7 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         return "annotate"
 
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
-        unimplemented_v2(
+        unimplemented(
             gb_type="torch.fx.traceback.annotate escaped from compiled region",
             context=str(self),
             explanation="Dynamo doesn't support graph break on torch.fx.traceback.annotate.",
@@ -1467,7 +1467,7 @@ class WithEnterFunctionVariable(VariableTracker):
             type_str = f"{self.ctx.module_name()}.{self.ctx.fn_name()}"
         except NotImplementedError:
             type_str = str(type(self.ctx))
-        unimplemented_v2(
+        unimplemented(
             gb_type="Attempted to reconstruct context manager's __enter__ method",
             context=str(self.ctx),
             explanation=f"Attempted to reconstruct context manager {type_str} while tracing `with ...:`",
