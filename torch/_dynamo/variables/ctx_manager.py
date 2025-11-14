@@ -1099,6 +1099,65 @@ class ProfilerContextVariable(ContextWrappingVariable):
         )
 
 
+class RecordFunctionVariable(ContextWrappingVariable):
+    """
+    Represents torch.profiler.record_function() and torch.autograd.profiler.record_function()
+    context managers. This captures the profiler annotations in the compiled graph.
+    """
+
+    def __init__(
+        self,
+        name: VariableTracker,
+        args: Optional[VariableTracker] = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(target_values=None, **kwargs)
+        self.name = name
+        self.args = args
+        self.record_handle: Any = None
+
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
+        # Get the actual values to pass to the profiler
+        name_value = self.name.as_python_constant()
+        args_value = self.args.as_python_constant() if self.args is not None else None
+
+        # Call the profiler op eagerly and emit it into the graph
+        # This runs during compilation but also adds the op to the traced graph
+        self.record_handle = torch.ops.profiler._record_function_enter_new(
+            name_value, args_value
+        )
+
+        # Add the profiler enter op to the graph
+        tx.output.create_node(
+            "call_function",
+            torch.ops.profiler._record_function_enter_new,
+            (name_value, args_value),
+            {},
+        )
+
+        return self
+
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
+        # Call the profiler exit op eagerly
+        if self.record_handle is not None:
+            torch.ops.profiler._record_function_exit._RecordFunction(self.record_handle)
+
+        # Add the profiler exit op to the graph
+        # Note: We can't pass the handle through the graph since it's a ScriptObject,
+        # so the exit call in the graph won't actually work. This is a limitation.
+        # For now, we'll just emit the enter call to mark the region.
+
+        return variables.ConstantVariable.create(None)
+
+    def module_name(self) -> str:
+        return "torch.profiler"
+
+    def fn_name(self) -> str:
+        return "record_function"
+
+
 class PreserveVersionContextVariable(ContextWrappingVariable):
     """
     Wraps torch.autograd._unsafe_preserve_version_counter

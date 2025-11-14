@@ -411,12 +411,31 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             # pyrefly: ignore [bad-argument-type]
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
+            torch.profiler.record_function,
+            torch.autograd.profiler.record_function,
+        ):
+            from .ctx_manager import RecordFunctionVariable
+
+            # Extract the name argument from args
+            name_var = args[0] if len(args) > 0 else kwargs.get("name")
+            args_var = args[1] if len(args) > 1 else kwargs.get("args")
+
+            if name_var is None:
+                unimplemented_v2(
+                    gb_type="torch.profiler.record_function requires a name argument",
+                    context="",
+                    explanation="torch.profiler.record_function requires a name argument",
+                    hints=[
+                        *graph_break_hints.USER_ERROR,
+                    ],
+                )
+
+            return RecordFunctionVariable(name=name_var, args=args_var)
+        elif self.value in (
             # NOTE any class added here must align with the semantic
             # requirements of `ProfilerContextVariable`.
             torch.profiler.profile,
-            torch.profiler.record_function,
             torch.autograd.profiler.profile,
-            torch.autograd.profiler.record_function,
         ):
             warning_once(log, "Profiler function %s will be ignored", self.value)
             return ProfilerContextVariable()
