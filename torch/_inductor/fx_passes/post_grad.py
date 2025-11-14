@@ -365,10 +365,9 @@ def prepare_softmax_extra_check(match):
     """
     We only have triton online softmax kernels currently.
     """
-    return config.online_softmax and (
-        match.kwargs["x"].meta["val"].device.type in ["cuda", "xpu"]
-        and "triton" in [config.cuda_backend, config.xpu_backend]
-    )
+    from torch._inductor.utils import get_current_backend
+    device_type = match.kwargs["x"].meta["val"].device.type
+    return config.online_softmax and device_type in ("cuda", "xpu") and "triton" == get_current_backend(device_type)
 
 
 def decompose_map_to_while_loop(gm: torch.fx.GraphModule):
