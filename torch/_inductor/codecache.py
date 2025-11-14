@@ -1665,7 +1665,7 @@ class CudaKernelParamCache:
 
         if config.aot_inductor.emit_multi_arch_kernel:
             bin_type_to_ext = {"cubin": ".fatbin", "spv": ".spv", "hsaco": ".hsaco"}
-            assert bin_type in bin_type_to_ext.keys(), (
+            assert bin_type in bin_type_to_ext, (
                 "multi_arch_kernel_binary only supported in CUDA/XPU/ROCm"
             )
             base_path, _ = os.path.splitext(bin_path)
@@ -2450,6 +2450,26 @@ end
                 aot_mode=graph.aot_mode,
                 use_relative_path=use_relative_path,
             )
+
+            if gpu_kernels_o and device_type == "xpu":
+                so_build_options = CppTorchDeviceOptions(
+                    compiler="icpx",
+                    vec_isa=picked_vec_isa,
+                    device_type=device_type,
+                    aot_mode=graph.aot_mode,
+                    use_relative_path=use_relative_path,
+                    extra_flags=[
+                        "-fsycl",
+                        "-fsycl-targets=intel_gpu_pvc",
+                        "-Xspirv-translator",
+                        (
+                            "-spirv-ext="
+                            "+SPV_INTEL_split_barrier,"
+                            "+SPV_INTEL_2d_block_io,"
+                            "+SPV_INTEL_subgroup_matrix_multiply_accumulate"
+                        ),
+                    ],
+                )
 
             obj_srcs = [wrapper_o, kernel_o, consts_o, *gpu_kernels_o, *cubins_o]
             so_builder = CppBuilder(
@@ -3587,7 +3607,7 @@ def _worker_task_halide(lockfile: str, jobs: list[partial[Any]]) -> None:
             cmd: list[Any]
             python, script, *cmd = getattr(e, "cmd", ("", "", ""))
             if os.path.basename(python).startswith("python"):
-                code = open(script).read()
+                code = Path(script).read_text()
                 main = "    hl.main()"
                 assert code.count(main) == 1
 
@@ -3739,11 +3759,13 @@ def cutlass_key() -> bytes:
     Note: OSS and fbcode will have different keys.
     """
     if config.is_fbcode():
-        with importlib.resources.path(
-            "cutlass_library", "src_hash.txt"
-        ) as resource_path:
-            with open(resource_path) as resource_file:
-                return resource_file.read().encode()
+        with (
+            importlib.resources.path(
+                "cutlass_library", "src_hash.txt"
+            ) as resource_path,
+            open(resource_path) as resource_file,
+        ):
+            return resource_file.read().encode()
 
     combined_hash = hashlib.sha256()
     build_code_hash([config.cutlass.cutlass_dir], "", combined_hash)
@@ -3853,11 +3875,11 @@ class CUTLASSCodeCache:
     _SOURCE_CODE_SUFFIX: str = ""
     _BACKEND: str = ""
 
-    @staticmethod
-    def cache_clear() -> None:
-        CUTLASSCodeCache.cache.clear()
-        CUTLASSCodeCache.aot_kernels_o.clear()
-        CUTLASSCodeCache.write.cache_clear()
+    @classmethod
+    def cache_clear(cls) -> None:
+        cls.cache.clear()
+        cls.aot_kernels_o.clear()
+        cls.write.cache_clear()
 
     @staticmethod
     @lru_cache(maxsize=4)
@@ -3981,7 +4003,7 @@ class CUTLASSCodeCache:
                         binary_remote_cache.put(
                             error_path, config.cutlass.binary_remote_cache_force_write
                         )
-                    cls.cache[key_with_ext] = CUTLASSCodeCache.CacheEntry(
+                    cls.cache[key_with_ext] = cls.CacheEntry(
                         input_path, output_path, error_json
                     )
                     raise exc.CUDACompileError(cmd_parts, error_output)
@@ -4050,9 +4072,7 @@ class CUTLASSCodeCache:
                     binary_remote_cache.put(
                         output_path, config.cutlass.binary_remote_cache_force_write
                     )
-                cls.cache[key_with_ext] = CUTLASSCodeCache.CacheEntry(
-                    input_path, output_path, None
-                )
+                cls.cache[key_with_ext] = cls.CacheEntry(input_path, output_path, None)
 
         cache_entry: CUTLASSCodeCache.CacheEntry = cls.cache[key_with_ext]
         if cache_entry.error_json is not None:
@@ -4091,9 +4111,7 @@ class CUTLASSCodeCache:
         binary_remote_cache: Any = None,
     ) -> None:
         error_json = json.dumps([cmd_parts, error_str])
-        cls.cache[key_with_ext] = CUTLASSCodeCache.CacheEntry(
-            input_path, output_path, error_json
-        )
+        cls.cache[key_with_ext] = cls.CacheEntry(input_path, output_path, error_json)
         error_path = binary_error_path(output_path)
         with open(error_path, "w", encoding="utf-8") as fh:
             fh.write(error_json)
