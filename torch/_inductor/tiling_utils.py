@@ -348,7 +348,7 @@ class NodeSplitGetter:
         max_pw_split = max(self.pw_split_options.keys())
         max_red_split = max(self.red_split_options.keys())
 
-        def add_combined_split_options(split_options, curr_length):
+        def add_combined_split_options(split_options: dict[int, OrderedSet[Split]], curr_length: int) -> None:
             for split in split_options[curr_length]:
                 for i in range(len(split) - 1):
                     new_split = tuple(
