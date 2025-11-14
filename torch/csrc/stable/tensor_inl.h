@@ -37,7 +37,7 @@ inline Device Tensor::device() const {
 // aten/src/ATen/templates/TensorMethods.cpp
 #define DEFINE_DATA_PTR_CAST(T, name, PRED)               \
   template <>                                             \
-  T* Tensor::mutable_data_ptr() const {                   \
+  inline T* Tensor::mutable_data_ptr() const {            \
     auto stype = scalar_type();                           \
     STD_TORCH_CHECK(                                      \
         PRED(stype, torch::headeronly::ScalarType::name), \
@@ -46,7 +46,7 @@ inline Device Tensor::device() const {
     return static_cast<T*>(mutable_data_ptr());           \
   }                                                       \
   template <>                                             \
-  const T* Tensor::const_data_ptr() const {               \
+  inline const T* Tensor::const_data_ptr() const {        \
     auto stype = scalar_type();                           \
     STD_TORCH_CHECK(                                      \
         PRED(stype, torch::headeronly::ScalarType::name), \
