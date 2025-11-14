@@ -51,6 +51,8 @@ from torch._inductor.utils import (
 )
 from torch.autograd.profiler import record_function
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._python_dispatch import is_in_torch_dispatch_mode
+from torch._higher_order_ops.wrap import inductor_compiled_code
 
 from . import config
 from .runtime.autotune_cache import AutotuneCacheBundler
@@ -437,6 +439,7 @@ class CompiledFxGraph(OutputCode):
 
     _boxed_call: Optional[bool] = None
     _triton_bundle: Optional[TritonBundle] = None
+    _wrap_compiled_regions: bool = False
 
     def __init__(
         self,
@@ -581,6 +584,10 @@ class CompiledFxGraph(OutputCode):
         # aot autograd needs to know to pass in inputs as a list
         self._boxed_call = True
 
+        # Store whether to wrap compiled regions in inductor_compiled_code HOP
+        # This is set at compile time to avoid runtime overhead
+        self._wrap_compiled_regions = config.wrap_inductor_compiled_regions
+
     def __del__(self) -> None:
         if self.compiled_fn_runner is not None:
             # For torch._inductor.config.graph_partition = True,
@@ -711,6 +718,18 @@ class CompiledFxGraph(OutputCode):
             inputs_to_check,
             self.mutated_input_idxs,
         )
+
+        # Apply inductor_compiled_code HOP wrapper if configured
+        # This is done in post_compile to ensure it works with cached artifacts
+        if self._wrap_compiled_regions and self.current_callable is not None:
+            from torch._higher_order_ops.wrap import inductor_compiled_code
+
+            original_callable = self.current_callable
+
+            def wrapped_callable(inputs):
+                return inductor_compiled_code(original_callable, inputs)
+
+            self.current_callable = wrapped_callable
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         self._triton_bundle = triton_bundle
