@@ -122,6 +122,16 @@ typedef struct {
 
 namespace torch::dynamo {
 
+thread_local bool tls_is_in_mode_without_ignore_compile_internals = false;
+
+void set_is_in_mode_without_ignore_compile_internals(bool value) {
+  tls_is_in_mode_without_ignore_compile_internals = value;
+}
+
+bool get_is_in_mode_without_ignore_compile_internals() {
+  return tls_is_in_mode_without_ignore_compile_internals;
+}
+
 // Macro to skip addition of duplicate guards like EQUALS_MATCH
 #define SKIP_IF_GUARD_ALREADY_PRESENT(name) \
   if (self.is_leaf_guard_present(name)) {   \
@@ -7830,6 +7840,11 @@ PyObject* torch_c_dynamo_guards_init() {
       "Failed to install dict_recursive_tag_watch_callback");
 
 #endif
+
+  py_m.def(
+      "set_is_in_mode_without_ignore_compile_internals",
+      &set_is_in_mode_without_ignore_compile_internals,
+      "Set the thread-local cache for whether we're in a mode with ignore_compile_internals=False");
 
   return m;
 }

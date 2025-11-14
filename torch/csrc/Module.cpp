@@ -2918,7 +2918,6 @@ static void pytorch_duplicate_guard() {
     abort();
   }
   initialized = 1;
-  ;
 }
 
 struct call_duplicate_guard {
