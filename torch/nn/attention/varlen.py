@@ -14,13 +14,25 @@ import torch
 
 log = logging.getLogger(__name__)
 
-__all__ = ["varlen_attn", "AuxRequest"]
+__all__ = ["varlen_attn", "AuxRequest", "VarlenMetadata"]
 
 
 @lru_cache(maxsize=8)
 def _should_use_cudnn(device_index: int) -> bool:
     """Cache device capability check to avoid repeated CUDA calls."""
     return False
+
+
+class VarlenMetadata(NamedTuple):
+    """
+    Cumulative sequence positions for queries and keys/values.
+
+    """
+
+    cu_seq_q: torch.Tensor
+    cu_seq_k: torch.Tensor
+    max_q: int
+    max_k: int
 
 
 class AuxRequest(NamedTuple):
