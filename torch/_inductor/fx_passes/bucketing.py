@@ -463,11 +463,11 @@ def all_reduce_merge_fn_to_trace(
 
 # List of all torch dtypes for serialization through custom ops
 # TODO: custom ops support list[dtype] input
-_ALL_DTYPES = [
+_ALL_DTYPES = tuple([
     getattr(torch, attr)
     for attr in dir(torch)
     if isinstance(getattr(torch, attr), torch.dtype)
-]
+])
 
 
 @torch.library.custom_op("bucketing::_pre_bucket_all_gather", mutates_args={})
