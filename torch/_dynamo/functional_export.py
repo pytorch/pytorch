@@ -488,7 +488,6 @@ def pytreeify(
     """
     assert out.backend_input is not None
     backend_input = out.backend_input
-    backend = out.backend_input.graph_module
 
     root = None
     if isinstance(mod, torch.nn.Module):
@@ -519,14 +518,11 @@ def pytreeify(
                 self.gm_inputs = example_inputs
                 raise Yield
 
-            backend_input.graph_module = backend_dummy  # type: ignore[assignment]
             try:
-                out.forward_callable()(*args, **kwargs)
+                out.forward_callable(compiled_fn=backend_dummy)(*args, **kwargs)
             except Yield:
                 assert self.gm_inputs is not None
                 return self.gm_inputs
-            finally:
-                backend_input.graph_module = backend
             raise RuntimeError
 
     fake_mode = torch._dynamo.utils.detect_fake_mode(flat_real_args)
@@ -558,11 +554,7 @@ def pytreeify(
                     for i in range(self.num_outputs)
                 ]
 
-            backend_input.graph_module = backend_dummy  # type: ignore[assignment]
-            try:
-                results = out.forward_callable()(*args, **kwargs)
-            finally:
-                backend_input.graph_module = backend
+            results = out.forward_callable(compiled_fn=backend_dummy)(*args, **kwargs)
             ret, self.out_spec = pytree.tree_flatten(results)
             return ret
 
