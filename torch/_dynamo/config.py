@@ -445,7 +445,7 @@ use_numpy_random_stream = False
 enable_cpp_guard_manager = True
 
 # Use C++ guard manager for symbolic shapes
-enable_cpp_symbolic_shape_guards = not is_fbcode()
+enable_cpp_symbolic_shape_guards = False
 
 # Enable tracing through contextlib.contextmanager
 enable_trace_contextlib = True
@@ -738,6 +738,12 @@ enable_aot_compile = False
 
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
+
+# Experimental: If True, graph module will register fx metadata during recompile()
+enrich_profiler_metadata: bool = Config(  # type: ignore[var-annotated]
+    default=False,
+    env_name_default="TORCH_ENRICH_RPOFILER_STACK_TRACE",
+)
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

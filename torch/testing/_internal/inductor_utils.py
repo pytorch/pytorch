@@ -84,6 +84,7 @@ HAS_XPU_AND_TRITON = torch.xpu.is_available() and HAS_TRITON
 HAS_MPS = torch.mps.is_available()
 
 HAS_GPU = HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON
+HAS_GPU_AND_TRITON = HAS_GPU
 
 GPU_TYPE = get_gpu_type()
 
@@ -190,7 +191,7 @@ IS_A100 = LazyVal(lambda: HAS_CUDA_AND_TRITON and get_gpu_shared_memory() == 166
 
 IS_H100 = LazyVal(lambda: HAS_CUDA_AND_TRITON and get_gpu_shared_memory() == 232448)
 
-IS_BIG_GPU = LazyVal(lambda: HAS_CUDA_AND_TRITON and is_big_gpu())
+IS_BIG_GPU = LazyVal(lambda: HAS_GPU_AND_TRITON and is_big_gpu())
 
 
 def dummy_graph() -> GraphLowering:

@@ -10,9 +10,8 @@ from numpy.testing import assert_array_equal
 import torch
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.tensor import (
-    DeviceMesh,
     distribute_tensor,
     DTensor,
     Partial,
@@ -554,6 +553,40 @@ class DTensorTest(DTensorTestBase):
         reloaded_st = torch.load(buffer, weights_only=True)
         self.assertEqual(sharded_tensor, reloaded_st)
 
+    @with_comms
+    def test_dtensor_save_load_with_mesh_backend_decouple(self):
+        import io
+
+        # Turn on gate for not saving PG names for device mesh when it comes to torch.save.
+        DeviceMesh.decouple_backend_at_save = True
+        device_mesh = self.build_device_mesh()
+        placements = [Shard(0)]
+        local_tensor = torch.randn(3, 3)
+        sharded_tensor = DTensor.from_local(local_tensor, device_mesh, placements)
+        buffer = io.BytesIO()
+        torch.save(sharded_tensor, buffer)
+        buffer.seek(0)
+        reloaded_st = torch.load(buffer, weights_only=False)
+        self.assertFalse(hasattr(reloaded_st._spec.mesh, "_dim_group_names"))
+        self.assertNotEqual(sharded_tensor._spec.mesh, reloaded_st._spec.mesh)
+        self.assertEqual(
+            sharded_tensor.to_local().tolist(), reloaded_st.to_local().tolist()
+        )
+        self.assertEqual(sharded_tensor._spec.placements, reloaded_st._spec.placements)
+        reloaded_st._spec.mesh = device_mesh
+        self.assertEqual(sharded_tensor, reloaded_st)
+        buffer.seek(0)
+        reloaded_st = torch.load(buffer, weights_only=True)
+        self.assertFalse(hasattr(reloaded_st._spec.mesh, "_dim_group_names"))
+        self.assertNotEqual(sharded_tensor._spec.mesh, reloaded_st._spec.mesh)
+        self.assertEqual(
+            sharded_tensor.to_local().tolist(), reloaded_st.to_local().tolist()
+        )
+        self.assertEqual(sharded_tensor._spec.placements, reloaded_st._spec.placements)
+        reloaded_st._spec.mesh = device_mesh
+        self.assertEqual(sharded_tensor, reloaded_st)
+        DeviceMesh.decouple_backend_at_save = False
+
     @skipIfHpu
     @with_comms
     @unittest.skipIf(
@@ -641,6 +674,7 @@ DTensorTestWithLocalTensor = create_local_tensor_test_class(
         # integration
         "test_dtensor_save_load",
         "test_dtensor_save_load_import",
+        "test_dtensor_save_load_with_mesh_backend_decouple",
     ],
 )
 
@@ -1018,6 +1052,28 @@ class DTensorMeshTest(DTensorTestBase):
             DTensor.from_local(local_tensor, device_mesh, placements, run_check=False)
         except ValueError:
             self.fail("Unexpected ValueError raised with run_check=False")
+
+    @with_comms
+    def test_as_strided_identity(self):
+        # Test calling as_strided with the same size/stride/offset as input tensor
+        # This should be a no-op but currently fails
+        device_mesh = self.build_device_mesh()
+        placements = [Shard(0)]
+        local_tensor = torch.randn(3, 4, device=self.device_type)
+        dtensor = DTensor.from_local(local_tensor, device_mesh, placements)
+
+        # Get the current size, stride, and storage_offset
+        size = dtensor.size()
+        stride = dtensor.stride()
+        storage_offset = dtensor.storage_offset()
+
+        # Call as_strided with the exact same parameters
+        result = dtensor.as_strided(size, stride, storage_offset)
+
+        # The result should be identical to the input
+        self.assertEqual(result.size(), dtensor.size())
+        self.assertEqual(result.stride(), dtensor.stride())
+        self.assertEqual(result.to_local(), dtensor.to_local())
 
 
 DTensorMeshTestWithLocalTensor = create_local_tensor_test_class(

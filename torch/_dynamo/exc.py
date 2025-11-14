@@ -273,7 +273,8 @@ class RecompileLimitExceeded(Unsupported):
 
 # debug exception thrown when tracing torch._dynamo.step_unsupported()
 class StepUnsupported(TorchDynamoException):
-    pass
+    def __init__(self) -> None:
+        self.real_stack = torch._guards.TracingContext.extract_stack()
 
 
 class UnsafeScriptObjectError(TorchDynamoException):

@@ -6,7 +6,7 @@ import threading
 import warnings
 from collections.abc import Iterator
 from itertools import zip_longest
-from typing import Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.distributed import is_available
@@ -130,24 +130,39 @@ else:
         This class is used to store the shared state of the DeviceMesh.
         """
 
+        # Flag to specify device save without backend info. This is a temporary variable
+        # We will remove this flag once we fully deprecate the behavior of save a device mesh with pg names.
+        _device_type: str
         _rank_map: torch.Tensor
         _root_mesh: Optional["DeviceMesh"]
         _backend_cache: dict[tuple[_MeshLayout, Optional[C10dBackend.Options]], str]
 
         def __init__(
-            self, rank_map: torch.Tensor, root_mesh: Optional["DeviceMesh"] = None
+            self,
+            device_type: str,
+            rank_map: torch.Tensor,
+            root_mesh: Optional["DeviceMesh"] = None,
         ) -> None:
+            self._device_type = device_type
             self._rank_map = rank_map
             self._root_mesh = root_mesh
             self._backend_cache: dict[
                 tuple[_MeshLayout, Optional[C10dBackend.Options]], str
             ] = {}
+            self.pg_cache_enabled = DeviceMesh.decouple_backend_at_save
+
+        def __post_init__(self):
+            assert self._rank_map.ndim == 1, "The rank map must be 1-dimensional"
+            assert self._rank_map.is_contiguous(), "The rank map must be contiguous"
 
         def get_rank_map(self) -> torch.Tensor:
             return self._rank_map
 
         def get_root_mesh(self) -> Optional["DeviceMesh"]:
             return self._root_mesh
+
+        def get_device_type(self) -> str:
+            return self._device_type
 
         def update_backend_cache(
             self,
@@ -339,7 +354,7 @@ else:
             >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
         """
 
-        _device_type: str
+        decouple_backend_at_save = False
         _mesh_dim_names: Optional[tuple[str, ...]]
         _layout: _MeshLayout
         # Record flatten mesh name to its flattened mesh in root mesh.
@@ -372,7 +387,9 @@ else:
                 )
                 _layout = _MeshLayout(mesh_tensor.size(), mesh_tensor.stride())
                 rank_map = mesh_tensor.flatten()
-                self._shared_state = _SharedState(rank_map, self)
+                self._shared_state = _SharedState(
+                    device_type=device_type, rank_map=rank_map, root_mesh=self
+                )
             else:
                 if _layout is None or _shared_state is None:
                     raise TypeError(
@@ -383,20 +400,19 @@ else:
                 if self._shared_state.get_root_mesh() is None:
                     self._shared_state._root_mesh = self
 
-            assert _layout.check_non_overlap(), (
-                "Please use a non-overlapping layout when creating a DeviceMesh."
-            )
-            assert rank_map.ndim == 1, "The rank map must be 1-dimensional"
-            assert rank_map.is_contiguous(), "The rank map must be contiguous"
-            assert rank_map.numel() >= _layout.cosize(), (
-                f"The rank map contains {rank_map.numel()} element, "
-                f"which isn't large enough for layout {_layout}"
-            )
+            if not _layout.check_non_overlap():
+                raise AssertionError(
+                    "Please use a non-overlapping layout when creating a DeviceMesh."
+                )
 
-            self._device_type = device_type
+            # Internal bookkeeping for the device mesh.
             self._layout = _layout
-            self._mesh_dim_names = tuple(mesh_dim_names) if mesh_dim_names else None
+            assert self._shared_state.get_rank_map().numel() >= self._layout.cosize(), (
+                f"The rank map contains {rank_map.numel()} element, "
+                f"which isn't large enough for layout {self._layout}"
+            )
 
+            self._mesh_dim_names = tuple(mesh_dim_names) if mesh_dim_names else None
             if backend_override is None:
                 backend_override = ((None, None),) * len(self._layout)
             elif len(backend_override) != len(self._layout):
@@ -405,9 +421,21 @@ else:
                     f"but got {len(backend_override)} and {len(self._layout)}."
                 )
 
+            # Because we still need to support slicing of flattened dim from root mesh, so we don't check stride here.
+            if self._layout.numel() != self.mesh.numel():
+                raise AssertionError(
+                    "Please use a valid layout when creating a DeviceMesh."
+                    f"The layout {self._layout} is not consistent with the mesh size {self.mesh.size()}."
+                )
+
+            # private field to pre-generate DeviceMesh's hash
+            self._flatten_rank_map = tuple(self._shared_state.get_rank_map().tolist())
+            self._thread_id = None
+            # Initialize instance-specific flatten mapping
+            self._flatten_mapping = {}
+
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
-            self._thread_id = None
             if device_type != "xla":
                 # always try to create default (world) pg, even if it is not initialized
                 # already. The world pg is used for device mesh identity (rank) on each
@@ -429,20 +457,18 @@ else:
 
                 # calculate the coordinates of the current global rank on the mesh
                 rank_coords = (self.mesh == _rank).nonzero()
-                assert rank_coords.size(0) in (0, 1)
+                if rank_coords.size(0) not in (0, 1):
+                    raise AssertionError(
+                        f"rank_coords.size(0) must be 0 or 1, got {rank_coords.size(0)}"
+                    )
                 self._coordinate_on_dim: Optional[list[int]] = (
                     rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
                 )
 
-            # private field to pre-generate DeviceMesh's hash
-            self._flatten_rank_map = tuple(rank_map.tolist())
-            # Initialize instance-specific flatten mapping
-            self._flatten_mapping = {}
-
         @property
         def device_type(self) -> str:
             """Returns the device type of the mesh."""
-            return self._device_type
+            return self._shared_state.get_device_type()
 
         @property
         def mesh(self) -> torch.Tensor:
@@ -479,7 +505,7 @@ else:
 
             # ONLY set the device if the current device is not initialized, if user already
             # set the device before DeviceMesh init, we respect the user's choice.
-            device_handle = _get_device_handle(self._device_type)
+            device_handle = _get_device_handle(self._shared_state.get_device_type())
             if device_handle and not device_handle.is_initialized():
                 # auto set the cuda/cuda-like device only if user has not set it, if there's LOCAL_RANK
                 # env variable from launchers, we use it to set the device.
@@ -509,7 +535,7 @@ else:
                     ):
                         raise RuntimeError(
                             f"DeviceMesh only support homogeneous hardware, but found "
-                            f"{world_size} ranks and {num_devices_per_host} {self._device_type} devices!"
+                            f"{world_size} ranks and {num_devices_per_host} {self._shared_state.get_device_type()} devices!"
                         )
                     device_handle.set_device(get_rank() % num_devices_per_host)
 
@@ -547,9 +573,9 @@ else:
             if not self._hash:
                 self._hash = hash(
                     (
-                        self._flatten_rank_map,
+                        self._get_universe_id(),
                         self._layout,
-                        self._device_type,
+                        self._shared_state.get_device_type(),
                         self._mesh_dim_names,
                         self._thread_id,
                     )
@@ -562,9 +588,10 @@ else:
             if not isinstance(other, DeviceMesh):
                 return False
             return (
-                self._flatten_rank_map == other._flatten_rank_map
+                self._get_universe_id() == other._get_universe_id()
                 and self._layout == other._layout
-                and self._device_type == other._device_type
+                and self._shared_state.get_device_type()
+                == other._shared_state.get_device_type()
                 and self._mesh_dim_names == other._mesh_dim_names
                 and self._thread_id == other._thread_id
             )
@@ -679,7 +706,10 @@ else:
                     if isinstance(mesh_dim, str)
                     else mesh_dim
                 )
-                assert isinstance(mesh_dim, int)
+                if not isinstance(mesh_dim, int):
+                    raise AssertionError(
+                        f"mesh_dim must be an int, got {type(mesh_dim)}"
+                    )
                 return not_none(_resolve_process_group(self._dim_group_names[mesh_dim]))
 
         def get_all_groups(self) -> list[ProcessGroup]:
@@ -716,7 +746,7 @@ else:
                         ]
                     )
             res_submesh = DeviceMesh(
-                self._device_type,
+                self._shared_state.get_device_type(),
                 _layout=layout,
                 mesh_dim_names=submesh_dim_names,
                 _init_backend=False,
@@ -765,7 +795,7 @@ else:
                     )
 
             res_flattened_mesh = DeviceMesh(
-                root_mesh._device_type,
+                root_mesh._shared_state.get_device_type(),
                 _layout=flattened_mesh_layout,
                 mesh_dim_names=(mesh_dim_name,),
                 backend_override=(backend_override,),
@@ -784,9 +814,8 @@ else:
             root_mesh = self._get_root_mesh()
             child_mesh_dim_names = self._mesh_dim_names
             if root_mesh and child_mesh_dim_names:
-                assert len(child_mesh_dim_names) == 1, (
-                    "The submesh can only be a 1D mesh."
-                )
+                if len(child_mesh_dim_names) != 1:
+                    raise AssertionError("The submesh can only be a 1D mesh.")
                 child_mesh_dim_name = child_mesh_dim_names[0]
                 return root_mesh._get_mesh_dim_by_name(child_mesh_dim_name)
             return None
@@ -812,12 +841,6 @@ else:
             """
             slice_from_root = True
             if self != self._get_root_mesh():
-                warnings.warn(
-                    "You are attempting to slice a submesh from another submesh. While we support this operation, "
-                    "it is users' responsibility to ensure that the submesh is consistently sliced across all ranks. "
-                    "If not, this may result in some ranks receiving the submesh while others encounter errors.",
-                    stacklevel=2,
-                )
                 slice_from_root = False
 
             # The slice mesh_dim_names should consist either the current device_mesh's mesh_dim_names
@@ -905,7 +928,7 @@ else:
             res_submeshes = []
             for mesh_1d in pg_ranks_by_dim:
                 submesh = DeviceMesh(
-                    self._device_type,
+                    self._shared_state.get_device_type(),
                     mesh_1d,
                     mesh_dim_names=(mesh_dim_name,),
                     _init_backend=False,
@@ -1071,10 +1094,17 @@ else:
                 mesh_dim = 0
 
             mesh_dim_group = not_none(self.get_group(mesh_dim))
-            assert isinstance(mesh_dim_group, ProcessGroup), (
-                "We expect ProcessGroup before calling `get_rank`!"
-            )
+            if not isinstance(mesh_dim_group, ProcessGroup):
+                raise AssertionError(
+                    "We expect ProcessGroup before calling `get_rank`!"
+                )
             return not_none(get_rank(mesh_dim_group))
+
+        def _get_universe_id(self) -> Union[tuple[int, ...], int]:
+            if self.decouple_backend_at_save:
+                return id(self._shared_state.get_rank_map())
+            else:
+                return self._flatten_rank_map
 
         def get_coordinate(self) -> Optional[list[int]]:
             """
@@ -1235,7 +1265,7 @@ else:
             concat_sizes: list[IntTuple] = []
             concat_strides: list[IntTuple] = []
             concat_dim_group_name: list[str] = []
-            flatten_rank_map = device_mesh_list[0]._flatten_rank_map
+            mesh_universe_id = device_mesh_list[0]._get_universe_id()
             for dm in device_mesh_list:
                 for i in range(len(dm._layout)):
                     concat_sizes.append(dm._layout[i].sizes)
@@ -1244,7 +1274,7 @@ else:
                 concat_dim_group_name.extend(not_none(dm._dim_group_names))
                 # Concatenate device mesh having different root mesh tensors are meaningless
                 # because the concatenated indices should be indexed by the same root mesh tensor.
-                if dm._flatten_rank_map != flatten_rank_map:
+                if dm._get_universe_id() != mesh_universe_id:
                     raise RuntimeError(
                         "Cannot concatenate DeviceMeshes derived from different device meshs"
                     )
@@ -1262,6 +1292,102 @@ else:
             )
             res_mesh._dim_group_names = concat_dim_group_name
             return res_mesh
+
+        def __getstate__(self):
+            """
+            Returns the state of the DeviceMesh as a dictionary for serialization,
+            which contains all necessary information to reconstruct the DeviceMesh.
+            """
+            shared_state = {
+                "device_type": self._shared_state._device_type,
+                "rank_map": self._shared_state._rank_map,
+            }
+            if self._shared_state._root_mesh != self:
+                shared_state["root_mesh"] = not_none(
+                    self._shared_state._root_mesh
+                ).__getstate__()
+
+            state: dict[str, Any] = {
+                "shared_state": shared_state,
+                "layout": self._layout,
+                "mesh_dim_names": self._mesh_dim_names,
+                "thread_id": self._thread_id,
+                "coordinate_on_dim": getattr(self, "_coordinate_on_dim", None),
+            }
+
+            # Serialize flatten_mapping
+            flatten_mapping: dict[str, Any] = {}
+            for mesh_name, mesh in self._flatten_mapping.items():
+                flatten_mapping[mesh_name] = mesh.__getstate__()
+            state["flatten_mapping"] = flatten_mapping
+
+            if not self.decouple_backend_at_save and hasattr(self, "_dim_group_names"):
+                logger.warning(
+                    "Save device mesh via torch.save with pg names and will be deprecated in PT 2.11. "
+                    "Users are welcome to use Distributed checkpoint (DCP) or re-create pgs in the same order"
+                    "as the original device mesh."
+                )
+                state["dim_group_names"] = self._dim_group_names
+
+            return state
+
+        def __setstate__(self, state):
+            """
+            Restores the DeviceMesh state from a state dictionary.
+            """
+            required_keys = {
+                "shared_state",
+                "layout",
+                "mesh_dim_names",
+                "thread_id",
+                "coordinate_on_dim",
+                "flatten_mapping",
+            }
+            missing_keys = required_keys - state.keys()
+            if missing_keys:
+                raise ValueError(f"state_dict is missing required keys: {missing_keys}")
+
+            # Restore shared_state
+            shared_state = state["shared_state"]
+
+            # First, restore root_mesh if it exists (we need to do this before creating _SharedState)
+            root_mesh = None
+            if shared_state.get("root_mesh") is not None:
+                # Create a new DeviceMesh for the root mesh
+                root_mesh = DeviceMesh.__new__(DeviceMesh)
+                root_mesh.__setstate__(shared_state["root_mesh"])
+
+            # Create and initialize the shared state
+            self._shared_state = _SharedState(
+                device_type=shared_state["device_type"],
+                rank_map=shared_state["rank_map"],
+                root_mesh=root_mesh,
+            )
+
+            # Restore other attributes
+            self._layout = state["layout"]
+            self._mesh_dim_names = state["mesh_dim_names"]
+            self._thread_id = state["thread_id"]
+            if state.get("coordinate_on_dim") is not None:
+                self._coordinate_on_dim = state["coordinate_on_dim"]
+
+            # Re-initialize internal bookkeeping
+            self._flatten_rank_map = tuple(self._shared_state._rank_map.tolist())
+
+            # Restore flatten_mapping
+            self._flatten_mapping = {}
+            if state.get("flatten_mapping"):
+                for mesh_name, mesh_state in state["flatten_mapping"].items():
+                    flatten_mesh = DeviceMesh.__new__(DeviceMesh)
+                    flatten_mesh.__setstate__(mesh_state)
+                    self._flatten_mapping[mesh_name] = flatten_mesh
+
+            # We don't recommend load from saved pg names, because users need to ensure the same
+            # order in creating process groups when we save the device mesh.
+            # This is implicit and error-prone. We will remove this behavior soon.
+            # What we recommend users to do is to explicitly create PGs and set it to the loaded mesh.
+            if state.get("dim_group_names"):
+                self._dim_group_names = state["dim_group_names"]
 
     def _normalize_backend_override(
         backend_override: dict[
@@ -1387,7 +1513,7 @@ else:
         # external device type has been set to be (e.g. meta)
         with torch.device("cpu"):
             rank_map = torch.arange(layout.numel(), dtype=torch.int)
-        shared_state = _SharedState(rank_map)
+        shared_state = _SharedState(device_type=device_type, rank_map=rank_map)
         device_mesh = DeviceMesh(
             device_type=device_type,
             _layout=layout,
