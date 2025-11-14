@@ -1391,7 +1391,9 @@ class bdist_wheel(setuptools.command.bdist_wheel.bdist_wheel):
             wrapped_content = (
                 "#if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
                 f"{original_content}"
-                "\n#endif  // !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
+                "\n#else\n"
+                '#error "This file should not be included when either TORCH_STABLE_ONLY or TORCH_TARGET_VERSION is defined."\n'
+                "#endif  // !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
             )
 
             header_file.write_text(wrapped_content, encoding="utf-8")
