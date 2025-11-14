@@ -2432,22 +2432,23 @@ def inductor_lookup_seed(seeds, index):
     )
 
 
-def get_threads_per_round(x_device_index: int, nelem: int):
-    if isinstance(x_device_or_index, torch.device):
-        dev = x_device_or_index
-    elif isinstance(x_device_or_index, int):
-        dev = torch.device("cuda", x_device_or_index) if torch.cuda.is_available() else torch.device("cpu")
-    else:
-        dev = torch.device("cpu")
-    if dev.type == "cuda":
-        prop = torch.cuda.get_device_properties(x_device_index)
+def get_threads_per_round(device: torch.device):
+    if not isinstance(device, torch.device):
+        device = torch.device(device)
+
+    if device.type == "cuda":
+        idx = device.index
+        if idx is None:
+            idx = torch.cuda.current_device()
+
+        prop = torch.cuda.get_device_properties(idx)
         threads_per_round = (
             prop.multi_processor_count * prop.max_threads_per_multi_processor
         )
-        gen = torch.cuda.default_generators[x_device_index]
     else:
         _CPU_GRAIN_SIZE = 32768
         threads_per_round = _CPU_GRAIN_SIZE
+
     return threads_per_round
 
 
@@ -2471,10 +2472,7 @@ def inductor_random(
     seed_loader = seed.make_loader()
 
     if config.align_random_eager:
-        nelem = math.prod(size)
-        threads_per_round = get_threads_per_round(
-            device.index, nelem
-        )
+        threads_per_round = get_threads_per_round(device)
 
         def _vec_from_dtype(dt: torch.dtype) -> int:
             if dt in (torch.float16, torch.bfloat16):
