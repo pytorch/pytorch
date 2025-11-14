@@ -455,9 +455,9 @@ def _maybe_insert_input_observers_for_node(
     # gelu has a has an approximate kwarg that persist in exported graph.
     # This is just a work around for these.
     if not (
-        node.target == torch.ops.aten.clone.default
-        or node.target == torch.ops.aten.zeros_like.default
-        or node.target == torch.ops.aten.gelu.default
+        node.target is torch.ops.aten.clone.default
+        or node.target is torch.ops.aten.zeros_like.default
+        or node.target is torch.ops.aten.gelu.default
         or len(node.kwargs) == 0
     ):
         raise AssertionError(" expecting kwargs for aten op IR to be empty")

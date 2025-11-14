@@ -84,6 +84,21 @@ class RepeatInterleaveModule(torch.nn.Module):
         return y_repeat
 
 
+class MultiModalMixin(torch.nn.Module):
+    def forward(self, x):
+        return super().forward(x)
+
+
+class TextModel(torch.nn.Module):
+    def forward(self, x):
+        return x + 1
+
+
+class TestVLLMModel(MultiModalMixin, TextModel):
+    def forward(self, x):
+        return super().forward(x)
+
+
 @torch._dynamo.config.patch("enable_aot_compile", True)
 @instantiate_parametrized_tests
 class TestAOTCompile(torch._inductor.test_case.TestCase):
@@ -531,6 +546,58 @@ from user code:
             torch.randn(3, 4),
         )
         self.assertEqual(compiled_foo(inputs), foo(inputs))
+
+    def test_aot_compile_with_closure_save_and_load(self):
+        tmp = 2
+
+        def fn(x, y):
+            return x + y + tmp
+
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+            ((torch.randn(3, 4), torch.randn(3, 4)), {})
+        )
+        inputs = (torch.randn(3, 4), torch.randn(3, 4))
+        expected = fn(*inputs)
+        actual = compiled_fn(*inputs)
+        self.assertEqual(expected, actual)
+        compiled_fn.save_compiled_function(self.path())
+        with open(self.path(), "rb") as f:
+            compiled_fn = torch.compiler.load_compiled_function(f)
+        actual = compiled_fn(*inputs)
+        self.assertEqual(expected, actual)
+
+    def test_aot_compile_with_super_call(self):
+        fn = TestVLLMModel()
+        compiled_fn = torch.compile(fn.forward, fullgraph=True).aot_compile(
+            ((torch.randn(3, 4),), {})
+        )
+        self.assertEqual(fn.forward.__code__.co_freevars, ("__class__",))
+        inputs = (torch.randn(3, 4),)
+        expected = fn(*inputs)
+        actual = compiled_fn(fn, *inputs)
+        self.assertEqual(expected, actual)
+        compiled_fn.save_compiled_function(self.path())
+        with open(self.path(), "rb") as f:
+            compiled_fn = torch.compiler.load_compiled_function(f)
+        actual = compiled_fn(fn, *inputs)
+        self.assertEqual(expected, actual)
+
+    def test_aot_compile_with_default_args(self):
+        def fn(x, y=1):
+            return x + x
+
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+            ((torch.randn(3, 4),), {})
+        )
+        inputs = (torch.randn(3, 4),)
+        expected = fn(*inputs)
+        actual = compiled_fn(*inputs)
+        self.assertEqual(expected, actual)
+        compiled_fn.save_compiled_function(self.path())
+        with open(self.path(), "rb") as f:
+            compiled_fn = torch.compiler.load_compiled_function(f)
+        actual = compiled_fn(*inputs)
+        self.assertEqual(expected, actual)
 
 
 if __name__ == "__main__":

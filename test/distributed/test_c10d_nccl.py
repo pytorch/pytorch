@@ -4901,7 +4901,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             for p2p_op_idx, input_sizes in zip(
                 range(first_op, coalesced_op, 1), op_sizes_per_coalesce
             ):
-                # the indivudal ops inside the coalescing group the individual op metadata,
+                # the individual ops inside the coalescing group the individual op metadata,
                 # but not the timing info coming from the actual coalesced kernel
                 profiling_name = (
                     "nccl:recv 0<-1" if self.rank == 0 else "nccl:send 1->0"

@@ -259,7 +259,7 @@ class graph:
         self.cuda_graph.capture_begin(
             # type: ignore[misc]
             *self.pool,
-            # pyrefly: ignore  # bad-keyword-argument
+            # pyrefly: ignore [bad-keyword-argument]
             capture_error_mode=self.capture_error_mode,
         )
 
@@ -525,7 +525,7 @@ def make_graphed_callables(
     ) -> Callable[..., object]:
         class Graphed(torch.autograd.Function):
             @staticmethod
-            # pyrefly: ignore  # bad-override
+            # pyrefly: ignore [bad-override]
             def forward(ctx: object, *inputs: Tensor) -> tuple[Tensor, ...]:
                 # At this stage, only the user args may (potentially) be new tensors.
                 for i in range(len_user_args):
@@ -537,7 +537,7 @@ def make_graphed_callables(
 
             @staticmethod
             @torch.autograd.function.once_differentiable
-            # pyrefly: ignore  # bad-override
+            # pyrefly: ignore [bad-override]
             def backward(ctx: object, *grads: Tensor) -> tuple[Tensor, ...]:
                 assert len(grads) == len(static_grad_outputs)
                 for g, grad in zip(static_grad_outputs, grads):
@@ -551,7 +551,7 @@ def make_graphed_callables(
                 # Input args that didn't require grad expect a None gradient.
                 assert isinstance(static_grad_inputs, tuple)
                 return tuple(
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     b.detach() if b is not None else b
                     for b in static_grad_inputs
                 )

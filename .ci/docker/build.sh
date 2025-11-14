@@ -195,13 +195,16 @@ case "$tag" in
     NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
-  pytorch-linux-jammy-xpu-n-py3)
+  pytorch-linux-jammy-xpu-n-py3 | pytorch-linux-jammy-xpu-n-py3-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     VISION=yes
     XPU_VERSION=2025.2
     NINJA_VERSION=1.9.0
     TRITON=yes
+    if [[ $tag =~ "benchmarks" ]]; then
+      INDUCTOR_BENCHMARKS=yes
+    fi
     ;;
   pytorch-linux-jammy-py3-gcc11-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
