@@ -2818,6 +2818,7 @@ class AlgorithmSelectorCache(PersistentCache):
             choices,
             precompile_fn,
             best_config_future=best_config_future,
+            is_collective=is_collective,
         )
         # if timings is empty, we really have no choice but to return a semi-random
         # choice. returning the first `ExternKernelCaller` is probably the safest bet
@@ -2861,12 +2862,18 @@ class AlgorithmSelectorCache(PersistentCache):
         layout,
         input_gen_fns,
         hint_override: Optional[int] = None,
+        is_collective=False,
     ):
         counters["inductor"]["select_algorithm_autotune"] += 1
         # TODO(nmacchioni): remove this layer of abstraction
         # construct `benchmark_fn` which should pick between in-process and sub-process autotuning
         benchmark_fn = self.make_benchmark_fn(
-            choices, input_nodes, layout, input_gen_fns, hint_override=hint_override
+            choices,
+            input_nodes,
+            layout,
+            input_gen_fns,
+            hint_override=hint_override,
+            is_collective=is_collective,
         )
         # `benchmark_fn(choices)` will execute each choice, and return a dict[choice, timing] which
         # maps each choice to its runtime, calculated by the specified benchmarker, in milliseconds
@@ -2880,6 +2887,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_gen_fns,
         choices,
         hint_override: Optional[int] = None,
+        is_collective=False,
     ):
         log.debug("Starting autotuning")
 
@@ -2890,7 +2898,12 @@ class AlgorithmSelectorCache(PersistentCache):
             metadata=_autotune_metadata(input_nodes),
         ):
             benchmark_results = self.benchmark(
-                choices, input_nodes, layout, input_gen_fns, hint_override=hint_override
+                choices,
+                input_nodes,
+                layout,
+                input_gen_fns,
+                hint_override=hint_override,
+                is_collective=is_collective,
             )
             if config.max_autotune_report_choices_stats:
                 _log_autotune_choices_stats(
@@ -2909,6 +2922,7 @@ class AlgorithmSelectorCache(PersistentCache):
         precompile_fn,
         hint_override: Optional[int] = None,
         best_config_future=None,
+        is_collective=False,
     ):
         """Execute the autotuning process for kernel algorithm selection.
 
@@ -3023,6 +3037,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 input_gen_fns,
                 choices,
                 hint_override=hint_override,
+                is_collective=is_collective,
             )
 
         timings = self.lookup(
