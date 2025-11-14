@@ -51,7 +51,7 @@ void initPlacementBindings(PyObject* module) {
           py::arg("dim"),
           py::kw_only(),
           py::arg("split_factor"))
-      .def(py::init<const StridedShard&>(), py::arg("other"))
+      .def_readonly("split_factor", &StridedShard::split_factor)
       .def("is_shard", &StridedShard::is_shard, py::arg("dim") = py::none())
       .def(
           "__eq__",
