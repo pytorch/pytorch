@@ -190,8 +190,6 @@ x = add_1, y = add_2);  getitem = None
         )
 
 
-@unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
-class TestHopPrintInDynamo(TestCase):
     def test_reorder_print_no_graph_break(self):
         def f(x):
             x1 = x + x
@@ -201,9 +199,9 @@ class TestHopPrintInDynamo(TestCase):
             x3 = x2 + x2
             return (x1, x3)
 
-        x = torch.ones(3, 3)
         # Eager and aot_eager backend for dynamo tracing testing
         for be in ["eager", "aot_eager"]:
+            x = torch.randn(3, 3)
             opt_f = torch.compile(backend=be, fullgraph=True)(f)
             with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
                 opt_out = opt_f(x)
@@ -212,7 +210,7 @@ class TestHopPrintInDynamo(TestCase):
 
             self.assertEqual(
                 printed_output,
-                f"moo {torch.ones(3, 3) * 2}\nmoo {torch.ones(3, 3) * 2 * torch.ones(3, 3) * 2}",
+                f"moo {x * 2}\nmoo {x * 2 * x * 2}",
             )
             self.assertEqual(orig_out, opt_out)
 
