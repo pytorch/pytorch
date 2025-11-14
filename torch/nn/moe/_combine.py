@@ -43,19 +43,26 @@ def dedup_combine(
         (seqlen * topk_nodes, hid_dim), dtype=dtype, device=device
     )
 
-    torch.ops.symm_mem._all_to_all_v_2d_index_reduce(
-        inp,
-        combine_intra_out,
-        topk_indices_intranode,
-        occurrences,
-        dispatch_intra_plan.dst_offsets,
-        dispatch_inter_plan.dst_offsets,
-        dispatch_inter_plan.out_splits,
-        intra_node_group.group_name,
-        b_start,
-        b_len,
-        b_head,
-    )
+    # Create side stream for intra-node data exchange
+    intra_node_stream = torch.Stream(device=device)
+    # Inter-node token exchange can start as soon as inter_plan is ready and signals are created
+    current_stream = torch.accelerator.current_stream(device)
+    intra_node_stream.wait_stream(current_stream)
+
+    with intra_node_stream:
+        torch.ops.symm_mem._all_to_all_v_2d_index_reduce(
+            inp,
+            combine_intra_out,
+            topk_indices_intranode,
+            occurrences,
+            dispatch_intra_plan.dst_offsets,
+            dispatch_inter_plan.dst_offsets,
+            dispatch_inter_plan.out_splits,
+            intra_node_group.group_name,
+            b_start,
+            b_len,
+            b_head,
+        )
 
     # Combine the tokens inter node
     torch.ops.symm_mem._all_to_all_put_signal_in(
@@ -68,6 +75,12 @@ def dedup_combine(
         b_len,
         b_head,
     )
+
+    # Join intra-node side stream
+    # The completion of inter-node exchange would also indicate the completion
+    # of intra-node exchange, due to the signal dependency. Here we still join
+    # intra-node stream for completion of the stream graph
+    current_stream.wait_stream(intra_node_stream)
 
     # Sort tokens from expert-grouped form (`combine_inter_out`) to
     # token-grouped form (i.e. copies of one token processed by different
