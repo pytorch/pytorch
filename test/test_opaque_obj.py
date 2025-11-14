@@ -90,7 +90,7 @@ class TestOpaqueObject(TestCase):
             # This is not accurate since the queue could have tensors that are
             # not rank 1
             ctx = torch._custom_op.impl.get_ctx()
-            u0 = ctx.create_unbacked_symint()
+            u0 = ctx.new_dynamic_size()
             return torch.empty(u0)
 
         self.lib._register_fake("queue_pop", pop_impl_fake)
@@ -107,8 +107,7 @@ class TestOpaqueObject(TestCase):
         @size_impl.register_fake
         def size_impl_fake(q: torch._C.ScriptObject) -> int:
             ctx = torch._custom_op.impl.get_ctx()
-            u0 = ctx.create_unbacked_symint()
-            torch._check_is_size(u0)
+            u0 = ctx.new_dynamic_size()
             return u0
 
         super().setUp()
