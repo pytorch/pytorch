@@ -1,6 +1,8 @@
 # Owner(s): ["module: cpp"]
 
 import math
+import re
+import unittest
 from pathlib import Path
 
 import torch
@@ -17,6 +19,25 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfTorchDynamo,
 )
+
+
+def get_pytorch_version():
+    """Get the PyTorch version as a tuple (major, minor, patch)"""
+    version_str = torch.__version__.split("+")[0]  # Remove git hash
+    match = re.match(r"(\d+)\.(\d+)\.(\d+)", version_str)
+    if match:
+        return tuple(int(x) for x in match.groups())
+    return (2, 10, 0)  # Default to 2.10.0
+
+
+PYTORCH_VERSION = get_pytorch_version()
+IS_PYTORCH_2_9 = PYTORCH_VERSION < (2, 10, 0)
+IS_PYTORCH_2_10_OR_LATER = PYTORCH_VERSION >= (2, 10, 0)
+
+
+def skipIfPyTorch2_9(reason):
+    """Skip test if running on PyTorch 2.9"""
+    return unittest.skipIf(IS_PYTORCH_2_9, reason)
 
 
 # TODO: Fix this error in Windows:
@@ -39,7 +60,9 @@ if not IS_WINDOWS:
 
         @classmethod
         def setUpClass(cls):
-            # Install and import the 2.9 extension
+            print(f"Running tests with PyTorch {'.'.join(map(str, PYTORCH_VERSION))}")
+
+            # Install and import the 2.9 extension (always needed)
             try:
                 import libtorch_agnostic_2_9
 
@@ -53,19 +76,23 @@ if not IS_WINDOWS:
 
                 cls.ops_2_9 = libtorch_agnostic_2_9.ops
 
-            # Install and import the 2.10 extension
-            try:
-                import libtorch_agnostic_2_10
+            # Install and import the 2.10 extension (only if on PyTorch 2.10+)
+            if IS_PYTORCH_2_10_OR_LATER:
+                try:
+                    import libtorch_agnostic_2_10
 
-                cls.ops_2_10 = libtorch_agnostic_2_10.ops
-            except ImportError:
-                extension_root = (
-                    Path(__file__).parent / "libtorch_agnostic_2_10_extension"
-                )
-                install_cpp_extension(extension_root=extension_root)
-                import libtorch_agnostic_2_10
+                    cls.ops_2_10 = libtorch_agnostic_2_10.ops
+                except ImportError:
+                    extension_root = (
+                        Path(__file__).parent / "libtorch_agnostic_2_10_extension"
+                    )
+                    install_cpp_extension(extension_root=extension_root)
+                    import libtorch_agnostic_2_10
 
-                cls.ops_2_10 = libtorch_agnostic_2_10.ops
+                    cls.ops_2_10 = libtorch_agnostic_2_10.ops
+            else:
+                print("Skipping 2.10 extension (running on PyTorch 2.9)")
+                cls.ops_2_10 = None
 
         # ============================================================================
         # Tests for 2.9 features
@@ -373,8 +400,10 @@ if not IS_WINDOWS:
 
         # ============================================================================
         # Tests for 2.10 features (only work with 2.10 extension)
+        # These tests are skipped when running on PyTorch 2.9 runtime
         # ============================================================================
 
+        @skipIfPyTorch2_9("Requires PyTorch 2.10+ runtime")
         def test_2_10_my_copy_(self, device):
             ops = self.ops_2_10
 
@@ -386,6 +415,7 @@ if not IS_WINDOWS:
             self.assertEqual(result, expected)
             self.assertEqual(result.data_ptr(), dst.data_ptr())
 
+        @skipIfPyTorch2_9("Requires PyTorch 2.10+ runtime")
         def test_2_10_my_clone(self, device):
             ops = self.ops_2_10
 
@@ -397,6 +427,7 @@ if not IS_WINDOWS:
             self.assertNotEqual(result.data_ptr(), expected.data_ptr())
             self.assertEqual(result.stride(), expected.stride())
 
+        @skipIfPyTorch2_9("Requires PyTorch 2.10+ runtime")
         def test_2_10_my__foreach_mul_(self, device):
             ops = self.ops_2_10
 
@@ -411,6 +442,7 @@ if not IS_WINDOWS:
             for tensor_t, expected_t in zip(tensors, expected_values):
                 self.assertEqual(tensor_t, expected_t)
 
+        @skipIfPyTorch2_9("Requires PyTorch 2.10+ runtime")
         def test_2_10_my__foreach_mul(self, device):
             ops = self.ops_2_10
 
@@ -439,6 +471,7 @@ if not IS_WINDOWS:
                     curr_mem = torch.cuda.memory_allocated(device)
                     self.assertEqual(curr_mem, init_mem)
 
+        @skipIfPyTorch2_9("Requires PyTorch 2.10+ runtime")
         def test_2_10_make_tensor_clones_and_call_foreach(self, device):
             ops = self.ops_2_10
 
@@ -448,6 +481,7 @@ if not IS_WINDOWS:
             self.assertEqual(result[0], t1 * t1)
             self.assertEqual(result[1], t2 * t2)
 
+        @skipIfPyTorch2_9("Requires PyTorch 2.10+ runtime")
         @onlyCUDA
         def test_2_10_device(self, device):
             ops = self.ops_2_10
@@ -491,6 +525,7 @@ if not IS_WINDOWS:
             ):
                 ops.test_device_set_index(cuda_device, 129)
 
+        @skipIfPyTorch2_9("Requires PyTorch 2.10+ runtime")
         @onlyCUDA
         @deviceCountAtLeast(2)
         def test_2_10_tensor_device(self, device):
@@ -505,6 +540,7 @@ if not IS_WINDOWS:
             t_cuda_1 = torch.randn(2, 3, device="cuda:1")
             self.assertEqual(ops.test_tensor_device(t_cuda_1), t_cuda_1.device)
 
+        @skipIfPyTorch2_9("Requires PyTorch 2.10+ runtime")
         @onlyCPU
         @xfailIfTorchDynamo
         def test_2_10_parallel_for(self, device):
@@ -525,6 +561,7 @@ if not IS_WINDOWS:
             self.assertEqual(result_values, expected)
             self.assertEqual(result_thread_ids, torch.arange(expected_num_threads_used))
 
+        @skipIfPyTorch2_9("Requires PyTorch 2.10+ runtime")
         @onlyCPU
         def test_2_10_get_num_threads(self, device):
             ops = self.ops_2_10
@@ -533,6 +570,7 @@ if not IS_WINDOWS:
             expected_num_threads = torch.get_num_threads()
             self.assertEqual(num_threads, expected_num_threads)
 
+        @skipIfPyTorch2_9("Requires PyTorch 2.10+ runtime")
         def test_2_10_my_empty(self, device):
             ops = self.ops_2_10
 
@@ -567,6 +605,7 @@ if not IS_WINDOWS:
             finally:
                 torch.use_deterministic_algorithms(deterministic)
 
+        @skipIfPyTorch2_9("Requires PyTorch 2.10+ runtime")
         def test_2_10_my_flatten(self, device):
             ops = self.ops_2_10
 
@@ -579,6 +618,7 @@ if not IS_WINDOWS:
             expected_all = torch.flatten(t, 0, -1)
             self.assertEqual(result_all, expected_all)
 
+        @skipIfPyTorch2_9("Requires PyTorch 2.10+ runtime")
         def test_2_10_my_reshape(self, device):
             ops = self.ops_2_10
 
@@ -588,6 +628,7 @@ if not IS_WINDOWS:
             expected = torch.reshape(t, shape)
             self.assertEqual(result, expected)
 
+        @skipIfPyTorch2_9("Requires PyTorch 2.10+ runtime")
         def test_2_10_my_view(self, device):
             ops = self.ops_2_10
 
