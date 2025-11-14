@@ -2159,7 +2159,7 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
-#if defined(USE_CUDA) && !defined(USE_ROCM)
+#if defined(USE_CUDA)
   ASSERT_TRUE(StaticCudaLauncher_init(module));
 #endif
 #ifdef USE_MPS
@@ -2918,7 +2918,6 @@ static void pytorch_duplicate_guard() {
     abort();
   }
   initialized = 1;
-  ;
 }
 
 struct call_duplicate_guard {

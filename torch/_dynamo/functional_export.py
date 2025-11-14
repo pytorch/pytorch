@@ -11,6 +11,7 @@ import sympy
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.convert_frame import CaptureOutput, fullgraph_capture, get_traced_fn
 from torch._dynamo.eval_frame import argument_names, check_user_input_output
 from torch._dynamo.exc import UserErrorType
@@ -498,6 +499,9 @@ def pytreeify(
         root = mod.__self__
 
     flat_real_args, in_spec = pytree.tree_flatten((args, kwargs))
+    torch._dynamo.eval_frame.check_user_input_output(
+        flat_real_args[1 if root else 0 :], UserErrorType.INVALID_INPUT
+    )
 
     class Yield(Exception):
         pass
@@ -579,9 +583,10 @@ def pytreeify(
     fake_mode = torch._dynamo.utils.detect_fake_mode(flat_out_shuffle_args)
     if fake_mode and fake_mode.shape_env is None:
         fake_mode.shape_env = ShapeEnv()
-    out_shuffle_graph = make_fx(
-        out_shuffle, tracing_mode="symbolic", proxy_module_inputs=True
-    )(*flat_out_shuffle_args)
+    with enable_python_dispatcher():
+        out_shuffle_graph = make_fx(
+            out_shuffle, tracing_mode="real", proxy_module_inputs=True
+        )(*flat_out_shuffle_args)
     _normalize_shuffle_graph(out_shuffle_graph)
 
     assert out_shuffle.out_spec is not None
@@ -609,6 +614,8 @@ def dynamo_graph_capture_for_export(
     def inner(*args: Any, **kwargs: Any) -> Any:
         assert not torch._dynamo.config.install_free_tensors
         with (
+            torch._dynamo.config.patch(replay_side_effects=False),
+            torch._dynamo.config.patch(side_effect_replay_policy="warn"),
             get_metrics_context(),
             dynamo_timed("fullgraph_capture"),
         ):
@@ -637,7 +644,7 @@ def dynamo_graph_capture_for_export(
             pyt.in_shuffle_graph,
             pyt.out_shuffle_graph,
             tree_leaf_names,
-            pyt.root,
+            graph_module if isinstance(pyt.root, torch.nn.Module) else pyt.root,
         )  # type: ignore[attr-defined]
         normalize_graph_module(graph_module)
         if pyt.root is not None:
@@ -648,6 +655,10 @@ def dynamo_graph_capture_for_export(
             graph_module._non_persistent_buffers_set = (
                 pyt.root._non_persistent_buffers_set.copy()
             )
+            annotations = torch.nn.Module.__dict__.get("__annotations__", None)
+            for name, value in pyt.root.__dict__.items():
+                if annotations and name not in annotations:
+                    graph_module.__dict__[name] = value
         graph_module._in_spec = pyt.in_spec
         graph_module._out_spec = pyt.out_spec
         assert not hasattr(graph_module, "_in_shuffle_graph")
