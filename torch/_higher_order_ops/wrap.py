@@ -4,10 +4,10 @@ import itertools
 import logging
 from typing import Any, Optional
 
-from torch._C import DispatchKey
 import torch
 import torch.utils._pytree as pytree
-from torch._higher_order_ops.utils import reenter_make_fx, redirect_to_mode
+from torch._C import DispatchKey
+from torch._higher_order_ops.utils import redirect_to_mode, reenter_make_fx
 from torch._logging import warning_once
 from torch._ops import HigherOrderOperator
 from torch.fx import GraphModule
@@ -48,6 +48,7 @@ class InductorCompiledCode(HigherOrderOperator):
     """
     Defines a HOP for wrapping inductor compiled functions as a callable.
     """
+
     def __init__(self) -> None:
         super().__init__("inductor_compiled_code")
 
@@ -59,9 +60,11 @@ inductor_compiled_code = InductorCompiledCode()
 inductor_compiled_code.fallthrough(DispatchKey.AutogradCPU)
 inductor_compiled_code.fallthrough(DispatchKey.AutogradCUDA)
 
+
 @inductor_compiled_code.py_impl(DispatchKey.CompositeExplicitAutograd)
 def inductor_compiled_code_impl(func, inputs):
     return func(inputs)
+
 
 redirect_to_mode(inductor_compiled_code, DebugMode)
 redirect_to_mode(inductor_compiled_code, _CachingTorchDispatchMode)

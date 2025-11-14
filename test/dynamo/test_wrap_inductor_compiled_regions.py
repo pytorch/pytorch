@@ -1,12 +1,10 @@
 # Owner(s): ["module: dynamo"]
-import unittest
 
 import torch
 import torch._dynamo.test_case
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._inductor import config as inductor_config
-from torch.testing._internal.common_utils import TEST_WITH_TORCHDYNAMO
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.utils._debug_mode import DebugMode
 
@@ -238,7 +236,9 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
     def test_wrap_with_cache(self):
         """
         Test that wrap_inductor_compiled_regions works correctly with caching.
-        Verify that the wrapper is applied even when loading from cache.
+        Verify that the wrapper is properly applied when loading from cache by
+        checking that DebugMode can see the inductor_compiled_code HOP on both
+        cache miss and cache hit.
         """
         from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 
@@ -266,8 +266,17 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         with DebugMode() as debug_mode1:
             result1 = compiled_fn(x, y)
 
-        # Verify wrapper is applied
-        self.assertIn("inductor_compiled_code", debug_mode1.debug_string())
+        debug_string1 = debug_mode1.debug_string()
+
+        # Verify wrapper is applied and invoked on cache miss
+        # If DebugMode sees the HOP, it means the wrapper was actually invoked
+        # (because DebugMode is registered with redirect_to_mode)
+        self.assertIn(
+            "inductor_compiled_code",
+            debug_string1,
+            "inductor_compiled_code HOP should be visible to DebugMode on cache miss",
+        )
+
         # Verify cache miss
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
@@ -280,8 +289,17 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         with DebugMode() as debug_mode2:
             result2 = compiled_fn(x, y)
 
-        # Verify wrapper is still applied after loading from cache
-        self.assertIn("inductor_compiled_code", debug_mode2.debug_string())
+        debug_string2 = debug_mode2.debug_string()
+
+        # Verify wrapper is still applied and invoked after loading from cache
+        # This proves that post_compile() properly wraps the cached callable
+        self.assertIn(
+            "inductor_compiled_code",
+            debug_string2,
+            "inductor_compiled_code HOP should be visible to DebugMode on cache hit, "
+            "proving wrapper was properly applied in post_compile()",
+        )
+
         # Verify cache hit
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)

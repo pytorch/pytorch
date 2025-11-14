@@ -51,8 +51,6 @@ from torch._inductor.utils import (
 )
 from torch.autograd.profiler import record_function
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._python_dispatch import is_in_torch_dispatch_mode
-from torch._higher_order_ops.wrap import inductor_compiled_code
 
 from . import config
 from .runtime.autotune_cache import AutotuneCacheBundler
