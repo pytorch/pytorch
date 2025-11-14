@@ -9,8 +9,12 @@ from torch.fx import has_side_effect, Proxy
 
 from .. import graph_break_hints
 from ..bytecode_transformation import create_call_function
-from ..exc import TYPE_CHECKING, unimplemented_v2
-from ..graph_bytecode_inputs import get_external_object_by_index
+from ..exc import TYPE_CHECKING, unimplemented
+from ..graph_bytecode_inputs import (
+    get_external_object_by_index,
+    register_graph_created_object,
+)
+from ..source import CurrentStreamSource
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import FxTracebackAnnotateVariable
@@ -26,6 +30,33 @@ from torch._library.custom_ops import custom_op
 
 
 Tensor = torch.Tensor
+
+
+def new_event(*args: Any, **kwargs: Any) -> int:
+    event = torch.Event(*args, **kwargs)
+    return register_graph_created_object(
+        event,
+        EventVariable.make_construct_in_graph_event_fn(
+            TupleVariable([]), ConstDictVariable({})
+        ),
+    )
+
+
+def new_stream(*args: tuple[Any], **kwargs: Any) -> int:
+    stream = torch.Stream(*args, **kwargs)  # type: ignore[no-matching-overload,call-overload]
+    return register_graph_created_object(
+        stream,
+        StreamVariable.make_construct_in_graph_stream_fn(
+            TupleVariable([]), ConstDictVariable({})
+        ),
+    )
+
+
+def get_current_stream(device: torch.device) -> int:
+    stream = torch.accelerator.current_stream()
+    return register_graph_created_object(
+        stream, lambda _, cg: cg(CurrentStreamSource(device))
+    )
 
 
 def _get_stream_by_index(index: int) -> torch.Stream:
@@ -113,6 +144,24 @@ def _(
 
 
 has_side_effect(torch.ops.streams.wait_event.default)
+
+
+@custom_op("streams::wait_stream", mutates_args=())
+def wait_stream(waiting_stream_index: int, waited_on_stream_index: int) -> None:
+    waiting = _get_stream_by_index(waiting_stream_index)
+    waited_on = _get_stream_by_index(waited_on_stream_index)
+    waiting.wait_stream(waited_on)
+
+
+@wait_stream.register_fake
+def _(
+    event_index: int,
+    stream_index: int,
+) -> None:
+    pass
+
+
+has_side_effect(torch.ops.streams.wait_stream.default)
 
 
 class SymbolicStreamState:
@@ -326,12 +375,19 @@ class StreamVariable(StreamContextVariable):
 
 
 class EventVariable(VariableTracker):
-    def __init__(self, proxy: Proxy, value: torch.Event, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        proxy: Proxy,
+        value: torch.Event,
+        user_object_index: Optional[int],
+        **kwargs: Any,
+    ) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value
+        self.user_object_index = user_object_index
 
     def call_method(
         self,
@@ -343,7 +399,29 @@ class EventVariable(VariableTracker):
         from ..utils import proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
 
-        if name in ("wait", "record", "synchronize"):
+        if name == "wait":
+            tx.output.create_proxy(
+                "call_function",
+                torch.ops.streams.wait_event,
+                (
+                    self.user_object_index,
+                    EventVariable._get_stream_arg(tx, args, kwargs).user_object_index,
+                ),
+                {},
+            )
+            return ConstantVariable(None)
+        elif name == "record":
+            tx.output.create_proxy(
+                "call_function",
+                torch.ops.streams.record_event,
+                (
+                    self.user_object_index,
+                    EventVariable._get_stream_arg(tx, args, kwargs).user_object_index,
+                ),
+                {},
+            )
+            return ConstantVariable(None)
+        elif name == "synchronize":
             tx.output.create_proxy(
                 "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
             )
@@ -360,7 +438,7 @@ class EventVariable(VariableTracker):
             method_name = (
                 f"{type(self.value).__module__}.{type(self.value).__qualname__}.{name}"
             )
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported event method",
                 context=str(name),
                 explanation=f"Dynamo doesn't support tracing the {method_name} method. "
@@ -372,6 +450,39 @@ class EventVariable(VariableTracker):
 
     def as_proxy(self) -> Proxy:
         return self.proxy
+
+    @staticmethod
+    def _get_stream_arg(
+        tx: "InstructionTranslator",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> "StreamVariable":
+        stream_arg = None
+        if args:
+            stream_arg = args[0]
+        elif kwargs:
+            stream_arg = kwargs.get("stream")
+
+        if not stream_arg:
+            stream_arg = tx.symbolic_stream_state.cur_stream()
+
+        return stream_arg  # type: ignore[return-value]
+
+    @staticmethod
+    def make_construct_in_graph_event_fn(
+        args: TupleVariable, kwargs: ConstDictVariable
+    ) -> Callable[[int, "PyCodegen"], None]:
+        def fn(index: int, codegen: "PyCodegen") -> None:
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
+                    torch._dynamo.utils.__name__, "build_event"
+                )
+            )
+            codegen(args)
+            codegen(kwargs)
+            codegen.extend_output(create_call_function(2, False))
+
+        return fn
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # If we got here, this event is fully subsumed by the graph - this means it is
