@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from collections.abc import Callable
-from typing import Any, Union
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -78,8 +78,8 @@ def get_root_module_to_quantized_reference_module(
 
 def get_fuser_method_mapping(
     backend_config: BackendConfig,
-) -> dict[Pattern, Union[nn.Sequential, Callable]]:
-    fuser_method_mapping: dict[Pattern, Union[nn.Sequential, Callable]] = {}
+) -> dict[Pattern, nn.Sequential | Callable]:
+    fuser_method_mapping: dict[Pattern, nn.Sequential | Callable] = {}
     for pattern, config in backend_config._pattern_complex_format_to_config.items():
         if config.fuser_method is not None:
             # Note: both the fuser method and the pattern are specified in forward order in the
