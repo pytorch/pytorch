@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import (
     retry_on_connect_failures,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
+    TemporaryFileName,
     TEST_CUDA,
     TEST_HPU,
     TEST_WITH_ROCM,
@@ -809,7 +810,8 @@ class MultiProcessTestCase(TestCase):
 
         self.processes = []  # type: ignore[var-annotated]
         self.rank = self.MAIN_PROCESS_RANK
-        self.file_name = tempfile.NamedTemporaryFile(delete=False).name
+        with TemporaryFileName() as name:
+            self.file_name = name
         # pid to pipe consisting of error message from process.
         self.pid_to_pipe = {}  # type: ignore[var-annotated]
 
@@ -1811,7 +1813,8 @@ class MultiProcContinuousTest(TestCase):
         cls.task_queues = []
         cls.completion_queues = []
         # Need a rendezvous file for `init_process_group` purpose.
-        cls.rdvz_file = tempfile.NamedTemporaryFile(delete=False).name
+        with TemporaryFileName() as name:
+            cls.rdvz_file = name
 
         # CUDA multiprocessing requires spawn instead of fork, to make sure
         # child processes have their own memory space.
