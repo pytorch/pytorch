@@ -1,11 +1,10 @@
-#include <cstdlib>
 #include <sstream>
 #include <string>
 #include <utility>
 
 #include <ATen/core/function.h>
 #include <c10/util/Exception.h>
-#include <c10/util/StringUtil.h>
+#include <c10/util/FileSystem.h>
 #include <c10/util/env.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/jit_opt_limit.h>
@@ -58,8 +57,7 @@ bool opt_limit(const char* pass_name) {
   static const std::unordered_map<std::string, int64_t> passes_to_opt_limits =
       parseJITOptLimitOption(opt_limit.value());
   std::string pass{pass_name};
-  pass = c10::detail::StripBasename(pass);
-  pass = c10::detail::ExcludeFileExtension(pass);
+  pass = c10::filesystem::path(pass).stem();
 
   auto opt_limit_it = passes_to_opt_limits.find(pass);
   if (opt_limit_it == passes_to_opt_limits.end()) {
