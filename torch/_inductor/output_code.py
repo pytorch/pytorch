@@ -26,8 +26,7 @@ import dataclasses
 import logging
 import os
 from functools import partial
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
-from typing_extensions import TypeAlias
+from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
 
 import torch
 from torch._dynamo.utils import counters, get_runtime_metrics_context
@@ -59,7 +58,7 @@ from .runtime.autotune_cache import AutotuneCacheBundler
 
 if TYPE_CHECKING:
     from collections import Counter
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch._inductor import metrics
     from torch._inductor.graph import GraphLowering
@@ -86,6 +85,9 @@ class OutputCode:
     _time_taken_ns: Optional[int] = dataclasses.field(default=None, init=False)
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
+        raise NotImplementedError(type(self))
+
+    def prepare_for_serialization(self) -> None:
         raise NotImplementedError(type(self))
 
     def post_compile(
@@ -771,9 +773,86 @@ class CompiledAOTI(OutputCode):
     """
 
     filename: Union[str, list[Union[str, Weights]], torch.fx.GraphModule]
+    device_type: str
+    current_callable: Optional[Callable[..., Any]] = None
+    _cached_files: dict[str, bytes] = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self):
+        if not config.aot_inductor.link_libtorch:
+            return
+
+        if (
+            torch._inductor.cpp_builder._IS_MACOS
+            or torch._inductor.cpp_builder._IS_WINDOWS
+        ):
+            return
+
+        if config.aot_inductor.cross_target_platform == "windows":
+            return
+
+        if config.aot_inductor.package_cpp_only:
+            return
+
+        if not config.enable_autograd_for_aot:
+            return
+
+        if isinstance(self.filename, list):
+            current_callable = next(
+                fn for fn in self.filename if isinstance(fn, str) and fn.endswith(".so")
+            )
+        else:
+            current_callable = self.filename
+
+        if isinstance(current_callable, torch.fx.GraphModule):
+            self.current_callable = current_callable
+            return
+
+        if self.device_type.startswith("cuda"):
+            current_callable = (
+                torch._C._aoti.AOTIModelContainerRunnerCuda(  # type: ignore[call-arg]
+                    current_callable,
+                    1,
+                    self.device_type,
+                    "",
+                    True,
+                ).run  # type: ignore[attr-defined]
+            )  # type: ignore[attr-defined]
+        elif self.device_type == "cpu":
+            current_callable = (
+                torch._C._aoti.AOTIModelContainerRunnerCpu(  # type: ignore[call-arg]
+                    current_callable, 1
+                ).run  # type: ignore[attr-defined]
+            )  # type: ignore[attr-defined]
+        else:
+            raise RuntimeError(f"unsupported device type {self.device_type}")
+        self.current_callable = current_callable
+        self._boxed_call = True
+        for file in self._cached_files:
+            if not os.path.exists(file):
+                with open(file, "wb") as f:
+                    f.write(self._cached_files[file])
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
-        raise NotImplementedError("NYI")
+        if self.current_callable is None:
+            raise RuntimeError("AOTInductor compiled so is not loaded")
+        return self.current_callable(inputs)
+
+    def prepare_for_serialization(self) -> None:
+        self.current_callable = None
+        self._cached_files = {}
+        filenames: list[str] = []
+        if isinstance(self.filename, list):
+            filenames = self.filename  # type: ignore[assignment]
+        elif isinstance(self.filename, str):
+            filenames = [self.filename]
+        for name in filenames:
+            with open(name, "rb") as f:
+                self._cached_files[name] = f.read()
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["current_callable"] = None
+        return state
 
     def post_compile(
         self,
@@ -781,7 +860,8 @@ class CompiledAOTI(OutputCode):
         constants: CompiledFxGraphConstants,
         graph_kwargs: _CompileFxKwargs,
     ) -> None:
-        pass
+        if self.current_callable is None:
+            self.__post_init__()
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         pass
@@ -807,3 +887,97 @@ class MockFXGraphCacheOutput(OutputCode):
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         pass
+
+
+@dataclasses.dataclass
+class RegionalOutputCode(OutputCode):
+    """
+    OutputCode for regional inductor compilation results.
+
+    Regional inductor returns a torch.fx.GraphModule that contains both
+    compiled regions (via standalone_compile) and eager regions. This needs
+    special serialization using GraphPickler instead of standard pickle.
+
+    The serialization strategy stores the GraphModule as bytes using
+    GraphPickler.dumps(), which handles FakeTensors, AOTCompiledArtifacts,
+    and other special objects that standard pickle cannot handle.
+    """
+
+    # The serialized graph module as bytes (using GraphPickler)
+    _serialized_graph_module: Optional[bytes] = dataclasses.field(
+        default=None, init=False
+    )
+
+    # The actual graph module (cleared during serialization)
+    _graph_module: Optional[torch.fx.GraphModule] = dataclasses.field(
+        default=None, init=False
+    )
+
+    def __init__(self, graph_module: torch.fx.GraphModule):
+        """
+        Args:
+            graph_module: The torch.fx.GraphModule returned by regional_inductor
+        """
+        super().__init__()
+        self._graph_module = graph_module
+        self._serialized_graph_module = None
+
+    def __call__(self, inputs: Sequence[Any]) -> Any:
+        """Execute the regional compiled graph."""
+        if self._graph_module is None:
+            raise RuntimeError(
+                "RegionalOutputCode has no graph module loaded. "
+                "Did you forget to call post_compile()?"
+            )
+        return self._graph_module(*inputs)
+
+    def post_compile(
+        self,
+        example_inputs: Sequence[InputType],
+        constants: CompiledFxGraphConstants,
+        graph_kwargs: _CompileFxKwargs,
+    ) -> None:
+        """
+        Post-compile processing for regional inductor.
+
+        This deserializes the GraphModule from bytes using GraphPickler,
+        extracting the fake_mode from example_inputs.
+        """
+        if self._graph_module is not None:
+            return
+        assert self._serialized_graph_module is not None
+        # Get fake mode from example inputs
+        from torch._guards import detect_fake_mode
+
+        fake_mode = detect_fake_mode(example_inputs)
+        if fake_mode is None:
+            raise RuntimeError(
+                "Could not detect fake mode from example inputs. "
+                "Regional inductor requires fake mode for deserialization."
+            )
+
+        # Deserialize the graph module
+        from torch.fx._graph_pickler import GraphPickler
+
+        gm = GraphPickler.loads(self._serialized_graph_module, fake_mode)
+        assert isinstance(gm, torch.fx.GraphModule)
+        gm.recompile()
+        self._graph_module = gm
+
+    def set_triton_bundle(self, triton_bundle: Any) -> None:
+        """Regional inductor doesn't use triton bundles directly."""
+
+    def prepare_for_serialization(self) -> None:
+        """
+        Prepare for serialization by converting the GraphModule to bytes.
+
+        This uses GraphPickler to serialize the graph module since it contains
+        special objects like FakeTensors and AOTCompiledArtifacts that need
+        custom pickling.
+        """
+        if self._graph_module is not None:
+            from torch.fx._graph_pickler import GraphPickler
+
+            self._serialized_graph_module = GraphPickler.dumps(self._graph_module)
+            # Clear the graph module to avoid pickling it with standard pickle
+            self._graph_module = None

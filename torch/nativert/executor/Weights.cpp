@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/nativert/executor/Weights.h>
+#include <unordered_map>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -55,92 +56,128 @@ Weights::Weights(
     const std::unordered_map<std::string, std::string>& constantPaths,
     std::string_view constantPathPrefix,
     std::function<bool(const std::string&)> skipSizeCheck,
-    std::function<bool(const std::string&)> skipDtypeCheck)
+    std::function<bool(const std::string&)> skipDtypeCheck,
+    std::shared_ptr<std::unordered_map<
+        std::string,
+        std::shared_ptr<torch::nativert::TensorMeta>>> maybeNewWeightsMeta)
     : graph_(graph),
       weightsMeta_(graph->weightsMeta()),
       version_(globalVersion_++),
       skipSizeCheck_(std::move(skipSizeCheck)),
       skipDtypeCheck_(std::move(skipDtypeCheck)) {
-  auto loadAndInsert =
-      [&](const std::string& tensorName,
-          std::string_view pathPrefix,
-          const std::unordered_map<std::string, std::string>& tensorPaths,
-          bool isUsed) {
-        auto pathIt = tensorPaths.find(tensorName);
+  auto loadAndInsert = [&](const std::string& tensorName,
+                           std::string_view pathPrefix,
+                           const std::unordered_map<std::string, std::string>&
+                               tensorPaths,
+                           bool isUsed,
+                           std::shared_ptr<std::unordered_map<
+                               std::string,
+                               std::shared_ptr<torch::nativert::TensorMeta>>>
+                               maybeNewWeightsMeta) {
+    auto pathIt = tensorPaths.find(tensorName);
+    TORCH_CHECK(
+        pathIt != tensorPaths.end(),
+        "Couldn't find ",
+        tensorName,
+        " in tensorPaths");
+
+    const std::string tensorPath = std::string{pathPrefix} + pathIt->second;
+    VLOG(1) << "Loading weight from: " << tensorPath;
+    TORCH_CHECK(
+        pytorchStreamReader->hasRecord(tensorPath), tensorPath, " not found");
+
+    auto [tensorData, tensorDataSize] =
+        pytorchStreamReader->getRecord(tensorPath);
+
+    // TODO: We now have two copies of metadata for weights, one in
+    // model definition /models/<model_name>.json, another in
+    // /extra/xl_weights/<model_name>_model_param_config.json
+    // Currently, we only use the metadata from model definition.
+    std::optional<TensorMeta> tensorMeta;
+    if (weightsMeta_.find(tensorName) != weightsMeta_.end()) {
+      tensorMeta = weightsMeta_.at(tensorName);
+    } else {
+      TORCH_CHECK(
+          false,
+          "Tensor meta not found for: ",
+          tensorName,
+          " in base weights.");
+    }
+    std::optional<TensorMeta> newTensorMeta;
+    if (maybeNewWeightsMeta) {
+      if (stateDictPaths.find(tensorName) == stateDictPaths.end()) {
+        TORCH_CHECK(false, "Tensor name not found in state dict paths");
+      }
+
+      std::string paramName = stateDictPaths.at(tensorName);
+      if (maybeNewWeightsMeta->find(paramName) != maybeNewWeightsMeta->end()) {
+        newTensorMeta = *maybeNewWeightsMeta->at(paramName);
+      } else {
         TORCH_CHECK(
-            pathIt != tensorPaths.end(),
-            "Couldn't find ",
+            false,
+            "Tensor meta not found for: ",
             tensorName,
-            " in tensorPaths");
+            " in new weights from: ",
+            paramName);
+      }
+    }
+    std::optional<TensorMeta> curTensorMeta =
+        newTensorMeta ? newTensorMeta : tensorMeta;
 
-        const std::string tensorPath = std::string{pathPrefix} + pathIt->second;
-        VLOG(1) << "Loading weight from: " << tensorPath;
-        TORCH_CHECK(
-            pytorchStreamReader->hasRecord(tensorPath),
-            tensorPath,
-            " not found");
+    if (tensorDataSize == 0 && tensorMeta->numel() > 0) {
+      VLOG(1) << "Tensor " << tensorName
+              << " does not have data and create on Meta device";
+      allValues_[tensorName] = at::empty_strided(
+          curTensorMeta->sizes(),
+          curTensorMeta->strides(),
+          curTensorMeta->asTensorOptions().device(at::kMeta));
+      return;
+    }
 
-        auto [tensorData, tensorDataSize] =
-            pytorchStreamReader->getRecord(tensorPath);
+    if (!isUsed) {
+      VLOG(1) << "Tensor " << tensorName << " is not used during inference";
+      auto targetDevice = curTensorMeta->device();
+      allValues_[tensorName] =
+          at::scalar_tensor(0, at::TensorOptions().device(targetDevice));
+      return;
+    }
 
-        // TODO: We now have two copies of metadata for weights, one in
-        // model definition /models/<model_name>.json, another in
-        // /extra/xl_weights/<model_name>_model_param_config.json
-        // Currently, we only use the metadata from model definition.
-        std::optional<TensorMeta> tensorMeta;
-        if (weightsMeta_.find(tensorName) != weightsMeta_.end()) {
-          tensorMeta = weightsMeta_.at(tensorName);
-        } else {
-          TORCH_CHECK(false, "Tensor meta not found for: ", tensorName);
-        }
+    size_t bytesPerEntry =
+        c10::scalarTypeToTypeMeta(curTensorMeta->dtype()).itemsize();
+    auto device = tensorData.device();
+    auto storage = c10::Storage(
+        c10::Storage::use_byte_size_t(),
+        at::detail::computeStorageNbytes(
+            curTensorMeta->sizes(), curTensorMeta->strides(), bytesPerEntry),
+        std::move(tensorData), // ownership is transferred
+        nullptr,
+        false);
+    const auto tensorOptions = at::TensorOptions(device)
+                                   .dtype(curTensorMeta->dtype())
+                                   .requires_grad(false);
+    auto tensor =
+        at::empty({0}, tensorOptions)
+            .set_(storage, 0, curTensorMeta->sizes(), curTensorMeta->strides());
 
-        if (tensorDataSize == 0 && tensorMeta->numel() > 0) {
-          VLOG(1) << "Tensor " << tensorName
-                  << " does not have data and create on Meta device";
-          allValues_[tensorName] = at::empty_strided(
-              tensorMeta->sizes(),
-              tensorMeta->strides(),
-              tensorMeta->asTensorOptions().device(at::kMeta));
-          return;
-        }
+    auto targetDevice = tensorMeta->device();
+    VLOG(1) << "Loading weight " << tensorName << " on " << targetDevice;
+    if (!isSameDevice(targetDevice, tensor.device())) {
+      tensor = tensor.to(targetDevice);
+    }
+    if (tensor.dtype() != tensorMeta->dtype()) {
+      tensor = tensor.to(tensorMeta->dtype());
+    }
 
-        if (!isUsed) {
-          VLOG(1) << "Tensor " << tensorName << " is not used during inference";
-          auto targetDevice = tensorMeta->device();
-          allValues_[tensorName] =
-              at::scalar_tensor(0, at::TensorOptions().device(targetDevice));
-          return;
-        }
-
-        size_t bytesPerEntry =
-            c10::scalarTypeToTypeMeta(tensorMeta->dtype()).itemsize();
-        auto device = tensorData.device();
-        auto storage = c10::Storage(
-            c10::Storage::use_byte_size_t(),
-            at::detail::computeStorageNbytes(
-                tensorMeta->sizes(), tensorMeta->strides(), bytesPerEntry),
-            std::move(tensorData), // ownership is transferred
-            nullptr,
-            false);
-        const auto tensorOptions = at::TensorOptions(device)
-                                       .dtype(tensorMeta->dtype())
-                                       .requires_grad(false);
-        auto tensor =
-            at::empty({0}, tensorOptions)
-                .set_(storage, 0, tensorMeta->sizes(), tensorMeta->strides());
-
-        auto targetDevice = tensorMeta->device();
-        VLOG(1) << "Loading weight " << tensorName << " on " << targetDevice;
-        if (!isSameDevice(targetDevice, tensor.device())) {
-          tensor = tensor.to(targetDevice);
-        }
-
-        allValues_[tensorName] = tensor;
-      };
+    allValues_[tensorName] = tensor;
+  };
 
   auto loadAndInsertParamsBuffers = [&](const auto& tensorName, bool isUsed) {
     return loadAndInsert(
-        std::string(tensorName), stateDictPathPrefix, stateDictPaths, isUsed);
+        std::string(tensorName),
+        stateDictPathPrefix,
+        stateDictPaths,
+        isUsed,
+        maybeNewWeightsMeta);
   };
 
   size_t weightIndex = 0;
@@ -190,7 +227,8 @@ Weights::Weights(
             std::string(constantName),
             constantPathPrefix,
             constantPaths,
-            isUsed);
+            isUsed,
+            nullptr);
         weightIndex++;
       } else {
         TORCH_CHECK(false, "Unknown constant path: ", fileName);
