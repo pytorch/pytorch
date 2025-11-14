@@ -2158,6 +2158,19 @@ class GuardBuilder(GuardBuilderBase):
             metadata_checker, get_verbose_code_parts(global_name, guard)
         )
 
+    def DTENSOR_SPEC_MATCH(self, guard: Guard) -> None:
+        # Copied from DTensor __metadata_guard__
+        # TODO - Consider moving this to C++ if stable
+        value = deepcopy(self.get(guard.name))
+
+        def guard_fn(x: Any) -> bool:
+            return x._check_equals(value, skip_shapes=True)
+
+        code = f"__dtensor_spec_{id(guard_fn)}"
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard)
+        )
+
     def EQUALS_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
@@ -2494,11 +2507,29 @@ class GuardBuilder(GuardBuilderBase):
     def DETERMINISTIC_ALGORITHMS(self, guard: Guard) -> None:
         pass  # we always guard on this via GlobalStateGuard()
 
-    def TORCH_FUNCTION_STATE(self, guard: Guard) -> None:
-        pass  # we always guard on this via GlobalStateGuard()
-
     def FSDP_TRAINING_STATE(self, guard: Guard) -> None:
         pass  # we always guard on this via GlobalStateGuard()
+
+    def GLOBAL_STATE(self, guard: Guard) -> None:
+        output_graph = self.check_fn_manager.output_graph
+        assert output_graph is not None
+        global_state = output_graph.global_state_guard
+        self.check_fn_manager.global_state = global_state
+        self.guard_manager.root.add_global_state_guard(
+            global_state, ["___check_global_state()"]
+        )
+
+    def TORCH_FUNCTION_STATE(self, guard: Guard) -> None:
+        assert self.check_fn_manager.torch_function_mode_stack is not None
+        self.check_fn_manager.torch_function_mode_stack_check_fn = (
+            make_torch_function_mode_stack_guard(
+                self.check_fn_manager.torch_function_mode_stack
+            )
+        )
+        self.guard_manager.root.add_torch_function_mode_stack_guard(
+            self.check_fn_manager.torch_function_mode_stack,
+            ["___check_torch_function_mode_stack()"],
+        )
 
     def DEFAULT_DEVICE(self, guard: Guard) -> None:
         """Guard on CURRENT_DEVICE per torch.utils._device"""
@@ -3519,6 +3550,8 @@ class CheckFunctionManager:
         self.additional_used_local_vars: OrderedSet[str] = OrderedSet()
         self.additional_used_global_vars: OrderedSet[str] = OrderedSet()
         self.runtime_global_scope = runtime_global_scope
+        self.global_state: Optional[torch._C._dynamo.guards.GlobalStateGuard] = None
+        self.torch_function_mode_stack_check_fn: Optional[Callable[[], bool]] = None
 
         if not justknobs_check("pytorch/compiler:guard_nn_modules"):
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
@@ -3926,27 +3959,11 @@ class CheckFunctionManager:
         verbose_code_parts = []
         structured_guard_fns: list[Callable[[], dict[str, Any]]] = []
 
-        assert self.torch_function_mode_stack is not None
-        torch_function_mode_stack_check_fn = make_torch_function_mode_stack_guard(
-            self.torch_function_mode_stack
-        )
-
         # Add compile id info in the guard manager for debugging purpose
         self.guard_manager.root.attach_compile_id(
             str(CompileContext.current_compile_id())
         )
 
-        # Insert the global_state guard
-        assert self.output_graph is not None
-        global_state = self.output_graph.global_state_guard
-        self.guard_manager.root.add_global_state_guard(
-            global_state, ["___check_global_state()"]
-        )
-
-        self.guard_manager.root.add_torch_function_mode_stack_guard(
-            self.torch_function_mode_stack,
-            ["___check_torch_function_mode_stack()"],
-        )
         # Clear references to torch_function modes held in the list
         self.torch_function_mode_stack = None
 
@@ -4092,12 +4109,14 @@ class CheckFunctionManager:
 
         if convert_frame.initial_global_state is None:
             # we should only hit this case in NopTests()
-            global_state = convert_frame.GlobalStateGuard()
+            check_global_state = convert_frame.GlobalStateGuard().check
+        else:
+            check_global_state = getattr(self.global_state, "check", None)
         closure_vars = {
             "___check_tensors": check_tensors_fn,
             "___check_tensors_verbose": check_tensors_verbose_fn,
-            "___check_global_state": global_state.check,
-            "___check_torch_function_mode_stack": torch_function_mode_stack_check_fn,
+            "___check_global_state": check_global_state,
+            "___check_torch_function_mode_stack": self.torch_function_mode_stack_check_fn,
             **SYMPY_INTERP,
             **_get_closure_vars(),
         }

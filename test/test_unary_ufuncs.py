@@ -1887,6 +1887,28 @@ class TestUnaryUfuncs(TestCase):
                 # Ensure we are notified when NumPy changes its behavior
                 self.compare_with_numpy(torch.exp, np.exp, nan_real_inf_imag_in)
 
+    # test for issue #161871 where mvlgamma_ should handle integer input gracefully
+    # with a clear error message on all architectures (not crash with FPE on x86)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.int32, torch.int64)
+    def test_mvlgamma_inplace_integer_error(self, device, dtype):
+        tensor = torch.randint(low=1, high=10, size=(5,), device=device, dtype=dtype)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"result type .* can't be cast to the desired output type"
+        ):
+            tensor.mvlgamma_(2)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.int32, torch.int64)
+    def test_mvlgamma_integer_promotion(self, device, dtype):
+        tensor = torch.tensor([5, 6, 7], device=device, dtype=dtype)
+        result = torch.mvlgamma(tensor, 2)
+
+        self.assertTrue(result.dtype.is_floating_point)
+        self.assertTrue(torch.all(torch.isfinite(result)))
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
 
