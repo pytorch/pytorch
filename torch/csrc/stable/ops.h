@@ -231,6 +231,8 @@ inline torch::stable::Tensor zero_(torch::stable::Tensor& self) {
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
 // We expect this to be the stable version of the copy_ op with
 // identical semantics to the existing copy_ op.
 inline torch::stable::Tensor copy_(
@@ -268,8 +270,6 @@ inline torch::stable::Tensor clone(const torch::stable::Tensor& self) {
 #endif
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
-
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 // New ops should be added here if they use a brand new shim API
 

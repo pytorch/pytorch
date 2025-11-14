@@ -4,6 +4,7 @@
 #include <torch/csrc/stable/c/shim.h>
 #include <torch/csrc/stable/device_struct.h>
 #include <torch/csrc/stable/tensor_struct.h>
+#include <torch/csrc/stable/version.h>
 #include <torch/headeronly/core/DeviceType.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
@@ -126,37 +127,6 @@ struct FromImpl<ScalarType> {
   }
 };
 
-// Specialization for torch::headeronly::DeviceType => StableIValue
-// Note that we call into the shim to translate between the user's
-// DeviceType and libtorch's DeviceType, which can be different!
-using torch::headeronly::DeviceType;
-template <>
-struct FromImpl<DeviceType> {
-  static StableIValue call(
-      DeviceType val,
-      [[maybe_unused]] uint64_t extension_build_version,
-      [[maybe_unused]] bool is_internal) {
-    switch (val) {
-      case DeviceType::CPU:
-        return from(aoti_torch_device_type_cpu());
-      case DeviceType::CUDA:
-        return from(aoti_torch_device_type_cuda());
-      case DeviceType::Meta:
-        return from(aoti_torch_device_type_meta());
-      case DeviceType::XPU:
-        return from(aoti_torch_device_type_xpu());
-      case DeviceType::MPS:
-        return from(aoti_torch_device_type_mps());
-      case DeviceType::PrivateUse1:
-        return from(aoti_torch_device_type_privateuse1());
-      default:
-        STD_TORCH_CHECK(
-            false,
-            "Not yet supported DeviceType, please file an issue describing your use case.");
-    }
-  }
-};
-
 // Specialization for std::nullopt_t => StableIValue
 template <>
 struct FromImpl<std::nullopt_t> {
@@ -225,6 +195,8 @@ struct FromImpl<torch::stable::Tensor> {
   }
 };
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
 // Specialization for torch::headeronly::HeaderOnlyArrayRef<T> => StableIValue
 // Returns a new owning reference of the underlying list.
 template <typename T>
@@ -286,6 +258,39 @@ struct FromImpl<torch::stable::Device> {
     return device_index_bits | device_type_bits;
   }
 };
+
+// Specialization for torch::headeronly::DeviceType => StableIValue
+// Note that we call into the shim to translate between the user's
+// DeviceType and libtorch's DeviceType, which can be different!
+using torch::headeronly::DeviceType;
+template <>
+struct FromImpl<DeviceType> {
+  static StableIValue call(
+      DeviceType val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    switch (val) {
+      case DeviceType::CPU:
+        return from(aoti_torch_device_type_cpu());
+      case DeviceType::CUDA:
+        return from(aoti_torch_device_type_cuda());
+      case DeviceType::Meta:
+        return from(aoti_torch_device_type_meta());
+      case DeviceType::XPU:
+        return from(aoti_torch_device_type_xpu());
+      case DeviceType::MPS:
+        return from(aoti_torch_device_type_mps());
+      case DeviceType::PrivateUse1:
+        return from(aoti_torch_device_type_privateuse1());
+      default:
+        STD_TORCH_CHECK(
+            false,
+            "Not yet supported DeviceType, please file an issue describing your use case.");
+    }
+  }
+};
+
+#endif
 
 // =============================================================================
 // TO CONVERSIONS (StableIValue -> T)
@@ -387,36 +392,6 @@ struct ToImpl<ScalarType> {
   }
 };
 
-// Specialization for StableIValue => torch::headeronly::DeviceType
-template <>
-struct ToImpl<DeviceType> {
-  static DeviceType call(
-      StableIValue val,
-      [[maybe_unused]] uint64_t extension_build_version,
-      [[maybe_unused]] bool is_internal) {
-    int32_t shim_devicetype = to<int32_t>(val);
-    if (shim_devicetype == aoti_torch_device_type_cpu()) {
-      return DeviceType::CPU;
-    } else if (shim_devicetype == aoti_torch_device_type_cuda()) {
-      return DeviceType::CUDA;
-    } else if (shim_devicetype == aoti_torch_device_type_meta()) {
-      return DeviceType::Meta;
-    } else if (shim_devicetype == aoti_torch_device_type_xpu()) {
-      return DeviceType::XPU;
-    } else if (shim_devicetype == aoti_torch_device_type_mps()) {
-      return DeviceType::MPS;
-    } else if (shim_devicetype == aoti_torch_device_type_privateuse1()) {
-      return DeviceType::PrivateUse1;
-    } else {
-      STD_TORCH_CHECK(
-          false,
-          "Not yet supported DeviceType ",
-          std::to_string(shim_devicetype),
-          ", please file an issue describing your use case.");
-    }
-  }
-};
-
 // Specialization for StableIValue => std::nullopt_t
 template <>
 struct ToImpl<std::nullopt_t> {
@@ -467,6 +442,8 @@ struct ToImpl<torch::stable::Tensor> {
   }
 };
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
 // Specialization for StableIValue => std::vector<T>
 // std::vector<T> should be represented as a StableListHandle
 // filled with StableIValues
@@ -516,6 +493,38 @@ struct ToImpl<torch::stable::Device> {
     return torch::stable::Device(device_type, device_index);
   }
 };
+
+// Specialization for StableIValue => torch::headeronly::DeviceType
+template <>
+struct ToImpl<DeviceType> {
+  static DeviceType call(
+      StableIValue val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    int32_t shim_devicetype = to<int32_t>(val);
+    if (shim_devicetype == aoti_torch_device_type_cpu()) {
+      return DeviceType::CPU;
+    } else if (shim_devicetype == aoti_torch_device_type_cuda()) {
+      return DeviceType::CUDA;
+    } else if (shim_devicetype == aoti_torch_device_type_meta()) {
+      return DeviceType::Meta;
+    } else if (shim_devicetype == aoti_torch_device_type_xpu()) {
+      return DeviceType::XPU;
+    } else if (shim_devicetype == aoti_torch_device_type_mps()) {
+      return DeviceType::MPS;
+    } else if (shim_devicetype == aoti_torch_device_type_privateuse1()) {
+      return DeviceType::PrivateUse1;
+    } else {
+      STD_TORCH_CHECK(
+          false,
+          "Not yet supported DeviceType ",
+          std::to_string(shim_devicetype),
+          ", please file an issue describing your use case.");
+    }
+  }
+};
+
+#endif
 
 // =============================================================================
 //  end to helpers for converting between StableIValue and T
