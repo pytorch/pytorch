@@ -66,23 +66,12 @@ class Shard : public Placement {
   }
 };
 
-class StridedShard : public Shard {
+class StridedShard : public Placement {
  public:
+  std::int64_t dim;
   std::int64_t split_factor;
-  explicit StridedShard(std::int64_t dim, std::int64_t split_factor_)
-      : Shard(dim), split_factor(split_factor_) {}
-
-  // Override virtual equals to handle polymorphic comparison correctly
-  // TODO(zpcore): once _StridedShard is not a subclass of Shard, we can clean
-  // those up
-  bool equals(const Shard& rhs) const override {
-    // Only equal if rhs is also StridedShard with same dim and split_factor
-    if (typeid(*this) != typeid(rhs)) {
-      return false;
-    }
-    const auto& rhs_strided = static_cast<const StridedShard&>(rhs);
-    return *this == rhs_strided;
-  }
+  explicit StridedShard(std::int64_t dim_, std::int64_t split_factor_)
+      : dim(dim_), split_factor(split_factor_) {}
 
   bool operator==(const StridedShard& rhs) const {
     return dim == rhs.dim && split_factor == rhs.split_factor;
