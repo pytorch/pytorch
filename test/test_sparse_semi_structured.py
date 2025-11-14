@@ -22,7 +22,7 @@ from torch.sparse._semi_structured_conversions import (
 )
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import _get_torch_cuda_version, PLATFORM_SUPPORTS_FP8, xfailIfSM89
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, IS_SM89, PLATFORM_SUPPORTS_FP8, xfailIfSM89
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -1121,7 +1121,9 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
     def test_sparse_fp8fp8_mm(self, dense_input_shape, device):
         if torch.backends.cusparselt.version() < 602:
             self.skipTest("fp8 matmul requires cuSPARSELt v0.6.2+")
-
+        # Expected to fail on SM 8.9 with CUDA < 13.0 (fixed in CUDA 13.0)
+        if IS_SM89 and _get_torch_cuda_version() < (13, 0):
+            raise unittest.SkipTest("expected failure on SM 8.9 with CUDA < 13.0")
         A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
         B = torch.rand(dense_input_shape, device=device).to(torch.float16).t()
 
@@ -1139,8 +1141,10 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
-    @xfailIfSM89
     def test_sparse_semi_structured_scaled_mm_fp8(self, device) -> None:
+        # Expected to fail on SM 8.9 with CUDA < 13.0 (fixed in CUDA 13.0)
+        if IS_SM89 and _get_torch_cuda_version() < (13, 0):
+            raise unittest.SkipTest("expected failure on SM 8.9 with CUDA < 13.0")
         (k, l, m) = (32, 64, 32)
         x = rand_sparse_semi_structured_mask(k, l, dtype=torch.float8_e4m3fn, device=device)
         y = torch.full((m, l), .25, device=device, dtype=torch.float8_e4m3fn).t()
@@ -1159,12 +1163,14 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
-    @xfailIfSM89
     @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.float32])
     @parametrize("dense_input_shape", [(256, 128)])
     def test_sparse_semi_structured_scaled_mm(
         self, dense_input_shape, device, out_dtype
     ):
+        # Expected to fail on SM 8.9 with CUDA < 13.0 (fixed in CUDA 13.0)
+        if IS_SM89 and _get_torch_cuda_version() < (13, 0):
+            raise unittest.SkipTest("expected failure on SM 8.9 with CUDA < 13.0")
         A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
         B = torch.rand(dense_input_shape, device=device).to(torch.float16).t()
 

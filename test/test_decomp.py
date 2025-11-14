@@ -15,7 +15,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._export.utils import _is_cia_op
 from torch._ops import DispatchKey
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import SM70OrLater, tf32_off
+from torch.testing._internal.common_cuda import SM70OrLater, tf32_off, _get_torch_cuda_version
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
@@ -548,9 +548,6 @@ comprehensive_failures = {
     xfail(
         "nn.functional.upsample_bilinear", "", dtypes=(torch.uint8,)
     ),  # off by one error
-    xfail(
-        "torch._scaled_mm", "", device_type="cuda", dtypes=(torch.float8_e4m3fn,)
-    ),  # xfail until nullptr issue is fixed
 }
 
 
@@ -602,6 +599,13 @@ class TestDecomp(TestCase):
     @suppress_warnings
     @ops(op_db)
     def test_comprehensive(self, device, dtype, op):
+        # Version-conditional xfails: skip torch._scaled_mm on CUDA 13.0+ with float8
+        if (device == "cuda" and 
+            op.name == "torch._scaled_mm" and 
+            dtype == torch.float8_e4m3fn and
+            _get_torch_cuda_version() >= (13, 0)):
+            self.skipTest("xfail on CUDA 13.0+ until nullptr issue is fixed")
+
         self.do_cross_ref(device, dtype, op, run_all=True)
 
     def test_uniform(self, device):
