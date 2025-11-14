@@ -647,6 +647,17 @@ class MatmulTest(TestCaseMPS):
 
         self.assertEqual(matmul_cpu, matmul_mps.to("cpu"))
 
+    def test_large_complex_matmul(self):
+        # See https://github.com/pytorch/pytorch/issues/167727
+        M, N, K = 64, 300, 3000
+        a = torch.rand((M, K), device='mps', dtype=torch.cfloat)
+        b = torch.rand((K, N), device='mps', dtype=torch.cfloat)
+        out = torch.mm(a, b)
+        out_cpu = torch.mm(a.cpu(), b.cpu())
+        # Operation order in large matmul can affect the results
+        # Float ulp is 1e-6, multiplied by inner dim results in 5e-3
+        self.assertEqual(out.cpu(), out_cpu, atol=5e-3, rtol=1e-5)
+
     def test_empty_matmul_vec(self):
         tensor_1 = torch.rand((0, 100), device="mps")
         tensor_2 = torch.rand((100, ), device="mps")
@@ -12702,6 +12713,12 @@ class TestErrorInputs(TestCase):
 
             with self.assertRaisesRegex(error_type, error_regex):
                 op(*mps_args, **mps_kwargs)
+
+    def test_index_put_out_of_bounds(self, device):
+        x = torch.rand(10, 1, 10, device=device)
+        with self.assertRaises(torch.AcceleratorError):
+            y = x[:, [1]]
+            torch.mps.synchronize()
 
 class TestComplex(TestCase):
     def test_tensor_scalar_binops(self):

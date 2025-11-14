@@ -70,10 +70,6 @@ inline PyObject* wrap(const at::Tensor& tensor) {
   return THPVariable_Wrap(tensor);
 }
 
-inline PyObject* wrap(at::Tensor&& tensor) {
-  return THPVariable_Wrap(std::move(tensor));
-}
-
 inline PyObject* wrap(const at::Scalar& scalar) {
   return wrap(scalar_to_tensor(scalar));
 }
