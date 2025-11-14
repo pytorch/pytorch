@@ -623,7 +623,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
         x_zero_point: Union["ShapeAsConstantBuffer", "TensorBox"],
         qw: "TensorBox",  # qw
         w_scale: "TensorBox",
-        w_zero_point: "TensorBox",
+        w_zero_point,
         bias: "TensorBox",
         stride: list[int],
         padding: list[int],
