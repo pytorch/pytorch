@@ -4855,8 +4855,8 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
 def forward(self, x):
     sin = torch.ops.aten.sin.default(x)
     sum_1 = torch.ops.aten.sum.default(x);  x = None
-    add_3 = torch.ops.aten.add.Tensor(sin, sum_1);  sin = sum_1 = None
-    return (add_3,)""",
+    add = torch.ops.aten.add.Tensor(sin, sum_1);  sin = sum_1 = None
+    return (add,)""",
         )
 
         ep_no_preserve_sum = ep.run_decompositions()
@@ -4866,8 +4866,8 @@ def forward(self, x):
 def forward(self, x):
     sin = torch.ops.aten.sin.default(x)
     sum_1 = torch.ops.aten.sum.dim_IntList(x, []);  x = None
-    add_3 = torch.ops.aten.add.Tensor(sin, sum_1);  sin = sum_1 = None
-    return (add_3,)""",
+    add = torch.ops.aten.add.Tensor(sin, sum_1);  sin = sum_1 = None
+    return (add,)""",
         )
 
     def test_set_grad_empty(self):
@@ -10057,12 +10057,12 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
     permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
     matmul = torch.ops.aten.matmul.default(conv2d, permute);  conv2d = permute = None
-    mul_30 = torch.ops.aten.mul.Tensor(c_linear_bias, 2);  c_linear_bias = None
-    add_36 = torch.ops.aten.add.Tensor(matmul, mul_30);  matmul = mul_30 = None
-    cos = torch.ops.aten.cos.default(add_36);  add_36 = None
+    mul = torch.ops.aten.mul.Tensor(c_linear_bias, 2);  c_linear_bias = None
+    add = torch.ops.aten.add.Tensor(matmul, mul);  matmul = mul = None
+    cos = torch.ops.aten.cos.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
-    add_47 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
-    return (add_47,)""",
+    add_1 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add_1,)""",
         )
 
     def test_export_decomps_dynamic(self):
@@ -15333,10 +15333,10 @@ graph():
     %_guards_fn : [num_users=0] = call_module[target=_guards_fn](args = (%x,), kwargs = {})
     %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%x,), kwargs = {})
     %cos : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
-    %add_12 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%sin, %cos), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%sin, %cos), kwargs = {})
     %cos_1 : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
-    %add_25 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_12, %cos_1), kwargs = {})
-    return (add_25,)""",
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %cos_1), kwargs = {})
+    return (add_1,)""",
         )
 
         self.assertEqual(gm(inp), Foo()(inp))
@@ -16715,46 +16715,36 @@ def forward(self, args_0):
                 ep_math.graph_module.code.strip(),
                 """\
 def forward(self, q, k, v):
-    sym_size_int_17 = torch.ops.aten.sym_size.int(q, 1)
-    sym_size_int_18 = torch.ops.aten.sym_size.int(q, 2)
-    sym_size_int_19 = torch.ops.aten.sym_size.int(q, 3)
-    sym_size_int_20 = torch.ops.aten.sym_size.int(k, 1)
-    sym_float = torch.sym_float(sym_size_int_19)
-    pow_1 = sym_float ** 0.5;  sym_float = None
-    truediv = 1.0 / pow_1;  pow_1 = None
-    pow_2 = truediv ** 0.5;  truediv = None
-    mul_39 = torch.ops.aten.mul.Scalar(q, pow_2);  q = None
-    floordiv_19 = sym_size_int_17 // sym_size_int_20
+    mul = torch.ops.aten.mul.Scalar(q, 0.29730177875068026);  q = None
     unsqueeze = torch.ops.aten.unsqueeze.default(k, 2);  k = None
-    expand = torch.ops.aten.expand.default(unsqueeze, [1, sym_size_int_20, floordiv_19, sym_size_int_18, sym_size_int_19]);  unsqueeze = None
+    expand = torch.ops.aten.expand.default(unsqueeze, [1, 8, 4, 256, 128]);  unsqueeze = None
     clone = torch.ops.aten.clone.default(expand, memory_format = torch.contiguous_format);  expand = None
-    mul_59 = sym_size_int_20 * floordiv_19
-    view = torch.ops.aten.view.default(clone, [1, mul_59, sym_size_int_18, sym_size_int_19]);  clone = None
+    view = torch.ops.aten.view.default(clone, [1, 32, 256, 128]);  clone = None
     unsqueeze_1 = torch.ops.aten.unsqueeze.default(v, 2);  v = None
-    expand_1 = torch.ops.aten.expand.default(unsqueeze_1, [1, sym_size_int_20, floordiv_19, sym_size_int_18, sym_size_int_19]);  unsqueeze_1 = sym_size_int_20 = floordiv_19 = None
+    expand_1 = torch.ops.aten.expand.default(unsqueeze_1, [1, 8, 4, 256, 128]);  unsqueeze_1 = None
     clone_1 = torch.ops.aten.clone.default(expand_1, memory_format = torch.contiguous_format);  expand_1 = None
-    view_1 = torch.ops.aten.view.default(clone_1, [1, mul_59, sym_size_int_18, sym_size_int_19]);  clone_1 = mul_59 = None
+    view_1 = torch.ops.aten.view.default(clone_1, [1, 32, 256, 128]);  clone_1 = None
     permute = torch.ops.aten.permute.default(view, [0, 1, 3, 2]);  view = None
-    mul_106 = torch.ops.aten.mul.Scalar(permute, pow_2);  permute = pow_2 = None
-    expand_2 = torch.ops.aten.expand.default(mul_39, [1, sym_size_int_17, sym_size_int_18, sym_size_int_19]);  mul_39 = None
-    view_2 = torch.ops.aten.view.default(expand_2, [sym_size_int_17, sym_size_int_18, sym_size_int_19]);  expand_2 = None
-    expand_3 = torch.ops.aten.expand.default(mul_106, [1, sym_size_int_17, sym_size_int_19, sym_size_int_18]);  mul_106 = None
-    view_3 = torch.ops.aten.view.default(expand_3, [sym_size_int_17, sym_size_int_19, sym_size_int_18]);  expand_3 = None
+    mul_1 = torch.ops.aten.mul.Scalar(permute, 0.29730177875068026);  permute = None
+    expand_2 = torch.ops.aten.expand.default(mul, [1, 32, 256, 128]);  mul = None
+    view_2 = torch.ops.aten.view.default(expand_2, [32, 256, 128]);  expand_2 = None
+    expand_3 = torch.ops.aten.expand.default(mul_1, [1, 32, 128, 256]);  mul_1 = None
+    view_3 = torch.ops.aten.view.default(expand_3, [32, 128, 256]);  expand_3 = None
     bmm = torch.ops.aten.bmm.default(view_2, view_3);  view_2 = view_3 = None
-    view_4 = torch.ops.aten.view.default(bmm, [1, sym_size_int_17, sym_size_int_18, sym_size_int_18]);  bmm = None
+    view_4 = torch.ops.aten.view.default(bmm, [1, 32, 256, 256]);  bmm = None
     _softmax = torch.ops.aten._softmax.default(view_4, -1, False)
-    eq_99 = torch.ops.aten.eq.Scalar(view_4, -inf);  view_4 = None
-    logical_not = torch.ops.aten.logical_not.default(eq_99);  eq_99 = None
+    eq = torch.ops.aten.eq.Scalar(view_4, -inf);  view_4 = None
+    logical_not = torch.ops.aten.logical_not.default(eq);  eq = None
     any_1 = torch.ops.aten.any.dim(logical_not, -1, True);  logical_not = None
     logical_not_1 = torch.ops.aten.logical_not.default(any_1);  any_1 = None
     full_like = torch.ops.aten.full_like.default(_softmax, 0, pin_memory = False, memory_format = torch.preserve_format)
     where = torch.ops.aten.where.self(logical_not_1, full_like, _softmax);  logical_not_1 = full_like = _softmax = None
-    expand_4 = torch.ops.aten.expand.default(where, [1, sym_size_int_17, sym_size_int_18, sym_size_int_18]);  where = None
-    view_5 = torch.ops.aten.view.default(expand_4, [sym_size_int_17, sym_size_int_18, sym_size_int_18]);  expand_4 = None
-    expand_5 = torch.ops.aten.expand.default(view_1, [1, sym_size_int_17, sym_size_int_18, sym_size_int_19]);  view_1 = None
-    view_6 = torch.ops.aten.view.default(expand_5, [sym_size_int_17, sym_size_int_18, sym_size_int_19]);  expand_5 = None
+    expand_4 = torch.ops.aten.expand.default(where, [1, 32, 256, 256]);  where = None
+    view_5 = torch.ops.aten.view.default(expand_4, [32, 256, 256]);  expand_4 = None
+    expand_5 = torch.ops.aten.expand.default(view_1, [1, 32, 256, 128]);  view_1 = None
+    view_6 = torch.ops.aten.view.default(expand_5, [32, 256, 128]);  expand_5 = None
     bmm_1 = torch.ops.aten.bmm.default(view_5, view_6);  view_5 = view_6 = None
-    view_7 = torch.ops.aten.view.default(bmm_1, [1, sym_size_int_17, sym_size_int_18, sym_size_int_19]);  bmm_1 = sym_size_int_17 = sym_size_int_18 = sym_size_int_19 = None
+    view_7 = torch.ops.aten.view.default(bmm_1, [1, 32, 256, 128]);  bmm_1 = None
     return (view_7,)""",
             )
         with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
@@ -16764,46 +16754,36 @@ def forward(self, q, k, v):
                 ep_flash.graph_module.code.strip(),
                 """\
 def forward(self, q, k, v):
-    sym_size_int_13 = torch.ops.aten.sym_size.int(q, 1)
-    sym_size_int_14 = torch.ops.aten.sym_size.int(q, 2)
-    sym_size_int_15 = torch.ops.aten.sym_size.int(q, 3)
-    sym_size_int_16 = torch.ops.aten.sym_size.int(k, 1)
-    sym_float = torch.sym_float(sym_size_int_15)
-    pow_1 = sym_float ** 0.5;  sym_float = None
-    truediv = 1.0 / pow_1;  pow_1 = None
-    pow_2 = truediv ** 0.5;  truediv = None
-    mul = torch.ops.aten.mul.Scalar(q, pow_2);  q = None
-    floordiv = sym_size_int_13 // sym_size_int_16
+    mul = torch.ops.aten.mul.Scalar(q, 0.29730177875068026);  q = None
     unsqueeze = torch.ops.aten.unsqueeze.default(k, 2);  k = None
-    expand = torch.ops.aten.expand.default(unsqueeze, [1, sym_size_int_16, floordiv, sym_size_int_14, sym_size_int_15]);  unsqueeze = None
+    expand = torch.ops.aten.expand.default(unsqueeze, [1, 8, 4, 256, 128]);  unsqueeze = None
     clone = torch.ops.aten.clone.default(expand, memory_format = torch.contiguous_format);  expand = None
-    mul_1 = sym_size_int_16 * floordiv
-    view = torch.ops.aten.view.default(clone, [1, mul_1, sym_size_int_14, sym_size_int_15]);  clone = None
+    view = torch.ops.aten.view.default(clone, [1, 32, 256, 128]);  clone = None
     unsqueeze_1 = torch.ops.aten.unsqueeze.default(v, 2);  v = None
-    expand_1 = torch.ops.aten.expand.default(unsqueeze_1, [1, sym_size_int_16, floordiv, sym_size_int_14, sym_size_int_15]);  unsqueeze_1 = sym_size_int_16 = floordiv = None
+    expand_1 = torch.ops.aten.expand.default(unsqueeze_1, [1, 8, 4, 256, 128]);  unsqueeze_1 = None
     clone_1 = torch.ops.aten.clone.default(expand_1, memory_format = torch.contiguous_format);  expand_1 = None
-    view_1 = torch.ops.aten.view.default(clone_1, [1, mul_1, sym_size_int_14, sym_size_int_15]);  clone_1 = mul_1 = None
+    view_1 = torch.ops.aten.view.default(clone_1, [1, 32, 256, 128]);  clone_1 = None
     permute = torch.ops.aten.permute.default(view, [0, 1, 3, 2]);  view = None
-    mul_9 = torch.ops.aten.mul.Scalar(permute, pow_2);  permute = pow_2 = None
-    expand_2 = torch.ops.aten.expand.default(mul, [1, sym_size_int_13, sym_size_int_14, sym_size_int_15]);  mul = None
-    view_2 = torch.ops.aten.view.default(expand_2, [sym_size_int_13, sym_size_int_14, sym_size_int_15]);  expand_2 = None
-    expand_3 = torch.ops.aten.expand.default(mul_9, [1, sym_size_int_13, sym_size_int_15, sym_size_int_14]);  mul_9 = None
-    view_3 = torch.ops.aten.view.default(expand_3, [sym_size_int_13, sym_size_int_15, sym_size_int_14]);  expand_3 = None
+    mul_1 = torch.ops.aten.mul.Scalar(permute, 0.29730177875068026);  permute = None
+    expand_2 = torch.ops.aten.expand.default(mul, [1, 32, 256, 128]);  mul = None
+    view_2 = torch.ops.aten.view.default(expand_2, [32, 256, 128]);  expand_2 = None
+    expand_3 = torch.ops.aten.expand.default(mul_1, [1, 32, 128, 256]);  mul_1 = None
+    view_3 = torch.ops.aten.view.default(expand_3, [32, 128, 256]);  expand_3 = None
     bmm = torch.ops.aten.bmm.default(view_2, view_3);  view_2 = view_3 = None
-    view_4 = torch.ops.aten.view.default(bmm, [1, sym_size_int_13, sym_size_int_14, sym_size_int_14]);  bmm = None
+    view_4 = torch.ops.aten.view.default(bmm, [1, 32, 256, 256]);  bmm = None
     _softmax = torch.ops.aten._softmax.default(view_4, -1, False)
-    eq_44 = torch.ops.aten.eq.Scalar(view_4, -inf);  view_4 = None
-    logical_not = torch.ops.aten.logical_not.default(eq_44);  eq_44 = None
+    eq = torch.ops.aten.eq.Scalar(view_4, -inf);  view_4 = None
+    logical_not = torch.ops.aten.logical_not.default(eq);  eq = None
     any_1 = torch.ops.aten.any.dim(logical_not, -1, True);  logical_not = None
     logical_not_1 = torch.ops.aten.logical_not.default(any_1);  any_1 = None
     full_like = torch.ops.aten.full_like.default(_softmax, 0, pin_memory = False, memory_format = torch.preserve_format)
     where = torch.ops.aten.where.self(logical_not_1, full_like, _softmax);  logical_not_1 = full_like = _softmax = None
-    expand_4 = torch.ops.aten.expand.default(where, [1, sym_size_int_13, sym_size_int_14, sym_size_int_14]);  where = None
-    view_5 = torch.ops.aten.view.default(expand_4, [sym_size_int_13, sym_size_int_14, sym_size_int_14]);  expand_4 = None
-    expand_5 = torch.ops.aten.expand.default(view_1, [1, sym_size_int_13, sym_size_int_14, sym_size_int_15]);  view_1 = None
-    view_6 = torch.ops.aten.view.default(expand_5, [sym_size_int_13, sym_size_int_14, sym_size_int_15]);  expand_5 = None
+    expand_4 = torch.ops.aten.expand.default(where, [1, 32, 256, 256]);  where = None
+    view_5 = torch.ops.aten.view.default(expand_4, [32, 256, 256]);  expand_4 = None
+    expand_5 = torch.ops.aten.expand.default(view_1, [1, 32, 256, 128]);  view_1 = None
+    view_6 = torch.ops.aten.view.default(expand_5, [32, 256, 128]);  expand_5 = None
     bmm_1 = torch.ops.aten.bmm.default(view_5, view_6);  view_5 = view_6 = None
-    view_7 = torch.ops.aten.view.default(bmm_1, [1, sym_size_int_13, sym_size_int_14, sym_size_int_15]);  bmm_1 = sym_size_int_13 = sym_size_int_14 = sym_size_int_15 = None
+    view_7 = torch.ops.aten.view.default(bmm_1, [1, 32, 256, 128]);  bmm_1 = None
     permute_1 = torch.ops.aten.permute.default(view_7, [2, 0, 1, 3]);  view_7 = None
     clone_2 = torch.ops.aten.clone.default(permute_1, memory_format = torch.contiguous_format);  permute_1 = None
     permute_2 = torch.ops.aten.permute.default(clone_2, [1, 2, 0, 3]);  clone_2 = None
