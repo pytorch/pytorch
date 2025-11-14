@@ -8792,29 +8792,11 @@ class HopPrint(ExternKernel):
             layout=NoneLayout(device=None),
         )
 
-        # Return a NoneAsConstantBuffer to represent the None return value
-        return [NoneAsConstantBuffer(device=None)]
+        # Return a NoneAsConstantBuffer to indicate a side-effecting node with no output
+        return [NoneAsConstantBuffer()]
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        # Codegen the print operation
-        args = [self.format_str]
-
-        # Generate the kernel call using the base ExternKernel codegen
-        from .codegen.wrapper import get_wrapper_codegen_for_device
-
-        # Build the function call with format_str and kwargs
-        kernel_name = self.python_kernel_name
-        assert kernel_name is not None
-
-        # Prepare kwargs for codegen
-        kwargs_code = ", ".join(
-            f"{k}={v.codegen_reference() if isinstance(v, IRNode) else repr(v)}"
-            for k, v in self.print_kwargs.items()
-        )
-
-        # Write the print call
-        wrapper.writeline(f"{kernel_name}({repr(self.format_str)}, {kwargs_code})")
-
+        wrapper.writeline(f'print("{self.format_str}".format({self.print_kwargs}))')
 
 
 @ir_dataclass(frozen=False)

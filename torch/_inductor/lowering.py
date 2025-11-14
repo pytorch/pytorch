@@ -7275,8 +7275,8 @@ def cond(pred, true_fn, false_fn, operands):
 
 @register_lowering(torch.ops.higher_order.print, type_promotion_kind=None)
 def print(format_str: str, **kwargs: object):
-    result = ir.HopPrint.create(format_str, **kwargs)
-    return list(map(TensorBox.create, result))  # type: ignore[call-overload]
+    ir.HopPrint.create(format_str, **kwargs)
+    return None  # type: ignore[call-overload]
 
 
 @register_lowering(torch.ops.higher_order.while_loop, type_promotion_kind=None)

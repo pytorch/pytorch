@@ -1,6 +1,5 @@
 # Owner(s): ["module: higher order operators"]
 import io
-import unittest
 from unittest.mock import patch
 
 import torch
@@ -182,7 +181,6 @@ x = add_1, y = add_2);  getitem = None
             """print(str format_str) -> ()""",
         )
 
-
     def test_reorder_print_no_graph_break(self):
         def f(x):
             x1 = x + x
@@ -229,18 +227,26 @@ x = add_1, y = add_2);  getitem = None
             self.assertEqual(printed_output, "moo tensor([2])\nmoo tensor([1])")
             self.assertEqual(orig_out, opt_out)
 
-
-class TestHopPrintInductor(TestCase):
     def test_hop_print_inductor(self):
-        def fn(a, b):
-            torch._higher_order_ops.print("hip hop {x} {y}", x=a, y=b)
-            return torch.sin(a, out=b)
+        def f(x):
+            x1 = x + x
+            torch._higher_order_ops.print("moo {x}", x=x1)
+            x2 = x1 * x1
+            torch._higher_order_ops.print("moo {x}", x=x2)
+            x3 = x2 + x2
+            return (x1, x3)
 
-        inp = [torch.randn(3, 3), torch.ones(3, 3)]
-        ref_out = fn(*inp)
-        # Validate the hop print can reduce the graph break in dynamo tracing
-        out = torch.compile(backend="inductor")(fn)(*inp)
-        self.assertEqual(ref_out, out)
+        x = torch.randn(3, 3)
+        opt_f = torch.compile(backend="inductor")(f)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            opt_f(x)
+            printed_output = mock_stdout.getvalue().strip()
+
+        self.assertEqual(
+            printed_output,
+            f"moo {x * 2}\nmoo {x * 2 * x * 2}",
+        )
+
 
 if __name__ == "__main__":
     run_tests()
