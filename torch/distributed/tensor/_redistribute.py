@@ -692,7 +692,8 @@ def _gen_transform_infos_non_cached(
 
     use_graph_based_transform = (
         has_non_default_order
-        or _FORCE_MIN_COST_REDISTRIBUTION_PLAN is True
+        or _FORCE_MIN_COST_REDISTRIBUTION_PLAN is not None
+        and _FORCE_MIN_COST_REDISTRIBUTION_PLAN
         or use_graph_based_transform is True
     )
 
