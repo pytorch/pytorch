@@ -1713,7 +1713,8 @@ class TestFP8Matmul(TestCase):
 
             prof.export_chrome_trace(f.name)
             if torch.version.hip:
-                events = [evt for evt in json.load(open(f.name))["traceEvents"] if evt.get("cat", "") == "kernel"]
+                with open(f.name) as file:
+                    events = [evt for evt in json.load(file)["traceEvents"] if evt.get("cat", "") == "kernel"]
                 # events were returned out of order; need to be sorted on "ts" timestamp
                 events = sorted(events, key=lambda x: x['ts'])
                 # ROCm carveout is invisible except for kernels running slower on fewer CUs
@@ -1736,11 +1737,12 @@ class TestFP8Matmul(TestCase):
                 self.assertTrue(no_carveout != carveout)
                 self.assertTrue(carveout_0 != carveout)
             else:
-                no_carveout, carveout_0, carveout_66, no_carveout_again = [
-                    math.prod(evt.get("args", {}).get("grid", []))
-                    for evt in json.load(open(f.name))["traceEvents"]
-                    if evt.get("cat", "") == "kernel"
-                ]
+                with open(f.name) as file:
+                    no_carveout, carveout_0, carveout_66, no_carveout_again = [
+                        math.prod(evt.get("args", {}).get("grid", []))
+                        for evt in json.load(file)["traceEvents"]
+                        if evt.get("cat", "") == "kernel"
+                    ]
 
                 self.assertEqual(no_carveout, no_carveout_again)
                 capability = torch.cuda.get_device_capability()
@@ -1864,6 +1866,8 @@ class TestFP8Matmul(TestCase):
     ], name_fn=lambda mkn: f"{mkn[0]}_{mkn[1]}_{mkn[2]}")
     @parametrize("recipe", ["mxfp8", "mxfp4", "nvfp4"])
     def test_blockwise_mxfp8_nvfp4_mxfp4_numerics(self, test_case_name, fast_accum, mkn, recipe) -> None:
+        if torch.version.hip and recipe == "nvfp4":
+            raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
         if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
             raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
 

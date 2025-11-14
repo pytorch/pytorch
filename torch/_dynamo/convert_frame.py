@@ -114,7 +114,7 @@ from .exc import (
     SkipCodeRecursiveException,
     TorchRuntimeError,
     UncapturedHigherOrderOpError,
-    unimplemented_v2,
+    unimplemented,
     Unsupported,
 )
 from .graph_bytecode_inputs import reset_user_object_tracking
@@ -646,7 +646,7 @@ class ConvertFrameAssert:
             return ConvertFrameReturn()
 
         if is_generator(code):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Attempt to trace generator",
                 context="",
                 explanation="Generators cannot be compiled directly with `torch.compile`.",
@@ -828,6 +828,7 @@ def trace_frame(
             raise
         finally:
             tracer.output.call_cleanup_hooks()
+            tracer.f_locals = {}
 
     try:
         run_tracer()
@@ -1000,10 +1001,24 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
     import inspect
 
     if isinstance(mod, torch.nn.Module):
-        if len(mod._forward_pre_hooks) == 0 and len(mod._forward_hooks) == 0:
+        # Mirrored from NNModuleVariable.call_function:
+        # https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/variables/nn_module.py#L1035
+        if (
+            len(mod._forward_pre_hooks) == 0
+            and len(mod._forward_hooks) == 0
+            and len(torch.nn.modules.module._global_forward_pre_hooks) == 0
+            and len(torch.nn.modules.module._global_forward_hooks) == 0
+            and len(mod._backward_pre_hooks) == 0
+            and len(mod._backward_hooks) == 0
+            and len(torch.nn.modules.module._global_backward_pre_hooks) == 0
+            and len(torch.nn.modules.module._global_backward_hooks) == 0
+        ):
             mod = mod.forward
+        elif isinstance(mod, torch.fx.GraphModule):
+            mod = mod._call_impl
         else:
             mod = mod.__call__
+
     if hasattr(mod, "__self__"):
         # pyrefly: ignore [missing-attribute]
         return mod.__func__, mod.__self__
@@ -1240,7 +1255,7 @@ def compile_frame(  # type: ignore[return]
             # We now have a new "last attempt", reset the clock
             last_attempt_start_time = time.time()
             if attempt > 100:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Excessive RestartAnalysis() calls",
                     context="",
                     explanation="Dynamo attempted to trace the same frame 100+ times. "
@@ -1575,7 +1590,7 @@ def _compile(
                 raise RecompileLimitExceeded(f"{limit_type} reached")
             else:
                 # do not recursively skip frames
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Dynamo cache limit exceeded",
                     context=f"Limit type: {limit_type}",
                     explanation="Dynamo attempted to recompile the code object too many times, "
@@ -1855,7 +1870,7 @@ class ConvertFrame:
                 raise
 
             soft_fail = isinstance(e, Unsupported)
-
+            code = frame.f_code
             # This is a soft failure. In the sense, the code path reaches here
             # when we do not support graph breaks on bytecodes like LOAD_ATTR,
             # BUILD_SET etc. In such case, we can fallback to eager without
@@ -1870,7 +1885,13 @@ class ConvertFrame:
                         user_stack_formatted = "".join(
                             traceback.format_list(user_stack)
                         )
-                        user_stack_trace = f"Graph break: skip: from user code at:\n{user_stack_formatted}"
+                        frame_info = exc.format_frame_info(code)
+                        user_stack_trace = (
+                            "Graph break: torch.compile cannot properly resume from this graph break, which results in a skip.\n"
+                            f"torch.compile will skip tracing the frame {frame_info} and fall back to eager.\n"
+                            "The graph break occurred in the following user code:\n"
+                            f"{user_stack_formatted}"
+                        )
                         torch._logging.trace_structured(
                             "artifact",
                             metadata_fn=lambda: {
@@ -1882,6 +1903,7 @@ class ConvertFrame:
                         graph_break_log.debug(
                             user_stack_trace,
                             exc_info=True,
+                            stack_info=config.verbose,
                         )
 
             if not config.suppress_errors and not soft_fail:
