@@ -212,7 +212,6 @@ def tensorify_python_scalars(
 
                 s = node.meta["val"].node.expr
 
-                # always track s.
                 expr_to_sym_proxy[s] = MetaProxy(
                     node, tracer=tracer, fake_mode=fake_mode
                 )
