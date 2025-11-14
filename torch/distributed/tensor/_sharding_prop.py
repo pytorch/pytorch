@@ -366,6 +366,18 @@ class ShardingPropagator:
         # special case op, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
         if op_schema.op is aten._local_scalar_dense.default:
+            from torch.distributed.tensor.placement_types import Partial
+
+            input_arg = op_schema.args_schema[0]
+            for placement in input_arg.placements:
+                if isinstance(placement, Partial):
+                    raise RuntimeError(
+                        "Cannot call scalar extraction (e.g., item, int, float) on "
+                        "DTensor with Partial placement. "
+                        "Different ranks have different local values. "
+                        "Call .redistribute(placements=[Replicate()]) first to reduce the tensor."
+                    )
+
             return OutputSharding(None, op_schema)
 
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
