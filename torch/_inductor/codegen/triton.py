@@ -6031,7 +6031,9 @@ def debug_triton_code(node: BaseSchedulerNode) -> list[str]:
         device = node.get_device()
         assert device is not None
         backend = node.scheduler.get_backend(device)
-        assert isinstance(backend, (SIMDScheduling, CUDACombinedScheduling, XPUCombinedScheduling)), (
+        assert isinstance(
+            backend, (SIMDScheduling, CUDACombinedScheduling, XPUCombinedScheduling)
+        ), (
             f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
         )
 
