@@ -1,6 +1,5 @@
 # Owner(s): ["module: higher order operators"]
 import io
-import unittest
 from unittest.mock import patch
 
 import torch
@@ -181,7 +180,6 @@ x = add_1, y = add_2);  getitem = None
             str(schema_no_kwargs),
             """print(str format_str) -> ()""",
         )
-
 
     def test_reorder_print_no_graph_break(self):
         def f(x):
