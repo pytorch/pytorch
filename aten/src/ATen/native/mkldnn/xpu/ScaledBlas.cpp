@@ -403,7 +403,7 @@ Tensor& _scaled_tensorwise_tensorwise(
     Tensor& out) {
   // Restrictions:
   // A, B are FP8, scales are fp32
-  //
+
   TORCH_CHECK_VALUE(
       isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()),
       "mat_a and mat_b must be fp8 types, got: ",
