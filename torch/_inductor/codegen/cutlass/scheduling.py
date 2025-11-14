@@ -40,7 +40,7 @@ class CUTLASSScheduling(BaseScheduling):
     """
     Partial Scheduling implementation for cutlass C++ Kernels.
     This class is intended to be used in combination with TritonScheduling,
-    and delegated to by CombinedScheduling.
+    and delegated to by CUDACombinedScheduling.
 
     It handles fusion decisions and cutlass C++ specific template code generation.
     """
