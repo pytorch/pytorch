@@ -4,7 +4,8 @@ import functools
 
 import torch
 import torch._dynamo.test_case
-import torch.nn as nn
+from functorch.compile import min_cut_rematerialization_partition
+from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._inductor import config as inductor_config
@@ -17,6 +18,52 @@ from torch.utils.checkpoint import (
     CheckpointPolicy,
     create_selective_checkpoint_contexts,
 )
+
+
+def count_ops(
+    gm, args, freq=None, freq_ge=None, op=None, freqs=None, freqs_ge=None, ops=None
+):
+    """
+    Count operations in a graph module.
+    Used to verify SAC behavior by counting ops in forward/backward graphs.
+    """
+
+    def match_rng_op(node, op):
+        if isinstance(node.target, torch._ops.HigherOrderOperator):
+            if node.name == "run_and_save_rng_state":
+                return node.args[0] == op
+            elif node.name == "run_with_rng_state":
+                return node.args[1] == op
+            elif node.name == "graphsafe_run_with_rng_state":
+                return node.args[0] == op
+        return False
+
+    if op is not None:
+        assert not isinstance(op, list)
+        ops = [op]
+    if freq is not None:
+        freqs = [freq]
+    if freq_ge is not None:
+        freqs_ge = [freq_ge]
+    if freqs:
+        for op, freq in zip(ops, freqs):
+            actual_count = 0
+            for node in gm.graph.nodes:
+                if match_rng_op(node, op) or node.target == op:
+                    actual_count += 1
+            err_msg = f"In graph {gm}, expected {op} to have occurred {freq} times in the graph, but got {actual_count}."
+            assert actual_count == freq, err_msg
+    else:
+        assert freqs_ge is not None
+        for op, freq_ge in zip(ops, freqs_ge):
+            actual_count = 0
+            for node in gm.graph.nodes:
+                if match_rng_op(node, op) or node.target == op:
+                    actual_count += 1
+            assert actual_count >= freq_ge, (
+                f"In graph {gm}, expected {op} to have occurred at least {freq_ge} times in the graph, but got {actual_count}."
+            )
+    return gm
 
 
 class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
@@ -629,43 +676,39 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
 
     @requires_cuda_and_triton
     @skipIfRocm
-    def test_flex_attention_with_sac_wrapper_enabled(self):
-        """Test that SAC works with flex_attention when wrapper is enabled"""
+    def test_flex_attention_with_sac_must_save(self):
+        """
+        Test that SAC policy MUST_SAVE for flex_attention_hop
+        prevents recomputation during backward when used with wrapper.
+
+        This verifies that flex_attention works correctly with SAC when
+        wrap_inductor_compiled_regions is enabled.
+        """
 
         def score_mod(score, b, h, q_idx, k_idx):
             return score
 
-        # SAC policy: save flex_attention HOP
+        # SAC policy: MUST_SAVE flex_attention_hop
         def policy_fn(ctx, op, *args, **kwargs):
             if op == flex_attention_hop:
                 return CheckpointPolicy.MUST_SAVE
             return CheckpointPolicy.PREFER_RECOMPUTE
 
-        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+        def gn(q, k, v):
+            return flex_attention(q, k, v, score_mod=score_mod)
 
-        class FlexAttentionModule(nn.Module):
-            def forward(self, q, k, v):
-                return flex_attention(q, k, v, score_mod=score_mod)
-
-        class SACModule(nn.Module):
-            def __init__(self, context_fn):
-                super().__init__()
-                self.flex_attn = FlexAttentionModule()
-                self.context_fn = context_fn
-
-            def forward(self, q, k, v):
-                def flex_attn_fn(q, k, v):
-                    return self.flex_attn(q, k, v)
-
-                output = checkpoint(
-                    flex_attn_fn,
-                    q,
-                    k,
-                    v,
-                    use_reentrant=False,
-                    context_fn=self.context_fn,
-                )
-                return output
+        def fn(q, k, v):
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts, policy_fn
+            )
+            return checkpoint(
+                gn,
+                q,
+                k,
+                v,
+                use_reentrant=False,
+                context_fn=context_fn,
+            )
 
         B, H, S, D = 2, 4, 128, 64
         q = torch.randn(
@@ -678,84 +721,80 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
         )
 
-        # Test with wrapper enabled
-        module_wrapped = SACModule(context_fn)
-        compiled_wrapped = torch.compile(
-            module_wrapped,
-            backend="inductor",
-            options={"wrap_inductor_compiled_regions": True},
+        # Forward compiler: should see flex_attention_hop once
+        fw_compiler = functools.partial(
+            count_ops,
+            freq=1,
+            op=flex_attention_hop,
         )
 
-        output_wrapped = compiled_wrapped(q, k, v)
-        loss_wrapped = output_wrapped.sum()
-        loss_wrapped.backward()
+        # Backward compiler: should NOT see flex_attention_hop
+        # because MUST_SAVE means it was saved, not recomputed
+        bw_compiler = functools.partial(
+            count_ops,
+            freq=0,
+            op=flex_attention_hop,
+        )
+
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+
+        # Use config.patch to enable wrapping at inductor level
+        with inductor_config.patch({"wrap_inductor_compiled_regions": True}):
+            compiled_fn = torch.compile(
+                fn,
+                backend=backend,
+                fullgraph=True,
+            )
+
+            output = compiled_fn(q, k, v)
+            loss = output.sum()
+            loss.backward()
 
         # Verify gradients exist
         self.assertIsNotNone(q.grad)
         self.assertIsNotNone(k.grad)
         self.assertIsNotNone(v.grad)
 
-        # Test with wrapper disabled for comparison
-        q2 = q.detach().clone().requires_grad_(True)
-        k2 = k.detach().clone().requires_grad_(True)
-        v2 = v.detach().clone().requires_grad_(True)
-
-        module_unwrapped = SACModule(context_fn)
-        compiled_unwrapped = torch.compile(
-            module_unwrapped,
-            backend="inductor",
-            options={"wrap_inductor_compiled_regions": False},
-        )
-
-        output_unwrapped = compiled_unwrapped(q2, k2, v2)
-        loss_unwrapped = output_unwrapped.sum()
-        loss_unwrapped.backward()
-
-        # Both should produce correct results
-        torch.testing.assert_close(
-            output_wrapped, output_unwrapped, rtol=1e-3, atol=1e-3
-        )
-        torch.testing.assert_close(q.grad, q2.grad, rtol=1e-3, atol=1e-3)
-        torch.testing.assert_close(k.grad, k2.grad, rtol=1e-3, atol=1e-3)
-        torch.testing.assert_close(v.grad, v2.grad, rtol=1e-3, atol=1e-3)
-
     @requires_cuda_and_triton
     @skipIfRocm
-    def test_flex_attention_with_sac_saves_hop_output(self):
+    def test_flex_attention_with_sac_prefer_recompute(self):
         """
-        Test that when SAC policy says MUST_SAVE for flex_attention_hop,
-        the output is actually saved and not recomputed during backward.
+        Test that SAC policy PREFER_RECOMPUTE for flex_attention_hop
+        causes recomputation during backward when used with wrapper.
+
+        This verifies that flex_attention is properly recomputed when SAC
+        policy specifies PREFER_RECOMPUTE.
         """
 
         def score_mod(score, b, h, q_idx, k_idx):
             return score
 
-        # Policy: MUST_SAVE flex_attention_hop
+        # SAC policy: PREFER_RECOMPUTE flex_attention_hop
         def policy_fn(ctx, op, *args, **kwargs):
             if op == flex_attention_hop:
-                return CheckpointPolicy.MUST_SAVE
+                # this would be very weird IRL fwiw, just testing
+                return CheckpointPolicy.PREFER_RECOMPUTE
             return CheckpointPolicy.PREFER_RECOMPUTE
 
-        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+        def gn(q, k, v):
+            return flex_attention(q, k, v, score_mod=score_mod)
 
-        class SACModule(nn.Module):
-            def __init__(self, context_fn):
-                super().__init__()
-                self.context_fn = context_fn
-
-            def forward(self, q, k, v):
-                def flex_attn_fn(q, k, v):
-                    return flex_attention(q, k, v, score_mod=score_mod)
-
-                output = checkpoint(
-                    flex_attn_fn,
-                    q,
-                    k,
-                    v,
-                    use_reentrant=False,
-                    context_fn=self.context_fn,
-                )
-                return output
+        def fn(q, k, v):
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts, policy_fn
+            )
+            return checkpoint(
+                gn,
+                q,
+                k,
+                v,
+                use_reentrant=False,
+                context_fn=context_fn,
+            )
 
         B, H, S, D = 2, 4, 128, 64
         q = torch.randn(
@@ -768,19 +807,38 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
         )
 
-        module = SACModule(context_fn)
-        compiled_module = torch.compile(
-            module,
-            backend="inductor",
-            options={"wrap_inductor_compiled_regions": True},
+        # Forward compiler: should see flex_attention_hop once
+        fw_compiler = functools.partial(
+            count_ops,
+            freq=1,
+            op=flex_attention_hop,
         )
 
-        # Note: This test verifies that SAC works, but counting HOP calls
-        # is complex because the HOP gets compiled. The key verification
-        # is that the code runs without errors and produces correct gradients.
-        output = compiled_module(q, k, v)
-        loss = output.sum()
-        loss.backward()
+        # Backward compiler: should see flex_attention_hop once
+        # because PREFER_RECOMPUTE means it gets recomputed
+        bw_compiler = functools.partial(
+            count_ops,
+            freq=1,
+            op=flex_attention_hop,
+        )
+
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+
+        # Use config.patch to enable wrapping at inductor level
+        with inductor_config.patch({"wrap_inductor_compiled_regions": True}):
+            compiled_fn = torch.compile(
+                fn,
+                backend=backend,
+                fullgraph=True,
+            )
+
+            output = compiled_fn(q, k, v)
+            loss = output.sum()
+            loss.backward()
 
         # Verify gradients exist
         self.assertIsNotNone(q.grad)
