@@ -614,10 +614,9 @@ def get_score(
             var_sizes.append(v_size)
     from .virtualized import V
 
-    score = V.graph.sizevars.atomically_apply_size_hint(
+    return V.graph.sizevars.atomically_apply_size_hint(
         sympy_product(var_sizes), fallback=config.unbacked_symint_fallback
     )
-    return score
 
 
 def try_get_buf_size(buf_name: str) -> Optional[int]:
