@@ -47,6 +47,8 @@ wrap = Wrap()
 class InductorCompiledCode(HigherOrderOperator):
     """
     Defines a HOP for wrapping inductor compiled functions as a callable.
+    When used with torch.compile via "wrap_inductor_compiled_regions",
+    this HOP will automatically be wrapped and redirect various torch dispatch modes.
     """
 
     def __init__(self) -> None:

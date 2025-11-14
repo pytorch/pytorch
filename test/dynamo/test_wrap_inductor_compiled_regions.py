@@ -309,6 +309,98 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         self.assertEqual(result1, expected)
         self.assertEqual(result2, expected)
 
+    @requires_cuda_and_triton
+    @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_wrap_config_affects_cache_key(self):
+        """
+        Test that wrap_inductor_compiled_regions is part of the cache key.
+        Changing this option should cause a cache miss because it produces
+        different compiled artifacts (wrapped vs unwrapped).
+        """
+        from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
+
+        def fn(x, y):
+            return torch.matmul(x, y)
+
+        x = torch.randn(4, 4, device="cuda")
+        y = torch.randn(4, 4, device="cuda")
+
+        # Clear all caches and counters
+        counters.clear()
+        torch._inductor.codecache.FxGraphCache.clear()
+        AOTAutogradCache.clear()
+        torch._dynamo.reset()
+        torch._inductor.codecache.PyCodeCache.cache_clear(purge=True)
+
+        # Compile with wrapping enabled
+        compiled_fn_wrapped = torch.compile(
+            fn,
+            backend="inductor",
+            options={"wrap_inductor_compiled_regions": True},
+            fullgraph=True,
+        )
+
+        # First call with wrapping=True should miss the cache
+        result1 = compiled_fn_wrapped(x, y)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+        # Clear dynamo and codecache (but not FX or AOT autograd cache)
+        torch._dynamo.reset()
+        torch._inductor.codecache.PyCodeCache.cache_clear(purge=True)
+
+        # Second call with wrapping=True should hit the cache
+        result2 = compiled_fn_wrapped(x, y)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+        # Clear dynamo and codecache again
+        torch._dynamo.reset()
+        torch._inductor.codecache.PyCodeCache.cache_clear(purge=True)
+
+        # Now compile with wrapping disabled - should miss cache because
+        # the config is different, even though the function is the same
+        compiled_fn_unwrapped = torch.compile(
+            fn,
+            backend="inductor",
+            options={"wrap_inductor_compiled_regions": False},
+            fullgraph=True,
+        )
+
+        result3 = compiled_fn_unwrapped(x, y)
+        # Should have a new cache miss because config changed
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+        # Clear dynamo and codecache again
+        torch._dynamo.reset()
+        torch._inductor.codecache.PyCodeCache.cache_clear(purge=True)
+
+        # Call again with wrapping=False - should hit the cache for unwrapped version
+        result4 = compiled_fn_unwrapped(x, y)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 2)
+
+        # All results should be correct
+        expected = torch.matmul(x, y)
+        self.assertEqual(result1, expected)
+        self.assertEqual(result2, expected)
+        self.assertEqual(result3, expected)
+        self.assertEqual(result4, expected)
+
+        # Verify the wrapping behavior is different
+        with DebugMode() as debug_wrapped:
+            _ = compiled_fn_wrapped(x, y)
+        with DebugMode() as debug_unwrapped:
+            _ = compiled_fn_unwrapped(x, y)
+
+        # Wrapped version should show the HOP
+        self.assertIn("inductor_compiled_code", debug_wrapped.debug_string())
+        # Unwrapped version should not
+        self.assertNotIn("inductor_compiled_code", debug_unwrapped.debug_string())
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
