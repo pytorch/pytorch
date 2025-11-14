@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, Sequence, TYPE_CHECKING
+from typing import Optional, Sequence, TYPE_CHECKING  # noqa: UP035
 
 from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
     opset20 as op20,
