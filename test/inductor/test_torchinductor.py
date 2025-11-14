@@ -2598,6 +2598,7 @@ class CommonTemplate:
 
         self.common(fn, (a, q_group, in_features, out_features))
 
+    @skipCPUIf(IS_MACOS, "fails on M1, mismatch in bf16 support reporting")
     @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
