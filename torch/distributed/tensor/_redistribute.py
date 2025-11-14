@@ -732,7 +732,7 @@ def _maybe_adjust_transform_info_inplace(
             # comm, just use the original local tensor
             updated_placements[i] = target
             continue
-        # adjust rule 3: no Replicate -> Partial
+
         if ignore_partial_to_replicate:
             # Skip the replicate to partial transformation when we are in
             # backward pass. In this case we keep the grad as replicate, this
@@ -742,11 +742,24 @@ def _maybe_adjust_transform_info_inplace(
             # actually useless as you would have to do reduce later which
             # would be more expensive than keeping it replicate! For this
             # reason, we keep the replicate grad here.
+
+            # adjust rule 3: no Replicate -> Partial
             if target.is_partial() and current.is_replicate():
                 updated_placements[i] = Replicate()
                 continue
+            # adjust rule 4: no Shard -> Partial, redistribute with Replicate()
+            if target.is_partial() and current.is_shard():
+                updated_placements[i] = Replicate()
+                new_transforms_infos.append(
+                    _TransformInfo(
+                        mesh_dim=i,
+                        src_dst_placements=(current, Replicate()),
+                        logical_shape=transform_info.logical_shape,
+                    )
+                )
+                continue
         else:
-            # adjust rule 4: safe check, we should not see Shard -> Partial in forward
+            # adjust rule 5: safe check, we should not see Shard -> Partial in forward
             if target.is_partial() and current.is_shard():
                 raise RuntimeError(
                     f"redistribute from {current} to {target} not supported yet"
@@ -819,10 +832,8 @@ def _execute_transform(
                     local_tensor, device_mesh, i
                 )
             elif current.is_shard():
-                # for backward shard -> partial, we just need to convert the shard to replicate
-                current_placement = cast(Shard, current)
-                new_local_tensor = current_placement._to_replicate_tensor(
-                    local_tensor, device_mesh, i, transform_info.logical_shape
+                raise RuntimeError(
+                    f"redistribute from {current} to {target} not supported yet"
                 )
             else:
                 # partial -> partial no op, should never hit
@@ -842,7 +853,7 @@ def redistribute_local_tensor(
     async_op: bool = False,
     is_backward: bool = False,
     use_graph_based_transform: Optional[bool] = None,
-) -> tuple[torch.Tensor, list[Placement]]:
+) -> tuple[torch.Tensor, Optional[list[Placement]]]:
     """
     Redistribute a local tensor from current DTensorSpec to target DTensorSpec.
 
@@ -867,7 +878,8 @@ def redistribute_local_tensor(
         A tuple containing:
             - The redistributed local tensor after applying transformations.
             - A list of final placements after redistribution (may differ from
-              target_spec.placements due to optimization adjustments).
+              target_spec.placements due to optimization adjustments), or None
+              if the current rank is not part of the device mesh.
 
     Raises:
         NotImplementedError: If current_spec and target_spec have different device meshes.
@@ -885,7 +897,7 @@ def redistribute_local_tensor(
     if my_coordinate is None:
         # if rank is not part of mesh, we skip redistribute and simply return local_tensor,
         # which should be an empty tensor
-        return local_tensor, list(current_spec.placements)
+        return local_tensor, None
 
     if _are_we_tracing():
         transform_infos = _gen_transform_infos_non_cached(
@@ -968,9 +980,11 @@ class Redistribute(torch.autograd.Function):
             output, end_placements = redistribute_local_tensor(
                 local_tensor, current_spec, target_spec, async_op=async_op
             )
-            if not tuple(end_placements) == tuple(target_spec.placements):
+            if end_placements is not None and not tuple(end_placements) == tuple(
+                target_spec.placements
+            ):
                 raise RuntimeError(
-                    f"End placements {end_placements} does not match target placements "
+                    f"End placements {end_placements} do not match target placements "
                     f"{target_spec.placements} in Redistribute forward. "
                     "This can be caused by _TransformInfo used in redistribution "
                     "be incorrectly adjusted."
@@ -1025,6 +1039,7 @@ class Redistribute(torch.autograd.Function):
         if output.dtype != ctx.original_dtype:
             output = output.to(ctx.original_dtype)
 
+        assert end_placements is not None
         spec = DTensorSpec(
             previous_spec.device_mesh,
             tuple(end_placements),
