@@ -1308,16 +1308,9 @@ def perload_gcc_libgomp_linux(cflags, ldflags, libs, lib_dir_paths):
         if not torch_libgomp:
             continue
         path = Path(torch_libgomp[0]).resolve()
-
         ldflags.append(f"L{path.parent}")
         ldflags.append(f"Wl,-rpath,{path.parent}")
-        ldflags.append(f"Wl,-rpath-link,{path.parent}")
-        ldflags.append("Wl,--as-needed")
-
         libs.append(f":{path.name}")
-
-        # Track the directory so it's prioritized
-        lib_dir_paths.append(str(path.parent))
 
         print(f"[DEBUG] Prioritizing TORCH libgomp: {path}")
         return True
