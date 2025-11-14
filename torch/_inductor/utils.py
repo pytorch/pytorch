@@ -3294,7 +3294,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     #       whether this fits in int32
     #   - If allowed range does have an upper bound, then obey the upper bound
     #       (check whether upper bound < int32_max) without checking the hint.
-    # Laith: I do not like this!
+
     if V.aot_compilation:
         # check whether value has an upper bound (1e20 is > INT64_MAX, assume
         # there is no upper bound if it can be larger than 1e20)
