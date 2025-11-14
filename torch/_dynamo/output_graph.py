@@ -794,6 +794,7 @@ class OutputGraph(OutputGraphCommon):
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
 
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GLOBAL_STATE))
         self.guards.add(
             GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
