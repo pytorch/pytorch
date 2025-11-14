@@ -5059,6 +5059,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ),
         }
 
+        if self.cooperative_reduction:
+            # Cooperative reductions rely on multi-block synchronization that
+            # requires cooperative-grid launches to avoid hanging.
+            triton_meta["launch_cooperative_grid"] = True
+
         # Skip memory optimization for forward of the training loop where we expect
         # every new node will increase the peak memory and our greedy approach would
         # introduce a lot of unnecessary cpu copies.
