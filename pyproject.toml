@@ -376,3 +376,19 @@ keep-runtime-typing = true
 
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"
+
+[tool.spin]
+package = 'torch'
+
+[tool.spin.commands]
+"Build" = [
+  ".spin/cmds.py:lint",
+  ".spin/cmds.py:fixlint",
+  ".spin/cmds.py:quicklint",
+  ".spin/cmds.py:quickfix",
+]
+"Regenerate" = [
+  ".spin/cmds.py:regenerate_version",
+  ".spin/cmds.py:regenerate_type_stubs",
+  ".spin/cmds.py:regenerate_clangtidy_files",
+]
