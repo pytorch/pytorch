@@ -119,6 +119,9 @@ class DeterministicTest(TestCase):
         the current working directory.
         """
 
+        if not os.path.exists("benchmarks/dynamo/huggingface.py"):
+            self.skipTest("Skip due to benchmarks/dynamo/huggingface.py not found.")
+
         def _setup_env(env):
             env["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"  # disable autotune cache
             env["TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE"] = "0"
