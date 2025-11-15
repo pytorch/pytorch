@@ -22,6 +22,8 @@ def _sycl_compiler() -> Optional[str]:
         oneapi_root = config.xpu.oneapi_root
     elif os.path.exists(os.getenv("ONEAPI_ROOT") or ""):
         oneapi_root = os.getenv("ONEAPI_ROOT")
+    else:
+        oneapi_root = None
 
     if oneapi_root:
         oneapi_inclue = os.path.join(oneapi_root, "include")
