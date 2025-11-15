@@ -195,6 +195,7 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 /torch/utils/_pytree.py @XuehaiPan
 /torch/utils/_cxx_pytree.py @XuehaiPan
 /torch/utils/pytree/ @XuehaiPan
+/torch/pytree.py @XuehaiPan
 /torch/_dynamo/polyfills/pytree.py @XuehaiPan
 
 # Relating to libtorch ABI

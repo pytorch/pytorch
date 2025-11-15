@@ -60,6 +60,7 @@ torch.special <special>
 torch.overrides
 torch.nativert <nativert>
 torch.package <package>
+torch.pytree <pytree>
 profiler
 nn.init
 nn.attention
