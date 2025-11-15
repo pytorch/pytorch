@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from collections.abc import Callable
-from typing import Optional, Union
+from typing import Optional
 from typing_extensions import deprecated
 
 from torch import Tensor
@@ -452,9 +452,7 @@ class GaussianNLLLoss(_Loss):
         self.full = full
         self.eps = eps
 
-    def forward(
-        self, input: Tensor, target: Tensor, var: Union[Tensor, float]
-    ) -> Tensor:
+    def forward(self, input: Tensor, target: Tensor, var: Tensor | float) -> Tensor:
         """
         Runs the forward pass.
         """
