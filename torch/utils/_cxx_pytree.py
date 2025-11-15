@@ -411,10 +411,13 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
         ``treespec``.
     """
     if not _is_pytreespec_instance(treespec):
-        raise TypeError(
-            f"Expected `treespec` to be an instance of "
-            f"PyTreeSpec but got item of type {type(treespec)}."
-        )
+        if not _is_pytreespec_instance(leaves):
+            raise TypeError(
+                f"Expected `treespec` to be an instance of "
+                f"PyTreeSpec but got item of type {type(treespec)}."
+            )
+        # Allow passing the PyTreeSpec instance as the first argument
+        leaves, treespec = treespec, leaves
     return treespec.unflatten(leaves)
 
 
