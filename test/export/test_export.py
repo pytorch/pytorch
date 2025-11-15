@@ -1266,11 +1266,17 @@ graph():
                 """\
 def forward(self, primals, tangents):
     primals_1, primals_2, primals_3, primals_4, primals_5, tangents_1, = fx_pytree.tree_flatten_spec([primals, tangents], self._in_spec)
+    # ac_graph_id: 3 - PREFER_RECOMPUTE
     t = torch.ops.aten.t.default(primals_1);  primals_1 = None
+    # ac_graph_id: 3 - MUST_SAVE
     addmm = torch.ops.aten.addmm.default(primals_2, primals_5, t);  primals_2 = None
+    # ac_graph_id: 3 - PREFER_RECOMPUTE
     relu = torch.ops.aten.relu.default(addmm);  addmm = None
+    # ac_graph_id: 3 - PREFER_RECOMPUTE
     detach_3 = torch.ops.aten.detach.default(relu)
+    # ac_graph_id: 3 - PREFER_RECOMPUTE
     t_1 = torch.ops.aten.t.default(primals_3);  primals_3 = None
+    # ac_graph_id: 3 - MUST_SAVE
     addmm_1 = torch.ops.aten.addmm.default(primals_4, relu, t_1);  primals_4 = None
     t_2 = torch.ops.aten.t.default(t_1);  t_1 = None
     mm = torch.ops.aten.mm.default(tangents_1, t_2);  t_2 = None
