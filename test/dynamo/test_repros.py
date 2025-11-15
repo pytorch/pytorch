@@ -7506,8 +7506,8 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                     return x
                 return fn(x, n - 1) + 1
 
-            # with self.assertRaisesRegex(RuntimeError, "new c_recursion limit"):
-            #     fn(torch.ones(3), 5)
+            with self.assertRaisesRegex(RuntimeError, "new c_recursion limit"):
+                fn(torch.ones(3), 5)
         finally:
             if old_dynamo_recursion_limit > 0:
                 torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
