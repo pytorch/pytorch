@@ -3410,10 +3410,9 @@ class AlgorithmSelectorCache(PersistentCache):
             except CUDACompileError:
                 from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
 
-                if not isinstance(choice, CUTLASSTemplateCaller):
-                    log.exception(
-                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice."
-                    )
+                log.exception(
+                    "CUTLASS compilation error during autotuning: \n%s. \nIgnoring this choice."
+                )
                 timing = float("inf")
             except NotImplementedError:
                 log.warning("Not yet implemented", exc_info=True)

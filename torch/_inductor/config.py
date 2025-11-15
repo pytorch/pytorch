@@ -1942,9 +1942,13 @@ class xpu(cutlass):
     # Xe arch to use for SYCL template kernel compilation.
     # eg. 12, 20, which corresponding to Xe12(PVC) and Xe20 (BMG)
     arch: Optional[str] = None
+
     # oneAPI version to use for SYCL template kernel compilation.
     # e.g. "20250201".
     version: Optional[str] = None
+
+    # Path to Intel OneAPI.
+    oneapi_root: Optional[str] = None
 
 
 class rocm:

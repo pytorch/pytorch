@@ -178,11 +178,6 @@ elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
   # setting PYTHON_TEST_EXTRA_OPTION
   export PYTHON_TEST_EXTRA_OPTION="--xpu"
-  # setting sycl-tla (Intel cutlass)
-  install_sycl_tla "./third_party/sycl-tla" || exit 1
-  TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/sycl-tla")
-  export TORCHINDUCTOR_CUTLASS_DIR
-  # end setting sycl-tla
 fi
 
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
@@ -217,6 +212,13 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   source /opt/intel/oneapi/pti/latest/env/vars.sh
   # Check XPU status before testing
   timeout 30 xpu-smi discovery || true
+
+  # setting sycl-tla (Intel cutlass)
+  install_sycl_tla "./third_party/sycl-tla" || exit 1
+  TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/sycl-tla")
+  export TORCHINDUCTOR_CUTLASS_DIR
+  export ONEAPI_ROOT="/opt/intel/oneapi/${XPU_VERSION}"
+  # end setting sycl-tla
 fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
