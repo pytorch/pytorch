@@ -680,7 +680,7 @@ TORCH_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type) {
     return false;
   }
   if (elem_type->kind() == AnyType::Kind) {
-    // List of Any can contains heterogenous types
+    // List of Any can contains heterogeneous types
     return false;
   }
   return true;
