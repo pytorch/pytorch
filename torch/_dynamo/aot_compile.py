@@ -167,7 +167,8 @@ class AOTCompiledFunction:
         state = pickle.loads(data)
         state["bytecode"] = SerializedCode.to_code_object(state["bytecode"])
         deserializer, compiled_fn_state = state["compiled_fn"]
-        state["compiled_fn"] = deserializer(compiled_fn_state)
+        with torch._inductor.config.patch(enable_autograd_for_aot=True):
+            state["compiled_fn"] = deserializer(compiled_fn_state)
         state["original_code"] = SerializedCode.to_code_object(state["original_code"])
 
         artifacts = CompileArtifacts(**state)
