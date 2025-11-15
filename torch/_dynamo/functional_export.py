@@ -11,6 +11,7 @@ import sympy
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.convert_frame import CaptureOutput, fullgraph_capture, get_traced_fn
 from torch._dynamo.eval_frame import argument_names, check_user_input_output
 from torch._dynamo.exc import UserErrorType
@@ -487,7 +488,6 @@ def pytreeify(
     """
     assert out.backend_input is not None
     backend_input = out.backend_input
-    backend = out.backend_input.graph_module
 
     root = None
     if isinstance(mod, torch.nn.Module):
@@ -498,6 +498,9 @@ def pytreeify(
         root = mod.__self__
 
     flat_real_args, in_spec = pytree.tree_flatten((args, kwargs))
+    torch._dynamo.eval_frame.check_user_input_output(
+        flat_real_args[1 if root else 0 :], UserErrorType.INVALID_INPUT
+    )
 
     class Yield(Exception):
         pass
@@ -518,14 +521,11 @@ def pytreeify(
                 self.gm_inputs = example_inputs
                 raise Yield
 
-            backend_input.graph_module = backend_dummy  # type: ignore[assignment]
             try:
-                out.forward_callable()(*args, **kwargs)
+                out.forward_callable(compiled_fn=backend_dummy)(*args, **kwargs)
             except Yield:
                 assert self.gm_inputs is not None
                 return self.gm_inputs
-            finally:
-                backend_input.graph_module = backend
             raise RuntimeError
 
     fake_mode = torch._dynamo.utils.detect_fake_mode(flat_real_args)
@@ -557,11 +557,7 @@ def pytreeify(
                     for i in range(self.num_outputs)
                 ]
 
-            backend_input.graph_module = backend_dummy  # type: ignore[assignment]
-            try:
-                results = out.forward_callable()(*args, **kwargs)
-            finally:
-                backend_input.graph_module = backend
+            results = out.forward_callable(compiled_fn=backend_dummy)(*args, **kwargs)
             ret, self.out_spec = pytree.tree_flatten(results)
             return ret
 
@@ -579,9 +575,10 @@ def pytreeify(
     fake_mode = torch._dynamo.utils.detect_fake_mode(flat_out_shuffle_args)
     if fake_mode and fake_mode.shape_env is None:
         fake_mode.shape_env = ShapeEnv()
-    out_shuffle_graph = make_fx(
-        out_shuffle, tracing_mode="symbolic", proxy_module_inputs=True
-    )(*flat_out_shuffle_args)
+    with enable_python_dispatcher():
+        out_shuffle_graph = make_fx(
+            out_shuffle, tracing_mode="real", proxy_module_inputs=True
+        )(*flat_out_shuffle_args)
     _normalize_shuffle_graph(out_shuffle_graph)
 
     assert out_shuffle.out_spec is not None
@@ -609,6 +606,8 @@ def dynamo_graph_capture_for_export(
     def inner(*args: Any, **kwargs: Any) -> Any:
         assert not torch._dynamo.config.install_free_tensors
         with (
+            torch._dynamo.config.patch(replay_side_effects=False),
+            torch._dynamo.config.patch(side_effect_replay_policy="warn"),
             get_metrics_context(),
             dynamo_timed("fullgraph_capture"),
         ):

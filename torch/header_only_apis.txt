@@ -161,6 +161,7 @@ COMPILE_TIME_MAX_DEVICE_TYPES
 NumScalarTypes
 ScalarType
 # dummy_int1_7_t, dummy_uint1_7_t tested through ScalarType
+CppTypeToScalarType
 ScalarTypeToCPPTypeT
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_F8NZ
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX
