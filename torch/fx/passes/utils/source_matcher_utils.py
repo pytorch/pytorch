@@ -57,6 +57,7 @@ def get_source_partitions(
     graph: Graph,
     wanted_sources: list[Any],
     filter_fn: Optional[Callable[[Node], bool]] = None,
+    ordered: bool = False,
 ) -> dict[Any, list[SourcePartition]]:
     """
     Args:
@@ -64,6 +65,7 @@ def get_source_partitions(
         wanted_sources: List of sources of nodes that were decomposed from this
             source. This can be a function (ex. torch.nn.functional.linear) or a
             leaf module type (ex. torch.nn.Linear).
+        ordered: Whether or not to sort nodes to ensure determinstic ordereing in return value
 
     Returns:
         Dictionary mapping sources that were given to a list of SourcePartitions
@@ -117,12 +119,16 @@ def get_source_partitions(
                 if user not in nodes:
                     output_nodes.add(node)
 
+        inputs_ret = sorted(input_nodes, key=str) if ordered else list(input_nodes)
+        outputs_ret = sorted(output_nodes, key=str) if ordered else list(output_nodes)
+        params_ret = sorted(params, key=str) if ordered else list(params)
+
         return SourcePartition(
             nodes,
             module_type,
-            list(input_nodes),
-            list(output_nodes),
-            list(params),  # type: ignore[arg-type]
+            inputs_ret,
+            outputs_ret,
+            params_ret, # type: ignore[arg-type]
         )
 
     ret: dict[type[Any], list[SourcePartition]] = {}
