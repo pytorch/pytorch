@@ -1,6 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import copy
 import inspect
 import warnings
 from collections.abc import Callable, Sequence
@@ -96,16 +97,23 @@ class _ToTorchTensor(torch.autograd.Function):
         )
         tensor_stride = tuple(tensor_stride)
         grad_placements = grad_placements or dtensor_spec.placements
-        grad_spec = DTensorSpec(
-            mesh,
-            grad_placements,
-            tensor_meta=TensorMeta(
-                shape=dtensor_meta.shape,
-                stride=tensor_stride,
-                dtype=dtensor_meta.dtype,
-            ),
-        )
-
+        if (
+            tensor_stride == dtensor_meta.stride
+            and grad_placements == dtensor_spec.placements
+        ):
+            # Avoid actual sharing of specs in case they're modified during (e.g.)
+            # sharding propagation.
+            grad_spec = copy.copy(dtensor_spec)
+        else:
+            grad_spec = DTensorSpec(
+                mesh,
+                grad_placements,
+                tensor_meta=TensorMeta(
+                    shape=dtensor_meta.shape,
+                    stride=tensor_stride,
+                    dtype=dtensor_meta.dtype,
+                ),
+            )
         return (
             # pyrefly: ignore [bad-argument-type]
             DTensor(
