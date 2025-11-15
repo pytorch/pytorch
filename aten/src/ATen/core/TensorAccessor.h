@@ -23,7 +23,7 @@ using TensorAccessorBase = torch::headeronly::detail::TensorAccessorBase<c10::In
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
 using TensorAccessor = torch::headeronly::detail::TensorAccessor<c10::IntArrayRef, T, N, PtrTraits, index_t>;
 
-namespace {
+namespace detail {
 
 template <size_t N, typename index_t>
 struct IndexBoundsCheck {
@@ -36,13 +36,13 @@ struct IndexBoundsCheck {
         N);
     }
 };
-}  // anonymous namespace
+}  // namespace detail
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using GenericPackedTensorAccessorBase = torch::headeronly::detail::GenericPackedTensorAccessorBase<IndexBoundsCheck<N, index_t>, T, N, PtrTraits, index_t>;
+using GenericPackedTensorAccessorBase = torch::headeronly::detail::GenericPackedTensorAccessorBase<detail::IndexBoundsCheck<N, index_t>, T, N, PtrTraits, index_t>;
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using GenericPackedTensorAccessor = torch::headeronly::detail::GenericPackedTensorAccessor<TensorAccessor<T, N-1, PtrTraits, index_t>, IndexBoundsCheck<N, index_t>, T, N, PtrTraits, index_t>;
+using GenericPackedTensorAccessor = torch::headeronly::detail::GenericPackedTensorAccessor<TensorAccessor<T, N-1, PtrTraits, index_t>, detail::IndexBoundsCheck<N, index_t>, T, N, PtrTraits, index_t>;
 
 // Can't put this directly into the macro function args because of commas
 #define AT_X GenericPackedTensorAccessor<T, N, PtrTraits, index_t>

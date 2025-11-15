@@ -1358,45 +1358,6 @@ class concat_license_files:
 
 # Need to create the proper LICENSE.txt for the wheel
 class bdist_wheel(setuptools.command.bdist_wheel.bdist_wheel):
-    def _wrap_headers_with_macro(self, bdist_dir: Path) -> None:
-        """Wrap all header files with #if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION).
-
-        Excludes:
-        - torch/include/torch/headeronly/*
-        - torch/include/torch/csrc/stable/*
-        - torch/include/torch/csrc/inductor/aoti_torch/c/ (only shim headers)
-        - torch/include/torch/csrc/inductor/aoti_torch/generated/
-        """
-        header_extensions = (".h", ".hpp", ".cuh")
-        header_files = [
-            f for ext in header_extensions for f in bdist_dir.rglob(f"*{ext}")
-        ]
-
-        # Paths to exclude from wrapping
-        exclude_dir_patterns = [
-            "torch/include/torch/headeronly/",
-            "torch/include/torch/csrc/stable/",
-            "torch/include/torch/csrc/inductor/aoti_torch/c/",
-            "torch/include/torch/csrc/inductor/aoti_torch/generated/",
-        ]
-
-        for header_file in header_files:
-            rel_path = header_file.relative_to(bdist_dir).as_posix()
-
-            if any(rel_path.startswith(pattern) for pattern in exclude_dir_patterns):
-                report(f"Skipping header: {rel_path}")
-                continue
-
-            original_content = header_file.read_text(encoding="utf-8")
-            wrapped_content = (
-                "#if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
-                f"{original_content}"
-                "\n#endif  // !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
-            )
-
-            header_file.write_text(wrapped_content, encoding="utf-8")
-            report(f"Wrapped header: {rel_path}")
-
     def run(self) -> None:
         with concat_license_files(include_files=True):
             super().run()
@@ -1418,14 +1379,6 @@ class bdist_wheel(setuptools.command.bdist_wheel.bdist_wheel):
                 file.unlink()
             # need an __init__.py file otherwise we wouldn't have a package
             (bdist_dir / "torch" / "__init__.py").touch()
-
-        # Wrap all header files with TORCH_STABLE_ONLY macro
-        assert self.bdist_dir is not None, "bdist_dir should be set during wheel build"
-        bdist_dir = Path(self.bdist_dir)
-        report(
-            "-- Wrapping header files with if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)"
-        )
-        self._wrap_headers_with_macro(bdist_dir)
 
 
 class clean(Command):
@@ -1632,7 +1585,7 @@ def configure_extension_build() -> tuple[
     if cmake_cache_vars["USE_DISTRIBUTED"]:
         # Only enable fr_trace command if distributed is enabled
         entry_points["console_scripts"].append(
-            "torchfrtrace = tools.flight_recorder.fr_trace:main",
+            "torchfrtrace = torch.distributed.flight_recorder.fr_trace:main",
         )
     return ext_modules, cmdclass, packages, entry_points, extra_install_requires
 

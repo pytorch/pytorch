@@ -381,9 +381,6 @@ class GenericPackedTensorAccessor<
   }
 };
 
-} // namespace detail
-
-namespace {
 template <size_t N, typename index_t>
 struct HeaderOnlyIndexBoundsCheck {
   HeaderOnlyIndexBoundsCheck(index_t i) {
@@ -395,7 +392,8 @@ struct HeaderOnlyIndexBoundsCheck {
         N);
   }
 };
-} // anonymous namespace
+
+} // namespace detail
 
 // HeaderOnlyTensorAccessorBase is same as at::TensorAccessorBase
 // except sizes() and strides() return IntHeaderOnlyArrayRef instead
@@ -437,7 +435,7 @@ template <
     typename index_t = int64_t>
 using HeaderOnlyGenericPackedTensorAccessorBase =
     detail::GenericPackedTensorAccessorBase<
-        HeaderOnlyIndexBoundsCheck<N, index_t>,
+        detail::HeaderOnlyIndexBoundsCheck<N, index_t>,
         T,
         N,
         PtrTraits,
@@ -455,7 +453,7 @@ template <
 using HeaderOnlyGenericPackedTensorAccessor =
     detail::GenericPackedTensorAccessor<
         HeaderOnlyTensorAccessor<T, N - 1, PtrTraits, index_t>,
-        HeaderOnlyIndexBoundsCheck<N, index_t>,
+        detail::HeaderOnlyIndexBoundsCheck<N, index_t>,
         T,
         N,
         PtrTraits,
