@@ -45,7 +45,7 @@ std::string Error::compute_what(bool include_backtrace) const {
 
   if (context_.size() == 1) {
     // Fold error and context in one line
-    oss << " (" << context_[0] << ")";
+    oss << " (" << context_[0] << ')';
   } else {
     for (const auto& c : context_) {
       oss << "\n  " << c;
@@ -248,7 +248,7 @@ void WarningHandler::process(const Warning& warning) {
   LOG_AT_FILE_LINE(
       WARNING, warning.source_location().file, warning.source_location().line)
       << "Warning: " << warning.msg() << " (function "
-      << warning.source_location().function << ")";
+      << warning.source_location().function << ')';
 }
 
 std::string GetExceptionString(const std::exception& e) {

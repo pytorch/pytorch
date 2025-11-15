@@ -56,7 +56,7 @@ SourceRange getPythonInterpreterSourceRange() {
         auto line =
             src->starting_line_no() + src->lineno_for_offset(range.start());
         stack_trace << *(src->filename()) << "(" << line
-                    << "): " << entry.filename << "\n";
+                    << "): " << entry.filename << '\n';
         if (!source_filename) {
           source_filename = *(src->filename());
           source_line = line;

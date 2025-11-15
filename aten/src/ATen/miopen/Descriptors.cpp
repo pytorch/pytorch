@@ -73,7 +73,7 @@ std::string miopenTypeToString(miopenDataType_t dtype) {
       return "miopenBFloat16";
     default:
       std::ostringstream oss;
-      oss << "(unknown data-type " << static_cast<int>(dtype) << ")";
+      oss << "(unknown data-type " << static_cast<int>(dtype) << ')';
       return oss.str();
   }
 }

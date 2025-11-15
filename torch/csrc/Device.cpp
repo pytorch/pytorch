@@ -36,7 +36,7 @@ static PyObject* THPDevice_repr(THPDevice* self) {
     // https://stackoverflow.com/questions/19562103/uint8-t-cant-be-printed-with-cout
     oss << ", index=" << static_cast<uint16_t>(self->device.index());
   }
-  oss << ")";
+  oss << ')';
   return THPUtils_packString(oss.str().c_str());
 }
 

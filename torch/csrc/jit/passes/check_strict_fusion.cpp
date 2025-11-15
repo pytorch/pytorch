@@ -73,7 +73,7 @@ static void checkForUnfusedOps(Node* enter_node) {
     std::stringstream ss;
     ss << "Found multiple fusions: \n";
     for (Node* n : guarding_ifs) {
-      ss << *n << "\n";
+      ss << *n << '\n';
     }
     throw(ErrorReport(enter_node->input()->node()->sourceRange()) << ss.str());
   }
@@ -106,7 +106,7 @@ static void checkForUnfusedOps(Node* enter_node) {
       } else {
         unfused->kind().toDisplayString();
       }
-      ss << "\n";
+      ss << '\n';
     }
     throw(ErrorReport(enter_node->input()->node()->sourceRange()) << ss.str());
   }

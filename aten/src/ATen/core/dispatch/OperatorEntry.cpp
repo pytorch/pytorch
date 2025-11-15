@@ -570,7 +570,7 @@ void OperatorEntry::checkInvariants() const {
 
 std::string OperatorEntry::listAllDispatchKeys() const {
   std::ostringstream str;
-  str << "[";
+  str << '[';
 
   bool has_kernels = false;
   for (auto k : allDispatchKeysInFullSet()) {
@@ -584,7 +584,7 @@ std::string OperatorEntry::listAllDispatchKeys() const {
     str << k;
     has_kernels = true;
   }
-  str << "]";
+  str << ']';
   return str.str();
 }
 

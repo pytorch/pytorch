@@ -93,7 +93,7 @@ std::string cudnnTypeToString(cudnnDataType_t dtype) {
       return "CUDNN_DATA_UINT8x4";
     default:
       std::ostringstream oss;
-      oss << "(unknown data-type " << static_cast<int>(dtype) << ")";
+      oss << "(unknown data-type " << static_cast<int>(dtype) << ')';
       return oss.str();
   }
 }
@@ -168,7 +168,7 @@ std::string cudnnMemoryFormatToString(cudnnTensorFormat_t tformat) {
       return "CUDNN_TENSOR_NHWC";
     default:
       std::ostringstream oss;
-      oss << "(unknown cudnn tensor format " << static_cast<int>(tformat) << ")";
+      oss << "(unknown cudnn tensor format " << static_cast<int>(tformat) << ')';
       return oss.str();
   }
 }

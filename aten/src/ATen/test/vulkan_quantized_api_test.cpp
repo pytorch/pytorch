@@ -95,7 +95,7 @@ void showRtol(
   std::cout << "Max Diff found is: " << diff.max().item<double>() << std::endl;
   if (diff.sizes().size() == 2) {
     for (const auto y : c10::irange(diff.sizes()[0])) {
-      std::cout << y << ":";
+      std::cout << y << ':';
       for (const auto x : c10::irange(diff.sizes()[1])) {
         double diff_xy = diff[y][x].item<double>();
         if (diff_xy > maxDiff) {
@@ -109,7 +109,7 @@ void showRtol(
             }
           }
         } else {
-          std::cout << std::setw(5) << " ";
+          std::cout << std::setw(5) << ' ';
         }
       }
       std::cout << std::endl;
@@ -148,19 +148,19 @@ using at::native::vulkan::api::utils::ivec4;
 using at::native::vulkan::api::utils::vec4;
 
 std::ostream& operator<<(std::ostream& os, const vec4& v) {
-  os << "(" << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ", "
-     << v.data[3u] << ")";
+  os << '(' << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ", "
+     << v.data[3u] << ')';
   return os;
 }
 
 std::ostream& operator<<(std::ostream& os, const ivec3& v) {
-  os << "(" << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ")";
+  os << '(' << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ')';
   return os;
 }
 
 std::ostream& operator<<(std::ostream& os, const ivec4& v) {
-  os << "(" << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ", "
-     << v.data[3u] << ")";
+  os << '(' << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ", "
+     << v.data[3u] << ')';
   return os;
 }
 
@@ -3379,7 +3379,7 @@ bool _test_quantized_linear(
       showRtol(out_cpu_dequant, out_vk_to_cpu_dequant);
     }
     if (xpos != -1 && ypos != -1) {
-      std::cout << "\nFailure caused on row/col: " << ypos << "/" << xpos
+      std::cout << "\nFailure caused on row/col: " << ypos << '/' << xpos
                 << "\n";
       std::cout << "Input tensor scale: " << scale << " zerop: " << zero_point
                 << "\n";

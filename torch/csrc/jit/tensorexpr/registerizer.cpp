@@ -141,7 +141,7 @@ void AccessInfo::print() const {
     std::cout << " cond: " << conditionId_;
   }
 
-  std::cout << "\n";
+  std::cout << '\n';
 }
 
 // Scope

@@ -95,7 +95,7 @@ struct Tree : c10::intrusive_ptr_target {
       std::stringstream ss;
       ss << filename << ":" << lineno << ": expected at least "
          << expected_subtrees << " subtrees, but found only " << trees().size()
-         << "\n";
+         << '\n';
       range().highlight(ss);
       TORCH_CHECK(false, ss.str());
     }
@@ -203,7 +203,7 @@ struct pretty_tree {
     std::string k = kindToString(t->kind());
     out << "(" << k;
     for (const auto& e : t->trees()) {
-      out << "\n" << std::string(indent + 2, ' ');
+      out << '\n' << std::string(indent + 2, ' ');
       print(out, e, indent + 2);
     }
     out << ")";

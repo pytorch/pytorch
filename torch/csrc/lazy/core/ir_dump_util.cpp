@@ -155,7 +155,7 @@ std::string GenerateDotNodeSpec(
     const Node* node,
     const std::unordered_map<const Node*, size_t>& roots_ids) {
   std::stringstream ss;
-  ss << "label=\"" << GenerateDotNodeLabel(node, roots_ids) << "\"";
+  ss << "label=\"" << GenerateDotNodeLabel(node, roots_ids) << '"';
   return ss.str();
 }
 
@@ -214,7 +214,7 @@ std::string DumpUtil::PostOrderToDot(
         if (output.node->num_outputs() > 1) {
           ss << " [label=\"o=" << output.index << "\"]";
         }
-        ss << "\n";
+        ss << '\n';
       }
     }
   }
@@ -242,7 +242,7 @@ std::string DumpUtil::PostOrderToText(
       ss << ", ROOT=" << *opt_root_id;
     }
     ss << ", NodeType=" << typeid(*node).name();
-    ss << "\n";
+    ss << '\n';
   }
   ss << "}\n";
   return ss.str();

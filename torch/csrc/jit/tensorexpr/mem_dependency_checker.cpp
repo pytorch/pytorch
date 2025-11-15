@@ -177,7 +177,7 @@ void AccessInfo::print() const {
     }
   }
 
-  std::cout << "\n";
+  std::cout << '\n';
 }
 
 void AccessInfo::dumpDOT(std::ostream& os) const {

@@ -310,11 +310,11 @@ std::string ivalueToStr(const c10::IValue& val, bool isString) {
   } else {
     ss.str("");
     if (isString) {
-      ss << "\"";
+      ss << '"';
     }
     ss << val;
     if (isString) {
-      ss << "\"";
+      ss << '"';
     }
     std::string mystr = ss.str();
 

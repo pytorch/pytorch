@@ -174,7 +174,7 @@ void dump(const onnx::NodeProto& node, std::ostream& stream, size_t indent) {
 
 void dump(const onnx::GraphProto& graph, std::ostream& stream, size_t indent) {
   stream << idt(indent) << "GraphProto {" << nlidt(indent + 1) << "name: \""
-         << graph.name() << "\"" << nlidt(indent + 1) << "inputs: [";
+         << graph.name() << '"' << nlidt(indent + 1) << "inputs: [";
   for (const auto i : c10::irange(graph.input_size())) {
     dump(graph.input(i), stream);
     stream << (i == graph.input_size() - 1 ? "" : ",");
@@ -213,9 +213,9 @@ void dump(
 
 void dump(const onnx::ModelProto& model, std::ostream& stream, size_t indent) {
   stream << idt(indent) << "ModelProto {" << nlidt(indent + 1)
-         << "producer_name: \"" << model.producer_name() << "\""
-         << nlidt(indent + 1) << "domain: \"" << model.domain() << "\""
-         << nlidt(indent + 1) << "doc_string: \"" << model.doc_string() << "\"";
+         << "producer_name: \"" << model.producer_name() << '"'
+         << nlidt(indent + 1) << "domain: \"" << model.domain() << '"'
+         << nlidt(indent + 1) << "doc_string: \"" << model.doc_string() << '"';
   if (model.has_graph()) {
     stream << nlidt(indent + 1) << "graph:\n";
     dump(model.graph(), stream, indent + 2);

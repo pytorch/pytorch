@@ -95,7 +95,7 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
           }
           first = false;
 
-          body << "\"" << jsonStrEscape(name) << "\"";
+          body << '"' << jsonStrEscape(name) << '"';
         }
         body << "]";
 

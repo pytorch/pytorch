@@ -145,7 +145,7 @@ bool isSortableListOfObjectsOrTuples(
   why_not << "Only list of Tensors, ints, floats, bools, strs, "
           << "a User Defined Class that defines the __lt__ compare method "
           << "or Tuples of aforementioned types can be sorted, got list of "
-          << type->repr_str() << "\n";
+          << type->repr_str() << '\n';
   return false;
 }
 

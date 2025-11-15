@@ -464,7 +464,7 @@ void IRPrinter::visit(const BlockPtr& v) {
 
   for (const StmtPtr& s : *v) {
     emitIndent();
-    os() << *s << "\n";
+    os() << *s << '\n';
   }
   indent_--;
   emitIndent();
@@ -657,7 +657,7 @@ void print(const ExprPtr& expr) {
   } else {
     std::cout << "(null expr)";
   }
-  std::cout << "\n";
+  std::cout << '\n';
 }
 
 void print(const StmtPtr& stmt) {
@@ -698,7 +698,7 @@ std::string to_string(const Tensor& t) {
     }
     oss << *t.buf()->dim(i);
   }
-  oss << "]:\n" << *t.stmt() << "\n";
+  oss << "]:\n" << *t.stmt() << '\n';
   return oss.str();
 }
 } // namespace std

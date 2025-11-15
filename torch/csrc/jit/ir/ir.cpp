@@ -358,7 +358,7 @@ std::ostream& Node::print(
     return out;
   }
 
-  out << "\n";
+  out << '\n';
 
   for (const auto i : c10::irange(blocks().size())) {
     auto b = blocks()[i];
@@ -397,7 +397,7 @@ std::ostream& Graph::print(std::ostream& out, bool print_source_locations)
   /*
   // Uncomment this to debug all_nodes issues
   {
-    out << "\n";
+    out << '\n';
     out << "all_nodes:\n";
     for (auto& n : all_nodes) {
       printNode(out, const_cast<Node*>(n), nullptr);
@@ -654,7 +654,7 @@ void Graph::lint() const {
 }
 
 void Graph::dump() const {
-  std::cout << *this << "\n";
+  std::cout << *this << '\n';
 }
 
 void Graph::push_scope(const std::string& scope_name) {
@@ -1069,7 +1069,7 @@ bool Node::mustBeNone() const {
 }
 
 void Node::dump() const {
-  std::cout << *this << "\n";
+  std::cout << *this << '\n';
 }
 
 const FunctionSchema& Node::schema() const {
@@ -1106,7 +1106,7 @@ const Operator& Node::getOperator() const {
 
   auto er = ErrorReport(sourceRange());
   er << "Schema not found for node. File a bug report.\n";
-  er << "Node: " << *this << "\n";
+  er << "Node: " << *this << '\n';
   er << "Input types:";
   for (const auto i : c10::irange(inputs().size())) {
     if (i > 0)
@@ -1117,13 +1117,13 @@ const Operator& Node::getOperator() const {
   if (!candidates.empty()) {
     er << "\ncandidates were:\n";
     for (auto& candidate : candidates) {
-      er << "  " << candidate->schema() << "\n";
+      er << "  " << candidate->schema() << '\n';
     }
   } else {
     er << "\nno candidates found\n";
   }
   er << "within the graph:\n";
-  er << *owningGraph() << "\n";
+  er << *owningGraph() << '\n';
   throw er;
 }
 

@@ -43,8 +43,8 @@ std::string get_mkldnn_version() {
     // https://github.com/intel/ideep/issues/29
     {
       const dnnl_version_t* ver = dnnl_version();
-      ss << "Intel(R) MKL-DNN v" << ver->major << "." << ver->minor << "." << ver->patch
-         << " (Git Hash " << ver->hash << ")";
+      ss << "Intel(R) MKL-DNN v" << ver->major << '.' << ver->minor << '.' << ver->patch
+         << " (Git Hash " << ver->hash << ')';
     }
   #else
     ss << "MKLDNN not found";
@@ -81,7 +81,7 @@ std::string get_openmp_version() {
           break;
       }
       if (ver_str) {
-        ss << " (a.k.a. OpenMP " << ver_str << ")";
+        ss << " (a.k.a. OpenMP " << ver_str << ')';
       }
     }
   #else
@@ -135,7 +135,7 @@ std::string show_config() {
 
 #if defined(__GNUC__)
   {
-    ss << "  - GCC " << __GNUC__ << "." << __GNUC_MINOR__ << "\n";
+    ss << "  - GCC " << __GNUC__ << '.' << __GNUC_MINOR__ << "\n";
   }
 #endif
 
@@ -147,7 +147,7 @@ std::string show_config() {
 
 #if defined(__clang_major__)
   {
-    ss << "  - clang " << __clang_major__ << "." << __clang_minor__ << "." << __clang_patchlevel__ << "\n";
+    ss << "  - clang " << __clang_major__ << '.' << __clang_minor__ << '.' << __clang_patchlevel__ << "\n";
   }
 #endif
 
@@ -200,7 +200,7 @@ std::string show_config() {
   ss << "  - Build settings: ";
   for (const auto& pair : caffe2::GetBuildOptions()) {
     if (!pair.second.empty()) {
-      ss << pair.first << "=" << pair.second << ", ";
+      ss << pair.first << '=' << pair.second << ", ";
     }
   }
   ss << "\n";

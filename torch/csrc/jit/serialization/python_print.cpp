@@ -534,7 +534,7 @@ struct PythonPrintImpl {
     body_ << " = ";
     // or if value is being assigned to something of a union type
     printValueList(body_, rhs);
-    body_ << "\n";
+    body_ << '\n';
   }
 
   bool requiresAnnotation(Value* lhs, Value* rhs) {
@@ -555,7 +555,7 @@ struct PythonPrintImpl {
       if (requiresAnnotation(lhs[i], rhs[i])) {
         body_ << ": " << lhs[i]->type()->annotation_str(type_printer_);
       }
-      body_ << " = " << useOf(rhs[i]) << "\n";
+      body_ << " = " << useOf(rhs[i]) << '\n';
     }
   }
 
@@ -705,7 +705,7 @@ struct PythonPrintImpl {
       printValueList(body_, node->outputs());
       body_ << " = ";
     }
-    body_ << expr << "\n";
+    body_ << expr << '\n';
   }
 
   // Recursively check contained types for any class dependencies
@@ -794,7 +794,7 @@ struct PythonPrintImpl {
           indent();
           body_ << "return ";
           printValueList(body_, node->inputs());
-          body_ << "\n";
+          body_ << '\n';
         }
         break;
       case prim::Loop:
@@ -814,7 +814,7 @@ struct PythonPrintImpl {
         if (!node->outputs().empty()) {
           printValueList(body_, node->outputs(), "", ", = ");
         }
-        body_ << useOf(node->input()) << "\n";
+        body_ << useOf(node->input()) << '\n';
         break;
       case prim::SetAttr: {
         const auto obj = node->inputs().at(0);
@@ -823,7 +823,7 @@ struct PythonPrintImpl {
         const auto& attrname = node->s(attr::name);
         indent();
         body_ << useOf(obj) << "." << attrname << " = " << useOf(newVal)
-              << "\n";
+              << '\n';
       } break;
       case prim::fork: {
         // the subgraph gets emitted as another function
@@ -1448,14 +1448,14 @@ struct PythonPrintImpl {
         indent();
         body_ << "__parameters__ = [";
         for (const auto& param : params) {
-          body_ << "\"" << param << "\", ";
+          body_ << '"' << param << "\", ";
         }
         body_ << "]\n";
 
         indent();
         body_ << "__buffers__ = [";
         for (const auto& buffer : buffers) {
-          body_ << "\"" << buffer << "\", ";
+          body_ << '"' << buffer << "\", ";
         }
         body_ << "]\n";
         auto forwardPreHooks = classType->getForwardPreHooks();
@@ -1463,7 +1463,7 @@ struct PythonPrintImpl {
           indent();
           body_ << "__forward_pre_hooks__ = [";
           for (const auto& pre_hook : forwardPreHooks) {
-            body_ << "\"" << pre_hook->name() << "\", ";
+            body_ << '"' << pre_hook->name() << "\", ";
           }
           body_ << "]\n";
         }
@@ -1473,7 +1473,7 @@ struct PythonPrintImpl {
           indent();
           body_ << "__forward_hooks__ = [";
           for (const auto& hook : forwardHooks) {
-            body_ << "\"" << hook->name() << "\", ";
+            body_ << '"' << hook->name() << "\", ";
           }
           body_ << "]\n";
         }
@@ -1496,13 +1496,12 @@ struct PythonPrintImpl {
           }
           // Print out a direct manipulation of the annotations dict, like:
           //   __annotations__["0"] = SomeType
-          body_ << "__annotations__["
-                << "\"" << name
-                << "\"] = " << type->annotation_str(type_printer_) << "\n";
+          body_ << "__annotations__[" << '"' << name
+                << "\"] = " << type->annotation_str(type_printer_) << '\n';
         } else {
           // Otherwise: just emit a python 3 attribute annotation, like:
           //   foo : SomeType
-          body_ << name << " : " << type->annotation_str(type_printer_) << "\n";
+          body_ << name << " : " << type->annotation_str(type_printer_) << '\n';
         }
       }
 
@@ -1516,7 +1515,7 @@ struct PythonPrintImpl {
               << "Final[" << v.type()->annotation_str(type_printer_) << "] = ";
         auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
         printConstant(*ss, v);
-        body_ << ss->str() << "\n";
+        body_ << ss->str() << '\n';
       }
 
       // TODO fields
@@ -1554,7 +1553,7 @@ struct PythonPrintImpl {
           TORCH_INTERNAL_ASSERT(attr.type());
           indent();
           body_ << attr.name() << " : "
-                << attr.type()->annotation_str(type_printer_) << "\n";
+                << attr.type()->annotation_str(type_printer_) << '\n';
         }
       }
     } else if (auto interfaceType = type->cast<InterfaceType>()) {
@@ -1600,7 +1599,7 @@ struct PythonPrintImpl {
         for (const auto& name_value : enumType->enumNamesValues()) {
           indent();
           body_ << name_value.first << " = " << value_wrapper
-                << name_value.second << value_wrapper << "\n";
+                << name_value.second << value_wrapper << '\n';
         }
       }
     } else {
