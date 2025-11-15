@@ -136,41 +136,6 @@ def wait_tensor(tensor):
     return torch.ops._c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
 
 
-def isend(
-    tensor: torch.Tensor, dst: int, group: RANK_TYPES, tag: int = 0, group_dst: int = -1
-):
-    group_name = _resolve_group_name(group)
-    if group_dst != -1:
-        if dst is not None:
-            raise ValueError(
-                "Cannot specify both 'dst' and 'group_dst' args as per eager impl"
-            )
-        global_dst = c10d.get_global_rank(group, group_dst)
-    else:
-        global_dst = dst
-    return torch.ops._c10d_functional.isend(tensor, global_dst, tag, group_name)
-
-
-def irecv(
-    tensor: torch.Tensor,
-    src: int,
-    group: RANK_TYPES,
-    tag: int = 0,
-    group_src: int = -1,
-    group_rcv: int = -1,
-):
-    group_name = _resolve_group_name(group)
-    if group_src != -1:
-        if src is not None:
-            raise ValueError(
-                "Cannot specify both 'src' and 'group_src' args as per eager impl"
-            )
-        global_src = c10d.get_global_rank(group, group_src)
-    else:
-        global_src = src
-    return torch.ops._c10d_functional.irecv(tensor, global_src, tag, group_name)
-
-
 def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
     """
     Broadcasts the tensor to all processes in the given process group.
@@ -1090,14 +1055,6 @@ lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)  # type: ignore[has-type]
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)  # type: ignore[has-type]
 
-torch.fx.node.has_side_effect(torch.ops._c10d_functional.isend.default)
-torch.fx.node.has_side_effect(torch.ops._c10d_functional.irecv.default)
-torch.fx.node.has_side_effect(torch.ops._c10d_functional.batch_p2p_ops.default)
-
-torch.fx.node.has_side_effect(torch.ops._c10d_functional.isend)
-torch.fx.node.has_side_effect(torch.ops._c10d_functional.irecv)
-torch.fx.node.has_side_effect(torch.ops._c10d_functional.batch_p2p_ops)
-
 
 # Register legacy ops for backward compatibility
 # TODO(yifu): remove these in functional collective beta release
@@ -1295,6 +1252,8 @@ def isend_inplace(
 
     group_name = _resolve_group_name(group)
     return torch.ops._c10d_functional.isend(tensor, global_dst, tag, group_name)
+    # token = torch.ops._c10d_functional.isend(tensor, global_dst, tag, group_name)
+    # return _maybe_wrap_tensor(token)
 
 
 def irecv_inplace(
@@ -1316,6 +1275,8 @@ def irecv_inplace(
         global_src = src
     group_name = _resolve_group_name(group)
     return torch.ops._c10d_functional.irecv(tensor, global_src, tag, group_name)
+    # token = torch.ops._c10d_functional.irecv(tensor, global_src, tag, group_name)
+    # return _maybe_wrap_tensor(token)
 
 
 def batch_p2p_ops_inplace(
@@ -1333,6 +1294,10 @@ def batch_p2p_ops_inplace(
     return torch.ops._c10d_functional.batch_p2p_ops(
         op_list, peer_list, tag_list, tensors, group_name
     )
+    # token = torch.ops._c10d_functional.batch_p2p_ops(
+    #     op_list, peer_list, tag_list, tensors, group_name
+    # )
+    # return _maybe_wrap_tensor(token)
 
 
 from torch.distributed.distributed_c10d import (  # pyrefly: ignore  # deprecated; pyrefly: ignore [deprecated]
@@ -1359,9 +1324,9 @@ traceable_collective_remaps = {
     legacy_all_gather: all_gather_inplace,  # type: ignore[has-type]
     legacy_reduce_scatter_base: reduce_scatter_tensor_inplace,  # type: ignore[has-type]
     legacy_all_gather_base: all_gather_tensor_inplace,  # type: ignore[has-type]
-    legacy_isend: isend_inplace, # type: ignore[has-type]
-    legacy_irecv: irecv_inplace, # type: ignore[has-type]
-    legacy_batch_p2p_ops: batch_p2p_ops_inplace, # type: ignore[has-type]
+    legacy_isend: isend_inplace,  # type: ignore[has-type]
+    legacy_irecv: irecv_inplace,  # type: ignore[has-type]
+    legacy_batch_p2p_ops: batch_p2p_ops_inplace,  # type: ignore[has-type]
 }
 
 # We register p2p funcols as side-effect-ful to not break dependencies in inductor.

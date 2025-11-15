@@ -5625,6 +5625,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @torch._dynamo.config.patch({"enable_p2p_compilation": True})
     @parametrize(
         "op_sizes_per_coalesce",
         [
@@ -5634,8 +5635,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
     )
     @parametrize("timing_enabled", [True, False])
     def test_batched_send_recv_compiled(self, op_sizes_per_coalesce, timing_enabled):
-        os.environ["TORCHDYNAMO_ENABLE_P2P_COMPILATION"] = "1"
-
         def _pattern(op_sizes_per_coalesce):
             ops = list()
             for input_sizes in op_sizes_per_coalesce:
@@ -5730,10 +5729,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @torch._dynamo.config.patch({"enable_p2p_compilation": True})
     def test_compiled_isend_with_wait(self):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-        os.environ["TORCHDYNAMO_ENABLE_P2P_COMPILATION"] = "1"
         pg = self._create_process_group_nccl()
         device = torch.device(f"cuda:{self.rank}")
 
@@ -5752,9 +5751,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @torch._dynamo.config.patch({"enable_p2p_compilation": True})
     @unittest.expectedFailure
     def test_compiled_with_reduce_overhead(self):
-        os.environ["TORCHDYNAMO_ENABLE_P2P_COMPILATION"] = "1"
+        # This test should work once inductor is informed of this new collective.
         pg = self._create_process_group_nccl()
         device = torch.device(f"cuda:{self.rank}")
 
@@ -5764,11 +5764,11 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @torch._dynamo.config.patch({"enable_p2p_compilation": True})
     @parametrize("tensor_size", [(10,), (5, 5), (2, 3, 4)])
     def test_compiled_paired_isend_irecv_with_waits(self, tensor_size):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-        os.environ["TORCHDYNAMO_ENABLE_P2P_COMPILATION"] = "1"
         pg = self._create_process_group_nccl()
         device = torch.device(f"cuda:{self.rank}")
 
@@ -5789,11 +5789,11 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @torch._dynamo.config.patch({"enable_p2p_compilation": True})
     @parametrize("num_tensors", [1, 3, 5])
     def test_compiled_multiple_isend_with_waits(self, num_tensors):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-        os.environ["TORCHDYNAMO_ENABLE_P2P_COMPILATION"] = "1"
         pg = self._create_process_group_nccl()
         device = torch.device(f"cuda:{self.rank}")
 
@@ -5828,11 +5828,11 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @torch._dynamo.config.patch({"enable_p2p_compilation": True})
     @parametrize("num_iterations", [5, 10])
     def test_compiled_iterative_communication_with_waits(self, num_iterations):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-        os.environ["TORCHDYNAMO_ENABLE_P2P_COMPILATION"] = "1"
         pg = self._create_process_group_nccl()
         device = torch.device(f"cuda:{self.rank}")
 
@@ -5847,10 +5847,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @torch._dynamo.config.patch({"enable_p2p_compilation": True})
     def test_compiled_isend_irecv_timing_stress_with_waits(self):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-        os.environ["TORCHDYNAMO_ENABLE_P2P_COMPILATION"] = "1"
         pg = self._create_process_group_nccl()
         pg._enable_collectives_timing()
         device = torch.device(f"cuda:{self.rank}")
@@ -5877,8 +5877,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @torch._dynamo.config.patch({"enable_p2p_compilation": True})
     def test_p2p_interleave(self):
-        os.environ["TORCHDYNAMO_ENABLE_P2P_COMPILATION"] = "1"
         if self.rank == self.MAIN_PROCESS_RANK:
             return
         pg = self._create_process_group_nccl()
