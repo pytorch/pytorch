@@ -56,8 +56,7 @@ bool opt_limit(const char* pass_name) {
 
   static const std::unordered_map<std::string, int64_t> passes_to_opt_limits =
       parseJITOptLimitOption(opt_limit.value());
-  std::string pass{pass_name};
-  pass = c10::filesystem::path(pass).stem();
+  auto pass = c10::filesystem::path(pass_name).stem().string();
 
   auto opt_limit_it = passes_to_opt_limits.find(pass);
   if (opt_limit_it == passes_to_opt_limits.end()) {
