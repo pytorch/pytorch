@@ -345,5 +345,5 @@ function install_sycl_tla() {
   target_dir=$1
   rm -rf "$target_dir"
   git clone --depth 1 --single-branch -b v0.6 --quiet https://github.com/intel/sycl-tla.git "${target_dir}"
-  pip install dpctl==0.20.2
+  pip install --no-deps dpctl==0.20.2
 }
