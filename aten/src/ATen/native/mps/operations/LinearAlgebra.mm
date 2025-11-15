@@ -121,7 +121,7 @@ Tensor& do_metal_addmm(const Tensor& self,
                        const Scalar& alpha,
                        const Scalar& beta,
                        const Tensor& bias) {
-  if (beta.toDouble() == 0 && alpha.toDouble() == 1) {
+  if (beta.isFloatingPoint() && alpha.isFloatingPoint() && beta.toDouble() == 0 && alpha.toDouble() == 1) {
     return do_metal_mm(self, other, output);
   }
   auto stream = getCurrentMPSStream();
@@ -153,7 +153,7 @@ Tensor& do_metal_addmm(const Tensor& self,
         alpha_beta.i64 = {alpha.toLong(), beta.toLong()};
       } else if (c10::isIntegralType(output.scalar_type(), true)) {
         alpha_beta.i32 = {alpha.toInt(), beta.toInt()};
-      } else if (c10::isComplexType(self.scalar_type())) {
+      } else if (c10::isComplexType(output.scalar_type())) {
         alpha_beta.c64 = {alpha.toComplexFloat(), beta.toComplexFloat()};
       } else {
         alpha_beta.f32 = {alpha.toFloat(), beta.toFloat()};
