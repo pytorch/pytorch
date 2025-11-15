@@ -727,10 +727,14 @@ static int clear_state(PyObject* module) {
 
 bool is_skip_guard_eval_unsafe = false;
 
-int c_recursion_limit = -1;
+static int c_recursion_limit = -1;
 
 int get_c_recursion_limit() {
   return c_recursion_limit;
+}
+
+static PyObject* get_c_recursion_limit_py(PyObject* dummy, PyObject* args) {
+  return (PyObject*)PyLong_FromInt32(c_recursion_limit);
 }
 
 static PyObject* set_c_recursion_limit_py(
@@ -739,6 +743,11 @@ static PyObject* set_c_recursion_limit_py(
   int limit = PyLong_AsInt(limit_obj);
   if (limit == -1 && PyErr_Occurred()) {
     Py_RETURN_NONE;
+  }
+  if (limit < 1) {
+    PyErr_SetString(
+        PyExc_ValueError, "recursion limit must be greater or equal than 1");
+    return NULL;
   }
   c_recursion_limit = limit;
   Py_SetRecursionLimit(limit); // also set the Python limit
@@ -755,6 +764,7 @@ static PyMethodDef _methods[] = {
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
     {"set_guard_complete_hook", set_guard_complete_hook, METH_O, NULL},
     {"raise_sigtrap", raise_sigtrap, METH_NOARGS, NULL},
+    {"get_c_recursion_limit", get_c_recursion_limit_py, METH_NOARGS, NULL},
     {"set_c_recursion_limit", set_c_recursion_limit_py, METH_O, NULL},
     {NULL, NULL, 0, NULL}};
 

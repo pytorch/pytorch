@@ -66,7 +66,8 @@ struct CRecursionLimitRAII {
       return;
     }
     if (limit < remaining) {
-      throw std::runtime_error(
+      PyErr_SetString(
+          PyExc_RuntimeError,
           "new c_recursion limit is lower than thread's current c_recursion_remaining.");
     }
     remaining = limit;
@@ -294,6 +295,11 @@ PyObject* dynamo__custom_eval_frame(
   try {
     CRecursionLimitRAII tmp(tstate); // increase C recursion limit to the given
                                      // value during compilation
+    // C recursion limit failure
+    if (PyErr_Occurred()) {
+      fail();
+      return eval_result;
+    }
     callback_result = dynamo_call_callback(
         callback, frame, locals.get(), cache_entry, frame_state);
     new_strategy =
