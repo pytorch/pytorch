@@ -3092,7 +3092,9 @@ def dstack(tensors: TensorSequenceType) -> TensorLikeType:
 
 @register_decomposition(aten.expand)
 def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_or
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, size_hint, sym_or
+
+    backed_so = torch.fx.experimental._config.backed_size_oblivious
 
     # NOTE: cannot use utils.extract_shape_from_varargs here
     # because that also validates the shape, but the shape
@@ -3125,6 +3127,19 @@ def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
         if guard_or_false(requested_length == -1):
             shape_[offset_idx] = x
         else:
+            # When backed size oblivious is used, we specialize for broadcasting
+            # if its the only way to compile the example input.
+            # i.e: x:1, requested_length:1 ==>
+            #           assert x==requested_length, no specialization on ==1 or !=1.
+            #            The non-broadcast path is picked
+            #      x:1, requested_length:4 ==>
+            #           specialize(x) to be 1.
+            if backed_so:
+                x_hint = size_hint(x, allow_none=True)
+                requested_hint = size_hint(requested_length, allow_none=True)
+                if x_hint == 1 and requested_hint != 1:
+                    torch._check(x == 1)
+
             torch._check(
                 sym_or(x == 1, requested_length == x),
                 lambda: f"expand: attempting to expand a dimension of length {x} -> {requested_length}!",
