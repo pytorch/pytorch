@@ -136,12 +136,59 @@ class TestStandaloneInductor(TestCase):
         mod_opt = inductor.compile(mod, inp)
         self.assertEqual(mod(*inp), mod_opt(*inp))
 
+    @mock.patch.dict(os.environ, {"TORCHINDUCTOR_DEBUG_COMPILE": "1"})
+    def test_inductor_generate_debug_compile(self):
+        cpp_code = """
+        int main(){
+            return 0;
+        }
+        """
+
+        _, source_path = write(
+            cpp_code,
+            "cpp",
+        )
+        build_option = CppOptions()
+        cpp_builder = CppBuilder(
+            name="test_compile",
+            sources=source_path,
+            output_dir=os.path.dirname(source_path),
+            BuildOption=build_option,
+        )
+        cpp_builder.build()
+        binary_path = cpp_builder.get_target_file_path()
+
+        """
+        When we turn on generate debug compile.
+        On Windows, it should create a [module_name].pdb file. It helps debug by WinDBG.
+        On Linux, it should create some debug sections in binary file.
+        """
+
+        def check_linux_debug_section(module_path: str):
+            check_cmd = shlex.split(f"readelf -S {module_path}")
+            output = safe_command_output(check_cmd)
+            has_debug_sym = ".debug_info" in output
+            self.assertEqual(has_debug_sym, True)
+
+        def check_windows_pdb_exist(module_path: str):
+            file_name_no_ext = os.path.splitext(module_path)[0]
+            file_name_pdb = f"{file_name_no_ext}.pdb"
+            has_pdb_file = os.path.exists(file_name_pdb)
+            self.assertEqual(has_pdb_file, True)
+
+        if _IS_WINDOWS:
+            check_windows_pdb_exist(binary_path)
+        elif _IS_MACOS:
+            pass  # MacOS not sure that if it should be works.
+        else:
+            check_linux_debug_section(binary_path)
+
     @mock.patch.dict(os.environ, {"TORCHINDUCTOR_DEBUG_SYMBOL": "1"})
     def test_inductor_generate_debug_symbol(self):
         cpp_code = """
-int main(){
-    return 0;
-}
+        int main(){
+            return 0;
+        }
         """
 
         _, source_path = write(
