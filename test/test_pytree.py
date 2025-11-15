@@ -165,6 +165,44 @@ class TestGenericPytree(TestCase):
                             ),
                         )
 
+    @parametrize(
+        "modulename",
+        [
+            subtest("python", name="py"),
+            *([subtest("cxx", name="cxx")] if not IS_FBCODE else []),
+        ],
+    )
+    def test_public_api_import(self, modulename):
+        for use_cxx_pytree in [None, "", "0", *(["1"] if not IS_FBCODE else [])]:
+            env = os.environ.copy()
+            if use_cxx_pytree is not None:
+                env["PYTORCH_USE_CXX_PYTREE"] = str(use_cxx_pytree)
+            else:
+                env.pop("PYTORCH_USE_CXX_PYTREE", None)
+            for statement in (
+                f"import torch.utils.pytree.{modulename}",
+                f"from torch.utils.pytree import {modulename}",
+                f"from torch.utils.pytree.{modulename} import tree_map",
+                f"import torch.utils.pytree; torch.utils.pytree.{modulename}",
+                f"import torch.utils.pytree; torch.utils.pytree.{modulename}.tree_map",
+            ):
+                try:
+                    subprocess.check_output(
+                        [sys.executable, "-c", statement],
+                        stderr=subprocess.STDOUT,
+                        # On Windows, opening the subprocess with the default CWD makes `import torch`
+                        # fail, so just set CWD to this script's directory
+                        cwd=os.path.dirname(os.path.realpath(__file__)),
+                        env=env,
+                    )
+                except subprocess.CalledProcessError as e:
+                    self.fail(
+                        msg=(
+                            f"Subprocess exception while attempting to run statement `{statement}`: "
+                            + e.output.decode("utf-8")
+                        )
+                    )
+
     @parametrize_pytree_module
     def test_register_pytree_node(self, pytree):
         class MyDict(UserDict):
@@ -847,12 +885,13 @@ class TestPythonPytree(TestCase):
         script = """
 import sys
 import torch
-import torch.utils._pytree
+assert "torch.utils.pytree" in sys.modules
 assert "torch.utils._pytree" in sys.modules
-if "torch.utils._cxx_pytree" in sys.modules:
-    raise RuntimeError("importing torch.utils._pytree should not import torch.utils._cxx_pytree")
-if "optree" in sys.modules:
-    raise RuntimeError("importing torch.utils._pytree should not import optree")
+if not torch.utils.pytree.PYTORCH_USE_CXX_PYTREE:
+    if "torch.utils._cxx_pytree" in sys.modules:
+        raise RuntimeError("importing torch.utils._pytree should not import torch.utils._cxx_pytree")
+    if "optree" in sys.modules:
+        raise RuntimeError("importing torch.utils._pytree should not import optree")
 """
         try:
             subprocess.check_output(
