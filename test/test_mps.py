@@ -130,7 +130,7 @@ class MpsMemoryLeakCheck:
 
         discrepancy_detected = True
         # Query memory multiple items to ensure leak was not transient
-        for n in range(3):
+        for _ in range(3):
             caching_allocator_mem_allocated = torch.mps.current_allocated_memory()
             driver_mem_allocated = torch.mps.driver_allocated_memory()
 
@@ -646,6 +646,34 @@ class MatmulTest(TestCaseMPS):
         matmul_cpu = torch.matmul(tensor1_cpu, tensor2_cpu)
 
         self.assertEqual(matmul_cpu, matmul_mps.to("cpu"))
+
+    def test_large_complex_matmul(self):
+        # See https://github.com/pytorch/pytorch/issues/167727
+        M, N, K = 64, 300, 3000
+        a = torch.rand((M, K), device='mps', dtype=torch.cfloat)
+        b = torch.rand((K, N), device='mps', dtype=torch.cfloat)
+        out = torch.mm(a, b)
+        out_cpu = torch.mm(a.cpu(), b.cpu())
+        # Operation order in large matmul can affect the results
+        # Float ulp is 1e-6, multiplied by inner dim results in 5e-3
+        self.assertEqual(out.cpu(), out_cpu, atol=5e-3, rtol=1e-5)
+
+    def test_large_complex_addmm(self):
+        # See https://github.com/pytorch/pytorch/issues/167727
+        M, N, K = 64, 300, 3000
+        a = torch.rand((M, N), device="mps", dtype=torch.cfloat)
+        b = torch.rand((M, K), device='mps', dtype=torch.cfloat)
+        c = torch.rand((K, N), device='mps', dtype=torch.cfloat)
+        out = torch.addmm(a, b, c, alpha=1.0, beta=0.5j)
+        out_cpu = torch.addmm(a.cpu(), b.cpu(), c.cpu(), alpha=1.0, beta=0.5j)
+        # Operation order in large matmul can affect the results
+        # Float ulp is 1e-6, multiplied by inner dim results in 5e-3
+        self.assertEqual(out.cpu(), out_cpu, atol=5e-3, rtol=2e-5)
+
+    def test_empty_matmul_vec(self):
+        tensor_1 = torch.rand((0, 100), device="mps")
+        tensor_2 = torch.rand((100, ), device="mps")
+        self.assertEqual((tensor_1 @ tensor_2).cpu(), tensor_1.cpu() @ tensor_2.cpu())
 
 class MPSLeakyReluTest(TestCaseMPS):
     def _npLeakyRelu(self, np_features, negative_slope=0.1):
@@ -1762,13 +1790,13 @@ class TestMPS(TestCaseMPS):
                             continue
                         # Running stats must be tracked in eval mode
                         if (track_running_stats):
-                            helper(shape, eps=0, momentum=1, channels_last=channels_last,
+                            helper(shape, eps=1e-5, momentum=1, channels_last=channels_last,
                                    track_running_stats=track_running_stats, test_module=test_module)
                             helper(shape, channels_last=channels_last,
                                    track_running_stats=track_running_stats, test_module=test_module)
                             helper(shape, eps=1e-05, momentum=0.1, wts=False, training=False, channels_last=channels_last,
                                    track_running_stats=track_running_stats, test_module=test_module)
-                            helper(shape, eps=0, momentum=1.0, wts=False, training=False, channels_last=channels_last,
+                            helper(shape, eps=1e-5, momentum=1.0, wts=False, training=False, channels_last=channels_last,
                                    track_running_stats=track_running_stats, test_module=test_module)
                             helper(shape, eps=1, momentum=1, wts=True, training=False, channels_last=channels_last,
                                    track_running_stats=track_running_stats, test_module=test_module)
@@ -1776,7 +1804,7 @@ class TestMPS(TestCaseMPS):
                                    track_running_stats=track_running_stats, test_module=test_module)
                         helper(shape, eps=1e-05, momentum=0.1, wts=False, training=True, channels_last=channels_last,
                                track_running_stats=track_running_stats, test_module=test_module)
-                        helper(shape, eps=0, momentum=1.0, wts=False, training=True, channels_last=channels_last,
+                        helper(shape, eps=1e-5, momentum=1.0, wts=False, training=True, channels_last=channels_last,
                                track_running_stats=track_running_stats, test_module=test_module)
                         helper(shape, eps=1, momentum=1, wts=True, training=True, channels_last=channels_last,
                                track_running_stats=track_running_stats, test_module=test_module)
@@ -4470,6 +4498,14 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(out1, out2)
 
+    def test_bce_backward_with_no_reduction_and_one_in_shape(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/166746
+        output = torch.zeros(3, 2, 1, requires_grad=True, device='mps')
+        target = torch.zeros(3, 2, 1, device='mps')
+        torch.sum(nn.BCELoss(reduction='none')(output, target)).backward()
+        expected_grad = torch.zeros(3, 2, 1, device='mps')
+        self.assertEqual(output.grad, expected_grad)
+
     def test_cross_entropy_loss(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/116095
         loss = nn.CrossEntropyLoss()
@@ -4902,7 +4938,7 @@ class TestMPS(TestCaseMPS):
             input_xs.append(torch.ones(prod, dtype=torch.int).reshape(shape).bool())
             input_xs.append(torch.zeros(prod, dtype=torch.int).reshape(shape).bool())
 
-            for i, cpu_x in enumerate(input_xs):
+            for cpu_x in input_xs:
                 x = cpu_x.detach().clone().to('mps')
                 y = torch.any(x)
                 ref_y = torch.any(cpu_x)
@@ -4984,7 +5020,7 @@ class TestMPS(TestCaseMPS):
             input_xs.append(torch.ones(prod, dtype=torch.int).reshape(shape).bool())
             input_xs.append(torch.zeros(prod, dtype=torch.int).reshape(shape).bool())
 
-            for i, cpu_x in enumerate(input_xs):
+            for cpu_x in input_xs:
                 x = cpu_x.detach().clone().to('mps')
                 y = torch.all(x)
                 ref_y = torch.all(cpu_x)
@@ -9452,7 +9488,7 @@ class TestSDPA(TestCaseMPS):
         torch.manual_seed(1729)
         causal_mask = torch.tril(torch.ones(S, S, dtype=torch.bool, device='mps'))
         with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
-            i = 42
+            i = 42 if S > 42 else S // 2
 
             q = torch.randn([1, NH, L, HS], dtype=dtype, device="mps")
             k = torch.randn([1, NH, S, HS], dtype=q.dtype, device="mps")
@@ -9601,7 +9637,7 @@ class TestSDPA(TestCaseMPS):
         key = torch.randn(batch_size, num_heads, seq_len, head_dim, device="mps", dtype=torch.float32)
         value = torch.randn(batch_size, num_heads, seq_len, head_dim, device="mps", dtype=torch.float32)
         memory_footprints = []
-        for i in range(100):
+        for _ in range(100):
             output = F.scaled_dot_product_attention(query, key, value)
             current_mem, driver_mem = get_mps_memory_usage()
             memory_footprints.append((current_mem, driver_mem))
@@ -12689,6 +12725,12 @@ class TestErrorInputs(TestCase):
 
             with self.assertRaisesRegex(error_type, error_regex):
                 op(*mps_args, **mps_kwargs)
+
+    def test_index_put_out_of_bounds(self, device):
+        x = torch.rand(10, 1, 10, device=device)
+        with self.assertRaises(torch.AcceleratorError):
+            y = x[:, [1]]
+            torch.mps.synchronize()
 
 class TestComplex(TestCase):
     def test_tensor_scalar_binops(self):

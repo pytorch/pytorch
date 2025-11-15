@@ -534,6 +534,7 @@ def create_aot_state(
     stack.enter_context(autograd_fallback_mode("error"))
 
     from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
+    from torch._library.opaque_object import is_opaque_type
 
     # Tracing may mutate the states the fake script object,
     # so we need to duplicate the fake script objects so that subsequent tracing
@@ -541,7 +542,7 @@ def create_aot_state(
     def _dup_fake_script_obj(fake_flat_args):
         return [
             maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
-            if isinstance(arg, FakeScriptObject)
+            if isinstance(arg, FakeScriptObject) or is_opaque_type(type(arg))
             else arg
             for arg in fake_flat_args
         ]
@@ -979,7 +980,9 @@ def prepare_aot_module_simplified(
     (
         aot_autograd_arg_pos_to_source,
         static_input_indices,
-    ) = _try_get_metadata_from_dynamo(mod, params_buffers.keys(), len(full_args))
+    ) = _try_get_metadata_from_dynamo(
+        mod, params_buffers.keys(), len(full_args), full_args_descs
+    )
 
     dynamic_shapes = False
     for x in full_args:
