@@ -217,7 +217,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   install_sycl_tla "./third_party/sycl-tla" || exit 1
   TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/sycl-tla")
   export TORCHINDUCTOR_CUTLASS_DIR
-  export ONEAPI_ROOT="/opt/intel/oneapi/2025.2"
+  export ONEAPI_ROOT="/opt/intel/oneapi/${XPU_VERSION}"
   # end setting sycl-tla
 fi
 
