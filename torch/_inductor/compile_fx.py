@@ -91,6 +91,7 @@ from torch._inductor.utils import (
     tensor_is_aligned,
 )
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch._logging import trace_structured
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
@@ -1639,7 +1640,9 @@ class _InProcessFxCompile(FxCompile):
                             # pyrefly: ignore [unbound-name]
                             (str, list, torch.fx.GraphModule),
                         ), type(compiled_fn)
-                        return CompiledAOTI(compiled_fn)
+                        return CompiledAOTI(
+                            filename=compiled_fn, device_type=graph.device_type
+                        )
 
                     # TODO: Hoist this above V.aot_compilation
                     # pyrefly: ignore [unbound-name]
@@ -2712,7 +2715,7 @@ def _compile_fx_main(
             or torch._guards.TracingContext(fake_mode)
         )
 
-        if V.aot_compilation:
+        if V.aot_compilation and not config.enable_autograd_for_aot:
             from .utils import is_valid_aoti_model_name
 
             is_valid_aoti_model_name()
@@ -2745,7 +2748,9 @@ def _compile_fx_main(
                             node.meta["val"] = fake_mode.from_tensor(
                                 target, static_shapes=True
                             )
-                        elif isinstance(target, torch.ScriptObject):
+                        elif isinstance(target, torch.ScriptObject) or is_opaque_type(
+                            type(target)
+                        ):
                             node.meta["val"] = (
                                 torch._library.fake_class_registry.maybe_to_fake_obj(
                                     fake_mode, target
