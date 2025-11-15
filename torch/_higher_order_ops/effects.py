@@ -204,7 +204,7 @@ def _get_schema(op, args, kwargs: Optional[dict] = None) -> torch.FunctionSchema
     elif op == call_torchbind:
         return getattr(args[0], args[1]).schema
     elif op == hop_print:
-        # hop_print expects (format_str, *args) as its arguments
+        # hop_print currently expects (format_str, *kwargs) as its arguments
         extra_kwargs = kwargs or {}
         return op.gen_schema(*args, **extra_kwargs)
     else:
