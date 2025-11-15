@@ -542,3 +542,17 @@ def my_view(t, size) -> Tensor:
     Returns: Tensor - tensor with new view
     """
     return torch.ops.libtorch_agnostic.my_view.default(t, size)
+
+
+def mv_tensor_accessor(m, v) -> Tensor:
+    """
+    Returns matrix-vector product.
+
+    Args:
+        m: any 2-D Tensor with shape (N, M)
+        v: any 1-D Tensor with shape (M,)
+
+    Returns:
+        a 1-D Tensor with shape (N,)
+    """
+    return torch.ops.libtorch_agnostic.mv_tensor_accessor.default(m, v)
