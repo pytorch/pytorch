@@ -178,9 +178,11 @@ elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
   # setting PYTHON_TEST_EXTRA_OPTION
   export PYTHON_TEST_EXTRA_OPTION="--xpu"
-  clone_sycl_tla
-  TORCHINDUCTOR_CUTLASS_DIR=$(realpath ./sycl-tla)
+  # setting sycl-tla (Intel cutlass)
+  install_sycl_tla "./third_party/sycl-tla" || exit 1
+  TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/sycl-tla")
   export TORCHINDUCTOR_CUTLASS_DIR
+  # end setting sycl-tla
 fi
 
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
