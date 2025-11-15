@@ -113,7 +113,7 @@ void JitLoggingConfig::parse() {
 bool is_enabled(const char* cfname, JitLoggingLevels level) {
   const auto& files_to_levels =
       JitLoggingConfig::getInstance().getFilesToLevels();
-  const auto fname_no_ext = c10::filesystem::path(cfname).stem();
+  const auto fname_no_ext = c10::filesystem::path(cfname).stem().string();
 
   const auto it = files_to_levels.find(fname_no_ext);
   if (it == files_to_levels.end()) {
