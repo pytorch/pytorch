@@ -904,23 +904,24 @@ def reset_graph_break_dup_checker() -> None:
 
 
 # Matches ANSI escape sequences (CSI)
-ANSI_ESCAPE_RE = re.compile(
-    r'''
+ANSI_ESCAPE_PATTERN = re.compile(
+    r"""
     \x1B            # ESC
     \[              # [
     [0-?]*          # Parameter bytes
     [ -/]*          # Intermediate bytes
     [@-~]           # Final byte
-    ''',
-    re.VERBOSE
+    """,
+    re.VERBOSE,
 )
 
 
 class StripAnsiFormatter(logging.Formatter):
     """Logging formatter that strips ANSI escape codes."""
+
     def format(self, record):
         msg = super().format(record)
-        return ANSI_ESCAPE_PATTERN.sub('', msg)
+        return ANSI_ESCAPE_PATTERN.sub("", msg)
 
 
 def add_file_handler() -> contextlib.ExitStack:
