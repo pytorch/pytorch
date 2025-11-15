@@ -1,17 +1,28 @@
 import functools
 import inspect
+import os
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
+from filelock import FileLock
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Concatenate, Optional, Union
+from typing import Any, Concatenate, Generator, Optional, Union
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.config import use_experimental_benchmarker
+from torch._inductor.runtime.runtime_utils import default_cache_dir
+from torch._inductor.runtime.caching import FileLockTimeoutError
+from torch._inductor.runtime.caching.locks import (
+    _acquire_flock_with_timeout,
+    _BLOCKING,
+    _unsafe_acquire_flock_with_timeout,
+)
+from torch._inductor.virtualized import threadlocal
 from torch.utils._debug_mode import DebugMode
 
 
@@ -24,7 +35,69 @@ use_experimental_benchmarker = (
 MILLISECONDS_PER_SECOND = 1000
 
 P = ParamSpec("P")
+R = TypeVar("R")
 T = TypeVar("T")
+
+# timeout, in seconds, when attempting to lock the gpu
+GPU_TIMEOUT: float = 60.0 * 60.0
+
+
+@contextmanager
+def _lock_gpu(priority: bool = True, timeout: float = GPU_TIMEOUT) -> Generator[None, None, None]:
+    start_t: float = time.time()
+    # would it ever be the case that `torch.cuda.current_device()` is not sufficient?
+    device: torch.device = torch.device(f"cuda:{torch.cuda.current_device()}")
+    # usage lock, may be heavily contested by multiple async autotuning processes
+    ulock: FileLock = FileLock(default_cache_dir() + f"/locks/usage_{device.type}_{device.index}.lock")
+    # priority lock, ensures that threads with priority (the main thread) obtain ulock first
+    plock: FileLock = FileLock(default_cache_dir() + f"/locks/priority_{device.type}_{device.index}.lock")
+    try:
+        if priority:
+            # if this thread has priority, we'll block on grabbing plock first
+            _unsafe_acquire_flock_with_timeout(plock, timeout=_BLOCKING)
+        
+        start_t: float = time.time()
+        while True:
+            if (time.time() - start_t) > timeout:
+                raise FileLockTimeoutError(ulock, timeout)
+
+            if not priority and plock.is_locked:
+                # if we don't have priority but the plock is obtained we should not contest ulock
+                time.sleep(0.5)
+                continue
+            
+            try:
+                with _acquire_flock_with_timeout(ulock, timeout=(_BLOCKING if priority else 0.5)):
+                    # we've obtained the rights to use the gpu
+                    yield
+            except FileLockTimeoutError:
+                # our attempt to obtain rights to the gpu timed out, try again.
+                # we do this because if we were to wait for rights indefinitely,
+                # then threads with priority would not be able to skip the queue
+                continue
+            
+            # we've finished using the gpu, and can exit safely
+            break
+    finally:
+        if priority:
+            # if we initially grabbed the plock, we'll also need to release it on exit
+            plock.release()
+
+
+def lock_gpu(fn: Callable[P, R]) -> Callable[P, R]:
+    @wraps(fn)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        if (
+            getattr(threadlocal, "__torchinductor_bypass_gpu_lock", False)
+            or os.getenv("TORCHINDUCTOR_BYPASS_GPU_LOCK", "0") == "1"
+        ):
+            # we've explicitly told this thread/process to bypass the locking
+            # mechanism, for example if we've manually obtained the lock for a larger
+            # scope than this single function call
+            return fn(*args, **kwargs)
+        with _lock_gpu():
+            return fn(*args, **kwargs)
+    return wrapper
 
 
 def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any]:
