@@ -1,3 +1,5 @@
+#include "kernel.h"
+
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/device.h>
@@ -550,6 +552,32 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("test_device_is_cpu", &boxed_test_device_is_cpu);
 }
 
+Tensor mv_tensor_accessor_cpu(Tensor m, Tensor v) {
+  STD_TORCH_CHECK(m.dim() == 2, "m must be 2D");
+  STD_TORCH_CHECK(v.dim() == 1, "v must be 1D");
+  STD_TORCH_CHECK(m.size(1) == v.size(0), "m.shape[1] == v.shape[0] must hold");
+  STD_TORCH_CHECK(m.scalar_type() == v.scalar_type(), "m and v must have the same dtype");
+  STD_TORCH_CHECK(m.device() == v.device(), "m and v must be on the same device");
+  Tensor res = new_empty(m, {m.size(0)});
+  THO_DISPATCH_V2(m.scalar_type(), "mv_tensor_accessor_cpu",
+                  AT_WRAP(([&]() {
+                    auto resa = Accessor_cpu<scalar_t, 1>(reinterpret_cast<scalar_t*>(res.data_ptr()), res.sizes().data(), res.strides().data());
+                    auto ma = Accessor_cpu<scalar_t, 2>(reinterpret_cast<scalar_t*>(m.data_ptr()), m.sizes().data(), m.strides().data());
+                    auto va = Accessor_cpu<scalar_t, 1>(reinterpret_cast<scalar_t*>(v.data_ptr()), v.sizes().data(), v.strides().data());
+                    mv_tensor_accessor_kernel<Accessor_cpu, scalar_t>(resa, ma, va);
+                  })),
+                  AT_FLOATING_TYPES);
+  return res;
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("mv_tensor_accessor(Tensor m, Tensor v) -> Tensor");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
+  m.impl("mv_tensor_accessor", TORCH_BOX(&mv_tensor_accessor_cpu));
+}
+
 // Test functions for torch::stable::accelerator APIs
 
 #ifdef LAE_USE_CUDA
@@ -669,4 +697,39 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("test_parallel_for", &boxed_test_parallel_for);
   m.impl("test_get_num_threads", &boxed_test_get_num_threads);
+}
+
+Tensor my_empty(
+    torch::headeronly::HeaderOnlyArrayRef<int64_t> size,
+    std::optional<torch::headeronly::ScalarType> dtype,
+    std::optional<torch::stable::Device> device,
+    std::optional<bool> pin_memory) {
+  return empty(size, dtype, device, pin_memory);
+}
+
+Tensor my_flatten(Tensor t, int64_t start_dim, int64_t end_dim) {
+  return flatten(t, start_dim, end_dim);
+}
+
+Tensor my_reshape(Tensor t, torch::headeronly::HeaderOnlyArrayRef<int64_t> shape) {
+  return reshape(t, shape);
+}
+
+Tensor my_view(Tensor t, torch::headeronly::HeaderOnlyArrayRef<int64_t> size) {
+  return view(t, size);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def(
+      "my_empty(int[] size, ScalarType? dtype=None, Device? device=None, bool? pin_memory=None) -> Tensor");
+  m.def("my_flatten(Tensor t, int start_dim=0, int end_dim=-1) -> Tensor");
+  m.def("my_reshape(Tensor t, int[] shape) -> Tensor");
+  m.def("my_view(Tensor t, int[] size) -> Tensor");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("my_empty", TORCH_BOX(&my_empty));
+  m.impl("my_flatten", TORCH_BOX(&my_flatten));
+  m.impl("my_reshape", TORCH_BOX(&my_reshape));
+  m.impl("my_view", TORCH_BOX(&my_view));
 }

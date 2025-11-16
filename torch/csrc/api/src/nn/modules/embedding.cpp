@@ -76,7 +76,7 @@ void EmbeddingImpl::pretty_print(std::ostream& stream) const {
   if (options.sparse()) {
     stream << ", sparse=" << std::boolalpha << options.sparse();
   }
-  stream << ")";
+  stream << ')';
 }
 
 torch::Tensor EmbeddingImpl::forward(const Tensor& input) {
@@ -181,6 +181,6 @@ void EmbeddingBagImpl::pretty_print(std::ostream& stream) const {
   if (padding_idx_opt.has_value()) {
     stream << ", padding_idx=" << padding_idx_opt.value();
   }
-  stream << ")";
+  stream << ')';
 }
 } // namespace torch::nn

@@ -65,7 +65,7 @@ VaryingShape<T> VaryingShape<T>::merge(const VaryingShape<T>& other) const {
 
 template <typename T>
 std::ostream& operator<<(std::ostream& out, const VaryingShape<T>& vs) {
-  out << "(";
+  out << '(';
   if (!vs.size()) {
     out << "*)";
     return out;
@@ -79,10 +79,10 @@ std::ostream& operator<<(std::ostream& out, const VaryingShape<T>& vs) {
     if (v.has_value()) {
       out << v.value();
     } else {
-      out << "*";
+      out << '*';
     }
   }
-  out << ")";
+  out << ')';
   return out;
 }
 
@@ -105,7 +105,7 @@ std::ostream& operator<<(
   }
   auto sizes_opt = ss.sizes();
 
-  os << "(";
+  os << '(';
   for (size_t i = 0; i < rank_opt.value(); i++) {
     if (i > 0) {
       os << ", ";
@@ -113,10 +113,10 @@ std::ostream& operator<<(
     if(sizes_opt.has_value() && sizes_opt.value()[i].is_static()) {
       os << sizes_opt.value()[i];
     } else {
-      os << "*";
+      os << '*';
     }
   }
-  os << ")";
+  os << ')';
 
   return os;
 }
@@ -131,17 +131,17 @@ std::ostream& operator<<(std::ostream& os, const ShapeSymbol& s) {
 }
 
 std::ostream& operator<<(std::ostream& os, const Stride& s) {
-  os << "{";
+  os << '{';
   if (s.stride_index_.has_value()) {
     os << *s.stride_index_;
   } else {
-    os << "*";
+    os << '*';
   }
-  os << ":";
+  os << ':';
   if (s.stride_.has_value()) {
     os << *s.stride_;
   } else {
-    os << "*";
+    os << '*';
   }
   os << '}';
   return os;

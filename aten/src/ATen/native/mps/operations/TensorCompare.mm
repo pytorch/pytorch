@@ -244,8 +244,8 @@ static void clamp_scalar_out_mps(const Tensor& input_t,
 
   @autoreleasepool {
     // the optional min/max refs could affect how we build the cached graph
-    std::string key = op_name + (has_min ? ("_min:" + std::to_string(min_scalar)) : "") +
-        (has_max ? ("_max:" + std::to_string(max_scalar)) : "") + "_scalar:" + getTensorsStringKey({input_t});
+    std::string key = op_name + (has_min ? ("_min:" + to_hex_key(min_scalar)) : "") +
+        (has_max ? ("_max:" + to_hex_key(max_scalar)) : "") + "_scalar:" + getTensorsStringKey({input_t});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       if (has_min)
         newCachedGraph->minTensor = [mpsGraph constantWithScalar:min_scalar

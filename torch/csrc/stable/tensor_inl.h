@@ -56,17 +56,12 @@ inline Device Tensor::device() const {
   }
 
 #define _PRED(S1, S2) S1 == S2
-#define _PRED_QINT(S1, S2) S1 == S2 || toUnderlying(S1) == S2
 #define DEFINE_CAST(T, name) DEFINE_DATA_PTR_CAST(T, name, _PRED)
-#define DEFINE_CAST_QINT(T, name) DEFINE_DATA_PTR_CAST(T, name, _PRED_QINT)
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CAST)
-AT_FORALL_QINT_TYPES(DEFINE_CAST_QINT)
 DEFINE_CAST(uint16_t, UInt16)
 DEFINE_CAST(uint32_t, UInt32)
 DEFINE_CAST(uint64_t, UInt64)
 #undef DEFINE_CAST
-#undef DEFINE_CAST_QINT
 #undef _PRED
-#undef _PRED_QINT
 
 HIDDEN_NAMESPACE_END(torch, stable)
