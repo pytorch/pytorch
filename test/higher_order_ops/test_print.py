@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import torch
 from torch._dynamo.utils import counters
+from torch._functorch.aot_autograd import aot_export_module
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -89,6 +90,99 @@ def forward(self, arg0_1):
             printed_output = mock_stdout.getvalue().strip()
 
         self.assertEqual(printed_output, f"moo 1 2\nmoo {new_inp}\nmoo 1 2\nyeehop 4")
+
+    def test_print_with_side_effect(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                torch._higher_order_ops.print("moo {x} {y}", x=1, y=2)
+                res = x + x
+                torch._higher_order_ops.print("moo {x} {y}", x=1, y=2)
+                return (res,)
+
+        inputs = (torch.randn(3),)
+
+        # With functionalization, it should appear wrapped with with_effects()
+        gm, gs = aot_export_module(M(), inputs, trace_joint=False)
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops.higher_order.print, 'moo {x} {y}', x = 1, y = 2);  \
+arg0_1 = None
+    getitem = with_effects[0];  with_effects = None
+    add = torch.ops.aten.add.Tensor(arg1_1, arg1_1);  arg1_1 = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, 'moo {x} {y}', x = 1, y = 2);  \
+getitem = None
+    getitem_2 = with_effects_1[0];  with_effects_1 = None
+    return (getitem_2, add)""",
+        )
+        self.assertEqual(len(gs.input_tokens), 1)
+        self.assertEqual(len(gs.output_tokens), 1)
+
+    def test_print_with_input_mutations(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                torch._higher_order_ops.print("moo {x} {y}", x=x, y=2)
+                res = x + x
+                x.add_(res)
+                res = x + x
+                torch._higher_order_ops.print("moo {x} {y}", x=x, y=res)
+                return (res,)
+
+        inputs = (torch.randn(3),)
+
+        # With functionalization, it should appear wrapped with with_effects()
+        gm, gs = aot_export_module(M(), inputs, trace_joint=False)
+        self.assertEqual(len(gs.input_tokens), 1)
+        self.assertEqual(len(gs.output_tokens), 1)
+        self.assertEqual(len(gs.user_inputs_to_mutate), 1)
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops.higher_order.print, 'moo {x} {y}', \
+x = arg1_1, y = 2);  arg0_1 = None
+    getitem = with_effects[0];  with_effects = None
+    add = torch.ops.aten.add.Tensor(arg1_1, arg1_1)
+    add_1 = torch.ops.aten.add.Tensor(arg1_1, add);  arg1_1 = add = None
+    add_2 = torch.ops.aten.add.Tensor(add_1, add_1)
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, 'moo {x} {y}', \
+x = add_1, y = add_2);  getitem = None
+    getitem_2 = with_effects_1[0];  with_effects_1 = None
+    return (getitem_2, add_1, add_2)""",
+        )
+
+    def test_print_gen_schema(self):
+        from torch._higher_order_ops.print import print as print_op
+
+        # Test basic schema generation with simple kwargs int
+        format_str = "Hello {x} {y}"
+        schema = print_op.gen_schema(format_str, x=1, y=2)
+        self.assertExpectedInline(
+            str(schema),
+            """print(str format_str, *, int x, int y) -> ()""",
+        )
+        # Test schema generation with different types of inputs
+
+        # Tensor input
+        tensor = torch.randn(2, 2)
+        schema_tensor = print_op.gen_schema("Tensor: {x}", x=tensor)
+        self.assertExpectedInline(
+            str(schema_tensor),
+            """print(str format_str, *, Tensor x) -> ()""",
+        )
+
+        # TODO: Add schema support with kwargs with value of list type
+
+        # No kwargs
+        schema_no_kwargs = print_op.gen_schema("Simple message")
+        self.assertExpectedInline(
+            str(schema_no_kwargs),
+            """print(str format_str) -> ()""",
+        )
 
 
 if __name__ == "__main__":
