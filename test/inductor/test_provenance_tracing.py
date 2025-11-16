@@ -27,9 +27,9 @@ from torch._inductor.fx_passes.post_grad import post_grad_passes
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code, run_and_get_cpp_code
 from torch._inductor.virtualized import V
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import IS_MACOS, skipIfRocm
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
-
+from torch.profiler import profile, ProfilerActivity
 
 try:
     from .test_aot_inductor_utils import AOTIRunnerUtil
@@ -939,6 +939,64 @@ copy_tests(
     TestProvenanceTracingKernelContextGpu,
     "cuda",
 )
+
+
+from torch.profiler._utils import _enrich_profiler_traces
+
+
+class TestProfilerStackTraceAugmentation(TestCase):
+    """
+    Test that profiler events are correctly augmented with stack traces
+    from both FX metadata and inductor kernel stack traces.
+    """
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @skipIfRocm
+    @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
+    @config.patch("fallback_by_default", True) # TODO update the config patch to inductor lite mode
+    @torch.compiler.config.patch("force_disable_caches", True)
+    def test_profiler_inductor_stack_trace_augmentation(self):
+        """
+        Test that map_recorded_events_to_aten_ops_with_stack_trace correctly
+        augments profiler events with stack traces from inductor kernel metadata.
+        """
+
+        # Test model similar to test.py
+        class TestModel(torch.nn.Module):
+            def forward(self, c):
+                d = c * 2
+                d = d + 1
+                return d
+
+        device = "cuda"
+        model = TestModel().to(device)
+        c = torch.randn((64, 32), device=device)
+
+        # Force disable caches to ensure fresh compilation
+        torch.compiler.config.force_disable_caches = True
+
+        # Compile the model
+        compiled_model = torch.compile(model, fullgraph=True)
+
+        # Warmup
+        for _ in range(3):
+            _ = compiled_model(c)
+
+        # Profile with the compiled model
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        ) as prof:
+            compiled_model(c)
+
+        actual_traces = _enrich_profiler_traces(prof)
+
+        self.assertExpectedInline(actual_traces, """\
+event=aten::mul node=torch.ops.aten.mul.Tensor:1 stack_trace=d = c * 2
+event=cudaLaunchKernel node=torch.ops.aten.mul.Tensor:1 stack_trace=d = c * 2
+event=aten::add node=torch.ops.aten.add.Tensor:2 stack_trace=d = d + 1
+event=cudaLaunchKernel node=torch.ops.aten.add.Tensor:2 stack_trace=d = d + 1""")
+
+    # TODO: add test that when enrich is not turned on there is no recordfast generated.
 
 
 if __name__ == "__main__":
