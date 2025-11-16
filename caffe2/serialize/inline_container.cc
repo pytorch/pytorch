@@ -734,7 +734,7 @@ void PyTorchStreamWriter::setup(const string& file_name) {
           file_name,
           std::ofstream::out | std::ofstream::trunc | std::ofstream::binary
         );
-    } catch (const std::ios_base::failure& e) {
+    } catch (const std::ios_base::failure&) {
 #ifdef _WIN32
       // Windows have verbose error code, we prefer to use it than std errno.
       uint32_t error_code = GetLastError();
