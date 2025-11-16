@@ -77,7 +77,7 @@ std::string normalize_path_separator(const std::string& orig_path) {
   return normalized_path;
 }
 
-std::string create_temp_dir() {
+c10::filesystem::path create_temp_dir() {
 #ifdef _WIN32
   try {
     fs::path temp_dir = fs::temp_directory_path();
@@ -523,30 +523,29 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
   }
 
   // Create temporary directory for extraction
-  std::string temp_dir = normalize_path_separator(create_temp_dir());
-  std::string output_path_str =
-      normalize_path_separator(temp_dir + k_separator + metadata_filename);
+  auto temp_dir = create_temp_dir();
+  auto output_path = temp_dir / metadata_filename;
 
   // Create the parent directory if it doesn't exist
-  size_t parent_path_idx = output_path_str.find_last_of(k_separator);
   TORCH_CHECK(
-      parent_path_idx != std::string::npos,
-      "Failed to find parent path in " + output_path_str);
-  std::string parent_path = output_path_str.substr(0, parent_path_idx);
+      output_path.has_parent_path(),
+      "Failed to find parent path in ",
+      output_path.c_str());
+  auto parent_path = output_path.parent_path();
   std::error_code ec{};
   c10::filesystem::create_directories(parent_path, ec);
   TORCH_CHECK(
       ec.value() == 0,
-      "Failed to create directory " + parent_path,
+      "Failed to create directory ",
+      parent_path.c_str(),
       ": ",
       ec.message());
 
-  LOG(INFO) << "Extract file: " << metadata_filename << " to "
-            << output_path_str;
-  zip_archive.extract_file(metadata_filename, output_path_str);
+  LOG(INFO) << "Extract file: " << metadata_filename << " to " << output_path;
+  zip_archive.extract_file(metadata_filename, output_path.c_str());
 
   // Parse the metadata json file
-  const nlohmann::json metadata_json_obj = load_json_file(output_path_str);
+  const nlohmann::json metadata_json_obj = load_json_file(output_path.c_str());
 
   std::unordered_map<std::string, std::string> metadata;
   for (auto& item : metadata_json_obj.items()) {
@@ -596,7 +595,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         << found_filenames[1];
   }
 
-  temp_dir_ = c10::filesystem::path(create_temp_dir());
+  temp_dir_ = create_temp_dir();
 
   std::string so_filename;
   std::string cpp_filename;
@@ -614,7 +613,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     // Only compile files in the specified model directory
     if (c10::starts_with(cur_filename.c_str(), model_directory.c_str()) ||
         c10::starts_with(cur_filename.c_str(), const_directory.c_str())) {
-      c10::filesystem::path output_file_path(temp_dir_);
+      auto output_file_path = temp_dir_;
 
       if (c10::starts_with(cur_filename.c_str(), model_directory.c_str())) {
         output_file_path /= cur_filename;
@@ -630,7 +629,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 
       TORCH_CHECK(
           output_file_path.has_parent_path(),
-          "Failed to find parent path in " + output_file_path.string());
+          "Failed to find parent path in ",
+          output_file_path.c_str());
 
       // Create the parent directory if it doesn't exist
       auto parent_path = output_file_path.parent_path();
@@ -638,12 +638,13 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       c10::filesystem::create_directories(parent_path, ec);
       TORCH_CHECK(
           ec.value() == 0,
-          "Failed to create directory " + parent_path.string(),
+          "Failed to create directory ",
+          parent_path.c_str(),
           ": ",
           ec.message());
 
       // Extracts file to the temp directory
-      zip_archive.extract_file(zip_filename_str, output_file_path.string());
+      zip_archive.extract_file(zip_filename_str, output_file_path.c_str());
 
       // Save the file for bookkeeping
       if (output_file_path.has_extension()) {
@@ -706,7 +707,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   c10::Device device = c10::Device(device_key);
   device.set_index(device_index);
 
-  std::string cubin_dir = temp_dir_ + k_separator + model_directory.string();
+  std::string cubin_dir = (temp_dir_ / model_directory).string();
   runner_ = registered_aoti_runner[device_key](
       so_path, num_runners, device.str(), cubin_dir, run_single_threaded);
 
