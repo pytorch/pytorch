@@ -138,6 +138,20 @@ constexpr bool _is_windows_os() {
   return false;
 #endif
 }
+bool path_starts_with(
+    const c10::filesystem::path& p,
+    const c10::filesystem::path& q) {
+  auto it1 = p.begin();
+  auto it2 = q.begin();
+  while (it1 != p.end() && it2 != q.end()) {
+    if (*it1 != *it2) {
+      return false;
+    }
+    it1++;
+    it2++;
+  }
+  return it2 == q.end();
+}
 } // namespace
 
 namespace torch::inductor {
@@ -611,8 +625,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   for (auto const& zip_filename_str : found_filenames) {
     auto cur_filename = c10::filesystem::path(zip_filename_str);
     // Only compile files in the specified model directory
-    if (c10::starts_with(cur_filename.string(), model_directory.string()) ||
-        c10::starts_with(cur_filename.string(), const_directory.string())) {
+    if (path_starts_with(cur_filename, model_directory) ||
+        path_starts_with(cur_filename, const_directory)) {
       auto output_file_path = temp_dir_;
 
       if (c10::starts_with(cur_filename.string(), model_directory.string())) {
