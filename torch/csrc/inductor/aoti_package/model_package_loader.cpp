@@ -611,11 +611,11 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   for (auto const& zip_filename_str : found_filenames) {
     auto cur_filename = c10::filesystem::path(zip_filename_str);
     // Only compile files in the specified model directory
-    if (c10::starts_with(cur_filename.c_str(), model_directory.c_str()) ||
-        c10::starts_with(cur_filename.c_str(), const_directory.c_str())) {
+    if (c10::starts_with(cur_filename.string(), model_directory.string()) ||
+        c10::starts_with(cur_filename.string(), const_directory.string())) {
       auto output_file_path = temp_dir_;
 
-      if (c10::starts_with(cur_filename.c_str(), model_directory.c_str())) {
+      if (c10::starts_with(cur_filename.string(), model_directory.string())) {
         output_file_path /= cur_filename;
       } else { // startsWith(zip_filename_str, const_directory)
         // Extract constants to the same directory as the rest of the files
