@@ -46,6 +46,7 @@
 
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
+#include <pybind11/functional.h>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
@@ -4203,7 +4204,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           }),
           py::arg("host_or_file"),
           py::arg("port") = -1)
-      .def("shutdown", &::c10d::control_plane::WorkerServer::shutdown);
+      .def("shutdown", &::c10d::control_plane::WorkerServer::shutdown)
+      .def_property_readonly(
+          "port", &::c10d::control_plane::WorkerServer::port);
 
   module.def(
       "_get_handler",
@@ -4218,6 +4221,25 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       R"(
       Returns the handler with the specified name.
     )");
+
+  module.def(
+      "_register_handler",
+      [](const std::string& name, const py::function& handler) {
+        ::c10d::control_plane::registerHandler(
+            name,
+            [handler](
+                const ::c10d::control_plane::Request& req,
+                ::c10d::control_plane::Response& res) {
+              py::gil_scoped_acquire acquire;
+              handler(std::ref(req), std::ref(res));
+            });
+      },
+
+      py::arg("name"),
+      py::arg("handler"),
+      R"(
+    Registers a handler by name.
+  )");
 
   module.def(
       "_get_handler_names",
@@ -4236,12 +4258,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       // Default constructor.
       .def(py::init<>())
       .def("body", &::c10d::control_plane::Request::body)
-      .def("params", &::c10d::control_plane::Request::params);
+      .def("get_param", &::c10d::control_plane::Request::getParam);
 
-  py::class_<
-      ::c10d::control_plane::Response,
-      std::shared_ptr<::c10d::control_plane::Response>,
-      PythonResponse>(
+  py::class_<::c10d::control_plane::Response, PythonResponse>(
       module,
       "_Response",
       R"(
