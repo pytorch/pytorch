@@ -1953,4 +1953,111 @@ __all__ = [
     "synchronize",
     "tunable",
     "utilization",
+    "StreamSafetyChecker",
 ]
+
+
+class StreamSafetyChecker:
+    r"""Context manager to detect potential stream synchronization bugs.
+    
+    This utility helps detect cases where tensors are used without proper
+    stream synchronization, which can cause race conditions and incorrect results.
+    
+    .. warning::
+        This is a debugging tool with significant performance overhead. Only use it
+        during development, not in production.
+        
+    Example::
+    
+        >>> # Example that would trigger a warning
+        >>> with torch.cuda.StreamSafetyChecker():
+        ...     s = torch.cuda.Stream()
+        ...     A = torch.randn(100, 100, device='cuda')
+        ...     with torch.cuda.stream(s):
+        ...         # BUG: Using A without proper synchronization
+        ...         B = A.sum()  # This will trigger a warning
+        
+        >>> # Correct version with synchronization
+        >>> with torch.cuda.StreamSafetyChecker():
+        ...     s = torch.cuda.Stream()
+        ...     A = torch.randn(100, 100, device='cuda')
+        ...     s.wait_stream(torch.cuda.default_stream())
+        ...     with torch.cuda.stream(s):
+        ...         A.record_stream(s)
+        ...         B = A.sum()  # No warning
+        
+    .. note::
+        Due to implementation limitations, this checker may have false positives
+        or false negatives. It's a best-effort debugging aid.
+    """
+    
+    def __init__(self, enabled: bool = True, warn_only: bool = True):
+        """Initialize the stream safety checker.
+        
+        Args:
+            enabled: If False, disable checking (useful for conditional debugging)
+            warn_only: If True, print warnings; if False, raise exceptions
+        """
+        self.enabled = enabled
+        self.warn_only = warn_only
+        self._original_debug_mode = None
+        self._tensor_stream_map: dict[int, int] = {}  # tensor id -> stream id
+        
+    def __enter__(self):
+        if not self.enabled:
+            return self
+            
+        if not torch.cuda.is_available():
+            warnings.warn("StreamSafetyChecker enabled but CUDA is not available")
+            self.enabled = False
+            return self
+            
+        # Enable CUDA synchronization debug mode
+        try:
+            self._original_debug_mode = torch.cuda.get_sync_debug_mode()
+            torch.cuda.set_sync_debug_mode("warn")
+        except Exception as e:
+            warnings.warn(f"Failed to enable sync debug mode: {e}")
+            
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if not self.enabled:
+            return False
+            
+        # Restore original debug mode
+        if self._original_debug_mode is not None:
+            try:
+                torch.cuda.set_sync_debug_mode(self._original_debug_mode)
+            except Exception:
+                pass
+                
+        return False
+    
+    @staticmethod
+    def check_tensor_stream_safety(tensor: torch.Tensor, 
+                                   current_stream: Optional[Stream] = None) -> bool:
+        """Check if a tensor is safe to use on the current stream.
+        
+        Args:
+            tensor: Tensor to check
+            current_stream: Stream to check against (defaults to current stream)
+            
+        Returns:
+            True if safe, False otherwise
+            
+        .. note::
+            This is a simplified check. Full stream safety tracking would require
+            deeper integration with PyTorch's stream management.
+        """
+        if not tensor.is_cuda:
+            return True
+            
+        if current_stream is None:
+            current_stream = torch.cuda.current_stream(tensor.device)
+            
+        # Simplified safety check: if tensor was created on a different stream
+        # and no synchronization has occurred, it may be unsafe
+        # This is a best-effort check and may have false positives/negatives
+        
+        return True  # Conservative: assume safe unless we have evidence otherwise

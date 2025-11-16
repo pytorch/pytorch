@@ -694,13 +694,18 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
     // Specifically, we might need to switch to a different context device
     // here explicitly to avoid relying on user synchronizing things
     // properly.
+    
+    // IMPORTANT: Use synchronous copy here to prevent use-after-free.
+    // oldData will be destroyed when it goes out of scope, but an async copy
+    // may still be reading from it. Previously this used async=true which
+    // could cause the source memory to be freed before the copy completed.
     CopyBytes(
         oldSize * itemsize(),
         oldData.get(),
         device(),
         newData,
         device(),
-        true); // non-blocking
+        false); // synchronous to ensure oldData can be safely freed
   }
   reserved_ = true;
   sizes_and_strides_.set_sizes(newDims);

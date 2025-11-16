@@ -51,6 +51,8 @@ __all__ = [
     "set_grad_enabled",
     "set_multithreading_enabled",
     "variable",
+    "detect_grad_reference_cycles",
+    "estimate_tensor_memory_overhead",
 ]
 
 _OptionalTensor = Optional[torch.Tensor]
@@ -559,6 +561,163 @@ def variable(*args, **kwargs):  # noqa: D103
     raise RuntimeError(
         "torch.autograd.variable(...) is deprecated, use torch.tensor(...) instead"
     )
+
+
+def detect_grad_reference_cycles(parameters: Union[torch.Tensor, Sequence[torch.Tensor]], 
+                                  clear_grads: bool = False) -> list[torch.Tensor]:
+    r"""Detect and optionally clear reference cycles in gradient graphs.
+    
+    When using backward() with create_graph=True, a reference cycle is created
+    between parameters and their gradients, which can cause memory leaks. This
+    function helps detect these cycles and optionally clear them.
+    
+    Args:
+        parameters: A single tensor or sequence of tensors to check for cycles
+        clear_grads: If True, automatically set .grad to None for tensors with cycles
+        
+    Returns:
+        List of tensors that have reference cycles
+        
+    Example::
+    
+        >>> # After backward with create_graph=True
+        >>> loss.backward(create_graph=True)
+        >>> # Check for cycles
+        >>> leaked_params = torch.autograd.detect_grad_reference_cycles(model.parameters())
+        >>> if leaked_params:
+        ...     print(f"Warning: {len(leaked_params)} parameters have gradient cycles")
+        >>> # Or automatically clear them
+        >>> torch.autograd.detect_grad_reference_cycles(model.parameters(), clear_grads=True)
+        
+    .. warning::
+        This function uses Python's garbage collector to detect cycles, which may
+        have some overhead. Use it sparingly in performance-critical code.
+        
+    .. note::
+        A better approach is to use torch.autograd.grad() instead of backward()
+        when you need create_graph=True, as grad() doesn't create these cycles.
+    """
+    import gc
+    
+    if isinstance(parameters, torch.Tensor):
+        parameters = [parameters]
+    else:
+        parameters = list(parameters)
+    
+    leaked_tensors = []
+    
+    for param in parameters:
+        if not isinstance(param, torch.Tensor):
+            continue
+            
+        grad = param.grad
+        if grad is None:
+            continue
+            
+        # Check if the grad has a grad_fn (indicating create_graph=True was used)
+        if grad.grad_fn is not None:
+            # Check if this creates a reference cycle by seeing if the grad
+            # is reachable from the grad_fn's outputs
+            # For simplicity, we consider any grad with grad_fn as potentially cyclic
+            leaked_tensors.append(param)
+            
+            if clear_grads:
+                param.grad = None
+    
+    # Force garbage collection to clean up cycles if we cleared grads
+    if clear_grads and leaked_tensors:
+        gc.collect()
+    
+    return leaked_tensors
+
+
+def estimate_tensor_memory_overhead(tensors: Union[torch.Tensor, Sequence[torch.Tensor]],
+                                     detailed: bool = False) -> Union[int, dict]:
+    r"""Estimate the memory overhead of tensor metadata (beyond data storage).
+    
+    Each tensor has metadata overhead including: TensorImpl object, storage object,
+    autograd metadata, version counter, etc. This function helps estimate this overhead.
+    
+    Args:
+        tensors: A single tensor or sequence of tensors to analyze
+        detailed: If True, return a detailed breakdown dict; if False, return total bytes
+        
+    Returns:
+        If detailed=False: Total estimated overhead in bytes
+        If detailed=True: Dict with breakdown of overhead sources
+        
+    Example::
+    
+        >>> model = torchvision.models.resnet50()
+        >>> params = list(model.parameters())
+        >>> overhead = torch.autograd.estimate_tensor_memory_overhead(params)
+        >>> print(f"Total metadata overhead: {overhead / 1024 / 1024:.2f} MB")
+        >>> # Get detailed breakdown
+        >>> breakdown = torch.autograd.estimate_tensor_memory_overhead(params, detailed=True)
+        >>> print(f"TensorImpl overhead: {breakdown['tensorimpl_bytes'] / 1024 / 1024:.2f} MB")
+        
+    .. note::
+        These are estimates based on typical configurations. Actual overhead may vary
+        based on tensor properties (sparse, quantized, etc.) and platform architecture.
+        
+    .. note::
+        With 400M tensors, even 8 bytes per tensor = 3.2 GB of overhead. Use this
+        function to understand if memory optimization is needed.
+    """
+    if isinstance(tensors, torch.Tensor):
+        tensors = [tensors]
+    else:
+        tensors = list(tensors)
+    
+    # Filter to actual tensors
+    tensors = [t for t in tensors if isinstance(t, torch.Tensor)]
+    num_tensors = len(tensors)
+    
+    if num_tensors == 0:
+        return {} if detailed else 0
+    
+    # Estimated sizes (64-bit platform):
+    # - TensorImpl base: ~192 bytes (includes vtable, refcount, storage ptr, sizes/strides, etc.)
+    # - StorageImpl: ~80 bytes
+    # - AutogradMeta (when present): ~64 bytes  
+    # - Version counter: ~24 bytes
+    # - PyObjectSlot: included in TensorImpl
+    # - Out-of-line sizes/strides (when ndim > 5): 16 bytes per dimension
+    
+    tensorimpl_bytes = num_tensors * 192
+    storage_bytes = num_tensors * 80  # Simplified: assumes unique storage per tensor
+    
+    autograd_bytes = 0
+    version_counter_bytes = 0
+    extra_dims_bytes = 0
+    
+    for tensor in tensors:
+        # Check if requires grad (implies autograd meta)
+        if tensor.requires_grad:
+            autograd_bytes += 64
+            version_counter_bytes += 24
+        
+        # Check for out-of-line dimension storage
+        ndim = tensor.ndim
+        if ndim > 5:
+            extra_dims_bytes += (ndim - 5) * 16  # 8 bytes size + 8 bytes stride per extra dim
+    
+    total_bytes = (tensorimpl_bytes + storage_bytes + autograd_bytes + 
+                   version_counter_bytes + extra_dims_bytes)
+    
+    if detailed:
+        return {
+            'num_tensors': num_tensors,
+            'tensorimpl_bytes': tensorimpl_bytes,
+            'storage_bytes': storage_bytes,
+            'autograd_bytes': autograd_bytes,
+            'version_counter_bytes': version_counter_bytes,
+            'extra_dims_bytes': extra_dims_bytes,
+            'total_bytes': total_bytes,
+            'total_mb': total_bytes / (1024 * 1024),
+        }
+    else:
+        return total_bytes
 
 
 # Monkey patching variable.Variable to fix FX codegen. FX generates a call by roughly doing
