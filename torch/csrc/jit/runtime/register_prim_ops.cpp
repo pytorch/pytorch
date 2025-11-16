@@ -820,7 +820,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           bool first = true;
           for (const IValue& i : last(stack, num_inputs)) {
             if (!first)
-              ss << " ";
+              ss << ' ';
             first = false;
             ss << i;
           }
@@ -2971,10 +2971,10 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
         auto i = pop(stack).toInt();                     \
         std::stringstream ss;                            \
         if (i < 0) {                                     \
-          ss << "-";                                     \
+          ss << '-';                                     \
           i = -i;                                        \
         }                                                \
-        ss << "0" << prefix << char_op << i;             \
+        ss << '0' << prefix << char_op << i;             \
         push(stack, ss.str());                           \
       },                                                 \
       aliasAnalysisFromSchema())
@@ -2991,7 +2991,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
             push(stack, "0b0");
           } else {
             if (i < 0) {
-              ss << "-";
+              ss << '-';
               i = -i;
             }
             std::string str = std::bitset<8 * sizeof(i)>(i).to_string();

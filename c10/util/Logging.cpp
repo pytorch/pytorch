@@ -476,10 +476,10 @@ MessageLogger::MessageLogger(
   }
   stream_ << '[' << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
           << (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
-          << std::setfill('0') << " " << std::setw(2) << timeinfo->tm_hour
-          << ":" << std::setw(2) << timeinfo->tm_min << ":" << std::setw(2)
-          << timeinfo->tm_sec << "." << std::setw(9) << ns << " "
-          << c10::filesystem::path(file).filename() << ":" << line << "] ";
+          << std::setfill('0') << ' ' << std::setw(2) << timeinfo->tm_hour
+          << ':' << std::setw(2) << timeinfo->tm_min << ':' << std::setw(2)
+          << timeinfo->tm_sec << '.' << std::setw(9) << ns << ' '
+          << c10::filesystem::path(file).filename() << ':' << line << "] ";
 }
 
 // Output the contents of the stream to the proper channel on destruction.

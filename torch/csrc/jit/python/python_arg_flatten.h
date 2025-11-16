@@ -79,7 +79,7 @@ static inline std::ostream& operator<<(
       out << ", ";
     out << meta.sizes[i];
   }
-  out << "}";
+  out << '}';
   return out;
 }
 

@@ -419,14 +419,14 @@ std::string AliasDb::getElementName(const Element* e) const {
   } else {
     std::ostringstream ss;
     if (e->values.size() == 1) {
-      ss << "%" << (*e->values.begin())->debugName();
+      ss << '%' << (*e->values.begin())->debugName();
       return ss.str();
     }
-    ss << "(";
+    ss << '(';
     for (const Value* v : e->values) {
-      ss << "%" << v->debugName() << ", ";
+      ss << '%' << v->debugName() << ", ";
     }
-    ss << ")";
+    ss << ')';
     return ss.str();
   }
 }

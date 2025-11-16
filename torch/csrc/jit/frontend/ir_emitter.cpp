@@ -842,7 +842,7 @@ struct to_ir {
       throw(
           ErrorReport(def.decl().params().range())
           << "Number of type annotations for"
-          << " function parameters (" << schema.arguments().size() << ")"
+          << " function parameters (" << schema.arguments().size() << ')'
           << " does not match the number of parameters on the function ("
           << expected_annotation_size << ")!");
     }

@@ -866,7 +866,7 @@ struct CodeImpl {
   }
 
   void dump(std::ostream& out, size_t i) const {
-    out << i << " " << instructions_[i];
+    out << i << ' ' << instructions_[i];
     if (instructions_[i].op == OP || instructions_[i].op == CALL ||
         instructions_[i].op == OPN) {
       out << " # " << *instructions_source_[i];
