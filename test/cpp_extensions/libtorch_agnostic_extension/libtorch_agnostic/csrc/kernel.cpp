@@ -637,8 +637,8 @@ void boxed_test_parallel_for(
     StableIValue* stack,
     uint64_t num_args,
     uint64_t num_outputs) {
-  Tensor res = test_parallel_for(to<int64_t>(stack[0]), to<int64_t>(stack[1]));
-  stack[0] = from(res);
+  Tensor res = test_parallel_for(torch::stable::detail::to<int64_t>(stack[0]), torch::stable::detail::to<int64_t>(stack[1]));
+  stack[0] = torch::stable::detail::from(res);
 }
 
 uint32_t test_get_num_threads() {
@@ -650,7 +650,7 @@ void boxed_test_get_num_threads(
     uint64_t num_args,
     uint64_t num_outputs) {
   uint32_t res = test_get_num_threads();
-  stack[0] = from(res);
+  stack[0] = torch::stable::detail::from(res);
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
@@ -683,12 +683,17 @@ Tensor my_view(Tensor t, torch::headeronly::HeaderOnlyArrayRef<int64_t> size) {
   return view(t, size);
 }
 
+torch::headeronly::HeaderOnlyArrayRef<int64_t> my_shape(Tensor t) {
+  return t.sizes();
+}
+
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def(
       "my_empty(int[] size, ScalarType? dtype=None, Device? device=None, bool? pin_memory=None) -> Tensor");
   m.def("my_flatten(Tensor t, int start_dim=0, int end_dim=-1) -> Tensor");
   m.def("my_reshape(Tensor t, int[] shape) -> Tensor");
   m.def("my_view(Tensor t, int[] size) -> Tensor");
+  m.def("my_shape(Tensor t) -> int[]");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
@@ -696,4 +701,5 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("my_flatten", TORCH_BOX(&my_flatten));
   m.impl("my_reshape", TORCH_BOX(&my_reshape));
   m.impl("my_view", TORCH_BOX(&my_view));
+  m.impl("my_shape", TORCH_BOX(&my_shape));
 }

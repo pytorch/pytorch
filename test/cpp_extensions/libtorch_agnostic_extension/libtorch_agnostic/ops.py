@@ -544,6 +544,18 @@ def my_view(t, size) -> Tensor:
     return torch.ops.libtorch_agnostic.my_view.default(t, size)
 
 
+def my_shape(t) -> tuple[int]:
+    """
+    Returns a shape of the input tensor.
+
+    Args:
+        t: Tensor - input tensor
+
+    Returns: tuple - shape of the imput tensor.
+    """
+    return torch.ops.libtorch_agnostic.my_shape.default(t)
+
+
 def mv_tensor_accessor(m, v) -> Tensor:
     """
     Returns matrix-vector product.

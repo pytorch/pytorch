@@ -491,7 +491,6 @@ if not IS_WINDOWS:
                 libtorch_agnostic.ops.test_tensor_device(t_cuda_1), t_cuda_1.device
             )
 
-        @onlyCPU
         # TODO: Debug this:
         # Dynamo failed to run FX node with fake tensors:
         # call_function libtorch_agnostic.test_parallel_for.default(*(100, 10), **{}):
@@ -615,6 +614,14 @@ if not IS_WINDOWS:
             result_flat = libtorch_agnostic.ops.my_view(t, [-1])
             expected_flat = t.view([-1])
             self.assertEqual(result_flat, expected_flat)
+
+        def test_my_shape(self, device):
+            import libtorch_agnostic
+
+            expected = (3, 5)
+            t = torch.rand(*expected, device=device)
+            shape = libtorch_agnostic.ops.my_shape(t)
+            self.assertEqual(shape, expected)
 
         def test_mv_tensor_accessor(self, device):
             import libtorch_agnostic
