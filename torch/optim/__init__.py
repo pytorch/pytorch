@@ -17,6 +17,7 @@ from torch.optim.adamw import AdamW as AdamW
 from torch.optim.asgd import ASGD as ASGD
 from torch.optim.lbfgs import LBFGS as LBFGS
 from torch.optim.nadam import NAdam as NAdam
+from torch.optim.neat import NEAT as NEAT
 from torch.optim.optimizer import Optimizer as Optimizer
 from torch.optim.radam import RAdam as RAdam
 from torch.optim.rmsprop import RMSprop as RMSprop
@@ -56,6 +57,7 @@ __all__ = [
     "lr_scheduler",
     "Muon",
     "NAdam",
+        "NEAT",
     "Optimizer",
     "RAdam",
     "RMSprop",
