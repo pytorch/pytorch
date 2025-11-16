@@ -414,7 +414,7 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
           false /*is_varret*/);
 
       function->setSchema(std::move(schema));
-    } catch (const c10::Error& e) {
+    } catch (const c10::Error&) {
     }
   }
   return function;
