@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Literal, Optional, Union
+from typing import Literal, Optional
 from typing_extensions import deprecated
 
 import torch
@@ -75,7 +75,7 @@ class _ConvNd(Module):
     out_channels: int
     kernel_size: tuple[int, ...]
     stride: tuple[int, ...]
-    padding: Union[str, tuple[int, ...]]
+    padding: str | tuple[int, ...]
     dilation: tuple[int, ...]
     transposed: bool
     output_padding: tuple[int, ...]
@@ -90,7 +90,7 @@ class _ConvNd(Module):
         out_channels: int,
         kernel_size: tuple[int, ...],
         stride: tuple[int, ...],
-        padding: Union[str, tuple[int, ...]],
+        padding: str | tuple[int, ...],
         dilation: tuple[int, ...],
         transposed: bool,
         output_padding: tuple[int, ...],
@@ -323,7 +323,7 @@ class Conv1d(_ConvNd):
         out_channels: int,
         kernel_size: _size_1_t,
         stride: _size_1_t = 1,
-        padding: Union[str, _size_1_t] = 0,
+        padding: str | _size_1_t = 0,
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
@@ -503,7 +503,7 @@ class Conv2d(_ConvNd):
         out_channels: int,
         kernel_size: _size_2_t,
         stride: _size_2_t = 1,
-        padding: Union[str, _size_2_t] = 0,
+        padding: str | _size_2_t = 0,
         dilation: _size_2_t = 1,
         groups: int = 1,
         bias: bool = True,
@@ -673,7 +673,7 @@ class Conv3d(_ConvNd):
         out_channels: int,
         kernel_size: _size_3_t,
         stride: _size_3_t = 1,
-        padding: Union[str, _size_3_t] = 0,
+        padding: str | _size_3_t = 0,
         dilation: _size_3_t = 1,
         groups: int = 1,
         bias: bool = True,
