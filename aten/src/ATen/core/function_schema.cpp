@@ -7,7 +7,7 @@
 namespace c10 {
 
 void FunctionSchema::dump() const {
-  std::cout << *this << "\n";
+  std::cout << *this << '\n';
 }
 
 const std::vector<Argument>& FunctionSchema::getCorrectList(SchemaArgType type) const {

@@ -683,12 +683,12 @@ void OperatorEntry::setReportErrorCallback_(std::unique_ptr<c10::SafePyObject> c
 // This WON'T report backend fallbacks.
 std::string OperatorEntry::dumpState() const {
   std::ostringstream oss;
-  oss << "name: " << name_ << "\n";
+  oss << "name: " << name_ << '\n';
   if (schema_) {
-    oss << "schema: " << schema_->schema << "\n";
-    oss << "debug: " << schema_->debug << "\n";
+    oss << "schema: " << schema_->schema << '\n';
+    oss << "debug: " << schema_->debug << '\n';
     oss << "alias analysis kind: " << toString(schema_->schema.aliasAnalysis())
-        << (schema_->schema.isDefaultAliasAnalysisKind() ? " (default)" : "") << "\n";
+        << (schema_->schema.isDefaultAliasAnalysisKind() ? " (default)" : "") << '\n';
   } else {
     oss << "schema: (none)\n";
   }

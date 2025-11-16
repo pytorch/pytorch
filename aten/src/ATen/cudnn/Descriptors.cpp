@@ -99,25 +99,25 @@ std::string cudnnTypeToString(cudnnDataType_t dtype) {
 }
 
 std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d) {
-  out << "TensorDescriptor " << static_cast<void*>(d.desc()) << "\n";
+  out << "TensorDescriptor " << static_cast<void*>(d.desc()) << '\n';
   int nbDims = 0;
   int dimA[CUDNN_DIM_MAX];
   int strideA[CUDNN_DIM_MAX];
   cudnnDataType_t dtype{};
   cudnnGetTensorNdDescriptor(d.desc(), CUDNN_DIM_MAX, &dtype, &nbDims, dimA, strideA);
-  out << "    type = " << cudnnTypeToString(dtype) << "\n";
-  out << "    nbDims = " << nbDims << "\n";
+  out << "    type = " << cudnnTypeToString(dtype) << '\n';
+  out << "    nbDims = " << nbDims << '\n';
   // Read out only nbDims of the arrays!
   out << "    dimA = ";
   for (auto i : ArrayRef<int>{dimA, static_cast<size_t>(nbDims)}) {
     out << i << ", ";
   }
-  out << "\n";
+  out << '\n';
   out << "    strideA = ";
   for (auto i : ArrayRef<int>{strideA, static_cast<size_t>(nbDims)}) {
     out << i << ", ";
   }
-  out << "\n";
+  out << '\n';
   return out;
 }
 
@@ -174,21 +174,21 @@ std::string cudnnMemoryFormatToString(cudnnTensorFormat_t tformat) {
 }
 
 std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d) {
-  out << "FilterDescriptor " << static_cast<void*>(d.desc()) << "\n";
+  out << "FilterDescriptor " << static_cast<void*>(d.desc()) << '\n';
   int nbDims = 0;
   int dimA[CUDNN_DIM_MAX];
   cudnnDataType_t dtype{};
   cudnnTensorFormat_t tformat{};
   cudnnGetFilterNdDescriptor(d.desc(), CUDNN_DIM_MAX, &dtype, &tformat, &nbDims, dimA);
-  out << "    type = " << cudnnTypeToString(dtype) << "\n";
-  out << "    tensor_format = " << cudnnMemoryFormatToString(tformat) << "\n";
-  out << "    nbDims = " << nbDims << "\n";
+  out << "    type = " << cudnnTypeToString(dtype) << '\n';
+  out << "    tensor_format = " << cudnnMemoryFormatToString(tformat) << '\n';
+  out << "    nbDims = " << nbDims << '\n';
   // Read out only nbDims of the arrays!
   out << "    dimA = ";
   for (auto i : ArrayRef<int>{dimA, static_cast<size_t>(nbDims)}) {
     out << i << ", ";
   }
-  out << "\n";
+  out << '\n';
   return out;
 }
 

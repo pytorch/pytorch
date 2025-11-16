@@ -10,7 +10,7 @@ APIVitals VitalsAPI;
 std::ostream& operator<<(std::ostream& os, TorchVital const& tv) {
   for (const auto& m : tv.attrs) {
     os << "[TORCH_VITAL] " << tv.name << '.' << m.first << "\t\t "
-       << m.second.value << "\n";
+       << m.second.value << '\n';
   }
   return os;
 }

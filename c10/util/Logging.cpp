@@ -488,7 +488,7 @@ MessageLogger::~MessageLogger() noexcept(false) {
     // Nothing needs to be logged.
     return;
   }
-  stream_ << "\n";
+  stream_ << '\n';
 #ifdef ANDROID
   static const int android_log_levels[] = {
       ANDROID_LOG_FATAL, // LOG_FATAL

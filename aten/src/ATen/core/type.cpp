@@ -1003,8 +1003,8 @@ bool InterfaceType::isSubTypeImpl(
           *why_not << "Method on interface '" << lhs.repr_str()
                    << "' (1) is not compatible with interface '"
                    << rhs.repr_str() << "' (2)\n"
-                   << "  (1) " << *self_schema << "\n"
-                   << "  (2) " << schema << "\n";
+                   << "  (1) " << *self_schema << '\n'
+                   << "  (2) " << schema << '\n';
           return false;
         }
         return false;
@@ -1078,7 +1078,7 @@ SymbolicShape SymbolicShape::merge(const SymbolicShape& other) const {
 }
 
 void SymbolicShape::dump() const {
-  std::cout << *this << "\n";
+  std::cout << *this << '\n';
 }
 
 bool EnumType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {

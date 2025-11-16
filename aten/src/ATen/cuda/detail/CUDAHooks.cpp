@@ -431,16 +431,16 @@ std::string CUDAHooks::showConfig() const {
   oss << "  - HIP Runtime ";
 #endif
   printCudaStyleVersion(runtimeVersion);
-  oss << "\n";
+  oss << '\n';
 
   // TODO: Make HIPIFY understand CUDART_VERSION macro
 #if !defined(USE_ROCM)
   if (runtimeVersion != CUDART_VERSION) {
     oss << "  - Built with CUDA Runtime ";
     printCudaStyleVersion(CUDART_VERSION);
-    oss << "\n";
+    oss << '\n';
   }
-  oss << "  - NVCC architecture flags: " << NVCC_FLAGS_EXTRA << "\n";
+  oss << "  - NVCC architecture flags: " << NVCC_FLAGS_EXTRA << '\n';
 #endif
 
 #if !defined(USE_ROCM)
@@ -463,20 +463,20 @@ std::string CUDAHooks::showConfig() const {
     printCudaStyleVersion(cudnnCudartVersion);
     oss << ')';
   }
-  oss << "\n";
+  oss << '\n';
   if (cudnnVersion != CUDNN_VERSION) {
     oss << "    - Built with CuDNN ";
     printCudnnStyleVersion(CUDNN_VERSION);
-    oss << "\n";
+    oss << '\n';
   }
 #endif
 #else
   // TODO: Check if miopen has the functions above and unify
-  oss << "  - MIOpen " << MIOPEN_VERSION_MAJOR << '.' << MIOPEN_VERSION_MINOR << '.' << MIOPEN_VERSION_PATCH << "\n";
+  oss << "  - MIOpen " << MIOPEN_VERSION_MAJOR << '.' << MIOPEN_VERSION_MINOR << '.' << MIOPEN_VERSION_PATCH << '\n';
 #endif
 
 #if AT_MAGMA_ENABLED()
-  oss << "  - Magma " << MAGMA_VERSION_MAJOR << '.' << MAGMA_VERSION_MINOR << '.' << MAGMA_VERSION_MICRO << "\n";
+  oss << "  - Magma " << MAGMA_VERSION_MAJOR << '.' << MAGMA_VERSION_MINOR << '.' << MAGMA_VERSION_MICRO << '\n';
 #endif
 
   return oss.str();

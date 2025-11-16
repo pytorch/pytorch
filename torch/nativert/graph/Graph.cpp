@@ -1106,7 +1106,7 @@ std::ostream& operator<<(std::ostream& out, const Node& node) {
 
 std::ostream& operator<<(std::ostream& out, const Graph& graph) {
   for (const auto& node : graph.nodes_) {
-    out << node << "\n";
+    out << node << '\n';
   }
   return out;
 }

@@ -3380,50 +3380,50 @@ bool _test_quantized_linear(
     }
     if (xpos != -1 && ypos != -1) {
       std::cout << "\nFailure caused on row/col: " << ypos << '/' << xpos
-                << "\n";
+                << '\n';
       std::cout << "Input tensor scale: " << scale << " zerop: " << zero_point
-                << "\n";
-      std::cout << "Input tensor row " << ypos << "\n";
+                << '\n';
+      std::cout << "Input tensor row " << ypos << '\n';
       for (int i = 0; i < input_cpu.sizes()[1]; i++) {
         std::cout << input_cpu[ypos][i].item<double>() << ", ";
       }
-      std::cout << "\n";
+      std::cout << '\n';
 
       std::cout << "Weight tensor scale: " << w_scale
-                << " zerop: " << w_zero_point << "\n";
-      std::cout << "Weight tensor col " << xpos << "\n";
+                << " zerop: " << w_zero_point << '\n';
+      std::cout << "Weight tensor col " << xpos << '\n';
       for (int i = 0; i < weight.sizes()[1]; i++) {
         std::cout << weight[xpos][i].item<double>() << ", ";
       }
-      std::cout << "\n";
+      std::cout << '\n';
 
       std::cout << "Input tensor quantized row " << ypos << " with dtype "
-                << (input_quant_dtype_int8 ? "QInt8" : "QUInt8") << "\n";
+                << (input_quant_dtype_int8 ? "QInt8" : "QUInt8") << '\n';
       for (int i = 0; i < input_cpu.sizes()[1]; i++) {
         std::cout << input_cpu_quantized[ypos][i].item<double>() << ", ";
       }
-      std::cout << "\n";
+      std::cout << '\n';
 
       std::cout << "Weight tensor quantized col " << xpos << " with dtype "
-                << (weight_quant_dtype_int8 ? "QInt8" : "QUInt8") << "\n";
+                << (weight_quant_dtype_int8 ? "QInt8" : "QUInt8") << '\n';
       for (int i = 0; i < weight.sizes()[1]; i++) {
         std::cout << weight_cpu_quantized[xpos][i].item<double>() << ", ";
       }
-      std::cout << "\n";
+      std::cout << '\n';
 
       std::cout << "bias tensor\n";
       for (int i = 0; i < bias.sizes()[0]; i++) {
         std::cout << bias[i].item<double>() << ", ";
       }
-      std::cout << "\n";
+      std::cout << '\n';
 
       std::cout << "out_scale: " << out_scale
-                << " out_zero_point: " << out_zero_point << "\n";
+                << " out_zero_point: " << out_zero_point << '\n';
 
       std::cout << "cpu unmatched output: "
-                << out_cpu_dequant[ypos][xpos].item<double>() << "\n";
+                << out_cpu_dequant[ypos][xpos].item<double>() << '\n';
       std::cout << "vk unmatched output: "
-                << out_vk_to_cpu_dequant[ypos][xpos].item<double>() << "\n";
+                << out_vk_to_cpu_dequant[ypos][xpos].item<double>() << '\n';
     }
   }
   return check;

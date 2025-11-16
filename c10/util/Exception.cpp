@@ -53,7 +53,7 @@ std::string Error::compute_what(bool include_backtrace) const {
   }
 
   if (include_backtrace && backtrace_) {
-    oss << "\n" << backtrace_->get();
+    oss << '\n' << backtrace_->get();
   }
 
   return oss.str();

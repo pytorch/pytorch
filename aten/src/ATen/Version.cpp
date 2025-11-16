@@ -135,38 +135,38 @@ std::string show_config() {
 
 #if defined(__GNUC__)
   {
-    ss << "  - GCC " << __GNUC__ << '.' << __GNUC_MINOR__ << "\n";
+    ss << "  - GCC " << __GNUC__ << '.' << __GNUC_MINOR__ << '\n';
   }
 #endif
 
 #if defined(__cplusplus)
   {
-    ss << "  - C++ Version: " << __cplusplus << "\n";
+    ss << "  - C++ Version: " << __cplusplus << '\n';
   }
 #endif
 
 #if defined(__clang_major__)
   {
-    ss << "  - clang " << __clang_major__ << '.' << __clang_minor__ << '.' << __clang_patchlevel__ << "\n";
+    ss << "  - clang " << __clang_major__ << '.' << __clang_minor__ << '.' << __clang_patchlevel__ << '\n';
   }
 #endif
 
 #if defined(_MSC_VER)
   {
-    ss << "  - MSVC " << _MSC_FULL_VER << "\n";
+    ss << "  - MSVC " << _MSC_FULL_VER << '\n';
   }
 #endif
 
 #if AT_MKL_ENABLED()
-  ss << "  - " << get_mkl_version() << "\n";
+  ss << "  - " << get_mkl_version() << '\n';
 #endif
 
 #if AT_MKLDNN_ENABLED()
-  ss << "  - " << get_mkldnn_version() << "\n";
+  ss << "  - " << get_mkldnn_version() << '\n';
 #endif
 
 #ifdef _OPENMP
-  ss << "  - " << get_openmp_version() << "\n";
+  ss << "  - " << get_openmp_version() << '\n';
 #endif
 
 #if AT_BUILD_WITH_LAPACK()
@@ -183,7 +183,7 @@ std::string show_config() {
   ss << "  - Cross compiling on MacOSX\n";
 #endif
 
-  ss << "  - "<< used_cpu_capability() << "\n";
+  ss << "  - "<< used_cpu_capability() << '\n';
 
   if (hasCUDA()) {
     ss << detail::getCUDAHooks().showConfig();
@@ -203,7 +203,7 @@ std::string show_config() {
       ss << pair.first << '=' << pair.second << ", ";
     }
   }
-  ss << "\n";
+  ss << '\n';
 
   // TODO: do HIP
   // TODO: do XLA

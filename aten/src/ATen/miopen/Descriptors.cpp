@@ -79,26 +79,26 @@ std::string miopenTypeToString(miopenDataType_t dtype) {
 }
 
 std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d) {
-  out << "TensorDescriptor " << static_cast<void*>(d.desc()) << "\n";
+  out << "TensorDescriptor " << static_cast<void*>(d.desc()) << '\n';
   int nbDims = 0;
   int dimA[MIOPEN_DIM_MAX];
   int strideA[MIOPEN_DIM_MAX];
   miopenDataType_t dtype;
   miopenGetTensorDescriptorSize(d.desc(), &nbDims);
   miopenGetTensorDescriptor(d.desc(), &dtype, dimA, strideA);
-  out << "    type = " << miopenTypeToString(dtype) << "\n";
-  out << "    nbDims = " << nbDims << "\n";
+  out << "    type = " << miopenTypeToString(dtype) << '\n';
+  out << "    nbDims = " << nbDims << '\n';
   // Read out only nbDims of the arrays!
   out << "    dimA = ";
   for (auto i : ArrayRef<int>{dimA, static_cast<size_t>(nbDims)}) {
     out << i << ", ";
   }
-  out << "\n";
+  out << '\n';
   out << "    strideA = ";
   for (auto i : ArrayRef<int>{strideA, static_cast<size_t>(nbDims)}) {
     out << i << ", ";
   }
-  out << "\n";
+  out << '\n';
   return out;
 }
 

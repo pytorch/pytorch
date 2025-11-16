@@ -106,7 +106,7 @@ class GetBacktraceImpl {
           /*length*/ &length,
           /*status*/ &status);
 
-      os << " frame #" << idx++ << "\t"
+      os << " frame #" << idx++ << '\t'
          << ((demangled != NULL && status == 0) ? demangled : symbol) << '['
          << addr << "]\t" << std::endl;
     }
@@ -274,7 +274,7 @@ class GetBacktraceImpl {
       } else {
         // In the edge-case where we couldn't parse the frame string, we can
         // just use it directly (it may have a different format).
-        stream << symbols[frame_number] << "\n";
+        stream << symbols[frame_number] << '\n';
       }
     }
 
