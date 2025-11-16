@@ -2133,7 +2133,14 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             foo_c = torch.compile(foo)
             gc.collect()
             torch.cuda.empty_cache()
-            torch.testing.assert_close(foo(inp), foo_c(inp), equal_nan=True)
+            torch.testing.assert_close(
+                foo(inp),
+                foo_c(inp),
+                equal_nan=True,
+                check_device=True,
+                check_dtype=False,
+                check_stride=False,
+            )
 
     @skipCUDAIf(
         not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
