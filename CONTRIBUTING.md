@@ -109,7 +109,6 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
       ```bash
       git submodule deinit -f .
       git clean -xdf
-      python setup.py clean
       git submodule update --init --recursive
       python -m pip install --group dev
       python -m pip install --no-build-isolation -v -e .
@@ -690,7 +689,7 @@ will want to keep in mind:
 
 ### Build only what you need
 
-`python setup.py build` will build everything by default, but sometimes you are
+`python -m pip install --no-build-isolation -v -e .` will build everything by default, but sometimes you are
 only interested in a specific component.
 
 - Working on a test binary? Run `(cd build && ninja bin/test_binary_name)` to
