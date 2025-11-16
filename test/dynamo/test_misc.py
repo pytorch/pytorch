@@ -244,6 +244,61 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
 
+    @unittest.skipIf(not TEST_CUDA, "cuda needed")
+    def test_assume_32_bit_indexing(self):
+        @torch.compile(backend="inductor")
+        def func(a, b):
+            # Multiple concat operations
+            x = torch.concat([a, b], dim=0)
+            y = torch.concat([a, b], dim=1)
+
+            # Reshape to create indexing patterns
+            x_flat = x.reshape(-1)
+            y_flat = y.reshape(-1)
+
+            # Take the smaller one and expand
+            min_size = min(x_flat.shape[0], y_flat.shape[0])
+            x_trunc = x_flat[:min_size]
+            y_trunc = y_flat[:min_size]
+
+            # Combine and compute
+            result = (x_trunc + y_trunc) * 10
+
+            # Cumulative operations create complex indexing
+            cumsum = result.cumsum(dim=0)
+
+            return cumsum.sum()
+
+        a = torch.rand(100, 30, device="cuda")
+        b = torch.rand(100, 30, device="cuda")
+
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(a, 1)
+        torch._dynamo.decorators.mark_unbacked(b, 0)
+        torch._dynamo.decorators.mark_unbacked(b, 1)
+
+        source_code = run_and_get_code(func, a, b)[1]
+
+        self.assertTrue(
+            "xindex = xoffset + tl.arange(0, XBLOCK)[:].to(tl.int64)\\n"
+            in str(source_code)
+        )
+        self.assertFalse(
+            "xindex = xoffset + tl.arange(0, XBLOCK)[:]\\n" in str(source_code)
+        )
+
+        torch._dynamo.reset()
+
+        with torch._inductor.config.patch(assume_32bit_indexing=True):
+            source_code = run_and_get_code(func, a, b)[1]
+            self.assertFalse(
+                "xindex = xoffset + tl.arange(0, XBLOCK)[:].to(tl.int64)\\n"
+                in str(source_code)
+            )
+            self.assertTrue(
+                "xindex = xoffset + tl.arange(0, XBLOCK)[:]\\n" in str(source_code)
+            )
+
     def test_dynamo_inside_custom_op(self):
         cnt = torch._dynamo.testing.InductorAndRecordGraphs()
         cnt1 = torch._dynamo.testing.InductorAndRecordGraphs()
