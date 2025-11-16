@@ -349,6 +349,18 @@ def forward(self, x):
         res2 = p.generate(input_tensor=inp, input_tensor2=inp2)
         self.assertTrue(torch.allclose(res, res2))
 
+    def test_side_effect(self):
+        global_env = []
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                global_env.append(x)
+                return x.sin()
+
+        with torch._dynamo.config.patch(replay_side_effects=False):
+            _ = dynamo_graph_capture_for_export(Foo())(torch.randn(4, 4))
+            self.assertEqual(len(global_env), 0)
+
     def test_export_add_in_out_info(self):
         class Foo(torch.nn.Module):
             def forward(self, dct, lst, bleh):
