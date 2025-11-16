@@ -751,7 +751,7 @@ Value* emitBuiltinCall(
     } else {
       error << "Here are some suggestions: \n";
       for (const auto& sym : close_symbols) {
-        error << "\t" << sym.toQualString() << '\n';
+        error << '\t' << sym.toQualString() << '\n';
       }
       error << "\nThe original call is";
     }

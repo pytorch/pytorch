@@ -100,7 +100,7 @@ static void checkForUnfusedOps(Node* enter_node) {
     std::stringstream ss;
     ss << "Found unfused operators: \n";
     for (Node* unfused : unfused_nodes_not_used_in_guard) {
-      ss << "\t";
+      ss << '\t';
       if (unfused->maybeSchema()) {
         ss << unfused->schema();
       } else {

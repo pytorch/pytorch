@@ -543,7 +543,7 @@ FileCheck::FileCheck() : fcImpl(new FileCheckImpl()) {}
 std::ostream& operator<<(std::ostream& out, const FileCheckImpl& fc) {
   out << "FileCheck checks:\n";
   for (const Check& c : fc.checks) {
-    out << "\t" << c << '\n';
+    out << '\t' << c << '\n';
   }
   return out;
 }
