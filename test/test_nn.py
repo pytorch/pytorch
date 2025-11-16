@@ -8893,6 +8893,16 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaises(ValueError):
             torch.nn.GroupNorm(10, 10)(x).to(device)
 
+    def test_GroupNorm_error_message_includes_values(self, device):
+        """Test that GroupNorm error message includes actual num_channels and num_groups values."""
+        # Test case 1: 10 channels, 3 groups (10 % 3 != 0)
+        with self.assertRaisesRegex(ValueError, r"num_channels \(10\) must be divisible by num_groups \(3\)"):
+            torch.nn.GroupNorm(num_groups=3, num_channels=10)
+
+        # Test case 2: 13 channels, 5 groups (13 % 5 != 0)
+        with self.assertRaisesRegex(ValueError, r"num_channels \(13\) must be divisible by num_groups \(5\)"):
+            torch.nn.GroupNorm(num_groups=5, num_channels=13)
+
     def test_GroupNorm_empty(self, device):
         mod = torch.nn.GroupNorm(2, 4).to(device)
         inp = torch.randn(0, 4, 2, 2, device=device)

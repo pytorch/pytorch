@@ -301,7 +301,9 @@ class GroupNorm(Module):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         if num_channels % num_groups != 0:
-            raise ValueError("num_channels must be divisible by num_groups")
+            raise ValueError(
+                f"num_channels ({num_channels}) must be divisible by num_groups ({num_groups})"
+            )
 
         self.num_groups = num_groups
         self.num_channels = num_channels
