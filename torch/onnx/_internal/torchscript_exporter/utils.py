@@ -1900,16 +1900,24 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names) -> No
 
     valid_names = set((input_names or []) + (output_names or []))
 
+    # Collect all invalid keys first
+    invalid_keys = []
+    for key in dynamic_axes.keys():
+        if key not in valid_names:
+            invalid_keys.append(key)
+
+    # Raise an error if any invalid keys were found
+    if invalid_keys:
+        raise ValueError(
+            f"Provided keys {invalid_keys} for dynamic_axes are not valid input/output names. "
+            f"Valid names are: {sorted(valid_names)}"
+        )
+
     # If dynamic axes are provided as a list rather than dictionary, they should
     # first get converted to a dictionary in expected format. If desired axes names
     # are not provided for dynamic axes, automatic names shall be generated for
     # provided dynamic axes of specified input/output
     for key, value in dynamic_axes.items():
-        if key not in valid_names:
-            warnings.warn(
-                f"Provided key {key} for dynamic axes is not a valid input/output name",
-                stacklevel=2,
-            )
         if isinstance(value, list):
             warnings.warn(
                 "No names were found for specified dynamic axes of provided input."
