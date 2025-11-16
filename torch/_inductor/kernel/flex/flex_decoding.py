@@ -40,6 +40,17 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
        use the main flex_attention kernel.
     """
     force_flex = kernel_options.get("FORCE_USE_FLEX_ATTENTION", False)
+    qhead = query.get_size()[1]
+    kvhead = value.get_size()[1]
+    qlen = query.get_size()[-2]
+
+    # This is required in create_flex_decoding_kernel function
+    can_use_single_block_m = True
+    if "BLOCK_M" in kernel_options:
+        can_use_single_block_m = V.graph.sizevars.evaluate_expr(
+            sympy.Le(qlen * (qhead // kvhead), kernel_options["BLOCK_M"])
+        )
+
     short_query_length = V.graph.sizevars.evaluate_expr(
         sympy.Lt(query.get_size()[-2], 128)
     )
@@ -70,16 +81,19 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
         sympy.And(sympy.Gt(ratio, 0), sympy.Eq(ratio & (ratio - 1), 0))
     )
 
-    return (
+    out = (
         not force_flex
         and not kernel_options.get("OUTPUT_MAX", False)
         and short_query_length
+        and can_use_single_block_m
         and static_batch
         and static_num_heads
         and non_zero_length
         and valid_block_mask_num_heads
         and pw_of_two
     )
+    print(f">>> use flex decoding {out}")
+    return out
 
 
 @SymbolicGridFn
@@ -305,6 +319,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
     num_consumer_groups, num_buffers_warp_spec = 0, 0
 
     for conf in configs:
+        if conf.block_n > SPARSE_KV_BLOCK_SIZE:
+            conf.block_n = SPARSE_KV_BLOCK_SIZE
+
         if SPARSE_KV_BLOCK_SIZE % conf.block_n != 0:
             continue
 
