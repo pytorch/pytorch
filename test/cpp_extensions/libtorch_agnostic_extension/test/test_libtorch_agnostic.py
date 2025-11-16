@@ -623,6 +623,8 @@ if not IS_WINDOWS:
             shape = libtorch_agnostic.ops.my_shape(t)
             self.assertEqual(shape, expected)
 
+            raise RuntimeError("WHAT IS CI WHERE THIS TEST IS EXECUTED?")
+
         def test_mv_tensor_accessor(self, device):
             import libtorch_agnostic
 
