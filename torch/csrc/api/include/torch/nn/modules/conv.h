@@ -113,8 +113,8 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
 
   /// Pretty prints the `Conv{1,2,3}d` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override {
-    stream << "torch::nn::Conv" << D << "d"
-           << "(" << options.in_channels() << ", " << options.out_channels()
+    stream << "torch::nn::Conv" << D << 'd' << '(' << options.in_channels()
+           << ", " << options.out_channels()
            << ", kernel_size=" << options.kernel_size()
            << ", stride=" << options.stride();
     std::visit(
@@ -143,7 +143,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
       stream << ", padding_mode="
              << enumtype::get_enum_name(options.padding_mode());
     }
-    stream << ")";
+    stream << ')';
   }
 
   /// The options with which this `Module` was constructed.
@@ -278,8 +278,8 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
 
   /// Pretty prints the `ConvTranspose{1,2,3}d` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override {
-    stream << "torch::nn::ConvTranspose" << D << "d"
-           << "(" << this->options.in_channels() << ", "
+    stream << "torch::nn::ConvTranspose" << D << 'd' << '('
+           << this->options.in_channels() << ", "
            << this->options.out_channels()
            << ", kernel_size=" << this->options.kernel_size()
            << ", stride=" << this->options.stride();
@@ -303,7 +303,7 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
       stream << ", padding_mode="
              << enumtype::get_enum_name(this->options.padding_mode());
     }
-    stream << ")";
+    stream << ')';
   }
 
  protected:

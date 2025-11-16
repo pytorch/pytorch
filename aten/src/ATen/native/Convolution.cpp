@@ -639,7 +639,7 @@ static std::ostream& operator<<(std::ostream & out, const ConvParams<T>& params)
       << "  deterministic = " << params.deterministic
       << "  cudnn_enabled = " << params.cudnn_enabled
       << "  allow_tf32 = " << params.allow_tf32
-      << "}";
+      << '}';
   return out;
 }
 
