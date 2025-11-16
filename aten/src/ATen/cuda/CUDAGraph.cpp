@@ -175,17 +175,24 @@ void CUDAGraph::instantiate() {
     // Trailing NULL, NULL, 0 arguments were recommended by Cuda driver people,
     // who prefer not to report error message through these arguments moving forward
     // (they prefer return value, or errors on api calls internal to the capture)
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000)
-    AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, 0));
+    // ROCM appears to fail with HIP error: invalid argument
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && !defined(USE_ROCM)
+    AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, cudaGraphInstantiateFlagUseNodePriority));
 #else
     AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, NULL, NULL, 0));
 #endif
 //Since ROCm 6.2, we want to go down this path as hipGraphExecDestroy in the destructor will not immediately free the memory.
 //It will wait for the next sync operation. cudaGraphInstantiateFlagAutoFreeOnLaunch will add async frees after graph launch.
   } else {
+#if !defined(USE_ROCM)
+    AT_CUDA_CHECK(cudaGraphInstantiateWithFlags(&graph_exec_,
+                                                graph_,
+                                                cudaGraphInstantiateFlagAutoFreeOnLaunch | cudaGraphInstantiateFlagUseNodePriority));
+#else
     AT_CUDA_CHECK(cudaGraphInstantiateWithFlags(&graph_exec_,
                                                 graph_,
                                                 cudaGraphInstantiateFlagAutoFreeOnLaunch));
+#endif
   }
   has_graph_exec_ = true;
 }
