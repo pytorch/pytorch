@@ -542,10 +542,10 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
       ec.message());
 
   LOG(INFO) << "Extract file: " << metadata_filename << " to " << output_path;
-  zip_archive.extract_file(metadata_filename, output_path.c_str());
+  zip_archive.extract_file(metadata_filename, output_path.string());
 
   // Parse the metadata json file
-  const nlohmann::json metadata_json_obj = load_json_file(output_path.c_str());
+  const nlohmann::json metadata_json_obj = load_json_file(output_path.string());
 
   std::unordered_map<std::string, std::string> metadata;
   for (auto& item : metadata_json_obj.items()) {
@@ -644,7 +644,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
           ec.message());
 
       // Extracts file to the temp directory
-      zip_archive.extract_file(zip_filename_str, output_file_path.c_str());
+      zip_archive.extract_file(zip_filename_str, output_file_path.string());
 
       // Save the file for bookkeeping
       if (output_file_path.has_extension()) {
