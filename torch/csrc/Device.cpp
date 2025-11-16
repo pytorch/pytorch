@@ -29,7 +29,7 @@ PyObject* THPDevice_New(const at::Device& device) {
 
 static PyObject* THPDevice_repr(THPDevice* self) {
   std::ostringstream oss;
-  oss << "device(type=\'" << self->device.type() << "\'";
+  oss << "device(type=\'" << self->device.type() << '\'';
   if (self->device.has_index()) {
     // `self->device.index()` returns uint8_t which is treated as ascii while
     // printing, hence casting it to uint16_t.
