@@ -794,6 +794,7 @@ class OutputGraph(OutputGraphCommon):
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
 
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GLOBAL_STATE))
         self.guards.add(
             GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
@@ -2781,6 +2782,7 @@ class DynamoTracerOutput:
     is_tracing_resume_prologue: bool
     output_graph: Optional[OutputGraph]
     closure: Optional[tuple[Any, ...]]
+    f_globals: dict[str, Any]
 
     def __init__(
         self, tracer: "InstructionTranslatorBase", error: Optional[Any] = None
@@ -2788,6 +2790,7 @@ class DynamoTracerOutput:
         self.error_on_graph_break = tracer.error_on_graph_break
         self.is_tracing_resume_prologue = tracer.is_tracing_resume_prologue
         self.closure = tracer.closure
+        self.f_globals = tracer.f_globals
         if error:
             self.output_graph = None
         else:
