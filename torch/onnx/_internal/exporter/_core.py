@@ -2,7 +2,6 @@
 # flake8: noqa: B950 We do not need flake8 as it complains line length
 from __future__ import annotations
 
-import sys
 import ctypes
 import datetime
 import inspect
@@ -10,6 +9,7 @@ import itertools
 import logging
 import operator
 import pathlib
+import sys
 import textwrap
 import traceback
 import typing
