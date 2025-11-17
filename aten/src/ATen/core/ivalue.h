@@ -1027,7 +1027,8 @@ struct TORCH_API IValue final {
   at::Generator toGenerator() &&;
   at::Generator toGenerator() const&;
 
-  IValue(const dummy_types::Dummy& d) : tag(Tag::Dummy) {
+  IValue(const dummy_types::v2_9::Dummy& d) : tag(Tag::Dummy) {
+    payload.u.as_dummy.foo = d.get_foo();
     payload.u.as_dummy.id = d.get_id();
   }
 
@@ -1035,10 +1036,10 @@ struct TORCH_API IValue final {
     return Tag::Dummy == tag;
   }
 
-  dummy_types::Dummy toDummy() const {
+  dummy_types::v2_9::Dummy toDummy() const {
     AT_ASSERT(isDummy());
-    return dummy_types::Dummy(
-        payload.u.as_dummy.id);
+    return dummy_types::v2_9::Dummy(
+        payload.u.as_dummy.foo, payload.u.as_dummy.id);
   }
 
   // for debugging
@@ -1409,6 +1410,7 @@ struct TORCH_API IValue final {
         DeviceIndex index;
       } as_device;
       struct {
+        int8_t foo;
         int32_t id;
       } as_dummy;
     } u;

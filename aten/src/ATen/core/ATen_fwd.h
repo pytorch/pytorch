@@ -47,5 +47,10 @@ using c10::TensorOptions;
 
 // Forward declarations for dummy types used in operator signatures
 namespace dummy_types {
+namespace v2_8 {
 struct Dummy;
+}
+inline namespace v2_9 {
+struct Dummy;
+}
 } // namespace dummy_types

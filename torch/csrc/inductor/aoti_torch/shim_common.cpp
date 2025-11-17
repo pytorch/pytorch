@@ -1870,6 +1870,37 @@ torch::jit::Stack adapt_v2_to_v3(
   return ivalue_stack;
 }
 
+constexpr uint64_t VERSION_2_9_0 = MAKE_VERSION(2, 9, 0);
+
+// Extension built with < 2_9_0 expects: fills tensor with Dummy.val
+// 2.9.0 schema: _test_versioning(Tensor self, Dummy dummy, *, int scale=1)
+// Need to pass additional scale=1
+torch::jit::Stack adapt_test_versioning_2_8_0(
+    const c10::FunctionSchema& current_schema,
+    const StableIValue* extension_stack,
+    uint64_t extension_build_version) {
+  TORCH_CHECK(
+          extension_build_version < VERSION_2_9_0,
+      "adapt_test_versioning_2_8_0 should only be called for extensions built in < VERSION_2_9_0");
+
+  torch::jit::Stack ivalue_stack;
+
+  // Convert extension's arguments: self, a
+  auto self_type = current_schema.arguments()[0].type();
+  auto dummy_type = current_schema.arguments()[1].type();
+
+  ivalue_stack.push_back(to_ivalue(
+      self_type, extension_stack[0], extension_build_version)); // self
+  ivalue_stack.push_back(to_ivalue(
+      dummy_type,
+      extension_stack[1],
+      extension_build_version)); // dummy (from extension)
+
+  ivalue_stack.push_back(c10::IValue(1));
+
+  return ivalue_stack;
+}
+
 } // namespace
 
 // Function to register test schema adapters for _test_schema_upgrader
@@ -1887,6 +1918,13 @@ static AOTITorchError _register_test_adapters() {
           "aten::_test_schema_upgrader",
           VERSION_V3, // applies to versions < V3
           adapt_v2_to_v3)) {
+    return err;
+  }
+
+  if (auto err = register_schema_adapter(
+          "aten::_test_versioning",
+          VERSION_2_9_0, // applies to versions < 2_9_0
+          adapt_test_versioning_2_8_0)) {
     return err;
   }
 
