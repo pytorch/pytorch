@@ -4,7 +4,6 @@ import unittest
 import sympy
 
 import torch
-import torch._inductor.config as config
 from torch._dynamo.test_case import TestCase
 from torch._inductor.codegen.cuda.cutlass_utils import (
     torch_dtype_to_cutlass_type,
@@ -27,17 +26,13 @@ if try_import_cutlass():
 
     LayoutType = cutlass_lib.LayoutType
     DataType = cutlass_lib.DataType
+    from cutlass_cppgen.backend.evt.ir.tensor import Tensor as CutlassTensor
+
     from torch._inductor.codegen.cuda.cutlass_lib_extensions.evt_extensions import (
         _render_argument_type,
         _trace,
         trace,
     )
-
-    if config.is_fbcode():
-        import python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
-    else:
-        import cutlass_cppgen as python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
-    CutlassTensor = python_cutlass.backend.evt.ir.tensor.Tensor
 
     BIAS_CODE = """def example_epilogue(accum, C, aux, bias):
         F = accum + C + aux
