@@ -35,6 +35,14 @@ class EffectHolder:
         if namespace == "higher_order":
             return
 
+        # These classes do not have side effects as they just store quantization
+        # params, so we dont need to mark them as ordered
+        skip_classes = (
+            "__torch__.torch.classes.quantized.Conv2dPackedParamsBase",
+            "__torch__.torch.classes.quantized.LinearPackedParamsBase",
+            "__torch__.torch.classes.quantized.Conv3dPackedParamsBase",
+        )
+
         opname = f"{namespace}::{opname}"
         if torch._C._get_operation_overload(opname, overload) is not None:
             # Since we call this when destroying the library, sometimes the
@@ -42,6 +50,8 @@ class EffectHolder:
             schema = torch._C._get_schema(opname, overload)
             for arg in schema.arguments:
                 if isinstance(arg.type, torch.ClassType):
+                    if arg.type.str() in skip_classes:
+                        continue
                     self._effect = EffectType.ORDERED
                     return
 
