@@ -1604,6 +1604,7 @@ def gelu_decomposition(match: Match, inp, *, approximate):
     from torch._decomp import get_decompositions
     gelu_decomp = get_decompositions([aten.gelu])[aten.gelu.default]
 
+    # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(gelu_decomp, [inp, approximate])
 
 
