@@ -152,11 +152,11 @@ static std::ostream& operator<<(std::ostream& os, const ShapeArguments& sa) {
     return os;
   }
 
-  os << "(";
+  os << '(';
   for (const auto i : c10::irange(sa.len())) {
     os << sa.at(i);
   }
-  os << ")";
+  os << ')';
 
   return os;
 }
