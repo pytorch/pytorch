@@ -13783,6 +13783,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 r"raise RuntimeError\('u.* >= 0'\)"
             ).run(code[0])
 
+    @
     def test_lite_regional_inductor_lowers(self):
         qk = torch.randn(8, 1, 8, 4224, 14, dtype=torch.float32)
 
@@ -13791,7 +13792,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 return torch.softmax(t, dim=4)
 
         _, (code,) = run_and_get_code(torch.compile(lite_regional, mode="lite"), qk)
-        FileCheck().check_not("aten.exp.default").check_not("aten._softmax").run(code)
+        FileCheck().check_not("aten.exp.default(").check_not("aten._softmax.default(").run(code)
 
     def test_lite_regional_fallback(self):
         qk = torch.randn(8, 1, 8, 4224, 14, dtype=torch.float32)
@@ -13803,7 +13804,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         _, (code,) = run_and_get_code(
             torch.compile(default_regional, options={"selective_decompose": True}), qk
         )
-        FileCheck().check("aten._softmax").run(code)
+        FileCheck().check("aten._softmax.default(").run(code)
 
     @lowering.force_fallback(aten.sort.default)
     @unittest.skipIf(
