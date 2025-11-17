@@ -1251,10 +1251,7 @@ test_custom_script_ops() {
 }
 
 test_libtorch_agnostic_targetting() {
-    echo "Testing libtorch_agnostic backward compatibility"
-
-    # Unset PYTORCH_TESTING_DEVICE_ONLY_FOR to test both CPU and CUDA
-    unset PYTORCH_TESTING_DEVICE_ONLY_FOR
+    echo "Testing libtorch_agnostic runs correctly on TORCH_TARGET_VERSION"
 
     REPO_DIR=$(pwd)
     WHEEL_DIR="${REPO_DIR}/test/cpp_extensions/.wheels"
@@ -1267,7 +1264,7 @@ test_libtorch_agnostic_targetting() {
     # Save the wheel
     mkdir -p "$WHEEL_DIR"
     cp dist/*.whl "$WHEEL_DIR/"
-    WHEEL_FILE=$(ls "$WHEEL_DIR"/*.whl | head -1)
+    WHEEL_FILE=$(find "$WHEEL_DIR" -maxdepth 1 -name "*.whl" -type f | head -1)
     echo "Built wheel: $(basename "$WHEEL_FILE")"
     popd
 
