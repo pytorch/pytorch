@@ -33,7 +33,6 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
-    skipIfRocm,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
@@ -279,7 +278,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
                 tmp.append(torch.rand(10 ** (3 + i), device=local_device))
             race_tensors.append(tmp)
 
-        for i in range(10):
+        for _ in range(10):
             race_tensors.pop()
             work = pg.alltoall_base(output, input, [], [], opts)
             # this triggers cudaFree
@@ -319,7 +318,6 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @skipIfRocm()
     def test_nccl_watchdog_cudagraph(self):
         # test that the watchdog does not crash graphs with disallowed event query
         pg = self.pg

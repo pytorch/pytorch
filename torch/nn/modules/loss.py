@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Callable, Optional, Union
+from collections.abc import Callable
+from typing import Optional
 from typing_extensions import deprecated
 
 from torch import Tensor
@@ -121,9 +122,6 @@ class L1Loss(_Loss):
     """
 
     __constants__ = ["reduction"]
-
-    def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
-        super().__init__(size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """
@@ -451,9 +449,7 @@ class GaussianNLLLoss(_Loss):
         self.full = full
         self.eps = eps
 
-    def forward(
-        self, input: Tensor, target: Tensor, var: Union[Tensor, float]
-    ) -> Tensor:
+    def forward(self, input: Tensor, target: Tensor, var: Tensor | float) -> Tensor:
         """
         Runs the forward pass.
         """
@@ -624,9 +620,6 @@ class MSELoss(_Loss):
 
     __constants__ = ["reduction"]
 
-    def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
-        super().__init__(size_average, reduce, reduction)
-
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """
         Runs the forward pass.
@@ -710,15 +703,6 @@ class BCELoss(_WeightedLoss):
     """
 
     __constants__ = ["reduction"]
-
-    def __init__(
-        self,
-        weight: Optional[Tensor] = None,
-        size_average=None,
-        reduce=None,
-        reduction: str = "mean",
-    ) -> None:
-        super().__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """
@@ -984,9 +968,6 @@ class MultiLabelMarginLoss(_Loss):
 
     __constants__ = ["reduction"]
 
-    def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
-        super().__init__(size_average, reduce, reduction)
-
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
         return F.multilabel_margin_loss(input, target, reduction=self.reduction)
@@ -1173,9 +1154,6 @@ class SoftMarginLoss(_Loss):
     """
 
     __constants__ = ["reduction"]
-
-    def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
-        super().__init__(size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
@@ -1432,15 +1410,6 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
     """
 
     __constants__ = ["reduction"]
-
-    def __init__(
-        self,
-        weight: Optional[Tensor] = None,
-        size_average=None,
-        reduce=None,
-        reduction: str = "mean",
-    ) -> None:
-        super().__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
@@ -2062,10 +2031,11 @@ class CTCLoss(_Loss):
         https://www.cs.toronto.edu/~graves/icml_2006.pdf
 
     Note:
-        In order to use CuDNN, the following must be satisfied: :attr:`targets` must be
+        In order to use CuDNN, the following must be satisfied: the :attr:`targets` must be
         in concatenated format, all :attr:`input_lengths` must be `T`.  :math:`blank=0`,
         :attr:`target_lengths` :math:`\leq 256`, the integer arguments must be of
-        dtype :attr:`torch.int32`.
+        dtype :attr:`torch.int32`, and the :attr:`log_probs` itself must be of
+        dtype :attr:`torch.float32`.
 
         The regular implementation uses the (more common in PyTorch) `torch.long` dtype.
 

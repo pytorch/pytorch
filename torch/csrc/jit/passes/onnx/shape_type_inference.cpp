@@ -1439,8 +1439,8 @@ void ComputeConstant(Node* n, int opset_version) {
                   for (auto cur_dim : shape_vector_0) {
                     num_elements *= cur_dim.static_size();
                   }
-                  dims.emplace_back(c10::ShapeSymbol::fromStaticSize(
-                      static_cast<int64_t>(num_elements)));
+                  dims.emplace_back(
+                      c10::ShapeSymbol::fromStaticSize(num_elements));
                 }
               }
             }
@@ -2414,8 +2414,8 @@ static size_t ONNXAssignOutputShape(
     }
   } else {
     std::string msg =
-        ("Model output has unsupported type. See "
-         "https://pytorch.org/docs/stable/onnx.html#types. Got type: ");
+        "Model output has unsupported type. See "
+        "https://pytorch.org/docs/stable/onnx.html#types. Got type: ";
     msg += THPUtils_typename(output_obj);
     throw std::runtime_error(msg);
   }

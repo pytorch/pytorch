@@ -99,6 +99,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
     // unique id used to tell the trace buffer that this
     // work has completed
     std::optional<uint64_t> trace_id_;
+    std::optional<uint64_t> trace_reset_epoch_;
     std::shared_ptr<gloo::Context> context_;
     const std::chrono::milliseconds timeout_;
 
@@ -254,6 +255,9 @@ class TORCH_API ProcessGroupGloo : public Backend {
         std::chrono::milliseconds timeout = kBackendDefaultTimeout) {
       return c10::make_intrusive<Options>(timeout);
     }
+
+    static c10::intrusive_ptr<Options> create_default(
+        std::chrono::milliseconds timeout = kBackendDefaultTimeout);
 
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
     int threads;

@@ -38,7 +38,7 @@ def unroll(num_unrolls, IndexType, InType, OutType):
     code = []
 
     if num_unrolls == 1:
-        code.append(f"    // tail loop")
+        code.append("    // tail loop")
         code.append("    if (j < end_offset) {")
     else:
         code.append(f"    // unrolling {num_unrolls} times")
