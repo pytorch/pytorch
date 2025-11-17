@@ -215,10 +215,10 @@ void Logger::set_construction_data_and_log(
         ddp_logging_data_->ints_map["rank"]);
     std::stringstream ddpLoggingDataInfo;
     for (const auto& intItem : ddp_logging_data_->ints_map) {
-      ddpLoggingDataInfo << intItem.first << ": " << intItem.second << "\n";
+      ddpLoggingDataInfo << intItem.first << ": " << intItem.second << '\n';
     }
     for (const auto& strItem : ddp_logging_data_->strs_map) {
-      ddpLoggingDataInfo << strItem.first << ": " << strItem.second << "\n";
+      ddpLoggingDataInfo << strItem.first << ": " << strItem.second << '\n';
     }
     LOG(INFO) << initInfo << ddpLoggingDataInfo.str();
   }

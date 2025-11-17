@@ -219,6 +219,32 @@ class PallasKernelOverrides(OpOverrides):
             return "True" if val else "False"
         return f"jnp.array({val}, dtype={jax_dtype})"
 
+    @staticmethod
+    def real(x: str) -> str:
+        return f"jnp.real({x})"
+
+    @staticmethod
+    def imag(x: str) -> str:
+        return f"jnp.imag({x})"
+
+    @staticmethod
+    def conj(x: str) -> str:
+        return f"jnp.conj({x})"
+
+    @staticmethod
+    def angle(x: str) -> str:
+        return f"jnp.angle({x})"
+
+    @staticmethod
+    def view_as_real(x: str) -> str:
+        """View complex tensor as real tensor with extra dimension."""
+        return f"jnp.stack([jnp.real({x}), jnp.imag({x})], axis=-1)"
+
+    @staticmethod
+    def view_as_complex(x: str) -> str:
+        """View real tensor as complex tensor."""
+        return f"({x}[..., 0] + 1j * {x}[..., 1])"
+
 
 class PallasKernel(SIMDKernel):
     """
@@ -643,6 +669,7 @@ class PallasKernel(SIMDKernel):
             import jax
             import jax.numpy as jnp
             from jax.experimental import pallas as pl
+            from torch._inductor.runtime.runtime_utils import torch_dtype_to_jax_runtime
             """
             + (
                 "\n            from jax.experimental.pallas import triton as pltriton"
@@ -823,16 +850,6 @@ class PallasKernel(SIMDKernel):
                     )
 
             code.writeline("# Prepare output metadata from PyTorch tensor")
-            code.writeline("# Map PyTorch dtype to JAX dtype")
-            code.writeline("_torch_dtype_to_jax = {")
-            code.writeline(
-                "    torch.float32: jnp.float32, torch.float64: jnp.float64, torch.float16: jnp.float16,"
-            )
-            code.writeline(
-                "    torch.int32: jnp.int32, torch.int64: jnp.int64, torch.int16: jnp.int16, torch.int8: jnp.int8,"
-            )
-            code.writeline("    torch.uint8: jnp.uint8, torch.bool: jnp.bool_,")
-            code.writeline("}")
             code.writeline(
                 "out_shapes = ("
                 + ", ".join([f"tuple({name}.shape)" for name in output_params])
@@ -841,7 +858,7 @@ class PallasKernel(SIMDKernel):
             code.writeline(
                 "out_dtypes = ("
                 + ", ".join(
-                    [f"_torch_dtype_to_jax[{name}.dtype]" for name in output_params]
+                    [f"torch_dtype_to_jax_runtime({name}.dtype)" for name in output_params]
                 )
                 + ",)"
             )
