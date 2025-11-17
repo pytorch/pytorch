@@ -29,7 +29,7 @@
 namespace at::native { namespace {
 
 template <typename scalar_t, typename scalar_t_2 = int64_t, typename loop1d_t>
-static inline void compare_base_kernel_core(
+inline void compare_base_kernel_core(
     const Tensor& result1,
     const Tensor& result2,
     const Tensor& self,
@@ -71,7 +71,7 @@ static inline void compare_base_kernel_core(
 }
 
 template <typename scalar_t, typename scalar_t_2=int64_t, typename func_t>
-static inline void compare_base_kernel(const Tensor& result1, const Tensor& result2,
+inline void compare_base_kernel(const Tensor& result1, const Tensor& result2,
     const Tensor& self,
     int64_t dim,
     bool keepdim,
@@ -98,7 +98,7 @@ static inline void compare_base_kernel(const Tensor& result1, const Tensor& resu
       result1, result2, self, dim, keepdim, loop);
 }
 
-static void min_kernel_impl(
+void min_kernel_impl(
     const Tensor& result,
     const Tensor& indice,
     const Tensor& self,
@@ -131,7 +131,7 @@ static void min_kernel_impl(
   });
 }
 
-static void max_kernel_impl(
+void max_kernel_impl(
     const Tensor& result,
     const Tensor& indice,
     const Tensor& self,
@@ -164,7 +164,7 @@ static void max_kernel_impl(
   });
 }
 
-static void aminmax_kernel(
+void aminmax_kernel(
     const Tensor& self,
     int64_t dim,
     bool keepdim,
@@ -212,7 +212,7 @@ static void aminmax_kernel(
   });
 }
 
-static void where_kernel_impl(TensorIterator &iter) {
+void where_kernel_impl(TensorIterator &iter) {
   AT_DISPATCH_V2(
     iter.dtype(), "where_cpu", [&] {
       cpu_kernel(
@@ -224,19 +224,19 @@ static void where_kernel_impl(TensorIterator &iter) {
   kComplexHalf, kHalf, kBFloat16, kBool, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_FLOAT8_TYPES));
 }
 
-static void isposinf_kernel_impl(TensorIteratorBase& iter) {
+void isposinf_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isposinf_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t a) -> bool { return a == std::numeric_limits<scalar_t>::infinity(); });
   });
 }
 
-static void isneginf_kernel_impl(TensorIteratorBase& iter) {
+void isneginf_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isneginf_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t a) -> bool { return a == -std::numeric_limits<scalar_t>::infinity(); });
   });
 }
 
-static void mode_kernel_impl(
+void mode_kernel_impl(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,
@@ -308,7 +308,7 @@ static void mode_kernel_impl(
 
 // Default brute force implementation of isin(). Used when the number of test elements is small.
 // Iterates through each element and checks it against each test element.
-static void isin_default_kernel_cpu(
+void isin_default_kernel_cpu(
     const Tensor& elements,
     const Tensor& test_elements,
     bool invert,
@@ -339,7 +339,7 @@ static void isin_default_kernel_cpu(
   });
 }
 
-static void clamp_kernel_impl(TensorIteratorBase& iter) {
+void clamp_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "clamp_cpu", [&]() {
     cpu_kernel_vec(iter,
       [](scalar_t a, scalar_t min, scalar_t max) -> scalar_t {
@@ -355,7 +355,7 @@ static void clamp_kernel_impl(TensorIteratorBase& iter) {
   });
 }
 
-static void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min_, const Scalar& max_) {
+void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min_, const Scalar& max_) {
   AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "clamp_scalar_cpu", [&]() {
     const auto min = min_.to<scalar_t>();
     const auto max = max_.to<scalar_t>();
@@ -371,7 +371,7 @@ static void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min
   });
 }
 
-static void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) {
+void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) {
   AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "clamp_max_scalar_cpu", [&]() {
     const auto max = max_.to<scalar_t>();
     const Vectorized<scalar_t> max_vec(max);
@@ -385,7 +385,7 @@ static void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) 
   });
 }
 
-static void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) {
+void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) {
   AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "clamp_min_scalar_cpu", [&]() {
     const auto min = min_.to<scalar_t>();
     const Vectorized<scalar_t> min_vec(min);
