@@ -345,11 +345,16 @@ struct ToImpl {
       [[maybe_unused]] bool is_internal) {
     static_assert(std::is_trivially_copyable_v<T>);
     // Ensure 2.10+ types don't accidentally use the base case - provide clear
-    // compile-time errors. Device is the only 2.10+ type that would silently
-    // pass the trivial copyability check.
+    // compile-time errors.
     static_assert(
         !std::is_same_v<T, torch::stable::Device>,
         "torch::stable::Device requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(
+        !is_header_only_array_ref_v<T>,
+        "HeaderOnlyArrayRef<T> requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(
+        !is_std_vector_v<T>,
+        "std::vector<T> requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
     // T may not have a default constructor. (For example, it might be
     // c10::Device.) However, std::memcpy implicitly creates a T at the
     // destination. So, we can use a union to work around this lack of
