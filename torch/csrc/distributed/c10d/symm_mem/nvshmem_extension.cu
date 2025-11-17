@@ -8,6 +8,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/dispatch_kernel.hpp>
 
 #include <ATen/ceil_div.h>
 // Use torch's cub wrapper instead of CUDA's <cub/cub.cuh>, see #55292
@@ -1614,12 +1615,11 @@ void _all_to_all_v_2d_index_push(
       stream));
 }
 
-using T = float;
-
 #define MAX_TOP_K 32
 
+template <typename T>
 __global__ void _allToAllV_2d_index_reduce_kernel(
-    void *send_data, void *recv_data,
+    T* send_data, T* recv_data,
     int64_t* topk_indices, int64_t* occurrences, int64_t* src_offsets, int64_t* dst_offsets, int64_t* output_splits,
     int topk, int n_local_experts, int nnodes, size_t stride_in_T, nvshmem_team_t team,
     int64_t* b_start, int64_t* b_len, int64_t* b_head, T* topk_weights) {
@@ -1666,7 +1666,8 @@ __global__ void _allToAllV_2d_index_reduce_kernel(
   // Store the top_k weights for a token
   __shared__ T k_weights[MAX_TOP_K];
   // Need a shared memory space to store the received tokens, up to topk tokens
-  extern __shared__ T k_tokens[];
+  extern __shared__ char k_tokens_storage[];
+  auto k_tokens = (T*)k_tokens_storage;
 
   auto head = start;
   while (head < start + block_tokens) {
@@ -1687,12 +1688,12 @@ __global__ void _allToAllV_2d_index_reduce_kernel(
       // Get the source offset
       auto src_offset = src_offsets[expert] + occurrences[flattened_k];
       // Get the source pointer
-      auto src_ptr = (T*)send_data + src_offset * stride_in_T;
+      auto src_ptr = send_data + src_offset * stride_in_T;
       // Fetch the data, i.e. 1 token
       nvshmemx_getmem_nbi_block(k_tokens + recved * stride_in_T, src_ptr, stride_in_T * sizeof(T), src_rank_global);
       // Read in the weight for this expert
       if (tid == 0) {
-        k_weights[recved] = topk_weights != nullptr ? topk_weights[flattened_k] : 1;
+        k_weights[recved] = topk_weights != nullptr ? topk_weights[flattened_k] : (T)1.0;
       }
       recved++;
     }
@@ -1703,7 +1704,7 @@ __global__ void _allToAllV_2d_index_reduce_kernel(
     constexpr int UNROLL = 4;
     T acc[UNROLL] = {0};
     // Where to write the accumulated result
-    auto recv_ptr = (T*)recv_data + abs_head * stride_in_T;
+    auto recv_ptr = recv_data + abs_head * stride_in_T;
     for (size_t offset = tid * UNROLL; offset < stride_in_T; offset += blockDim.x * UNROLL) {
       // Loop over the received tokens
       for (int t = 0; t < recved; t++) {
@@ -1762,10 +1763,15 @@ void _all_to_all_v_2d_index_reduce(
   // If topk_weights is passed in, give it to the kernel for mul-add on the fly
   void* topk_weights_ptr = nullptr;
   if (topk_weights.has_value()) {
+    auto topk_weights_tensor = topk_weights.value();
     TORCH_CHECK_VALUE(
-      topk_weights.value().size(1) <= MAX_TOP_K,
-      "Top K cannot be larger than ", MAX_TOP_K);
-      topk_weights_ptr = topk_weights.value().data_ptr();
+        topk_weights_tensor.size(1) <= MAX_TOP_K,
+        "Top K cannot be larger than ", MAX_TOP_K);
+    // In the kernel definition, weight and token have the same dtype
+    TORCH_CHECK_VALUE(
+        topk_weights_tensor.scalar_type() == input.scalar_type(),
+        "topk_weights must have the same data type as input");
+    topk_weights_ptr = topk_weights_tensor.data_ptr();
   }
 
   auto topk = topk_indices.size(1);
@@ -1791,13 +1797,19 @@ void _all_to_all_v_2d_index_reduce(
       &b_start_ptr, &b_len_ptr, &b_head_ptr, &topk_weights_ptr
   };
   size_t sharedMemBytes = topk * stride_in_T * input.element_size();
-  C10_CUDA_CHECK(cudaLaunchKernel(
-      (const void*)_allToAllV_2d_index_reduce_kernel,
-      dim3(nblocks),
-      dim3(THREADS_PER_BLOCK),
-      args,
-      sharedMemBytes,
-      stream));
+
+  // The kernel involves reduction operation, thus needs templating
+  AT_DISPATCH_FLOAT_AND_BFLOAT16(
+      input.scalar_type(), "_allToAllV_2d_index_reduce_kernel",
+      [&]() {
+        C10_CUDA_CHECK(cudaLaunchKernel(
+            (const void*)_allToAllV_2d_index_reduce_kernel<scalar_t>,
+            dim3(nblocks),
+            dim3(THREADS_PER_BLOCK),
+            args,
+            sharedMemBytes,
+            stream));
+      });
 }
 
 // This kernel extends `allToAllGet` with an out signal that indicates readiness of a "token" after each fetch.
