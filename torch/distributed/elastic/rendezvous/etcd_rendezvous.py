@@ -153,7 +153,7 @@ class EtcdRendezvousHandler(RendezvousHandler):
     +--------------------------------------------+--------------------------+
     """
 
-    def __init__(self, rdzv_impl: "EtcdRendezvous", local_addr: Optional[str]):
+    def __init__(self, rdzv_impl: "EtcdRendezvous", local_addr: Optional[str] = None):
         """
         Args:
             rdzv_impl: the implementation of the rendezvous
