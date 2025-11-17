@@ -216,11 +216,11 @@ class ExperimentalConfigWrapper {
     std::string perKernel =
         config_.profiler_measure_per_kernel ? "true" : "false";
 
-    configss << "CUPTI_PROFILER_ENABLE_PER_KERNEL=" << perKernel << "\n";
+    configss << "CUPTI_PROFILER_ENABLE_PER_KERNEL=" << perKernel << '\n';
     if (hasActivityTypeXPU) {
-      configss << "XPUPTI_PROFILER_ENABLE_PER_KERNEL=" << perKernel << "\n";
+      configss << "XPUPTI_PROFILER_ENABLE_PER_KERNEL=" << perKernel << '\n';
     }
-    configss << "CUSTOM_CONFIG=" << config_.custom_profiler_config << "\n";
+    configss << "CUSTOM_CONFIG=" << config_.custom_profiler_config << '\n';
     LOG(INFO) << "Generated config = " << configss.str();
 
     libkineto::api().activityProfiler().prepareTrace(
@@ -249,8 +249,8 @@ static const std::string setTraceID(const std::string& trace_id) {
     return "";
   }
   std::stringstream configss;
-  configss << "REQUEST_TRACE_ID=" << trace_id << "\n";
-  configss << "REQUEST_GROUP_TRACE_ID=" << trace_id << "\n";
+  configss << "REQUEST_TRACE_ID=" << trace_id << '\n';
+  configss << "REQUEST_GROUP_TRACE_ID=" << trace_id << '\n';
   return configss.str();
 }
 
@@ -262,7 +262,7 @@ static const std::string appendCustomConfig(
   }
   std::stringstream configss;
   configss << config;
-  configss << "CUSTOM_CONFIG=" << custom_profiler_config << "\n";
+  configss << "CUSTOM_CONFIG=" << custom_profiler_config << '\n';
   return configss.str();
 }
 #endif

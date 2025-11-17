@@ -2482,7 +2482,7 @@ class CommonTemplate:
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
     @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
-    def test__dyn_quant_pack_4bit_weight(self):
+    def test__dyn_quant_pack_4bit_weight_fp32(self):
         q_group = 32
         k = 128
         n = 128
@@ -2515,10 +2515,51 @@ class CommonTemplate:
 
     @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
+    @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
+    @skipIfRocm
+    @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
+    def test__dyn_quant_pack_4bit_weight_bf16(self):
+        k = 128
+        n = 128
+        q_group = 32
+
+        if not self.is_dtype_supported(torch.bfloat16):
+            raise unittest.SkipTest(
+                f"torch.bfloat16 not supported for device {self.device}"
+            )
+
+        torch.manual_seed(1)
+        b = torch.rand((k, n), dtype=torch.bfloat16)
+        in_features = b.size(0)
+        out_features = b.size(1)
+
+        def dyn_quant_pack_4bit_weight(b, in_features, out_features):
+            b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
+                b, n_bit=4, groupsize=q_group
+            )
+
+            if q_group == in_features:
+                b_scales_and_zeros = b_scales_and_zeros.to(torch.float)
+            else:
+                b_scales_and_zeros = b_scales_and_zeros.to(torch.bfloat16)
+            b_int4pack = torch._dyn_quant_pack_4bit_weight(
+                b_uint8, b_scales_and_zeros, None, q_group, in_features, out_features
+            )
+
+            return b_int4pack, b_scales_and_zeros
+
+        def fn(b, in_features, out_features):
+            b_int4pack, _ = dyn_quant_pack_4bit_weight(b, in_features, out_features)
+            return b_int4pack
+
+        self.common(fn, (b, in_features, out_features))
+
+    @xfail_if_mps_unimplemented
+    @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
     @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
-    def test__dyn_quant_matmul_4bit(self):
+    def test__dyn_quant_matmul_4bit_fp32_input(self):
         q_group = 32
         m = 32
         k = 128
@@ -2557,6 +2598,67 @@ class CommonTemplate:
             return res
 
         self.common(fn, (a, q_group, in_features, out_features))
+
+    @skipCPUIf(IS_MACOS, "fails on M1, mismatch in bf16 support reporting")
+    @xfail_if_mps_unimplemented
+    @xfail_if_triton_cpu
+    @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
+    @skipIfRocm
+    @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
+    def test__dyn_quant_matmul_4bit_bf16_input(self):
+        m = 32
+        k = 128
+        n = 128
+        q_group = k
+
+        if not self.is_dtype_supported(torch.bfloat16):
+            raise unittest.SkipTest(
+                f"torch.bfloat16 not supported for device {self.device}"
+            )
+
+        torch.manual_seed(1)
+        a = torch.rand((m, k), dtype=torch.bfloat16)
+        b = torch.rand((k, n), dtype=torch.bfloat16)
+
+        # codegen_dynamic_shape test fails without explicitly marking these dynamic
+        torch._dynamo.mark_dynamic(a, 0)
+        torch._dynamo.mark_dynamic(b, 1)
+
+        in_features = b.size(0)
+        out_features = b.size(1)
+
+        if not self.is_dtype_supported(torch.bfloat16):
+            raise unittest.SkipTest(
+                f"torch.bfloat16 not supported for device {self.device}"
+            )
+
+        def dyn_quant_pack_4bit_weight(b, in_features, out_features):
+            b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
+                b, n_bit=4, groupsize=q_group
+            )
+
+            if q_group == in_features:
+                b_scales_and_zeros = b_scales_and_zeros.to(torch.float)
+            else:
+                b_scales_and_zeros = b_scales_and_zeros.to(torch.bfloat16)
+            b_int4pack = torch._dyn_quant_pack_4bit_weight(
+                b_uint8, b_scales_and_zeros, None, q_group, in_features, out_features
+            )
+
+            return b_int4pack, b_scales_and_zeros
+
+        def fn(a, q_group, in_features, out_features):
+            b_int4pack, _ = dyn_quant_pack_4bit_weight(b, in_features, out_features)
+            res = torch.ops.aten._dyn_quant_matmul_4bit(
+                a,
+                b_int4pack,
+                q_group,
+                in_features,
+                out_features,
+            )
+            return res
+
+        self.common(fn, (a, q_group, in_features, out_features), atol=1, rtol=0.5)
 
     def test_expanded_reduction(self):
         def fn(x, y):
@@ -14606,6 +14708,26 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             "Generated Triton code should use triton_helpers.minimum for clamping",
         )
 
+    @skipIfMPS  # Accuracy issue on MPS
+    def test_weight_norm_conv2d(self):
+        """
+        Verify fix for https://github.com/pytorch/pytorch/issues/165749
+        """
+        from torch.nn.utils.parametrizations import weight_norm
+
+        d = 65
+        x = torch.randn((2, 2, 32, 32), device=self.device)
+        conv = weight_norm(nn.Conv2d(2, d, 2)).to(device=self.device)
+        ref = conv(x)
+        grad_out = torch.randn_like(ref)
+        ref_grad = torch.autograd.grad(ref, list(conv.parameters()), grad_out)
+
+        compiled_conv = torch.compile(conv)
+        act = compiled_conv(x)
+        act_grad = torch.autograd.grad(act, list(compiled_conv.parameters()), grad_out)
+
+        self.assertTrue(same((ref, ref_grad), (act, act_grad), tol=1e-3))
+
     @skip_if_halide
     @requires_cuda_and_triton
     @skip_if_cpp_wrapper("skip cpp wrapper")
@@ -16146,6 +16268,26 @@ if RUN_GPU:
                 FileCheck().check_count(
                     f"with torch.{GPU_TYPE}._DeviceGuard(0)", 1, exactly=True
                 ).run(code)
+
+        @skipCUDAIf(
+            not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
+        )
+        def test_bf16_atomic_add(self):
+            def fn(output, indices, values):
+                output.index_put_([indices], values, accumulate=True)
+                return output
+
+            indices = torch.tensor([0, 1], device=GPU_TYPE)
+            values = torch.randn(2, 768, dtype=torch.bfloat16, device=GPU_TYPE)
+            output = torch.zeros(512, 768, dtype=torch.bfloat16, device=GPU_TYPE)
+
+            result, code = run_and_get_code(torch.compile(fn), output, indices, values)
+            self.assertTrue(
+                "tl.atomic_add" in code[0],
+                "bf16 should generate tl.atomic_add",
+            )
+            expected = torch.zeros(512, 768, dtype=torch.bfloat16, device=GPU_TYPE)
+            torch.testing.assert_close(result, fn(expected, indices, values))
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
