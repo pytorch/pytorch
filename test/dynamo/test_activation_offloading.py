@@ -1,9 +1,9 @@
 # Owner(s): ["oncall: pt2"]
 # flake8: noqa: B950
 
-import unittest
-import warnings
 from functools import partial
+
+import pytest
 
 import torch
 import torch._functorch.config
@@ -19,13 +19,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
-USE_NETWORKX = False
-try:
-    import networkx  # noqa: F401
-
-    USE_NETWORKX = True
-except ImportError:
-    warnings.warn("Some tests use networkx but it was not installed", UserWarning)
+networkx = pytest.importorskip("networkx")
 
 
 def extract_graph(fx_g, _, graph_cell):
@@ -75,7 +69,6 @@ class ActivationOffloadingTests(TestCase):
     The first set of tests are for the case of adding offload nodes to the fwd and bwd graphs.
     """
 
-    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     @torch._functorch.config.patch(enable_activation_offloading=True)
     def test_partitioner_offload(self):
         torch._dynamo.reset()
@@ -137,7 +130,6 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
             .run(bw_code)
         )
 
-    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     @torch._functorch.config.patch(
         enable_activation_offloading=True,
         activation_offload_separate_stream=True,
@@ -187,7 +179,6 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
     return (mul_2, mul_2, mul_1, mul_1, mul, mul)""",
         )
 
-    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     @torch._functorch.config.patch(
         enable_activation_offloading=True,
         activation_offload_separate_stream=True,

@@ -1,6 +1,5 @@
-# mypy: allow-untyped-defs
 """
-Activation offloading for memory optimization in AOT Autograd.
+Activation offloading for memory optimization in (more like post) partitioners.
 
 This module provides functionality to offload activations to CPU during forward pass
 and reload them during backward pass, reducing GPU memory usage.
@@ -16,7 +15,7 @@ from torch._subclasses.fake_tensor import extract_tensor_metadata
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
-from ..partitioners import _is_primal, get_default_op_list, OpTypes
+from ..partitioners import get_default_op_list, OpTypes
 
 
 log: logging.Logger = logging.getLogger(__name__)
@@ -144,6 +143,7 @@ def can_offload(
     node: torch.fx.Node,
     fwd_outputs: OrderedSet[torch.fx.Node],
     model_outputs: OrderedSet[torch.fx.Node],
+    static_lifetime_input_nodes: OrderedSet[fx.Node],
 ) -> bool:
     """
     Determine if a node can be offloaded to CPU.
@@ -163,8 +163,8 @@ def can_offload(
     if node in model_outputs:
         log.debug("\tSkipped! Cannot offload model outputs.")
         return False
-    if _is_primal(node):
-        log.debug("\tSkipped! Cannot offload model inputs.")
+    if node in static_lifetime_input_nodes:
+        log.debug("\tSkipped! Cannot offload static input nodes.")
         return False
     if op_types.is_view(node) or node.target == operator.getitem:
         log.debug("\tSkipped! Cannot offload views of getitems.")
@@ -185,6 +185,7 @@ def choose_offload_sets(
     fwd_module: fx.GraphModule,
     bwd_module: fx.GraphModule,
     num_fwd_outputs: int,
+    static_lifetime_input_nodes: OrderedSet[fx.Node],
 ) -> bool:
     """
     Decide which nodes will be offloaded based on the marked nodes and feasibility.
@@ -211,7 +212,7 @@ def choose_offload_sets(
         if node.meta.get("should_offload", False) is False:
             continue
 
-        if can_offload(node, fwd_outputs, model_outputs):
+        if can_offload(node, fwd_outputs, model_outputs, static_lifetime_input_nodes):
             node.meta["saved_for_offloading"] = True
             node.meta["original_device"] = node.meta["val"].device
             should_perform_offloading = True
@@ -415,6 +416,7 @@ def enable_activation_offloading(
     fwd_module: fx.GraphModule,
     bwd_module: fx.GraphModule,
     num_fwd_outputs: int,
+    static_lifetime_input_nodes: OrderedSet[fx.Node],
 ) -> None:
     """
     Main entry point for activation offloading.
@@ -430,6 +432,7 @@ def enable_activation_offloading(
         fwd_module,
         bwd_module,
         num_fwd_outputs,
+        static_lifetime_input_nodes,
     )
     if not should_perform_offloading:
         return

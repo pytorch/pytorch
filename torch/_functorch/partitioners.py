@@ -2941,6 +2941,7 @@ def min_cut_rematerialization_partition(
             fw_module,
             bw_module,
             num_fwd_outputs,
+            node_info.static_lifetime_input_nodes,
         )
 
     # raise all getitem ops to as early as possible
