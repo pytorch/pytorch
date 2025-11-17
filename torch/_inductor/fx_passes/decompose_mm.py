@@ -21,6 +21,7 @@ def _fn(a: torch.Tensor, b: torch.Tensor, num_chunks: int, orig_out: torch.Tenso
 
 def split_mms(gm: torch.fx.GraphModule, min_m_size: int, num_chunks: int = 2):
     g = gm.graph
+    g.owning_module
 
     def _size_hint(s: sympy.Expr) -> int:
         from torch.fx.experimental.symbolic_shapes import size_hint
@@ -34,7 +35,7 @@ def split_mms(gm: torch.fx.GraphModule, min_m_size: int, num_chunks: int = 2):
         return t.is_contiguous(memory_format=torch.contiguous_format)
 
     for n in g.nodes:
-        if n.target != torch.ops.aten.mm.default:
+        if n.op == "call_function" and n.target != torch.ops.aten.mm.default:
             continue
 
         mm_n = n
@@ -71,3 +72,66 @@ def split_mms(gm: torch.fx.GraphModule, min_m_size: int, num_chunks: int = 2):
         )
 
         g.erase_node(mm_n)
+
+from torch._inductor.fx_passes.micro_pipeline_tp import _ReduceScatterMatch
+
+def split_mm_split_cat_rs(gm: torch.fx.GraphModule):
+    g = gm.graph
+    c10d = torch.ops._c10d_functional
+
+    # Matches funcol.reduce_scatter_tensor with scatter_dim > 0
+    non_zero_dim_reduce_scatter_pattern_single_user = reduce_scatter_template(
+        CallFunction(
+            aten.cat.default,
+            ListOf(
+                CallFunction(
+                    operator.getitem,
+                    CallFunction(
+                        aten.split.Tensor,
+                        KeywordArg("input"),
+                        Ignored(),
+                        KeywordArg("scatter_dim"),
+                        _users=MULTIPLE,
+                    ),
+                    Ignored(),
+                )
+            ),
+        ),
+        users=1,
+    )
+
+    reduce_scatters = []
+    for node in reversed(g.nodes):
+        if node.target == c10d.wait_tensor.default:
+            if match := non_zero_dim_reduce_scatter_pattern_single_user.match(node):
+                assert isinstance(match, Match)
+                reduce_scatters.append(
+                    _ReduceScatterMatch(
+                        match=match,
+                        input_node=match.kwargs["input"],
+                        reduce_scatter_node=match.nodes[-2],
+                        wait_tensor_node=node,
+                        reduce_op=match.kwargs["reduce_op"],
+                        scatter_dim=match.kwargs["scatter_dim"],
+                        group_name=match.kwargs["group_name"],
+                    )
+                )
+    reduce_scatters = list(reversed(reduce_scatters))
+    process_mamtul_reduce_scatter(reduce_scatters)
+
+def process_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
+    (
+        input_node,
+        _reduce_scatter_node,
+        rs_wait_tensor_node,
+        reduce_op,
+        orig_scatter_dim,
+        group_name,
+    ) = (
+        reduce_scatter.input_node,
+        reduce_scatter.reduce_scatter_node,
+        reduce_scatter.wait_tensor_node,
+        reduce_scatter.reduce_op,
+        reduce_scatter.scatter_dim,
+        reduce_scatter.group_name,
+    )
