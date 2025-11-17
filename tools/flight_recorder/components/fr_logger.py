@@ -5,8 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import logging
-from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 
 class FlightRecorderLogger:

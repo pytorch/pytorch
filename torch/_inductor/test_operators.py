@@ -15,7 +15,6 @@ for dispatch_key in ("CPU", "CUDA", "MPS", "Meta"):
 
 class Realize(Function):
     @staticmethod
-    # pyrefly: ignore [bad-override]
     def forward(ctx: object, x: Tensor) -> Tensor:
         return torch.ops._inductor_test.realize(x)
 

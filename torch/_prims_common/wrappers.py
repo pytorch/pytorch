@@ -180,7 +180,7 @@ def _resize_output_check(out: TensorLikeType, shape: ShapeType):
             "be resized unless they have zero elements. "
             "You can explicitly reuse an out tensor t by resizing it, inplace, to zero elements with t.resize_(0)."
         )
-        warnings.warn(msg, stacklevel=2)
+        warnings.warn(msg)
     return True
 
 
@@ -330,7 +330,7 @@ def out_wrapper(
                 # Naively you might expect this assert to be true, but
                 # it's not:
                 #
-                #   assert type(out) is type(result)
+                #   assert type(out) == type(result)
                 #
                 # The reason is that functions under this wrapper can
                 # get registered to the Meta dispatch key, and that

@@ -478,58 +478,6 @@ torch::CppFunction autogradNotImplementedFallback() {
       &autogradNotImplementedFallbackImpl>();
 }
 
-struct GenericViewFunc : public ViewFunc {
-  GenericViewFunc(
-      torch::jit::Stack non_tensor_stack,
-      size_t aliased_input_idx_val,
-      c10::OperatorHandle op)
-      : non_tensor_stack_(non_tensor_stack),
-        aliased_input_idx_val_(aliased_input_idx_val),
-        op_(op) {
-    // This should report saved Tensors and SymInts.
-    // We already have an assert that ensure there are no Tensors here
-    // by making sure there is only one Tensor input.
-    // We also verify there are no SymInt here for now.
-    // Both can be lifted if the visit and clone logic get updated.
-    const auto& schema = op_.schema();
-    for (const auto& arg : schema.arguments()) {
-      TORCH_CHECK(
-          arg.real_type()->kind() != c10::TypeKind::SymIntType,
-          "Custom ops that are views do not support SymInt. Please file an issue if you need it.");
-      for (const auto& ct : arg.real_type()->containedTypes()) {
-        TORCH_CHECK(
-            ct->kind() != c10::TypeKind::SymIntType,
-            "Custom ops that are views do not support SymInt. Please file an issue if you need it.");
-      }
-    }
-  }
-
-  at::Tensor operator()(const at::Tensor& new_base) const override {
-    torch::jit::Stack local_stack = non_tensor_stack_;
-    local_stack.at(aliased_input_idx_val_) = c10::IValue(new_base);
-
-    op_.callBoxed(local_stack);
-    auto& result = local_stack[local_stack.size() - 1];
-    TORCH_CHECK(
-        result.isTensor(),
-        "ADInplaceOrView fallback view replay did not return a Tensor");
-    return result.toTensor();
-  }
-
-  std::unique_ptr<ViewFunc> clone_and_set(
-      std::optional<std::vector<c10::SymInt>> /*unused*/ = std::nullopt,
-      std::optional<std::vector<at::Tensor>> /*unused*/ =
-          std::nullopt) const override {
-    return std::make_unique<GenericViewFunc>(
-        non_tensor_stack_, aliased_input_idx_val_, op_);
-  }
-
- private:
-  torch::jit::Stack non_tensor_stack_;
-  size_t aliased_input_idx_val_;
-  c10::OperatorHandle op_;
-};
-
 static void autogradNotImplementedInplaceOrViewFallbackImpl(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet dispatch_keys,
@@ -605,18 +553,6 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
       "input and the first output (the output can be a vector of tensors). Please change the "
       "order of your operator's parameters so that this is the case.");
   const bool is_view = aliased_input_idx.has_value();
-  size_t aliased_input_idx_val;
-
-  // Save inputs before we redispatch down
-  torch::jit::Stack non_tensor_stack;
-  if (is_view) {
-    // Note that this won't be used if a TensorList is returned.
-    aliased_input_idx_val = aliased_input_idx.value();
-    non_tensor_stack.reserve(num_arguments);
-    for (const auto i : c10::irange(num_arguments)) {
-      non_tensor_stack.push_back((*stack)[stack_start + i]);
-    }
-  }
 
   {
     at::AutoDispatchBelowADInplaceOrView guard;
@@ -672,32 +608,13 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
       auto result = std::move(aliased_output);
       stack->at(stack->size() - num_returns + aliased_output_idx) = result;
     } else {
-      c10::IValue& aliased_output_iv =
-          (*stack)[stack->size() - num_returns + aliased_output_idx];
       TORCH_CHECK(aliased_output_iv.isTensor());
-      TORCH_CHECK(
-          num_returns == 1,
-          "ADInplaceOrView fallback only support single output view functions");
-
-      // Remove the Tensor from the original stack
-      for (const auto i : c10::irange(num_arguments)) {
-        if (non_tensor_stack[i].isTensor()) {
-          TORCH_CHECK(
-              i == aliased_input_idx_val,
-              "Internal error in ADInplaceOrView fallback, unknown Tensor in the stack");
-          non_tensor_stack[i] = {};
-        }
-      }
-
-      auto view_func = std::make_unique<GenericViewFunc>(
-          non_tensor_stack, aliased_input_idx_val, op);
-
       auto result = as_view(
           /* base=*/aliased_input,
           /* tensor=*/std::move(aliased_output_iv).toTensor(),
           /* is_bw_differentiable=*/true,
           /* is_fw_differentiable=*/true,
-          /* view_func=*/std::move(view_func),
+          /* view_func=*/std::move(erroring_view_func),
           /* rev_view_func=*/erroring_rev_view_func,
           /* creation_meta=*/
           InferenceMode::is_enabled()

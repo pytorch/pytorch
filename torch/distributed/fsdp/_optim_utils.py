@@ -146,8 +146,9 @@ def _unflatten_optim_state(
         dict will need to map these entries using the proper unflattened
         parameter IDs.
     """
-    if shard_state and not to_save:
-        raise AssertionError("If ``shard_state`` is True, ``to_save`` has to be True.")
+    assert not shard_state or to_save, (
+        "If ``shard_state`` is True, ``to_save`` has to be True."
+    )
     consolidated_state = _communicate_optim_state(
         fsdp_param_info,
         flat_param_state,
@@ -218,8 +219,9 @@ def _communicate_optim_state(
             ):
                 tensor_state[state_name] = value
                 continue
-            if fsdp_state.compute_device is None:
-                raise AssertionError("compute_device has not been initialized")
+            assert fsdp_state.compute_device is not None, (
+                "compute_device has not been initialized"
+            )
             if value.device.type != fsdp_state.compute_device.type:
                 value = value.to(fsdp_state.compute_device)
             # Assume that positive-dimension tensor optimizer state
@@ -292,10 +294,7 @@ def _unflatten_communicated_optim_state(
             if shard_state:
                 osd_config = fsdp_state._optim_state_dict_config
                 if getattr(osd_config, "_use_dtensor", False):
-                    if fsdp_state._device_mesh is None:
-                        raise AssertionError(
-                            f"Expected _device_mesh to be not None, got {fsdp_state._device_mesh}"
-                        )
+                    assert fsdp_state._device_mesh is not None
                     optim_state = _ext_chunk_dtensor(
                         optim_state,
                         fsdp_state.rank,
@@ -303,10 +302,7 @@ def _unflatten_communicated_optim_state(
                         fsdp_state._fsdp_extension,
                     )
                 else:
-                    if fsdp_state.process_group is None:
-                        raise AssertionError(
-                            f"Expected process_group to be not None, got {fsdp_state.process_group}"
-                        )
+                    assert fsdp_state.process_group is not None
                     optim_state = _ext_chunk_tensor(
                         optim_state,
                         fsdp_state.rank,
@@ -353,11 +349,10 @@ def _broadcast_state(
         tensor = state.to(fsdp_state.compute_device)
     else:
         if isinstance(state, torch.Tensor):
-            if state.dim() != 0:
-                raise AssertionError(
-                    "For non-zero ranks, a tensor state should have zero dimension, "
-                    f"but got the state with shape {state.shape}."
-                )
+            assert state.dim() == 0, (
+                "For non-zero ranks, a tensor state should have zero dimension, "
+                f"but got the state with shape {state.shape}."
+            )
             return state
         elif not isinstance(state, _PosDimTensorInfo):
             return state
@@ -496,18 +491,16 @@ def _flatten_optim_state_dict(
             if flat_state:
                 flat_osd_state[key] = flat_state
             elif use_orig_params:
-                if len(fqns) != 1:
-                    raise AssertionError(
-                        f"use_orig_params is True but there are multiple FQNs, {fqns}."
-                    )
+                assert len(fqns) == 1, (
+                    f"use_orig_params is True but there are multiple FQNs, {fqns}."
+                )
                 if optim is not None:  # NamedOptimizer or KeyedOptimizer case.
                     state = optim.state.get(param, None)  # type: ignore[call-overload]
                     if state is not None:
                         flat_osd_state[key] = copy.deepcopy(state)
                     else:
                         warnings.warn(
-                            f"optim_state[{key}] is not on rank{fsdp_state.rank}.",
-                            stacklevel=2,
+                            f"optim_state[{key}] is not on rank{fsdp_state.rank}."
                         )
 
             else:
@@ -516,8 +509,7 @@ def _flatten_optim_state_dict(
                     "use_orig_params=True."
                 )
         else:  # do not flatten non-FSDP parameters' states
-            if len(fqns) != 1:
-                raise AssertionError(f"Expected len(fqns) == 1, got {len(fqns)}")
+            assert len(fqns) == 1
             key = _OptimStateKey(tuple(fqns), False)
             flat_osd_state[key] = copy.copy(unflat_osd_state[fqn])
 
@@ -579,16 +571,14 @@ def _flatten_optim_state(
     handle = fsdp_param_info.handle
     flat_param = handle.flat_param
     num_unflat_params = len(unflat_param_names)
-    if num_unflat_params <= 0:
-        raise AssertionError(
-            "Expects at least one unflattened parameter corresponding to the flat parameter"
-        )
+    assert num_unflat_params > 0, (
+        "Expects at least one unflattened parameter corresponding to the flat parameter"
+    )
     unflat_param_shapes = flat_param._shapes
     num_unflat_param_shapes = len(unflat_param_shapes)
-    if num_unflat_params != num_unflat_param_shapes:
-        raise AssertionError(
-            f"Expects {num_unflat_params} shapes but got {num_unflat_param_shapes}"
-        )
+    assert num_unflat_params == num_unflat_param_shapes, (
+        f"Expects {num_unflat_params} shapes but got {num_unflat_param_shapes}"
+    )
 
     # Check if these unflattened parameters have any optimizer state
     has_state = [
@@ -613,7 +603,6 @@ def _flatten_optim_state(
     ]
     # Check that the unflattened parameters have the same state names
     state_names = None
-    # pyrefly: ignore [bad-assignment]
     for unflat_param_state in unflat_param_states:
         if unflat_param_state is None:
             continue
@@ -625,8 +614,7 @@ def _flatten_optim_state(
                     "Differing optimizer state names for the unflattened "
                     f"parameters: {unflat_param_names}"
                 )
-    if state_names is None:
-        raise AssertionError(f"Expected state_names to be not None, got {state_names}")
+    assert state_names is not None
 
     # Flatten the state
     flat_state: dict[str, Optional[torch.Tensor]] = {}
@@ -683,10 +671,7 @@ def _flatten_optim_state(
                 unflat_param_names,
             )
         else:
-            if not are_non_tensors:
-                raise AssertionError(
-                    f"Expected are_non_tensors to be True, got {are_non_tensors}"
-                )
+            assert are_non_tensors
             flat_state[state_name] = _flatten_non_tensor_optim_state(
                 state_name,
                 state_values,
@@ -774,10 +759,9 @@ def _flatten_tensor_optim_state(
     ]
     flat_tensor = handle.flatten_tensors(tensors_to_flatten, handle._aligned_numel)
     flat_param_shape = flat_param._unpadded_unsharded_size  # type: ignore[attr-defined]
-    if flat_tensor.shape != flat_param_shape:
-        raise AssertionError(
-            f"tensor optim state: {flat_tensor.shape} flat parameter: {flat_param_shape}"
-        )
+    assert flat_tensor.shape == flat_param_shape, (
+        f"tensor optim state: {flat_tensor.shape} flat parameter: {flat_param_shape}"
+    )
     return flat_tensor
 
 
@@ -908,10 +892,7 @@ def _rekey_sharded_optim_state_dict(
     # All parameter keys in `param_to_param_key` should be in
     # `param_to_fqns` -- strict inequality follows when not all parameters are
     # passed to the optimizer
-    if len(param_to_param_key) > len(param_to_fqns):
-        raise AssertionError(
-            f"Expected len(param_to_param_key) <= len(param_to_fqns), got {len(param_to_param_key)} > {len(param_to_fqns)}"
-        )
+    assert len(param_to_param_key) <= len(param_to_fqns)
 
     unflat_param_names_to_flat_param_key: dict[
         tuple[str, ...], Union[int, str]
@@ -937,7 +918,6 @@ def _rekey_sharded_optim_state_dict(
         flat_param_key = unflat_param_names_to_flat_param_key.get(
             key.unflat_param_names, key.unflat_param_names
         )
-        # pyrefly: ignore [unsupported-operation]
         rekeyed_osd_state[flat_param_key] = param_state
 
     # Only process param_groups if it exists in sharded_osd
@@ -1000,7 +980,6 @@ def _get_param_id_to_param_from_optim_input(
     if optim_input is None:
         return dict(enumerate(model.parameters()))
     try:
-        # pyrefly: ignore [no-matching-overload]
         params = cast(list[nn.Parameter], list(optim_input))
     except TypeError as e:
         raise TypeError(
@@ -1020,15 +999,14 @@ def _get_param_id_to_param_from_optim_input(
         raise TypeError("Optimizer input should be an iterable of Tensors or dicts")
     if all_tensors:
         return dict(enumerate(params))
-    if not all_dicts:
-        raise AssertionError(f"Expected all_dicts to be True, got {all_dicts}")
+    assert all_dicts
     param_id_to_param: list[nn.Parameter] = []
     for param_group in params:
         has_params_key = "params" in param_group  # type: ignore[operator]
-        if not has_params_key:
-            raise AssertionError(
-                'A parameter group should map "params" to a list of the parameters in the group'
-            )
+        assert has_params_key, (
+            'A parameter group should map "params" to a list of the '
+            "parameters in the group"
+        )
         # Implicitly map `flat_param_id` (current length of the list) to
         # `param`
         param_id_to_param.extend(param_group["params"])  # type: ignore[index]
@@ -1087,12 +1065,10 @@ def _get_param_key_to_param(
     """
     clean_fqn_to_curr_fqn: dict[str, str] = {}
     if is_named_optimizer:
-        if param_to_fqns is None or flat_param_to_fqn is None:
-            raise AssertionError(
-                "The optimizer is a NamedOptimizer, `param_to_fqns` must not be None."
-            )
-        if model is None:
-            raise AssertionError(f"Expected model to be not None, got {model}")
+        assert param_to_fqns is not None and flat_param_to_fqn is not None, (
+            "The optimizer is a NamedOptimizer, `param_to_fqns` must not be None."
+        )
+        assert model is not None
         for key, _ in _named_parameters_with_duplicates(model):
             clean_fqn_to_curr_fqn[clean_tensor_name(key)] = key
 
@@ -1101,23 +1077,14 @@ def _get_param_key_to_param(
     for param_group in optim.param_groups:
         if is_named_optimizer:
             for param in param_group["params"]:
-                if flat_param_to_fqn is None:
-                    raise AssertionError(
-                        f"Expected flat_param_to_fqn to be not None, got {flat_param_to_fqn}"
-                    )
+                assert flat_param_to_fqn is not None
                 if param in flat_param_to_fqn:
                     # FlatParameter case
                     key = flat_param_to_fqn[param]
                 else:
-                    if param_to_fqns is None:
-                        raise AssertionError(
-                            f"Expected param_to_fqns to be not None, got {param_to_fqns}"
-                        )
+                    assert param_to_fqns is not None
                     # use_orig_params case
-                    if len(param_to_fqns[param]) != 1:
-                        raise AssertionError(
-                            f"Expected len(param_to_fqns[param]) == 1, got {len(param_to_fqns[param])}"
-                        )
+                    assert len(param_to_fqns[param]) == 1
                     key = param_to_fqns[param][0]
                 try:
                     key = clean_fqn_to_curr_fqn[key]
@@ -1183,8 +1150,9 @@ def _check_missing_keys_on_rank(
             continue
         param_key = optim_state_key_to_param_key[r0_optim_state_key]
         if isinstance(param_key, int):
-            if not (param_key >= 0 and param_key < len(param_key_to_param)):
-                raise AssertionError("Check the `param_key_to_param` construction")
+            assert param_key >= 0 and param_key < len(param_key_to_param), (
+                "Check the `param_key_to_param` construction"
+            )
     # We cannot use FSDPState.compute_device as this API is a global view.
     device = _get_pg_default_device(group)
     num_missing = torch.tensor([len(missing_keys)], dtype=torch.int32, device=device)
@@ -1233,10 +1201,10 @@ def _map_param_key_to_optim_keys(
         fqns = param_to_fqns[param]
         is_fsdp_managed = isinstance(param, FlatParameter)
         if is_fsdp_managed:
-            if fqns[0] not in fqn_to_fsdp_param_info:
-                raise AssertionError(
-                    f"Expected {fqns[0]} to be in fqn_to_fsdp_param_info, got keys: {list(fqn_to_fsdp_param_info.keys())}"
-                )
+            assert fqns[0] in fqn_to_fsdp_param_info, (
+                fqns[0],
+                list(fqn_to_fsdp_param_info.keys()),
+            )
         is_fsdp_managed = fqns[0] in fqn_to_fsdp_param_info
         optim_state_key = _OptimStateKey(
             unflat_param_names=tuple(fqns),
@@ -1258,10 +1226,7 @@ def _map_param_key_to_optim_keys(
             [all_optim_state_keys] if rank == 0 else [None]
         )
         dist.broadcast_object_list(key_obj_list, src=0, group=group)
-        if key_obj_list[0] is None:
-            raise AssertionError(
-                f"Expected key_obj_list[0] to be not None, got {key_obj_list[0]}"
-            )
+        assert key_obj_list[0] is not None
         all_optim_state_keys = key_obj_list[0]
         _check_missing_keys_on_rank(
             all_optim_state_keys,
@@ -1302,7 +1267,7 @@ def _is_named_optimizer(optim_state_dict: dict[str, Any]) -> bool:
     (which usually are FQNs) versus integers (which usually refer to param_ids
     from a vanilla torch.optim.Optimizer).
     """
-    state = optim_state_dict.get("state")
+    state = optim_state_dict.get("state", None)
     if not state:
         # If we cannot find a state, assume it is not NamedOptimizer as
         # NamedOptimizer has eager initialization.
@@ -1394,17 +1359,11 @@ def _convert_all_state_info(
                     if not dtype:
                         dtype = info.dtype
                     else:
-                        if dtype != info.dtype:
-                            raise AssertionError(
-                                f"Expected dtype == info.dtype, got {dtype} != {info.dtype}"
-                            )
+                        assert dtype == info.dtype
                 if numels[-1] == 0:
                     _empty_ranks.add(rank)
 
-            if not (not empty_ranks or empty_ranks == _empty_ranks):
-                raise AssertionError(
-                    f"Expected empty_ranks to be empty or equal to _empty_ranks, got {empty_ranks} vs {_empty_ranks}"
-                )
+            assert not empty_ranks or empty_ranks == _empty_ranks
             empty_ranks = _empty_ranks
             if state_name not in state_buffers:
                 state_buffers[state_name] = [
@@ -1426,26 +1385,23 @@ def _convert_all_state_info(
                 continue
             for name, non_tensor_value in object_state.non_tensors.items():
                 curr_non_tensor_value = gathered_state.get(name, None)
-                if not (
+                assert (
                     curr_non_tensor_value is None
                     or curr_non_tensor_value == non_tensor_value
-                ):
-                    raise AssertionError(
-                        f"Rank {rank} has different values for {name}: {non_tensor_value}."
-                        + f" Other ranks: {curr_non_tensor_value}"
-                    )
+                ), (
+                    f"Rank {rank} has different values for {name}: {non_tensor_value}."
+                    + f" Other ranks: {curr_non_tensor_value}"
+                )
                 gathered_state[name] = non_tensor_value
 
             for name, scalar_tensor_value in object_state.scalar_tensors.items():
                 curr_scalar_tensor_value = gathered_state.get(name, None)
-                if not (
-                    curr_scalar_tensor_value is None
-                    or torch.equal(scalar_tensor_value, curr_scalar_tensor_value)
-                ):
-                    raise AssertionError(
-                        f"Rank {rank} has different values for {name}: {scalar_tensor_value}."
-                        + f" Other ranks: {curr_scalar_tensor_value}"
-                    )
+                assert curr_scalar_tensor_value is None or torch.equal(
+                    scalar_tensor_value, curr_scalar_tensor_value
+                ), (
+                    f"Rank {rank} has different values for {name}: {scalar_tensor_value}."
+                    + f" Other ranks: {curr_scalar_tensor_value}"
+                )
                 gathered_state[name] = scalar_tensor_value
 
     return dtype, state_buffers  # type: ignore[possibly-undefined]
@@ -1496,10 +1452,7 @@ def _unflatten_orig_param_states(
         if shard_state:
             osd_config = fsdp_state._optim_state_dict_config
             if getattr(osd_config, "_use_dtensor", False):
-                if fsdp_state._device_mesh is None:
-                    raise AssertionError(
-                        f"Expected _device_mesh to be not None, got {fsdp_state._device_mesh}"
-                    )
+                assert fsdp_state._device_mesh is not None
                 value = _ext_chunk_dtensor(
                     value,
                     fsdp_state.rank,
@@ -1507,10 +1460,7 @@ def _unflatten_orig_param_states(
                     fsdp_state._fsdp_extension,
                 )
             else:
-                if fsdp_state.process_group is None:
-                    raise AssertionError(
-                        f"Expected process_group to be not None, got {fsdp_state.process_group}"
-                    )
+                assert fsdp_state.process_group is not None
                 value = _ext_chunk_tensor(
                     value,
                     fsdp_state.rank,
@@ -1645,26 +1595,24 @@ def _allgather_orig_param_states(
             sum(t.numel() for t in local_buffers)
         )
 
-        if flat_param._shard_numel_padded != shard_numel_padded:
-            raise AssertionError(
-                "Manually calculated _sharded_numel_padded is incorrect. "
-                f"_shard_numel_padded={flat_param._shard_numel_padded}, "
-                f"shard_numel_padded={shard_numel_padded}, "
-                f"_sharded_size.numel={flat_param._sharded_size.numel()}, "
-                f"_numels_with_padding={flat_param._numels_with_padding}, "
-                f"begin={begin}, end={end},"
-            )
+        assert flat_param._shard_numel_padded == shard_numel_padded, (
+            "Manually calculated _sharded_numel_padded is incorrect. "
+            f"_shard_numel_padded={flat_param._shard_numel_padded}, "
+            f"shard_numel_padded={shard_numel_padded}, "
+            f"_sharded_size.numel={flat_param._sharded_size.numel()}, "
+            f"_numels_with_padding={flat_param._numels_with_padding}, "
+            f"begin={begin}, end={end},"
+        )
         if shard_numel_padded > 0:
             # Add right-handed padding.
             local_buffers.append(empty_func(shard_numel_padded))
         local_shard = torch.cat(local_buffers)
-        if local_shard.numel() * fsdp_state.world_size != gathered_tensor.numel():
-            raise AssertionError(
-                "The size of local shard times the world size should equal to the "
-                "gathered tensor size. The inconsistency may be from a bug of "
-                "FlatParameter's metadata or the reconstruction logic in optimizer "
-                "state dict."
-            )
+        assert local_shard.numel() * fsdp_state.world_size == gathered_tensor.numel(), (
+            "The size of local shard times the world size should equal to the "
+            "gathered tensor size. The inconsistency may be from a bug of "
+            "FlatParameter's metadata or the reconstruction logic in optimizer "
+            "state dict."
+        )
         fsdp_state._device_handle.synchronize()
         with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
             dist.all_gather_into_tensor(
@@ -1676,12 +1624,11 @@ def _allgather_orig_param_states(
         unpadded_tensor = gathered_tensor[: flat_param._unpadded_unsharded_size.numel()]
         flat_param_handle = fsdp_param_info.handle
         orig_states = flat_param_handle._get_unflat_views_aligned(unpadded_tensor)
-        if len(orig_states) != len(fsdp_param_info.param_indices):
-            raise AssertionError(
-                "The number of parameters from FlatParameter is not consistent to "
-                "the number of states used by optimizer state dict reconstruction "
-                "logic."
-            )
+        assert len(orig_states) == len(fsdp_param_info.param_indices), (
+            "The number of parameters from FlatParameter is not consistent to "
+            "the number of states used by optimizer state dict reconstruction "
+            "logic."
+        )
         for fqn, idx in fsdp_param_info.param_indices.items():
             if fsdp_param_info.param_requires_grad[idx] or fqn in output_states:
                 output_states[fqn][state_name] = orig_states[idx]
@@ -1768,7 +1715,7 @@ def _convert_state_with_orig_params(
     # across ranks
     for optim_state_key in all_optim_state_keys:
         param_key: Union[str, int, None] = optim_state_key_to_param_key.get(
-            optim_state_key
+            optim_state_key, None
         )
 
         if param_key is None and not optim_state_key.is_fsdp_managed:
@@ -1776,7 +1723,7 @@ def _convert_state_with_orig_params(
 
         if optim_state_key.is_fsdp_managed:
             fqn = optim_state_key.unflat_param_names[0]
-            fsdp_param_info = fqn_to_fsdp_param_info.get(fqn)
+            fsdp_param_info = fqn_to_fsdp_param_info.get(fqn, None)
             if fsdp_param_info is None:
                 # This can happen if the not all FSDP instances have all the
                 # parameters. This can happen with FSDP + some MPMD style
@@ -1791,10 +1738,7 @@ def _convert_state_with_orig_params(
             all_states[id(fsdp_param_info)][fqn] = state
 
         elif to_save:
-            if len(optim_state_key.unflat_param_names) != 1:
-                raise AssertionError(
-                    f"Expected len(optim_state_key.unflat_param_names) == 1, got {len(optim_state_key.unflat_param_names)}"
-                )
+            assert len(optim_state_key.unflat_param_names) == 1
             unflat_param_name = optim_state_key.unflat_param_names[0]
             with SimpleProfiler.profile("none_fsdp_managed_copy"):
                 param_key = cast(Union[str, int], param_key)
@@ -1814,11 +1758,10 @@ def _convert_state_with_orig_params(
     for _all_states in all_states.values():
         fqn = next(iter(_all_states.keys()))
         fsdp_param_info = fqn_to_fsdp_param_info[fqn]
-        if len(fsdp_param_info.param_requires_grad) <= 0:
-            raise AssertionError(
-                "With use_orig_params, FSDPParamInfo should have requires_grad "
-                "information. However, the length is zero."
-            )
+        assert len(fsdp_param_info.param_requires_grad) > 0, (
+            "With use_orig_params, FSDPParamInfo should have requires_grad "
+            "information. However, the length is zero."
+        )
         for key, idx in fsdp_param_info.param_indices.items():
             if key in _all_states:
                 continue
@@ -1858,14 +1801,13 @@ def _convert_state_with_flat_params(
     # across ranks
     for optim_state_key in all_optim_state_keys:
         param_key: Union[str, int, None] = optim_state_key_to_param_key.get(
-            optim_state_key
+            optim_state_key, None
         )
 
-        if param_key is None:
-            raise AssertionError(
-                "If use_orig_params is False, we must be able to find the "
-                f"corresponding param id. {optim_state_key} {param_key}"
-            )
+        assert param_key is not None, (
+            "If use_orig_params is False, we must be able to find the "
+            f"corresponding param id. {optim_state_key} {param_key}"
+        )
 
         if optim_state_key.is_fsdp_managed:
             # If there are multiple unflat_param_names (not use_orig_params),
@@ -1881,11 +1823,7 @@ def _convert_state_with_flat_params(
                 cpu_offload,
             )
             if to_save:
-                if len(unflat_state) != len(optim_state_key.unflat_param_names):
-                    raise AssertionError(
-                        f"Expected len(unflat_state) == len(optim_state_key.unflat_param_names), "
-                        f"got {len(unflat_state)} != {len(optim_state_key.unflat_param_names)}"
-                    )
+                assert len(unflat_state) == len(optim_state_key.unflat_param_names)
                 fsdp_osd_state.update(
                     zip(
                         optim_state_key.unflat_param_names,
@@ -1893,10 +1831,7 @@ def _convert_state_with_flat_params(
                     )
                 )
         elif to_save:
-            if len(optim_state_key.unflat_param_names) != 1:
-                raise AssertionError(
-                    f"Expected len(optim_state_key.unflat_param_names) == 1, got {len(optim_state_key.unflat_param_names)}"
-                )
+            assert len(optim_state_key.unflat_param_names) == 1
             unflat_param_name = optim_state_key.unflat_param_names[0]
             fsdp_osd_state[unflat_param_name] = copy.copy(optim_state_dict[param_key])
             if cpu_offload:
@@ -2052,8 +1987,7 @@ def _optim_state_dict(
             "most cases, this is a user-defined state that is not "
             "associated with any particular parameter. Another possible "
             "case is this state is managed by TorchRec. Otherwise, there may "
-            " be a mismatched assumption of optim_state_dict of this mode.",
-            stacklevel=2,
+            " be a mismatched assumption of optim_state_dict of this mode."
         )
         fsdp_osd_state[key] = value
 
@@ -2093,10 +2027,7 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> dict[str, FSDPParamInfo]:
         for idx, local_fqn in enumerate(flat_param._fqns):
             fqn = clean_tensor_name(prefix + local_fqn)
             if fqn in fqn_to_param_info:
-                if fqn_to_param_info[fqn].handle.flat_param is not flat_param:
-                    raise AssertionError(
-                        f"Expected fqn_to_param_info[fqn].handle.flat_param is flat_param for {fqn}"
-                    )
+                assert fqn_to_param_info[fqn].handle.flat_param is flat_param, fqn
             fqn_to_param_info[fqn] = fsdp_param_info
             fsdp_param_info.param_indices[fqn] = idx
             if flat_param._params is not None:

@@ -419,7 +419,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   // Do not call this directly, use ProcessGroup::setGroupName instead.
-  virtual void setGroupUid(const std::string& pg_uid) {
+  void setGroupUid(const std::string& pg_uid) {
     pg_uid_ = pg_uid;
   }
 

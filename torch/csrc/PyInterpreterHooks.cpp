@@ -3,8 +3,7 @@
 
 namespace torch::detail {
 
-PyInterpreterHooks::PyInterpreterHooks(
-    c10::impl::PyInterpreterHooksArgs /*unused*/) {}
+PyInterpreterHooks::PyInterpreterHooks(c10::impl::PyInterpreterHooksArgs) {}
 
 c10::impl::PyInterpreter* PyInterpreterHooks::getPyInterpreter() const {
   // Delegate to the existing implementation

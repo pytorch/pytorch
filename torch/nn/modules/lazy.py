@@ -172,9 +172,9 @@ class LazyModuleMixin:
     def __init__(self: _LazyProtocol, *args, **kwargs):
         # Mypy doesn't like this super call in a mixin
         super().__init__(*args, **kwargs)  # type: ignore[misc]
-        # pyrefly: ignore [read-only]
+        # pyrefly: ignore  # read-only
         self._load_hook = self._register_load_state_dict_pre_hook(self._lazy_load_hook)
-        # pyrefly: ignore [read-only]
+        # pyrefly: ignore  # read-only
         self._initialize_hook = self.register_forward_pre_hook(
             self._infer_parameters, with_kwargs=True
         )

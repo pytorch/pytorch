@@ -3074,7 +3074,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 wrong_dtype_shards, [10, 10], init_rrefs=True
             )
 
-        tensor_requires_grad = self.rank == 0
+        tensor_requires_grad = True if self.rank == 0 else False
         wrong_requires_grad_shards = [
             sharded_tensor.Shard(
                 torch.randn(
@@ -3121,7 +3121,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 wrong_pin_memory_local_shards, [10, 10], init_rrefs=True
             )
 
-        tensor_pin_memory = self.rank == 0
+        tensor_pin_memory = True if self.rank == 0 else False
         wrong_pin_memory_shards_cross_ranks = [
             sharded_tensor.Shard(
                 torch.randn(5, 5, pin_memory=tensor_pin_memory), local_shard_metadata

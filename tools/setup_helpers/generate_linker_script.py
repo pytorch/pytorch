@@ -31,9 +31,7 @@ def gen_linker_script(
     text_line_start = text_line_start[0]
 
     # ensure that parent directory exists before writing
-    # pyrefly: ignore [bad-assignment]
     fout = Path(fout)
-    # pyrefly: ignore [missing-attribute]
     fout.parent.mkdir(parents=True, exist_ok=True)
 
     with open(fout, "w") as f:

@@ -35,7 +35,7 @@ def _get_build_root() -> str:
     global _BUILD_ROOT
     if _BUILD_ROOT is None:
         _BUILD_ROOT = _make_temp_dir(prefix="benchmark_utils_jit_build")
-        # pyrefly: ignore [missing-argument]
+        # pyrefly: ignore  # missing-argument
         atexit.register(shutil.rmtree, _BUILD_ROOT)
     return _BUILD_ROOT
 
@@ -159,8 +159,7 @@ def compile_timeit_template(*, stmt: str, setup: str, global_setup: str) -> Time
         src: str = f.read()
 
     module = _compile_template(stmt=stmt, setup=setup, global_setup=global_setup, src=src, is_standalone=False)
-    if not isinstance(module, TimeitModuleType):
-        raise AssertionError("compiled module is not a TimeitModuleType")
+    assert isinstance(module, TimeitModuleType)
     return module
 
 
@@ -170,6 +169,5 @@ def compile_callgrind_template(*, stmt: str, setup: str, global_setup: str) -> s
         src: str = f.read()
 
     target = _compile_template(stmt=stmt, setup=setup, global_setup=global_setup, src=src, is_standalone=True)
-    if not isinstance(target, str):
-        raise AssertionError("compiled target path is not a string")
+    assert isinstance(target, str)
     return target

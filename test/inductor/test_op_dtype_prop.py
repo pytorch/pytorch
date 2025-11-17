@@ -9,7 +9,7 @@ from torch._dynamo.utils import disable_cache_limit
 from torch._inductor import config
 from torch._inductor.codegen.triton import OpDtypeSupport
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_code, run_and_get_triton_code, triton_type
+from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -305,34 +305,6 @@ class TestCase(InductorTestCase):
         associative_scan(
             lambda acc, curr: acc + torch.abs(curr), x, dim=-1, combine_mode="pointwise"
         )
-
-    @parametrize("upcast_to_fp32", (False, True))
-    @parametrize("dtype", (torch.float16, torch.bfloat16))
-    def test_upcast_rank_0_cpu(self, dtype: torch.dtype, upcast_to_fp32: bool):
-        """
-        Test whether we implicitly upcast CPU tensors of rank 0 to float32.
-        """
-
-        # Test broadcasting a rank-0 CPU tensor to rank 1.
-        x = torch.randn(1, dtype=dtype, device="cpu")[0]
-        y = torch.randn(8, dtype=dtype, device=GPU_TYPE)
-        self.assertEqual(len(x.shape), 0)
-        self.assertEqual(len(y.shape), 1)
-        inps = (x, y)
-        func = torch.add
-
-        with config.patch("triton.codegen_upcast_to_fp32", upcast_to_fp32):
-            compiled = torch.compile(func)
-            result, (code,) = run_and_get_code(compiled, *inps)
-
-        # Check numerics.
-        ref = func(*inps)
-        self.assertTrue(torch.allclose(result, ref))
-
-        # Inductor upcasts CPU arguments of rank 0 to float32. Check for a downcast to
-        # the original dtype.
-        num_downcasts = code.count(f".to({triton_type(dtype)})")
-        self.assertEqual(num_downcasts, 0 if upcast_to_fp32 else 1)
 
 
 instantiate_device_type_tests(TestCase, globals(), only_for=("cuda",))

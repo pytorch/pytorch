@@ -118,7 +118,6 @@ def download_patch(pr_number: int, repo_url: str, download_dir: str) -> str:
             urllib.request.urlopen(patch_url) as response,
             open(patch_file, "wb") as out_file,
         ):
-            # pyrefly: ignore [bad-specialization]
             shutil.copyfileobj(response, out_file)
         if not os.path.isfile(patch_file):
             print(f"Failed to download patch for PR #{pr_number}")

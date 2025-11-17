@@ -33,7 +33,7 @@ std::atomic<int64_t> defaultNodeId(-1);
 std::atomic<uint64_t> next_thread_id_{0};
 thread_local uint64_t current_thread_id_ = 0;
 
-constexpr size_t NumRecordScopes =
+static constexpr size_t NumRecordScopes =
     static_cast<size_t>(RecordScope::NUM_SCOPES);
 
 RecordFunctionCallbacks::iterator findCallback(

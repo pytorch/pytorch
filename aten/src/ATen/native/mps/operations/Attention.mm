@@ -92,8 +92,13 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
           }
 
           // upcasting to float32 if needed to improve precision when multiplying by the scale factor
-          maskedMM = castMPSTensor(mpsGraph, maskedMM, MPSDataTypeFloat32);
+          if ([maskedMM dataType] != MPSDataTypeFloat32) {
+            maskedMM = [mpsGraph castTensor:maskedMM toType:MPSDataTypeFloat32 name:nil];
+          }
           maskedMM = [mpsGraph multiplicationWithPrimaryTensor:maskedMM secondaryTensor:scaleTensor name:nil];
+          if ([maskedMM dataType] != qTensor.dataType) {
+            maskedMM = [mpsGraph castTensor:maskedMM toType:qTensor.dataType name:nil];
+          }
 
           if (is_causal) {
             auto causalMask = [mpsGraph constantWithScalar:1.0f
@@ -107,9 +112,7 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
                                                       name:nil];
           } else if (attn_mask) {
             graph->maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, *attn_mask);
-            maskedMM = [mpsGraph additionWithPrimaryTensor:maskedMM
-                                           secondaryTensor:castMPSTensor(mpsGraph, graph->maskTensor, maskedMM.dataType)
-                                                      name:nil];
+            maskedMM = [mpsGraph additionWithPrimaryTensor:maskedMM secondaryTensor:graph->maskTensor name:nil];
           }
 
           // Account for case where all values were masked causing division by 0 in softmax (issue:#156707)
@@ -130,8 +133,8 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
           graph->qTensor = qTensor;
           graph->kTensor = kTensor;
           graph->vTensor = vTensor;
-          graph->outputTensor = castMPSTensor(mpsGraph, output, qTensor.dataType);
-          graph->attnTensor = castMPSTensor(mpsGraph, sm, qTensor.dataType);
+          graph->outputTensor = output;
+          graph->attnTensor = sm;
         });
     auto qPlaceholder = Placeholder(cachedGraph->qTensor, query);
     auto kPlaceholder = Placeholder(cachedGraph->kTensor, key);

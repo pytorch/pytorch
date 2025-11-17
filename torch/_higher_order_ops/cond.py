@@ -177,7 +177,6 @@ def cond(
                 "Pred is a Python constant. When used with torch.cond, it specializes on one of the branches."
                 " If you want torch.cond to preserve two branches, please make the predicate a boolean tensor or a SymBool.",
                 UserWarning,
-                stacklevel=2,
             )
         # This is the eager case. We can just run the true or false branch.
         if pred:

@@ -201,63 +201,18 @@ for hip_platform_file in hip_platform_files:
                     sources.write(line)
             print(f"{hip_platform_file} updated")
 
-# NOTE: fbgemm sources needing hipify
-# fbgemm is its own project with its own build system. pytorch uses fbgemm as
-# a submodule to acquire some gpu source files but compiles only those sources
-# instead of using fbgemm's own build system. One of the source files refers
-# to a header file that is the result of running hipify, but fbgemm uses
-# slightly different hipify settings than pytorch. fbgemm normally hipifies
-# and renames tuning_cache.cuh to tuning_cache_hip.cuh, but pytorch's settings
-# for hipify puts it into its own 'hip' directory. After hipify runs below with
-# the added fbgemm file, we move it to its expected location.
-# NOTE: Internal meta builds (using buck) don't need this step, so conditionally disable it
-buck_build = os.environ.get("FBCODE_BUILD_TOOL", "") == "buck"
-
-extra_files = [
-    "torch/_inductor/codegen/cuda/device_op_overrides.py",
-    "torch/_inductor/codegen/cpp_wrapper_cpu.py",
-    "torch/_inductor/codegen/cpp_wrapper_gpu.py",
-    "torch/_inductor/codegen/wrapper.py",
-]
-
-fbgemm_dir = (
-    REPO_ROOT
-    / "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/common/include/fbgemm_gpu/quantize"
-)
-
-if not buck_build:
-    fbgemm_original = fbgemm_dir / "tuning_cache.cuh"
-
-    extra_files.append(fbgemm_original.as_posix())
 
 hipify_python.hipify(
     project_directory=proj_dir,
     output_directory=out_dir,
     includes=includes,
     ignores=ignores,
-    extra_files=extra_files,
+    extra_files=[
+        "torch/_inductor/codegen/cuda/device_op_overrides.py",
+        "torch/_inductor/codegen/cpp_wrapper_cpu.py",
+        "torch/_inductor/codegen/cpp_wrapper_gpu.py",
+        "torch/_inductor/codegen/wrapper.py",
+    ],
     out_of_place_only=args.out_of_place_only,
     hip_clang_launch=is_hip_clang(),
 )
-
-if not buck_build:
-    fbgemm_move_src = fbgemm_dir / "hip/tuning_cache.cuh"
-    fbgemm_move_dst = fbgemm_dir / "tuning_cache_hip.cuh"
-
-    # only update the file if it changes or doesn't exist
-    do_write = True
-    src_lines = None
-    with open(fbgemm_move_src) as src:
-        src_lines = src.readlines()
-    if os.path.exists(fbgemm_move_dst):
-        dst_lines = None
-        with open(fbgemm_move_dst) as dst:
-            dst_lines = dst.readlines()
-        if src_lines == dst_lines:
-            print(f"{fbgemm_move_dst} skipped")
-            do_write = False
-    if do_write:
-        with open(fbgemm_move_dst, "w") as dst:
-            for line in src_lines:
-                dst.write(line)
-        print(f"{fbgemm_move_dst} updated")

@@ -410,7 +410,7 @@ struct ExistingBdimBatchRuleHelper<F, Func, c10::guts::typelist::typelist<A, T..
 
 
 template <typename F, F Method, typename... ExtraArgs>
-Tensor& unary_inplace_batch_rule(Tensor& self, std::optional<int64_t> /*unused*/, ExtraArgs... extra_args) {
+Tensor& unary_inplace_batch_rule(Tensor& self, std::optional<int64_t>, ExtraArgs... extra_args) {
   INVOKE(self, Method)(std::forward<ExtraArgs>(extra_args)...);
   return self;
 }

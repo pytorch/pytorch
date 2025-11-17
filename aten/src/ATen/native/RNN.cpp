@@ -538,7 +538,7 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_fp16(
       std::move(w_ih_packed), std::move(w_hh_packed));
 }
 
-std::unordered_map<
+static std::unordered_map<
     std::string,
     c10::intrusive_ptr<CellParamsBase> (*)(CellParamsSerializationType)>
     cell_params_deserializers = {
@@ -578,7 +578,7 @@ struct QRNNCellParamsWrapper {
 
 // Gathers every two elements of a vector in a vector of pairs
 template<typename T>
-std::vector<pair_of<T>> pair_vec(const std::vector<T>& vals) {
+static std::vector<pair_of<T>> pair_vec(const std::vector<T>& vals) {
   TORCH_CHECK(vals.size() % 2 == 0, "Odd number of params or hiddens given to a bidirectional RNN");
   std::vector<pair_of<T>> result;
   result.reserve(vals.size() / 2);
@@ -590,7 +590,7 @@ std::vector<pair_of<T>> pair_vec(const std::vector<T>& vals) {
 
 // Flattens a vector of pairs
 template<typename T>
-std::vector<T> unpair_vec(std::vector<pair_of<T>>&& vals) {
+static std::vector<T> unpair_vec(std::vector<pair_of<T>>&& vals) {
   std::vector<T> result;
   result.reserve(vals.size() * 2);
   for (const auto i : c10::irange(vals.size())) {
@@ -601,7 +601,7 @@ std::vector<T> unpair_vec(std::vector<pair_of<T>>&& vals) {
 }
 
 // Parses a flat list of parameter tensors into a list of CellParams
-std::vector<CellParams> gather_params(TensorList params, bool has_biases, bool has_projections = false) {
+static std::vector<CellParams> gather_params(TensorList params, bool has_biases, bool has_projections = false) {
   static at::Tensor undefined;
   std::vector<CellParams> result;
   if (has_biases) {
@@ -1894,10 +1894,10 @@ static DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_tanh_cell_dynamic, simple
 
 namespace {
 
-[[maybe_unused]] auto ensure_linear_params_registered =
+[[maybe_unused]] static auto ensure_linear_params_registered =
     register_linear_params();
 
-auto cell_params_base_registry =
+static auto cell_params_base_registry =
     torch::selective_class_<CellParamsBase>("rnn", TORCH_SELECTIVE_CLASS("CellParamsBase"))
         .def_pickle(
             [](const c10::intrusive_ptr<CellParamsBase>& self)

@@ -187,22 +187,19 @@ if [[ $CUDA_VERSION == 12* || $CUDA_VERSION == 13* ]]; then
             export USE_CUFILE=0
         else
             DEPS_LIST+=(
+                "/usr/local/cuda/lib64/libnvToolsExt.so.1"
                 "/usr/local/cuda/lib64/libcublas.so.12"
                 "/usr/local/cuda/lib64/libcublasLt.so.12"
                 "/usr/local/cuda/lib64/libcudart.so.12"
                 "/usr/local/cuda/lib64/libnvrtc.so.12"
                 "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.12")
             DEPS_SONAME+=(
+                "libnvToolsExt.so.1"
                 "libcublas.so.12"
                 "libcublasLt.so.12"
                 "libcudart.so.12"
                 "libnvrtc.so.12"
                 "libcupti.so.12")
-
-            if [[ $CUDA_VERSION != 12.9* ]]; then
-                DEPS_LIST+=("/usr/local/cuda/lib64/libnvToolsExt.so.1")
-                DEPS_SONAME+=("libnvToolsExt.so.1")
-            fi
         fi
     else
         echo "Using nvidia libs from pypi."

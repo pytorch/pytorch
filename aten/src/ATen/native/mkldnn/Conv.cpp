@@ -160,12 +160,8 @@ static bool mkldnn_conv_enabled_fpmath_mode_bf16(){
 }
 
 static bool mkldnn_conv_enabled_fpmath_mode_tf32(){
-#if defined(__x86_64__) || defined(_M_X64)
-    return at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::CONV) == at::Float32Precision::TF32 &&
-        cpuinfo_has_x86_amx_fp16();
-#else
-    return false;   //TF32 not supported on power system
-#endif
+  return at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::CONV) == at::Float32Precision::TF32 &&
+      cpuinfo_has_x86_amx_fp16();
 }
 
 static inline at::MemoryFormat mkldnn_convolution_memory_format(int64_t dims, bool is_channels_last) {

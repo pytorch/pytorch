@@ -173,8 +173,8 @@ struct TORCH_API GraphFunction : public Function {
 };
 
 // Short hands for dynamic_cast<GraphFunction*>.
-TORCH_API GraphFunction* tryToGraphFunction(Function& /*function*/) noexcept;
-TORCH_API GraphFunction& toGraphFunction(Function& /*function*/);
-TORCH_API const GraphFunction& toGraphFunction(const Function& /*function*/);
+TORCH_API GraphFunction* tryToGraphFunction(Function&) noexcept;
+TORCH_API GraphFunction& toGraphFunction(Function&);
+TORCH_API const GraphFunction& toGraphFunction(const Function&);
 } // namespace torch::jit
 C10_DECLARE_bool(torch_jit_do_not_store_optimized_graph);

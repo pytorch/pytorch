@@ -10,7 +10,9 @@
 
 #include <c10/macros/Macros.h>
 
+#if CUB_SUPPORTS_UNIQUE_BY_KEY()
 #include <thrust/iterator/counting_iterator.h>
+#endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -86,9 +88,9 @@ __global__ void compute_grad_weight_bags(
     const int64_t stride_warped) {
 
   int64_t num_of_segments = *num_of_segments_ptr;
-  const int64_t gid = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-  const int64_t id = gid / stride_warped;
-  const int64_t startFeature = gid % stride_warped;
+  const int gid = blockIdx.x * blockDim.x + threadIdx.x;
+  const int id = gid / stride_warped;
+  const int startFeature = gid % stride_warped;
   if (startFeature >= stride) {
     return;
   }
@@ -132,9 +134,9 @@ __global__ void compute_grad_weight(
 
   int64_t num_of_segments = *num_of_segments_ptr;
   using accscalar_t = acc_type<scalar_t, true>;
-  const int64_t gid = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-  const int64_t id = gid / stride_warped;
-  const int64_t startFeature = gid % stride_warped;
+  const int gid = blockIdx.x * blockDim.x + threadIdx.x;
+  const int id = gid / stride_warped;
+  const int startFeature = gid % stride_warped;
   if (startFeature >= stride) {
     return;
   }
@@ -165,9 +167,9 @@ __global__ void sum_and_scatter(
 
   int64_t num_of_segments = *num_of_segments_ptr;
   int64_t num_of_partial_segments = *num_of_partial_segments_ptr;
-  const int64_t gid = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-  const int64_t id = gid / stride_warped;
-  const int64_t startFeature = gid % stride_warped;
+  const int gid = blockIdx.x * blockDim.x + threadIdx.x;
+  const int id = gid / stride_warped;
+  const int startFeature = gid % stride_warped;
   if (startFeature >= stride) {
     return;
   }
@@ -194,9 +196,18 @@ __global__ void compute_num_of_partial_segments(const index_t *partials_per_segm
             partials_per_segment_offset[num_of_segments-1];
 }
 
+#if !CUB_SUPPORTS_UNIQUE_BY_KEY()
+__global__ void write_num_of_segments_for_legacy_thrust_path(int64_t *num_of_segments_ptr, int64_t num_of_segments) {
+  *num_of_segments_ptr = num_of_segments;
+}
+#endif
 
 } // anon namespace
 
+#if !CUB_SUPPORTS_UNIQUE_BY_KEY()
+template<typename index_t>
+int64_t embedding_backward_cuda_kernel_unique_by_key(const Tensor &sorted_indices, Tensor &segment_offsets);
+#endif
 
 Tensor embedding_backward_cuda_kernel(
         const Tensor &grad,
@@ -223,12 +234,20 @@ Tensor embedding_backward_cuda_kernel(
   auto segment_offsets = at::empty({numel}, orig_indices.options());
   auto num_of_segments_tensor = at::empty({}, grad.options().dtype(kLong));
   int64_t *num_of_segments_ptr = num_of_segments_tensor.mutable_data_ptr<int64_t>();
+#if !CUB_SUPPORTS_UNIQUE_BY_KEY()
+  AT_DISPATCH_INDEX_TYPES(orig_indices.scalar_type(), "embedding_backward_cuda_kernel", [&] () {
+    int64_t num_of_segments = embedding_backward_cuda_kernel_unique_by_key<index_t>(sorted_indices, segment_offsets);
+    write_num_of_segments_for_legacy_thrust_path<<<1, 1, 0, c10::cuda::getCurrentCUDAStream()>>>(num_of_segments_ptr, num_of_segments);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  });
+#else
   AT_DISPATCH_INDEX_TYPES(orig_indices.scalar_type(), "embedding_backward_cuda_kernel", [&] () {
     cuda::cub::unique_by_key(
       sorted_indices.const_data_ptr<index_t>(), thrust::make_counting_iterator(0),
       segment_offsets.mutable_data_ptr<index_t>(),
       num_of_segments_ptr, sorted_indices.numel());
   });
+#endif
 
   int64_t max_segments = std::min<int64_t>(numel, num_weights);
 

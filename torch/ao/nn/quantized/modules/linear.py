@@ -310,7 +310,7 @@ class Linear(WeightedQuantizedModule):
             # the type mismatch in assignment. Also, mypy has an issue with
             # iterables not being implemented, so we are ignoring those too.
             if not isinstance(cls._FLOAT_MODULE, Iterable):
-                # pyrefly: ignore [bad-assignment]
+                # pyrefly: ignore  # bad-assignment
                 cls._FLOAT_MODULE = [cls._FLOAT_MODULE]
             supported_modules = ", ".join(
                 [float_mod.__name__ for float_mod in cls._FLOAT_MODULE]

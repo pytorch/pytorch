@@ -8,7 +8,7 @@ from .expanded_weights_impl import ExpandedWeight
 
 def is_batch_first(expanded_args_and_kwargs):
     batch_first = None
-    # pyrefly: ignore [bad-assignment]
+    # pyrefly: ignore  # bad-assignment
     for arg in expanded_args_and_kwargs:
         if not isinstance(arg, ExpandedWeight):
             continue

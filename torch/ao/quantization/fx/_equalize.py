@@ -121,8 +121,7 @@ class _InputEqualizationObserver(nn.Module):
         ):
             warnings.warn(
                 "Must call calculate_equalization_scale before calling calculate_scaled_minmax. "
-                + "Will not scale the next quantization observer.",
-                stacklevel=2,
+                + "Will not scale the next quantization observer."
             )
             return None, None
 
@@ -227,8 +226,7 @@ def calculate_equalization_scale(
     ):
         warnings.warn(
             "Must run observer before calling calculate_equalization_scale. "
-            + "Returning default equalization scale torch.tensor(1).",
-            stacklevel=2,
+            + "Returning default equalization scale torch.tensor(1)."
         )
         return torch.tensor(1)
 
@@ -248,7 +246,7 @@ def calculate_equalization_scale(
 
 
 class EqualizationQConfig(
-    # pyrefly: ignore [invalid-inheritance]
+    # pyrefly: ignore  # invalid-inheritance
     namedtuple("EqualizationQConfig", ["input_activation", "weight"])
 ):
     """
@@ -463,7 +461,7 @@ def maybe_get_next_equalization_scale(
     In this case, the node given is linear1 and we want to locate the InputEqObs.
     """
     next_inp_eq_obs = maybe_get_next_input_eq_obs(node, modules)
-    # pyrefly: ignore [invalid-argument]
+    # pyrefly: ignore  # invalid-argument
     if next_inp_eq_obs:
         if (
             next_inp_eq_obs.equalization_scale.nelement() == 1
@@ -827,7 +825,7 @@ def convert_eq_obs(
                 scale_weight_node(
                     node,
                     modules,
-                    # pyrefly: ignore [bad-argument-type]
+                    # pyrefly: ignore  # bad-argument-type
                     equalization_scale,
                     maybe_next_equalization_scale,
                 )
@@ -836,7 +834,7 @@ def convert_eq_obs(
                     node,
                     model,
                     modules,
-                    # pyrefly: ignore [bad-argument-type]
+                    # pyrefly: ignore  # bad-argument-type
                     equalization_scale,
                     maybe_next_equalization_scale,
                 )

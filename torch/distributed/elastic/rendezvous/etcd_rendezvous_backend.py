@@ -126,7 +126,6 @@ class EtcdRendezvousBackend(RendezvousBackend):
         return tmp
 
     def _decode_state(self, result: etcd.EtcdResult) -> tuple[bytes, Token]:
-        # pyrefly: ignore [missing-attribute]
         base64_state = result.value.encode()
 
         try:
@@ -136,7 +135,6 @@ class EtcdRendezvousBackend(RendezvousBackend):
                 "The state object is corrupt. See inner exception for details."
             ) from exc
 
-        # pyrefly: ignore [missing-attribute]
         return state, result.modifiedIndex
 
 

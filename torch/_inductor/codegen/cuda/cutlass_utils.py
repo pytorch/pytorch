@@ -53,8 +53,8 @@ def move_cutlass_compiled_cache() -> None:
         filename = os.path.basename(cutlass_cppgen.CACHE_FILE)
         shutil.move(cutlass_cppgen.CACHE_FILE, os.path.join(cache_dir(), filename))
         log.debug("Moved CUTLASS compiled cache file to %s", cache_dir())
-    except OSError:
-        log.warning("Failed to move CUTLASS compiled cache file", exc_info=True)
+    except OSError as e:
+        log.warning("Failed to move CUTLASS compiled cache file: %s", e)
 
 
 def _rename_cutlass_import(content: str, cutlass_modules: list[str]) -> str:
@@ -79,7 +79,7 @@ def try_import_cutlass() -> bool:
             import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
             import cutlass_library  # type: ignore[import-not-found]
         except ImportError as e:
-            log.warning(  # noqa: G200
+            log.warning(
                 "Failed to import CUTLASS packages in fbcode: %s, ignoring the CUTLASS backend.",
                 str(e),
             )
@@ -164,7 +164,7 @@ def try_import_cutlass() -> bool:
 
             return True
         except ImportError as e:
-            log.debug(  # noqa: G200
+            log.debug(
                 "Failed to import CUTLASS packages: %s, ignoring the CUTLASS backend.",
                 str(e),
             )
@@ -470,7 +470,6 @@ class CUDACompileSourceCapturingContext:
             self.sources.append(source_code)
             return _compile_method_orig(source_code, dst_file_ext)
 
-        # pyrefly: ignore [bad-assignment]
         self._compile_patch = mock.patch(
             "torch._inductor.codecache.CUDACodeCache.compile", my_compile
         )

@@ -187,7 +187,6 @@ class IterationRangesRoot(IterationRanges):
 
         # True if the dimension is implemented as a single program looping over
         # the full dimension (currently only used for non-persistent reduction)
-        # pyrefly: ignore [missing-argument]
         assert not is_loop or (self.is_reduction and grid_dim is None)
         self.is_loop = is_loop
         # Index of corresponding dimension on triton tensors
@@ -375,7 +374,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     sexpr: Callable[[sympy.Expr], str] = pexpr
     kexpr: Callable[[sympy.Expr], str]
     allow_block_ptr: bool = False
-    # pyrefly: ignore [bad-override]
     kernel_name: str
 
     def __init__(
@@ -417,16 +415,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self.code_hash: Optional[str] = None
         # Info to enable multiple store_output calls for epilogue subtiling
         self.store_output_ctr = itertools.count()
-        self.is_native_matmul = False
-        if config.triton.native_matmul:
-            for node in self.features.node_schedule:
-                if (
-                    isinstance(node, scheduler.SchedulerNode)
-                    and isinstance(node.node, ir.ComputedBuffer)
-                    and node.node.get_reduction_type() == "dot"
-                ):
-                    self.is_native_matmul = True
-                    break
 
         # define this in a closure to make cache local to object
         @functools.cache
@@ -572,7 +560,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             if tree.tensor_dim is None:
                 continue
 
-            # pyrefly: ignore [missing-argument]
             if not tree.is_reduction or self.inside_reduction:
                 sizes[tree.tensor_dim] = f"{tree.prefix.upper()}BLOCK"
         return sizes
@@ -684,19 +671,10 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             return next(var_count)
 
         def make_combined(
-            sizes: list[sympy.Expr], idxs: list[int]
+            size: sympy.Expr, idx1: int, idx2: int
         ) -> Callable[[list[sympy.Expr]], sympy.Expr]:
-            """
-            Builds the nested expression:
-              ((...((s1*v[i1] + v[i2]) * s2 + v[i3]) ... ) * sk + v[i(k+1)])
-            """
-            assert len(idxs) == len(sizes) + 1
-
             def getter(flat_vars: list[sympy.Expr]) -> sympy.Expr:
-                expr = flat_vars[idxs[0]]
-                for s, idx in zip(sizes, idxs[1:]):
-                    expr = s * expr + flat_vars[idx]
-                return expr
+                return size * flat_vars[idx1] + flat_vars[idx2]
 
             return getter
 
@@ -716,47 +694,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     # scroll to next group with remaining elements
                     current_group += 1
 
-                # During native matmul on bmm, we enforce tiling order (z, y, x, r).
-                # When fusing a bmm node with loop (z, y, x, r) with a pw node
-                # of shape (z*y*x, 1), we need to split the pw iteration range
-                # into three dimensions.
-                # The group becomes [z, y, x, 1], with lengths ([z*y*x], []).
-                # In this case, we decompose the combined size z*y*x into three
-                # consecutive groups. Previously, _split_iteration_ranges supported
-                # splitting into at most two dimensions, but we now extend it to do
-                # three splits when the total size is divisible by all three.
-
-                # is group having (z,y,x,r=1) form?
-                is_bmm_then_pw = len(remaining) == 4 and remaining[-1] == 1
-                if (
-                    current_group + 2 < len(remaining)
-                    and sv.statically_known_gt(
-                        size, remaining[current_group] * remaining[current_group + 1]
-                    )
-                    and is_bmm_then_pw
-                ):
-                    # need to break size in three
-                    if not sv.statically_known_multiple_of(
-                        size, remaining[current_group] * remaining[current_group + 1]
-                    ):
-                        raise CantSplit
-
-                    size1 = remaining[current_group]
-                    size2 = remaining[current_group + 1]
-                    size3 = FloorDiv(size, size1 * size2)
-                    return_getters.append(
-                        make_combined(
-                            [size2, size3],
-                            [
-                                add_range(current_group, size1),
-                                add_range(current_group + 1, size2),
-                                add_range(current_group + 2, size3),
-                            ],
-                        )
-                    )
-
-                # Two-dimensional tiling
-                elif current_group + 1 < len(remaining) and sv.statically_known_gt(
+                if current_group + 1 < len(remaining) and sv.statically_known_gt(
                     size, remaining[current_group]
                 ):
                     # need to break size in two
@@ -769,11 +707,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     size2 = FloorDiv(size, remaining[current_group])
                     return_getters.append(
                         make_combined(
-                            [size2],
-                            [
-                                add_range(current_group, size1),
-                                add_range(current_group + 1, size2),
-                            ],
+                            size2,
+                            add_range(current_group, size1),
+                            add_range(current_group + 1, size2),
                         )
                     )
                 else:
@@ -786,6 +722,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
             f"failed to set ranges {remaining} {lengths}"
         )
+
         return new_ranges, return_getters_groups
 
     @classmethod
@@ -965,10 +902,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
     def active_range_trees(self) -> list[IterationRangesRoot]:
         return [
-            t
-            for t in self.range_trees
-            # pyrefly: ignore [missing-argument]
-            if not t.is_reduction or self.inside_reduction
+            t for t in self.range_trees if not t.is_reduction or self.inside_reduction
         ]
 
     def codegen_indexing(self, expr: sympy.Expr) -> sympy.Expr:
@@ -1116,7 +1050,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 numel = buf_size
             dtype = V.graph.get_dtype(arg)
             dtype_size = get_dtype_size(dtype)
-            # pyrefly: ignore [bad-argument-type]
             nbytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
         return sum(nbytes)
 
@@ -1137,7 +1070,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
         argdefs, call_args, _signature, _ = self.args.python_argdefs()
         uniform_stride_order = None
-        # pyrefly: ignore [bad-assignment]
         for arg_name in call_args:
             buf = V.graph.try_get_buffer(arg_name)
             if not buf:
@@ -1264,34 +1196,6 @@ class SIMDScheduling(BaseScheduling):
                     rnumel1,
                     rnumel2,
                 )
-
-            if reduction_can_fuse and (
-                node1.is_native_matmul() or node2.is_native_matmul()
-            ):
-                # Ensure node1 is always the native matmul side
-                if not node1.is_native_matmul():
-                    node1, node2 = node2, node1
-
-                # 1. A native matmul node keeps its original loop order.
-                #    For example: C[z,y,x] = torch.bmm(A[z,y,r], B[z,r,x]) keeps (z,y,x) order.
-                #    (see simplify_and_reorder in ir.py)
-                #
-                # 2. Triton kernels with native matmul always tile loops as (z,y,x)
-                #    (see get_tiling_and_scores in this file)
-                #
-                # 3. If a candidate node (node2) uses a different loop order (e.g., (z,x,y,r)),
-                #    its tiling is incompatible with native matmul tiling (z,y,x,r).
-                #    This means _split_iteration_ranges will fail, so these nodes should not be fused.
-                tiling = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
-                if not all(
-                    SIMDKernel.is_compatible(
-                        tiling.values(), n2.get_ranges(), reduction_numel=rnumel1
-                    )
-                    for n2 in node2.get_nodes()
-                ):
-                    why("invalid loop order and tiling for native matmul")
-                    return False
-
             return reduction_can_fuse
 
         if not node1.is_reduction() and not node2.is_reduction():
@@ -1761,13 +1665,11 @@ class SIMDScheduling(BaseScheduling):
 
             for input_name in kernel.named_input_nodes.keys():
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
-                # pyrefly: ignore [missing-attribute]
                 partial_code.finalize_hook(subgraph_name, strict=False)
 
             num_store_subgraphs = kernel.get_store_output_count()
             for i in range(num_store_subgraphs):
                 subgraph_name = kernel._get_store_output_subgraph_name(i)
-                # pyrefly: ignore [missing-attribute]
                 partial_code.finalize_hook(subgraph_name)
 
             if isinstance(partial_code, str):
@@ -1889,7 +1791,6 @@ class SIMDScheduling(BaseScheduling):
                         only_gen_src_code=True,
                     )
                     assert isinstance(src_code, str)
-                    # pyrefly: ignore [bad-argument-type]
                     src_codes.append(src_code)
                 else:
                     if size_hint is None:
@@ -1994,8 +1895,6 @@ class SIMDScheduling(BaseScheduling):
         )
         kernel_code_list = []
         for node_group in partitions:
-            if len(node_group) == 0:
-                continue
             fused_node_lists = [node.get_nodes() for node in node_group]
             kernel = ComboKernel(
                 enable_autotune=enable_autotune,
@@ -2395,7 +2294,7 @@ class SIMDScheduling(BaseScheduling):
                     return ([], [])
 
             key = (repr(vars_to_use), use_split_var, is_pointwise)
-            if out := scored_sub_split.get(key):
+            if out := scored_sub_split.get(key, None):
                 return out
 
             splitting_vars = all_iter_vars if is_pointwise else all_red_vars
@@ -2609,22 +2508,6 @@ class SIMDScheduling(BaseScheduling):
         # Tiled reductions are gated by a config flag.
         default_tiling = cls.create_tiling([numel], [reduction_numel])
 
-        # Force tiling compatible with matmul dimensions
-        # when natively generating matmul without template calls.
-        for node in EnableReduction.filter(node_schedule):
-            if isinstance(node.node, ir.ComputedBuffer):
-                if (
-                    node.node.get_reduction_type() == "dot"
-                    and config.triton.native_matmul
-                ):
-                    # A[M,K] @ B[K,N]
-                    # force tiling to be {'y':M, 'x':N, 'r0_':K}
-                    node_ranges = node.get_ranges()
-                    range_y_x = node_ranges[0]  # (M,N)
-                    range_r = node_ranges[1]  # (K)
-                    tiling = cls.create_tiling(range_y_x, range_r)
-                    return tiling, None
-
         # # TODO: enable by default
         if (
             torch._inductor.config.triton.coalesce_tiling_analysis
@@ -2719,7 +2602,6 @@ class SIMDScheduling(BaseScheduling):
             perf_hint_log.info("possibly bad tiling: %s", ranked_tilings)
 
         # Optionally, prefer tiling into as many dimensions as possible.
-        # pyrefly: ignore [unbound-name]
         if config.triton.prefer_nd_tiling:
             ranked_tilings = (
                 cls.get_nd_tilings(node_schedule, numel, reduction_numel)
@@ -2769,7 +2651,6 @@ class SIMDScheduling(BaseScheduling):
                     hint_override=hint_override,
                 )
 
-        # pyrefly: ignore [missing-attribute]
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
         return src_code
 

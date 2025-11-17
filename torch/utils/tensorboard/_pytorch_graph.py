@@ -187,8 +187,8 @@ class GraphPy:
                 )
 
         for key, node in self.nodes_io.items():
-            if type(node) is NodeBase:
-                # pyrefly: ignore [unsupported-operation]
+            if type(node) == NodeBase:
+                # pyrefly: ignore  # unsupported-operation
                 self.unique_name_to_scoped_name[key] = node.scope + "/" + node.debugName
             if hasattr(node, "input_or_output"):
                 self.unique_name_to_scoped_name[key] = (
@@ -199,7 +199,7 @@ class GraphPy:
                 self.unique_name_to_scoped_name[key] = node.scope + "/" + node.debugName
                 if node.scope == "" and self.shallowest_scope_name:
                     self.unique_name_to_scoped_name[node.debugName] = (
-                        # pyrefly: ignore [unsupported-operation]
+                        # pyrefly: ignore  # unsupported-operation
                         self.shallowest_scope_name + "/" + node.debugName
                     )
 

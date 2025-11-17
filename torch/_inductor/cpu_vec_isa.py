@@ -156,7 +156,7 @@ cdll.LoadLibrary("__lib_path__")
 @dataclasses.dataclass
 class VecNEON(VecISA):
     _bit_width = 128  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec128/vec128_float_neon.h
-    _macro = ["CPU_CAPABILITY_NEON", "AT_BUILD_ARM_VEC256_WITH_SLEEF"]
+    _macro = ["CPU_CAPABILITY_NEON", "AT_BUILD_ARM_VECSVE_WITH_SLEEF"]
     _arch_flags = ""  # Unused
     _dtype_nelements = {torch.float: 4, torch.bfloat16: 8, torch.float16: 8}
 
@@ -168,9 +168,29 @@ class VecNEON(VecISA):
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
+class VecSVE128(VecISA):
+    # SVE with 128-bit width
+    _bit_width = 128
+    _macro = [
+        "CPU_CAPABILITY_SVE",
+        "CPU_CAPABILITY_SVE128",
+        "AT_BUILD_ARM_VECSVE_WITH_SLEEF",
+        "__ARM_FEATURE_BF16",
+    ]
+    _arch_flags = "-march=armv9-a+sve2+fp16+fp16fml+bf16 -msve-vector-bits=128"
+    _dtype_nelements = {torch.float: 4, torch.bfloat16: 8, torch.float16: 8}
+
+    def __str__(self) -> str:
+        if config.is_fbcode():
+            return "sve128"
+        return "asimd"
+
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
+
+
 @dataclasses.dataclass
 class VecSVE256(VecISA):
-    # this function can be repurposed for SVE with variable vec length
+    # SVE with 256-bit width
     _bit_width = 256
     _macro = [
         "CPU_CAPABILITY_SVE",
@@ -217,7 +237,6 @@ extern "C" __m512bh __avx512_bf16_chk_kernel(__m512 a, __m512 b) {
 """
 
     @functools.cache  # noqa: B019
-    # pyrefly: ignore [bad-override]
     def __bool__(self) -> bool:
         if super().__bool__():
             if config.is_fbcode():
@@ -410,6 +429,7 @@ supported_vec_isa_list = [
     VecAVX512(),
     VecAVX2(),
     VecNEON(),
+    VecSVE128(),
     VecSVE256(),
 ]
 
@@ -430,7 +450,6 @@ def get_isa_from_cpu_capability(
         "avx512": "avx512",
     }
     if capability in capability_to_isa_str.keys():
-        # pyrefly: ignore [index-error]
         isa_str = capability_to_isa_str[capability]
         if isa_str == "INVALID_VEC_ISA":
             return invalid_vec_isa
@@ -475,6 +494,8 @@ def valid_vec_isa_list() -> list[VecISA]:
     elif arch == "aarch64":
         if torch.backends.cpu.get_cpu_capability() == "SVE256":
             isa_list.append(VecSVE256())
+        elif torch.backends.cpu.get_cpu_capability() == "SVE128":
+            isa_list.append(VecSVE128())
         else:
             isa_list.append(VecNEON())
 

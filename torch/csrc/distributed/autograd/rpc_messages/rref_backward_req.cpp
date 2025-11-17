@@ -37,7 +37,7 @@ c10::intrusive_ptr<Message> RRefBackwardReq::toMessageImpl() && {
 std::unique_ptr<RRefBackwardReq> RRefBackwardReq::fromMessage(
     const Message& message) {
   // Unpickle the message and retrieve tupleElements.
-  auto payload = message.payload().data();
+  auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
   IValue tuple = jit::unpickle(
       payload,

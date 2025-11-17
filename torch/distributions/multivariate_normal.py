@@ -123,7 +123,7 @@ class MultivariateNormal(Distribution):
         the corresponding lower triangular matrices using a Cholesky decomposition.
     """
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     arg_constraints = {
         "loc": constraints.real_vector,
         "covariance_matrix": constraints.positive_definite,
@@ -157,7 +157,7 @@ class MultivariateNormal(Distribution):
                     "with optional leading batch dimensions"
                 )
             batch_shape = torch.broadcast_shapes(scale_tril.shape[:-2], loc.shape[:-1])
-            # pyrefly: ignore [read-only]
+            # pyrefly: ignore  # read-only
             self.scale_tril = scale_tril.expand(batch_shape + (-1, -1))
         elif covariance_matrix is not None:
             if covariance_matrix.dim() < 2:
@@ -168,7 +168,7 @@ class MultivariateNormal(Distribution):
             batch_shape = torch.broadcast_shapes(
                 covariance_matrix.shape[:-2], loc.shape[:-1]
             )
-            # pyrefly: ignore [read-only]
+            # pyrefly: ignore  # read-only
             self.covariance_matrix = covariance_matrix.expand(batch_shape + (-1, -1))
         else:
             assert precision_matrix is not None  # helps mypy
@@ -180,7 +180,7 @@ class MultivariateNormal(Distribution):
             batch_shape = torch.broadcast_shapes(
                 precision_matrix.shape[:-2], loc.shape[:-1]
             )
-            # pyrefly: ignore [read-only]
+            # pyrefly: ignore  # read-only
             self.precision_matrix = precision_matrix.expand(batch_shape + (-1, -1))
         self.loc = loc.expand(batch_shape + (-1,))
 

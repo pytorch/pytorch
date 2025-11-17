@@ -16,7 +16,7 @@ struct C10_API GPUTrace {
 
   // This function will only register the first interpreter that tries to invoke
   // it. For all of the next ones it will be a no-op.
-  static void set_trace(const PyInterpreter* /*trace*/);
+  static void set_trace(const PyInterpreter*);
 
   static const PyInterpreter* get_trace() {
     if (!haveState)

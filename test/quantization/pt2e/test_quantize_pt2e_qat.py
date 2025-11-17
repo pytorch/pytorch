@@ -665,6 +665,12 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
         self.assertNotEqual(get_source_fn(second_conv), get_source_fn(second_relu))
         self.assertNotEqual(get_source_fn(first_relu), get_source_fn(second_relu))
 
+        # Assert that "backbone" exists only in the second set of conv and relu's partition
+        self.assertTrue("backbone" not in get_source_fn(first_conv))
+        self.assertTrue("backbone" not in get_source_fn(first_relu))
+        self.assertTrue("backbone" in get_source_fn(second_conv))
+        self.assertTrue("backbone" in get_source_fn(second_relu))
+
     def test_qat_conv_bn_bias_derived_qspec(self):
         m = self._get_conv_bn_model()
         example_inputs = self.example_inputs

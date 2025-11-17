@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-import functools
 import inspect
 import os
 import pickle
@@ -174,39 +173,6 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
 
     def test_decorated_function_aot(self):
         def check_inputs(fn):
-            def _fn(*args, **kwargs):
-                for arg in args:
-                    assert arg.shape[0] > 1
-
-                return fn(*args, **kwargs)
-
-            return _fn
-
-        @check_inputs
-        def foo(x, y):
-            a = x + x
-            b = y + y
-            c = a + b
-            return c
-
-        example_inputs = (torch.ones(3), torch.ones(3))
-        expected = foo(*example_inputs)
-
-        def backend(gm, example_inputs):
-            return CustomCompiledFunction(gm, example_inputs)
-
-        with torch.compiler.set_stance("fail_on_recompile"):
-            compiled_fn = torch.compile(
-                foo,
-                fullgraph=True,
-                backend=backend,
-            ).aot_compile((example_inputs, {}))
-            actual = compiled_fn(*example_inputs)
-            self.assertEqual(expected, actual)
-
-    def test_decorated_function_with_functools_wrap_aot(self):
-        def check_inputs(fn):
-            @functools.wraps(fn)
             def _fn(*args, **kwargs):
                 for arg in args:
                     assert arg.shape[0] > 1
@@ -470,67 +436,6 @@ from user code:
         )
         assert hasattr(backend_result.compiled_fn, "serialize")
         self.assertIsNotNone(backend_result.compiled_fn.serialize)
-
-    def test_fullgraph_capture_with_pytree_module(self):
-        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
-
-        class Module(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(3, 3)
-                self.linear1 = torch.nn.Linear(3, 3)
-                self.linear2 = torch.nn.Linear(3, 3)
-                self.linear3 = torch.nn.Linear(3, 3)
-
-            def forward(self, x):
-                return {
-                    "y": self.linear2(x[2] + 1),
-                    "z": self.linear3(x[1] - 1),
-                    "w": self.linear(x[0]["b"] + 2),
-                    "v": self.linear1(x[0]["a"] - 2),
-                }
-
-        mod = Module()
-        compiled_mod = dynamo_graph_capture_for_export(mod)(
-            (
-                {"a": torch.randn(3, 3), "b": torch.randn(3, 3)},
-                torch.randn(3, 3),
-                torch.randn(3, 3),
-            )
-        )
-
-        inputs = (
-            {"a": torch.randn(3, 3), "b": torch.randn(3, 3)},
-            torch.randn(3, 3),
-            torch.randn(3, 3),
-        )
-        self.assertEqual(compiled_mod(inputs), mod(inputs))
-
-    def test_fullgraph_capture_with_pytree_func(self):
-        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
-
-        def foo(x):
-            return {
-                "y": x[2] + 1,
-                "z": x[1] - 1,
-                "w": x[0]["b"] + 2,
-                "v": x[0]["a"] - 2,
-            }
-
-        compiled_foo = dynamo_graph_capture_for_export(foo)(
-            (
-                {"a": torch.randn(4, 3), "b": torch.randn(3, 2)},
-                torch.randn(2, 3),
-                torch.randn(3, 4),
-            )
-        )
-
-        inputs = (
-            {"a": torch.randn(4, 3), "b": torch.randn(3, 2)},
-            torch.randn(2, 3),
-            torch.randn(3, 4),
-        )
-        self.assertEqual(compiled_foo(inputs), foo(inputs))
 
 
 if __name__ == "__main__":

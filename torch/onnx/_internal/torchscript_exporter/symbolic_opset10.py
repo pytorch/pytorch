@@ -205,7 +205,7 @@ def _adjust_attributes_of_max_pool(
     else:
         strides = stride  # type: ignore[assignment]
 
-    # pyrefly: ignore [bad-return]
+    # pyrefly: ignore  # bad-return
     return (kernel_shape, strides, pads, dilation)
 
 
@@ -382,7 +382,7 @@ def _adjust_attributes_of_avg_pool(
     else:
         strides = stride  # type: ignore[assignment]
 
-    # pyrefly: ignore [bad-return]
+    # pyrefly: ignore  # bad-return
     return (kernel_shape, strides, pads)
 
 
@@ -613,8 +613,7 @@ def embedding_bag(
 
     warnings.warn(
         "Export of embedding_bag with dynamic input/offsets shape is not supported in opset 10. "
-        "Please use opset 11 or higher to export model for dynamic input shape.'",
-        stacklevel=2,
+        "Please use opset 11 or higher to export model for dynamic input shape.'"
     )
     offsets_dim_0 = symbolic_helper._get_tensor_dim_size(offsets, 0)
     if offsets_dim_0 is not None:
@@ -712,7 +711,7 @@ def fake_quantize_per_tensor_affine(
             "Non-constant scale not supported",
             inputs,
         )
-    # pyrefly: ignore [missing-attribute]
+    # pyrefly: ignore  # missing-attribute
     scale = scale.float().data  # Avoid exporter generating double type
     if quant_min == 0:
         zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.UINT8)

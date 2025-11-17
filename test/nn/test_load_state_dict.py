@@ -474,8 +474,8 @@ def load_torch_function_handler(cls, func, types, args=(), kwargs=None):
                 f"Expected isinstance(src, {cls}) but got {type(src)}"
             )
             assert (
-                type(dest) is torch.Tensor
-                or type(dest) is torch.nn.Parameter
+                type(dest) == torch.Tensor
+                or type(dest) == torch.nn.Parameter
                 or issubclass(cls, type(dest))
             )
             if assign:

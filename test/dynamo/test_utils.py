@@ -8,7 +8,6 @@ from unittest import mock
 import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
-import torch.compiler.config as compiler_config
 from torch._dynamo import utils
 from torch._inductor.test_case import TestCase
 
@@ -498,11 +497,9 @@ class TestDynamoTimed(TestCase):
             e.co_filename = None
             e.co_firstlineno = None
             e.inductor_config = None
-            e.compiler_config = None
             e.cuda_version = None
             e.triton_version = None
             e.python_version = None
-            e.pytorch_version = None
             e.stack_trace = None
             e.graph_node_shapes = None
             e.exception_stack_trace = None
@@ -512,7 +509,6 @@ class TestDynamoTimed(TestCase):
         raw = dataclasses.asdict(compilation_events[0])
         del raw["feature_usage"]
         del raw["ir_count"]
-        del raw["inductor_provenance"]
         del raw["param_numel"]
         del raw["param_bytes"]
         del raw["param_count"]
@@ -532,7 +528,6 @@ class TestDynamoTimed(TestCase):
  'code_gen_time_s': 0.0,
  'compile_id': '1/0',
  'compile_time_autotune_time_us': None,
- 'compiler_config': None,
  'compliant_custom_ops': set(),
  'config_inline_inbuilt_nn_modules': False,
  'config_suppress_errors': False,
@@ -581,7 +576,6 @@ class TestDynamoTimed(TestCase):
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': 0,
  'python_version': None,
- 'pytorch_version': None,
  'recompile_reason': None,
  'recompile_user_contexts': None,
  'remote_cache_time_saved_s': None,
@@ -619,7 +613,6 @@ class TestDynamoTimed(TestCase):
  'code_gen_time_s': 0.0,
  'compile_id': '1/0',
  'compile_time_autotune_time_us': None,
- 'compiler_config': None,
  'compliant_custom_ops': set(),
  'config_inline_inbuilt_nn_modules': False,
  'config_suppress_errors': False,
@@ -668,7 +661,6 @@ class TestDynamoTimed(TestCase):
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': 0,
  'python_version': None,
- 'pytorch_version': None,
  'recompile_reason': None,
  'recompile_user_contexts': None,
  'remote_cache_time_saved_s': None,
@@ -699,7 +691,6 @@ class TestDynamoTimed(TestCase):
         raw = dataclasses.asdict(compilation_events[1])
         del raw["feature_usage"]
         del raw["ir_count"]
-        del raw["inductor_provenance"]
         del raw["guard_latency_us"]
         del raw["param_numel"]
         del raw["param_bytes"]
@@ -718,7 +709,6 @@ class TestDynamoTimed(TestCase):
  'code_gen_time_s': 0.0,
  'compile_id': '1/0',
  'compile_time_autotune_time_us': None,
- 'compiler_config': None,
  'compliant_custom_ops': None,
  'config_inline_inbuilt_nn_modules': False,
  'config_suppress_errors': False,
@@ -767,7 +757,6 @@ class TestDynamoTimed(TestCase):
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': None,
  'python_version': None,
- 'pytorch_version': None,
  'recompile_reason': None,
  'recompile_user_contexts': None,
  'remote_cache_time_saved_s': None,
@@ -805,7 +794,6 @@ class TestDynamoTimed(TestCase):
  'code_gen_time_s': 0.0,
  'compile_id': '1/0',
  'compile_time_autotune_time_us': None,
- 'compiler_config': None,
  'compliant_custom_ops': None,
  'config_inline_inbuilt_nn_modules': False,
  'config_suppress_errors': False,
@@ -854,7 +842,6 @@ class TestDynamoTimed(TestCase):
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': None,
  'python_version': None,
- 'pytorch_version': None,
  'recompile_reason': None,
  'recompile_user_contexts': None,
  'remote_cache_time_saved_s': None,
@@ -879,25 +866,6 @@ class TestDynamoTimed(TestCase):
  'triton_compile_time_us': 0,
  'triton_kernel_compile_times_us': None,
  'triton_version': None}""",  # noqa: B950
-        )
-
-    @dynamo_config.patch(
-        {
-            "log_compilation_metrics": True,
-        }
-    )
-    @compiler_config.patch({"job_id": "test_job_id"})
-    def test_compiler_config(self):
-        def test1(x):
-            return x * x
-
-        compilation_events = []
-        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            torch.compile(test1)(torch.randn(1))
-            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
-        self.assertIn(
-            '"job_id": "test_job_id"',
-            compilation_events[0].compiler_config,
         )
 
     @dynamo_config.patch(
@@ -937,27 +905,6 @@ class TestDynamoTimed(TestCase):
             torch.compile(test2)(torch.randn(10, 10))
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].ir_count, second)
-
-    @dynamo_config.patch(
-        {
-            "log_compilation_metrics": True,
-        }
-    )
-    @inductor_config.patch(
-        {"trace.enabled": True, "trace.provenance_tracking_level": 1},
-    )
-    def test_inductor_provenance(self):
-        module = torch.nn.Linear(6, 66)
-        graph_module = torch.fx.symbolic_trace(module)
-
-        compilation_events = []
-        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            torch.compile(graph_module)(torch.randn(6, 6))
-            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
-        self.assertEqual(
-            compilation_events[0].inductor_provenance,
-            {'{"extern_kernels.addmm:1": []}'},
-        )
 
     @dynamo_config.patch({"log_compilation_metrics": True})
     @inductor_config.patch({"force_disable_caches": True})

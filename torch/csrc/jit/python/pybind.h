@@ -113,7 +113,7 @@ struct type_caster<torch::jit::IValue> {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(torch::jit::IValue, _("IValue"));
 
-  bool load(handle src, bool /*unused*/) {
+  bool load(handle src, bool) {
     try {
       value = torch::jit::toTypeInferredIValue(src);
       return true;
@@ -136,7 +136,7 @@ struct type_caster<torch::jit::Symbol> {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(torch::jit::Symbol, _("Symbol"));
 
-  bool load(handle src, bool /*unused*/) {
+  bool load(handle src, bool) {
     // TODO: Is there a way to py::cast that doesn't raise an exception on
     // failure?  Can we catch pybind11::cast_error here instead?
     std::string src_str;
@@ -164,7 +164,7 @@ struct type_caster<torch::jit::AttributeKind> {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(torch::jit::AttributeKind, _("AttributeKind"));
 
-  bool load(handle src, bool /*unused*/) {
+  bool load(handle src, bool) {
     return false;
   }
 
@@ -186,7 +186,7 @@ template <>
 struct type_caster<std::vector<torch::jit::Node*>> : ListCasterBase {
   static handle cast(
       const std::vector<torch::jit::Node*>& src,
-      return_value_policy /*unused*/,
+      return_value_policy,
       handle parent) {
     return ListCasterBase::cast(src, return_value_policy::reference, parent);
   }

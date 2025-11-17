@@ -38,8 +38,8 @@ import builtins
 import dis
 import time
 import traceback
-from collections.abc import Callable, Sequence
-from typing import Any, Optional, TextIO, Union
+from collections.abc import Sequence
+from typing import Any, Callable, Optional, TextIO, Union
 
 import torch
 from torch._dynamo.symbolic_convert import InstructionTranslatorBase

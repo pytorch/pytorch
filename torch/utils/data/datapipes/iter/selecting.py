@@ -88,7 +88,7 @@ class FilterIterDataPipe(IterDataPipe[_T_co]):
             for idx, mask in enumerate(df_wrapper.iterate(condition)):
                 if mask:
                     result.append(df_wrapper.get_item(data, idx))
-            if result:
+            if len(result):
                 return True, df_wrapper.concat(result)
             else:
                 return False, None  # type: ignore[return-value]

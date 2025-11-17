@@ -47,8 +47,8 @@ class TORCH_API IRVerifier : public IRVisitor {
   void visit(const BlockPtr& v) override;
 };
 
-TORCH_API void verify(const StmtPtr& /*s*/);
-TORCH_API void verify(const ExprPtr& /*e*/);
-TORCH_API void verify(const ExprHandle& /*e*/);
+TORCH_API void verify(const StmtPtr&);
+TORCH_API void verify(const ExprPtr&);
+TORCH_API void verify(const ExprHandle&);
 
 } // namespace torch::jit::tensorexpr

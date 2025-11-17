@@ -4,7 +4,7 @@ import logging
 import operator
 from collections import OrderedDict
 from collections.abc import Iterable, Iterator
-from typing import Any
+from typing import Any, Optional
 
 import torch
 from torch._dynamo.utils import counters, is_node_meta_valid
@@ -185,7 +185,9 @@ class PostGradBatchLinearFusion(BatchFusion):
             and isinstance(input_shapes[1], int)
         )
 
-    def match(self, node: torch.fx.Node) -> tuple[str, int, int, int, bool, str] | None:
+    def match(
+        self, node: torch.fx.Node
+    ) -> Optional[tuple[str, int, int, int, bool, str]]:
         if CallFunctionVarArgs(aten.mm).match(node):
             input_m, weight_m = node.args
             bias_m = None
@@ -323,7 +325,7 @@ class GroupLinearFusion(GroupFusion):
             )
         )
 
-    def match(self, node: torch.fx.Node) -> tuple[str, bool] | None:
+    def match(self, node: torch.fx.Node) -> Optional[tuple[str, bool]]:
         if CallFunctionVarArgs(aten.mm.default).match(
             node
         ) and self._mm_node_can_be_fused(node):
@@ -491,7 +493,7 @@ class BatchLinearLHSFusion(BatchFusion):
     We have a separate pass to eliminate contiguous transpose in a generic way.
     """
 
-    def match(self, node: torch.fx.Node) -> tuple[str, bool, Any] | None:
+    def match(self, node: torch.fx.Node) -> Optional[tuple[str, bool, Any]]:
         if CallFunctionVarArgs(torch.nn.functional.linear).match(
             node
         ) and is_linear_node_can_be_fused(node):
@@ -838,7 +840,6 @@ class BatchLayernormFusion(BatchFusion):
                 )
                 update_pointwise_example_value(
                     batch_layer_norm,
-                    # pyrefly: ignore [missing-attribute]
                     stack_weight.meta["example_value"],
                     previous_batch_layer_norm_meta,
                     torch.mul,
@@ -849,33 +850,28 @@ class BatchLayernormFusion(BatchFusion):
                 )
                 update_pointwise_example_value(
                     batch_layer_norm,
-                    # pyrefly: ignore [missing-attribute]
                     stack_bias.meta["example_value"],
                     previous_batch_layer_norm_meta,
                     torch.add,
                 )
             elif group_weights is not None and group_biases is None:
                 previous_batch_layer_norm_meta = batch_layer_norm.meta["example_value"]
-                # pyrefly: ignore [not-callable]
                 batch_layer_norm = graph.call_function(
                     torch.mul, args=(stack_weight, batch_layer_norm)
                 )
                 update_pointwise_example_value(
                     batch_layer_norm,
-                    # pyrefly: ignore [missing-attribute]
                     stack_weight.meta["example_value"],
                     previous_batch_layer_norm_meta,
                     torch.mul,
                 )
             elif group_weights is None and group_biases is not None:
                 previous_batch_layer_norm_meta = batch_layer_norm.meta["example_value"]
-                # pyrefly: ignore [not-callable]
                 batch_layer_norm = graph.call_function(
                     torch.add, args=(stack_bias, batch_layer_norm)
                 )
                 update_pointwise_example_value(
                     batch_layer_norm,
-                    # pyrefly: ignore [missing-attribute]
                     stack_bias.meta["example_value"],
                     previous_batch_layer_norm_meta,
                     torch.add,

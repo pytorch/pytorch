@@ -62,7 +62,7 @@ ncclResult_t to_nccl_result(torch::cuda::nccl::ncclResult var) {
     case torch::cuda::nccl::ncclResult::NumResults:
       return ncclResult_t::ncclNumResults;
     default:
-      TORCH_CHECK(false, "Unconvertible NCCL type");
+      throw std::runtime_error("Unconvertible NCCL type");
   }
 }
 
@@ -91,7 +91,7 @@ torch::cuda::nccl::ncclResult from_nccl_result(ncclResult_t var) {
     case ncclNumResults:
       return torch::cuda::nccl::ncclResult::NumResults;
     default:
-      TORCH_CHECK(false, "Unconvertible NCCL type");
+      throw std::runtime_error("Unconvertible NCCL type");
   }
 }
 
@@ -194,9 +194,10 @@ static void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
     auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(
                            currentTimepoint - startTimepoint)
                            .count();
-    TORCH_CHECK(
-        timeElapsed <= nccl_nonblocking_timeout(),
-        "NCCL timeout when waiting for nonblocking call to become successful.");
+    if (timeElapsed > nccl_nonblocking_timeout()) {
+      throw std::runtime_error(
+          "NCCL timeout when waiting for nonblocking call to become successful.");
+    }
     sched_yield(); // yield to other threads
     ncclCommGetAsyncError(to_nccl_comm(comm), &result);
   }
@@ -226,9 +227,10 @@ static void NCCL_CHECK_TIMEOUT(
         auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(
                                currentTimepoint - startTimepoint)
                                .count();
-        TORCH_CHECK(
-            timeElapsed <= nccl_nonblocking_timeout(),
-            "NCCL timeout when waiting for nonblocking call to become successful.");
+        if (timeElapsed > nccl_nonblocking_timeout()) {
+          throw std::runtime_error(
+              "NCCL timeout when waiting for nonblocking call to become successful.");
+        }
         sched_yield(); // yield to other threads
         ncclCommGetAsyncError(to_nccl_comm(comms[i]), &result);
       } while (result == ncclInProgress);
@@ -256,7 +258,7 @@ void throw_nccl_error(torch::cuda::nccl::ncclResult status) {
   std::ostringstream err;
   err << "NCCL Error " << static_cast<int>(status) << ": "
       << ncclGetErrorString(to_nccl_result(status));
-  TORCH_CHECK(false, err.str());
+  throw std::runtime_error(err.str());
 }
 
 struct NcclCommList {
@@ -316,36 +318,41 @@ static void check_tensor(
     int64_t ref_numel,
     ScalarType ref_dtype) {
   auto check_one = [&](const at::Tensor& tensor) {
-    TORCH_CHECK(
-        tensor.is_cuda() && !tensor.is_sparse(),
-        "input and output elements have to be cuda dense Tensors");
+    if (!tensor.is_cuda() || tensor.is_sparse()) {
+      throw std::runtime_error(
+          "input and output elements have to be cuda dense Tensors");
+    }
 
-    TORCH_CHECK(
-        ref_dtype == tensor.scalar_type(),
-        "all inputs and outputs must be of the same Tensor dtype");
+    if (ref_dtype != tensor.scalar_type()) {
+      throw std::runtime_error(
+          "all inputs and outputs must be of the same Tensor dtype");
+    }
 
-    TORCH_CHECK(
-        tensor.is_contiguous(), "all inputs and outputs have to be contiguous");
+    if (!tensor.is_contiguous()) {
+      throw std::runtime_error("all inputs and outputs have to be contiguous");
+    }
   };
 
   check_one(input);
 
   // all inputs must be same size
-  TORCH_CHECK(
-      input.numel() == ref_numel,
-      "all inputs must have the same number of elements");
+  if (input.numel() != ref_numel) {
+    throw std::runtime_error(
+        "all inputs must have the same number of elements");
+  }
 
   if (output) {
     check_one(*output);
 
     // inputs and outputs must be on same device respectively
-    TORCH_CHECK(
-        input.get_device() == output->get_device(),
-        "input and output must be on the same device");
+    if (input.get_device() != output->get_device()) {
+      throw std::runtime_error("input and output must be on the same device");
+    }
 
-    TORCH_CHECK(
-        output->numel() * output_multiplier == ref_numel * input_multiplier,
-        "output must be of size input_size * size_multiplier");
+    if (output->numel() * output_multiplier != ref_numel * input_multiplier) {
+      throw std::runtime_error(
+          "output must be of size input_size * size_multiplier");
+    }
   }
 }
 
@@ -357,13 +364,15 @@ void check_inputs(
   // len(inputs) == len(outputs)
   size_t len = inputs.size();
 
-  TORCH_CHECK(len != 0, "input sequence can't be empty");
+  if (len == 0) {
+    throw std::runtime_error("input sequence can't be empty");
+  }
 
   if (len != outputs.size()) {
     std::stringstream err;
     err << "inputs and outputs sequences have to be of the same length, but got input of length "
         << len << " and output of length " << outputs.size();
-    TORCH_CHECK(false, err.str());
+    throw std::runtime_error(err.str());
   }
 
   device_set devices;
@@ -379,8 +388,9 @@ void check_inputs(
 
     auto input_device = input.get_device();
     // inputs must be on unique devices
-    TORCH_CHECK(
-        !devices.test(input_device), "inputs must be on unique devices");
+    if (devices.test(input_device)) {
+      throw std::runtime_error("inputs must be on unique devices");
+    }
     devices.set(input_device);
   }
 }
@@ -393,7 +403,9 @@ void check_inputs(
     int output_multiplier) {
   auto len = inputs.size();
 
-  TORCH_CHECK(len > 0, "input sequence can't be empty");
+  if (len <= 0) {
+    throw std::runtime_error("input sequence can't be empty");
+  }
 
   device_set devices;
   int64_t numel = inputs[0].numel();
@@ -414,8 +426,9 @@ void check_inputs(
 
     auto input_device = input.get_device();
     // inputs must be on unique devices
-    TORCH_CHECK(
-        !devices.test(input_device), "inputs must be on unique devices");
+    if (devices.test(input_device)) {
+      throw std::runtime_error("inputs must be on unique devices");
+    }
     devices.set(input_device);
   }
 }

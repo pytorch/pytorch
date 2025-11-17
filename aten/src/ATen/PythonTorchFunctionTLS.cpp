@@ -42,14 +42,8 @@ const PythonTorchFunctionTLS& PythonTorchFunctionTLS::get_state() {
 }
 
 bool torch_function_mode_enabled() {
-  // Manually flatten because gcc is refusing to inline here.  Note
-  // that we are still calling __tls_get_addr twice here with GCC,
-  // presumably because of
-  // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=81501 (which says
-  // the fix ships in GCC 16), but forcing inlining still improves
-  // performance.
-  const auto& ptfs = pythonTorchFunctionState;
-  return ptfs.disabled_state_ != TorchFunctionDisabledState::ALL_DISABLED && !ptfs.stack_.empty();
+  return PythonTorchFunctionTLS::get_disabled_state() != TorchFunctionDisabledState::ALL_DISABLED &&
+         PythonTorchFunctionTLS::stack_len() > 0;
 }
 
 // This is needed to disambiguate the ternary torch function disabled states

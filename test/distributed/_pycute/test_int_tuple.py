@@ -164,9 +164,6 @@ class TestIntTuple(TestCase):
             crd2idx(4, ((2, 2, 2), (2, 2, 2)), ((1, 16, 4), (8, 2, 32))), 8
         )  # 4 -> (1,0,0) -> 1*8 = 8
 
-        # Test with zero-length shape and strides
-        self.assertEqual(crd2idx(0, (), ()), 0)  # 0 -> () -> sum([]) = 0
-
     def test_idx2crd_basic(self):
         # Test basic int/int case
         self.assertEqual(idx2crd(2, 5, 1), 2)

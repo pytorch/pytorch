@@ -6,7 +6,6 @@ from ._fully_shard import (
     MixedPrecisionPolicy,
     OffloadPolicy,
     register_fsdp_forward_method,
-    share_comm_ctx,
     UnshardHandle,
 )
 from .fully_sharded_data_parallel import (
@@ -55,7 +54,6 @@ __all__ = [
     "OffloadPolicy",
     "register_fsdp_forward_method",
     "UnshardHandle",
-    "share_comm_ctx",
 ]
 
 # Set namespace for exposed private names
@@ -66,4 +64,3 @@ MixedPrecisionPolicy.__module__ = "torch.distributed.fsdp"
 OffloadPolicy.__module__ = "torch.distributed.fsdp"
 register_fsdp_forward_method.__module__ = "torch.distributed.fsdp"
 UnshardHandle.__module__ = "torch.distributed.fsdp"
-share_comm_ctx.__module__ = "torch.distributed.fsdp"

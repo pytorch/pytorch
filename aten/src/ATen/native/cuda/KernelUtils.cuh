@@ -6,7 +6,7 @@
 #endif
 
 // ROCm 6.3 is planned to have these functions, but until then here they are.
-#if defined(USE_ROCM)
+#if defined(USE_ROCM) && ROCM_VERSION >= 60201
 #include <device_functions.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_bf16.h>
@@ -115,7 +115,9 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
     index_t index,
     const index_t numel,
     scalar_t value) {
-#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700))
+#if (                      \
+    (defined(USE_ROCM) && ROCM_VERSION < 60201) || \
+    (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
   gpuAtomicAddNoReturn(
       reinterpret_cast<at::Half*>(tensor) + index,
       static_cast<at::Half>(value));
@@ -158,7 +160,9 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
     index_t index,
     const index_t numel,
     scalar_t value) {
-#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+#if (                      \
+    (defined(USE_ROCM) && ROCM_VERSION < 60201) || \
+    (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800)))
   gpuAtomicAddNoReturn(
       reinterpret_cast<at::BFloat16*>(tensor) + index,
       static_cast<at::BFloat16>(value));

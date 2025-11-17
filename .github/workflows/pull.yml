@@ -127,7 +127,6 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: linux.2xlarge.memory
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-clang18-asan
       docker-image-name: ci-image:pytorch-linux-jammy-py3-clang18-asan
@@ -347,8 +346,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      # This should sync with the build in xpu.yml but xpu uses a larger runner
-      # sync-tag: linux-xpu-n-build
+      sync-tag: linux-xpu-n-build
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-jammy-xpu-n-py3.10
       docker-image-name: ci-image:pytorch-linux-jammy-xpu-n-py3

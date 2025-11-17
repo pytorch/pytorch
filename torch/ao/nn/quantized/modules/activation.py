@@ -67,9 +67,9 @@ class Hardswish(torch.nn.Hardswish):
     def __init__(self, scale, zero_point, device=None, dtype=None):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         self.register_buffer("scale", torch.tensor(scale, **factory_kwargs))
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         self.register_buffer("zero_point", torch.tensor(zero_point, **factory_kwargs))
 
     def forward(self, input):
@@ -140,9 +140,9 @@ class LeakyReLU(torch.nn.LeakyReLU):
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(negative_slope, inplace)
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         self.register_buffer("scale", torch.tensor(scale, **factory_kwargs))
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         self.register_buffer("zero_point", torch.tensor(zero_point, **factory_kwargs))
 
     def forward(self, input):
@@ -230,7 +230,7 @@ class Softmax(torch.nn.Softmax):
 
 
 class MultiheadAttention(torch.ao.nn.quantizable.MultiheadAttention):
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     _FLOAT_MODULE = torch.ao.nn.quantizable.MultiheadAttention
 
     def _get_name(self):
@@ -322,8 +322,7 @@ class PReLU(torch.nn.Module):
         observer(float_wt)
         if observer.dtype != torch.quint8:
             warn(
-                f"PReLU's weight observer should have dtype quint8 but got {observer.dtype}",
-                stacklevel=2,
+                f"PReLU's weight observer should have dtype quint8 but got {observer.dtype}"
             )
         wt_scale, wt_zp = observer.calculate_qparams()
         qweight = torch.quantize_per_tensor(
@@ -340,8 +339,7 @@ class PReLU(torch.nn.Module):
         observer(float_wt)
         if observer.dtype != torch.quint8:
             warn(
-                f"PReLU's weight observer should have dtype quint8 but got {observer.dtype}",
-                stacklevel=2,
+                f"PReLU's weight observer should have dtype quint8 but got {observer.dtype}"
             )
         wt_scale, wt_zp = observer.calculate_qparams()
         qweight = torch.quantize_per_tensor(

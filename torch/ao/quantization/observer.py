@@ -245,8 +245,7 @@ class UniformQuantizationObserverBase(ObserverBase):
         if reduce_range:
             warnings.warn(
                 "Please use quant_min and quant_max to specify the range for observers. \
-                    reduce_range will be deprecated in a future release of PyTorch.",
-                stacklevel=2,
+                    reduce_range will be deprecated in a future release of PyTorch."
             )
         self.reduce_range = reduce_range
         self.register_buffer("eps", torch.tensor([eps], **factory_kwargs))
@@ -281,12 +280,12 @@ class UniformQuantizationObserverBase(ObserverBase):
         )
         self.has_customized_qrange = (quant_min is not None) and (quant_max is not None)
         if self.has_customized_qrange:
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             validate_qmin_qmax(quant_min, quant_max)
         self.quant_min, self.quant_max = calculate_qmin_qmax(
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             quant_min,
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             quant_max,
             self.has_customized_qrange,
             self.dtype,
@@ -807,7 +806,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
         unexpected_keys: list[str],
         error_msgs: list[str],
     ):
-        version = local_metadata.get("version")
+        version = local_metadata.get("version", None)
         if version is not None and version < 3:
             local_state = ["min_vals", "max_vals"]
             expected_min_name = "min_vals"
@@ -830,8 +829,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
                     self.max_val.resize_(val.shape)
                 else:
                     warnings.warn(
-                        f"Observer load_from_state_dict got unexpected name {name}",
-                        stacklevel=2,
+                        f"Observer load_from_state_dict got unexpected name {name}"
                     )
                 # For torchscript module we need to update the attributes here since we do not
                 # call the `_load_from_state_dict` function defined module.py
@@ -842,8 +840,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
                         self.max_val.copy_(val)
                     else:
                         warnings.warn(
-                            f"Observer load_from_state_dict got unexpected name {name}",
-                            stacklevel=2,
+                            f"Observer load_from_state_dict got unexpected name {name}"
                         )
             elif strict:
                 missing_keys.append(key)
@@ -1292,9 +1289,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         # want to make our quantization range infinite
         # and in practice those values will be clamped
         if x_min == -torch.inf or x_max == torch.inf:
-            warnings.warn(
-                "torch.inf detected in input tensor, ignoring input", stacklevel=2
-            )
+            warnings.warn("torch.inf detected in input tensor, ignoring input")
             x = x[x.abs() != torch.inf]
             if x.numel() == 0:
                 return x_orig
@@ -1350,8 +1345,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         if is_uninitialized:
             warnings.warn(
                 "must run observer before calling calculate_qparams.\
-                                    Returning default scale and zero point ",
-                stacklevel=2,
+                                    Returning default scale and zero point "
             )
             return torch.tensor([1.0], device=self.min_val.device.type), torch.tensor(
                 [0], device=self.min_val.device.type
@@ -1515,8 +1509,7 @@ class PlaceholderObserver(ObserverBase):
             warnings.warn(
                 "Please use `is_dynamic` instead of `compute_dtype`. \
                     `compute_dtype` will be deprecated in a future release \
-                    of PyTorch.",
-                stacklevel=2,
+                    of PyTorch."
             )
 
     def forward(self, x):

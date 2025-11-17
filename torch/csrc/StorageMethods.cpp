@@ -297,7 +297,7 @@ static PyObject* THPStorage_fromBuffer(
     size_bytes = count * element_size;
   }
 
-  if (offset + (count * static_cast<Py_ssize_t>(element_size)) > buffer.len) {
+  if (offset + (count * (Py_ssize_t)element_size) > buffer.len) {
     PyErr_SetString(
         PyExc_ValueError,
         fmt::format(
@@ -309,7 +309,7 @@ static PyObject* THPStorage_fromBuffer(
     return nullptr;
   }
 
-  uint8_t* src = static_cast<uint8_t*>(buffer.buf);
+  uint8_t* src = (uint8_t*)buffer.buf;
   auto fake_mode_active =
       c10::impl::TorchDispatchModeTLS::get_mode(
           c10::impl::TorchDispatchModeKey::FAKE) != std::nullopt;
@@ -508,8 +508,8 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
   // advanced position
   const auto fd_current_pos = LSEEK(fd, 0, SEEK_CUR);
   LSEEK(fd, fd_original_pos, SEEK_SET);
-  const auto seek_return = PyObject_CallMethod(
-      file, "seek", "Li", static_cast<long long>(fd_current_pos), 0);
+  const auto seek_return =
+      PyObject_CallMethod(file, "seek", "Li", (long long)fd_current_pos, 0);
   if (seek_return == nullptr) {
     return nullptr;
   }
@@ -521,19 +521,18 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
 
 static PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
   HANDLE_TH_ERRORS
-  auto self = reinterpret_cast<THPStorage*>(_self);
+  auto self = (THPStorage*)_self;
   TORCH_CHECK(
       THPUtils_checkLong(new_cdata),
       "given an invalid argument to "
       "_set_cdata - expected an int or long, but got ",
       THPUtils_typename(new_cdata));
-  c10::StorageImpl* ptr =
-      static_cast<c10::StorageImpl*>(PyLong_AsVoidPtr(new_cdata));
+  c10::StorageImpl* ptr = (c10::StorageImpl*)PyLong_AsVoidPtr(new_cdata);
   self->cdata.~MaybeOwned<c10::Storage>();
   self->cdata = c10::MaybeOwned<c10::Storage>::owned(
       c10::Storage(c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(ptr)));
   Py_INCREF(self);
-  return reinterpret_cast<PyObject*>(self);
+  return (PyObject*)self;
   END_HANDLE_TH_ERRORS
 }
 

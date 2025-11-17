@@ -71,7 +71,7 @@ class Type {
 // These are all the constant types that are allowed as attributes on Nodes.
 struct None {};
 // None always equals itself
-inline bool operator==(const None& /*unused*/, const None& /*unused*/) {
+inline bool operator==(const None&, const None&) {
   return true;
 }
 

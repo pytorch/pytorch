@@ -241,72 +241,6 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_10-cuda12_9-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.10"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_10-cuda12_9
-      build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.9.86; platform_system == 'Linux' | nvidia-cuda-runtime-cu12==12.9.79; platform_system == 'Linux' | nvidia-cuda-cupti-cu12==12.9.79; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cublas-cu12==12.9.1.4; platform_system == 'Linux' | nvidia-cufft-cu12==11.4.1.4; platform_system == 'Linux' | nvidia-curand-cu12==10.3.10.19; platform_system == 'Linux' | nvidia-cusolver-cu12==11.7.5.82; platform_system == 'Linux' | nvidia-cusparse-cu12==12.5.10.65; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.3.20; platform_system == 'Linux' | nvidia-nvtx-cu12==12.9.79; platform_system == 'Linux' | nvidia-nvjitlink-cu12==12.9.86; platform_system == 'Linux' | nvidia-cufile-cu12==1.14.1.1; platform_system == 'Linux'
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-cuda12_9-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs:
-      - manywheel-py3_10-cuda12_9-build
-      - get-label-type
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-cuda12_9
-      build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu # 12.8+ builds need sm_70+ runner
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-cuda12_9-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_10-cuda12_9-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-cuda12_9
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
-
   manywheel-py3_10-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
@@ -413,9 +347,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.10"
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -528,9 +459,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm7.0
       DESIRED_PYTHON: "3.10"
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -907,72 +835,6 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_11-cuda12_9-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.11"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_11-cuda12_9
-      build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.9.86; platform_system == 'Linux' | nvidia-cuda-runtime-cu12==12.9.79; platform_system == 'Linux' | nvidia-cuda-cupti-cu12==12.9.79; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cublas-cu12==12.9.1.4; platform_system == 'Linux' | nvidia-cufft-cu12==11.4.1.4; platform_system == 'Linux' | nvidia-curand-cu12==10.3.10.19; platform_system == 'Linux' | nvidia-cusolver-cu12==11.7.5.82; platform_system == 'Linux' | nvidia-cusparse-cu12==12.5.10.65; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.3.20; platform_system == 'Linux' | nvidia-nvtx-cu12==12.9.79; platform_system == 'Linux' | nvidia-nvjitlink-cu12==12.9.86; platform_system == 'Linux' | nvidia-cufile-cu12==1.14.1.1; platform_system == 'Linux'
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_11-cuda12_9-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs:
-      - manywheel-py3_11-cuda12_9-build
-      - get-label-type
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.11"
-      build_name: manywheel-py3_11-cuda12_9
-      build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu # 12.8+ builds need sm_70+ runner
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_11-cuda12_9-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_11-cuda12_9-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.11"
-      build_name: manywheel-py3_11-cuda12_9
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
-
   manywheel-py3_11-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
@@ -1079,9 +941,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.11"
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -1194,9 +1053,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm7.0
       DESIRED_PYTHON: "3.11"
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -1573,72 +1429,6 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_12-cuda12_9-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.12"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_12-cuda12_9
-      build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.9.86; platform_system == 'Linux' | nvidia-cuda-runtime-cu12==12.9.79; platform_system == 'Linux' | nvidia-cuda-cupti-cu12==12.9.79; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cublas-cu12==12.9.1.4; platform_system == 'Linux' | nvidia-cufft-cu12==11.4.1.4; platform_system == 'Linux' | nvidia-curand-cu12==10.3.10.19; platform_system == 'Linux' | nvidia-cusolver-cu12==11.7.5.82; platform_system == 'Linux' | nvidia-cusparse-cu12==12.5.10.65; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.3.20; platform_system == 'Linux' | nvidia-nvtx-cu12==12.9.79; platform_system == 'Linux' | nvidia-nvjitlink-cu12==12.9.86; platform_system == 'Linux' | nvidia-cufile-cu12==1.14.1.1; platform_system == 'Linux'
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_12-cuda12_9-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs:
-      - manywheel-py3_12-cuda12_9-build
-      - get-label-type
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.12"
-      build_name: manywheel-py3_12-cuda12_9
-      build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu # 12.8+ builds need sm_70+ runner
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_12-cuda12_9-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_12-cuda12_9-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.12"
-      build_name: manywheel-py3_12-cuda12_9
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
-
   manywheel-py3_12-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
@@ -1745,9 +1535,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.12"
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -1860,9 +1647,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm7.0
       DESIRED_PYTHON: "3.12"
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -2239,72 +2023,6 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_13-cuda12_9-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.13"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_13-cuda12_9
-      build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.9.86; platform_system == 'Linux' | nvidia-cuda-runtime-cu12==12.9.79; platform_system == 'Linux' | nvidia-cuda-cupti-cu12==12.9.79; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cublas-cu12==12.9.1.4; platform_system == 'Linux' | nvidia-cufft-cu12==11.4.1.4; platform_system == 'Linux' | nvidia-curand-cu12==10.3.10.19; platform_system == 'Linux' | nvidia-cusolver-cu12==11.7.5.82; platform_system == 'Linux' | nvidia-cusparse-cu12==12.5.10.65; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.3.20; platform_system == 'Linux' | nvidia-nvtx-cu12==12.9.79; platform_system == 'Linux' | nvidia-nvjitlink-cu12==12.9.86; platform_system == 'Linux' | nvidia-cufile-cu12==1.14.1.1; platform_system == 'Linux'
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13-cuda12_9-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs:
-      - manywheel-py3_13-cuda12_9-build
-      - get-label-type
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.13"
-      build_name: manywheel-py3_13-cuda12_9
-      build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu # 12.8+ builds need sm_70+ runner
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13-cuda12_9-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_13-cuda12_9-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.13"
-      build_name: manywheel-py3_13-cuda12_9
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
-
   manywheel-py3_13-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
@@ -2411,9 +2129,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.13"
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -2526,9 +2241,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm7.0
       DESIRED_PYTHON: "3.13"
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -2905,72 +2617,6 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_13t-cuda12_9-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.13t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_13t-cuda12_9
-      build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.9.86; platform_system == 'Linux' | nvidia-cuda-runtime-cu12==12.9.79; platform_system == 'Linux' | nvidia-cuda-cupti-cu12==12.9.79; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cublas-cu12==12.9.1.4; platform_system == 'Linux' | nvidia-cufft-cu12==11.4.1.4; platform_system == 'Linux' | nvidia-curand-cu12==10.3.10.19; platform_system == 'Linux' | nvidia-cusolver-cu12==11.7.5.82; platform_system == 'Linux' | nvidia-cusparse-cu12==12.5.10.65; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.3.20; platform_system == 'Linux' | nvidia-nvtx-cu12==12.9.79; platform_system == 'Linux' | nvidia-nvjitlink-cu12==12.9.86; platform_system == 'Linux' | nvidia-cufile-cu12==1.14.1.1; platform_system == 'Linux'
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13t-cuda12_9-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs:
-      - manywheel-py3_13t-cuda12_9-build
-      - get-label-type
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.13t"
-      build_name: manywheel-py3_13t-cuda12_9
-      build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu # 12.8+ builds need sm_70+ runner
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13t-cuda12_9-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_13t-cuda12_9-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.13t"
-      build_name: manywheel-py3_13t-cuda12_9
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
-
   manywheel-py3_13t-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
@@ -3077,9 +2723,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.13t"
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -3192,9 +2835,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm7.0
       DESIRED_PYTHON: "3.13t"
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -3571,72 +3211,6 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_14-cuda12_9-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.14"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_14-cuda12_9
-      build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.9.86; platform_system == 'Linux' | nvidia-cuda-runtime-cu12==12.9.79; platform_system == 'Linux' | nvidia-cuda-cupti-cu12==12.9.79; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cublas-cu12==12.9.1.4; platform_system == 'Linux' | nvidia-cufft-cu12==11.4.1.4; platform_system == 'Linux' | nvidia-curand-cu12==10.3.10.19; platform_system == 'Linux' | nvidia-cusolver-cu12==11.7.5.82; platform_system == 'Linux' | nvidia-cusparse-cu12==12.5.10.65; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.3.20; platform_system == 'Linux' | nvidia-nvtx-cu12==12.9.79; platform_system == 'Linux' | nvidia-nvjitlink-cu12==12.9.86; platform_system == 'Linux' | nvidia-cufile-cu12==1.14.1.1; platform_system == 'Linux'
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_14-cuda12_9-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs:
-      - manywheel-py3_14-cuda12_9-build
-      - get-label-type
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.14"
-      build_name: manywheel-py3_14-cuda12_9
-      build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu # 12.8+ builds need sm_70+ runner
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_14-cuda12_9-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_14-cuda12_9-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.14"
-      build_name: manywheel-py3_14-cuda12_9
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
-
   manywheel-py3_14-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
@@ -3743,9 +3317,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.14"
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -3858,9 +3429,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm7.0
       DESIRED_PYTHON: "3.14"
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -4237,72 +3805,6 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_14t-cuda12_9-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.14t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_14t-cuda12_9
-      build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.9.86; platform_system == 'Linux' | nvidia-cuda-runtime-cu12==12.9.79; platform_system == 'Linux' | nvidia-cuda-cupti-cu12==12.9.79; platform_system == 'Linux' | nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | nvidia-cublas-cu12==12.9.1.4; platform_system == 'Linux' | nvidia-cufft-cu12==11.4.1.4; platform_system == 'Linux' | nvidia-curand-cu12==10.3.10.19; platform_system == 'Linux' | nvidia-cusolver-cu12==11.7.5.82; platform_system == 'Linux' | nvidia-cusparse-cu12==12.5.10.65; platform_system == 'Linux' | nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | nvidia-nvshmem-cu12==3.3.20; platform_system == 'Linux' | nvidia-nvtx-cu12==12.9.79; platform_system == 'Linux' | nvidia-nvjitlink-cu12==12.9.86; platform_system == 'Linux' | nvidia-cufile-cu12==1.14.1.1; platform_system == 'Linux'
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_14t-cuda12_9-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs:
-      - manywheel-py3_14t-cuda12_9-build
-      - get-label-type
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.14t"
-      build_name: manywheel-py3_14t-cuda12_9
-      build_environment: linux-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu # 12.8+ builds need sm_70+ runner
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_14t-cuda12_9-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_14t-cuda12_9-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      DESIRED_PYTHON: "3.14t"
-      build_name: manywheel-py3_14t-cuda12_9
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
-
   manywheel-py3_14t-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
@@ -4409,9 +3911,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.14t"
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -4524,9 +4023,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm7.0
       DESIRED_PYTHON: "3.14t"
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm

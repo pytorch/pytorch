@@ -71,14 +71,12 @@ def simple_sympify(e):
             return sympy.oo if e > 0 else -sympy.oo
         return sympy.Float(e)
     elif isinstance(e, sympy.Expr):
-        if not getattr(e, "is_number", False):
-            raise AssertionError(e)
+        assert e.is_number, e
         # NaNs can occur when doing things like 0 * sympy.oo, but it is better
         # if the operator notices this and takes care of it, because sometimes
         # the NaN is inappropriate (for example, for ints, the [-oo, oo] range
         # should go to zero when multiplied with [0, 0])
-        if e == sympy.nan:
-            raise AssertionError("sympy expression is NaN")
+        assert e != sympy.nan
         return e
     elif isinstance(e, BooleanAtom):
         return e
@@ -89,17 +87,16 @@ def simple_sympify(e):
 # Sympy atomics only. Unlike <=, it also works on Sympy bools.
 def sympy_generic_le(lower, upper):
     if isinstance(lower, sympy.Expr):
-        if not isinstance(upper, sympy.Expr):
-            raise AssertionError(
-                "upper must be a sympy.Expr when lower is a sympy.Expr"
-            )
+        assert isinstance(upper, sympy.Expr)
         # instead of lower <= upper, we do upper >= lower since upper is mostly int_oo
         # and we have better code paths there.
         return upper >= lower
     else:
         # only negative condition is True > False
-        if not isinstance(lower, SympyBoolean) or not isinstance(upper, SympyBoolean):
-            raise AssertionError((lower, upper))
+        assert isinstance(lower, SympyBoolean) and isinstance(upper, SympyBoolean), (
+            lower,
+            upper,
+        )
         return not (lower and not upper)
 
 
@@ -126,9 +123,9 @@ AllFn2 = Union[ExprFn2, BoolFn2]
 class ValueRanges(Generic[_T]):
     if TYPE_CHECKING:
         # ruff doesn't understand circular references but mypy does
-        # pyrefly: ignore [unbound-name]
+        # pyrefly: ignore  # unbound-name
         ExprVR = ValueRanges[sympy.Expr]  # noqa: F821
-        # pyrefly: ignore [unbound-name]
+        # pyrefly: ignore  # unbound-name
         BoolVR = ValueRanges[SympyBoolean]  # noqa: F821
         AllVR = Union[ExprVR, BoolVR]
 
@@ -171,8 +168,7 @@ class ValueRanges(Generic[_T]):
 
         is_bool_lower = isinstance(lower, SympyBoolean)
         is_bool_upper = isinstance(upper, SympyBoolean)
-        if is_bool_lower != is_bool_upper:
-            raise AssertionError((lower, upper))
+        assert is_bool_lower == is_bool_upper, (lower, upper)
 
         # Warning: is_int/is_float is best effort.  We do pretty well in
         # Dynamo, but in Inductor these attributes are often wrong because we
@@ -215,8 +211,7 @@ class ValueRanges(Generic[_T]):
         """
         # NB: [-oo, oo] always advertises as float!
         object.__setattr__(self, "is_float", not self.is_bool and not self.is_int)
-        if not self.is_bool and not self.is_int and not self.is_float:
-            raise AssertionError((lower, upper))
+        assert self.is_bool or self.is_int or self.is_float, (lower, upper)
 
     def boolify(self) -> ValueRanges[SympyBoolean]:
         if vr_is_bool(self):
@@ -258,12 +253,9 @@ class ValueRanges(Generic[_T]):
             return self
         if self in (ValueRanges.unknown(), ValueRanges.unknown_int()):
             return other
-        if self.is_bool != other.is_bool:
-            raise AssertionError((self, other))
-        if self.is_int != other.is_int:
-            raise AssertionError((self, other))
-        if self.is_float != other.is_float:
-            raise AssertionError((self, other))
+        assert self.is_bool == other.is_bool, (self, other)
+        assert self.is_int == other.is_int, (self, other)
+        assert self.is_float == other.is_float, (self, other)
         if self.is_bool:
             return ValueRanges(
                 sympy.Or(self.lower, other.lower), sympy.And(self.upper, other.upper)
@@ -289,12 +281,9 @@ class ValueRanges(Generic[_T]):
     def __or__(self: AllVR, other: AllVR) -> AllVR:
         if ValueRanges.unknown() in (self, other):
             return ValueRanges.unknown()
-        if self.is_bool != other.is_bool:
-            raise AssertionError((self, other))
-        if self.is_int != other.is_int:
-            raise AssertionError((self, other))
-        if self.is_float != other.is_float:
-            raise AssertionError((self, other))
+        assert self.is_bool == other.is_bool, (self, other)
+        assert self.is_int == other.is_int, (self, other)
+        assert self.is_float == other.is_float, (self, other)
         if self.is_bool:
             return ValueRanges(
                 sympy.And(self.lower, other.lower), sympy.Or(self.upper, other.upper)
@@ -439,15 +428,13 @@ class SymPyValueRangeAnalysis:
     @staticmethod
     def constant(value, dtype):
         if isinstance(value, ValueRanges):
-            if not value.is_singleton():
-                raise AssertionError("ValueRanges must be a singleton for constant()")
+            assert value.is_singleton()
             value = value.lower
         # NB: value is NOT a sympy expression, it's a constant!
         is_python = isinstance(value, (int, float, bool))
-        if not is_python and not isinstance(
+        assert is_python or isinstance(
             value, (BooleanAtom, sympy.Integer, sympy.Number)
-        ):
-            raise AssertionError(f"not a supported constant type: {type(value)}")
+        )
 
         # using nan makes subsequent computation throw, and for the purposes of optimization
         # returning -math.inf - math.inf is equivalent to giving up
@@ -466,17 +453,12 @@ class SymPyValueRangeAnalysis:
             # We do a type check on a best-effort basis
             # We don't want to force a cast to sympy.Float if the value is Rational to avoid losing precision
             if dtype == torch.bool:
-                if not isinstance(value, BooleanAtom):
-                    raise AssertionError("expected BooleanAtom for bool dtype")
+                assert isinstance(value, BooleanAtom)
             elif dtype.is_floating_point:
-                if value.is_finite and not value.is_real:
-                    raise AssertionError(
-                        "expected float-like sympy value for float dtype"
-                    )
+                assert not value.is_finite or value.is_real
             else:
                 # dtype is intXX
-                if not getattr(value, "is_integer", False):
-                    raise AssertionError("expected integer sympy value for int dtype")
+                assert value.is_integer
 
         r = ValueRanges.wrap(value)
         return r
@@ -484,7 +466,7 @@ class SymPyValueRangeAnalysis:
     @staticmethod
     def to_dtype(a, dtype, src_dtype=None):
         if dtype == torch.float64:
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             return ValueRanges.increasing_map(a, ToFloat)
         elif dtype == torch.bool:
             return ValueRanges.unknown_bool()
@@ -494,15 +476,14 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def trunc_to_int(a, dtype):
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         return ValueRanges.increasing_map(a, TruncToInt)
 
     @staticmethod
     def not_(a):
         a = ValueRanges.wrap(a)
         a = a.boolify()
-        if not a.is_bool:
-            raise AssertionError("not_ expects a boolean ValueRanges")
+        assert a.is_bool
         return ValueRanges.decreasing_map(a, sympy.Not)
 
     @staticmethod
@@ -588,10 +569,7 @@ class SymPyValueRangeAnalysis:
     def lt(cls, a, b):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
-        if a.is_bool != b.is_bool:
-            raise AssertionError(
-                "operands must both be boolean ValueRanges or both non-boolean"
-            )
+        assert a.is_bool == b.is_bool
         if a.is_bool:
             return cls.and_(cls.not_(a), b)
         else:
@@ -624,10 +602,7 @@ class SymPyValueRangeAnalysis:
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
 
-        if a.is_bool != b.is_bool:
-            raise AssertionError(
-                "operands must both be boolean ValueRanges or both non-boolean"
-            )
+        assert a.is_bool == b.is_bool
         if a.is_bool:
             return cls.and_(a, b)
 
@@ -652,7 +627,7 @@ class SymPyValueRangeAnalysis:
             return ValueRanges.coordinatewise_monotone_map(
                 a,
                 b,
-                # pyrefly: ignore [bad-argument-type]
+                # pyrefly: ignore  # bad-argument-type
                 _keep_float(IntTrueDiv),
             )
 
@@ -668,7 +643,7 @@ class SymPyValueRangeAnalysis:
             return ValueRanges.coordinatewise_monotone_map(
                 a,
                 b,
-                # pyrefly: ignore [bad-argument-type]
+                # pyrefly: ignore  # bad-argument-type
                 _keep_float(FloatTrueDiv),
             )
 
@@ -748,7 +723,7 @@ class SymPyValueRangeAnalysis:
             # We should know that b >= 0 but we may have forgotten this fact due
             # to replacements, so don't assert it, but DO clamp it to prevent
             # degenerate problems
-            # pyrefly: ignore [no-matching-overload]
+            # pyrefly: ignore  # no-matching-overload
             return ValueRanges.coordinatewise_increasing_map(
                 a, b & ValueRanges(0, int_oo), PowByNatural
             )
@@ -915,7 +890,7 @@ class SymPyValueRangeAnalysis:
 
     @classmethod
     def round_to_int(cls, number, dtype):
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         return ValueRanges.increasing_map(number, RoundToInt)
 
     # It's used in some models on symints
@@ -933,10 +908,7 @@ class SymPyValueRangeAnalysis:
         a = a.boolify()
         # We sometimes write unknown without specifying the type correctly
         # In particular, we do that when initialising the bounds for loads in bounds.py
-        if b.is_bool != c.is_bool and ValueRanges.unknown() not in (b, c):
-            raise AssertionError(
-                "where() requires b and c to have the same boolean-ness or allow unknown()"
-            )
+        assert b.is_bool == c.is_bool or ValueRanges.unknown() in (b, c)
         if b.is_bool:
             return ValueRanges(sympy.And(b.lower, c.lower), sympy.Or(b.upper, c.upper))
         else:
@@ -1032,7 +1004,7 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def trunc(x):
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         return ValueRanges.increasing_map(x, TruncToFloat)
 
 

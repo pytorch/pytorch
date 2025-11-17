@@ -1,6 +1,5 @@
 #include <ATen/autocast_mode.h>
 #include <ATen/core/Generator.h>
-#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
@@ -160,8 +159,9 @@ void sort_op(Stack& stack) {
 
   if (!g_list.empty()) {
     std::stringstream error_str;
-    TORCH_CHECK(
-        isSortableListOfObjectsOrTuples(g_list, error_str), error_str.str());
+    if (!isSortableListOfObjectsOrTuples(g_list, error_str)) {
+      throw std::runtime_error(error_str.str());
+    }
 
     c10::IValueComparator comparator;
     if (reverse) {
@@ -254,7 +254,9 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           int64_t lo = 0, hi = 0, step = 0;
           pop(stack, lo, hi, step);
           // error handling when step_val = 0 during runtime
-          TORCH_CHECK(step != 0, "range() arg 3 must not be zero");
+          if (step == 0) {
+            throw std::runtime_error("range() arg 3 must not be zero");
+          }
           if (step > 0 && lo < hi) {
             push(stack, 1 + (hi - 1 - lo) / step);
           } else if (step < 0 && lo > hi) {
@@ -380,13 +382,14 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           auto s = pop(stack).toString();
           std::string::size_type sz = 0;
           int64_t val = static_cast<int64_t>(std::stoll(s->string(), &sz));
-          TORCH_CHECK(
-              sz == s->string().size(),
-              "invalid literal for int() ",
-              "with base 10: '",
-              s->string(),
-              "'");
-          push(stack, val);
+          if (sz == s->string().size()) {
+            push(stack, val);
+          } else {
+            std::stringstream error_str;
+            error_str << "invalid literal for int() "
+                      << "with base 10: '" << s->string() << "'";
+            throw std::runtime_error(error_str.str());
+          }
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -433,13 +436,14 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           auto s = pop(stack).toString();
           std::string::size_type sz = 0;
           double b = std::stod(s->string(), &sz);
-          TORCH_CHECK(
-              sz == s->string().size(),
-              "could not convert string ",
-              "to float: '",
-              s->string(),
-              "'");
-          push(stack, b);
+          if (sz == s->string().size()) {
+            push(stack, b);
+          } else {
+            std::stringstream error_str;
+            error_str << "could not convert string "
+                      << "to float: '" << s->string() << "'";
+            throw std::runtime_error(error_str.str());
+          }
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -1789,7 +1793,10 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           }
 
           const std::string& separator = ivalue.toStringRef();
-          TORCH_CHECK(!separator.empty(), "ValueError: empty separator");
+
+          if (separator.empty()) {
+            throw std::runtime_error("ValueError: empty separator");
+          }
 
           auto count = 0;
 
@@ -1912,9 +1919,11 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           std::string fillchar = pop(stack).toStringRef();
           int64_t width = pop(stack).toInt();
           std::string string = pop(stack).toStringRef();
-          TORCH_CHECK(
-              fillchar.size() == 1,
-              "TypeError: The fill character must be exactly one character long");
+          if (fillchar.size() != 1) {
+            // TODO: this should be a TypeError
+            throw std::runtime_error(
+                "TypeError: The fill character must be exactly one character long");
+          }
           if (string.size() > static_cast<std::string::size_type>(width)) {
             push(stack, string);
             return;
@@ -2083,7 +2092,9 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           std::string substr = pop(stack).toStringRef();
           std::string string = pop(stack).toStringRef();
           auto result = stringFindImpl(string, substr, start, end);
-          TORCH_CHECK(result >= 0, "ValueError: substring not found");
+          if (result < 0) {
+            throw std::runtime_error("ValueError: substring not found");
+          }
           push(stack, result);
         },
         aliasAnalysisFromSchema()),
@@ -2096,7 +2107,9 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           std::string substr = pop(stack).toStringRef();
           std::string string = pop(stack).toStringRef();
           auto result = stringFindImpl(string, substr, start, end, true);
-          TORCH_CHECK(result >= 0, "ValueError: substring not found");
+          if (result < 0) {
+            throw std::runtime_error("ValueError: substring not found");
+          }
           push(stack, result);
         },
         aliasAnalysisFromSchema()),
@@ -2170,9 +2183,11 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           std::string fillchar = pop(stack).toStringRef();
           int64_t width = pop(stack).toInt();
           std::string string = pop(stack).toStringRef();
-          TORCH_CHECK(
-              fillchar.size() == 1,
-              "TypeError: The fill character must be exactly one character long");
+          if (fillchar.size() != 1) {
+            // TODO: this should be a TypeError
+            throw std::runtime_error(
+                "TypeError: The fill character must be exactly one character long");
+          }
           auto to_append =
               std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
 
@@ -2192,9 +2207,11 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           std::string fillchar = pop(stack).toStringRef();
           int64_t width = pop(stack).toInt();
           std::string string = pop(stack).toStringRef();
-          TORCH_CHECK(
-              fillchar.size() == 1,
-              "TypeError: The fill character must be exactly one character long");
+          if (fillchar.size() != 1) {
+            // TODO: this should be a TypeError
+            throw std::runtime_error(
+                "TypeError: The fill character must be exactly one character long");
+          }
           auto to_append =
               std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
 
@@ -3341,8 +3358,10 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
           int64_t a = 0, b = 0;
           lldiv_t divresult = {};
           pop(stack, a, b);
-          TORCH_CHECK(
-              b != 0, "ZeroDivisionError: integer division or modulo by zero");
+          if (b == 0) {
+            throw std::runtime_error(
+                "ZeroDivisionError: integer division or modulo by zero");
+          }
           divresult = lldiv(a, b);
           if (divresult.rem && (a < 0) != (b < 0)) {
             divresult.quot -= 1;
@@ -3360,7 +3379,9 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
         [](Stack& stack) {
           double a = 0, b = 0;
           pop(stack, a, b);
-          TORCH_CHECK(b != 0, "ZeroDivisionError: float divmod()");
+          if (b == 0) {
+            throw std::runtime_error("ZeroDivisionError: float divmod()");
+          }
           double rem = fmod(a, b);
           // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           if (rem && (a < 0) != (b < 0)) {
@@ -3405,7 +3426,9 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
         type_a a;                                                            \
         type_b b;                                                            \
         pop(stack, a, b);                                                    \
-        TORCH_CHECK(b != 0, "ZeroDivisionError: float divmod()");            \
+        if (b == 0) {                                                        \
+          throw std::runtime_error("ZeroDivisionError: float divmod()");     \
+        }                                                                    \
         double quot = floor(a / b);                                          \
         double rem = a - (quot * b);                                         \
         push(stack, quot, rem);                                              \

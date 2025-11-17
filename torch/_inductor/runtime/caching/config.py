@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 
 import torch
 from torch._environment import is_fbcode
@@ -8,7 +9,7 @@ def _versioned_config(
     jk_name: str,
     this_version: int,
     oss_default: bool,
-    env_var_override: str | None = None,
+    env_var_override: Optional[str] = None,
 ) -> bool:
     """
     A versioned configuration utility that determines boolean settings based on:

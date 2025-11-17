@@ -14,7 +14,7 @@ inline int64_t divup(int64_t x, int64_t y) {
 TORCH_API void init_num_threads();
 
 // Sets the number of threads to be used in parallel region
-TORCH_API void set_num_threads(int /*nthreads*/);
+TORCH_API void set_num_threads(int);
 
 // Returns the maximum number of threads that may be used in a parallel region
 TORCH_API int get_num_threads();
@@ -37,7 +37,7 @@ inline void lazy_init_num_threads() {
   }
 }
 
-TORCH_API void set_thread_num(int /*id*/);
+TORCH_API void set_thread_num(int);
 
 class TORCH_API ThreadIdGuard {
  public:
@@ -130,7 +130,7 @@ inline scalar_t parallel_reduce(
 TORCH_API std::string get_parallel_info();
 
 // Sets number of threads used for inter-op parallelism
-TORCH_API void set_num_interop_threads(int /*nthreads*/);
+TORCH_API void set_num_interop_threads(int);
 
 // Returns the number of threads used for inter-op parallelism
 TORCH_API size_t get_num_interop_threads();

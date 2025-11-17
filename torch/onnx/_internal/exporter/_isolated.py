@@ -26,7 +26,7 @@ def _call_function_and_return_exception(
     """Call function and return a exception if there is one."""
 
     try:
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         return func(*args, **kwargs)
     except Exception as e:
         return e

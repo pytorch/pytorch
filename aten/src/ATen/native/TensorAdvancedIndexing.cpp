@@ -1906,9 +1906,11 @@ Tensor& index_fill_(
         "This also applies to advanced indexing e.g. tensor[mask] = scalar");
   }
 
-  TORCH_CHECK(
-      self.is_complex() || !source.isComplex(),
-      "index_fill_(): Converting complex Scalar to non-complex type is not supported");
+  if (!self.is_complex() && source.isComplex()) {
+    TORCH_CHECK(
+        false,
+        "index_fill_(): Converting complex Scalar to non-complex type is not supported");
+  }
 
   // Handle the case when `self` is 0-dim
   Tensor self_nonzero_dim = (self.dim() == 0) ? self.unsqueeze(-1) : self;
@@ -2674,7 +2676,7 @@ inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
       std::move(dim));
 }
 
-inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
+static inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
   TORCH_CHECK(
       !t.defined() || t.device() == device,
       "Expected tensor to have ",
@@ -2687,7 +2689,7 @@ inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
       ")");
 }
 
-inline void checkDevice(
+static inline void checkDevice(
     CheckedFrom c,
     at::ArrayRef<Tensor> tensors,
     Device device) {

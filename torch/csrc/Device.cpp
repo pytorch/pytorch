@@ -151,7 +151,7 @@ static PyObject* THPDevice_rc(PyObject* a, PyObject* b, int op) {
 
 static PyObject* THPDevice_reduce(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = reinterpret_cast<THPDevice*>(_self);
+  auto self = (THPDevice*)_self;
   auto ret = THPObjectPtr{PyTuple_New(2)};
   if (!ret)
     throw python_error();
@@ -221,16 +221,8 @@ typedef PyObject* (*getter)(PyObject*, void*);
 // NB: If you edit these properties/methods, update torch/_C/__init__.pyi.in
 
 static const std::initializer_list<PyGetSetDef> THPDevice_properties = {
-    {"type",
-     reinterpret_cast<getter>(THPDevice_type),
-     nullptr,
-     nullptr,
-     nullptr},
-    {"index",
-     reinterpret_cast<getter>(THPDevice_index),
-     nullptr,
-     nullptr,
-     nullptr},
+    {"type", (getter)THPDevice_type, nullptr, nullptr, nullptr},
+    {"index", (getter)THPDevice_index, nullptr, nullptr, nullptr},
     {nullptr}};
 
 static const std::initializer_list<PyMethodDef> THPDevice_methods = {
@@ -250,18 +242,18 @@ PyTypeObject THPDeviceType = {
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
-    reinterpret_cast<reprfunc>(THPDevice_repr), /* tp_repr */
+    (reprfunc)THPDevice_repr, /* tp_repr */
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
-    reinterpret_cast<hashfunc>(THPDevice_hash), /* tp_hash  */
+    (hashfunc)THPDevice_hash, /* tp_hash  */
     // TODO: We're not sure if this is a good idea or not, because making
     // torch.device callable means that it will start returning true
     // for callable() queries, and that is unexpected.  We can always add
     // this later, so for now, don't actually implement this
     // THPDevice_call, /* tp_call */
     nullptr, /* tp_call */
-    reinterpret_cast<reprfunc>(THPDevice_str), /* tp_str */
+    (reprfunc)THPDevice_str, /* tp_str */
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
@@ -269,7 +261,7 @@ PyTypeObject THPDeviceType = {
     nullptr, /* tp_doc */
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
-    static_cast<richcmpfunc>(THPDevice_rc), /* tp_richcompare */
+    (richcmpfunc)THPDevice_rc, /* tp_richcompare */
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
@@ -294,8 +286,7 @@ void THPDevice_init(PyObject* module) {
   }
   Py_INCREF(&THPDeviceType);
   THPUpperModuleOfDevice = module;
-  if (PyModule_AddObject(
-          module, "device", reinterpret_cast<PyObject*>(&THPDeviceType)) != 0) {
+  if (PyModule_AddObject(module, "device", (PyObject*)&THPDeviceType) != 0) {
     throw python_error();
   }
 }

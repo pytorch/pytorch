@@ -209,46 +209,6 @@ command = [
     '@{{PATHSFILE}}'
 ]
 
-
-[[linter]]
-code = 'PYREFLY'
-include_patterns = [
-    'torch/**/*.py',
-    'torch/**/*.pyi',
-    'torchgen/**/*.py',
-    'torchgen/**/*.pyi',
-    'functorch/**/*.py',
-    'functorch/**/*.pyi',
-]
-exclude_patterns = []
-command = [
-    'python3',
-    'tools/linter/adapters/pyrefly_linter.py',
-    '--config=pyrefly.toml',
-]
-init_command = [
-    'python3',
-    'tools/linter/adapters/pip_init.py',
-    '--dry-run={{DRYRUN}}',
-    'numpy==2.1.0 ; python_version >= "3.12"',
-    'expecttest==0.3.0',
-    'pyrefly==0.36.2',
-    'sympy==1.13.3',
-    'types-requests==2.27.25',
-    'types-pyyaml==6.0.2',
-    'types-tabulate==0.8.8',
-    'types-protobuf==5.29.1.20250403',
-    'types-setuptools==79.0.0.20250422',
-    'types-jinja2==2.11.9',
-    'types-colorama==0.4.6',
-    'filelock==3.18.0',
-    'junitparser==2.1.1',
-    'rich==14.1.0',
-    'optree==0.17.0',
-    'types-openpyxl==3.1.5.20250919',
-    'types-python-dateutil==2.9.0.20251008'
-]
-
 [[linter]]
 code = 'CLANGTIDY'
 include_patterns = [
@@ -833,7 +793,8 @@ exclude_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=(cudaSetDevice|cudaGetDevice)\\(',
+    '--pattern=cudaSetDevice(',
+    '--pattern=cudaGetDevice(',
     '--linter-name=RAWCUDADEVICE',
     '--error-name=raw CUDA API usage',
     """--error-description=\
@@ -1137,8 +1098,11 @@ command = [
 [[linter]]
 code = 'WORKFLOWSYNC'
 include_patterns = [
-    '.github/workflows/*.yml',
-    '.github/workflows/*.yaml',
+    '.github/workflows/pull.yml',
+    '.github/workflows/trunk.yml',
+    '.github/workflows/periodic.yml',
+    '.github/workflows/mac-mps.yml',
+    '.github/workflows/slow.yml',
 ]
 command = [
     'python3',

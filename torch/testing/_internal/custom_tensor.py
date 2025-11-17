@@ -144,9 +144,7 @@ class CustomTensorPlainOut(torch.Tensor):
             new_out = pytree.tree_unflatten(
                 (
                     CustomTensorPlainOut(tensor1, tensor2)
-                    for tensor1, tensor2 in zip(
-                        out_inner_flat_1, out_inner_flat_2, strict=True
-                    )
+                    for tensor1, tensor2 in zip(out_inner_flat_1, out_inner_flat_2)
                 ),
                 spec,
             )

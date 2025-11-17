@@ -43,7 +43,7 @@ def add_job(
     if workflow_name not in workflows:
         workflows[workflow_name] = {"when": "always", "jobs": []}
 
-    requires = job.get("requires")
+    requires = job.get("requires", None)
     if requires is not None:
         for requirement in requires:
             dependency = past_jobs[requirement]

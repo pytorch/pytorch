@@ -173,13 +173,12 @@ class ExceptionClassTests(__TestCase):
         # in PyObject_SetAttr.
         import gc
         d = {}
-        with torch._dynamo.error_on_graph_break(False):
-            class HashThisKeyWillClearTheDict(str):
-                def __hash__(self) -> int:
-                    d.clear()
-                    return super().__hash__()
-            class Value(str):
-                pass
+        class HashThisKeyWillClearTheDict(str):
+            def __hash__(self) -> int:
+                d.clear()
+                return super().__hash__()
+        class Value(str):
+            pass
         exc = Exception()
 
         d[HashThisKeyWillClearTheDict()] = Value()  # refcount of Value() is 1 now
@@ -234,9 +233,8 @@ class UsageTests(__TestCase):
         # BaseException; the ability was not possible until BaseException's
         # introduction so no need to support new-style objects that do not
         # inherit from it.
-        with torch._dynamo.error_on_graph_break(False):
-            class NewStyleClass(object):
-                pass
+        class NewStyleClass(object):
+            pass
         self.raise_fails(NewStyleClass)
         self.raise_fails(NewStyleClass())
 
@@ -247,9 +245,8 @@ class UsageTests(__TestCase):
     def test_catch_non_BaseException(self):
         # Trying to catch an object that does not inherit from BaseException
         # is not allowed.
-        with torch._dynamo.error_on_graph_break(False):
-            class NonBaseException(object):
-                pass
+        class NonBaseException(object):
+            pass
         self.catch_fails(NonBaseException)
         self.catch_fails(NonBaseException())
 

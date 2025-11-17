@@ -14,15 +14,8 @@ from torch.backends.cuda import (
     SDPAParams,
 )
 
-from .varlen import varlen_attn
 
-
-__all__: list[str] = [
-    "SDPBackend",
-    "sdpa_kernel",
-    "WARN_FOR_UNFUSED_KERNELS",
-    "varlen_attn",
-]
+__all__: list[str] = ["SDPBackend", "sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
 
 # Note: [SDPA warnings]
 # TODO: Consider using this for sdpa regardless of subclasses
@@ -34,6 +27,9 @@ __all__: list[str] = [
 WARN_FOR_UNFUSED_KERNELS = False
 
 
+# Hacks for Sphinx documentation:
+# https://stackoverflow.com/questions/38765577/overriding-sphinx-autodoc-alias-of-for-import-of-private-class
+SDPBackend = SDPBackend
 r"""An enum-like class that contains the different backends for scaled dot product attention.
     This backend class is designed to be used with the sdpa_kernel context manager.
 
@@ -60,10 +56,10 @@ def _raise_kernel_warnings(params: SDPAParams) -> None:
     """
     if WARN_FOR_UNFUSED_KERNELS:
         if not can_use_efficient_attention(params):
-            warn("Efficient attention can't be used because:", stacklevel=2)
+            warn("Efficient attention can't be used because:")
             can_use_efficient_attention(params, True)
         if not can_use_flash_attention(params):
-            warn("Flash attention can't be used because:", stacklevel=2)
+            warn("Flash attention can't be used because:")
             can_use_flash_attention(params, True)
 
 

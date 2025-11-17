@@ -589,31 +589,6 @@ class LoopOrderingTest(TestCase):
             ".run(", 1 + int(inductor_config.benchmark_kernel), exactly=True
         ).run(code[0])
 
-    @inductor_config.patch(
-        {
-            "max_autotune": True,
-            "max_autotune_gemm_backends": "TRITON",
-            "test_configs.max_mm_configs": 4,
-        }
-    )
-    @skipUnless(HAS_GPU and is_big_gpu(), "Need big gpu for max-autotune")
-    def test_interaction_with_multi_template(self):
-        """
-        Skip MultiTemplateBuffer during loop reordering
-        """
-
-        @torch.compile
-        def f(x, y):
-            return (x @ y), x + 1
-
-        N = 2
-        x = torch.randn([N, N], device=GPU_TYPE, dtype=torch.bfloat16)
-        y = torch.randn([N, N], device=GPU_TYPE, dtype=torch.bfloat16)
-
-        out, code = run_and_get_code(f, x, y)
-        # didn't fuse due to small savings
-        FileCheck().check_count("@triton.jit", 2, exactly=True).run(code[0])
-
     def test_fuse_with_scalar_shared_memory(self):
         """
         Make sure if we can fuse two nodes sharing a scalar before,

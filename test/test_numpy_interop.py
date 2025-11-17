@@ -205,7 +205,7 @@ class TestNumPyInterop(TestCase):
                             x = x.conj()
                             y = x.resolve_conj()
                         expect_error = (
-                            requires_grad or sparse or conj or device != "cpu"
+                            requires_grad or sparse or conj or not device == "cpu"
                         )
                         error_msg = r"Use (t|T)ensor\..*(\.numpy\(\))?"
                         if not force and expect_error:
@@ -596,7 +596,7 @@ class TestNumPyInterop(TestCase):
                 if (
                     dtype == torch.complex64
                     and torch.is_tensor(t)
-                    and type(a) is np.complex64
+                    and type(a) == np.complex64
                 ):
                     # TODO: Imaginary part is dropped in this case. Need fix.
                     # https://github.com/pytorch/pytorch/issues/43579

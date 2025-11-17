@@ -18,7 +18,7 @@ from unittest.mock import patch
 import torch
 import torch.nn as nn
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
-from torch._inductor import config, metrics
+from torch._inductor import metrics
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
@@ -456,17 +456,15 @@ class TestFlexAttention(InductorTestCase):
         compiled_out: torch.Tensor,
         fudge_factor: float,
         tensor_name: Optional[str] = None,
-        fudge_atol: float = 0,
     ):
         compiled_error = (golden_out - compiled_out).abs().mean()
         ref_error = (golden_out - ref_out).abs().mean()
         if torch.isnan(compiled_error).any() or torch.isnan(ref_error).any():
-            self.fail("Output/Grad with NaN")
-        name = tensor_name if tensor_name is not None else ""
-        msg = f"{name} Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
-        torch.testing.assert_close(
-            compiled_error, ref_error, rtol=fudge_factor, atol=1e-7, msg=msg
-        )
+            self.assertTrue(False, "Output/Grad with NaN")
+        if compiled_error > ref_error * fudge_factor:
+            name = tensor_name if tensor_name is not None else ""
+            msg = f"{name} Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
+            self.assertTrue(False, msg)
 
     def _check_out(
         self,
@@ -585,7 +583,9 @@ class TestFlexAttention(InductorTestCase):
             )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
-        sdpa_partial = create_attention(score_mod, block_mask, enable_gqa=(Q_H != KV_H))
+        sdpa_partial = create_attention(
+            score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
+        )
 
         compiled_sdpa = torch.compile(sdpa_partial)
         golden_out = sdpa_partial(q_gold, k_gold, v_gold)
@@ -759,7 +759,7 @@ class TestFlexAttention(InductorTestCase):
                 return_lse=return_lse,
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
-                enable_gqa=(Q_H != KV_H),
+                enable_gqa=(not Q_H == KV_H),
                 kernel_options=kernel_options,
             )
         else:
@@ -772,7 +772,7 @@ class TestFlexAttention(InductorTestCase):
                 return_lse=return_lse,
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
-                enable_gqa=(Q_H != KV_H),
+                enable_gqa=(not Q_H == KV_H),
                 kernel_options=kernel_options,
             )
         return compiled_out, compiled_lse
@@ -817,7 +817,9 @@ class TestFlexAttention(InductorTestCase):
         if block_mask is None:
             block_mask = create_block_mask(noop_mask, Q_B, 1, Q_S, KV_S, device=device)
 
-        sdpa_partial = create_attention(score_mod, block_mask, enable_gqa=(Q_H != KV_H))
+        sdpa_partial = create_attention(
+            score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
+        )
         golden_out, golden_lse = sdpa_partial(q_gold, k_gold, v_gold, return_lse=True)
         ref_out, ref_lse = sdpa_partial(q_ref, k_ref, v_ref, return_lse=True)
 
@@ -1462,7 +1464,7 @@ class TestFlexAttention(InductorTestCase):
 
         block_mask = create_block_mask(mask_mod, Bq, 1, S, S, device=device)
         attention = functools.partial(
-            flex_attention, block_mask=block_mask, enable_gqa=(Hq != Hkv)
+            flex_attention, block_mask=block_mask, enable_gqa=(not Hq == Hkv)
         )
 
         self.run_test_with_call(attention, dtype, device, Bq, Hq, S, D, Bkv, Hkv, S, D)
@@ -1965,38 +1967,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return qk + scale[b].sum(dim=-1)
 
         self.run_test(score_mod_scale, dtype, device=device)
-
-    @supported_platform
-    @skip_on_cpu
-    @dtypes(torch.float16)
-    @dtypesIfCUDA(torch.float16)
-    def test_dynamic_captured_buffer(self, device, dtype):
-        def run_with_head_count(compiled_fa, head_count):
-            head_scale = torch.randn(
-                head_count, device=device, dtype=dtype, requires_grad=True
-            )
-
-            def score_mod(score, batch, head, token_q, token_kv):
-                return score * head_scale[head]
-
-            q = torch.randn(
-                B, head_count, S, D, device=device, dtype=dtype, requires_grad=True
-            )
-            k = torch.randn_like(q, requires_grad=True)
-            v = torch.randn_like(q, requires_grad=True)
-
-            block_mask = create_block_mask(noop_mask, B, 1, S, S, device=device)
-
-            out = compiled_fa(q, k, v, score_mod=score_mod, block_mask=block_mask)
-            loss = out.sum()
-            loss.backward()
-            return out
-
-        compiled_fa = torch.compile(flex_attention, fullgraph=True, dynamic=True)
-
-        head_counts = [4, 8, 4, 16, 4]
-        for head_count in head_counts:
-            run_with_head_count(compiled_fa, head_count)
 
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
@@ -4005,7 +3975,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    @unittest.skipIf(config.triton.native_matmul, "different dynamo counters")
     def test_free_symbol_dynamic(self, device):
         def batch_flip_causal(b, h, q_idx, kv_idx):
             return (q_idx >= kv_idx) & (b % 2 == 0)
@@ -4994,28 +4963,6 @@ class TestBlockMask(InductorTestCase):
                 new_block_mask.full_kv_indices,
                 block_mask.full_kv_indices[:, :, q_index, :],
             )
-
-    @supported_platform
-    def test_sliced_blockmask_mask_mod_error(self, device):
-        """Test that sliced BlockMask raises helpful error when used with flex_attention"""
-
-        def causal_mask(b, h, q_idx, kv_idx):
-            return q_idx >= kv_idx
-
-        base_mask = create_block_mask(
-            causal_mask, B=1, H=1, Q_LEN=256, KV_LEN=256, device=device
-        )
-        sliced_mask = base_mask[:, :, 0]
-
-        q = torch.randn(1, 1, 1, 64, device=device)
-        k = torch.randn(1, 1, 256, 64, device=device)
-        v = torch.randn(1, 1, 256, 64, device=device)
-
-        compiled_fa = torch.compile(flex_attention)
-        with self.assertRaisesRegex(
-            RuntimeError, "Cannot use mask_mod from a sliced BlockMask"
-        ):
-            compiled_fa(q, k, v, block_mask=sliced_mask)
 
     @supported_platform
     def test_block_mask_device_change(self, device):
@@ -6489,7 +6436,7 @@ class TestLearnableBiases(InductorTestCase):
         bias = torch.randn(
             params.seq_length,
             device=device,
-            dtype=torch.float32,
+            dtype=params.dtype,
             requires_grad=True,
         )
 
@@ -6618,7 +6565,7 @@ class TestLearnableBiases(InductorTestCase):
         )
         # Error in backwards
         with self.assertRaisesRegex(
-            torch._inductor.exc.InductorError,
+            torch._inductor.exc.LoweringException,
             "Using multiple indexing operations on the same tensor that requires gradients",
         ):
             self._check_outputs_and_grads(
@@ -6672,12 +6619,12 @@ class TestLearnableBiases(InductorTestCase):
         gate_score = torch.randn(
             params.num_heads,
             device=device,
-            dtype=torch.float32,
+            dtype=params.dtype,
             requires_grad=True,
         )
 
         def bias_func(score, b, h, q_idx, kv_idx):
-            return score * torch.sigmoid(gate_score[h])
+            return score * torch.sigmoid(gate_score[h].to(torch.float32))
 
         flex_compiled = torch.compile(flex_attention, mode=mode)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
@@ -6712,7 +6659,7 @@ class TestLearnableBiases(InductorTestCase):
         bias2 = torch.randn(
             params.seq_length,
             device=device,
-            dtype=torch.float32,
+            dtype=params.dtype,
             requires_grad=True,
         )
 

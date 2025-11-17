@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
-from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 from torch.ao.ns.fx.mappings import get_node_type_to_io_type_map
@@ -32,8 +31,7 @@ def _maybe_get_fqn(node: Node, gm: GraphModule) -> Optional[str]:
         # an observer, get the fqn of the node being observed.
         node_to_use_for_fqn = node
         if node.op == "call_module":
-            if not isinstance(node.target, str):
-                raise AssertionError(f"Expected str, got {type(node.target)}")
+            assert isinstance(node.target, str)
             module = getattr_from_fqn(gm, node.target)
             if _is_activation_post_process(module):
                 node_to_use_for_fqn = get_normalized_nth_input(node, gm, 0)
@@ -129,7 +127,7 @@ def add_loggers_to_model(
                 arg_indices_to_log = get_arg_indices_of_inputs_to_log(node)
                 for node_arg_idx in arg_indices_to_log:
                     node_arg = get_normalized_nth_input(node, gm, node_arg_idx)
-                    if type(node_arg) is Node:
+                    if type(node_arg) == Node:
                         # create a single input logger
                         prev_node = env[node_arg.name]
                         env[node_arg.name] = _insert_logger_after_node(
@@ -147,7 +145,7 @@ def add_loggers_to_model(
                             fqn=fqn,
                         )
                     elif (
-                        type(node_arg) is torch.fx.immutable_collections.immutable_list
+                        type(node_arg) == torch.fx.immutable_collections.immutable_list
                     ):
                         # create N input loggers, one for each node
                         for arg_idx, arg in enumerate(node_arg):  # type: ignore[var-annotated, arg-type]
@@ -349,8 +347,7 @@ def _insert_dtype_cast_after_node(
                 new_dtype_cast_name,
             )
         else:
-            if not dtype_cast_mod_cls:
-                raise AssertionError("Expected dtype_cast_mod_cls to be not None")
+            assert dtype_cast_mod_cls
             dtype_cast_mod = dtype_cast_mod_cls()
             setattr(gm_b, new_dtype_cast_name, dtype_cast_mod)
             return graph_c.create_node(
@@ -375,8 +372,7 @@ def _insert_dtype_cast_after_node(
                 )
                 results.append(new_dtype_cast_node)
             else:
-                if not dtype_cast_mod_cls:
-                    raise AssertionError("Expected dtype_cast_mod_cls to be not None")
+                assert dtype_cast_mod_cls
                 dtype_cast_mod = dtype_cast_mod_cls()
                 setattr(gm_b, new_dtype_cast_name, dtype_cast_mod)
                 new_dtype_cast_node = graph_c.create_node(
@@ -415,8 +411,10 @@ def _copy_node_from_a_to_c(
         )
         return node_a_copy
     elif node_a.op == "call_method":
-        if node_a.target not in ("dequantize", "to"):
-            raise AssertionError(f"target {node_a.target} is not implemented")
+        assert node_a.target in (
+            "dequantize",
+            "to",
+        ), f"target {node_a.target} is not implemented"
         if node_a.target == "dequantize":
             arg_copy = _copy_node_from_a_to_c(
                 get_normalized_nth_input(node_a, gm_a, 0), gm_a, gm_b, graph_c
@@ -536,8 +534,7 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
     """
     TODO(before land): real docblock
     """
-    if not isinstance(input_node_c, (Node, list)):
-        raise AssertionError(f"Expected Node or list, got {type(input_node_c)}")
+    assert isinstance(input_node_c, (Node, list))
 
     # create a sequential list of the subgraphs' nodes from start to end,
     # because we need to add the nodes to graph C in non-reverse order
@@ -623,8 +620,7 @@ def _insert_copy_of_node_a_after_input_node_c(
     if isinstance(input_node_c, Node):
         graph_c = input_node_c.graph
     else:
-        if not isinstance(input_node_c, list):
-            raise AssertionError(f"Expected list, got {type(input_node_c)}")
+        assert isinstance(input_node_c, list)
         graph_c = input_node_c[0].graph
 
     norm_args_kwargs = node_a.normalized_arguments(
@@ -648,10 +644,9 @@ def _insert_copy_of_node_a_after_input_node_c(
             return arg
         elif isinstance(kwarg_val, (list, tuple)):
             for el in kwarg_val:
-                if isinstance(el, Node):
-                    raise AssertionError(
-                        "handling of Node inside list is not implemented"
-                    )
+                assert not isinstance(el, Node), (
+                    "handling of Node inside list is not implemented"
+                )
             return arg
         else:
             raise AssertionError(
@@ -688,8 +683,7 @@ def _insert_copy_of_node_a_after_input_node_c(
         # if target is a module, we point to the module from gm_b
         new_mod_copy_name = get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
         # fetch the corresponding module from gm_a
-        if not isinstance(node_a.target, str):
-            raise AssertionError(f"Expected str, got {type(node_a.target)}")
+        assert isinstance(node_a.target, str)
         mod_a = getattr_from_fqn(gm_a, node_a.target)
         setattr(gm_b, new_mod_copy_name, mod_a)
         node_a_shadows_c = graph_c.create_node(
@@ -701,8 +695,7 @@ def _insert_copy_of_node_a_after_input_node_c(
         )
         return node_a_shadows_c
     else:
-        if node_a.op not in ("call_function", "call_method"):
-            raise AssertionError(f"Unexpected op: {node_a.op}")
+        assert node_a.op in ("call_function", "call_method")
         node_a_shadows_c = graph_c.create_node(
             node_a.op,
             node_a.target,
@@ -797,8 +790,7 @@ def create_a_shadows_b(
                     ref_node_type_b,
                 ) = start_node_b_to_matched_subgraph_a_and_name[node_b]
             else:
-                if not node_b_is_end_node:
-                    raise AssertionError("Expected node_b_is_end_node to be not false")
+                assert node_b_is_end_node
                 (
                     subgraph_a,
                     ref_name,
@@ -959,7 +951,7 @@ def create_a_shadows_b(
                 if should_log_inputs:
                     # skip the input logger when inserting a dtype cast
                     if isinstance(prev_node_c, Node):
-                        # pyrefly: ignore [unbound-name]
+                        # pyrefly: ignore  # unbound-name
                         prev_node_c = get_normalized_nth_input(node_c, gm_b, 0)
                     elif isinstance(prev_node_c, list):
                         prev_node_c = [
@@ -968,7 +960,7 @@ def create_a_shadows_b(
                         ]
                 dtype_cast_node = _insert_dtype_cast_after_node(
                     subgraph_a.start_node,
-                    # pyrefly: ignore [unbound-name]
+                    # pyrefly: ignore  # unbound-name
                     node_c,
                     prev_node_c,
                     gm_a,
@@ -1008,10 +1000,7 @@ def create_a_shadows_b(
                         )
                         input_logger: Union[Node, list[Node]] = dtype_cast_node
                     else:
-                        if not isinstance(dtype_cast_node, list):
-                            raise AssertionError(
-                                f"Expected list, got {type(dtype_cast_node)}"
-                            )
+                        assert isinstance(dtype_cast_node, list)
                         new_loggers = []
                         for dtype_cast_idx, dtype_cast_node_inner in enumerate(
                             dtype_cast_node
@@ -1052,7 +1041,7 @@ def create_a_shadows_b(
                 if num_non_param_args_node_a == 2:
                     # node_c_second_non_param_arg = node_c.args[1]
                     node_c_second_non_param_arg = get_normalized_nth_input(
-                        # pyrefly: ignore [unbound-name]
+                        # pyrefly: ignore  # unbound-name
                         node_c,
                         gm_b,
                         1,
@@ -1063,7 +1052,7 @@ def create_a_shadows_b(
                     subgraph_a,
                     gm_a,
                     gm_b,
-                    # pyrefly: ignore [unbound-name]
+                    # pyrefly: ignore  # unbound-name
                     node_c.name + "_shadow_copy_",
                 )
                 env_c[node_a_shadows_c.name] = node_a_shadows_c
@@ -1086,19 +1075,15 @@ def create_a_shadows_b(
                     cur_node = node_a_shadows_c
                     while get_normalized_nth_input(cur_node, gm_b, 0) != input_logger:  # type: ignore[possibly-undefined]
                         cur_node = get_normalized_nth_input(cur_node, gm_b, 0)  # type: ignore[assignment]
-                    # pyrefly: ignore [unbound-name]
+                    # pyrefly: ignore  # unbound-name
                     if isinstance(input_logger, Node):
-                        # pyrefly: ignore [unbound-name]
+                        # pyrefly: ignore  # unbound-name
                         input_logger_mod = getattr(gm_b, input_logger.name)
                         input_logger_mod.ref_node_name = cur_node.name
                     else:
-                        # pyrefly: ignore [unbound-name]
-                        if not isinstance(input_logger, list):
-                            raise AssertionError(
-                                # pyrefly: ignore [unbound-name]
-                                f"Expected list, got {type(input_logger)}"
-                            )
-                        # pyrefly: ignore [unbound-name]
+                        # pyrefly: ignore  # unbound-name
+                        assert isinstance(input_logger, list)
+                        # pyrefly: ignore  # unbound-name
                         for input_logger_inner in input_logger:
                             input_logger_mod = getattr(gm_b, input_logger_inner.name)
                             input_logger_mod.ref_node_name = cur_node.name

@@ -388,7 +388,7 @@ template <
          !std::is_convertible_v<
              std::decay_t<T>,
              c10::intrusive_ptr<c10::ivalue::Object>>)>>
-void addOutput(Node* node, T&& /*unused*/) {
+void addOutput(Node* node, T&&) {
   TORCH_CHECK(
       false,
       "Found an unsupported argument type ",

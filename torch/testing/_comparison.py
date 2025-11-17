@@ -92,9 +92,7 @@ def default_tolerances(
                 f"Expected a torch.Tensor or a torch.dtype, but got {type(input)} instead."
             )
     dtype_precisions = dtype_precisions or _DTYPE_PRECISIONS
-    rtols, atols = zip(
-        *[dtype_precisions.get(dtype, (0.0, 0.0)) for dtype in dtypes], strict=True
-    )
+    rtols, atols = zip(*[dtype_precisions.get(dtype, (0.0, 0.0)) for dtype in dtypes])
     return max(rtols), max(atols)
 
 

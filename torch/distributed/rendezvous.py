@@ -93,7 +93,6 @@ def _rendezvous_helper(url: str, rank: int, world_size_opt: Optional[int], **kwa
         result = result._replace(
             query=f"{'&'.join([f'{k}={v}' for k, v in query_dict.items()])}"
         )
-        # pyrefly: ignore [bad-assignment]
         url = urlunparse(result)
 
     if result.scheme not in _rendezvous_handlers:
@@ -111,7 +110,6 @@ def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
     if not isinstance(world_size, numbers.Integral):
         raise RuntimeError(f"`world_size` must be an integer. {world_size}")
 
-    # pyrefly: ignore [bad-argument-type]
     return _rendezvous_helper(url, rank, world_size, **kwargs)
 
 

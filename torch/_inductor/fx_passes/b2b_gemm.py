@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 from collections import deque
+from typing import Union
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -475,7 +476,9 @@ def build_subgraph_buffer(
         elif node.op == "call_function":
             # For call_function we use the default lowerings and pass in the
             # already created TensorBoxes as args
-            args, kwargs = tree_map(lambda x: env.get(x, x), (node.args, node.kwargs))
+            args, kwargs = tree_map(
+                lambda x: env[x] if x in env else x, (node.args, node.kwargs)
+            )
             env[node] = lowerings[node.target](*args, **kwargs)
         elif node.op == "output":
 
@@ -513,7 +516,7 @@ def build_subgraph_buffer(
 
 def create_placeholder(
     name: str, dtype: torch.dtype, device: torch.device
-) -> TensorBox | ShapeAsConstantBuffer:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     """
     Creates a placeholder input buffers for producing subgraph_output
     """
@@ -577,7 +580,6 @@ def tuned_b2b_gemm(
 # match the inner mm of a potential b2b_gemm
 @register_graph_pattern(
     CallFunction(torch.ops.aten.mm, Arg(), Arg()),
-    # pyrefly: ignore [bad-argument-type]
     pass_dict=B2B_GEMM_PASS,
 )
 def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> None:
@@ -689,39 +691,30 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
     for node in graph.nodes:  # preserve the order of nodes
         if node in subgraph_node_set:
             subgraph_node_list.append(node)
-            new_node = new_graph.node_copy(node, lambda x: node_remapping.get(x, x))
+            new_node = new_graph.node_copy(
+                node, lambda x: node_remapping[x] if x in node_remapping else x
+            )
             node_remapping[node] = new_node
             if node is inner_mm:
                 new_input_anchor = new_node
             if node is f_node:
                 new_output_anchor = new_node
-    # pyrefly: ignore [unbound-name]
     if new_input_anchor is not new_output_anchor:  # subgraph is non-trivial
         # update the input node
-        # pyrefly: ignore [unbound-name]
         with new_graph.inserting_before(new_input_anchor):
             new_input_node = new_graph.placeholder(name="subgraph_input")
-            # pyrefly: ignore [unbound-name]
             new_input_node.meta.update(new_input_anchor.meta)
-            # pyrefly: ignore [unbound-name]
             new_input_anchor.replace_all_uses_with(new_input_node)
-        # pyrefly: ignore [unbound-name]
         new_graph.erase_node(new_input_anchor)
         # add the output node
-        # pyrefly: ignore [unbound-name]
         new_output_node = new_graph.output(new_output_anchor)
-        # pyrefly: ignore [unbound-name]
         new_output_node.meta.update(new_output_anchor.meta)
     else:  # subgraph is trivial, e.g. (A @ (B @ C))
         # update the input node
-        # pyrefly: ignore [unbound-name]
         with new_graph.inserting_before(new_input_anchor):
             new_input_node = new_graph.placeholder(name="subgraph_input")
-            # pyrefly: ignore [unbound-name]
             new_input_node.meta.update(new_input_anchor.meta)
-            # pyrefly: ignore [unbound-name]
             new_input_anchor.replace_all_uses_with(new_input_node)
-        # pyrefly: ignore [unbound-name]
         new_graph.erase_node(new_input_anchor)
         # update the output node (don't use new_output_anchor since it has been erased)
         new_output_node = new_graph.output(new_input_node)

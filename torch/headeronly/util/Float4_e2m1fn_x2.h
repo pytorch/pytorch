@@ -27,6 +27,6 @@ struct alignas(1) Float4_e2m1fn_x2 {
 
 } // namespace c10
 
-HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
+namespace torch::headeronly {
 using c10::Float4_e2m1fn_x2;
-HIDDEN_NAMESPACE_END(torch, headeronly)
+} // namespace torch::headeronly

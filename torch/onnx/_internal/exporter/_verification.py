@@ -317,9 +317,12 @@ class _VerificationInterpreter(torch.fx.Interpreter):
             return result
         try:
             (onnx_result,) = self._onnx_program.compute_values([node_name], self._args)
-        except Exception:
+        except Exception as e:
             logger.warning(
-                "Failed to compute value for node %s", node_name, exc_info=True
+                "Failed to compute value for node %s: %s",
+                node_name,
+                e,
+                exc_info=True,
             )
             return result
         info = VerificationInfo.from_tensors(

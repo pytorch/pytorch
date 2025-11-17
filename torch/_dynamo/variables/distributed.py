@@ -29,7 +29,6 @@ from torch.fx.experimental._backward_state import BackwardState
 
 from .. import compiled_autograd, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
-from ..bytecode_transformation import create_call_function
 from ..exc import unimplemented_v2
 from ..external_utils import call_module_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
@@ -232,30 +231,6 @@ class PlacementVariable(DistributedVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def reconstruct(self, codegen):
-        # Reconstruct the Placement object by calling its constructor
-        # e.g., Shard(0), Replicate(), Partial()
-        from torch.distributed.tensor.placement_types import Partial, Replicate, Shard
-
-        placement_type = type(self.value)
-
-        # Load the placement class
-        codegen.add_push_null(
-            lambda: codegen.load_import_from(
-                "torch.distributed.tensor.placement_types", placement_type.__name__
-            )
-        )
-
-        # For Shard, we need to pass the dim argument
-        if isinstance(self.value, Shard):
-            codegen(ConstantVariable.create(self.value.dim))
-            codegen.extend_output(create_call_function(1, False))
-        # Replicate and Partial have no required args
-        elif istype(self.value, (Replicate, Partial)):
-            codegen.extend_output(create_call_function(0, False))
-        else:
-            super().reconstruct(codegen)
-
 
 class DeviceMeshVariable(DistributedVariable):
     @staticmethod
@@ -299,11 +274,7 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "get_rank":
             return ConstantVariable.create(self.value.get_rank())
         if name == "get_local_rank":
-            const_args = [x.as_python_constant() for x in args]
-            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return ConstantVariable.create(
-                self.value.get_local_rank(*const_args, **const_kwargs)
-            )
+            return ConstantVariable.create(self.value.get_local_rank())
         if name == "get_group":
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}

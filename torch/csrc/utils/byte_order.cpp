@@ -172,7 +172,7 @@ template <>
 TORCH_API void THP_decodeBuffer<bool, bool>(
     bool* dst,
     const uint8_t* src,
-    bool /*unused*/,
+    bool,
     size_t len) {
   for (const auto i : c10::irange(len)) {
     dst[i] = (int)src[i] != 0 ? true : false;

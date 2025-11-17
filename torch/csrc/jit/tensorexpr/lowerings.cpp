@@ -1554,22 +1554,6 @@ int nnc_lowerings_lazy_registration() {
             [](const ExprHandle& a) { return trunc(a); });
       });
 
-  RegisterNNCLoweringsFunction aten__cast_Float(
-      {"aten::_cast_Float(Tensor self, bool non_blocking=False) -> (Tensor)"},
-      [](const std::vector<ArgValue>& inputs,
-         const std::vector<ExprHandle>& outputShape,
-         const std::vector<ExprHandle>& outputStrides,
-         const std::optional<ScalarType>& outputType,
-         at::Device device) {
-        return computeOneOperand(
-            "aten_cast_float",
-            inputs,
-            outputShape,
-            outputStrides,
-            outputType,
-            [](const ExprHandle& a) { return cast<float>(a); });
-      });
-
   RegisterNNCLoweringsFunction aten_to(
       {"aten::to.dtype(Tensor(a) self, int dtype, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))",
        "aten::to.dtype_layout(Tensor(a) self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))",

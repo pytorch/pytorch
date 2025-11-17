@@ -36,10 +36,10 @@ class LogisticNormal(TransformedDistribution):
     """
 
     arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     support = constraints.simplex
     has_rsample = True
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     base_dist: Independent[Normal]
 
     def __init__(

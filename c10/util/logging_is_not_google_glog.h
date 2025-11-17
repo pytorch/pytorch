@@ -234,9 +234,7 @@ inline std::ostream& operator<<(
   return out;
 }
 
-inline std::ostream& operator<<(
-    std::ostream& out,
-    const std::nullptr_t& /*unused*/) {
+inline std::ostream& operator<<(std::ostream& out, const std::nullptr_t&) {
   out << "(null)";
   return out;
 }

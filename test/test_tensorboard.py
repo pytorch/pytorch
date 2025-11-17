@@ -200,7 +200,7 @@ class TestTensorBoardPyTorchNumpy(BaseTestCase):
                 bucket_counts=counts.tolist(),
             )
 
-            ints = torch.tensor(range(100)).float()
+            ints = torch.tensor(range(0, 100)).float()
             nbins = 100
             counts = torch.histc(ints, bins=nbins, min=0, max=99)
             limits = torch.tensor(range(nbins))

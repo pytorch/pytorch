@@ -23,7 +23,7 @@ using extra_meta_t = std::unordered_map<std::string, std::string>;
 
 struct TORCH_API KinetoEvent {
   KinetoEvent(
-      const std::shared_ptr<const torch::profiler::impl::Result>& /*result*/,
+      const std::shared_ptr<const torch::profiler::impl::Result>&,
       const bool verbose);
 
   uint64_t startThreadId() const;
@@ -63,7 +63,7 @@ struct TORCH_API KinetoEvent {
   bool isPythonFunction() const;
   int64_t cudaElapsedUs() const;
   int64_t privateuse1ElapsedUs() const;
-  void getPerfEventCounters(torch::profiler::perf_counters_t& /*in*/) const;
+  void getPerfEventCounters(torch::profiler::perf_counters_t&) const;
   extra_meta_t extraMeta() const;
   std::string metadataJson() const;
 

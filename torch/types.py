@@ -18,15 +18,15 @@ from typing_extensions import Self
 # `as` imports have better static analysis support than assignment `ExposedType: TypeAlias = HiddenType`
 from torch import (  # noqa: F401
     device as _device,
-    DispatchKey,
+    DispatchKey as DispatchKey,
     dtype as _dtype,
     layout as _layout,
     qscheme as _qscheme,
-    Size,
-    SymBool,
-    SymFloat,
-    SymInt,
-    Tensor,
+    Size as Size,
+    SymBool as SymBool,
+    SymFloat as SymFloat,
+    SymInt as SymInt,
+    Tensor as Tensor,
 )
 
 

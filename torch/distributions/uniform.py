@@ -79,7 +79,7 @@ class Uniform(Distribution):
         return new
 
     @constraints.dependent_property(is_discrete=False, event_dim=0)
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def support(self):
         return constraints.interval(self.low, self.high)
 

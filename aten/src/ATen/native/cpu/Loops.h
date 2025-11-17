@@ -46,7 +46,7 @@ using namespace vec;
 template <typename traits, std::size_t... INDEX>
 typename traits::ArgsTuple
 dereference_impl(char* C10_RESTRICT data[], const int64_t* strides, int64_t i,
-                 std::index_sequence<INDEX...> /*unused*/) {
+                 std::index_sequence<INDEX...>) {
   return std::make_tuple(
       c10::load<typename traits::template arg<INDEX>::type>(
           data[INDEX] + i * strides[INDEX])...);
@@ -65,7 +65,7 @@ dereference_vec_impl(char* C10_RESTRICT data[],
                      const typename traits::result_type& opt_scalar,
                      size_t S,
                      int64_t i,
-                     std::index_sequence<INDEX...> /*unused*/) {
+                     std::index_sequence<INDEX...>) {
   using Vec = typename traits::result_type;
   using scalar_t = typename Vec::value_type;
   return std::make_tuple(
@@ -231,7 +231,7 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
 template <typename traits, typename cb_t>
 inline void unroll_contiguous_scalar_checks(
     const int64_t* /*strides*/,
-    std::index_sequence<> /*unused*/,
+    std::index_sequence<>,
     cb_t&& cb) {
   cb(0);
 }
@@ -239,7 +239,7 @@ inline void unroll_contiguous_scalar_checks(
 template <typename traits, typename cb_t, size_t INDEX0, size_t ...INDEX>
 inline void unroll_contiguous_scalar_checks(
     const int64_t* strides,
-    std::index_sequence<INDEX0, INDEX...> /*unused*/,
+    std::index_sequence<INDEX0, INDEX...>,
     cb_t&& cb) {
   if (is_contiguous_scalar<traits, INDEX0 + 1>(strides)) {
     cb(INDEX0 + 1);

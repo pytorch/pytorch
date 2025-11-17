@@ -44,7 +44,7 @@ namespace {
 
 // this ad-hoc converts from targets (l in [1]) to augmented targets (l' in [1]) note that no bound-checking is done
 template<typename target_t>
-inline int64_t get_target_prime(target_t* target, int64_t offset, int64_t stride, int64_t idx, int64_t BLANK) {
+static inline int64_t get_target_prime(target_t* target, int64_t offset, int64_t stride, int64_t idx, int64_t BLANK) {
   if (idx % 2 == 0) {
     return BLANK;
   } else {

@@ -427,8 +427,7 @@ def check_min_max_valid(min_val: torch.Tensor, max_val: torch.Tensor) -> bool:
     if min_val.numel() == 0 or max_val.numel() == 0:
         warnings.warn(
             "must run observer before calling calculate_qparams. "
-            + "Returning default values.",
-            stacklevel=2,
+            + "Returning default values."
         )
         return False
 
@@ -436,8 +435,7 @@ def check_min_max_valid(min_val: torch.Tensor, max_val: torch.Tensor) -> bool:
         if min_val == float("inf") and max_val == float("-inf"):
             warnings.warn(
                 "must run observer before calling calculate_qparams. "
-                + "Returning default values.",
-                stacklevel=2,
+                + "Returning default values."
             )
 
             return False
@@ -808,8 +806,7 @@ def _assert_and_get_unique_device(module: torch.nn.Module) -> Any:
     """
     if {torch.device("cpu"), torch.device("meta")} == devices:
         warnings.warn(
-            "Both 'meta' and 'cpu' are present in the list of devices. Module can have one device. We Select 'cpu'.",
-            stacklevel=2,
+            "Both 'meta' and 'cpu' are present in the list of devices. Module can have one device. We Select 'cpu'."
         )
         devices = {torch.device("cpu")}
     ""

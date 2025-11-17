@@ -27,8 +27,9 @@ jobs:
       fail-fast: false
       matrix:
         python-version: [ '3.12' ]
+        # TODO (huydhn): Add cu130 after https://github.com/vllm-project/vllm/issues/24464 is resolved
         platform: [ 'manylinux_2_28_x86_64', 'manylinux_2_28_aarch64' ]
-        device: [ 'cu128', 'cu129', 'cu130' ]
+        device: [ 'cu128', 'cu129' ]
         include:
           - platform: manylinux_2_28_x86_64
             device: cu128
@@ -38,10 +39,6 @@ jobs:
             device: cu129
             manylinux-image: 'pytorch/manylinux2_28-builder:cuda12.9'
             runner: linux.12xlarge.memory
-          - platform: manylinux_2_28_x86_64
-            device: cu130
-            manylinux-image: 'pytorch/manylinux2_28-builder:cuda13.0'
-            runner: linux.12xlarge.memory
           - platform: manylinux_2_28_aarch64
             device: cu128
             manylinux-image: 'pytorch/manylinuxaarch64-builder:cuda12.8'
@@ -50,11 +47,6 @@ jobs:
             device: cu129
             manylinux-image: 'pytorch/manylinuxaarch64-builder:cuda12.9'
             runner: linux.arm64.r7g.12xlarge.memory
-        exclude:
-          # TODO (huydhn): Add cu130 aarch64 once PyTorch is on 2.9+ and
-          # xformers is update to support 13.0
-          - platform: manylinux_2_28_aarch64
-            device: cu130
     name: "Build ${{ matrix.device }} vLLM wheel on ${{ matrix.platform }}"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 480
@@ -177,12 +169,7 @@ jobs:
       fail-fast: false
       matrix:
         platform: [ 'manylinux_2_28_x86_64', 'manylinux_2_28_aarch64' ]
-        device: [ 'cu128', 'cu129', 'cu130' ]
-        exclude:
-          # TODO (huydhn): Add cu130 aarch64 once PyTorch is on 2.9+ and
-          # xformers is update to support 13.0
-          - platform: manylinux_2_28_aarch64
-            device: cu130
+        device: [ 'cu128', 'cu129' ]
     env:
       PLATFORM: ${{ matrix.platform }}
       BUILD_DEVICE: ${{ matrix.device }}

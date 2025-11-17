@@ -31,7 +31,6 @@
 #################################################################################################
 
 from .int_tuple import (
-    as_tuple,
     crd2crd,
     crd2idx,
     elem_scale,
@@ -42,7 +41,6 @@ from .int_tuple import (
     IntTuple,
     is_int,
     is_tuple,
-    match_structure,
     product,
     shape_div,
     signum,

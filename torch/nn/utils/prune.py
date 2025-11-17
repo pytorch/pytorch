@@ -274,11 +274,11 @@ class PruningContainer(BasePruningMethod):
         if not isinstance(args, Iterable):  # only 1 item
             self._tensor_name = args._tensor_name
             self.add_pruning_method(args)
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         elif len(args) == 1:  # only 1 item in a tuple
-            # pyrefly: ignore [index-error]
+            # pyrefly: ignore  # index-error
             self._tensor_name = args[0]._tensor_name
-            # pyrefly: ignore [index-error]
+            # pyrefly: ignore  # index-error
             self.add_pruning_method(args[0])
         else:  # manual construction from list or other iterable (or no args)
             for method in args:
@@ -1100,7 +1100,7 @@ def global_unstructured(parameters, pruning_method, importance_scores=None, **kw
 
     # flatten importance scores to consider them all at once in global pruning
     relevant_importance_scores = torch.nn.utils.parameters_to_vector(
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         [
             importance_scores.get((module, name), getattr(module, name))
             for (module, name) in parameters

@@ -255,20 +255,6 @@ class AOTInductorModelContainer {
     return models_[0]->constant_dtype(static_cast<int64_t>(idx));
   }
 
-  uint64_t constant_blob_size() const {
-    if (this->num_models() == 0) {
-      throw std::runtime_error("No available models in container!");
-    }
-    return models_[0]->constant_blob_size();
-  }
-
-  void update_constants_from_blob(const uint8_t* weight_blob_ptr) {
-    if (this->num_models() == 0) {
-      throw std::runtime_error("No available models in container!");
-    }
-    return models_[0]->update_constants_from_blob(weight_blob_ptr);
-  }
-
   void run_const_fold(
       bool inactive_buffer,
       DeviceStreamType stream,

@@ -680,7 +680,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             "#torch.distributed.checkpoint.state_dict.get_state_dict ."
             "Tutorial: https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html .",
             FutureWarning,
-            stacklevel=2,
         )
         _state_dict_type_to_config = {
             StateDictType.FULL_STATE_DICT: FullStateDictConfig,
@@ -700,12 +699,12 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             state_dict_config = state_dict_config_type()
         if optim_state_dict_config is None:
             optim_state_dict_config = optim_state_dict_config_type()
-        if state_dict_config_type is not type(state_dict_config):
+        if state_dict_config_type != type(state_dict_config):
             raise RuntimeError(
                 f"Expected state_dict_config of type {state_dict_config_type} "
                 f"but got {type(state_dict_config)}"
             )
-        if optim_state_dict_config_type is not type(optim_state_dict_config):
+        if optim_state_dict_config_type != type(optim_state_dict_config):
             raise RuntimeError(
                 f"Expected optim_state_dict_config of type {optim_state_dict_config_type} "
                 f"but got {type(optim_state_dict_config)}"
@@ -719,29 +718,24 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             if prev_state_dict_type is None:
                 prev_state_dict_type = submodule._state_dict_type
             else:
-                if prev_state_dict_type != submodule._state_dict_type:
-                    raise AssertionError(
-                        "All FSDP modules should have the same state_dict_type."
-                    )
+                assert prev_state_dict_type == submodule._state_dict_type, (
+                    "All FSDP modules should have the same state_dict_type."
+                )
             if prev_state_dict_config is None:
                 prev_state_dict_config = submodule._state_dict_config
             else:
-                if not isinstance(
+                assert isinstance(
                     submodule._state_dict_config, type(prev_state_dict_config)
-                ):
-                    raise AssertionError(
-                        "All FSDP modules must have the same type of state_dict_config."
-                    )
+                ), "All FSDP modules must have the same type of state_dict_config."
             if prev_optim_state_dict_config is None:
                 prev_optim_state_dict_config = submodule._optim_state_dict_config
             else:
-                if not isinstance(
+                assert isinstance(
                     submodule._optim_state_dict_config,
                     type(prev_optim_state_dict_config),
-                ):
-                    raise AssertionError(
-                        "All FSDP modules must have the same type of optim_state_dict_config."
-                    )
+                ), (
+                    "All FSDP modules must have the same type of optim_state_dict_config."
+                )
 
             submodule._state_dict_type = state_dict_type
             submodule._state_dict_config = state_dict_config
@@ -780,11 +774,10 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                     submodule._state_dict_config,
                     submodule._optim_state_dict_config,
                 )
-                if state_dict_settings != submodule_settings:
-                    raise AssertionError(
-                        "All FSDP modules must have the same state dict settings."
-                        f"Got {submodule_settings} and {state_dict_settings}."
-                    )
+                assert state_dict_settings == submodule_settings, (
+                    "All FSDP modules must have the same state dict settings."
+                    f"Got {submodule_settings} and {state_dict_settings}."
+                )
                 _set_optim_use_dtensor(submodule, submodule_settings)
         return state_dict_settings
 
@@ -1061,11 +1054,10 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             yield
         finally:
             for m, old_flag in old_flags:
-                if m._sync_gradients:
-                    raise AssertionError(
-                        "`_sync_gradients` was incorrectly set to "
-                        "`True` while in the `no_sync()` context manager"
-                    )
+                assert not m._sync_gradients, (
+                    "`_sync_gradients` was incorrectly set to "
+                    "`True` while in the `no_sync()` context manager"
+                )
                 m._sync_gradients = old_flag
 
     @torch.no_grad()
@@ -1209,8 +1201,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             warnings.warn(
                 f"Called FSDP.clip_grad_norm_() on rank {self.rank} with no "
                 "gradients -- returning the total norm in the default dtype "
-                f"{total_norm.dtype}",
-                stacklevel=2,
+                f"{total_norm.dtype}"
             )  # warn since this is generally unexpected
             return total_norm
         total_norm_dtype = functools.reduce(
@@ -1284,22 +1275,15 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             )
         else:
             using_optim_input = False
-            if optim_input is not None or rank0_only:
-                raise AssertionError(
-                    f"Expected optim_input to be None and rank0_only to be False, "
-                    f"got optim_input={optim_input}, rank0_only={rank0_only}"
-                )
+            assert optim_input is None and not rank0_only
 
         use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[
             0
         ]._use_orig_params
-        if not all(
+        assert all(
             use_orig_params == m._use_orig_params
             for m in FullyShardedDataParallel.fsdp_modules(model)
-        ):
-            raise AssertionError(
-                "Not all FSDP modules have the same _use_orig_params value"
-            )
+        ), "Not all FSDP modules have the same _use_orig_params value"
 
         return _optim_state_dict(
             model=model,
@@ -1345,22 +1329,15 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             )
         else:
             using_optim_input = False
-            if optim_input is not None or rank0_only:
-                raise AssertionError(
-                    f"Expected optim_input to be None and rank0_only to be False, "
-                    f"got optim_input={optim_input}, rank0_only={rank0_only}"
-                )
+            assert optim_input is None and not rank0_only
 
         use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[
             0
         ]._use_orig_params
-        if not all(
+        assert all(
             use_orig_params == m._use_orig_params
             for m in FullyShardedDataParallel.fsdp_modules(model)
-        ):
-            raise AssertionError(
-                "Not all FSDP modules have the same _use_orig_params value"
-            )
+        ), "Not all FSDP modules have the same _use_orig_params value"
 
         if rank0_only and dist.get_rank(group) > 0:
             optim_state_dict = {}
@@ -1742,13 +1719,10 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             optim_input,
             optim,
         )
-        if optim_state_key_type not in (
+        assert optim_state_key_type in (
             OptimStateKeyType.PARAM_NAME,
             OptimStateKeyType.PARAM_ID,
-        ):
-            raise AssertionError(
-                f"Expected optim_state_key_type to be PARAM_NAME or PARAM_ID, got {optim_state_key_type}"
-            )
+        )
         osd = optim_state_dict  # alias
         # Validate that the existing parameter keys are uniformly typed
         uses_param_name_mask = [type(param_key) is str for param_key in osd["state"]]
@@ -2176,10 +2150,9 @@ def _get_param_to_fqn(
     """
     param_to_param_names = _get_param_to_fqns(model)
     for param_names in param_to_param_names.values():
-        if len(param_names) == 0:
-            raise AssertionError(
-                "`_get_param_to_fqns()` should not construct empty lists"
-            )
+        assert len(param_names) > 0, (
+            "`_get_param_to_fqns()` should not construct empty lists"
+        )
         if len(param_names) > 1:
             raise RuntimeError(
                 "Each parameter should only map to one parameter name but got "

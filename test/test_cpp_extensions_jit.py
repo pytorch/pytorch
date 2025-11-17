@@ -1240,18 +1240,18 @@ class TestCppExtensionJIT(common.TestCase):
         at::Tensor my_abs(at::Tensor x) {
         StableIValue stack[1];
         RAIIATH raii(torch::aot_inductor::new_tensor_handle(std::move(x)));
-        stack[0] = torch::stable::detail::from(raii.release());
+        stack[0] = from(raii.release());
         aoti_torch_call_dispatcher("aten::abs", "", stack);
-        RAIIATH res(torch::stable::detail::to<AtenTensorHandle>(stack[0]));
+        RAIIATH res(to<AtenTensorHandle>(stack[0]));
         return *reinterpret_cast<at::Tensor*>(res.release());
         }
 
         at::Tensor my_floor(at::Tensor x) {
         StableIValue stack[1];
         RAIIATH raii(torch::aot_inductor::new_tensor_handle(std::move(x)));
-        stack[0] = torch::stable::detail::from(raii.release());
+        stack[0] = from(raii.release());
         aoti_torch_call_dispatcher("aten::floor", "", stack);
-        RAIIATH res(torch::stable::detail::to<AtenTensorHandle>(stack[0]));
+        RAIIATH res(to<AtenTensorHandle>(stack[0]));
         return *reinterpret_cast<at::Tensor*>(res.release());
         }
         """

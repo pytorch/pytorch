@@ -515,11 +515,8 @@ def meta_copy_(self, src, non_blocking=False):
 def inferUnsqueezeGeometry(tensor, dim):
     result_sizes = list(tensor.size())
     result_strides = list(tensor.stride())
-    # pyrefly: ignore [unsupported-operation]
     new_stride = 1 if dim >= tensor.dim() else result_sizes[dim] * result_strides[dim]
-    # pyrefly: ignore [bad-argument-type]
     result_sizes.insert(dim, 1)
-    # pyrefly: ignore [bad-argument-type]
     result_strides.insert(dim, new_stride)
     return result_sizes, result_strides
 
@@ -1790,7 +1787,7 @@ def _padding_check_valid_input(input, padding, *, dim):
         for d in range(1, input_dim):
             valid_batch_mode = valid_batch_mode and input.size(d) != 0
     else:
-        for d in range(input_dim):
+        for d in range(0, input_dim):
             valid_non_batch_mode = valid_non_batch_mode and input.size(d) != 0
 
     # allow empty batch size but not other dimensions.
@@ -2344,19 +2341,19 @@ def calc_conv_nd_return_shape(
 
     ret_shape = [input_tensor.shape[0], out_channels]
     if isinstance(stride, IntLike):
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         stride = [stride] * len(dims)
     elif len(stride) == 1:
         stride = [stride[0]] * len(dims)
 
     if isinstance(padding, IntLike):
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         padding = [padding] * len(dims)
     elif len(padding) == 1:
         padding = [padding[0]] * len(dims)
 
     if isinstance(dilation, IntLike):
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         dilation = [dilation] * len(dims)
     elif len(dilation) == 1:
         dilation = [dilation[0]] * len(dims)
@@ -2364,7 +2361,7 @@ def calc_conv_nd_return_shape(
     output_padding_list: Optional[list[int]] = None
     if output_padding:
         if isinstance(output_padding, IntLike):
-            # pyrefly: ignore [bad-assignment]
+            # pyrefly: ignore  # bad-assignment
             output_padding_list = [output_padding] * len(dims)
         elif len(output_padding) == 1:
             output_padding_list = [output_padding[0]] * len(dims)
@@ -2377,19 +2374,19 @@ def calc_conv_nd_return_shape(
             ret_shape.append(
                 _formula_transposed(
                     dims[i],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore  # index-error
                     padding[i],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore  # index-error
                     dilation[i],
                     kernel_size[i],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore  # index-error
                     stride[i],
                     output_padding_list[i],
                 )
             )
         else:
             ret_shape.append(
-                # pyrefly: ignore [index-error]
+                # pyrefly: ignore  # index-error
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
     from torch.fx.experimental.symbolic_shapes import sym_or
@@ -2722,22 +2719,20 @@ if torch._C._has_mkldnn:
 
     @register_meta(torch.ops.quantized.int4mm_packed_weight_cpu)
     def meta_int4mm_packed_weight_cpu(x, w, q_group_size, q_scale_and_zeros):
-        torch._check(x.dim() == 2, lambda: f"x must be a 2D tensor, got {x.dim()}D")
-        torch._check(w.dim() == 2, lambda: f"w must be a 2D tensor, got {w.dim()}D")
+        torch._check(x.dim() == 2, f"x must be a 2D tensor, got {x.dim()}D")
+        torch._check(w.dim() == 2, f"w must be a 2D tensor, got {w.dim()}D")
         torch._check(
             x.dtype in [torch.float32, torch.float16, torch.bfloat16],
-            lambda: f"expected x to be f32/f16/bf16, got {x.dtype}",
+            f"expected x to be f32/f16/bf16, got {x.dtype}",
         )
-        torch._check(
-            w.dtype == torch.uint8, lambda: f"expected w to be uint8, got {w.dtype}"
-        )
+        torch._check(w.dtype == torch.uint8, f"expected w to be uint8, got {w.dtype}")
         torch._check(
             q_group_size.dtype == torch.int64,
-            lambda: f"q_group_size must be int64, got {q_group_size.dtype}",
+            f"q_group_size must be int64, got {q_group_size.dtype}",
         )
         torch._check(
             q_scale_and_zeros.dtype == x.dtype,
-            lambda: f"q_scale_and_zeros must have the same dtype as x, got {q_scale_and_zeros.dtype}",
+            f"q_scale_and_zeros must have the same dtype as x, got {q_scale_and_zeros.dtype}",
         )
         return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
 
@@ -3457,7 +3452,7 @@ def meta_index_Tensor(self, indices):
         """
         shape = before_shape + replacement_shape + after_shape
         strides = list(self.stride())
-        # pyrefly: ignore [unsupported-operation]
+        # pyrefly: ignore  # unsupported-operation
         strides[len(before_shape) : len(self.shape) - len(after_shape)] = [0] * len(
             replacement_shape
         )
@@ -4900,7 +4895,7 @@ def meta_fractional_max_pool2d(self, kernel_size, output_size, random_samples):
     for d in range(ndim - 3, ndim):
         torch._check(
             self.size(d) > 0,
-            lambda: f"fractional_max_pool2d: Expected input to have non-zero "
+            f"fractional_max_pool2d: Expected input to have non-zero "
             f" size for non-batch dimensions, but got {self.size()} with dimension {d} empty",
         )
 
@@ -4938,7 +4933,7 @@ def meta_fractional_max_pool2d(self, kernel_size, output_size, random_samples):
     d = random_samples.size(2)
     torch._check(
         n >= input_batch,
-        lambda: "Expect _random_samples.size(0) no less then input batch size.",
+        "Expect _random_samples.size(0) no less then input batch size.",
     )
     torch._check(
         c == input_channels,
@@ -5310,11 +5305,10 @@ def grid_sampler_3d_backward(
 
 @register_meta([aten.full.default])
 def full(size, fill_value, *args, **kwargs):
-    dtype = kwargs.get("dtype")
+    dtype = kwargs.get("dtype", None)
     if not dtype:
         dtype = utils.get_dtype(fill_value)
     kwargs["dtype"] = dtype
-    # pyrefly: ignore [not-iterable]
     return torch.empty(size, *args, **kwargs)
 
 
@@ -6672,7 +6666,7 @@ def rnn_cell_checkSizes(
     )
     torch._check(
         all(
-            # pyrefly: ignore [missing-attribute]
+            # pyrefly: ignore  # missing-attribute
             x.device == input_gates.device
             for x in [hidden_gates, input_bias, hidden_bias, prev_hidden]
         ),
@@ -7198,7 +7192,7 @@ def meta_searchsorted(
     # Per the docs, if side == "left" and right is True, we error.
     torch._check(
         side != "left" or not right,
-        lambda: "torch.searchsorted(): side and right can't be set to opposites, got side of "
+        "torch.searchsorted(): side and right can't be set to opposites, got side of "
         "left while right was True",
     )
 
@@ -7309,7 +7303,7 @@ def meta_embedding_bag_per_sample_weights_backward(
     embedding_features = grad.size(1)
     torch._check(
         mode == MODE_SUM,
-        lambda: "embedding_bag_backward: per_sample_weights only supported for mode='sum'",
+        "embedding_bag_backward: per_sample_weights only supported for mode='sum'",
     )
     torch._check(grad.dim() == 2)
     torch._check(indices.dim() == 1)
@@ -7456,7 +7450,7 @@ def _meta_grouped_mm_common(
     if not mat_a_is_2d or not mat_b_is_2d:
         torch._check(
             mat_a.size(-1) == mat_b.size(-2),
-            lambda: "contraction dimension of mat_a and mat_b must match",
+            "contraction dimension of mat_a and mat_b must match",
         )
 
     if scaled:

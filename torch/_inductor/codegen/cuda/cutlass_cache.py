@@ -94,11 +94,11 @@ def maybe_fetch_ops() -> Optional[list[Any]]:
             assert isinstance(serialized_ops, list), (
                 f"Expected serialized ops is a list, got {type(serialized_ops)}"
             )
-        except Exception:
+        except Exception as e:
             log.warning(
-                "Failed to load CUTLASS config %s from local cache",
+                "Failed to load CUTLASS config %s from local cache: %s",
                 filename,
-                exc_info=True,
+                e,
             )
             serialized_ops = None
     elif config.is_fbcode():

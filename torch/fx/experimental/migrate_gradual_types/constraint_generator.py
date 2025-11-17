@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 import operator
 import warnings
-from collections.abc import Callable, Iterable
-from typing import TypeVar
+from collections.abc import Iterable
+from typing import Callable, TypeVar
 from typing_extensions import ParamSpec
 
 import torch

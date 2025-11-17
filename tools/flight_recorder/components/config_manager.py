@@ -78,22 +78,15 @@ class JobConfig:
     def parse_args(
         self: "JobConfig", args: Optional[Sequence[str]]
     ) -> argparse.Namespace:
-        # pyrefly: ignore [bad-assignment]
         args = self.parser.parse_args(args)
-        # pyrefly: ignore [missing-attribute]
         if args.selected_ranks is not None:
-            # pyrefly: ignore [missing-attribute]
             assert args.just_print_entries, (
                 "Not support selecting ranks without printing entries"
             )
-        # pyrefly: ignore [missing-attribute]
         if args.pg_filters is not None:
-            # pyrefly: ignore [missing-attribute]
             assert args.just_print_entries, (
                 "Not support selecting pg filters without printing entries"
             )
-        # pyrefly: ignore [missing-attribute]
         if args.verbose:
             logger.set_log_level(logging.DEBUG)
-        # pyrefly: ignore [bad-return]
         return args

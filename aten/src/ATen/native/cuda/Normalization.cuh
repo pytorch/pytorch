@@ -23,7 +23,7 @@ namespace at::native {
 
 // The maximum number of threads in a block
 #if defined(USE_ROCM)
-constexpr int MAX_BLOCK_SIZE = 1024;
+constexpr int MAX_BLOCK_SIZE = 256;
 #else
 constexpr int MAX_BLOCK_SIZE = 512;
 #endif
@@ -33,7 +33,7 @@ constexpr unsigned MAX_GRID_SIZE = 65535u;
 // Number of threads in a block given an input size up to MAX_BLOCK_SIZE
 static int getNumThreads(int nElem) {
 #if defined(USE_ROCM)
-  int threadSizes[5] = { 64, 128, 256, 512, MAX_BLOCK_SIZE };
+  int threadSizes[5] = { 16, 32, 64, 128, MAX_BLOCK_SIZE };
 #else
   int threadSizes[5] = { 32, 64, 128, 256, MAX_BLOCK_SIZE };
 #endif
@@ -115,23 +115,9 @@ __device__ scalar_t reduce(Op op, PTA tensor, int plane) {
   // first the reductions each thread does separately
   scalar_t sum = static_cast<scalar_t>(0);
   for (int batch = threadIdx.y; batch < tensor.size(0); batch += blockDim.y) {
-#if defined(USE_ROCM)
-    constexpr int UNRL = 4; // load deserilize factor
-    scalar_t tmp[UNRL];
-    for (int x = threadIdx.x; x < tensor.size(2); x += blockDim.x*UNRL) {
-#pragma unroll
-      for (int u = 0; u < UNRL; u++)
-        tmp[u] = op(batch, plane, std::min((int)tensor.size(2)-1, (int)(x+u*blockDim.x)));
-#pragma unroll
-      for (int u = 0; u < UNRL; u++)
-        if (x+u*blockDim.x < tensor.size(2))
-          sum += tmp[u];
-    }
-#else
     for (int x = threadIdx.x; x < tensor.size(2); x += blockDim.x) {
       sum += op(batch, plane, x);
     }
-#endif
   }
   __shared__ scalar_t shared[C10_WARP_SIZE];
   SumReduceOp<scalar_t> reduce_op;
@@ -306,22 +292,6 @@ __global__ void batch_norm_collect_statistics_kernel(
   stat_accscalar_t var_n = 0;
   int n = 0;
   for (int batch = threadIdx.y; batch < input.size(0); batch += blockDim.y) {
-#if defined(USE_ROCM)
-    constexpr int UNRL = 4;
-    stat_accscalar_t v_[UNRL];
-    for (int x = threadIdx.x; x < input.size(2); x += blockDim.x*UNRL) {
-      for (int u = 0; u < UNRL; u++)
-        v_[u] = input[batch][plane][min(x+u*blockDim.x, input.size(2)-1)];
-      for (int u = 0; u < UNRL; u++) {
-        if (x+u*blockDim.x < input.size(2)) {
-          stat_accscalar_t d1 = v_[u] - avg;
-          n++;
-          avg += d1 / n;
-          var_n += d1 * (v_[u] - avg);
-        }
-      }
-    }
-#else
     for (int x = threadIdx.x; x < input.size(2); x += blockDim.x) {
       stat_accscalar_t v = input[batch][plane][x];
       stat_accscalar_t d1 = v - avg;
@@ -329,7 +299,6 @@ __global__ void batch_norm_collect_statistics_kernel(
       avg += d1 / n;
       var_n += d1 * (v - avg);
     }
-#endif
   }
 
   // first warpSum to get one value per thread to

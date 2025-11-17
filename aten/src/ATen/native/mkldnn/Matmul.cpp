@@ -114,13 +114,8 @@ static bool use_mkldnn_bf32_matmul() {
   return use_mkldnn_bf16_matmul() && at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::MATMUL) == at::Float32Precision::BF16;
 }
 
-
 static bool use_mkldnn_tf32_matmul() {
-#if defined(__x86_64__) || defined(_M_X64)
-    return cpuinfo_has_x86_amx_fp16() && at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::MATMUL) == at::Float32Precision::TF32;
-#else
-    return false;  // TF32 not supported on power system
-#endif
+  return cpuinfo_has_x86_amx_fp16() && at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::MATMUL) == at::Float32Precision::TF32;
 }
 
 // returns an ideep::tensor
@@ -416,7 +411,7 @@ static inline bool checksize(const Tensor& mat1, const Tensor& mat2){
   // else if dim = 3, mat1's size = (b * m * n), mat2's size = (b * n * k)
   // else called from aten::mv, mat1.size = (m * n), mat2.size = (n)
   // only m * n * b * k(if exist) are large enough we can get benefit from mkldnn optimized gemm kernel
-  constexpr int64_t mkldnn_gemm_min_size = 16 * 16 * 16;
+  static const int64_t mkldnn_gemm_min_size = 16 * 16 * 16;
   if (mat1.dim() == 1 && mat2.dim() == 1) {
     // aten::dot
     return mat1.size(0) > mkldnn_gemm_min_size;

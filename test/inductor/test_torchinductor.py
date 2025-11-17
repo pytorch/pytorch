@@ -514,11 +514,11 @@ def check_model(
     #         print("Graph", graph)
     if check_has_compiled:
         assert called, "Ran graph without calling compile_fx"
-    assert type(actual) is type(correct)
+    assert type(actual) == type(correct)
     if isinstance(actual, (tuple, list)):
         assert len(actual) == len(correct)
         assert all(
-            type(actual_item) is type(correct_item)
+            type(actual_item) == type(correct_item)
             for actual_item, correct_item in zip(actual, correct)
         )
 
@@ -706,7 +706,7 @@ def check_model_gpu(
     if check_lowp:
 
         def downcast_fn(x):
-            if not isinstance(x, torch.Tensor) or x.dtype != torch.float:
+            if not isinstance(x, torch.Tensor) or not x.dtype == torch.float:
                 return x
             return torch.empty_strided(
                 x.size(), x.stride(), device=GPU_TYPE, dtype=torch.half
@@ -4640,7 +4640,6 @@ class CommonTemplate:
             (torch.randn([4, 4, 4]),),
         )
 
-    @skipIfXpu(msg="Incorrect reference on XPU, see issue #165392")
     def test_conv1d_with_permute(self):
         # fix https://github.com/pytorch/pytorch/issues/159462
         class ConvModel(nn.Module):
@@ -4694,7 +4693,7 @@ class CommonTemplate:
             # Make sure we compute also with fp16 in the reference. Otherwise,
             # the reference will compute with fp32 and cast back to fp16, which
             # causes numeric differences beyond tolerance.
-            reference_in_float=not torch.version.hip,
+            reference_in_float=False if torch.version.hip else True,
         )
 
     def test_convolution2(self):
@@ -4728,7 +4727,7 @@ class CommonTemplate:
             # Make sure we compute also with fp16 in the reference. Otherwise,
             # the reference will compute with fp32 and cast back to fp16, which
             # causes numeric differences beyond tolerance.
-            reference_in_float=not torch.version.hip,
+            reference_in_float=False if torch.version.hip else True,
         )
 
     @skip_if_gpu_halide
@@ -4779,7 +4778,7 @@ class CommonTemplate:
             # Make sure we compute also with fp16 in the reference. Otherwise,
             # the reference will compute with fp32 and cast back to fp16, which
             # causes numeric differences beyond tolerance.
-            reference_in_float=not torch.version.hip,
+            reference_in_float=False if torch.version.hip else True,
         )
 
     def test_conv2d_channels_last(self):
@@ -6448,9 +6447,9 @@ class CommonTemplate:
             atol = 3e-4
             rtol = 1e-4
         else:
-            atol = 5e-4
-            rtol = 3e-4
-
+            # use default
+            atol = None
+            rtol = None
         # MPS has correctness problem before MacOS15
         with (
             contextlib.nullcontext()
@@ -6473,7 +6472,6 @@ class CommonTemplate:
     @skip_if_gpu_halide
     # Constant folding was explicitly turned off due to issue #108388
     # Turn it back on for test
-    @unittest.skipIf(config.triton.native_matmul, "native matmul has better precision")
     @torch._inductor.config.patch(joint_graph_constant_folding=True)
     def test_remove_no_ops(self):
         def matmul_with_op(x, y, fn):
@@ -6495,7 +6493,6 @@ class CommonTemplate:
             out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
             self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
 
-            atol, rtol = None, None
             if self.device == "cpu":
                 FileCheck().check_not("cpp_fused").run(source_codes[0])
             else:
@@ -6511,18 +6508,14 @@ class CommonTemplate:
             ]
             for fn in fns:
                 out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
-                self.assertEqual(
-                    out, matmul_with_op(inps[0], inps[1], fn), atol=atol, rtol=rtol
-                )
+                self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
 
             # test broadcasted shape bail
             fn = lambda x: x + torch.zeros(  # noqa: E731
                 [256, 256, 256], dtype=lowp_dtype, device=self.device
             )
             out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
-            self.assertEqual(
-                out, matmul_with_op(inps[0], inps[1], fn), atol=atol, rtol=rtol
-            )
+            self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
 
     def test_remove_noop_copy(self):
         def fn(x, y):
@@ -6904,7 +6897,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
-    @unittest.skipIf(config.triton.native_matmul, "matmul is now generated")
     def test_deterministic_codegen_with_suffix(self):
         if "cpu" in str(self.device) and config.is_fbcode():
             raise unittest.SkipTest("cpp packaging is wacky in fbcode")
@@ -8660,15 +8652,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         torch._inductor.metrics.generated_kernel_count = 0
         with torch.no_grad():
             self.common(kv_cache_module, (inp, 1), check_lowp=False)
-
-        if (
-            config.triton.native_matmul
-            and config.cuda_backend == "triton"
-            and self.device == "cuda"
-        ):
-            assertGeneratedKernelCountEqual(self, 2)
-        else:
-            assertGeneratedKernelCountEqual(self, 1)
+        assertGeneratedKernelCountEqual(self, 1)
 
     @skipIfMPS
     def test_slice_scatter_dtype_consistency(self):
@@ -9945,16 +9929,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ),
             check_lowp=False,
         )
-
-        if (
-            config.triton.native_matmul
-            and config.cuda_backend == "triton"
-            and self.device == "cuda"
-        ):
-            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
-        else:
-            # codegen mm kernel from template
-            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+        expected_kernel = 0
+        # codegen mm kernel from template
+        self.assertEqual(
+            torch._inductor.metrics.generated_kernel_count, expected_kernel
+        )
 
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_dtype_sympy_expr(self):
@@ -10027,7 +10006,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @xfail_if_mps
     @config.patch(search_autotune_cache=False)
-    @unittest.skipIf(config.triton.native_matmul, "matmul count is different")
     def test_dropout3(self):
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
@@ -11308,7 +11286,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             {
                 "triton.prefer_nd_tiling": prefer_nd_tiling,
                 "triton.use_block_ptr": use_block_ptr,
-                "triton.native_matmul": False,
             }
         ):
             # Check accuracy
@@ -12970,7 +12947,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             )
 
         res = torch.compile(fn)(20)
-        self.assertTrue(torch.all((res >= 0) & (res < 10)).item())
+        self.assertTrue(torch.all((0 <= res) & (res < 10)).item())
 
     @torch._inductor.config.patch(force_shape_pad=True)
     @skip_if_gpu_halide  # correctness issue
@@ -14115,7 +14092,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         code_disallowed = re.sub(r"AOT ID: .*", "AOT ID: ['test']", code_disallowed)
         return code_allowed != code_disallowed
 
-    @unittest.skipIf(config.triton.native_matmul, "matmul is now generated")
     def test_allow_reuse_disable_if_exceed_peak(self):
         @torch.compile
         def fn(inp):  # 1*N^2
@@ -14268,42 +14244,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         out, (code,) = run_and_get_code(compiled, a, b)
         self.assertTrue("'enable_fp_fusion': False" in code)
         torch.testing.assert_close(out, fn(a, b), atol=0, rtol=0)
-
-    @skip_if_cpp_wrapper("skip cpp wrapper")
-    @requires_cuda_and_triton
-    def test_repeat_interleave_decomposition_has_clamp(self):
-        repeat = torch.ones(2560, dtype=torch.int64, device=GPU_TYPE)
-        output_size = 505450
-        data = torch.arange(2560, device=GPU_TYPE)
-
-        if is_dynamic_shape_enabled():
-            raise unittest.SkipTest(
-                "repeat_interleave decomp doesn't support dynamic output size"
-            )
-
-        @torch.compile
-        def fn(repeat, output_size, data):
-            indices = torch.ops.aten.repeat_interleave.Tensor(
-                repeat, output_size=output_size
-            )
-            return data[indices]
-
-        result, code = run_and_get_code(fn, repeat, output_size, data)
-
-        self.assertEqual(result.shape[0], output_size)
-        self.assertTrue(torch.all(result >= 0).item())
-        self.assertTrue(torch.all(result < 2560).item())
-
-        code_str = "\n".join(code)
-        if torch.version.hip:
-            triton_str = "tl.minimum"
-        else:
-            triton_str = "triton_helpers.minimum"
-        self.assertIn(
-            triton_str,
-            code_str,
-            "Generated Triton code should use triton_helpers.minimum for clamping",
-        )
 
     # end of class CommonTemplate - add new tests here
 
@@ -15146,7 +15086,6 @@ if RUN_GPU:
                 self.assertTrue("ymask = yindex < ynumel" in code)
                 self.assertTrue("xmask = xindex < xnumel" in code)
 
-        @config.patch("triton.native_matmul", False)
         def test_kernel_names_descriptive(self):
             @torch.compile(backend="inductor")
             def fn1(x):
@@ -15788,7 +15727,7 @@ if RUN_GPU:
                 ).run(code)
             else:
                 FileCheck().check_count(
-                    f"with torch.{GPU_TYPE}._DeviceGuard(0)", 1, exactly=True
+                    "with torch.cuda._DeviceGuard(0)", 1, exactly=True
                 ).run(code)
 
     class RNNTest(TestCase):

@@ -1,8 +1,8 @@
 import itertools
 from collections import defaultdict
-from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
+from typing import Callable
 
 from tabulate import tabulate
 from tqdm import tqdm

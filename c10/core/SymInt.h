@@ -52,7 +52,7 @@ class C10_API SymInt {
   // One appropriate use for this is when you are constructing a symint
   // in a situation where you know it is non-negative (or, if it is negative,
   // the negative value is -1; i.e., not user controlled)
-  SymInt(Unchecked /*unused*/, int64_t d) : data_(d) {}
+  SymInt(Unchecked, int64_t d) : data_(d) {}
 
   // TODO: these implementations are not optimal because they allocate a
   // temporary and then use the move constructor/assignment
@@ -152,6 +152,14 @@ class C10_API SymInt {
   // It should be called as guard_int(__FILE__, __LINE__).  The file and line
   // number can be used to diagnose overspecialization.
   int64_t guard_int(const char* file, int64_t line) const;
+
+  // Insert a guard that this SymInt must be size-like, returning true if
+  // the integer actually is >= 0.  Unlike manually performing a >= 0 test,
+  // if the SymInt in question is an unbacked SymInt (or, potentially in the
+  // future, if it contains unbacked SymInts), we will also treat the
+  // unbacked SymInt as statically testing >= 2 (which will prevent us from
+  // choking on, e.g., contiguity checks.)
+  bool expect_size(const char* file, int64_t line) const;
 
   // Distinguish actual symbolic values from constants stored on the heap
   bool is_symbolic() const {

@@ -5,7 +5,7 @@ namespace at {
 
 namespace detail {
 
-inline void noopDelete(void* /*unused*/) {}
+inline void noopDelete(void*) {}
 
 } // namespace detail
 

@@ -134,7 +134,7 @@ def compare_state_dicts(gpu_state_dict, cpu_state_dict, rtol=1e-5, atol=1e-8):
                     False,
                     f"Collection length mismatch at {path}: {len(gpu_obj)} vs {len(cpu_obj)}",
                 )
-            if type(gpu_obj) is not type(cpu_obj):
+            if type(gpu_obj) != type(cpu_obj):
                 return (
                     False,
                     f"Collection type mismatch at {path}: {type(gpu_obj)} vs {type(cpu_obj)}",
@@ -149,7 +149,7 @@ def compare_state_dicts(gpu_state_dict, cpu_state_dict, rtol=1e-5, atol=1e-8):
 
         # If objects are custom classes, compare their attributes
         elif hasattr(gpu_obj, "__dict__") and hasattr(cpu_obj, "__dict__"):
-            if type(gpu_obj) is not type(cpu_obj):
+            if type(gpu_obj) != type(cpu_obj):
                 return (
                     False,
                     f"Object type mismatch at {path}: {type(gpu_obj)} vs {type(cpu_obj)}",
@@ -165,7 +165,7 @@ def compare_state_dicts(gpu_state_dict, cpu_state_dict, rtol=1e-5, atol=1e-8):
 
         # For other types, use direct equality comparison
         else:
-            if type(gpu_obj) is not type(cpu_obj):
+            if type(gpu_obj) != type(cpu_obj):
                 return (
                     False,
                     f"Type mismatch at {path}: {type(gpu_obj)} vs {type(cpu_obj)}",

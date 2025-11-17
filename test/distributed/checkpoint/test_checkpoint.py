@@ -152,7 +152,7 @@ class TestStorageBase:
         self.rank = 0 if not dist.is_initialized() else dist.get_rank()
 
     def _get_ranks(self, name):
-        return self.fail_conf.get(name, None)
+        return self.fail_conf[name] if name in self.fail_conf else None
 
     def _fail_rank(self, name):
         ranks = self._get_ranks(name)

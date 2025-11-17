@@ -166,7 +166,7 @@ class AllReduce:
             # collect all data to the list and make them
             # all on rank 0 device
             tensors = [
-                data[src_rank][i].to(rank_0_device) for src_rank in range(len(data))
+                data[src_rank][i].to(rank_0_device) for src_rank in range(0, len(data))
             ]
 
             # now mimic reduce across all ranks
@@ -457,9 +457,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
     ):
         works = [
             self._reduce_scatter_base(output_tensor, input_tensor, opts)
-            for output_tensor, input_tensor in zip(
-                output_tensors, input_tensors, strict=True
-            )
+            for output_tensor, input_tensor in zip(output_tensors, input_tensors)
         ]
         for work in works[:-1]:
             work.wait()
@@ -469,7 +467,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
         self, output_tensor_list, input_tensor_list, opts=AllgatherOptions()
     ):
         res = None
-        for o_t, i_t in zip(output_tensor_list, input_tensor_list, strict=True):
+        for o_t, i_t in zip(output_tensor_list, input_tensor_list):
             res = self._allgather_base(o_t, i_t)
         return res
 

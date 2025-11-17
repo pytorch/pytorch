@@ -61,7 +61,7 @@
 constexpr float EPSILON = 1e-12;
 
 namespace {
-  inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
+  static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
     if (reduction == at::Reduction::Mean) {
       return unreduced.mean();
     } else if (reduction == at::Reduction::Sum) {

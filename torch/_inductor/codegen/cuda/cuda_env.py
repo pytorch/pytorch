@@ -22,8 +22,8 @@ def get_cuda_arch() -> Optional[str]:
             major, minor = torch.cuda.get_device_capability(0)
             return str(major * 10 + minor)
         return str(cuda_arch)
-    except Exception:
-        log.exception("Error getting cuda arch")
+    except Exception as e:
+        log.error("Error getting cuda arch: %s", e)
         return None
 
 
@@ -45,8 +45,8 @@ def get_cuda_version() -> Optional[str]:
         if cuda_version is None:
             cuda_version = torch.version.cuda
         return cuda_version
-    except Exception:
-        log.exception("Error getting cuda version")
+    except Exception as e:
+        log.error("Error getting cuda version: %s", e)
         return None
 
 

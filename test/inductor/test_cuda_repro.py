@@ -39,8 +39,6 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     freeze_rng_state,
     IS_FBCODE,
-    MI350_ARCH,
-    skipIfRocmArch,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     xfailIfPy312Plus,
@@ -220,7 +218,6 @@ class CudaReproTests(TestCase):
         # dont check rng state
         self.assertEqual(out[:2], fn(query, key, value, input_tensor2)[:2])
 
-    @skipIfRocmArch(MI350_ARCH)
     def test_effn_attn_bias_padding_misaligned(self):
         seqlen_start = 1008
 
@@ -1541,7 +1538,7 @@ class CudaReproTests(TestCase):
                 t2 = a0.view(379, 165, 2).mean(dim=2)
                 t7 = ((((a1) - a2) - a3) - a2) - a4
                 t8 = t7.view(379, 165)
-                t11 = torch.nn.functional.relu(a5).mean(dim=0)
+                t11 = torch.nn.functional.gelu(a5).mean(dim=0)
                 t12 = t2 - t11
                 t13 = (((t2) / t8) / t11) / t12
                 return t13
@@ -2441,42 +2438,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                     f"Max diff: {torch.max(torch.abs(eager_output - compiled_output)):.6f}",
                 )
 
-    def test_identity_load(self):
-        device = "cuda"
-
-        def f(x, y):
-            y2 = torch.cat(
-                [
-                    x[:, 1:],
-                    y[:, None] + 32 * 2048,
-                ],
-                dim=1,
-            )
-
-            x2 = x[:, 1:, None]
-            y3 = y2[:, -1:, None]
-
-            return (
-                torch.cat([x2, y3], dim=1)
-                + torch.arange(-2048, 0, device=device)[None, None, :]
-            ).reshape(1, 32 * 2048)
-
-        # This succeeds
-        eager_out = f(
-            torch.zeros(1, 32, dtype=torch.int64, device=device),
-            torch.zeros(1, dtype=torch.int32, device=device),
-        )
-        # This crashes
-        compile_out, code = run_and_get_code(
-            torch.compile(f),
-            torch.zeros(1, 32, dtype=torch.int64, device=device),
-            torch.zeros(1, dtype=torch.int32, device=device),
-        )
-        # make sure the identity is maintained
-        FileCheck().check("(1 + ((31)").run(code[0])
-
-        self.assertEqual(eager_out, compile_out)
-
     def test_qwen2_7b_sdpa_input_alignment_requires_recompile(self):
         # SDPA constraints ensures inputs have alignment (8).
         device = "cuda"
@@ -2579,52 +2540,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         correct = forward(*example_inputs)
         actual = compiled(*example_inputs)
         self.assertEqual(actual, correct)
-
-    @config.patch({"emulate_divison_rounding": True})
-    def test_truediv_emulate_divison_rounding(self):
-        from decimal import Decimal
-
-        y, x = 7.0, 11.0
-
-        @torch.compile
-        def compiled_divide(x, y):
-            return x / y
-
-        for y_dtype in [torch.float16, torch.bfloat16, torch.float32, torch.float64]:
-            for x_dtype in [
-                torch.float16,
-                torch.bfloat16,
-                torch.float32,
-                torch.float64,
-            ]:
-                y_ten = torch.tensor([y], dtype=y_dtype, device="cuda")
-                x_ten = torch.tensor([x], dtype=x_dtype, device="cuda")
-
-                torch._dynamo.reset()
-                compiled_div = Decimal(compiled_divide(x_ten, y_ten).item())
-                eager_div = Decimal((x_ten / y_ten).item())
-
-                self.assertEqual(eager_div, compiled_div)
-
-    @config.patch({"emulate_divison_rounding": False})
-    def test_truediv_base_not_bitwise_equivalent(self):
-        from decimal import Decimal
-
-        y, x = 7.0, 11.0
-
-        y_ten = torch.tensor([y], dtype=torch.float32, device="cuda")
-        x_ten = torch.tensor([x], dtype=torch.float32, device="cuda")
-
-        compile_out, code = run_and_get_code(
-            torch.compile(lambda x, y: x / y),
-            x_ten,
-            y_ten,
-        )
-        compiled_div = Decimal(compile_out.item())
-        eager_div = Decimal((x_ten / y_ten).item())
-
-        self.assertNotEqual(eager_div, compiled_div)
-        self.assertTrue("div_rn" not in code)
 
 
 if __name__ == "__main__":

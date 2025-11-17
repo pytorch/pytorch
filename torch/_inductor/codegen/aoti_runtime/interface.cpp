@@ -66,7 +66,6 @@ AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
     size_t num_models,
     const char* device_str,
     const char* cubin_dir) {
-
   if (num_models == 0) {
     std::cerr << "Error: num_models must be positive, but got 0\n";
     return AOTI_RUNTIME_FAILURE;
@@ -82,7 +81,6 @@ AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
         reinterpret_cast<AOTInductorModelContainerHandle>(container);
   })
 }
-
 
 AOTIRuntimeError AOTInductorModelContainerDelete(
     AOTInductorModelContainerHandle container_handle) {
@@ -461,28 +459,5 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
     model->update_constants_map(std::move(constant_map));
   })
 }
-
-AOTIRuntimeError AOTInductorModelContainerGetConstantsBlobSize(
-    AOTInductorModelContainerHandle container_handle,
-    uint64_t* ret_size) {
-  auto* container =
-      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
-          container_handle);
-  CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { *ret_size = container->constant_blob_size(); })
-}
-
-
-// Load weights from a single blob in weight_blob_ptr
-AOTIRuntimeError AOTInductorModelUpdateConstantsFromBlob(
-    AOTInductorModelContainerHandle container_handle,
-    const uint8_t* weight_blob_ptr){
-    auto* container =
-      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
-          container_handle);
-  CONVERT_EXCEPTION_TO_ERROR_CODE(
-      {container->update_constants_from_blob(weight_blob_ptr); })
-    }
-
 
 } // extern "C"

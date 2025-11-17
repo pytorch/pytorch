@@ -3,7 +3,6 @@
 
 import math
 from collections.abc import Sequence
-from functools import partial
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -37,7 +36,6 @@ from ...lowering import (
     to_dtype,
 )
 from ...select_algorithm import realize_inputs
-from ...utils import load_template
 
 
 SubgraphResults = Union[list[Optional[ComputedBuffer]], Optional[ComputedBuffer]]
@@ -92,16 +90,13 @@ def get_fwd_subgraph_outputs(
     subgraph_buffer: SubgraphResults, mask_graph_buffer: SubgraphResults
 ) -> list[Optional[ComputedBuffer]]:
     subgraph_buffer = (
-        # pyrefly: ignore [bad-assignment]
         subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
     )
     mask_graph_buffer = (
-        # pyrefly: ignore [bad-assignment]
         mask_graph_buffer
         if isinstance(mask_graph_buffer, Sequence)
         else [mask_graph_buffer]
     )
-    # pyrefly: ignore [not-iterable]
     return [*subgraph_buffer, *mask_graph_buffer]
 
 
@@ -339,8 +334,13 @@ def next_power_of_two(n):
     return 2 ** math.ceil(math.log2(n))
 
 
-_FLEX_TEMPLATE_DIR = Path(__file__).parent / "templates"
-load_flex_template = partial(load_template, template_dir=_FLEX_TEMPLATE_DIR)
+_TEMPLATE_DIR = Path(__file__).parent / "templates"
+
+
+def load_template(name: str) -> str:
+    """Load a template file and return its content."""
+    with open(_TEMPLATE_DIR / f"{name}.py.jinja") as f:
+        return f.read()
 
 
 # Template strings have been moved to templates/common.py.jinja

@@ -426,7 +426,7 @@ class TestExecutionTrace(TestCase):
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
     def test_execution_trace_env_enabled_with_pt2(self, device):
         # clean up the local cache for triton kernel
-        from torch._inductor.codecache import PyCodeCache
+        from torch._inductor.codecache import PyCodeCache as PyCodeCache
 
         PyCodeCache.cache_clear(purge=True)
 
@@ -488,7 +488,7 @@ class TestExecutionTrace(TestCase):
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
     def test_triton_fx_graph_with_et(self, device):
         # clean up the local cache for triton kernel
-        from torch._inductor.codecache import PyCodeCache
+        from torch._inductor.codecache import PyCodeCache as PyCodeCache
 
         PyCodeCache.cache_clear(purge=True)
 

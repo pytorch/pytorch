@@ -133,7 +133,6 @@ def _dispatch_kl(type_p, type_q):
             f"Ambiguous kl_divergence({type_p.__name__}, {type_q.__name__}). "
             f"Please register_kl({left_p.__name__}, {right_q.__name__})",
             RuntimeWarning,
-            stacklevel=2,
         )
     return left_fun
 
@@ -281,7 +280,7 @@ def _kl_exponential_exponential(p, q):
 
 @register_kl(ExponentialFamily, ExponentialFamily)
 def _kl_expfamily_expfamily(p, q):
-    if type(p) is not type(q):
+    if not type(p) == type(q):
         raise NotImplementedError(
             "The cross KL-divergence between different exponential families cannot \
                             be computed using Bregman divergences"

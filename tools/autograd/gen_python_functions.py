@@ -36,7 +36,7 @@ from __future__ import annotations
 import itertools
 import re
 from collections import defaultdict
-from typing import TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
 import yaml
 
@@ -77,7 +77,7 @@ from .gen_trace_type import should_trace
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Iterable, Sequence
 
 
 #

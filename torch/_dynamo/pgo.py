@@ -167,7 +167,7 @@ class CodeId:
 @dataclasses.dataclass
 class CodeState:
     automatic_dynamic: defaultdict[str, FrameStateSizeEntry] = dataclasses.field(
-        # pyrefly: ignore [unbound-name]
+        # pyrefly: ignore  # unbound-name
         default_factory=lambda: defaultdict(FrameStateSizeEntry)
     )
 
@@ -175,7 +175,6 @@ class CodeState:
 _INIT_CODE_STATE: Optional[defaultdict[CodeId, CodeState]] = None
 _CODE_STATE: Optional[defaultdict[CodeId, CodeState]] = None
 _LOGGED_DYNAMIC_ALLOWLIST: bool = False
-_KNOWN_DYNAMIC_SOURCES: set[str] = set()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -631,49 +630,26 @@ def _collect_dynamic_sources(code_state: CodeState) -> OrderedSet[str]:
     return dynamic_sources
 
 
-def _collect_missing_sources(all_sources: OrderedSet[str]) -> OrderedSet[str]:
-    from torch._dynamo.variables.builder import is_dynamic_source
-
-    global _KNOWN_DYNAMIC_SOURCES
-    missing_sources: OrderedSet[str] = OrderedSet()
-    for src in all_sources:
-        if src in _KNOWN_DYNAMIC_SOURCES:
-            continue
-        elif is_dynamic_source(src):
-            _KNOWN_DYNAMIC_SOURCES.add(src)
-            continue
-        missing_sources.add(src)
-    return missing_sources
-
-
 def log_frame_dynamic_whitelist(f_code: types.CodeType) -> None:
-    global _KNOWN_DYNAMIC_SOURCES
+    global _LOGGED_DYNAMIC_ALLOWLIST
     code_id = CodeId.make(f_code)
     frame_state = get_code_state()[code_id]
-    all_dynamic_sources = _collect_dynamic_sources(frame_state)
-    frame_whitelist = ",".join(all_dynamic_sources)
-    missing_whitelist = ",".join(_collect_missing_sources(all_dynamic_sources))
+    frame_whitelist = ",".join(_collect_dynamic_sources(frame_state))
     if frame_whitelist:
         with dynamo_timed(name := "pgo.dynamic_whitelist", log_pt2_compile_event=True):
             CompileEventLogger.pt2_compile(
-                name,
-                recompile_dynamic_whitelist=frame_whitelist,
-                missing_dynamic_whitelist=missing_whitelist,
+                name, recompile_dynamic_whitelist=frame_whitelist
             )
-
-
-def _log_size_mismatch_recompile() -> None:
-    global _LOGGED_DYNAMIC_ALLOWLIST
-    if not _LOGGED_DYNAMIC_ALLOWLIST:
-        torch._utils_internal.add_mlhub_insight(
-            category="dynamic_shapes_analysis",
-            insight="Dynamic shape recompilation detected",
-            insight_description="PGO detected a recompilation due to dynamic shapes. \
-            Please follow the instruction from the action link to reduce \
-            recompilation overhead.",
-        )
-        # add mlhub insight only once per rank
-        _LOGGED_DYNAMIC_ALLOWLIST = True
+        if not _LOGGED_DYNAMIC_ALLOWLIST:
+            torch._utils_internal.add_mlhub_insight(
+                category="dynamic_shapes_analysis",
+                insight="Dynamic shape recompilation detected",
+                insight_description="PGO detected a recompilation due to dynamic shapes. \
+                Please follow the instruction from the action link to reduce \
+                recompilation overhead.",
+            )
+            # add mlhub insight only once per rank
+            _LOGGED_DYNAMIC_ALLOWLIST = True
 
 
 def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
@@ -876,6 +852,7 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
         not _CODE_STATE
         and (sticky_read := torch.compiler.config.pgo_extra_read_key) is not None
     ):
+        # pyrefly: ignore  # unbound-name
         extra_read_key = get_extra_cache_key(sticky_read)
         if extra_read_key is not None:
             get_extra_remote_code_state(extra_read_key)

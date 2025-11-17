@@ -55,17 +55,17 @@ std::vector<int64_t> THPUtils_unpackLongs(PyObject* arg) {
     for (int i = 0; i != nDim; ++i) {
       PyObject* item =
           tuple ? PyTuple_GET_ITEM(arg, i) : PyList_GET_ITEM(arg, i);
-      TORCH_CHECK(
-          THPUtils_checkLong(item),
-          "expected int at position ",
-          i,
-          ", but got: ",
-          THPUtils_typename(item));
+      if (!THPUtils_checkLong(item)) {
+        std::ostringstream oss;
+        oss << "expected int at position " << i
+            << ", but got: " << THPUtils_typename(item);
+        throw std::runtime_error(oss.str());
+      }
       sizes[i] = THPUtils_unpackLong(item);
     }
     return sizes;
   }
-  TORCH_CHECK(false, "Expected tuple or list");
+  throw std::runtime_error("Expected tuple or list");
 }
 
 bool THPUtils_checkIntTuple(PyObject* arg) {
@@ -81,10 +81,12 @@ bool THPUtils_checkIntTuple(PyObject* arg) {
 }
 
 std::vector<int> THPUtils_unpackIntTuple(PyObject* arg) {
-  TORCH_CHECK(THPUtils_checkIntTuple(arg), "Couldn't unpack int tuple");
+  if (!THPUtils_checkIntTuple(arg)) {
+    throw std::runtime_error("Couldn't unpack int tuple");
+  }
   std::vector<int> values(PyTuple_GET_SIZE(arg));
   for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(arg); ++i) {
-    values[i] = THPUtils_unpackInt(PyTuple_GET_ITEM(arg, i));
+    values[i] = (int)THPUtils_unpackLong(PyTuple_GET_ITEM(arg, i));
   }
   return values;
 }
@@ -354,7 +356,7 @@ std::string dispatch_keyset_string(c10::DispatchKeySet keyset) {
 
 namespace pybind11::detail {
 
-bool type_caster<at::Tensor>::load(handle src, bool /*unused*/) {
+bool type_caster<at::Tensor>::load(handle src, bool) {
   PyObject* obj = src.ptr();
   if (THPVariable_Check(obj)) {
     value = THPVariable_Unpack(obj);
@@ -370,7 +372,7 @@ handle type_caster<at::Tensor>::cast(
   return handle(THPVariable_Wrap(src));
 }
 
-bool type_caster<at::IntArrayRef>::load(handle src, bool /*unused*/) {
+bool type_caster<at::IntArrayRef>::load(handle src, bool) {
   PyObject* source = src.ptr();
   auto tuple = PyTuple_Check(source);
   if (tuple || PyList_Check(source)) {
@@ -403,7 +405,7 @@ handle type_caster<at::IntArrayRef>::cast(
   return handle(THPUtils_packInt64Array(src.size(), src.data()));
 }
 
-bool type_caster<at::SymIntArrayRef>::load(handle src, bool /*unused*/) {
+bool type_caster<at::SymIntArrayRef>::load(handle src, bool) {
   PyObject* source = src.ptr();
 
   auto tuple = PyTuple_Check(source);
@@ -444,9 +446,7 @@ handle type_caster<at::SymIntArrayRef>::cast(
   return t.release();
 }
 
-bool type_caster<at::ArrayRef<c10::SymNode>>::load(
-    handle src,
-    bool /*unused*/) {
+bool type_caster<at::ArrayRef<c10::SymNode>>::load(handle src, bool) {
   TORCH_INTERNAL_ASSERT(0, "NYI");
 }
 handle type_caster<at::ArrayRef<c10::SymNode>>::cast(

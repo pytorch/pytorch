@@ -72,7 +72,7 @@ class _NormBase(Module):
                 torch.tensor(
                     0,
                     dtype=torch.long,
-                    # pyrefly: ignore [bad-argument-type]
+                    # pyrefly: ignore  # bad-argument-type
                     **{k: v for k, v in factory_kwargs.items() if k != "dtype"},
                 ),
             )
@@ -222,7 +222,7 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
         dtype=None,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         super().__init__(
             # affine and track_running_stats are hardcoded to False to
             # avoid creating tensors that will soon be overwritten.
@@ -236,29 +236,29 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
         self.affine = affine
         self.track_running_stats = track_running_stats
         if self.affine:
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             self.weight = UninitializedParameter(**factory_kwargs)
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             self.bias = UninitializedParameter(**factory_kwargs)
         if self.track_running_stats:
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             self.running_mean = UninitializedBuffer(**factory_kwargs)
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             self.running_var = UninitializedBuffer(**factory_kwargs)
             self.num_batches_tracked = torch.tensor(
                 0,
                 dtype=torch.long,
-                # pyrefly: ignore [bad-argument-type]
+                # pyrefly: ignore  # bad-argument-type
                 **{k: v for k, v in factory_kwargs.items() if k != "dtype"},
             )
 
     def reset_parameters(self) -> None:
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         if not self.has_uninitialized_params() and self.num_features != 0:
             super().reset_parameters()
 
     def initialize_parameters(self, input) -> None:  # type: ignore[override]
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         if self.has_uninitialized_params():
             self.num_features = input.shape[1]
             if self.affine:
@@ -352,7 +352,6 @@ class BatchNorm1d(_BatchNorm):
             raise ValueError(f"expected 2D or 3D input (got {input.dim()}D input)")
 
 
-# pyrefly: ignore [inconsistent-inheritance]
 class LazyBatchNorm1d(_LazyNormBase, _BatchNorm):
     r"""A :class:`torch.nn.BatchNorm1d` module with lazy initialization.
 
@@ -464,7 +463,6 @@ class BatchNorm2d(_BatchNorm):
             raise ValueError(f"expected 4D input (got {input.dim()}D input)")
 
 
-# pyrefly: ignore [inconsistent-inheritance]
 class LazyBatchNorm2d(_LazyNormBase, _BatchNorm):
     r"""A :class:`torch.nn.BatchNorm2d` module with lazy initialization.
 
@@ -576,7 +574,6 @@ class BatchNorm3d(_BatchNorm):
             raise ValueError(f"expected 5D input (got {input.dim()}D input)")
 
 
-# pyrefly: ignore [inconsistent-inheritance]
 class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
     r"""A :class:`torch.nn.BatchNorm3d` module with lazy initialization.
 

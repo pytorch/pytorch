@@ -443,8 +443,7 @@ PyTypeObject* GetReduceOpMetaclass() {
     spec.basicsize = base_metaclass->tp_basicsize;
     spec.flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
     spec.slots = slots;
-    PyTypeObject* metaclass =
-        reinterpret_cast<PyTypeObject*>(PyType_FromSpec(&spec));
+    PyTypeObject* metaclass = (PyTypeObject*)PyType_FromSpec(&spec);
     if (!metaclass)
       throw py::error_already_set();
     return metaclass;
@@ -813,10 +812,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
   //    `ReduceOp.PREMUL_SUM(scale)` might be better as per @wanchaol.
   // https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types
   py::class_<::c10d::ReduceOp> reduce_op(
-      module,
-      "ReduceOp",
-      py::metaclass(reinterpret_cast<PyObject*>(GetReduceOpMetaclass())),
-      R"(
+      module, "ReduceOp", py::metaclass((PyObject*)GetReduceOpMetaclass()), R"(
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
 ``MIN``, ``MAX``, ``BAND``, ``BOR``, ``BXOR``, and ``PREMUL_SUM``.
 
@@ -3532,35 +3528,11 @@ Example::
               py::arg("rank"),
               py::arg("size"),
               py::arg("options"),
-              R"(Create a new ProcessGroupXCCL instance.)")
-          .def(
-              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                          int rank,
-                          int size) {
-                // gil_scoped_release is not safe as a call_guard in init.
-                // https://github.com/pybind/pybind11/issues/5473
-                py::gil_scoped_release nogil{};
-
-                auto options = ::c10d::ProcessGroupXCCL::Options::create();
-                options->is_high_priority_stream = false;
-                return c10::make_intrusive<::c10d::ProcessGroupXCCL>(
-                    store, rank, size, options);
-              }),
-              py::arg("store"),
-              py::arg("rank"),
-              py::arg("size"),
-              R"(Create a new ProcessGroupXCCL instance.)")
-          .def_property_readonly(
-              "options",
-              &::c10d::ProcessGroupXCCL::getOptions,
-              R"(Return the options used to create this ProcessGroupXCCL instance.)");
+              R"(Create a new ProcessGroupXCCL instance.)");
 
   intrusive_ptr_class_<::c10d::ProcessGroupXCCL::Options>(
       processGroupXCCL, "Options", backendOptions)
-      .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
-      .def_readwrite(
-          "is_high_priority_stream",
-          &::c10d::ProcessGroupXCCL::Options::is_high_priority_stream);
+      .def(py::init<>());
   module
       .def(
           "_dump_xccl_trace",
@@ -3866,6 +3838,17 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           py::arg("world_size"),
           py::arg("options") =
               c10::make_intrusive<::c10d::FakeProcessGroup::Options>())
+      .def(
+          "__init__",
+          [](const py::object&,
+             const py::args& args,
+             const py::kwargs& kwargs) {
+            TORCH_CHECK(
+                false,
+                "FakeProcessGroup cannot be constructed directly. "
+                "Use torch.distributed.init_process_group(backend='fake') instead to ensure "
+                "proper dispatch system integration.");
+          })
       .def_property_readonly(
           "options", &::c10d::FakeProcessGroup::getBackendOptions);
   auto fakeWork =
@@ -4108,10 +4091,6 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             Stringified pickle work traces.
             Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
       )");
-  module.def(
-      "_reset_fr_recording_nccl",
-      []() { ::c10d::reset_nccl_trace(); },
-      "API to reset Flight recorder recording when it comes fault tolerance.");
 #endif
 
   module.def(

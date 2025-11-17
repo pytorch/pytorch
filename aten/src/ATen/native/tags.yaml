@@ -93,7 +93,3 @@
           This operator does not support cudagraphs. The presence of this tag on an operator will cause
           Inductor to split the graph around this operator. Note that operators without this tag may still
           not support CUDAGraphs. Inductor may have other hardcoded lists around that.
-- tag: reduction
-  desc: |
-          This tag indicates that an operator performs a reduction operation, computing aggregate values
-          (sum, mean, max, min, etc.) across one or more dimensions of the input tensor(s).

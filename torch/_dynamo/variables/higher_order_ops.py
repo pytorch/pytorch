@@ -718,7 +718,11 @@ def validate_args_and_maybe_create_graph_inputs(
                     new_proxy = tracer.create_graph_input(
                         arg_name, a.python_type(), example_value
                     )
-                    example_value = node.meta.get("example_value", None)
+                    example_value = (
+                        node.meta["example_value"]
+                        if "example_value" in node.meta
+                        else None
+                    )
                     a = wrap_fx_proxy_cls(
                         target_cls=type(a),
                         tx=tx,
@@ -756,7 +760,9 @@ def validate_args_and_maybe_create_graph_inputs(
             # If `a` can be put into a graph
             elif a.maybe_fx_node() is not None:
                 node = a.maybe_fx_node()
-                example_value = node.meta.get("example_value", None)
+                example_value = (
+                    node.meta["example_value"] if "example_value" in node.meta else None
+                )
                 arg_name = node.name if sub_args_names is None else sub_args_names[idx]
                 new_proxy = tracer.create_graph_input(
                     arg_name, a.python_type(), example_value
@@ -1183,7 +1189,7 @@ def speculate_subgraph(
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
         log.info(msg)
-        log.info(ex)  # noqa: G200
+        log.info(ex)
         raise ex
 
 
@@ -1370,11 +1376,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 supports_input_mutation=self.supports_input_mutation,
                 supports_aliasing=self.supports_aliasing,
             )
-
-            # need to ensure we increase epoch so we don't memoize unbacked bindings
-            # across different subgraphs which can interfere with runtime assertion
-            # generation.
-            tx.fake_mode.epoch += 1
 
             if not only_consist_of(ret_val, (TensorVariable, ConstantVariable)):
                 unimplemented(
@@ -2074,16 +2075,9 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
             unimplemented(
                 "executorch_call_delegate: kwargs arguments were not enabled."
             )
-        if isinstance(args[0], variables.NNModuleVariable):
-            lowered_module = tx.output.get_submodule(args[0].module_key)
-            lowered_node = make_attr(tx, args[0].module_key)
-        elif isinstance(args[0], variables.UnspecializedNNModuleVariable):
-            # This nn module is special sa delegated by executorch. Just
-            # install it as a attr in the graph.
-            lowered_module = args[0].value
-            lowered_node = tx.output.register_static_attr_and_return_proxy(
-                "delegate", lowered_module
-            )
+        lowered_module = tx.output.get_submodule(args[0].module_key)
+
+        lowered_node = make_attr(tx, args[0].module_key)
 
         p_args = tuple(arg.as_proxy() for arg in args[1:])
         real_sub_args = pytree.tree_map_only(
@@ -2150,9 +2144,6 @@ class ReparametrizeModuleCallVariable(FunctorchHigherOrderVariable):
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     supports_input_mutation = True
     supports_aliasing = True
-    # TODO - Go through all subclasses of WrapHigherOrderVariable to see if
-    # restore_side_effects can be ignored. For now, this is conservative.
-    restore_side_effects = True
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
@@ -2186,7 +2177,6 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             kwargs,
             description,
             source_target=self.value,
-            restore_side_effects=self.restore_side_effects,
             should_flatten_outputs=True,
             under_activation_checkpoint=under_activation_checkpoint,
             supports_input_mutation=self.supports_input_mutation,
@@ -2574,14 +2564,6 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        # If side effects are allowed under checkpoint, we should not restore
-        # the side effects after speculate subgraph.
-        self.restore_side_effects = (
-            not torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint
-        )
-
     def _call_function(
         self,
         tx: "InstructionTranslator",
@@ -2840,6 +2822,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         fn_name: str,
     ):
         from .._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
+        tx: InstructionTranslator = tx
 
         def create_scalar():
             return query.call_method(
@@ -3554,7 +3538,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         from torch.distributed.tensor.experimental._func_map import _local_map_wrapped
 
         # check is important to avoid subclass dispatch
-        if type(value) is not type(_local_map_wrapped):
+        if type(value) != type(_local_map_wrapped):
             return False
 
         return value == _local_map_wrapped and cls._enabled
@@ -3590,81 +3574,6 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             *user_args,
         ) = args
 
-        # None placements are used to pass non-Tensors into the local_map function.
-        # Containers passed this way can not hold tensors. Thus, Dynamo would have inlined
-        # into them, and we handle None placements by assuming they will be desugared away.
-        # This will need to be adjusted for dynamic shapes support.
-        def check_none_last(placements):
-            seen_none = 0
-            for p in placements:
-                if p is None:
-                    seen_none += 1
-                else:
-                    assert seen_none == 0, (
-                        "Tracing local_map is only currently supported with None placements last."
-                    )
-            return seen_none
-
-        inputs_none_placements = check_none_last(in_placements.value)
-        output_none_placements = check_none_last(out_placements.value)
-
-        local_map_kwargs = {
-            "out_placements": out_placements.value,
-            "in_placements": in_placements.value,
-            "redistribute_inputs": redistribute_inputs.value,
-            "in_grad_placements": in_grad_placements.value,
-            "device_mesh": device_mesh.value,
-        }
-        assert local_map_kwargs["device_mesh"] is not None, (
-            "Not yet implemented, please manually provide a device_mesh to local_map."
-        )
-        mesh = local_map_kwargs["device_mesh"]
-
-        # For Autoparallel, the initial trace is done with global shapes, then we decide model weights sharding,
-        # and reuse the graph. Since the sharding decision is after the initial trace, we can't trace with local shapes.
-        # For local_map however, since we specify all placements, we can trace with local shapes.
-
-        # Step 1: Validate the annotated function matches the input_placements (i.e. that it can run in eager)
-        template = (
-            "Expecting {expected} {inputs_or_outputs} to local_map function based on placements"
-            ", but found {actual}. Please ensure the count matches for eager. "
-        )
-        assert len(in_placements.value) == len(user_args), template.format(
-            expected=len(in_placements.value),
-            inputs_or_outputs="inputs",
-            actual=len(user_args),
-        )
-
-        from torch._higher_order_ops.local_map import (
-            redistribute_fw_inputs,
-            redistribute_fw_outputs,
-        )
-
-        # Step 2: Convert inputs to local shapes
-        priors = {}
-        for placements, vt in zip(in_placements.value, user_args):
-            if isinstance(vt, variables.lazy.LazyVariableTracker):
-                vt = variables.lazy.LazyVariableTracker.realize_all(vt)
-
-            if not isinstance(vt, variables.TensorVariable):
-                assert placements is None
-                continue
-
-            global_tensor = vt.as_proxy().node.meta["example_value"]
-            # NOTE: We don't support local_map region relying on exact grad_fn information
-            # This is okay since accessing grad_fn is a graph break.
-            local_tensor = redistribute_fw_inputs(
-                (global_tensor,),
-                (placements,),
-                mesh,
-            )
-            local_tensor = local_tensor[0]
-
-            priors[vt] = global_tensor
-            vt.as_proxy().node.meta["example_value"] = local_tensor
-            vt.synchronize_attributes(tx)
-
-        # Step 3: Trace local_map subgraph with local tensors
         (
             p_args,
             p_kwargs,
@@ -3677,39 +3586,15 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             tx, user_func, user_args, kwargs, self.value._name, subgraph_name="subgraph"
         )
 
-        # Step 4: Validate traced graph signature still matches placement information
-        expected_num_inputs = len(in_placements.value) - inputs_none_placements
-        actual_num_inputs = len(body_gmod.graph.find_nodes(op="placeholder"))
-        expected_num_outputs = len(out_placements.value) - output_none_placements
-        assert len(body_gmod.graph.find_nodes(op="output")) == 1
-        actual_num_outputs = len(body_gmod.graph.find_nodes(op="output")[0].args[0])
-
-        template = (
-            "Expecting {expected} {inputs_or_outputs} to local_map function based on placements"
-            ", but found {actual}. If the count matches for eager, "
-            "Dynamo may have flattened {inputs_or_outputs} to the function or found additional "
-            "tensors used via closures. "
-            "Please adjust the input placements to match what the traced graph sees: \n{gm_str}."
-        )
-
-        def make_error_msg(*args):
-            expected_num, actual_num, inputs_or_outputs = args
-            gm_str = body_gmod.print_readable(print_output=False)
-            return template.format(
-                expected=expected_num,
-                inputs_or_outputs=inputs_or_outputs,
-                actual=actual_num,
-                gm_str=gm_str,
-            )
-
-        if expected_num_inputs != actual_num_inputs:
-            raise AssertionError(
-                make_error_msg(expected_num_inputs, actual_num_inputs, "inputs")
-            )
-        if expected_num_outputs != actual_num_outputs:
-            raise AssertionError(
-                make_error_msg(expected_num_outputs, actual_num_outputs, "outputs")
-            )
+        # Treat as const, so we don't have to deal with Placement types in fx IR
+        # Guarded with EQUALS_MATCH on local_map call's arguments
+        body_gmod.meta["local_map_kwargs"] = {
+            "out_placements": out_placements.value,
+            "in_placements": in_placements.value,
+            "redistribute_inputs": redistribute_inputs.value,
+            "in_grad_placements": in_grad_placements.value,
+            "device_mesh": device_mesh.value,
+        }
 
         assert len(p_kwargs) == 0
 
@@ -3719,48 +3604,10 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             body_r.as_proxy(),
         )
 
-        # Step 5: Install local_map subgraph
         p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
         out = _call_function_and_unflatten_output(
             tx, self.value, p_args, p_kwargs, flat_example_value, treespec
         )
-
-        # Step 6: Restore inputs and outputs to global shapes
-        for vt, global_tensor in priors.items():
-            vt.as_proxy().node.meta["example_value"] = global_tensor
-            vt.synchronize_attributes(tx)
-
-        outs = out.items if isinstance(out, TupleVariable) else [out]
-        assert len(outs) == len(out_placements.value)
-        for placements, vt in zip(out_placements.value, outs):
-            if not isinstance(vt, variables.TensorVariable):
-                assert placements is None
-                continue
-
-            local_tensor = vt.as_proxy().node.meta["example_value"]
-
-            # NOTE: We don't support code after the local_map region relying on exact grad_fn information
-            # This is okay since accessing grad_fn is a graph break.
-            global_tensor = redistribute_fw_outputs(
-                (local_tensor,),
-                (placements,),
-                mesh,
-                num_activations=0,  # this is not the joint
-            )
-            global_tensor = global_tensor[0]
-
-            vt.as_proxy().node.meta["example_value"] = global_tensor
-            vt.synchronize_attributes(tx)
-
-        # Treat as const, so we don't have to deal with Placement types in fx IR
-        # Guarded with EQUALS_MATCH on local_map call's arguments
-        body_gmod.meta["local_map_kwargs"] = {
-            "out_placements": out_placements.value[:expected_num_outputs],
-            "in_placements": in_placements.value[:expected_num_inputs],
-            "redistribute_inputs": redistribute_inputs.value,
-            "in_grad_placements": in_grad_placements.value,
-            "device_mesh": device_mesh.value,
-        }
 
         return out
 

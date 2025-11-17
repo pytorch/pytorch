@@ -18,9 +18,8 @@ from __future__ import annotations
 import heapq
 import logging
 import time
-from collections.abc import Callable
-from typing import Any, Optional, TYPE_CHECKING, TypeAlias
-from typing_extensions import Self
+from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing_extensions import Self, TypeAlias
 
 
 if TYPE_CHECKING:

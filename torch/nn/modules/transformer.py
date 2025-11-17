@@ -138,7 +138,7 @@ class Transformer(Module):
                 d_model,
                 eps=layer_norm_eps,
                 bias=bias,
-                # pyrefly: ignore [bad-argument-type]
+                # pyrefly: ignore  # bad-argument-type
                 **factory_kwargs,
             )
             self.encoder = TransformerEncoder(
@@ -164,7 +164,7 @@ class Transformer(Module):
                 d_model,
                 eps=layer_norm_eps,
                 bias=bias,
-                # pyrefly: ignore [bad-argument-type]
+                # pyrefly: ignore  # bad-argument-type
                 **factory_kwargs,
             )
             self.decoder = TransformerDecoder(
@@ -399,8 +399,7 @@ class TransformerEncoder(Module):
 
         if enable_nested_tensor and why_not_sparsity_fast_path:
             warnings.warn(
-                f"enable_nested_tensor is True, but self.use_nested_tensor is False because {why_not_sparsity_fast_path}",
-                stacklevel=2,
+                f"enable_nested_tensor is True, but self.use_nested_tensor is False because {why_not_sparsity_fast_path}"
             )
             self.use_nested_tensor = False
 
@@ -769,9 +768,9 @@ class TransformerEncoderLayer(Module):
         self.linear2 = Linear(dim_feedforward, d_model, bias=bias, **factory_kwargs)
 
         self.norm_first = norm_first
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         self.norm1 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         self.norm2 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
@@ -1063,11 +1062,11 @@ class TransformerDecoderLayer(Module):
         self.linear2 = Linear(dim_feedforward, d_model, bias=bias, **factory_kwargs)
 
         self.norm_first = norm_first
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         self.norm1 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         self.norm2 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         self.norm3 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)

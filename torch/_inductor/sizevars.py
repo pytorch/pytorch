@@ -2,7 +2,6 @@
 import functools
 import itertools
 import logging
-from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from typing import Any, Callable, cast, Optional, Union
 
@@ -113,7 +112,7 @@ class SizeVarAllocator:
                 cache.clear()
                 replacement_count = len(self.replacements)
             key = (expr, *var_ranges.items())
-            result = cache.get(key)
+            result = cache.get(key, None)
             if result is None:
                 result = self._simplify_with_ranges(expr, var_ranges)
                 cache[key] = result
@@ -137,7 +136,7 @@ class SizeVarAllocator:
                 cache.clear()
                 replacement_count = len(self.replacements)
             key = (*index_vars, *sizes, *index_formulas)
-            result = cache.get(key)
+            result = cache.get(key, None)
             if result is None:
                 result = self._simplify_loops_impl(index_vars, sizes, index_formulas)
                 cache[key] = result
@@ -181,7 +180,6 @@ class SizeVarAllocator:
         def statically_known(expr):
             evaluated = self.shape_env._maybe_evaluate_static(
                 expr,
-                # pyrefly: ignore [bad-argument-type]
                 axioms=axioms,
                 var_to_range=var_to_range_tuple,
             )
@@ -731,162 +729,56 @@ class SizeVarAllocator:
         return strides
 
     def _get_unbacked_replacements(self) -> dict[Expr, Expr]:
+        """
+        This helps with covering unbacked symint cases where you may have two
+        expressions: s0 + u0 and u1. And s0 + u0 is known to be equal to u1
+        via deferred_runtime_asserts.
+
+        For example in atomically_apply_size_hint, it must return the same size
+        hint for both s0 + u0 and u1, but it first needs to know they are equal.
+        Then it can substitute s0 + u0 for u1.
+        """
         if self.unbacked_replacements is not None:
             return self.unbacked_replacements
 
-        class CanonicalExprFinder:
-            """
-            Purpose:
-            A disjoint-set/union-find data structure that can return the
-            "canonical" expression for a group of equivalent expressions.
-            - The canonical expression must come from the input eq_graph.
-            - The heuristics used to choose a leader determines which
-            expression becomes the canonical expression.
+        def should_keep_src_dst(lhs: Expr, rhs: Expr):
+            # assuming lhs is the expr to be replaced (src), rhs is the replacement (dst)
+            # checking if we should keep them for the replacement rule or swap
 
-            Problem:
-            Given any unbacked expression, we should be able to find a size_hint
-            for the unbacked expression, that adheres to the ShapeEnv's deferred
-            runtime assertions. Otherwise, we may generate conflicting size hints.
-            In other words, even though we know u0 + s0 == u2, we may generate
-            size hints, such that, size_hint(u0 + s0) != size_hint(u2).
-            NOTE: At this time, only deferred runtime asserts that are equalities
-            (i.e. Eq(lhs, rhs)) are considered in this data structure.
-
-            Examples:
-            - u0 + u1 == 9000, then find_expr(u0 + u1) == find_expr(9000)
-            - u0 + u1 == s9, then find_expr(u0 + u1) == find_expr(s9)
-            - u0 + s0 == u10, then find_expr(u0 + s0) == find_expr(u10)
-
-            Inputs:
-            - equality_graph: An adjacency set of expressions where the edge
-            connects two expressions that are found equal to each other. The
-            edges are sourced from ShapeEnv's deferred_runtime_asserts.
-
-            Usage:
-            - Call union_expr(a, b) to merge a & b into a single set which
-            shares the same canonical expression.
-            - Call find_expr(x) to find the canonical expression for x.
-            """
-
-            def __init__(self, eq_graph: dict[Expr, OrderedSet[Expr]]):
-                self.eq_graph = eq_graph
-                self.expressions = list(eq_graph.keys())
-                self.reverse_expressions = {
-                    expr: i for i, expr in enumerate(self.expressions)
-                }
-                # Each node is its own leader/parent initially
-                self.leader = list(range(len(self.expressions)))
-                # Track rank for union-by-rank
-                self.rank = [1] * len(self.expressions)
-
-                # Takes each edge from the undirected graph and starts merging them.
-                self._build_canonical_expr_mapping()
-
-            def _build_canonical_expr_mapping(self):
-                for expr, edges in self.eq_graph.items():
-                    for adj in edges:
-                        self.union_expr(expr, adj)
-
-            def union_expr(self, a: Expr, b: Expr):
-                return self.union(
-                    self.reverse_expressions[a], self.reverse_expressions[b]
-                )
-
-            def union(self, a: int, b: int):
-                rootA = self.find(a)
-                rootB = self.find(b)
-                if rootA == rootB:
-                    return False  # already connected
-                leader, other = self.choose_leader(rootA, rootB)
-                self.leader[other] = leader
-                self.rank[leader] += self.rank[other]
+            if not has_free_unbacked_symbols(rhs):
+                # prioritize replacing unbacked exprs with backed expressions
+                # e.g. u0 + s3 ==> s0 + s1
                 return True
+            elif not has_free_unbacked_symbols(lhs):
+                return False
+            elif lhs.has(rhs):
+                # handles cases where LHS is a sub-expression of the RHS
+                # e.g. Max(2, u0) == s1 * Max(2, u0)
+                return True
+            elif rhs.has(lhs):
+                return False
+            else:
+                # fallback to sympy.Basic.compare for a deterministic ordering
+                return lhs.compare(rhs) == 1
 
-            def find_expr(self, expr: Expr):
-                parent = self.find(self.reverse_expressions[expr])
-                return self.expressions[parent]
-
-            def find(self, x: int):
-                # Path compression
-                if self.leader[x] != x:
-                    self.leader[x] = self.find(self.leader[x])
-                return self.leader[x]
-
-            def choose_leader(self, a: int, b: int):
-                """
-                The leader will become the canonical expression.
-
-                Here are the heuristics used for choosing a leader:
-                1. Backed expression or constants preferred over unbacked expr
-                2. Simpler sub-expr when one contains the other
-                3. Higher frequency across equalities from deferred runtime assertions
-                4. Rank/size of the set
-                5. Fallback to sympy.Basic.compare
-                """
-
-                def _choose(x: int, y: int) -> bool:
-                    lhs, rhs = self.expressions[x], self.expressions[y]
-
-                    # Prefer replacing unbacked exprs with backed expressions/constants.
-                    # Examples:
-                    # u0 + s3 ==> s0 + s1, then leader is s0 + s1
-                    # u2 ==> 300, then leader is 300
-                    any_unbacked_lhs = has_free_unbacked_symbols(lhs)
-                    any_unbacked_rhs = has_free_unbacked_symbols(rhs)
-                    if any_unbacked_lhs != any_unbacked_rhs:
-                        return bool(any_unbacked_rhs)
-
-                    # Handles cases where LHS contains the RHS. In other words,
-                    # RHS is a sub-expression of LHS. For example:
-                    # s1 * Max(2, u0) ==> Max(2, u0), then leader is Max(2, u0)
-                    if lhs.has(rhs):
-                        return False
-                    elif rhs.has(lhs):
-                        return True
-
-                    # Prefer expressions that come up more often.
-                    degrees_lhs = len(self.eq_graph[lhs])
-                    degrees_rhs = len(self.eq_graph[rhs])
-                    if degrees_lhs != degrees_rhs:
-                        return degrees_lhs > degrees_rhs
-
-                    # Try to apply union-by-rank optimization to flatten the
-                    # leader trees.
-                    if self.rank[x] != self.rank[y]:
-                        return self.rank[x] > self.rank[y]
-
-                    # Fallback to sympy.Basic.compare for a deterministic ordering.
-                    return lhs.compare(rhs) == -1
-
-                if _choose(a, b):
-                    return a, b
-                return b, a
-
-        # Build an undirected graph using ShapeEnv's deferred runtime assertions.
-        self.equality_graph: dict[Expr, OrderedSet[Expr]] = defaultdict(OrderedSet)
+        self.unbacked_replacements = {}
         for assertions in self.shape_env.deferred_runtime_asserts.values():
             for assertion in assertions:
                 if not isinstance(assertion.expr, sympy.Equality):
-                    # We're ignoring other relationals for now. If you need to
-                    # account for relationals, then you may need a solver solution.
                     continue
-                lhs = sympy.sympify(assertion.expr.lhs)  # sympify helps with ints
-                rhs = sympy.sympify(assertion.expr.rhs)
-                self.equality_graph[lhs].add(rhs)
-                self.equality_graph[rhs].add(lhs)
 
-        # Use the undirected graph to create a DSU data structure, so we can
-        # query for a "canonical" expression.
-        uf = CanonicalExprFinder(self.equality_graph)
+                lhs, rhs = assertion.expr.lhs, assertion.expr.rhs
+                should_keep = should_keep_src_dst(lhs, rhs)
+                src = lhs if should_keep else rhs
+                dst = rhs if should_keep else lhs
 
-        # Start building the unbacked replacements mapping using CanonicalExprFinder
-        # The mapping is from Expr to its "canonical" Expr.
-        self.unbacked_replacements = {}
-        for expr in self.equality_graph.keys():
-            canonical_expr = uf.find_expr(expr)
-            if expr != canonical_expr:
-                self.unbacked_replacements[expr] = canonical_expr
-
+                existing_replacement = self.unbacked_replacements.get(src, None)
+                if existing_replacement and isinstance(
+                    existing_replacement, sympy.Symbol
+                ):
+                    # Prefer to keep replacements with symbols.
+                    continue
+                self.unbacked_replacements[src] = dst
         return self.unbacked_replacements
 
     @functools.lru_cache  # noqa: B019
@@ -908,11 +800,7 @@ class SizeVarAllocator:
         return expr
 
     def atomically_apply_size_hint(
-        self,
-        expr: Union[Expr, int],
-        *,
-        fallback: Optional[int] = None,
-        hint_override: Optional[int] = None,
+        self, expr: Union[Expr, int], *, fallback: Optional[int] = None
     ) -> Union[Expr, int]:
         if isinstance(expr, (int, sympy.Integer)):
             return int(expr)
@@ -929,9 +817,7 @@ class SizeVarAllocator:
         assert isinstance(expr, Expr), type(expr)
         free_symbols = expr.free_symbols
         size_dict = {
-            symbol: V.graph.sizevars.size_hint(
-                symbol, fallback=fallback, hint_override=hint_override
-            )
+            symbol: V.graph.sizevars.size_hint(symbol, fallback=fallback)
             for symbol in free_symbols
         }
         return expr.subs(size_dict)

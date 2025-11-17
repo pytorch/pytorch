@@ -95,7 +95,6 @@ def register_backend(
     BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
     if BackendType.__doc__:
         BackendType.__doc__ = _backend_type_doc
-    # pyrefly: ignore [unsupported-operation]
     return BackendType[backend_name]
 
 

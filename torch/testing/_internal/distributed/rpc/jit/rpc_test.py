@@ -85,7 +85,7 @@ class RRefAPITest:
         ):
             rref_local_value(rref)
 
-        ret = rpc.rpc_sync(dst_worker_name, rref_local_value, (rref,))
+        ret = ret = rpc.rpc_sync(dst_worker_name, rref_local_value, (rref,))
         self.assertEqual(ret, torch.add(torch.ones(2, 2), 1))
 
     @dist_init

@@ -17,7 +17,7 @@ from .expanded_weights_utils import (
 @implements_per_sample_grads(F.instance_norm)
 class InstanceNormPerSampleGrad(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def forward(ctx, kwarg_names, _, *expanded_args_and_kwargs):
         instance_norm = partial(torch.instance_norm, cudnn_enabled=True)
         expanded_args, expanded_kwargs = standard_kwargs(
@@ -37,7 +37,7 @@ class InstanceNormPerSampleGrad(torch.autograd.Function):
         return output
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def backward(ctx, grad_output):
         input, running_mean, running_var = ctx.input, ctx.running_mean, ctx.running_var
         weight, bias, eps = ctx.weight, ctx.bias, ctx.eps

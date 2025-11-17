@@ -3,9 +3,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
 #include <c10/util/accumulate.h>
-#include <c10/core/SymBool.h>
-#include <c10/util/StringUtil.h>
-
 
 namespace at::native {
 
@@ -22,30 +19,28 @@ C10_ALWAYS_INLINE void _check_rms_norm_inputs_symint(
       "Expected normalized_shape to be at least 1-dimensional, i.e., ",
       "containing at least one element, but got normalized_shape = ",
       normalized_shape);
-  if (weight.defined()) {
-    TORCH_SYM_CHECK(
-        sym_equals(weight.sym_sizes(), normalized_shape),
-        "Expected weight to be of same shape as normalized_shape, but got ",
-        "weight of shape ",
-        weight.sym_sizes(),
-        " and normalized_shape = ",
-        normalized_shape);
-  }
+  TORCH_CHECK(
+      !weight.defined() || weight.sym_sizes().equals(normalized_shape),
+      "Expected weight to be of same shape as normalized_shape, but got ",
+      "weight of shape ",
+      weight.sym_sizes(),
+      " and normalized_shape = ",
+      normalized_shape);
 
   const auto input_ndim = input.dim();
   const auto input_shape = input.sym_sizes();
-  TORCH_CHECK_VALUE(
-      input_ndim >= normalized_ndim,
-      "Input tensor must have at least ", normalized_ndim, " dimensions, but got ", input_ndim);
-
-  auto expect_input_shape_msg = c10::str(
-      "Given normalized_shape=", normalized_shape,
-      ", expected input with shape [*", c10::Join(", ", normalized_shape),
-      "], but got input of size", input_shape);
-
-  TORCH_SYM_CHECK(
-      sym_equals(input_shape.slice(input_ndim - normalized_ndim), normalized_shape),
-      expect_input_shape_msg);
+  if (input_ndim < normalized_ndim ||
+      !input_shape.slice(input_ndim - normalized_ndim)
+           .equals(normalized_shape)) {
+    std::stringstream ss;
+    ss << "Given normalized_shape=" << normalized_shape
+       << ", expected input with shape [*";
+    for (auto size : normalized_shape) {
+      ss << ", " << size;
+    }
+    ss << "], but got input of size" << input_shape;
+    TORCH_CHECK(false, ss.str());
+  }
 }
 
 C10_ALWAYS_INLINE std::pair<int64_t, int64_t> _check_layer_norm_inputs(

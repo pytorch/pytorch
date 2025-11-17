@@ -118,8 +118,7 @@ def is_acceptable(tensor):
     if not is_available():
         warnings.warn(
             "PyTorch was compiled without cuDNN/MIOpen support. To use cuDNN/MIOpen, rebuild "
-            "PyTorch making sure the library is visible to the build system.",
-            stacklevel=2,
+            "PyTorch making sure the library is visible to the build system."
         )
         return False
     if not _init():
@@ -128,8 +127,7 @@ def is_acceptable(tensor):
                 libpath={"darwin": "DYLD_LIBRARY_PATH", "win32": "PATH"}.get(
                     sys.platform, "LD_LIBRARY_PATH"
                 )
-            ),
-            stacklevel=2,
+            )
         )
         return False
     return True

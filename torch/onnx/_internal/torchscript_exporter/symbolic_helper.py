@@ -364,6 +364,7 @@ def parse_args(
                 fn_name = None
             args = [
                 _parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore[method-assign]
+                # pyrefly: ignore  # no-matching-overload
                 for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)
             ]
             # only support _outputs in kwargs
@@ -909,8 +910,7 @@ def _interpolate_warning(interpolate_mode):
         "ONNX's Upsample/Resize operator did not match Pytorch's Interpolation until opset 11. "
         "Attributes to determine how to transform the input were added in onnx:Resize in opset 11 "
         "to support Pytorch's behavior (like coordinate_transformation_mode and nearest_mode).\n"
-        "We recommend using opset 11 and above for models using this operator.",
-        stacklevel=2,
+        "We recommend using opset 11 and above for models using this operator."
     )
 
 
@@ -1005,7 +1005,7 @@ def _interpolate_size_to_scales(g: jit_utils.GraphContext, input, output_size, d
             if i < 2
             else float(output_size[-(dim - i)])
             / float(input.type().sizes()[-(dim - i)])
-            for i in range(dim)
+            for i in range(0, dim)
         ]
         scales = g.op(
             "Constant", value_t=torch.tensor(scales_constant, dtype=torch.float32)
@@ -1237,8 +1237,7 @@ def __interpolate_helper(
             if not is_scalar:
                 warnings.warn(
                     "Cannot verify if the output_size is a scalar "
-                    "while exporting interpolate. Assuming that it is not a scalar.",
-                    stacklevel=2,
+                    "while exporting interpolate. Assuming that it is not a scalar."
                 )
 
         if is_scalar:
@@ -1579,8 +1578,7 @@ def check_training_mode(op_train_mode: int, op_name: str) -> None:
     # in training.
     warnings.warn(
         f"ONNX export mode is set to {GLOBALS.training_mode}, but operator '{op_name}' "
-        f"is set to {op_mode_text}. Exporting with {op_mode_text}.",
-        stacklevel=2,
+        f"is set to {op_mode_text}. Exporting with {op_mode_text}."
     )
 
 
@@ -1803,27 +1801,27 @@ def _op_with_optional_float_cast(g: jit_utils.GraphContext, op_name, *args, **kw
 
     if require_cast:
         for input in inputs:
-            # pyrefly: ignore [missing-attribute]
+            # pyrefly: ignore  # missing-attribute
             if input.isCompleteTensor():
                 input_scalar_type = _type_utils.JitScalarType.from_value(input)
                 if input_scalar_type != dtype_0:
                     raise errors.SymbolicValueError(
                         f"Inputs of {op_name} must have same dtype."
                         f"Got {dtype_0.scalar_name()} and {input_scalar_type.scalar_name()}",
-                        # pyrefly: ignore [bad-argument-type]
+                        # pyrefly: ignore  # bad-argument-type
                         input,
                     )
         for i, input in enumerate(inputs):
-            # pyrefly: ignore [missing-attribute]
+            # pyrefly: ignore  # missing-attribute
             if input.isCompleteTensor() and not _is_fp(input):
                 inputs[i] = g.op(
                     "Cast",
-                    # pyrefly: ignore [bad-argument-type]
+                    # pyrefly: ignore  # bad-argument-type
                     input,
                     to_i=target_float_t.onnx_type(),
                 )
 
-    # pyrefly: ignore [bad-argument-type]
+    # pyrefly: ignore  # bad-argument-type
     self = g.op(op_name, *inputs, **kwargs)
 
     if require_cast:

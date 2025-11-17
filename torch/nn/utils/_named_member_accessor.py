@@ -77,7 +77,7 @@ def swap_tensor(
             setattr(module, name, tensor)
         elif hasattr(module, name):
             delattr(module, name)
-    # pyrefly: ignore [bad-return]
+    # pyrefly: ignore  # bad-return
     return orig_tensor
 
 
@@ -146,7 +146,7 @@ class NamedMemberAccessor:
                     f"{module._get_name()} has no attribute `{attr}`"
                 ) from ex
             if not isinstance(submodule, torch.nn.Module):
-                raise TypeError(
+                raise TypeError(  # noqa: B904
                     f"submodule `{name}`: {submodule} is not an instance of torch.nn.Module"
                 )
             self.memo[name] = submodule

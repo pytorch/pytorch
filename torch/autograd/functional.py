@@ -54,8 +54,7 @@ def _tuple_postprocess(res, to_unpack):
     # - invert _as_tuple when res should match the inp given to _as_tuple
     # - optionally remove nesting of two tuples created by multiple calls to _as_tuple
     if isinstance(to_unpack, tuple):
-        if len(to_unpack) != 2:
-            raise AssertionError("Expected to_unpack tuple to have exactly 2 elements")
+        assert len(to_unpack) == 2
         if not to_unpack[1]:
             res = tuple(el[0] for el in res)
         if not to_unpack[0]:
@@ -175,17 +174,11 @@ def _autograd_grad(
 ):
     # Version of autograd.grad that accepts `None` in outputs and do not compute gradients for them.
     # This has the extra constraint that inputs has to be a tuple
-    if not isinstance(outputs, tuple):
-        raise AssertionError("Expected outputs to be a tuple")
+    assert isinstance(outputs, tuple)
     if grad_outputs is None:
         grad_outputs = (None,) * len(outputs)
-    if not isinstance(grad_outputs, tuple):
-        raise AssertionError("Expected grad_outputs to be a tuple")
-    if len(outputs) != len(grad_outputs):
-        raise AssertionError(
-            f"Expected outputs and grad_outputs to have the same length, "
-            f"but got {len(outputs)} and {len(grad_outputs)}"
-        )
+    assert isinstance(grad_outputs, tuple)
+    assert len(outputs) == len(grad_outputs)
 
     new_outputs: tuple[torch.Tensor, ...] = ()
     new_grad_outputs: tuple[torch.Tensor, ...] = ()
@@ -496,13 +489,8 @@ def _construct_standard_basis_for(
     # See NOTE: [Computing jacobian with vmap and grad for multiple tensors]
     # for context behind this function. All the pre-conditions are guarded for
     # in torch.autograd.functional.jacobian.
-    if len(tensors) != len(tensor_numels):
-        raise AssertionError(
-            f"Expected tensors and tensor_numels to have the same length, "
-            f"but got {len(tensors)} and {len(tensor_numels)}"
-        )
-    if len(tensors) == 0:
-        raise AssertionError("Expected at least one tensor")
+    assert len(tensors) == len(tensor_numels)
+    assert len(tensors) > 0
     total_numel = sum(tensor_numels)
     chunks = tuple(
         tensor.new_zeros(total_numel, tensor_numel)
@@ -676,12 +664,11 @@ def jacobian(
         >>> jac.shape
         torch.Size([4, 2, 4, 2])
     """
-    if strategy not in ("forward-mode", "reverse-mode"):
-        raise AssertionError(
-            'Expected strategy to be either "forward-mode" or "reverse-mode". Hint: If your '
-            'function has more outputs than inputs, "forward-mode" tends to be more performant. '
-            'Otherwise, prefer to use "reverse-mode".'
-        )
+    assert strategy in ("forward-mode", "reverse-mode"), (
+        'Expected strategy to be either "forward-mode" or "reverse-mode". Hint: If your '
+        'function has more outputs than inputs, "forward-mode" tends to be more performant. '
+        'Otherwise, prefer to use "reverse-mode".'
+    )
     if strategy == "forward-mode":
         if create_graph:
             raise NotImplementedError(
@@ -945,13 +932,10 @@ def hessian(
                   [0., 6.]])))
     """
     is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "hessian")
-    if outer_jacobian_strategy not in (
+    assert outer_jacobian_strategy in (
         "forward-mode",
         "reverse-mode",
-    ):
-        raise AssertionError(
-            'Expected strategy to be either "forward-mode" or "reverse-mode".'
-        )
+    ), 'Expected strategy to be either "forward-mode" or "reverse-mode".'
 
     def ensure_single_output_function(*inp):
         out = func(*inp)

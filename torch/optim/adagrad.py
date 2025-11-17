@@ -337,8 +337,7 @@ def _single_tensor_adagrad(
     differentiable: bool,
     has_complex: bool,
 ):
-    if grad_scale is not None or found_inf is not None:
-        raise AssertionError("Expected grad_scale and found_inf to be None")
+    assert grad_scale is None and found_inf is None
 
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
@@ -403,10 +402,8 @@ def _multi_tensor_adagrad(
     differentiable: bool,
     has_complex: bool,
 ):
-    if differentiable:
-        raise AssertionError("_foreach ops don't support autograd")
-    if grad_scale is not None or found_inf is not None:
-        raise AssertionError("Expected grad_scale and found_inf to be None")
+    assert not differentiable, "_foreach ops don't support autograd"
+    assert grad_scale is None and found_inf is None
 
     # Foreach functions will throw errors if given empty lists
     if len(params) == 0:

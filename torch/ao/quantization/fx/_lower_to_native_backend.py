@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import operator
-from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -589,7 +588,7 @@ def _match_static_pattern(
 
     # Handle cases where the node is wrapped in a ReLU
     if (ref_node.op == "call_function" and ref_node.target in (F.relu, torch.relu)) or (
-        ref_node.op == "call_module" and type(_get_module(ref_node, modules)) is nn.ReLU
+        ref_node.op == "call_module" and type(_get_module(ref_node, modules)) == nn.ReLU
     ):
         relu_node = ref_node
         ref_node = relu_node.args[0]
@@ -724,7 +723,7 @@ def _lower_static_weighted_ref_module(
         # If so, we replace the entire fused module with the corresponding quantized module
         if ref_class in STATIC_LOWER_FUSED_MODULE_MAP:
             inner_ref_class, q_class = STATIC_LOWER_FUSED_MODULE_MAP[ref_class]
-            if type(ref_module[0]) is not inner_ref_class:  # type: ignore[index]
+            if type(ref_module[0]) != inner_ref_class:  # type: ignore[index]
                 continue
         else:
             q_class = STATIC_LOWER_MODULE_MAP[ref_class]
@@ -786,7 +785,7 @@ def _lower_static_weighted_ref_module_with_two_inputs(
             inner_ref_class, q_class = STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP[
                 ref_class
             ]
-            if type(ref_module[0]) is not inner_ref_class:  # type: ignore[index]
+            if type(ref_module[0]) != inner_ref_class:  # type: ignore[index]
                 continue
         else:
             continue
@@ -846,7 +845,7 @@ def _lower_dynamic_weighted_ref_module(model: GraphModule):
         ref_class = type(ref_module)
         if ref_class in DYNAMIC_LOWER_FUSED_MODULE_MAP:
             inner_ref_class, q_class = DYNAMIC_LOWER_FUSED_MODULE_MAP[ref_class]
-            if type(ref_module[0]) is not inner_ref_class:
+            if type(ref_module[0]) != inner_ref_class:
                 continue
         else:
             q_class = DYNAMIC_LOWER_MODULE_MAP.get(ref_class)  # type: ignore[assignment]
@@ -1008,7 +1007,7 @@ def _lower_dynamic_weighted_ref_functional(
             func_node.op == "call_function"
             and func_node.target == F.relu
             or func_node.op == "call_module"
-            and type(modules[str(func_node.target)]) is torch.nn.ReLU
+            and type(modules[str(func_node.target)]) == torch.nn.ReLU
         ):
             relu_node = func_node
             func_node = relu_node.args[0]

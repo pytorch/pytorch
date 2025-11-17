@@ -83,7 +83,7 @@ def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
 def check_backward_validity(inputs: Iterable[Any]) -> None:
     if not any(inp.requires_grad for inp in inputs if isinstance(inp, torch.Tensor)):
         warnings.warn(
-            "None of the inputs have requires_grad=True. Gradients will be None", stacklevel=2
+            "None of the inputs have requires_grad=True. Gradients will be None"
         )
 
 
@@ -144,7 +144,7 @@ def _infer_device_type(*args):
             "devices will be ignored. Consequently, if any checkpointed functions involve randomness, "
             "this may result in incorrect gradients. (Note that if CUDA devices are among the devices "
             "detected, it will be prioritized; otherwise, the first device encountered will be selected.)"
-            f"\nDevice types: {sorted(device_types_set)} first device type: {device_types[0]}", stacklevel=2
+            f"\nDevice types: {sorted(device_types_set)} first device type: {device_types[0]}"
         )
     if len(device_types) == 0:
         return DefaultDeviceType.get_device_type()
@@ -222,7 +222,7 @@ def _get_autocast_kwargs(device_type="cuda"):
 
 class CheckpointFunction(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def forward(ctx, run_function, preserve_rng_state, *args):
         check_backward_validity(args)
         ctx.run_function = run_function
@@ -565,7 +565,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
             "is not passed. use_reentrant=False is "
             "recommended, but if you need to preserve the current default "
             "behavior, you can pass use_reentrant=True. Refer to docs for more "
-            "details on the differences between the two variants.", stacklevel=2
+            "details on the differences between the two variants."
         )
         use_reentrant = True
 
@@ -785,7 +785,7 @@ class _Holder:
 
 class _NoopSaveInputs(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def forward(*args):
         return torch.empty((0,))
 
@@ -1008,7 +1008,7 @@ def _get_debug_context_and_cb() -> Tuple[Callable[[], Any], Callable[[Checkpoint
             def logging_mode():
                 with LoggingTensorMode(), \
                      capture_logs(True, python_tb=True, script_tb=True, cpp_tb=cpp_tb) as logs_and_tb:
-                    # pyrefly: ignore [bad-assignment]
+                    # pyrefly: ignore  # bad-assignment
                     self.logs, self.tbs = logs_and_tb
                     yield logs_and_tb
             return logging_mode()
@@ -1187,7 +1187,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 def _is_compiling(func, args, kwargs):
     # Check if we are under AOTAutograd tracing
     # Checking that a functional mode is active should always do what we want
-    return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY) is not None
+    return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL) is not None
 
 
 class _VersionWrapper:
@@ -1292,7 +1292,7 @@ SAC_IGNORED_OPS = {
     # With subclasses involved, these metadata ops become dispatchable, this
     # can result in incorrectness if these ops are selected cached.
     torch.ops.prim.device.default,
-} | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)  # type: ignore[has-type]
+} | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)
 
 
 class _CachingTorchDispatchMode(TorchDispatchMode):

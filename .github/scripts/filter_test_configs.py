@@ -512,8 +512,6 @@ def perform_misc_tasks(
         "keep-going",
         branch == MAIN_BRANCH
         or bool(tag and re.match(r"^trunk/[a-f0-9]{40}$", tag))
-        # Pattern for tags created via manual run on HUD
-        or bool(tag and re.match(r"^ciflow/[^/]+/[a-f0-9]{40}$", tag))
         or check_for_setting(labels, pr_body, "keep-going"),
     )
     set_output(

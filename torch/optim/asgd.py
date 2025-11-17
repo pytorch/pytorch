@@ -226,17 +226,16 @@ def _single_tensor_asgd(
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch.compiler.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
-            if not (
+            assert (
                 param.device.type
                 == mu.device.type
                 == eta.device.type
                 == step_t.device.type
                 and param.device.type in capturable_supported_devices
-            ):
-                raise AssertionError(
-                    f"If capturable=True, params, mus, etas, and state_steps must be "
-                    f"on supported devices: {capturable_supported_devices}."
-                )
+            ), (
+                f"If capturable=True, params, mus, etas, and state_steps must be "
+                f"on supported devices: {capturable_supported_devices}."
+            )
 
         if torch.is_complex(param):
             grad = torch.view_as_real(grad)
@@ -296,23 +295,20 @@ def _multi_tensor_asgd(
     if len(params) == 0:
         return
 
-    if differentiable:
-        raise AssertionError("_foreach ops don't support autograd")
+    assert not differentiable, "_foreach ops don't support autograd"
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
-        if not all(
+        assert all(
             p.device.type == mu.device.type == eta.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, mu, eta, step in zip(params, mus, etas, state_steps)
-        ):
-            raise AssertionError(
-                f"If capturable=True, params, mus, etas, and state_steps must be on "
-                f"supported devices: {capturable_supported_devices}."
-            )
+        ), (
+            f"If capturable=True, params, mus, etas, and state_steps must be on supported devices: {capturable_supported_devices}."
+        )
 
     lr = _to_scalar(lr)
 

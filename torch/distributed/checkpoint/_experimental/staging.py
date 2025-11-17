@@ -147,21 +147,18 @@ class DefaultStager(CheckpointStager):
         self._staging_stream = None
 
         if self._config.use_async_staging:
-            # pyrefly: ignore [bad-assignment]
             self._staging_executor = ThreadPoolExecutor(max_workers=1)
             if torch.accelerator.is_available():
                 # Note: stream needs to be initialized on the main thread after default cuda
                 # stream is setup/used to avoid the risk of accidentally reusing the main
                 # compute stream or in other cases kernels actually launching from the
                 # main thread.
-                # pyrefly: ignore [bad-assignment]
                 self._staging_stream = torch.Stream()
 
         if self._config.use_non_blocking_copy:
-            if not torch.accelerator.is_available():
-                raise AssertionError(
-                    "Non-blocking copy requires that the current accelerator is available."
-                )
+            assert torch.accelerator.is_available(), (
+                "Non-blocking copy requires that the current accelerator is available."
+            )
 
     def stage(
         self,
@@ -169,10 +166,9 @@ class DefaultStager(CheckpointStager):
         **kwargs: Any,
     ) -> Union[STATE_DICT, Future[STATE_DICT]]:
         if self._config.use_async_staging:
-            if self._staging_executor is None:
-                raise AssertionError(
-                    "Staging executor should be initialized for async staging"
-                )
+            assert self._staging_executor is not None, (
+                "Staging executor should be initialized for async staging"
+            )
             return self._staging_executor.submit(
                 self._stage,
                 state_dict,
@@ -187,10 +183,9 @@ class DefaultStager(CheckpointStager):
         )
 
         if self._config.use_non_blocking_copy:
-            if not (self._staging_stream or not self._config.use_async_staging):
-                raise AssertionError(
-                    "Non-blocking copy in a background thread for async staging needs staging_stream to be initialized."
-                )
+            assert self._staging_stream or not self._config.use_async_staging, (
+                "Non-blocking copy in a background thread for async staging needs staging_stream to be initialized."
+            )
 
             # waits for the enqued copy operations to finish.
             self._staging_stream.synchronize() if self._staging_stream else torch.accelerator.synchronize()

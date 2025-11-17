@@ -61,7 +61,7 @@ def insert_deferred_runtime_asserts(
     """
     During tracing, we may have discovered that some data-dependent values
     had runtime assert on them; e.g., torch.empty(x.item()) induces a runtime
-    that x.item() >= 0.  These asserts can happen unpredictably during fake
+    that x.item() >= 0.  This asserts can happen unpredictably during fake
     tensor propagation, so we cannot conveniently insert them into the FX graph
     when they occur.  Instead, we accumulate them in the ShapeEnv, and in this
     pass insert them into the graph as proper tests.
@@ -298,12 +298,14 @@ def insert_deferred_runtime_asserts(
                         and s not in expr_to_proxy
                     ):
                         with _set_node_metadata_hook(gm, _node_metadata_hook):
+                            # pyrefly: ignore  # unbound-name
                             expr_to_proxy[s] = fx.Proxy(cb(), tracer=tracer)
-
+                        # pyrefly: ignore  # unbound-name
                         log.debug("expr_to_proxy[%s] = %s", s, expr_to_proxy[s])
 
+                # pyrefly: ignore  # unbound-name
                 match_symbol(example_value, lambda: node)
-
+                # pyrefly: ignore  # unbound-name
                 if isinstance(t := example_value, torch.Tensor):
                     for i, s in enumerate(t.size()):
                         match_symbol(
@@ -384,6 +386,7 @@ def insert_deferred_runtime_asserts(
 
                 # maybe re-reify expression, replace current node
                 if (
+                    # pyrefly: ignore  # unbound-name
                     sym_expr in expr_to_proxy
                     or (  # example value is redundant
                         _is_intermediate_tensor_sym_call(node)
@@ -402,8 +405,10 @@ def insert_deferred_runtime_asserts(
                                 nn_module_stack=node.meta.get("nn_module_stack"),
                             ),
                         ):
+                            # pyrefly: ignore  # unbound-name
                             expr_to_proxy[sym_expr] = _sympy_interp(
                                 expr_to_proxy,
+                                # pyrefly: ignore  # unbound-name
                                 sym_expr,
                             )  # type: ignore[arg-type]
                         # won't try DCE-ing tensor compute here
@@ -414,12 +419,14 @@ def insert_deferred_runtime_asserts(
                         "CSE node %s -> %s for expr %s",
                         node,
                         hash_node,
+                        # pyrefly: ignore  # unbound-name
                         sym_expr,
                     )
 
                 # store node in hash cons, don't delete/replace
-
+                # pyrefly: ignore  # unbound-name
                 elif sym_expr not in expr_to_proxy and not isinstance(
+                    # pyrefly: ignore  # unbound-name
                     sym_expr,
                     (sympy.Number, sympy.logic.boolalg.BooleanAtom),
                 ):  # don't hash cons primitives

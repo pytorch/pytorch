@@ -112,7 +112,7 @@ flex_attention = FlexAttentionHOP()
 
 class FlexAttentionBackwardHOP(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("flex_attention_backward", cacheable=True)
+        super().__init__("flex_attention_backward")
 
     def __call__(
         self,
@@ -902,15 +902,9 @@ def sdpa_dense_backward(
 
     grad_value = softmax_scores.to(query.dtype).transpose(-2, -1) @ grad_out
 
-    grad_softmax_scores = grad_out.to(dtype=softmax_scores.dtype) @ value.to(
-        dtype=softmax_scores.dtype
-    ).transpose(-2, -1)
+    grad_softmax_scores = grad_out @ value.transpose(-2, -1)
 
-    sum_scores = torch.sum(
-        out.to(dtype=softmax_scores.dtype) * grad_out.to(dtype=softmax_scores.dtype),
-        -1,
-        keepdim=True,
-    )
+    sum_scores = torch.sum(out * grad_out, -1, keepdim=True)
     grad_score_mod = softmax_scores * (
         grad_softmax_scores - sum_scores + grad_logsumexp.unsqueeze(-1)
     )

@@ -39,7 +39,7 @@ struct alignas(1) Float8_e8m0fnu {
 
   Float8_e8m0fnu() = default;
 
-  constexpr C10_HOST_DEVICE Float8_e8m0fnu(uint8_t bits, from_bits_t /*unused*/)
+  constexpr C10_HOST_DEVICE Float8_e8m0fnu(uint8_t bits, from_bits_t)
       : x(bits) {}
   inline C10_HOST_DEVICE Float8_e8m0fnu(float value);
   inline C10_HOST_DEVICE operator float() const;
@@ -157,14 +157,14 @@ C10_CLANG_DIAGNOSTIC_POP()
 
 } // namespace c10
 
-HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
+namespace torch::headeronly {
 using c10::Float8_e8m0fnu;
 using c10::operator<<;
 
 namespace detail {
 using c10::detail::fp8e8m0fnu_from_fp32_value;
 } // namespace detail
-HIDDEN_NAMESPACE_END(torch, headeronly)
+} // namespace torch::headeronly
 
 namespace std {
 

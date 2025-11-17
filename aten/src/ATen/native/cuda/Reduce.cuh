@@ -413,12 +413,14 @@ struct ReduceOp {
       value = thread_reduce<output_vec_size>(input_slice);
     }
 
-    if (config.should_block_x_reduce()) {
-      value = block_x_reduce<output_vec_size>(value, shared_memory);
-    }
     if (config.should_block_y_reduce()) {
       value = block_y_reduce<output_vec_size>(value, shared_memory);
     }
+    __syncthreads();
+    if (config.should_block_x_reduce()) {
+      value = block_x_reduce<output_vec_size>(value, shared_memory);
+    }
+
     using out_ptr_vec_t = std::array<out_scalar_t*, output_vec_size>;
     using offset_vec_t = std::array<index_t, output_vec_size>;
     offset_vec_t base_offsets;
@@ -653,14 +655,8 @@ struct ReduceOp {
     }
 
     __syncthreads();
-    // Intra-warp reduction, fix CUDA to have offset decreasing for better numerics
-    // matching Triton, etc.
-    // TODO(PaulZhang12): AMD and internal
-    #if defined(USE_ROCM) || defined(FBCODE_CAFFE2)
+
     for (int offset = 1; offset < dim_x; offset <<= 1) {
-    #else
-    for (int offset = dim_x >> 1; offset > 0; offset >>= 1) {
-    #endif
       #pragma unroll
       for (int i = 0; i < output_vec_size; i++) {
         arg_t other = ops.warp_shfl_down(value[i], offset);
@@ -1095,7 +1091,11 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
   // threads with different threadIdx.x are independent and will produce results for different outputs.
   // In such case, values in each loaded vector always correspond to different outputs.
   if (fastest_moving_stride == sizeof(scalar_t)) {
+#ifdef USE_ROCM
     if (reduction_on_fastest_striding_dimension && dim0 >= 128 && iter.num_reduce_dims() == 1) {
+#else
+    if (reduction_on_fastest_striding_dimension && dim0 > 128 && iter.num_reduce_dims() == 1 && vt0 >= input_vec_size) {
+#endif
       // Case 1: "vectorize along input"
       // Note that if vt0 < ReduceConfig::vec_size, then this means the register pressure could be high, in such case,
       // we should avoid vectorization.

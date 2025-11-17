@@ -81,16 +81,6 @@ def evaluate_platform_supports_efficient_attention():
 def evaluate_platform_supports_cudnn_attention():
     return (not TEST_WITH_ROCM) and SM80OrLater and (TEST_CUDNN_VERSION >= 90000)
 
-def evaluate_platform_supports_green_context():
-    if IS_WINDOWS:
-        return False
-    if not _get_torch_cuda_version() >= (12, 8):
-        return False
-    driver_version = torch.utils.collect_env.get_nvidia_driver_version(torch.utils.collect_env.run)
-    if driver_version is None:
-        return False
-    return int(driver_version.split('.')[0]) >= 550
-
 PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_flash_attention())
 PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_efficient_attention())
 PLATFORM_SUPPORTS_CUDNN_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_cudnn_attention())
@@ -102,8 +92,6 @@ PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLAS
 PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 
 PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: TEST_CUDA and SM80OrLater)
-
-PLATFORM_SUPPORTS_GREEN_CONTEXT: bool = LazyVal(lambda: evaluate_platform_supports_green_context())
 
 def evaluate_platform_supports_fp8():
     if torch.cuda.is_available():
@@ -264,7 +252,7 @@ def tf32_on_and_off(tf32_precision=1e-5, *, only_if=True):
 
         @functools.wraps(f)
         def wrapped(*args, **kwargs):
-            kwargs.update(zip(arg_names, args, strict=False))
+            kwargs.update(zip(arg_names, args))
             cond = torch.cuda.is_tf32_supported() and only_if
             if 'device' in kwargs:
                 cond = cond and (torch.device(kwargs['device']).type == 'cuda')
@@ -337,7 +325,7 @@ def _create_scaling_models_optimizers(device="cuda", optimizer_ctor=torch.optim.
     mod_control = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).to(device=device)
     mod_scaling = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).to(device=device)
     with torch.no_grad():
-        for c, s in zip(mod_control.parameters(), mod_scaling.parameters(), strict=True):
+        for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
             s.copy_(c)
 
     kwargs = {"lr": 1.0}

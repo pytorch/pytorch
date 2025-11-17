@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_raise.py b/test/dynamo/cpython/3_13/test_raise.py
-index 6d26a61bee4..ce748433d28 100644
+index 6d26a61bee4..042d1ae3d7c 100644
 --- a/test/dynamo/cpython/3_13/test_raise.py
 +++ b/test/dynamo/cpython/3_13/test_raise.py
 @@ -1,3 +1,58 @@
@@ -70,35 +70,7 @@ index 6d26a61bee4..ce748433d28 100644
      def test_invalid_reraise(self):
          try:
              raise
-@@ -120,9 +175,10 @@ class TestRaise(unittest.TestCase):
-         self.assertRaises(StopIteration, lambda: next(g))
- 
-     def test_erroneous_exception(self):
--        class MyException(Exception):
--            def __init__(self):
--                raise RuntimeError()
-+        with torch._dynamo.error_on_graph_break(False):
-+            class MyException(Exception):
-+                def __init__(self):
-+                    raise RuntimeError()
- 
-         try:
-             raise MyException
-@@ -133,9 +189,10 @@ class TestRaise(unittest.TestCase):
- 
-     def test_new_returns_invalid_instance(self):
-         # See issue #11627.
--        class MyException(Exception):
--            def __new__(cls, *args):
--                return object()
-+        with torch._dynamo.error_on_graph_break(False):
-+            class MyException(Exception):
-+                def __new__(cls, *args):
-+                    return object()
- 
-         with self.assertRaises(TypeError):
-             raise MyException
-@@ -148,7 +205,7 @@ class TestRaise(unittest.TestCase):
+@@ -148,7 +203,7 @@ class TestRaise(unittest.TestCase):
  
  
  
@@ -107,37 +79,7 @@ index 6d26a61bee4..ce748433d28 100644
  
      def testCauseSyntax(self):
          try:
-@@ -186,10 +243,11 @@ class TestCause(unittest.TestCase):
-             self.fail("No exception raised")
- 
-     def test_class_cause_nonexception_result(self):
--        class ConstructsNone(BaseException):
--            @classmethod
--            def __new__(*args, **kwargs):
--                return None
-+        with torch._dynamo.error_on_graph_break(False):
-+            class ConstructsNone(BaseException):
-+                @classmethod
-+                def __new__(*args, **kwargs):
-+                    return None
-         try:
-             raise IndexError from ConstructsNone
-         except TypeError as e:
-@@ -209,9 +267,10 @@ class TestCause(unittest.TestCase):
-             self.fail("No exception raised")
- 
-     def test_erroneous_cause(self):
--        class MyException(Exception):
--            def __init__(self):
--                raise RuntimeError()
-+        with torch._dynamo.error_on_graph_break(False):
-+            class MyException(Exception):
-+                def __init__(self):
-+                    raise RuntimeError()
- 
-         try:
-             raise IndexError from MyException
-@@ -221,7 +280,7 @@ class TestCause(unittest.TestCase):
+@@ -221,7 +276,7 @@ class TestCause(unittest.TestCase):
              self.fail("No exception raised")
  
  
@@ -146,7 +88,7 @@ index 6d26a61bee4..ce748433d28 100644
  
      def test_sets_traceback(self):
          try:
-@@ -242,7 +301,7 @@ class TestTraceback(unittest.TestCase):
+@@ -242,7 +297,7 @@ class TestTraceback(unittest.TestCase):
              self.fail("No exception raised")
  
  
@@ -155,7 +97,7 @@ index 6d26a61bee4..ce748433d28 100644
  
      def raiser(self):
          raise ValueError
-@@ -308,7 +367,7 @@ class TestTracebackType(unittest.TestCase):
+@@ -308,7 +363,7 @@ class TestTracebackType(unittest.TestCase):
              types.TracebackType(other_tb, frame, 1, "nuh-uh")
  
  
@@ -164,45 +106,7 @@ index 6d26a61bee4..ce748433d28 100644
      def test_instance_context_instance_raise(self):
          context = IndexError()
          try:
-@@ -392,11 +451,12 @@ class TestContext(unittest.TestCase):
-             self.fail("No exception raised")
- 
-     def test_context_manager(self):
--        class ContextManager:
--            def __enter__(self):
--                pass
--            def __exit__(self, t, v, tb):
--                xyzzy
-+        with torch._dynamo.error_on_graph_break(False):
-+            class ContextManager:
-+                def __enter__(self):
-+                    pass
-+                def __exit__(self, t, v, tb):
-+                    xyzzy
-         try:
-             with ContextManager():
-                 1/0
-@@ -471,12 +531,13 @@ class TestContext(unittest.TestCase):
-         import gc
-         # A re-raised exception in a __del__ caused the __context__
-         # to be cleared
--        class C:
--            def __del__(self):
--                try:
--                    1/0
--                except:
--                    raise
-+        with torch._dynamo.error_on_graph_break(False):
-+            class C:
-+                def __del__(self):
-+                    try:
-+                        1/0
-+                    except:
-+                        raise
- 
-         def f():
-             x = C()
-@@ -498,7 +559,7 @@ class TestContext(unittest.TestCase):
+@@ -498,7 +553,7 @@ class TestContext(unittest.TestCase):
              self.assertEqual(ZeroDivisionError, cm.unraisable.exc_type)
  
  
@@ -211,7 +115,7 @@ index 6d26a61bee4..ce748433d28 100644
      def test_tuples(self):
          try:
              raise (IndexError, KeyError) # This should be a tuple!
-@@ -517,4 +578,4 @@ class TestRemovedFunctionality(unittest.TestCase):
+@@ -517,4 +572,4 @@ class TestRemovedFunctionality(unittest.TestCase):
  
  
  if __name__ == "__main__":

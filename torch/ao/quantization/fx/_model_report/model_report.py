@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 from collections import OrderedDict
-from collections.abc import Callable
-from typing import Any
+from typing import Any, Callable
 
 import torch
 from torch.ao.quantization.fx._equalize import EqualizationQConfig
@@ -370,10 +369,10 @@ class ModelReport:
             dict_b_val = info_dict_b[key]
 
             # if it's a tensor we have to handle separately
-            if type(dict_a_val) is torch.Tensor:
+            if type(dict_a_val) == torch.Tensor:
                 # if dict_b_val not tensor, automatically false
                 if (
-                    type(dict_b_val) is not torch.Tensor
+                    type(dict_b_val) != torch.Tensor
                     or sum(dict_a_val != dict_b_val) != 0
                 ):
                     return False

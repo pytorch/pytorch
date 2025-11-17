@@ -81,7 +81,7 @@ C10_API void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set);
 
 class C10_API IncludeDispatchKeyGuard {
  public:
-  IncludeDispatchKeyGuard(DispatchKeySet /*include*/);
+  IncludeDispatchKeyGuard(DispatchKeySet);
   IncludeDispatchKeyGuard(DispatchKey k)
       : IncludeDispatchKeyGuard(DispatchKeySet(k)) {}
   IncludeDispatchKeyGuard(const IncludeDispatchKeyGuard&) = delete;
@@ -99,7 +99,7 @@ class C10_API IncludeDispatchKeyGuard {
 
 class C10_API ExcludeDispatchKeyGuard {
  public:
-  ExcludeDispatchKeyGuard(DispatchKeySet /*exclude*/);
+  ExcludeDispatchKeyGuard(DispatchKeySet);
   ExcludeDispatchKeyGuard(DispatchKey k)
       : ExcludeDispatchKeyGuard(DispatchKeySet(k)) {}
   ExcludeDispatchKeyGuard(const ExcludeDispatchKeyGuard&) = delete;

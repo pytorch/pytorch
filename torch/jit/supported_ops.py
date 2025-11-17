@@ -261,7 +261,7 @@ def _get_global_builtins():
 
     magic_methods_rows = []
     for fn, magic_method in magic_methods:
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         magic_methods_rows.append(f'"{fn}", "``{magic_method}``"')
 
     schematized_ops = []
@@ -280,7 +280,7 @@ def _get_global_builtins():
             table_row = (
                 f'":external+python:py:obj:`{fn}`", "{schemaless_op_explanations[fn]}"'
             )
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             schemaless_ops.append(table_row)
 
     schematized_ops_str = "\n".join(schematized_ops)

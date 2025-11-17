@@ -2887,9 +2887,9 @@ graph(%Ra, %Rb):
                     self.assertTrue(hasattr(input, 'type'))
                     self.assertTrue(input.type() is not None)
                 self.assertTrue(hasattr(block, 'returnNode'))
-                self.assertTrue(type(block.returnNode()) is torch._C.Node)
+                self.assertTrue(type(block.returnNode()) == torch._C.Node)
                 self.assertTrue(hasattr(block, 'paramNode'))
-                self.assertTrue(type(block.paramNode()) is torch._C.Node)
+                self.assertTrue(type(block.paramNode()) == torch._C.Node)
         self.assertTrue(tested_blocks)
 
     def test_export_opnames(self):
@@ -3153,7 +3153,7 @@ class TestScript(JitTestCase):
             eplan = get_execution_plan(dstate)
             num_bailouts = eplan.code.num_bailouts()
 
-            for i in range(num_bailouts):
+            for i in range(0, num_bailouts):
                 eplan.code.request_bailout(i)
                 self.assertEqual(jitted(x), expected)
 
@@ -5950,7 +5950,7 @@ a")
             # type: (int) -> int
             prev = 1
             v = 1
-            for i in range(x):
+            for i in range(0, x):
                 save = v
                 v = v + prev
                 prev = save
@@ -6510,7 +6510,7 @@ a")
                     if isinstance(res_python, Exception):
                         continue
 
-                    if type(res_python) is type(res_script):
+                    if type(res_python) == type(res_script):
                         if isinstance(res_python, tuple) and (math.isnan(res_python[0]) == math.isnan(res_script[0])):
                             continue
                         if isinstance(res_python, float) and math.isnan(res_python) and math.isnan(res_script):
@@ -6723,7 +6723,7 @@ a")
         @torch.jit.script
         def testNoThrows(t):
             c1 = 1
-            if (False and bool(t[1])) or (True or bool(t[1])):  # noqa: SIM222,SIM223
+            if (False and bool(t[1])) or (True or bool(t[1])):
                 c1 = 0
             return c1
 
@@ -8646,7 +8646,7 @@ dedent """
         args = args + [1, 1.5]
 
         def isBool(arg):
-            return type(arg) is bool or (type(arg) is str and "torch.bool" in arg)
+            return type(arg) == bool or (type(arg) == str and "torch.bool" in arg)
 
         for op in ops:
             for first_arg in args:
@@ -8655,7 +8655,7 @@ dedent """
                     if (op == 'sub' or op == 'div') and (isBool(first_arg) or isBool(second_arg)):
                         continue
                     # div is not implemented correctly for mixed-type or int params
-                    if (op == 'div' and (type(first_arg) is not type(second_arg) or
+                    if (op == 'div' and (type(first_arg) != type(second_arg) or
                        isinstance(first_arg, int) or
                        (isinstance(first_arg, str) and 'int' in first_arg))):
                         continue
@@ -8671,7 +8671,7 @@ dedent """
                     graph = cu.func.graph
                     torch._C._jit_pass_complete_shape_analysis(graph, (), False)
                     # use dim=-1 to represent a python/jit scalar.
-                    dim = -1 if type(first_arg) is not str and type(second_arg) is not str else non_jit_result.dim()
+                    dim = -1 if type(first_arg) != str and type(second_arg) != str else non_jit_result.dim()
                     dtype = non_jit_result.dtype
                     # jit only supports int/float scalars.
                     if dim < 0:
@@ -10005,7 +10005,7 @@ dedent """
         def tensor_unifying(x, y, z):
             # testing dynamic is appropriately set for y and z
             if bool(x):
-                x, y, z = x + 1, y, z  # noqa: PLW0127
+                x, y, z = x + 1, y, z
             else:
                 x, y, z = x + 1, x, y
 
@@ -10938,7 +10938,7 @@ dedent """
 
             # Test symbolic differentiation
             # Run Forward and Backward thrice to trigger autodiff graph
-            for i in range(3):
+            for i in range(0, 3):
                 y = jit_module(x)
                 y.backward(grad)
             x.grad.zero_()
@@ -11802,7 +11802,7 @@ dedent """
         def fn_zip_enumerate(x, y):
             # type: (List[int], List[int]) -> int
             sum = 0
-            for (i, (j, v), k) in zip(x, enumerate(y), range(100)):
+            for (i, (j, v), k) in zip(x, enumerate(y), range(0, 100)):
                 sum += i * j * v * k
 
             return sum
@@ -15758,7 +15758,7 @@ dedent """
         def fn(d):
             # type: (Dict[str, int]) -> List[int]
             out = [1]
-            for i in range(d.get("hi", 6)):
+            for i in range(d["hi"] if "hi" in d else 6):
                 out.append(i)  # noqa: PERF402
             return out
 
@@ -16104,7 +16104,7 @@ M = 10
 S = 5
 
 def add_nn_module_test(*args, **kwargs):
-    no_grad = kwargs.get('no_grad', False)
+    no_grad = False if 'no_grad' not in kwargs else kwargs['no_grad']
 
     if 'desc' in kwargs and 'eval' in kwargs['desc']:
         # eval() is not supported, so skip these tests

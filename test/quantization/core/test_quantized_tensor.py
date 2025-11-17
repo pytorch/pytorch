@@ -97,10 +97,10 @@ def param_search_greedy(x, bit_rate, n_bins=200, ratio=0.16):
             # found a local optima
             solutions.append((cur_min, cur_max, cur_loss))
         if loss1 < loss2:
-            cur_min, cur_loss = cur_min + stepsize, loss1
+            cur_min, cur_max, cur_loss = cur_min + stepsize, cur_max, loss1
         else:
-            cur_max, cur_loss = cur_max - stepsize, loss2
-    if solutions:
+            cur_min, cur_max, cur_loss = cur_min, cur_max - stepsize, loss2
+    if len(solutions):
         best = solutions[0]
         for solution in solutions:
             if solution[-1] < best[-1]:

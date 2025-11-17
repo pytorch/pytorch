@@ -1,16 +1,16 @@
 #pragma once
 
-#include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/headeronly/core/ScalarType.h>
-#include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/shim_utils.h>
 
 #include <optional>
 
-HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
+// use anonymous namespace to avoid collisions between differing
+// versions of this file that may be included by different sources
+namespace {
 
 // forward declare so that the from/to() implementations in the detail
 // namespace of library.h where the real work is done can compile.
@@ -20,8 +20,15 @@ template <typename T>
 T to(StableIValue val);
 
 // =============================================================================
-//  Below are the helpers for converting between StableIValue and T
+//  helpers for converting between StableIValue and T
 // =============================================================================
+
+// note that the signatures for from and to are forward declared in
+// stable/stableivalue_conversions.h but defined below to avoid circular
+// dependencies where other headers (like tensor-inl.h) will need to/from.
+
+namespace detail {
+
 // =============================================================================
 // FROM CONVERSIONS (T -> StableIValue)
 // =============================================================================
@@ -111,8 +118,7 @@ struct FromImpl<ScalarType> {
       case ScalarType::UInt64:
         return from(aoti_torch_dtype_uint64());
       default:
-        TORCH_CHECK(
-            false,
+        throw std::runtime_error(
             "Not yet supported ScalarType, please file an issue describing your use case.");
     }
   }
@@ -261,10 +267,8 @@ struct ToImpl<ScalarType> {
     } else if (shim_scalartype == aoti_torch_dtype_uint64()) {
       return ScalarType::UInt64;
     } else {
-      TORCH_CHECK(
-          false,
-          "Not yet supported ScalarType ",
-          std::to_string(shim_scalartype),
+      throw std::runtime_error(
+          "Not yet supported ScalarType " + std::to_string(shim_scalartype) +
           ", please file an issue describing your use case.");
     }
   }
@@ -310,68 +314,32 @@ struct ToImpl<torch::stable::Tensor> {
   }
 };
 
-// =============================================================================
-//  end to helpers for converting between StableIValue and T
-// =============================================================================
+} // namespace detail
 
 // Expose the partially templated class functions through single functions
 template <typename T>
-inline StableIValue from(T val) {
+StableIValue from(T val) {
   return detail::FromImpl<T>::call(val);
 }
 
 template <typename T>
-inline StableIValue from(const std::optional<T>& val) {
+StableIValue from(const std::optional<T>& val) {
   return detail::FromImpl<std::optional<T>>::call(val);
 }
 
 // The below overload is used! See https://godbolt.org/z/859cshxrW
 // We are suppressing the warning for versions clang12- and gcc11-
-[[maybe_unused]] inline StableIValue from(const torch::stable::Tensor& val) {
+[[maybe_unused]] StableIValue from(const torch::stable::Tensor& val) {
   return detail::FromImpl<torch::stable::Tensor>::call(val);
 }
 
 template <typename T>
-inline T to(StableIValue val) {
+T to(StableIValue val) {
   return detail::ToImpl<T>::call(val);
 }
 
-HIDDEN_NAMESPACE_END(torch, stable, detail)
+// =============================================================================
+//  end to helpers for converting between StableIValue and T
+// =============================================================================
 
-// [global from/to deprecation note]
-// WARNING! the following APIs will be removed!! We deprecated global from/to
-// (in 2.10) in favor of torch::stable::detail from/to to not pollute the global
-// namespace. We are only including the following wrappers for backwards
-// compatibility.
-
-// WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
-// note]
-template <typename T>
-[[deprecated("Use torch::stable::detail::from instead.")]]
-inline StableIValue from(T val) {
-  return torch::stable::detail::from(val);
-}
-
-// WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
-// note]
-template <typename T>
-[[deprecated("Use torch::stable::detail::from instead.")]]
-inline StableIValue from(const std::optional<T>& val) {
-  return torch::stable::detail::from(val);
-}
-
-// WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
-// note]
-[[deprecated(
-    "Use torch::stable::detail::from instead.")]] [[maybe_unused]] inline StableIValue
-from(const torch::stable::Tensor& val) {
-  return torch::stable::detail::from(val);
-}
-
-// WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
-// note]
-template <typename T>
-[[deprecated("Use torch::stable::detail::to instead.")]]
-inline T to(StableIValue val) {
-  return torch::stable::detail::to<T>(val);
-}
+} // namespace

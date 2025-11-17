@@ -134,12 +134,11 @@ class CheckpointReader:
 
                 tensor_offset = source.untyped_storage()._checkpoint_offset
 
-                if tensor_offset is None:
-                    raise AssertionError(
-                        "checkpoint_offset for tensor in torch serialized file is not set. This could "
-                        "happen if the checkpoint was saved with a older version of Pytorch. "
-                        "Please make sure that the checkpoint was saved with Pytorch 2.7 or later."
-                    )
+                assert tensor_offset is not None, (
+                    "checkpoint_offset for tensor in torch serialized file is not set. This could"
+                    "happen if the checkpoint was saved with a older version of Pytorch."
+                    "Please make sure that the checkpoint was saved with Pytorch 2.7 or later."
+                )
 
                 tensor_len = source.nelement() * source.element_size()
                 file.seek(
@@ -176,7 +175,6 @@ class CheckpointReader:
                         # create a new map with all the keys present in source_value
                         target_value = dict.fromkeys(source_value.keys())
 
-                    # pyrefly: ignore [missing-attribute]
                     for key in list(target_value.keys()):
                         current_path = f"{key_path}.{key}" if key_path else key
                         if key in source_value:

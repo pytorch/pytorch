@@ -72,8 +72,7 @@ def _set_SIGCHLD_handler():
         # Python can still get and update the process status successfully.
         _error_if_any_worker_fails()
         if previous_handler is not None:
-            if not callable(previous_handler):
-                raise AssertionError("previous_handler is not callable")
+            assert callable(previous_handler)
             previous_handler(signum, frame)
 
     signal.signal(signal.SIGCHLD, handler)

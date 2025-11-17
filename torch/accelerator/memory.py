@@ -104,7 +104,6 @@ def memory_stats(device_index: _device_t = None, /) -> OrderedDict[str, Any]:
 
     flatten("", stats)
     flat_stats.sort()
-    # pyrefly: ignore [no-matching-overload]
     return OrderedDict(flat_stats)
 
 

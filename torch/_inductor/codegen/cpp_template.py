@@ -85,7 +85,6 @@ class CppTemplate(KernelTemplate):
         bmreq = CppBenchmarkRequest(
             kernel_name=kernel_name,
             input_tensor_meta=TensorMeta.from_irnodes(self.input_nodes),
-            # pyrefly: ignore [bad-argument-type]
             output_tensor_meta=TensorMeta.from_irnodes(self.output_node),
             extra_args=extra_args,
             source_code=code,
@@ -113,7 +112,6 @@ class CppTemplate(KernelTemplate):
             kernel_hash_name,
             self.name,
             self.input_nodes,
-            # pyrefly: ignore [index-error]
             self.output_node[0].get_layout()
             if isinstance(self.output_node, Iterable)
             else self.output_node.get_layout(),

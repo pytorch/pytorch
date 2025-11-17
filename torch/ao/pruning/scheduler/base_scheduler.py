@@ -92,8 +92,7 @@ class BaseScheduler:
         if not self._get_sl_called_within_step:
             warnings.warn(
                 "To get the last sparsity level computed by the scheduler, "
-                "please use `get_last_sl()`.",
-                stacklevel=2,
+                "please use `get_last_sl()`."
             )
         raise NotImplementedError
 
@@ -125,7 +124,6 @@ class BaseScheduler:
                     "initialization. Please, make sure to call `sparsifier.step()` before "
                     "`scheduler.step()`.",
                     UserWarning,
-                    stacklevel=2,
                 )
 
             # Just check if there were two first scheduler.step() calls before sparsifier.step()
@@ -135,7 +133,6 @@ class BaseScheduler:
                     "You have to make sure you run the sparsifier.step() BEFORE any "
                     "calls to the scheduler.step().",
                     UserWarning,
-                    stacklevel=2,
                 )
         self._step_count += 1
 

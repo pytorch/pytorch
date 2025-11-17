@@ -2183,6 +2183,7 @@ class GraphModuleDeserializer(metaclass=Final):
                     simplify=True,
                 )
             ):
+                # pyrefly: ignore  # unbound-name
                 node.meta["unbacked_bindings"] = unbacked_bindings
 
         assert len(self.unbacked_symbols) == 0
@@ -3189,7 +3190,7 @@ def _dict_to_dataclass(cls, data):
     elif isinstance(data, dict):
         v_type = typing.get_args(cls)[1]
         return {k: _dict_to_dataclass(v_type, v) for k, v in data.items()}
-    elif cls is float:
+    elif cls == float:
         return float(data)
     return data
 

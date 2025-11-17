@@ -130,7 +130,7 @@ jobs:
     name: test-periodically
     uses: ./.github/workflows/_linux-test.yml
     needs: build
-    if: github.event.schedule == '15 0 * * 1-6'
+    if: github.event.schedule == '15 0,12 * * 1-6'
     with:
       build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm90
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-cudagraphs_low_precision-true

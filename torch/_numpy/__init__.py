@@ -21,10 +21,10 @@ from ._util import AxisError, UFuncTypeError
 from math import pi, e  # usort: skip
 
 
-all = all  # noqa: PLW0127
+all = all
 alltrue = all
 
-any = any  # noqa: PLW0127
+any = any
 sometrue = any
 
 inf = float("inf")

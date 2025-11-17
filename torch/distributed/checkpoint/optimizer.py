@@ -29,8 +29,6 @@ from torch.distributed.checkpoint.planner_helpers import (
     _create_read_items,
     create_read_items_for_chunk_list,
 )
-
-# pyrefly: ignore [deprecated]
 from torch.distributed.checkpoint.state_dict_loader import load_state_dict
 from torch.distributed.checkpoint.storage import StorageReader
 from torch.distributed.checkpoint.utils import (
@@ -137,10 +135,12 @@ def _get_state_dict_2d_layout(
     for key, value in state_dict.items():
         specs[key] = (None, value.size())
         if _is_nested_tensor(value):
-            if not len(value.local_shards()) == 1:
-                raise AssertionError("Cannot handle ST with multiple shards")
-            if not isinstance(value, ShardedTensor):
-                raise AssertionError("Can only handle nested ShardedTensor")
+            assert len(value.local_shards()) == 1, (
+                "Cannot handle ST with multiple shards"
+            )
+            assert isinstance(value, ShardedTensor), (
+                "Can only handle nested ShardedTensor"
+            )
             shard = value.local_shards()[0]
             specs[key] = (
                 shard.metadata.shard_offsets,
@@ -157,7 +157,6 @@ def _get_state_dict_2d_layout(
 class _ReaderWithOffset(DefaultLoadPlanner):
     translation: dict[MetadataIndex, MetadataIndex]
     state_dict: STATE_DICT_TYPE
-    # pyrefly: ignore [bad-override]
     metadata: Metadata
 
     def __init__(self, fqn_to_offset: dict[str, Sequence[int]]) -> None:
@@ -182,8 +181,7 @@ class _ReaderWithOffset(DefaultLoadPlanner):
 
             offset = self.fqn_to_offset[fqn]
 
-            if not len(obj.local_shards()) == 1:
-                raise AssertionError("Expected exactly one local shard")
+            assert len(obj.local_shards()) == 1
             original_shard = obj.local_shards()[0]
             local_chunks = [
                 ChunkStorageMetadata(
@@ -200,8 +198,7 @@ class _ReaderWithOffset(DefaultLoadPlanner):
             # TODO: The ReadItems will have a displaced MetadataIndex, fix it.
             # TODO: we should change _create_sharded_read_items to have more ergonomic API
             for ri in reqs:
-                if ri.dest_index.offset is None:
-                    raise AssertionError("dest_index.offset must not be None")
+                assert ri.dest_index.offset is not None
                 original_offset = _element_wise_sub(ri.dest_index.offset, offset)
                 original_index = dataclasses.replace(
                     ri.dest_index, offset=torch.Size(original_offset)

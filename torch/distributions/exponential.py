@@ -27,7 +27,7 @@ class Exponential(ExponentialFamily):
         rate (float or Tensor): rate = 1 / scale of the distribution
     """
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     arg_constraints = {"rate": constraints.positive}
     support = constraints.nonnegative
     has_rsample = True
@@ -90,6 +90,6 @@ class Exponential(ExponentialFamily):
     def _natural_params(self) -> tuple[Tensor]:
         return (-self.rate,)
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def _log_normalizer(self, x):
         return -torch.log(-x)

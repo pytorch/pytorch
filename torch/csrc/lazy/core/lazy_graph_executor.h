@@ -21,7 +21,7 @@ class TORCH_API LazyGraphExecutor {
   };
 
   // Register a lazy graph executor instance that can be retrieved using Get()
-  static void Register(LazyGraphExecutor* /*executor*/);
+  static void Register(LazyGraphExecutor*);
   static LazyGraphExecutor* Get();
 
   virtual ~LazyGraphExecutor() = default;

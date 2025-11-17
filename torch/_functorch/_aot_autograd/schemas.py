@@ -973,7 +973,6 @@ class AOTConfig:
     # This config makes sure to check certain things like
     # mutating input with req_grad in export joint tracing.
     export_trace_joint: bool = False
-    disable_functionalization: bool = False
 
     def __post_init__(self):
         if self.pre_dispatch:

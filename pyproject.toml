@@ -155,10 +155,13 @@ ignore = [
     "E402",
     "C408", # C408 ignored because we like the dict keyword argument syntax
     "E501", # E501 is not flexible enough, we're using B950 instead
+    "E721",
     "E741",
     "EXE001",
     "F405",
     "FURB122", # writelines
+    # these ignores are from flake8-logging-format; please fix!
+    "G101",
     # these ignores are from ruff NPY; please fix!
     "NPY002",
     # these ignores are from ruff PERF; please fix!
@@ -178,7 +181,6 @@ ignore = [
     "SIM116", # Disable Use a dictionary instead of consecutive `if` statements
     "SIM117",
     "SIM118",
-    "SIM300", # Yoda condition detected
     "UP007", # keep-runtime-typing
     "UP045", # keep-runtime-typing
     "TC006",
@@ -194,7 +196,8 @@ select = [
     "E",
     "EXE",
     "F",
-    "SIM",
+    "SIM1",
+    "SIM911",
     "W",
     # Not included in flake8
     "FURB",
@@ -202,19 +205,21 @@ select = [
     "NPY",
     "PERF",
     "PGH004",
-    "PIE",
+    "PIE790",
+    "PIE794",
+    "PIE800",
+    "PIE804",
+    "PIE807",
+    "PIE810",
     "PLC0131", # type bivariance
     "PLC0132", # type param mismatch
-    "PLC1802", # len({expression}) used as condition without comparison
     "PLC0205", # string as __slots__
     "PLC3002", # unnecessary-direct-lambda-call
-    "PLC0414", # Import alias does not rename original package
     "PLE",
     "PLR0133", # constant comparison
     "PLR0206", # property with params
     "PLR1722", # use sys exit
     "PLR1736", # unnecessary list index
-    "PLW0127", # Self-assignment of variable
     "PLW0129", # assert on string literal
     "PLW0131", # named expr without context
     "PLW0133", # useless exception statement

@@ -40,7 +40,7 @@ class LogitRelaxedBernoulli(Distribution):
     (Jang et al., 2017)
     """
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
     support = constraints.real
 
@@ -58,12 +58,12 @@ class LogitRelaxedBernoulli(Distribution):
             )
         if probs is not None:
             is_scalar = isinstance(probs, _Number)
-            # pyrefly: ignore [read-only]
+            # pyrefly: ignore  # read-only
             (self.probs,) = broadcast_all(probs)
         else:
             assert logits is not None  # helps mypy
             is_scalar = isinstance(logits, _Number)
-            # pyrefly: ignore [read-only]
+            # pyrefly: ignore  # read-only
             (self.logits,) = broadcast_all(logits)
         self._param = self.probs if probs is not None else self.logits
         if is_scalar:
@@ -141,10 +141,10 @@ class RelaxedBernoulli(TransformedDistribution):
     """
 
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     support = constraints.unit_interval
     has_rsample = True
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     base_dist: LogitRelaxedBernoulli
 
     def __init__(

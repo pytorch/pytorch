@@ -129,7 +129,7 @@ class TestSegmentReductions(TestCase):
 
         for reduction in reductions:
             for initial in [0, None]:
-                check_backward = initial is not None
+                check_backward = True if initial is not None else False
                 initial_value = initial
                 default_value = get_default_value(initial_value, reduction)
                 if reduction == "max":
@@ -186,7 +186,7 @@ class TestSegmentReductions(TestCase):
 
         for reduction in reductions:
             for initial in [0, None]:
-                check_backward = initial is not None
+                check_backward = True if initial is not None else False
                 initial_value = initial
                 default_value = get_default_value(initial_value, reduction)
                 if reduction == "max":
@@ -244,7 +244,7 @@ class TestSegmentReductions(TestCase):
 
         for reduction in reductions:
             for initial in [0, None]:
-                check_backward = initial is not None
+                check_backward = True if initial is not None else False
                 initial_value = initial
                 default_value = get_default_value(initial_value, reduction)
                 if reduction == "max":

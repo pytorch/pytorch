@@ -286,7 +286,7 @@ class OptionalScaledTensor(torch.Tensor):
     def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
         return OptionalScaledTensor(
             inner_tensors["_data"],
-            inner_tensors.get("_scale", None),
+            inner_tensors["_scale"] if "_scale" in inner_tensors else None,
             constant=metadata["_constant"],
         )
 
@@ -662,7 +662,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         "comparison",
         [
             subtest(isinstance, "isinstance"),
-            subtest(lambda instance, type_: type(instance) is type_, "equality"),
+            subtest(lambda instance, type_: type(instance) == type_, "equality"),
             subtest(lambda instance, type_: type(instance) is type_, "identity"),
         ],
     )

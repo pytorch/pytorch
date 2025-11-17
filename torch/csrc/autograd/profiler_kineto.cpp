@@ -222,7 +222,7 @@ struct AddTensorboardFields : public MetadataBase {
   }
 
   template <typename T>
-  void operator()(const T& /*unused*/) {}
+  void operator()(const T&) {}
 };
 
 struct AddGenericMetadata : public MetadataBase {
@@ -346,7 +346,7 @@ struct AddGenericMetadata : public MetadataBase {
   }
 
   template <typename T>
-  void operator()(const T& /*unused*/) {}
+  void operator()(const T&) {}
 
  private:
   /* To get names of the performance events */

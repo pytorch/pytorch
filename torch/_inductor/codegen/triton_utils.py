@@ -256,5 +256,4 @@ def config_of(
 
     equal_to_1 = equal_1_arg_indices(args, indices=indices)
 
-    # pyrefly: ignore [bad-argument-type]
     return AttrsDescriptorWrapper(divisible_by_16, equal_to_1)

@@ -109,7 +109,7 @@ class Sequential(Module):
     def __init__(self, *args: Module) -> None: ...
 
     @overload
-    # pyrefly: ignore [inconsistent-overload]
+    # pyrefly: ignore  # inconsistent-overload
     def __init__(self, arg: OrderedDict[str, Module]) -> None: ...
 
     def __init__(self, *args):
@@ -473,6 +473,7 @@ class ModuleList(Module):
         return self
 
     def pop(self, key: Union[int, slice]) -> Module:
+        # pyrefly: ignore  # index-error
         v = self[key]
         del self[key]
         return v
@@ -624,11 +625,11 @@ class ModuleDict(Module):
                         "ModuleDict update sequence element "
                         "#" + str(j) + " should be Iterable; is" + type(m).__name__
                     )
-                # pyrefly: ignore [bad-argument-type]
+                # pyrefly: ignore  # bad-argument-type
                 if not len(m) == 2:
                     raise ValueError(
                         "ModuleDict update sequence element "
-                        # pyrefly: ignore [bad-argument-type]
+                        # pyrefly: ignore  # bad-argument-type
                         "#" + str(j) + " has length " + str(len(m)) + "; 2 is required"
                     )
                 # modules can be Mapping (what it's typed at), or a list: [(name1, module1), (name2, module2)]
@@ -687,7 +688,7 @@ class ParameterList(Module):
     def __getitem__(self, idx: int) -> Any: ...
 
     @overload
-    # pyrefly: ignore [inconsistent-overload]
+    # pyrefly: ignore  # inconsistent-overload
     def __getitem__(self: T, idx: slice) -> T: ...
 
     def __getitem__(self, idx):
@@ -773,11 +774,11 @@ class ParameterList(Module):
                     size_str,
                     device_str,
                 )
-                # pyrefly: ignore [bad-argument-type]
+                # pyrefly: ignore  # bad-argument-type
                 child_lines.append("  (" + str(k) + "): " + parastr)
             else:
                 child_lines.append(
-                    # pyrefly: ignore [bad-argument-type]
+                    # pyrefly: ignore  # bad-argument-type
                     "  (" + str(k) + "): Object of type: " + type(p).__name__
                 )
 
@@ -929,7 +930,7 @@ class ParameterDict(Module):
             key (str): key to get from the ParameterDict
             default (Parameter, optional): value to return if key not present
         """
-        return self[key] if key in self else default  # noqa: SIM401
+        return self[key] if key in self else default
 
     def fromkeys(
         self, keys: Iterable[str], default: Optional[Any] = None
@@ -985,11 +986,11 @@ class ParameterDict(Module):
                         "ParameterDict update sequence element "
                         "#" + str(j) + " should be Iterable; is" + type(p).__name__
                     )
-                # pyrefly: ignore [bad-argument-type]
+                # pyrefly: ignore  # bad-argument-type
                 if not len(p) == 2:
                     raise ValueError(
                         "ParameterDict update sequence element "
-                        # pyrefly: ignore [bad-argument-type]
+                        # pyrefly: ignore  # bad-argument-type
                         "#" + str(j) + " has length " + str(len(p)) + "; 2 is required"
                     )
                 # parameters as length-2 list too cumbersome to type, see ModuleDict.update comment
@@ -1010,11 +1011,11 @@ class ParameterDict(Module):
                     size_str,
                     device_str,
                 )
-                # pyrefly: ignore [bad-argument-type]
+                # pyrefly: ignore  # bad-argument-type
                 child_lines.append("  (" + str(k) + "): " + parastr)
             else:
                 child_lines.append(
-                    # pyrefly: ignore [bad-argument-type]
+                    # pyrefly: ignore  # bad-argument-type
                     "  (" + str(k) + "): Object of type: " + type(p).__name__
                 )
         tmpstr = "\n".join(child_lines)

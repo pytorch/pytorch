@@ -29,7 +29,7 @@ class FisherSnedecor(Distribution):
         df2 (float or Tensor): degrees of freedom parameter 2
     """
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     arg_constraints = {"df1": constraints.positive, "df2": constraints.positive}
     support = constraints.positive
     has_rsample = True

@@ -2083,9 +2083,9 @@ class TestFrozenOptimizations(JitTestCase):
 
             mod_eager = ConvBN(3, 32, kernel_size=3, stride=2).eval()
             inps = [4, 3, 4]
-            if modules[0] is nn.Conv2d:
+            if modules[0] == nn.Conv2d:
                 inps.append(inps[-1])
-            if modules[0] is nn.Conv3d:
+            if modules[0] == nn.Conv3d:
                 inps.append(inps[-1])
                 inps.append(inps[-1])
 
@@ -2224,9 +2224,9 @@ class TestFrozenOptimizations(JitTestCase):
             mod_eager = ConvOp(3, 32, kernel_size=3, stride=2).eval()
 
             inps = [4, 3, 4]
-            if module is nn.Conv2d:
+            if module == nn.Conv2d:
                 inps.append(inps[-1])
-            if module is nn.Conv3d:
+            if module == nn.Conv3d:
                 inps.append(inps[-1])
                 inps.append(inps[-1])
 
@@ -2366,10 +2366,10 @@ class TestFrozenOptimizations(JitTestCase):
             mod_eager = LinearBN(32, 32).eval()
 
             inps = [3, 32]
-            if modules[1] is nn.BatchNorm2d:
+            if modules[1] == nn.BatchNorm2d:
                 inps.append(inps[-1])
                 inps.append(inps[-1])
-            if modules[1] is nn.BatchNorm3d:
+            if modules[1] == nn.BatchNorm3d:
                 inps.append(inps[-1])
                 inps.append(inps[-1])
                 inps.append(inps[-1])
@@ -2429,14 +2429,14 @@ class TestFrozenOptimizations(JitTestCase):
 
             N, C = 3, bn_in
             input_shape = [N, C]
-            if modules[1] is nn.BatchNorm1d:
+            if modules[1] == nn.BatchNorm1d:
                 H = linear_in
                 input_shape.append(H)
-            elif modules[1] is nn.BatchNorm2d:
+            elif modules[1] == nn.BatchNorm2d:
                 H, W = 4, linear_in
                 input_shape.append(H)
                 input_shape.append(W)
-            elif modules[1] is nn.BatchNorm3d:
+            elif modules[1] == nn.BatchNorm3d:
                 D, H, W = 4, 4, linear_in
                 input_shape.append(D)
                 input_shape.append(H)
@@ -2504,10 +2504,10 @@ class TestFrozenOptimizations(JitTestCase):
             mod_eager = LinearBN(32, 32).cuda().eval()
 
             inps = [3, 32]
-            if modules[1] is nn.BatchNorm2d:
+            if modules[1] == nn.BatchNorm2d:
                 inps.append(inps[-1])
                 inps.append(inps[-1])
-            if modules[1] is nn.BatchNorm3d:
+            if modules[1] == nn.BatchNorm3d:
                 inps.append(inps[-1])
                 inps.append(inps[-1])
                 inps.append(inps[-1])
@@ -2757,9 +2757,9 @@ class TestFrozenOptimizations(JitTestCase):
             for module, trace in product([nn.Conv2d, nn.Conv3d], [False, True]):
                 mod = module(3, 32, kernel_size=3, stride=2).eval()
                 inps = [4, 3, 4]
-                if module is nn.Conv2d:
+                if module == nn.Conv2d:
                     inps.append(inps[-1])
-                if module is nn.Conv3d:
+                if module == nn.Conv3d:
                     inps.append(inps[-1])
                     inps.append(inps[-1])
 
@@ -2997,7 +2997,7 @@ class TestFrozenOptimizations(JitTestCase):
                 mod_eager = Net(3, 6, kernel_size=3, stride=2).eval().cuda()
 
                 inps = [5, 3, 4, 4]
-                if conv is nn.Conv3d:
+                if conv == nn.Conv3d:
                     inps.append(inps[-1])
                 inp = torch.rand(inps).cuda()
 

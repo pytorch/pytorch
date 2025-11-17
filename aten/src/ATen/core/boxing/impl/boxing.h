@@ -131,7 +131,7 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(
   new (dest++) IValue(options.pinned_memory());
 }
 
-inline void boxArgsToStack(IValue*& /*unused*/) {}
+inline void boxArgsToStack(IValue*&) {}
 
 template <typename T, typename... Args>
 C10_ALWAYS_INLINE_UNLESS_MOBILE void boxArgsToStack(
@@ -185,7 +185,7 @@ struct PopResult<std::tuple<Types...>> final {
   template <size_t... indices>
   static Result pop_to_tuple_impl(
       Stack& stack,
-      std::index_sequence<indices...> /*unused*/) {
+      std::index_sequence<indices...>) {
     return std::make_tuple((std::move(stack[indices]).template to<Types>())...);
   }
 };

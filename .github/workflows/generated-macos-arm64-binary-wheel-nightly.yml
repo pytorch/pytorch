@@ -59,6 +59,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
+          # TODO: Removeme once 3.14 is out
           # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
           python-version: "3.10.4"
           freethreaded: false
@@ -168,6 +169,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
+          # TODO: Removeme once 3.14 is out
           # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
           python-version: "3.11.4"
           freethreaded: false
@@ -277,6 +279,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
+          # TODO: Removeme once 3.14 is out
           # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
           python-version: "3.12.4"
           freethreaded: false
@@ -386,6 +389,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
+          # TODO: Removeme once 3.14 is out
           # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
           python-version: "3.13.4"
           freethreaded: false
@@ -495,6 +499,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
+          # TODO: Removeme once 3.14 is out
           # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
           python-version: "3.13.4"
           freethreaded: true
@@ -604,8 +609,9 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
+          # TODO: Removeme once 3.14 is out
           # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
-          python-version: "3.14.0"
+          python-version: "3.14.0-rc.2"
           freethreaded: false
       - name: Checkout PyTorch
         uses: actions/checkout@v4
@@ -713,8 +719,9 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
+          # TODO: Removeme once 3.14 is out
           # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
-          python-version: "3.14.0"
+          python-version: "3.14.0-rc.2"
           freethreaded: true
       - name: Checkout PyTorch
         uses: actions/checkout@v4

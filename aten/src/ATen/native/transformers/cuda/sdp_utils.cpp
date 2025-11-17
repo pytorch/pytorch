@@ -76,21 +76,14 @@ bool priority_order_init_ = false;
 // TODO(eqy): more benchmarking to determine whether this should include sm86/89
 // Needs to be kept in-sync with test_fused_chocie in test_transformers.py
 bool check_prefer_cudnn_attention() {
-  static const bool prefer_cudnn = c10::utils::check_env("TORCH_CUDNN_SDPA_DEPRIORITIZED") != true;
+  static const bool prefer_cudnn = c10::utils::check_env("TORCH_CUDNN_SDPA_PREFERRED") != false;
   if (!prefer_cudnn) {
     return false;
   }
 #if (defined(CUDNN_VERSION) && (CUDNN_VERSION >= 90900))
-  try {
-    auto dprops = at::cuda::getCurrentDeviceProperties();
-    auto major = dprops->major;
-    return (major == 9 || major == 10) && !dprops->minor;
-  } catch (c10::Error const& e) {
-#ifdef DEBUG
-    TORCH_WARN("check_prefer_cudnn_attention() caught exception ", e.what());
-#endif
-    return false;
-  }
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  auto major = dprops->major;
+  return (major == 9 || major == 10) && !dprops->minor;
 #else
   return false;
 #endif
@@ -644,7 +637,13 @@ bool check_for_nested_inputs(sdp_params const& params, bool debug) {
       TORCH_WARN("Experimental cuDNN SDPA nested tensor support is not enabled.");
     }
     return false;
+  } else if (has_for_nested_inputs(params) && (params.query.requires_grad() || params.key.requires_grad() || params.value.requires_grad())) {
+    if (debug) {
+      TORCH_WARN("Experimental cuDNN SDPA nested tensor support does not support backward.");
+      return false;
+    }
   }
+
   const auto dprop = at::cuda::getCurrentDeviceProperties();
   // Check that the input is nested
   if (!(dprop->major == 9 || dprop->major == 10) && has_for_nested_inputs(params)) {

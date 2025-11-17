@@ -237,7 +237,7 @@ def conv_unfold_weight_grad_sample(
     # n=batch_sz; o=num_out_channels; p=(num_in_channels/groups)*kernel_sz
     weight_grad_sample = torch.einsum("noq,npq->nop", grad_output, input)
     # rearrange the above tensor and extract diagonals.
-    # pyrefly: ignore [no-matching-overload]
+    # pyrefly: ignore  # no-matching-overload
     weight_grad_sample = weight_grad_sample.view(
         n,
         groups,

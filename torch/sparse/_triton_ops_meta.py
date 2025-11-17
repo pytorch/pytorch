@@ -194,8 +194,7 @@ def update(op, device_name, version, key, value):
     # skip storing possible optimization failures:
     if not value:
         warnings.warn(
-            f"skipping empty value for {op}: {device_name=} {version=} {key=}",
-            stacklevel=2,
+            f"skipping empty value for {op}: {device_name=} {version=} {key=}"
         )
         return
     if (op, device_name, version) in _operation_device_version_data:
@@ -218,8 +217,7 @@ def dump():
     if begin_data_index == -1 or end_data_index == -1:
         warnings.warn(
             f"{current_file} cannot be updated:"
-            " BEGIN/END GENERATED DATA comment blocks appear to be corrupted",
-            stacklevel=2,
+            " BEGIN/END GENERATED DATA comment blocks appear to be corrupted"
         )
         return
 

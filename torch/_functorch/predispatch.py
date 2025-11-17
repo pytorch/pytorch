@@ -28,7 +28,6 @@ def _add_batch_dim(self, batch_dim, level):
     from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export
 
     mode = _maybe_find_pre_dispatch_tf_mode_for_export()
-    batch_dim = self.ndim + batch_dim if batch_dim < 0 else batch_dim
 
     if mode:
         return torch.overrides.handle_torch_function(

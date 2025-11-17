@@ -42,8 +42,7 @@ aten = torch.ops.aten
 @register_op_strategy(aten.t.default)
 def transpose_strategy(op_schema: OpSchema) -> OpStrategy:
     self_strategy = op_schema.args_schema[0]
-    if not isinstance(self_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(self_strategy)}")
+    assert isinstance(self_strategy, OpStrategy)
 
     transpose_strategies = []
     for input_strategy in self_strategy.strategies:
@@ -69,20 +68,15 @@ def _mm_like_strategy(
     mm_equation: str, mesh: DeviceMesh, op_schema: OpSchema
 ) -> OpStrategy:
     self_strategy, mat2_strategy = op_schema.args_schema
-    if not isinstance(self_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(self_strategy)}")
-    if not isinstance(mat2_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(mat2_strategy)}")
+    assert isinstance(self_strategy, OpStrategy)
+    assert isinstance(mat2_strategy, OpStrategy)
     # generate all possible strategies for mm
     mm_strategy = gen_einsum_strategies(mm_equation, mesh)
     # filter out invalid strategies and associate costs
     strategies = mm_strategy.strategies
     filtered_strategies = []
     for strtg in strategies:
-        if strtg.input_specs is None:
-            raise AssertionError(
-                f"Expected input_specs to be not None, got {strtg.input_specs}"
-            )
+        assert strtg.input_specs is not None
         self_spec = strtg.input_specs[0]
         mat2_spec = strtg.input_specs[1]
         if is_tensor_shardable(self_strategy.shape, self_spec) and is_tensor_shardable(
@@ -104,12 +98,9 @@ def _addmm_like_strategy(
     mm_equation: str, mesh: DeviceMesh, op_schema: OpSchema
 ) -> OpStrategy:
     self_strategy, mat1_strategy, mat2_strategy = op_schema.args_schema
-    if not isinstance(self_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(self_strategy)}")
-    if not isinstance(mat1_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(mat1_strategy)}")
-    if not isinstance(mat2_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(mat2_strategy)}")
+    assert isinstance(self_strategy, OpStrategy)
+    assert isinstance(mat1_strategy, OpStrategy)
+    assert isinstance(mat2_strategy, OpStrategy)
     self_shape = self_strategy.shape
     mm_out_shape = torch.Size(
         [
@@ -124,10 +115,7 @@ def _addmm_like_strategy(
     filtered_strategies = []
     for strtg in strategies:
         # construct new strategy by consider the self arg
-        if strtg.input_specs is None:
-            raise AssertionError(
-                f"Expected input_specs to be not None, got {strtg.input_specs}"
-            )
+        assert strtg.input_specs is not None
         mat1_spec = strtg.input_specs[0]
         mat2_spec = strtg.input_specs[1]
         out_spec = strtg.output_spec
@@ -172,29 +160,22 @@ def _scaled_mm_like_strategy(
         scale_result_strategy,
         *_,
     ) = op_schema.args_schema
-    if not isinstance(self_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(self_strategy)}")
-    if not isinstance(mat2_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(mat2_strategy)}")
-    if not isinstance(scale_self_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(scale_self_strategy)}")
-    if not isinstance(scale_mat2_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(scale_mat2_strategy)}")
+    assert isinstance(self_strategy, OpStrategy)
+    assert isinstance(mat2_strategy, OpStrategy)
+    assert isinstance(scale_self_strategy, OpStrategy)
+    assert isinstance(scale_mat2_strategy, OpStrategy)
     # TODO: add support for these later
-    if bias_strategy is not None:
-        raise AssertionError("_scaled_mm on DTensors doesn't support bias")
-    if scale_result_strategy is not None:
-        raise AssertionError("_scaled_mm on DTensors doesn't support scale_result")
+    assert bias_strategy is None, "_scaled_mm on DTensors doesn't support bias"
+    assert scale_result_strategy is None, (
+        "_scaled_mm on DTensors doesn't support scale_result"
+    )
     # generate all possible strategies for mm
     mm_strategy = gen_einsum_strategies(mm_equation, mesh)
     # filter out invalid strategies and associate costs
     strategies = mm_strategy.strategies
     filtered_strategies = []
     for strtg in strategies:
-        if strtg.input_specs is None:
-            raise AssertionError(
-                f"Expected input_specs to be not None, got {strtg.input_specs}"
-            )
+        assert strtg.input_specs is not None
         self_spec = strtg.input_specs[0]
         mat2_spec = strtg.input_specs[1]
         # propagate the operands' specs to their scales, except for tensor-wise
@@ -279,8 +260,7 @@ def scaled_dot_product_flash_attention_strategy(op_schema: OpSchema) -> OpStrate
 
     return_debug_mask = len(op_schema.args_schema) >= 6 and op_schema.args_schema[5]
     q_input_strategy = op_schema.args_schema[0]
-    if not isinstance(q_input_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(q_input_strategy)}")
+    assert isinstance(q_input_strategy, OpStrategy)
     # assuming q/k/v have the same shape
 
     single_mesh_dim_strategies = []
@@ -381,8 +361,7 @@ def scaled_dot_product_flash_attention_backward_strategy(
     mesh = op_schema.get_mesh_from_args(validate=False)
 
     q_input_strategy = op_schema.args_schema[1]
-    if not isinstance(q_input_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(q_input_strategy)}")
+    assert isinstance(q_input_strategy, OpStrategy)
     # assuming q/k/v have the same shape
 
     tensor_input_indices = [
@@ -494,8 +473,7 @@ def scaled_dot_product_efficient_attention_strategy(op_schema: OpSchema) -> OpSt
     # NOTE: currently we only support some simple strategies to support tensor parallelism
     mesh = op_schema.get_mesh_from_args()
     q_input_strategy = op_schema.args_schema[0]
-    if not isinstance(q_input_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(q_input_strategy)}")
+    assert isinstance(q_input_strategy, OpStrategy)
     # assuming q/k/v have the same shape
 
     has_attn_bias = op_schema.args_schema[3] is not None
@@ -592,8 +570,7 @@ def scaled_dot_product_efficient_attention_backward_strategy(
     mesh = op_schema.get_mesh_from_args(validate=False)
 
     q_input_strategy = op_schema.args_schema[1]
-    if not isinstance(q_input_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(q_input_strategy)}")
+    assert isinstance(q_input_strategy, OpStrategy)
     # assuming q/k/v have the same shape
     has_attn_bias = op_schema.args_schema[4] is not None
 
@@ -712,8 +689,7 @@ def scaled_dot_product_cudnn_attention_strategy(op_schema: OpSchema) -> OpStrate
         Replicate() if return_debug_mask else None
     )
 
-    if not isinstance(query_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(query_strategy)}")
+    assert isinstance(query_strategy, OpStrategy)
     # assuming q/k/v have the same shape
 
     single_mesh_dim_strategies = []
@@ -818,16 +794,12 @@ def scaled_scaled_dot_product_cudnn_attention_backward_strategy(
     # backward op does not need to validate the mesh since forward op has already done it
     mesh = op_schema.get_mesh_from_args(validate=False)
 
-    if len(op_schema.args_schema) < 15:
-        raise AssertionError(
-            f"Expected at least 15 args_schema, got {len(op_schema.args_schema)}"
-        )
+    assert len(op_schema.args_schema) >= 15
     has_attn_bias = op_schema.args_schema[8] is not None
     has_scale = len(op_schema.args_schema) >= 16 and False
 
     query_strategy = op_schema.args_schema[1]
-    if not isinstance(query_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(query_strategy)}")
+    assert isinstance(query_strategy, OpStrategy)
     # assuming q/k/v have the same shape
 
     single_mesh_dim_strategies = []
@@ -939,15 +911,12 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
     mesh = op_schema.get_mesh_from_args()
 
     mat1_strategy = op_schema.args_schema[0]
-    if not isinstance(mat1_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(mat1_strategy)}")
+    assert isinstance(mat1_strategy, OpStrategy)
     mat2_strategy = op_schema.args_schema[1]
-    if not isinstance(mat2_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(mat2_strategy)}")
+    assert isinstance(mat2_strategy, OpStrategy)
     if len(op_schema.args_schema) > 3:
         bias_strategy = op_schema.args_schema[3]
-        if bias_strategy is not None:
-            raise AssertionError("grouped_mm doesn't support bias yet")
+        assert bias_strategy is None, "grouped_mm doesn't support bias yet"
 
     single_mesh_dim_strategies = []
 
@@ -1079,14 +1048,8 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
         # 2. apply the logic from the groped_mm meta function
         # UGH the input DTensorSpecs are missing their tensormetas... so i can get them another way
         def local_meta(spec: OpSpec, placements: tuple[Placement, ...]) -> TensorMeta:
-            if not isinstance(spec.output_specs, DTensorSpec):
-                raise AssertionError(
-                    f"Expected DTensorSpec, got {type(spec.output_specs)}"
-                )
-            if not isinstance(spec.output_specs.tensor_meta, TensorMeta):
-                raise AssertionError(
-                    f"Expected TensorMeta, got {type(spec.output_specs.tensor_meta)}"
-                )
+            assert isinstance(spec.output_specs, DTensorSpec)
+            assert isinstance(spec.output_specs.tensor_meta, TensorMeta)
             meta: TensorMeta = spec.output_specs.tensor_meta
             local_stride = compute_local_stride(meta.stride, mesh, placements)
             local_shape, _ = compute_local_shape_and_global_offset(
@@ -1094,9 +1057,7 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
             )
             return TensorMeta(torch.Size(local_shape), local_stride, meta.dtype)
 
-        # pyrefly: ignore [missing-attribute]
         mat1_meta = local_meta(mat1_strategy.strategies[0], input_specs[0].placements)
-        # pyrefly: ignore [missing-attribute]
         mat2_meta = local_meta(mat2_strategy.strategies[0], input_specs[1].placements)
 
         def check_valid_strides(meta: TensorMeta) -> bool:

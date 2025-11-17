@@ -48,7 +48,6 @@ else:
     _TensorPipeRpcBackendOptionsBase = object  # type: ignore[assignment, misc]
 
 
-# pyrefly: ignore [invalid-inheritance]
 class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
     r"""
     The backend options for

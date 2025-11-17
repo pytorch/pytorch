@@ -407,7 +407,6 @@ reorder_iterative_debug_limit_to_reorder: Optional[int] = (
     else int(env_str)
 )
 sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
-    # pyrefly: ignore [unbound-name]
     None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
 )
 
@@ -764,13 +763,6 @@ emulate_precision_casts = (
     os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
 )
 
-# x / y in Triton is lowered to div.full which is approx
-# PyTorch eager uses the equivalent of Triton's div_rn, which can
-# come at a performance penalty
-emulate_divison_rounding = (
-    os.environ.get("TORCHINDUCTOR_EMULATE_DIVISION_ROUNDING", "0") == "1"
-)
-
 # warnings intended for PyTorch developers, disable for point releases
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
 developer_warnings = is_fbcode() or is_nightly_or_source
@@ -852,31 +844,6 @@ _micro_pipeline_tp: bool = False
 class _collective:
     auto_select: bool = False
     one_shot_all_reduce_threshold_bytes: int = 128 * 1024
-
-
-class aten_distributed_optimizations:
-    """Configuration for distributed optimization passes on ATen FX graphs."""
-
-    # Enable overlap scheduling pass
-    enable_overlap_scheduling: bool = False
-
-    # Enable overlap-preserving collective bucketing
-    collective_bucketing: Optional[bool] = None
-
-    # Insert ordering dependencies to preserve overlap relationships. This should only be used if
-    # compiling with inductor, or for subsequent passes before removing the ops prior to execution
-    insert_overlap_deps: Optional[bool] = None
-
-    # Maximum compute node prefetch distance for overlap scheduling
-    max_compute_pre_fetch: Optional[int] = None
-
-    # Custom runtime estimation function for ops
-    # For user-defined estimation function, pass in the function handle
-    # None means use default estimations
-    # TODO - need estimated and profile based version
-    custom_runtime_estimation: Optional[Callable[[torch.fx.Node], Optional[float]]] = (
-        None
-    )
 
 
 def parallel_compile_enabled_internally() -> bool:
@@ -1115,8 +1082,6 @@ enable_caching_generated_triton_templates: bool = True
 # Lookup table for overriding autotune configs based on hash of Triton source code
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
 
-file_lock_timeout: int = int(os.environ.get("TORCHINDUCTOR_FILE_LOCK_TIMEOUT", "600"))
-
 
 def get_worker_log_path() -> Optional[str]:
     log_loc = None
@@ -1294,7 +1259,7 @@ class triton:
     cudagraph_trees_history_recording = False
 
     # Enable cudagraph support for mutated inputs from prior cudagraph pool
-    cudagraph_support_input_mutation = not is_fbcode()
+    cudagraph_support_input_mutation = False if is_fbcode() else True
 
     # Maximal number of allowed cudagraph re-record for a function and
     # a cudagraph node due to static input tensor address changes or
@@ -1380,24 +1345,6 @@ class triton:
     # For best results, this should be used with prefer_nd_tiling.
     tile_reductions: bool = False
 
-    # Codegen matmul natively with tl.dot without using a template.
-    # This option makes Inductor generate matrix multiplication from scratch,
-    # instead of calling predefined Triton templates (mm, bmm, mm_plus_mm).
-    # Compile time may be longer because native matmul benchmarks more Triton configs
-    # than regular pointwise or reduction kernels.
-    # Native matmul often aggressively fuses operations around the matrix multiply,
-    # which can make it faster or slower depending on your program.
-    #
-    # This option takes priority over other GEMM implementations. If Inductor determines
-    # that a matmul can be generated, it will always generate it with native_matmul.
-    # That means optimized kernels such as decompose_k or persistent_tma_matmul will
-    # not be called when this option is enabled.
-    #
-    # Note: Native matmul does not currently support block pointers or TMA matmul.
-    # If both native_matmul and (use_block_ptr or enable_persistent_tma_matmul) are enabled,
-    # an error will be thrown.
-    native_matmul: bool = False
-
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
@@ -1469,7 +1416,7 @@ class triton:
     # So far we see a fixed 8 spilled registers for kernels using sin/cos.
     # Raise the threshold to 16 to be safe.
     # We should revisit this once we understand more of the source of register spills.
-    spill_threshold: int = 32 if torch.version.hip else 16
+    spill_threshold: int = 16
 
     # Generate code containing the newer tl.make_block_ptr() API for loads/store
     use_block_ptr = False
@@ -1635,22 +1582,10 @@ class aot_inductor:
     )
 
     # Experimental. Flag to control whether to include weight in .so
-    # Not supported for cross_target_platform="windows".
     package_constants_in_so: bool = True
 
-    # Experimental. Flag to control whether to package weight separately on disk and which
-    # format to package it in.
-    # Options:
-    # None:
-    #       Do not package weight separately on disk.
-    # "pickle_weights":
-    #       Each weight is pickled and stored separately in data/weights. We also store the
-    #       FQN names of each weight in a weights_config.json in each model's data/aot_inductor/model folder.
-    #       Can only be load back from python using torch._inductor.aoti_load_package API now.
-    # "binary_blob":
-    #       Stores all weights in a single binary blob in data/aot_inductor/model folder for each model.
-    #       This option and config.aot_inductor.force_mmap_weights cannot both be True
-    package_constants_on_disk_format: Optional[str] = None
+    # Experimental. Flag to control whether to package weight separately on disk
+    package_constants_on_disk: bool = False
 
     # Experimental.  Controls automatic precompiling of common AOTI include files.
     precompile_headers: bool = not is_fbcode()
@@ -1695,7 +1630,7 @@ class aot_inductor:
 
     # If link_libtorch is False and cross_target_platform is windows,
     # a library needs to be provided to provide the shim implementations.
-    aoti_shim_library: Optional[str | list[str]] = None
+    aoti_shim_library: Optional[str] = None
     aoti_shim_library_path: Optional[str] = None
 
 
@@ -2068,10 +2003,6 @@ _cache_config_ignore_prefix: list[str] = [
 # External callable for matmul tuning candidates
 external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
 
-write_are_deterministic_algorithms_enabled = (
-    os.getenv("TORCHINDUCTOR_WRITE_ARE_DETERMINISTIC_ALGORITHMS_ENABLED", "1") == "1"
-)
-
 
 class test_configs:
     force_extern_kernel_in_multi_template: bool = False
@@ -2095,20 +2026,26 @@ class test_configs:
     # for unit testing
     use_libtorch = False
 
-    # Assume bucketing reduces latency (mostly for testing)
-    assume_bucketing_reduces_latency: bool = True
+    # to be migrated when ready for use
+    aten_fx_overlap_scheduling = False
+
+    # insert ordering deps for overlap
+    aten_fx_overlap_insert_overlap_deps = True
+
+    # to be migrated when ready for use
+    aten_fx_overlap_preserving_bucketing = False
+
+    # to be migrated when ready for use
+    # runtime estimation function for ops
+    # for user-defined estimation function, pass in the function handle
+    # TODO - need estimated and profile based version
+    estimate_aten_runtime: Union[
+        Literal["default"], Callable[[torch.fx.Node], Optional[float]]
+    ] = "default"
 
     # A test config to ease the test for perf of reduction config filtering
     force_filter_reduction_configs = (
         os.getenv("TORCHINDUCTOR_FORCE_FILTER_REDUCTION_CONFIGS") == "1"
-    )
-
-    # a testing config to distort benchmarking result
-    # - empty string to disable
-    # - "inverse" to inverse the numbers
-    # - "random" return a random value
-    distort_benchmarking_result = os.getenv(
-        "TORCHINDUCTOR_DISTORT_BENCHMARKING_RESULT", ""
     )
 
 

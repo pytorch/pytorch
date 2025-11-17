@@ -232,11 +232,11 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // messages by server, and write request messages by client. This
   // is a protected method since it is overwritten by FaultyTensorPipeAgent
   virtual void pipeWrite(
-      const std::shared_ptr<tensorpipe::Pipe>& /*pipe*/,
+      const std::shared_ptr<tensorpipe::Pipe>&,
       const c10::intrusive_ptr<Message>& message,
       std::vector<c10::Device>&& devices,
       std::vector<c10::Stream> streams,
-      std::function<void(const tensorpipe::Error&)> /*fn*/) noexcept;
+      std::function<void(const tensorpipe::Error&)>) noexcept;
 
  private:
   // Removes the given messageId with the given expirationTime from the
@@ -257,11 +257,11 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // TensorPipe read function that could be used to read response messages
   // by client, and read request messages by server.
   void pipeRead(
-      const std::shared_ptr<tensorpipe::Pipe>& /*pipe*/,
+      const std::shared_ptr<tensorpipe::Pipe>&,
       std::function<void(
           const tensorpipe::Error&,
           c10::intrusive_ptr<Message>,
-          std::vector<c10::Stream>)> /*fn*/) noexcept;
+          std::vector<c10::Stream>)>) noexcept;
 
   // Callback of listener accept()
   void onListenerAccepted(

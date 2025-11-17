@@ -31,7 +31,7 @@ import logging
 import os
 import os.path
 import re
-from typing import Any, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
@@ -115,14 +115,14 @@ class AutotuneCacheArtifact(CacheArtifact):
 @dataclasses.dataclass
 class AutotuneCache:
     configs_hash: str
-    local_cache: tuple[RemoteCache[JsonDataTy], str] | None = None
-    remote_cache: tuple[RemoteCache[JsonDataTy], str] | None = None
+    local_cache: Optional[tuple[RemoteCache[JsonDataTy], str]] = None
+    remote_cache: Optional[tuple[RemoteCache[JsonDataTy], str]] = None
 
     # Create a AutotuneCache. Returns None if none of the caches can be used.
     @staticmethod
     def create(
         inductor_meta: _InductorMetaTy, filename: str, configs_hash: str
-    ) -> AutotuneCache | None:
+    ) -> Optional[AutotuneCache]:
         cache = AutotuneCache(configs_hash)
         key = AutotuneCache._prepare_key(filename)
 
@@ -142,7 +142,7 @@ class AutotuneCache:
         return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
     # Read the best config options from the most local cache and return it.
-    def _read(self) -> dict[str, JsonDataTy] | None:
+    def _read(self) -> Optional[dict[str, JsonDataTy]]:
         if local_cache := self.local_cache:
             cache, key = local_cache
             if best_config := cache.get(key):
@@ -161,7 +161,7 @@ class AutotuneCache:
     # which `configs` represents that option.
     def read_best(
         self, inductor_meta: _InductorMetaTy, configs: list[Config]
-    ) -> Config | None:
+    ) -> Optional[Config]:
         if best := self._read():
             return _load_cached_autotuning(
                 best, self.configs_hash, configs, inductor_meta
@@ -272,14 +272,11 @@ class AutotuneCache:
         config: Config,
         time_taken_ns: int,
         found_by_coordesc: bool = False,
-        triton_cache_hash: str | None = None,
+        triton_cache_hash: Optional[str] = None,
     ) -> None:
         data = {
-            # pyrefly: ignore [missing-attribute]
             **config.kwargs,
-            # pyrefly: ignore [missing-attribute]
             "num_warps": config.num_warps,
-            # pyrefly: ignore [missing-attribute]
             "num_stages": config.num_stages,
             "configs_hash": self.configs_hash,
             "found_by_coordesc": found_by_coordesc,
@@ -417,7 +414,7 @@ class _AutotuneCacheBundlerImpl:
 
 
 class AutotuneCacheBundler:
-    _bundler: _AutotuneCacheBundlerImpl | None = None
+    _bundler: Optional[_AutotuneCacheBundlerImpl] = None
 
     def __init__(self) -> None:
         pass
@@ -430,8 +427,8 @@ class AutotuneCacheBundler:
         cls,
         inductor_meta: _InductorMetaTy,
         *,
-        code: str | None = None,
-        code_hash: str | None = None,
+        code: Optional[str] = None,
+        code_hash: Optional[str] = None,
     ) -> None:
         assert cls._bundler is None
 
@@ -539,7 +536,7 @@ def _load_cached_autotuning(
     configs_hash: str,
     configs: list[Config],
     inductor_meta: _InductorMetaTy,
-) -> Config | None:
+) -> Optional[Config]:
     if best_config is None:
         return None
     if best_config.pop("configs_hash", None) != configs_hash:
@@ -573,20 +570,15 @@ def _load_cached_autotuning(
             )
 
         # Create the triton_config with the appropriate arguments
-        # pyrefly: ignore [bad-argument-count]
         triton_config = Config(best_config, **config_args)
-        # pyrefly: ignore [missing-attribute]
         triton_config.found_by_coordesc = True
         return triton_config
 
     matching_configs = [
         cfg
         for cfg in configs
-        # pyrefly: ignore [missing-attribute]
         if all(val == best_config.get(key) for key, val in cfg.kwargs.items())
-        # pyrefly: ignore [missing-attribute]
         and cfg.num_warps == best_config.get("num_warps")
-        # pyrefly: ignore [missing-attribute]
         and cfg.num_stages == best_config.get("num_stages")
     ]
     if len(matching_configs) != 1:
@@ -597,7 +589,7 @@ def _load_cached_autotuning(
 
 class _LocalAutotuneCacheBackend(RemoteCacheBackend[bytes]):
     @override
-    def _get(self, key: str) -> bytes | None:
+    def _get(self, key: str) -> Optional[bytes]:
         try:
             with open(key, "rb") as fd:
                 return fd.read()
@@ -619,7 +611,7 @@ class LocalAutotuneCache(RemoteCache[JsonDataTy]):
         super().__init__(backend, serde)
 
     @override
-    def _get(self, key: str, sample: Sample | None) -> JsonDataTy | None:
+    def _get(self, key: str, sample: Optional[Sample]) -> Optional[JsonDataTy]:
         AutotuneCacheBundler.sync()
         result = super()._get(key, sample)
         if result is not None:
@@ -637,7 +629,7 @@ class LocalAutotuneCache(RemoteCache[JsonDataTy]):
         return result
 
     @override
-    def _put(self, key: str, value: JsonDataTy, sample: Sample | None) -> None:
+    def _put(self, key: str, value: JsonDataTy, sample: Optional[Sample]) -> None:
         AutotuneCacheBundler.put(key, value)
         super()._put(key, value, sample)
 

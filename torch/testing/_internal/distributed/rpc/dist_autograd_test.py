@@ -266,7 +266,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
         grads = dist_autograd.get_gradients(context_id)
         nargs = len(args)
         ngrads = 0
-        for i in range(nargs):
+        for i in range(0, nargs):
             if local_grads[i] is not None:
                 self.assertIn(args[i], grads)
                 self.assertEqual(local_grads[i], grads[args[i]])
@@ -1973,7 +1973,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         DistAutogradTest._test_clean_context_backward_context_id = context_id
 
         # Send the context id to all nodes.
-        for i in range(self.world_size):
+        for i in range(0, self.world_size):
             if i != self.rank:
                 rank_distance = (i - self.rank + self.world_size) % self.world_size
                 rpc.rpc_sync(
@@ -1988,7 +1988,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         self.assertEqual(self.world_size - 1, len(known_context_ids))
 
         t1 = torch.rand((3, 3), requires_grad=True)
-        for i in range(100):
+        for i in range(0, 100):
             dst = self._next_rank()
             t1 = rpc.rpc_sync(worker_name(dst), torch.add, args=(t1, t1))
 
@@ -2749,7 +2749,7 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
 
                 for i in range(len(futs)):
                     local_gradients = [p.grad for p in local_layers[i].parameters()]
-                    for g1, g2 in zip(futs[i].wait(), local_gradients, strict=True):
+                    for g1, g2 in zip(futs[i].wait(), local_gradients):
                         self.assertEqual(g1, g2)
 
         rpc.shutdown()

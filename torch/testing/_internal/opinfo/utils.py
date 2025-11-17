@@ -62,8 +62,7 @@ def get_supported_dtypes(op, sample_inputs_fn, device_type):
     assert device_type in ["cpu", "cuda"]
     if not TEST_CUDA and device_type == "cuda":
         warnings.warn(
-            "WARNING: CUDA is not available, empty_dtypes dispatch will be returned!",
-            stacklevel=2,
+            "WARNING: CUDA is not available, empty_dtypes dispatch will be returned!"
         )
         return _dynamic_dispatch_dtypes(())
 
@@ -77,8 +76,7 @@ def get_supported_dtypes(op, sample_inputs_fn, device_type):
             # We raise a warning, so that user knows that this was the case
             # and can investigate if there was an issue with the `sample_inputs_fn`.
             warnings.warn(
-                f"WARNING: Unable to generate sample for device:{device_type} and dtype:{dtype}",
-                stacklevel=2,
+                f"WARNING: Unable to generate sample for device:{device_type} and dtype:{dtype}"
             )
             continue
 

@@ -106,23 +106,23 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          static_cast<const WorkerInfo& (TensorPipeAgent::*)(void) const>(
-              &RpcAgent::getWorkerInfo),
+          (const WorkerInfo& (TensorPipeAgent::*)(void) const) &
+              RpcAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          static_cast<const WorkerInfo& (TensorPipeAgent::*)(const std::string&)
-                          const>(&TensorPipeAgent::getWorkerInfo),
+          (const WorkerInfo& (TensorPipeAgent::*)(const std::string&) const) &
+              TensorPipeAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          static_cast<const WorkerInfo& (TensorPipeAgent::*)(worker_id_t id)
-                          const>(&TensorPipeAgent::getWorkerInfo),
+          (const WorkerInfo& (TensorPipeAgent::*)(worker_id_t id) const) &
+              TensorPipeAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_infos",
-          static_cast<std::vector<WorkerInfo> (TensorPipeAgent::*)() const>(
-              &TensorPipeAgent::getWorkerInfos),
+          (std::vector<WorkerInfo>(TensorPipeAgent::*)() const) &
+              TensorPipeAgent::getWorkerInfos,
           py::call_guard<py::gil_scoped_release>());
 #endif // USE_TENSORPIPE
 

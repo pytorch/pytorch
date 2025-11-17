@@ -838,7 +838,7 @@ void dyn_quant_pack_4bit_weight_kernel(
   }
 }
 
-void ref_dyn_quant_matmul_4bit_channelwise_kernel(
+static void ref_dyn_quant_matmul_4bit_channelwise_kernel(
     size_t m,
     size_t n,
     size_t k,
@@ -997,7 +997,7 @@ void ref_dyn_quant_matmul_4bit_channelwise_kernel(
   }
 }
 
-void ref_dyn_quant_matmul_4bit_groupwise_kernel(
+static void ref_dyn_quant_matmul_4bit_groupwise_kernel(
     size_t m,
     size_t n,
     size_t k,

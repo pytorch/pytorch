@@ -3,7 +3,6 @@ import sys
 from benchmark_base import BenchmarkBase
 
 import torch
-from torch._dynamo.utils import CompileTimeInstructionCounter
 
 
 class Benchmark(BenchmarkBase):
@@ -33,11 +32,7 @@ class Benchmark(BenchmarkBase):
     def _work(self):
         # enable_cpp_symbolic_shape_guards has impact on this benchmark
         # Keep using False value for consistency.
-        with (
-            torch._dynamo.config.patch("enable_cpp_symbolic_shape_guards", False),
-            torch._export.config.patch(use_new_tracer_experimental=True),
-            CompileTimeInstructionCounter.record(),
-        ):
+        with torch._dynamo.config.patch("enable_cpp_symbolic_shape_guards", False):
             torch.export.export(self.m, (self.input,), strict=True)
 
 

@@ -510,7 +510,7 @@ class CKGemmTemplate(CKTemplate):
                         torch.cuda.get_device_properties(X_meta.device).warp_size,
                     )
                 except Exception as e:
-                    log.debug(  # noqa: G200
+                    log.debug(
                         "Failed to prefetch_stages for %s with exception %s", op.name, e
                     )
                     # be conservative here and disable the op
@@ -547,7 +547,7 @@ class CKGemmTemplate(CKTemplate):
         # Define the mapping of versions to stages
         version_to_stages = {1: 1, 3: 2, 4: 4, 5: 3}
         # Get the stages for the given version
-        stages = version_to_stages.get(version)
+        stages = version_to_stages.get(version, None)
         if stages is None:
             # This means we're at stage 2, and this requires computation
             # See github.com/ROCm/composable_kernel/blob/d6a4605/include/ck/tensor_operation/gpu/block/blockwise_gemm_pipeline_xdlops_v2.hpp#L143 # noqa: B950
@@ -590,11 +590,9 @@ class CKGemmTemplate(CKTemplate):
                     arg = f"/* {field_name} */ Tuple<{tuple_elements}>"
                 else:  # tile shape
                     arg = f"/* {field_name} */ S<{tuple_elements}>"
-                # pyrefly: ignore [bad-argument-type]
                 template_params.append(arg)
             else:
                 if field_value is not None:
-                    # pyrefly: ignore [bad-argument-type]
                     template_params.append(f"/* {field_name} */ {field_value}")
         operation_name = op.name().replace("(", "").replace(",", "").replace(")", "")
         return self._template_from_string(template_definition).render(
@@ -614,9 +612,9 @@ class CKGemmTemplate(CKTemplate):
         """
         The primary entry point for the code rendering process used in this template.
         """
-        epilogue_nodes = kwargs.get("epilogue_nodes")
+        epilogue_nodes = kwargs.get("epilogue_nodes", None)
         assert epilogue_nodes is None or 0 == len(epilogue_nodes)
-        template_buffer_node = kwargs.get("template_buffer_node")
+        template_buffer_node = kwargs.get("template_buffer_node", None)
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
         # input nodes:
@@ -939,7 +937,6 @@ class CKGemmTemplate(CKTemplate):
         for o in rops:
             kBatches = self._get_kBatch(o)
             for kBatch in kBatches:
-                # pyrefly: ignore [bad-argument-type]
                 ops.append(InductorROCmOp(op=o, kBatch=kBatch))
 
         filtered_instances = list(filter(lambda op: self.filter_op(op), ops))

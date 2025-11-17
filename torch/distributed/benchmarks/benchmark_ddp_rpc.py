@@ -74,7 +74,6 @@ class HybridModel(torch.nn.Module):
         assert NUM_PS * EMBEDDING_DIM >= 512
         dim_normalizer = int(NUM_PS * EMBEDDING_DIM / 512)
         emb_lookups_reshaped = emb_lookups_cat.reshape(  # type: ignore[possibly-undefined]
-            # pyrefly: ignore [unbound-name]
             [emb_lookups_cat.shape[0] * dim_normalizer, 512]
         )
 

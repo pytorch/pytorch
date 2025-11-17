@@ -49,7 +49,7 @@ void StoreCollectives::barrier(
           msg += fmt::format("{}, ", i);
         }
       }
-      TORCH_CHECK(false, msg, e.what());
+      throw std::runtime_error(msg + e.what());
     }
   }
 }
@@ -118,7 +118,7 @@ std::vector<std::vector<uint8_t>> StoreCollectives::gatherRecv(
         msg += fmt::format("{}, ", i);
       }
     }
-    TORCH_CHECK(false, msg, e.what());
+    throw std::runtime_error(msg + e.what());
   }
 
   // insert local data
@@ -194,7 +194,7 @@ std::vector<std::vector<uint8_t>> StoreCollectives::allGather(
         msg += fmt::format("{}, ", i);
       }
     }
-    TORCH_CHECK(false, msg, e.what());
+    throw std::runtime_error(msg + e.what());
   }
 }
 

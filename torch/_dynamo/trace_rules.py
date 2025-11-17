@@ -36,9 +36,8 @@ import traceback
 import types
 import unittest
 from collections import defaultdict
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast, Optional, Union
+from typing import Any, Callable, cast, Optional, Union
 
 import torch
 import torch._inductor.test_operators
@@ -450,7 +449,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._accelerator_getAccelerator",
         "torch._C._accelerator_getDeviceIndex",
         "torch._C._accelerator_getStream",
-        "torch._C._accelerator_setAllocatorSettings",
         "torch._C._accelerator_setStream",
         "torch._C._accelerator_synchronizeDevice",
         "torch._C._activate_gpu_trace",
@@ -507,6 +505,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cuda_clearCublasWorkspaces",
         "torch._C._cuda_cudaCachingAllocator_raw_alloc",
         "torch._C._cuda_cudaCachingAllocator_raw_delete",
+        "torch._C._cuda_cudaCachingAllocator_set_allocator_settings",
         "torch._C._cuda_cudaHostAllocator",
         "torch._C._cuda_customAllocator",
         "torch._C._cuda_emptyCache",
@@ -1415,14 +1414,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C.unify_type_list",
         "torch._C.vitals_enabled",
         "torch._C.wait",
-        "torch._cast_Byte",
-        "torch._cast_Char",
-        "torch._cast_Double",
-        "torch._cast_Float",
-        "torch._cast_Half",
-        "torch._cast_Int",
-        "torch._cast_Long",
-        "torch._cast_Short",
         "torch._choose_qparams_per_tensor",
         "torch._chunk_cat",
         "torch._coalesce",
@@ -3368,7 +3359,6 @@ LEGACY_MOD_INLINELIST = {
     "torch._functorch.apis",
     "torch._functorch.deprecated",
     "torch.nn.attention.flex_attention",
-    "torch.ao.quantization.stubs",
     "torch.ao.quantization.pt2e.export_utils",
     "torch.ao.quantization.pt2e.qat_utils",
     "torch.ao.quantization.pt2e.representation.rewrite",

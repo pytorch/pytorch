@@ -4,7 +4,6 @@ from . import (
     net_min_base,
     operator_support,
     param_fetch,
-    regional_inductor,
     reinplace,
     runtime_assert,
     shape_prop,

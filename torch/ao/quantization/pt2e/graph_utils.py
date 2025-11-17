@@ -124,18 +124,9 @@ def _get_submodule(
     graph_module: torch.fx.GraphModule, node: torch.fx.Node, arg_index: int
 ) -> tuple[str, torch.nn.Module, torch.fx.Node]:
     submod_node = node.args[arg_index]
-    if not isinstance(submod_node, torch.fx.Node):
-        raise AssertionError(
-            f"Expected submod_node to be a torch.fx.Node, got {type(submod_node)}"
-        )
-    if submod_node.op != "get_attr":
-        raise AssertionError(
-            f"Expected submod_node.op to be 'get_attr', got {submod_node.op}"
-        )
-    if not isinstance(submod_node.target, str):
-        raise AssertionError(
-            f"Expected submod_node.target to be a string attribute name, got {type(submod_node.target)}"
-        )
+    assert isinstance(submod_node, torch.fx.Node)
+    assert submod_node.op == "get_attr"
+    assert isinstance(submod_node.target, str)
     submodule = graph_module.get_submodule(submod_node.target)
     # pyre-ignore
     return submod_node.target, submodule, node
@@ -170,10 +161,9 @@ def bfs_trace_with_node_process(
 ) -> None:
     """Traverse the graph module and apply node_op to each node."""
 
-    if not isinstance(model, (ExportedProgram, torch.fx.GraphModule)):
-        raise AssertionError(
-            f"Expected GraphModule or ExportedProgram, got {type(model)}"
-        )
+    assert isinstance(model, (ExportedProgram, torch.fx.GraphModule)), (
+        f"Expected GraphModule or ExportedProgram, got {type(model)}"
+    )
     gm = model.graph_module if isinstance(model, ExportedProgram) else model
     queue = [gm]
     while queue:

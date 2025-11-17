@@ -241,7 +241,7 @@ if __name__ == "__main__":
     import argparse
 
     try:
-        from multi_process_fuzzer import run_multi_process_fuzzer, run_until_failure
+        from multi_process_fuzzer import run_multi_process_fuzzer
     except ImportError:
         # If importing as a module fails, import from the same directory
         import os
@@ -249,7 +249,7 @@ if __name__ == "__main__":
 
         current_dir = os.path.dirname(os.path.abspath(__file__))
         sys.path.insert(0, current_dir)
-        from multi_process_fuzzer import run_multi_process_fuzzer, run_until_failure
+        from multi_process_fuzzer import run_multi_process_fuzzer
 
     # Set up command-line argument parsing
     parser = argparse.ArgumentParser(
@@ -296,11 +296,6 @@ if __name__ == "__main__":
         action="store_true",
         help="Print detailed output for all runs (not just failures)",
     )
-    parser.add_argument(
-        "--stop-at-first-failure",
-        action="store_true",
-        help="Pick a random seed and keep iterating until finding a failure (exits with non-zero code)",
-    )
 
     # Legacy arguments
     parser.add_argument(
@@ -342,30 +337,6 @@ if __name__ == "__main__":
             supported_ops=parsed_supported_ops,
             op_weights=(parsed_weights if parsed_weights else None),
         )
-    elif args.stop_at_first_failure:
-        # Stop-at-first-failure mode
-        # Default number of processes
-        if args.processes is None:
-            cpu_count = mp.cpu_count()
-            args.processes = max(1, min(16, int(cpu_count * 0.75)))
-
-        if args.processes < 1:
-            print("❌ Error: Number of processes must be at least 1")
-            sys.exit(1)
-
-        try:
-            run_until_failure(
-                num_processes=args.processes,
-                verbose=args.verbose,
-                template=args.template,
-                supported_ops=args.supported_ops,
-            )
-        except Exception as e:
-            print(f"❌ Unexpected error: {str(e)}")
-            import traceback
-
-            traceback.print_exc()
-            sys.exit(1)
     elif args.start is not None or args.count is not None:
         # Multi-process fuzzing mode
         if args.start is None:

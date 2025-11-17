@@ -150,7 +150,7 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
         Args: `mod' a float module, either produced by torch.ao.quantization
         utilities or directly from user
         """
-        assert type(mod) is nni.LinearBn1d, (
+        assert type(mod) == nni.LinearBn1d, (
             "qat."
             + cls.__name__
             + ".from_float only works for "

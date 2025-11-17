@@ -132,7 +132,7 @@ class ModelReportVisualizer:
                 # if we need plottable, ensure type of val is tensor
                 if (
                     not plottable_features_only
-                    or type(feature_dict[feature_name]) is torch.Tensor
+                    or type(feature_dict[feature_name]) == torch.Tensor
                 ):
                     unique_feature_names.add(feature_name)
 
@@ -223,7 +223,7 @@ class ModelReportVisualizer:
                         feature_val = feature_val.item()
 
                     # we add to our list of values
-                    # pyrefly: ignore [bad-argument-type]
+                    # pyrefly: ignore  # bad-argument-type
                     tensor_table_row.append(feature_val)
 
                 tensor_table.append(tensor_table_row)
@@ -284,7 +284,7 @@ class ModelReportVisualizer:
                             feature_val = feature_val.item()
 
                         # add value to channel specific row
-                        # pyrefly: ignore [bad-argument-type]
+                        # pyrefly: ignore  # bad-argument-type
                         new_channel_row.append(feature_val)
 
                     # add to table and increment row index counter
@@ -520,7 +520,7 @@ class ModelReportVisualizer:
                 # the index of the feature will the 0 + num non feature columns
                 tensor_feature_index = feature_column_offset
                 row_value = row[tensor_feature_index]
-                if type(row_value) is not str:
+                if type(row_value) != str:
                     x_data.append(x_val_to_append)
                     y_data.append(row_value)
         elif is_valid_per_channel_plot:
@@ -543,7 +543,7 @@ class ModelReportVisualizer:
                 # the index of the feature will the 0 + num non feature columns
                 tensor_feature_index = feature_column_offset
                 row_value = row[tensor_feature_index]
-                if type(row_value) is not str:
+                if type(row_value) != str:
                     # only append if new index we are appending
                     if len(x_data) == 0 or x_data[-1] != x_val_to_append:
                         x_data.append(x_val_to_append)

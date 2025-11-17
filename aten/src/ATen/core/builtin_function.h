@@ -63,13 +63,13 @@ struct BuiltinOpFunction : public Function {
 
   bool call(
       Stack& stack,
-      std::optional<size_t> /*unused*/,
-      c10::function_ref<void(const Code&)> /*unused*/) override {
+      std::optional<size_t>,
+      c10::function_ref<void(const Code&)>) override {
     run(stack);
     return false;
   }
 
-  bool call(Stack& stack, c10::function_ref<void(const mobile::Code&)> /*unused*/)
+  bool call(Stack& stack, c10::function_ref<void(const mobile::Code&)>)
       override {
     run(stack);
     return false;

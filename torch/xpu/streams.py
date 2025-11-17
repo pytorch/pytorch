@@ -126,7 +126,7 @@ class Event(torch._C._XpuEventBase):
         """
         if stream is None:
             stream = torch.xpu.current_stream()
-        super().record(stream)  # pyrefly: ignore [bad-argument-type]
+        super().record(stream)  # pyrefly: ignore  # bad-argument-type
 
     def wait(self, stream=None) -> None:
         r"""Make all future work submitted to the given stream wait for this event.

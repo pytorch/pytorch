@@ -2735,12 +2735,6 @@
   ],
   "GB0272": [
     {
-      "Gb_type": "Failed to make weakref to User Object when storing by ID",
-      "Context": "user_objected: {obj}",
-      "Explanation": "Object does not allow us to make a weakref to it",
-      "Hints": []
-    },
-    {
       "Gb_type": "Failed to make weakref to User Object",
       "Context": "user_objected: {obj}",
       "Explanation": "Object does not allow us to make a weakref to it",
@@ -2780,44 +2774,6 @@
         "Include at least one checkpoint: (1) include at least 2 ops and (2) make sure there is some ",
         "line of code that is not in a try/with block, and has an empty Python stack.",
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
-      ]
-    }
-  ],
-  "GB0276": [
-    {
-      "Gb_type": "Failed to make weakref to User Object",
-      "Context": "user_object: {value}",
-      "Explanation": "Object does not allow us to make a weakref to it",
-      "Hints": []
-    }
-  ],
-  "GB0277": [
-    {
-      "Gb_type": "Attempted to wrap sparse Tensor with VariableTracker",
-      "Context": "str(example_value)",
-      "Explanation": "torch.compile does not support sparse Tensors with VariableTracker",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB0278": [
-    {
-      "Gb_type": "Unsupported dict type for fromkeys()",
-      "Context": "{user_cls.__name__}.fromkeys(): {args} {kwargs}",
-      "Explanation": "Failed to call {user_cls.__name__}.fromkeys() because {user_cls.__name__} is not any type of dict, OrderedDict, or defaultdict",
-      "Hints": [
-        "Ensure {user_cls.__name__} is a type of dict, OrderedDict, or defaultdict."
-      ]
-    }
-  ],
-  "GB0279": [
-    {
-      "Gb_type": "torch.fx.traceback.annotate escaped from compiled region",
-      "Context": "str(self)",
-      "Explanation": "Dynamo doesn't support graph break on torch.fx.traceback.annotate.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ]

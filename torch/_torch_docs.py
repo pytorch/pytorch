@@ -253,7 +253,7 @@ add_docstr(
     r"""
 acos(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
-Returns a new tensor with the arccosine (in radians) of each element in :attr:`input`.
+Computes the inverse cosine of each element in :attr:`input`.
 
 .. math::
     \text{out}_{i} = \cos^{-1}(\text{input}_{i})
@@ -1047,7 +1047,7 @@ add_docstr(
     r"""
 asin(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
-Returns a new tensor with the arcsine of the elements (in radians) in the :attr:`input` tensor.
+Returns a new tensor with the arcsine of the elements of :attr:`input`.
 
 .. math::
     \text{out}_{i} = \sin^{-1}(\text{input}_{i})
@@ -1119,7 +1119,7 @@ add_docstr(
     r"""
 atan(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
-Returns a new tensor with the arctangent of the elements (in radians) in the :attr:`input` tensor.
+Returns a new tensor with the arctangent of the elements of :attr:`input`.
 
 .. math::
     \text{out}_{i} = \tan^{-1}(\text{input}_{i})
@@ -3135,7 +3135,7 @@ add_docstr(
     r"""
 cos(input, *, out=None) -> Tensor
 
-Returns a new tensor with the cosine of the elements of :attr:`input` given in radians.
+Returns a new tensor with the cosine  of the elements of :attr:`input`.
 
 .. math::
     \text{out}_{i} = \cos(\text{input}_{i})
@@ -7673,6 +7673,8 @@ If :attr:`keepdim` is ``True``, the output tensors are of the same size as
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
 in the output tensors having 1 fewer dimension than :attr:`input`.
 
+.. note:: This function is not defined for ``torch.cuda.Tensor`` yet.
+
 Args:
     {input}
     {opt_dim}
@@ -9940,8 +9942,7 @@ add_docstr(
     r"""
 sin(input, *, out=None) -> Tensor
 
-Returns a new tensor with the sine of the elements in the :attr:`input` tensor,
-where each value in this input tensor is in radians.
+Returns a new tensor with the sine of the elements of :attr:`input`.
 
 .. math::
     \text{out}_{i} = \sin(\text{input}_{i})
@@ -11358,8 +11359,7 @@ add_docstr(
     r"""
 tan(input, *, out=None) -> Tensor
 
-Returns a new tensor with the tangent of the elements in the :attr:`input` tensor,
-where each value in this input tensor is in radians.
+Returns a new tensor with the tangent of the elements of :attr:`input`.
 
 .. math::
     \text{out}_{i} = \tan(\text{input}_{i})

@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/runtime/logging.h>
 
-#include <c10/util/Exception.h>
 #include <atomic>
 #include <chrono>
 #include <mutex>
@@ -34,7 +33,7 @@ int64_t LockingLogger::getCounterValue(const std::string& name) const {
       return raw_counter.sum / raw_counter.count;
     } break;
   }
-  TORCH_CHECK(false, "Unknown aggregation type!");
+  throw std::runtime_error("Unknown aggregation type!");
 }
 
 void LockingLogger::setAggregationType(

@@ -228,11 +228,11 @@ def multiple_logs_to_string(module: str, *log_options: str) -> tuple[list[io.Str
     def tmp_redirect_logs():
         loggers = [torch._logging.getArtifactLogger(module, option) for option in log_options]
         try:
-            for logger, handler in zip(loggers, handlers, strict=True):
+            for logger, handler in zip(loggers, handlers):
                 logger.addHandler(handler)
             yield
         finally:
-            for logger, handler in zip(loggers, handlers, strict=True):
+            for logger, handler in zip(loggers, handlers):
                 logger.removeHandler(handler)
 
     def ctx_manager() -> AbstractContextManager[None]:

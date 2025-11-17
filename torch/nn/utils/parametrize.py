@@ -179,28 +179,28 @@ class ParametrizationList(ModuleList):
 
         # Register the tensor(s)
         if self.is_tensor:
-            # pyrefly: ignore [missing-attribute]
+            # pyrefly: ignore  # missing-attribute
             if original.dtype != new.dtype:
                 raise ValueError(
                     "When `right_inverse` outputs one tensor, it may not change the dtype.\n"
                     f"original.dtype: {original.dtype}\n"
-                    # pyrefly: ignore [missing-attribute]
+                    # pyrefly: ignore  # missing-attribute
                     f"right_inverse(original).dtype: {new.dtype}"
                 )
 
-            # pyrefly: ignore [missing-attribute]
+            # pyrefly: ignore  # missing-attribute
             if original.device != new.device:
                 raise ValueError(
                     "When `right_inverse` outputs one tensor, it may not change the device.\n"
                     f"original.device: {original.device}\n"
-                    # pyrefly: ignore [missing-attribute]
+                    # pyrefly: ignore  # missing-attribute
                     f"right_inverse(original).device: {new.device}"
                 )
 
             # Set the original to original so that the user does not need to re-register the parameter
             # manually in the optimiser
             with torch.no_grad():
-                # pyrefly: ignore [bad-argument-type]
+                # pyrefly: ignore  # bad-argument-type
                 _maybe_set(original, new)
             _register_parameter_or_buffer(self, "original", original)
         else:
@@ -401,7 +401,7 @@ def _inject_property(module: Module, tensor_name: str) -> None:
         if torch.jit.is_scripting():
             raise RuntimeError("Parametrization is not working with scripting.")
         parametrization = self.parametrizations[tensor_name]
-        # pyrefly: ignore [redundant-condition]
+        # pyrefly: ignore  # redundant-condition
         if _cache_enabled:
             if torch.jit.is_scripting():
                 # Scripting
@@ -701,7 +701,7 @@ def remove_parametrizations(
     # Fetch the original tensor
     assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
     parametrizations = module.parametrizations[tensor_name]
-    # pyrefly: ignore [invalid-argument]
+    # pyrefly: ignore  # invalid-argument
     if parametrizations.is_tensor:
         original = parametrizations.original
         assert isinstance(original, torch.Tensor), "is_tensor promised us a Tensor"

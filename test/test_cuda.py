@@ -98,7 +98,7 @@ requiresCppContext = unittest.skipUnless(
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests  # noqa: PLW0127
+load_tests = load_tests
 
 try:
     import torchvision.models  # noqa: F401
@@ -577,7 +577,7 @@ print(t.is_pinned())
             src = torch.randn(
                 1000000,
                 device="cuda" if dst == "cpu" else "cpu",
-                pin_memory=dst == "cuda",
+                pin_memory=True if dst == "cuda" else False,
             )
             _test_to_non_blocking(src, try_non_blocking, dst)
 
@@ -1679,6 +1679,8 @@ except RuntimeError as e:
             self.assertEqual(x.grad, torch.ones_like(x) * 3)
             self.assertEqual(torch.cuda.current_stream(), bwd_ambient_stream)
 
+    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
+    @skipIfRocm(msg="flakey on ROCm https://github.com/pytorch/pytorch/issues/53190")
     def test_streaming_backwards_multiple_streams(self):
         MultiplyInStream = self._make_multiply_in_stream()
 
@@ -3176,6 +3178,8 @@ exit(2)
     @parametrize(
         "with_amp,cache_enabled,allow_unused_input",
         [
+            subtest((False, False, True), decorators=[skipIfRocm]),
+            subtest((True, False, True), decorators=[skipIfRocm]),
             subtest((True, True, True), decorators=[unittest.expectedFailure]),
             subtest((False, False, False), decorators=[unittest.expectedFailure]),
         ],
@@ -4381,28 +4385,6 @@ class TestCudaMallocAsync(TestCase):
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
-    @requiresCppContext
-    def test_memory_plots_metadata(self):
-        for context in ["alloc", "all", "state"]:
-            try:
-                torch._C._cuda_clearCublasWorkspaces()
-                torch.cuda.memory.empty_cache()
-                torch.cuda.memory._set_memory_metadata("metadata test")
-                torch.cuda.memory._record_memory_history(context="all")
-                x = torch.rand(3, 4, device="cuda")
-                del x
-                torch.cuda.memory.empty_cache()
-                torch.cuda.memory._set_memory_metadata("")
-
-                ss = torch.cuda.memory._snapshot()
-                for event in ss["device_traces"][0]:
-                    self.assertTrue(event["user_metadata"] == "metadata test")
-            finally:
-                torch.cuda.memory._record_memory_history(None)
-
-    @unittest.skipIf(
-        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
-    )
     def test_memory_snapshot_script(self):
         try:
             torch._C._cuda_clearCublasWorkspaces()
@@ -4582,54 +4564,49 @@ class TestCudaMallocAsync(TestCase):
         reg_mem = torch.cuda.memory_stats()[key_allocated]
         self.assertEqual(reg_mem - start_mem, nbytes)
 
-        with self.assertRaises(ValueError):
-            torch._C._accelerator_setAllocatorSettings("foo:1,bar:2")
+        # Test division==1 case.
+        torch.cuda.memory.empty_cache()
+        div1_start_mem = torch.cuda.memory_stats()[key_allocated]
+        div1_start_requested = torch.cuda.memory_stats()[key_requested]
+        torch.cuda.memory._set_allocator_settings("roundup_power2_divisions:1")
+        torch.rand(nelems, device="cuda")
+        div1_end_mem = torch.cuda.memory_stats()[key_allocated]
+        div1_end_requested = torch.cuda.memory_stats()[key_requested]
 
-        with self.assertRaises(ValueError):
-            torch._C._accelerator_setAllocatorSettings(
+        self.assertEqual(div1_start_mem - start_mem, nbytes)
+        if not TEST_CUDAMALLOCASYNC:
+            # not supported with the cudaMallocAsync backend
+            self.assertEqual(div1_end_mem - div1_start_mem, power2_div(nbytes, 1))
+            self.assertEqual(div1_end_requested - div1_start_requested, nbytes)
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("foo:1,bar:2")
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings(
                 "garbage_collection_threshold:1.2"
             )
 
-        with self.assertRaises(ValueError):
-            torch._C._accelerator_setAllocatorSettings("max_split_size_mb:2")
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("max_split_size_mb:2")
 
-        with self.assertRaises(ValueError):
-            torch._C._accelerator_setAllocatorSettings(
-                "release_lock_on_cudamalloc:none"
-            )
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("release_lock_on_cudamalloc:none")
 
-        with self.assertRaises(ValueError):
-            torch._C._accelerator_setAllocatorSettings(
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings(
                 "pinned_use_cuda_host_register:none"
             )
 
-        with self.assertRaises(ValueError):
-            torch._C._accelerator_setAllocatorSettings(
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings(
                 "pinned_num_register_threads:none"
             )
 
-        with self.assertRaises(ValueError):
-            torch._C._accelerator_setAllocatorSettings(
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings(
                 "pinned_num_register_threads:1024"
             )
-
-    def test_allocator_backend(self):
-        def check_output(script: str) -> str:
-            return (
-                subprocess.check_output([sys.executable, "-c", script])
-                .decode("ascii")
-                .strip()
-            )
-
-        test_script = """\
-import os
-os.environ["PYTORCH_ALLOC_CONF"] = "max_split_size_mb:20,backend:cudaMallocAsync,release_lock_on_cudamalloc:none"
-import torch
-torch.cuda.init()
-print(torch.cuda.get_allocator_backend())
-"""
-        rc = check_output(test_script)
-        self.assertEqual(rc, "cudaMallocAsync")
 
     def test_cachingAllocator_raw_alloc(self):
         # Test that raw_alloc respects the setting that

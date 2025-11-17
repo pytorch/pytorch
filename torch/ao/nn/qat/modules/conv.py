@@ -62,7 +62,7 @@ class _ConvNd(nn.modules.conv._ConvNd):
            `mod`: a float module, either produced by torch.ao.quantization utilities
            or directly from user
         """
-        assert type(mod) is cls._FLOAT_MODULE, (
+        assert type(mod) == cls._FLOAT_MODULE, (
             "qat."
             + cls.__name__
             + ".from_float only works for "
@@ -114,7 +114,7 @@ class _ConvNd(nn.modules.conv._ConvNd):
             assert hasattr(cls, "_FLOAT_RELU_MODULE")
             relu = cls._FLOAT_RELU_MODULE()
             modules.append(relu)
-            # pyrefly: ignore [missing-attribute]
+            # pyrefly: ignore  # missing-attribute
             fused = cls._FLOAT_MODULE(*modules)
             fused.train(self.training)
             return fused

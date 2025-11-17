@@ -7,11 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       test_mode:
-        type: choice
-        options:
-          - 'short'
-          - 'long'
-          - 'all'
+        required: false
+        type: string
+        default: 'short'
         description: tag filter for operator benchmarks, options from long, short, all
   schedule:
     # Run at 07:00 UTC every Sunday
@@ -30,49 +28,38 @@ permissions:
   contents: read
 
 jobs:
-  x86-opbenchmark-build:
+  opbenchmark-build:
     if: github.repository_owner == 'pytorch'
-    name: x86-opbenchmark-build
+    name: opbenchmark-build
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-jammy-py3.10-gcc11-build
       docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
       test-matrix: |
         { include: [
-          { config: "cpu_operator_benchmark_${{ inputs.test_mode || 'short' }}", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
+          { config: "cpu_operator_benchmark_short", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
         ]}
     secrets: inherit
 
-  x86-opbenchmark-test:
-    name: x86-opbenchmark-test
-    uses: ./.github/workflows/_linux-test.yml
-    needs: x86-opbenchmark-build
-    with:
-      build-environment: linux-jammy-py3.10-gcc11-build
-      docker-image: ${{ needs.x86-opbenchmark-build.outputs.docker-image }}
-      test-matrix: ${{ needs.x86-opbenchmark-build.outputs.test-matrix }}
-    secrets: inherit
-
-  aarch64-opbenchmark-build:
-    if: github.repository_owner == 'pytorch'
-    name: aarch64-opbenchmark-build
+  opbenchmark-on-demand-build:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository_owner == 'pytorch' }}
+    name: opbenchmark-on-demand-build
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-jammy-aarch64-py3.10
-      runner: linux.arm64.m7g.4xlarge
-      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc11
+      build-environment: linux-jammy-py3.10-gcc11-build
+      docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
       test-matrix: |
         { include: [
-          { config: "cpu_operator_benchmark_short", shard: 1, num_shards: 1, runner: "linux.arm64.m8g.4xlarge" },
+          { config: "cpu_operator_benchmark_${{ inputs.test_mode }}", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
         ]}
     secrets: inherit
 
-  aarch64-opbenchmark-test:
-    name: aarch64-opbenchmark-test
+  opbenchmark-test:
+    name: opbenchmark-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: aarch64-opbenchmark-build
+    needs: opbenchmark-build
     with:
-      build-environment: linux-jammy-aarch64-py3.10
-      docker-image: ${{ needs.aarch64-opbenchmark-build.outputs.docker-image }}
-      test-matrix: ${{ needs.aarch64-opbenchmark-build.outputs.test-matrix }}
+      build-environment: linux-jammy-py3.10-gcc11-build
+      docker-image: ${{ needs.opbenchmark-build.outputs.docker-image }}
+      test-matrix: ${{ needs.opbenchmark-build.outputs.test-matrix }}
     secrets: inherit

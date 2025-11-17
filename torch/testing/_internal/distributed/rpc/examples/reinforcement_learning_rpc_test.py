@@ -216,7 +216,7 @@ class Agent:
             returns.insert(0, R)
         returns = torch.tensor(returns)
         returns = (returns - returns.mean()) / (returns.std() + self.eps)
-        for log_prob, R in zip(probs, returns, strict=True):
+        for log_prob, R in zip(probs, returns):
             policy_loss.append(-log_prob * R)
         self.optimizer.zero_grad()
         policy_loss = torch.cat(policy_loss).sum()

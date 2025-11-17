@@ -241,17 +241,17 @@ class TestScript(JitTestCase):
         def test_split() -> tuple[list[str], list[str], list[str], list[str], list[str],
                                   list[str], list[str], list[str], list[str], list[str], list[str]]:
             return (
-                ["a", "a", "a", "a", "a"],
-                ["a", "a", "a", "a", "a"],
-                ["a", "a", "a", "a", "a"],
-                ["", "a", "a", "a", "a", "a", ""],
-                ["a", "a", "a", "a", "a", ""],
-                ["a", "a", "a", "a", "a", ""],
-                ["a", "a", "a", "a a "],
-                [" a a a a a "],
-                [" a", "a a", "a a"],
-                [" a", "a a", "a a "],
-                [" ", "a ", "a a "],
+                "a a a a a".split(),
+                "a  a a   a a".split(),
+                "   a a\ta \v a \v\f\n a \t   ".split(),
+                " a a a a a ".split(" "),
+                "a a a a a ".split(" ", 10),
+                "a a a a a ".split(" ", -1),
+                "a a a a a ".split(" ", 3),
+                " a a a a a ".split("*"),
+                " a*a a*a a".split("*"),
+                " a*a a*a a ".split("*", -1),
+                " a*a a*a a ".split("a*", 10),
             )
         self.checkScript(test_split, ())
 
@@ -266,15 +266,15 @@ class TestScript(JitTestCase):
         def test_rsplit() -> tuple[list[str], list[str], list[str], list[str], list[str],
                                    list[str], list[str], list[str], list[str]]:
             return (
-                ["a", "a", "a", "a", "a"],
-                ["", "a", "a", "a", "a", "a", ""],
-                ["a", "a", "a", "a", "a", ""],
-                ["a", "a", "a", "a", "a", ""],
-                ["a a a", "a", "a", ""],
-                [" a a a a a "],
-                [" a", "a a", "a a "],
-                [" a", "a a", "a a "],
-                [" ", "a ", "a a"],
+                "a a a a a".rsplit(),
+                " a a a a a ".rsplit(" "),
+                "a a a a a ".rsplit(" ", 10),
+                "a a a a a ".rsplit(" ", -1),
+                "a a a a a ".rsplit(" ", 3),
+                " a a a a a ".rsplit("*"),
+                " a*a a*a a ".rsplit("*"),
+                " a*a a*a a ".rsplit("*", -1),
+                " a*a a*a a".rsplit("a*", 10),
             )
         self.checkScript(test_rsplit, ())
 

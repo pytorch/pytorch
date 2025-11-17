@@ -164,7 +164,6 @@ class _SymbolicFunctionGroup:
                 f"Replacing the existing function with new function. This is unexpected. "
                 f"Please report it on {_constants.PYTORCH_GITHUB_ISSUES_URL}.",
                 errors.OnnxExporterWarning,
-                stacklevel=2,
             )
         self._functions.set_base(opset, func)
 
@@ -185,8 +184,7 @@ class _SymbolicFunctionGroup:
         """
         if not self._functions.overridden(opset):
             warnings.warn(
-                f"No custom function registered for '{self._name}' opset {opset}",
-                stacklevel=2,
+                f"No custom function registered for '{self._name}' opset {opset}"
             )
             return
         self._functions.remove_override(opset)

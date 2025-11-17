@@ -513,11 +513,9 @@ class CKGroupedConvFwdTemplate(CKTemplate):
                     arg = f"/* {field_name} */ Tuple<{tuple_elements}>"
                 else:  # tile shape
                     arg = f"/* {field_name} */ S<{tuple_elements}>"
-                # pyrefly: ignore [bad-argument-type]
                 template_params.append(arg)
             else:
                 if field_value is not None:
-                    # pyrefly: ignore [bad-argument-type]
                     template_params.append(f"/* {field_name} */ {field_value}")
         return self._template_from_string(template_definition).render(
             operation_name=op.name(),
@@ -530,7 +528,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         op: "CKGroupedConvFwdOp",  # type: ignore[name-defined]
         **kwargs,
     ) -> str:
-        template_buffer_node = kwargs.get("template_buffer_node")
+        template_buffer_node = kwargs.get("template_buffer_node", None)
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
         X, W = self.input_nodes[0], self.input_nodes[1]

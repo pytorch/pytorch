@@ -182,21 +182,18 @@ class DefaultStager(AsyncStager):
         self._staging_executor = None
         self._staging_stream = None
         if self._config.use_async_staging:
-            # pyrefly: ignore [bad-assignment]
             self._staging_executor = ThreadPoolExecutor(max_workers=1)
             if torch.accelerator.is_available():
                 # Note: stream needs to be initialized on the main thread after default cuda
                 # stream is setup/used to avoid the risk of accidentally reusing the main
                 # compute stream or in other cases kernels actually launching from the
                 # main thread.
-                # pyrefly: ignore [bad-assignment]
                 self._staging_stream = torch.Stream()
 
         if self._config.use_non_blocking_copy:
-            if not torch.accelerator.is_available():
-                raise AssertionError(
-                    "Non-blocking copy requires that the current accelerator is available."
-                )
+            assert torch.accelerator.is_available(), (
+                "Non-blocking copy requires that the current accelerator is available."
+            )
 
         self._staging_future: Optional[Future[STATE_DICT_TYPE]] = None
 
@@ -216,10 +213,7 @@ class DefaultStager(AsyncStager):
             state_dict (STATE_DICT_TYPE): The state_dict to be staged.
         """
         if self._config.use_async_staging:
-            if self._staging_executor is None:
-                raise AssertionError(
-                    "staging_executor should not be None for async staging"
-                )
+            assert self._staging_executor is not None
             self._staging_future = self._staging_executor.submit(
                 self._stage,
                 state_dict,
@@ -231,10 +225,9 @@ class DefaultStager(AsyncStager):
 
     def _stage(self, state_dict: STATE_DICT_TYPE, **kwargs: Any) -> STATE_DICT_TYPE:
         if self._config.use_non_blocking_copy:
-            if not (self._staging_stream or not self._config.use_async_staging):
-                raise AssertionError(
-                    "Non-blocking copy in a background thread for async staging needs staging_stream to be initialized."
-                )
+            assert self._staging_stream or not self._config.use_async_staging, (
+                "Non-blocking copy in a background thread for async staging needs staging_stream to be initialized."
+            )
             with (
                 self._staging_stream
                 if self._staging_stream is not None
@@ -355,7 +348,6 @@ class _ReplicationStager(AsyncStager):
     ):
         self._pg = pg
         self._timeout = timeout
-        # pyrefly: ignore [read-only]
         self._device = device
         self._transport = PGTransport(pg, timeout, device, None)
 

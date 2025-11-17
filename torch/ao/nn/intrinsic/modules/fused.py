@@ -245,7 +245,7 @@ class LinearLeakyReLU(_FusedModule):
     During quantization this will be replaced with the corresponding fused module."""
 
     def __init__(self, linear, leaky_relu):
-        assert type(linear) is Linear and type(leaky_relu) is torch.nn.LeakyReLU, (
+        assert type(linear) == Linear and type(leaky_relu) == torch.nn.LeakyReLU, (
             f"Incorrect types for input modules{type(linear)}{type(leaky_relu)}"
         )
         super().__init__(linear, leaky_relu)
@@ -256,7 +256,7 @@ class LinearTanh(_FusedModule):
     During quantization this will be replaced with the corresponding fused module."""
 
     def __init__(self, linear, tanh):
-        assert type(linear) is Linear and type(tanh) is torch.nn.Tanh, (
+        assert type(linear) == Linear and type(tanh) == torch.nn.Tanh, (
             f"Incorrect types for input modules{type(linear)}{type(tanh)}"
         )
         super().__init__(linear, tanh)

@@ -464,7 +464,7 @@ def _check_input_constraints_for_graph(
                 )
 
         elif isinstance(node_val, (int, float, str)):
-            if type(arg) is not type(node_val) or arg != node_val:
+            if type(arg) != type(node_val) or arg != node_val:
                 raise RuntimeError(
                     f"Expected input at {get_keystr(key_path)} to be equal to {node_val}, but got {arg}",
                 )

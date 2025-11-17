@@ -16,7 +16,7 @@ def has_triton_package() -> bool:
 @functools.cache
 def get_triton_version(fallback: tuple[int, int] = (0, 0)) -> tuple[int, int]:
     try:
-        import triton
+        import triton  # noqa: F401
 
         major, minor = tuple(int(v) for v in triton.__version__.split(".")[:2])
         return (major, minor)

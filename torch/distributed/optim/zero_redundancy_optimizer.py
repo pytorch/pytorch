@@ -100,19 +100,15 @@ def _broadcast_object(
         data = bytearray(buffer.getbuffer())
         length_tensor = torch.LongTensor([len(data)]).to(device)
         data_send_tensor = torch.ByteTensor(data).to(device)
-        # pyrefly: ignore [bad-argument-type]
         dist.broadcast(length_tensor, src=src_rank, group=group, async_op=False)
-        # pyrefly: ignore [bad-argument-type]
         dist.broadcast(data_send_tensor, src=src_rank, group=group, async_op=False)
     else:
         # Receive the object
         length_tensor = torch.LongTensor([0]).to(device)
-        # pyrefly: ignore [bad-argument-type]
         dist.broadcast(length_tensor, src=src_rank, group=group, async_op=False)
         data_recv_tensor = torch.empty(
             [int(length_tensor.item())], dtype=torch.uint8, device=device
         )
-        # pyrefly: ignore [bad-argument-type]
         dist.broadcast(data_recv_tensor, src=src_rank, group=group, async_op=False)
         buffer = io.BytesIO(data_recv_tensor.cpu().numpy())
         obj = torch.load(buffer, map_location=device, weights_only=False)
@@ -171,7 +167,6 @@ class _DDPBucketAssignment:
         if len(self.parameters) == 0:
             raise ValueError("Empty bucket assignment")
         # DDP guarantees all parameters in the bucket have the same device
-        # pyrefly: ignore [read-only]
         self.device: torch.device = self.parameters[0].device
         self.tensor: Optional[torch.Tensor] = None
 
@@ -420,9 +415,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         self.world_size: int = dist.get_world_size(self.process_group)
         self.rank: int = dist.get_rank(self.process_group)
         self.global_rank: int = dist.distributed_c10d.get_global_rank(
-            # pyrefly: ignore [bad-argument-type]
-            self.process_group,
-            self.rank,
+            self.process_group, self.rank
         )
 
         self._overlap_with_ddp: bool = overlap_with_ddp
@@ -542,9 +535,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         self._all_state_dicts = []
         for rank in range(self.world_size):
             global_rank = dist.distributed_c10d.get_global_rank(
-                # pyrefly: ignore [bad-argument-type]
-                self.process_group,
-                rank,
+                self.process_group, rank
             )
             if self.rank == to:
                 # Consolidate all local `state_dict`s on this rank, storing on
@@ -776,9 +767,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             for dev_i_buckets in self._buckets:
                 bucket = dev_i_buckets[rank]
                 global_rank = dist.distributed_c10d.get_global_rank(
-                    # pyrefly: ignore [bad-argument-type]
-                    self.process_group,
-                    rank,
+                    self.process_group, rank
                 )
                 handles.append(
                     dist.broadcast(
@@ -791,9 +780,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         else:
             param_groups = self._partition_parameters()[rank]
             global_rank = dist.distributed_c10d.get_global_rank(
-                # pyrefly: ignore [bad-argument-type]
-                self.process_group,
-                rank,
+                self.process_group, rank
             )
             for param_group in param_groups:
                 handles.extend(
@@ -992,14 +979,11 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 for param_index, param in enumerate(bucket_params):
                     param_numel = param.numel()
                     if (
-                        # pyrefly: ignore [unbound-name]
                         assignment_size + param_numel >= threshold
                         and param_index > bucket_offset
                     ):
                         assigned_rank = self._get_min_index(
-                            # pyrefly: ignore [unbound-name]
-                            size_per_rank,
-                            assigned_ranks_per_bucket[bucket_index],
+                            size_per_rank, assigned_ranks_per_bucket[bucket_index]
                         )
                         # Include up to but not including the parameter that
                         # exceeded the threshold
@@ -1010,7 +994,6 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                             assigned_rank,
                             assigned_ranks_per_bucket,
                         )
-                        # pyrefly: ignore [unbound-name]
                         size_per_rank[assigned_rank] += assignment_size
                         bucket_offset = param_index
                         assignment_size = 0
@@ -1018,9 +1001,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 # Assign the remainder of the bucket so that no assignment
                 # spans across two buckets
                 assigned_rank = self._get_min_index(
-                    # pyrefly: ignore [unbound-name]
-                    size_per_rank,
-                    assigned_ranks_per_bucket[bucket_index],
+                    size_per_rank, assigned_ranks_per_bucket[bucket_index]
                 )
                 self._assign_bucket_subset_to_rank(
                     bucket_index,
@@ -1029,7 +1010,6 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                     assigned_rank,
                     assigned_ranks_per_bucket,
                 )
-                # pyrefly: ignore [unbound-name]
                 size_per_rank[assigned_rank] += assignment_size
 
         return self._bucket_assignments_per_rank_cache
@@ -1108,7 +1088,6 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
 
         return loss
 
-    # pyrefly: ignore [bad-override]
     def step(
         self,
         closure: Optional[Callable[[], float]] = None,

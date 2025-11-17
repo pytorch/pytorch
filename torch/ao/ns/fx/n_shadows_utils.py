@@ -2,8 +2,7 @@
 import collections
 import copy
 import operator
-from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import torch
 import torch.fx
@@ -94,10 +93,10 @@ class OutputProp:
                 )
 
             if isinstance(result, torch.Tensor):  # type: ignore[possibly-undefined]
-                # pyrefly: ignore [unbound-name]
+                # pyrefly: ignore  # unbound-name
                 node.traced_result = result
 
-            # pyrefly: ignore [unsupported-operation]
+            # pyrefly: ignore  # unsupported-operation
             env[node.name] = result
 
         return None
@@ -144,11 +143,9 @@ def _get_dedup_subgraphs(matches: dict[str, _MatchResult]) -> dict[str, list[Nod
                 seen_nodes.add(node_or_tuple)
 
             else:
-                if not isinstance(node_or_tuple, tuple):
-                    raise AssertionError(f"Expected tuple, got {type(node_or_tuple)}")
+                assert isinstance(node_or_tuple, tuple)
                 for node in node_or_tuple:
-                    if not isinstance(node, Node):
-                        raise AssertionError(f"Expected Node, got {type(node)}")
+                    assert isinstance(node, Node)
                     if node in seen_nodes:
                         was_seen = True
                     seen_nodes.add(node)
@@ -162,10 +159,7 @@ def _get_dedup_subgraphs(matches: dict[str, _MatchResult]) -> dict[str, list[Nod
         if len(cur_match[1]) == 1:
             list_of_nodes = cur_match[1]
         else:
-            if len(cur_match[1]) != 2:
-                raise ValueError(
-                    f"Expected cur_match[1] to have length 2, got {len(cur_match[1])}"
-                )
+            assert len(cur_match[1]) == 2
             # either (a, b), or ((a, b), c) or (c, (a, b))
             # cannot make any assumptions on order, not clear what the
             # _find_matches function is doing to populate this
@@ -186,12 +180,13 @@ def _get_dedup_subgraphs(matches: dict[str, _MatchResult]) -> dict[str, list[Nod
                         last_node = n
                     else:
                         mid_node = n
-                if first_node is None or mid_node is None or last_node is None:
-                    raise AssertionError("Expected all nodes to be non-None")
-                if mid_node.args[0] is not first_node:
-                    raise AssertionError("Expected mid_node.args[0] to be first_node")
-                if last_node.args[0] is not mid_node:
-                    raise AssertionError("Expected last_node.args[0] to be mid_node")
+                assert (
+                    first_node is not None
+                    and mid_node is not None
+                    and last_node is not None
+                )
+                assert mid_node.args[0] is first_node
+                assert last_node.args[0] is mid_node
                 return [last_node, mid_node, first_node]
 
             if isinstance(cur_match[1][0], Node) and isinstance(cur_match[1][1], Node):
@@ -381,10 +376,7 @@ def create_submodule_from_subgraph(
             # the current implementation is simplistic and cannot handle
             # ops with two or more arguments which need to be passed from
             # the previous op, so we assert them out
-            if cur_node_orig.target in BINARY_FUNCTIONS:
-                raise AssertionError(
-                    f"Unexpected binary function target: {cur_node_orig.target}"
-                )
+            assert cur_node_orig.target not in BINARY_FUNCTIONS
 
             # at this point in the code, cur_node_copy is pointing to the copy
             # of the previous node
@@ -403,10 +395,10 @@ def create_submodule_from_subgraph(
                         cur_name_idx += 1
                         setattr(gm, mod_name, new_arg)
                         new_arg_placeholder = gm.placeholder(mod_name)  # type: ignore[operator]
-                        # pyrefly: ignore [missing-attribute]
+                        # pyrefly: ignore  # missing-attribute
                         cur_args_copy.append(new_arg_placeholder)
                     elif isinstance(arg, (float, int, torch.dtype)):
-                        # pyrefly: ignore [missing-attribute]
+                        # pyrefly: ignore  # missing-attribute
                         cur_args_copy.append(arg)
                     else:
                         raise AssertionError(f"arg of type {type(arg)} not handled yet")
@@ -442,10 +434,9 @@ def create_submodule_from_subgraph(
             break
 
         # go to next node
-        if len(cur_node_orig.users.keys()) != 1:
-            raise AssertionError(
-                f"{cur_node_orig} has more than 1 users, not supported yet"
-            )
+        assert len(cur_node_orig.users.keys()) == 1, (
+            f"{cur_node_orig} has more than 1 users, not supported yet"
+        )
         cur_node_orig = next(iter(cur_node_orig.users.keys()))
         cur_iteration += 1
         if cur_iteration > iteration_limit:
@@ -502,8 +493,7 @@ def create_one_transformed_and_logged_copy_of_subgraph(
         )
 
         attr_name = _get_attr_name(subgraph_idx, subgraph_candidate_idx)
-        if hasattr(mt, attr_name):
-            raise AssertionError(f"Unexpected attribute '{attr_name}' found in {mt}")
+        assert not hasattr(mt, attr_name)
         setattr(mt, attr_name, logger_mod_orig)
         with mt.graph.inserting_after(last_node):
             new_node = mt.graph.call_module(attr_name, args=(last_node,), kwargs={})
@@ -546,10 +536,9 @@ def create_one_transformed_and_logged_copy_of_subgraph(
                 "prepare_custom_config",
                 "qconfig_mapping",
             ]:
-                if kwarg_name in custom_prepare_kwargs:
-                    raise AssertionError(
-                        f"cannot specify {kwarg_name} in custom_prepare_kwargs"
-                    )
+                assert kwarg_name not in custom_prepare_kwargs, (
+                    f"cannot specify {kwarg_name} in custom_prepare_kwargs"
+                )
             prepare_kwargs: dict[str, Any] = {
                 "example_inputs": example_inputs,
                 "qconfig_mapping": qconfig_mapping,
@@ -561,8 +550,7 @@ def create_one_transformed_and_logged_copy_of_subgraph(
 
         # attach the wrapper to the model
         attr_name = _get_attr_wrapper_name(subgraph_idx, subgraph_candidate_idx)
-        if hasattr(mt, attr_name):
-            raise AssertionError(f"Unexpected attribute '{attr_name}' found in {mt}")
+        assert not hasattr(mt, attr_name)
         setattr(mt, attr_name, orig_mod_copy_wrapped)
 
         # add a call to the wrapper module from the parent graph
@@ -611,8 +599,7 @@ def create_one_transformed_and_logged_copy_of_subgraph(
         )
 
         attr_name = _get_attr_name(subgraph_idx, subgraph_candidate_idx)
-        if hasattr(mt, attr_name):
-            raise AssertionError(f"Unexpected attribute '{attr_name}' found in {mt}")
+        assert not hasattr(mt, attr_name)
         setattr(mt, attr_name, logger_mod_orig)
         with mt.graph.inserting_after(new_node):
             logger = mt.graph.call_module(
@@ -818,7 +805,7 @@ def create_add_loggers_graph(
                 model,
                 cur_subgraph_idx,
                 match_name,
-                # pyrefly: ignore [bad-argument-type]
+                # pyrefly: ignore  # bad-argument-type
                 maybe_subgraph,
                 [qconfig_mapping],
                 [node_name_to_qconfig],
@@ -836,8 +823,7 @@ def create_add_loggers_graph(
                 ):
                     new_shadow_mod = maybe_shadow_mod
                     break
-            if new_shadow_mod is None:
-                raise AssertionError("Expected new_shadow_mod to be non-None")
+            assert new_shadow_mod is not None
             orig_first_node_to_shadow_in_node[first_node] = new_shadow_mod
             orig_first_node_to_shadow_out_node[first_node] = new_shadow_mod
 
@@ -863,10 +849,7 @@ def create_add_loggers_graph(
                 fqn,
             )
             attr_name = _get_attr_name(cur_subgraph_idx, subgraph_candidate_idx)
-            if hasattr(model, attr_name):
-                raise AssertionError(
-                    f"Unexpected attribute '{attr_name}' found in {model}"
-                )
+            assert not hasattr(model, attr_name)
             setattr(model, attr_name, logger_mod_orig)
             insertion_point = last_node
             with model.graph.inserting_after(insertion_point):
@@ -879,7 +862,7 @@ def create_add_loggers_graph(
             cur_node_orig = first_node
             cur_node_copy = None
             first_node_copy = None
-            # pyrefly: ignore [bad-assignment]
+            # pyrefly: ignore  # bad-assignment
             while cur_node_orig in subgraph_to_use:
                 # TODO(future PR): make this support all possible args/kwargs
                 if cur_node_orig is first_node:
@@ -903,15 +886,9 @@ def create_add_loggers_graph(
                 # since now only linear subgraphs are supported, all nodes
                 # except the last one must have only one user
                 if cur_node_orig != last_node:
-                    if len(cur_node_orig.users.keys()) != 1:
-                        raise AssertionError(
-                            f"Expected exactly 1, but got {len(cur_node_orig.users)}"
-                        )
+                    assert len(cur_node_orig.users.keys()) == 1
                 cur_node_orig = next(iter(cur_node_orig.users.keys()))
-                if cur_node_orig.name.startswith(SHADOW_NODE_NAME_PREFIX):
-                    raise AssertionError(
-                        "cur_node_orig should not start with SHADOW_NODE_NAME_PREFIX"
-                    )
+                assert not cur_node_orig.name.startswith(SHADOW_NODE_NAME_PREFIX)
                 insertion_point = cur_node_copy
 
             # add a comparison logger after last_node's copy
@@ -927,10 +904,7 @@ def create_add_loggers_graph(
                 fqn,
             )
             attr_name = _get_attr_name(cur_subgraph_idx, subgraph_candidate_idx)
-            if hasattr(model, attr_name):
-                raise AssertionError(
-                    f"Unexpected attribute '{attr_name}' found in {model}"
-                )
+            assert not hasattr(model, attr_name)
             setattr(model, attr_name, logger_mod_orig)
             with model.graph.inserting_after(insertion_point):
                 logger = model.graph.call_module(
@@ -1004,8 +978,7 @@ def create_add_loggers_graph(
             return prev_shadow_output
 
         cur_shadow_input = orig_first_node_to_shadow_in_node[first_node]
-        if cur_shadow_input is None:
-            raise AssertionError("Expected cur_shadow_input to be non-None")
+        assert cur_shadow_input is not None
         cur_shadow_input.args = tree_map(
             maybe_remap_node_to_shadow, cur_shadow_input.args
         )
@@ -1045,8 +1018,7 @@ def _get_weight_info_from_shadow_wrapper(shadow_wrapper: torch.nn.Module):
         #  we have `w2_0`, and are navigating this subgraph
         #  to get `_input_scale_1` and `_input_zero_point_1`
 
-        if len(shadow_n.users) != 1:
-            raise AssertionError(f"Expected exactly 1, got {len(shadow_n.users)}")
+        assert len(shadow_n.users) == 1
         quant_node = next(iter(shadow_n.users.keys()))
         new_args: Any = None
         if quant_node.target == torch.quantize_per_channel:
@@ -1055,10 +1027,7 @@ def _get_weight_info_from_shadow_wrapper(shadow_wrapper: torch.nn.Module):
             zp_val = getattr_from_fqn(shadow_wrapper, zp_node.target)
             new_args = (scale_val, zp_val, axis, dtype)
         else:
-            if quant_node.target != torch.quantize_per_tensor:
-                raise AssertionError(
-                    f"Expected torch.quantize_per_tensor, but got {quant_node.target}"
-                )
+            assert quant_node.target == torch.quantize_per_tensor
             _weight, scale_node, zp_node, dtype = quant_node.args
             scale_val = getattr_from_fqn(shadow_wrapper, scale_node.target)
             zp_val = getattr_from_fqn(shadow_wrapper, zp_node.target)

@@ -30,7 +30,7 @@ class LinearReLU(nnqd.Linear):
         torch.Size([128, 30])
     """
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     _FLOAT_MODULE = nni.LinearReLU
 
     def __init__(

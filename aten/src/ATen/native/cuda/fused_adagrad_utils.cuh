@@ -52,7 +52,7 @@ struct FusedAdagradMathFunctor {
   using opmath_t = at::opmath_type<scalar_t>;
 
   C10_DEVICE __forceinline__ void operator()(
-      int64_t chunk_size,
+      int chunk_size,
       FusedOptimizerTensorListMetadata<3>& tl,
       const float* lr_ptr,
       const double& lr,

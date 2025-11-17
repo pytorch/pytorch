@@ -500,9 +500,9 @@ static void child_atfork() {
 
 bool THPEngine_initModule(PyObject* module) {
 #ifndef _WIN32
-  TORCH_CHECK(
-      pthread_atfork(nullptr, nullptr, child_atfork) == 0,
-      "unable to set pthread_atfork handler");
+  if (pthread_atfork(nullptr, nullptr, child_atfork) != 0) {
+    TORCH_CHECK(false, "unable to set pthread_atfork handler");
+  }
 #endif
   if (PyType_Ready(&THPEngineType) < 0)
     return false;

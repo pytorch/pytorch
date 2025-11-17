@@ -100,8 +100,8 @@ try:
 except ImportError:
     has_pytest = False
 
+
 SEED = 1234
-MI350_ARCH = ("gfx950",)
 MI300_ARCH = ("gfx942",)
 MI200_ARCH = ("gfx90a")
 NAVI_ARCH = ("gfx1030", "gfx1100", "gfx1101", "gfx1200", "gfx1201")
@@ -132,14 +132,6 @@ TEST_IN_SUBPROCESS = False
 TEST_SAVE_XML = ""
 UNITTEST_ARGS : list[str] = []
 USE_PYTEST = False
-
-def is_navi3_arch():
-    if torch.cuda.is_available():
-        prop = torch.cuda.get_device_properties(0)
-        gfx_arch = prop.gcnArchName.split(":")[0]
-        if gfx_arch in NAVI3_ARCH:
-            return True
-    return False
 
 def freeze_rng_state(*args, **kwargs):
     return torch.testing._utils.freeze_rng_state(*args, **kwargs)
@@ -699,7 +691,7 @@ class parametrize(_TestParametrizer):
             return f"{name}{idx}"
 
     def _default_subtest_name(self, idx, values):
-        return '_'.join([self._formatted_str_repr(idx, a, v) for a, v in zip(self.arg_names, values, strict=True)])
+        return '_'.join([self._formatted_str_repr(idx, a, v) for a, v in zip(self.arg_names, values)])
 
     def _get_subtest_name(self, idx, values, explicit_name=None):
         if explicit_name:
@@ -743,7 +735,7 @@ class parametrize(_TestParametrizer):
                     raise RuntimeError(f'Expected # values == # arg names, but got: {len(values)} '
                                        f'values and {len(self.arg_names)} names for test "{test.__name__}"')
 
-                param_kwargs = dict(zip(self.arg_names, values, strict=True))
+                param_kwargs = dict(zip(self.arg_names, values))
 
                 test_name = self._get_subtest_name(idx, values, explicit_name=maybe_name)
 
@@ -1258,7 +1250,7 @@ def run_tests(argv=None):
                 # use env vars so pytest-xdist subprocesses can still access them
                 os.environ['SLOW_TESTS_FILE'] = SLOW_TESTS_FILE
         else:
-            warnings.warn(f'slow test file provided but not found: {SLOW_TESTS_FILE}', stacklevel=2)
+            warnings.warn(f'slow test file provided but not found: {SLOW_TESTS_FILE}')
     if DISABLED_TESTS_FILE:
         if os.path.exists(DISABLED_TESTS_FILE):
             with open(DISABLED_TESTS_FILE) as fp:
@@ -1266,7 +1258,7 @@ def run_tests(argv=None):
                 disabled_tests_dict = json.load(fp)
                 os.environ['DISABLED_TESTS_FILE'] = DISABLED_TESTS_FILE
         else:
-            warnings.warn(f'disabled test file provided but not found: {DISABLED_TESTS_FILE}', stacklevel=2)
+            warnings.warn(f'disabled test file provided but not found: {DISABLED_TESTS_FILE}')
     # Determine the test launch mechanism
     if TEST_DISCOVER:
         _print_test_names()
@@ -2109,21 +2101,6 @@ def skipIfWindows(func=None, *, msg="test doesn't currently work on the Windows 
         return dec_fn(func)
     return dec_fn
 
-def skipIfWindowsXPU(func=None, *, msg="test doesn't currently work on the Windows stack"):
-    def dec_fn(fn):
-        reason = f"skipIfWindowsXPU: {msg}"
-
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            if IS_WINDOWS and torch.xpu.is_available():  # noqa: F821
-                raise unittest.SkipTest(reason)
-            else:
-                return fn(*args, **kwargs)
-        return wrapper
-    if func:
-        return dec_fn(func)
-    return dec_fn
-
 def requires_cuda_p2p_access():
     cuda_p2p_access_available = (
         torch.cuda.is_available()
@@ -2663,7 +2640,7 @@ class CudaMemoryLeakCheck:
                        f"and is now reported as {caching_allocator_mem_allocated} "  # type: ignore[possibly-undefined]
                        f"on device {i}. "
                        f"CUDA driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")  # type: ignore[possibly-undefined]
-                warnings.warn(msg, stacklevel=2)
+                warnings.warn(msg)
             elif caching_allocator_discrepancy and driver_discrepancy:  # type: ignore[possibly-undefined]
                 # A caching allocator discrepancy validated by the driver API is a
                 #   failure (except on ROCm, see below)
@@ -2757,7 +2734,7 @@ try:
         "pytorch_ci" if IS_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE', 'dev')
     )
 except ImportError:
-    warnings.warn('Fail to import hypothesis in common_utils, tests are not derandomized', ImportWarning, stacklevel=2)
+    warnings.warn('Fail to import hypothesis in common_utils, tests are not derandomized', ImportWarning)
 
 # Used in check_if_enable to see if a test method should be disabled by an issue,
 # sanitizes a test method name from appended suffixes by @dtypes parametrization.
@@ -3703,7 +3680,7 @@ class TestCase(expecttest.TestCase):
             n_compressed_dims, n_plain_dims = size[-1 - dense_dims] // blocksize1, size[-2 - dense_dims] // blocksize0
         blocknnz = nnz // (blocksize0 * blocksize1)
         sparse_tensors = [random_sparse_compressed(n_compressed_dims, n_plain_dims, blocknnz) for _ in range(n_batch)]
-        sparse_tensors_it = map(list, zip(*sparse_tensors, strict=True))
+        sparse_tensors_it = map(list, zip(*sparse_tensors))
 
         values = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, blocknnz, *blocksize, *dense_size)
         compressed_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
@@ -4265,7 +4242,7 @@ class TestCase(expecttest.TestCase):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
     def assertEqualTypeString(self, x, y) -> None:
-        # This API is used simulate deprecated x.type() is y.type()
+        # This API is used simulate deprecated x.type() == y.type()
         self.assertEqual(x.device, y.device)
         self.assertEqual(x.dtype, y.dtype)
         self.assertEqual(x.is_sparse, y.is_sparse)
@@ -4648,7 +4625,7 @@ def download_file(url, binary=True):
         return path
     except error.URLError as e:
         msg = f"could not download test file '{url}'"
-        warnings.warn(msg, RuntimeWarning, stacklevel=2)
+        warnings.warn(msg, RuntimeWarning)
         raise unittest.SkipTest(msg) from e
 
 def find_free_port():
@@ -5147,7 +5124,7 @@ def gradcheck(fn, inputs, **kwargs):
 
     for key, value in default_values.items():
         # default value override values explicitly set to None
-        k = kwargs.get(key)
+        k = kwargs.get(key, None)
         kwargs[key] = k if k is not None else value
 
     return torch.autograd.gradcheck(fn, inputs, **kwargs)
@@ -5167,7 +5144,7 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
 
     for key, value in default_values.items():
         # default value override values explicitly set to None
-        k = kwargs.get(key)
+        k = kwargs.get(key, None)
         kwargs[key] = k if k is not None else value
 
     return torch.autograd.gradgradcheck(fn, inputs, grad_outputs, **kwargs)
@@ -5744,17 +5721,17 @@ def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
         num_garbage_objs = len(garbage_objs)
         if num_garbage_objs > 0:
             warnings.warn(
-                f"{num_garbage_objs} tensors were found in the garbage. Did you introduce a reference cycle?", stacklevel=2
+                f"{num_garbage_objs} tensors were found in the garbage. Did you introduce a reference cycle?"
             )
             try:
                 import objgraph  # type: ignore[import-not-found,import-untyped]
                 warnings.warn(
-                    f"Dumping first {limit} objgraphs of leaked {matched_type}s rendered to png", stacklevel=2
+                    f"Dumping first {limit} objgraphs of leaked {matched_type}s rendered to png"
                 )
                 for g in garbage_objs[:limit]:
                     objgraph.show_backrefs([g], max_depth=10)
             except ImportError:
-                warnings.warn("`pip install objgraph` to enable memory leak debugging", stacklevel=2)
+                warnings.warn("`pip install objgraph` to enable memory leak debugging")
 
     finally:
         gc.set_debug(0)
@@ -5855,26 +5832,3 @@ def skipIfPythonVersionMismatch(predicate):
                 raise unittest.SkipTest("Python version mismatch")
         return wrap_fn
     return dec_fn
-
-# Decorator to patch multiple test class members for the duration of the subtest
-def patch_test_members(updates: dict[str, Any]):
-    def decorator(test_func):
-        @wraps(test_func)
-        def wrapper(self, *args, **kwargs):
-            # Store the original values of the specified members
-            original_values = {member: getattr(self, member) for member in updates}
-
-            # Update the members before running the subtest
-            for member, value in updates.items():
-                setattr(self, member, value)
-
-            # Run the test function, allowing subtests to run
-            try:
-                return test_func(self, *args, **kwargs)
-            finally:
-                # Restore the original values of the specified members after the subtest finishes
-                for member, original_value in original_values.items():
-                    setattr(self, member, original_value)
-
-        return wrapper
-    return decorator

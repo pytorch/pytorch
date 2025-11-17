@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.append(str(REPO_ROOT))
 
 from tools.test.heuristics.test_interface import TestTD
+from tools.testing.target_determination.determinator import TestPrioritizations
 from tools.testing.target_determination.heuristics.filepath import (
     file_matches_keyword,
     get_keywords,
@@ -21,7 +22,6 @@ from tools.testing.target_determination.heuristics.filepath import (
 from tools.testing.target_determination.heuristics.historical_class_failure_correlation import (
     HistoricalClassFailurCorrelation,
 )
-from tools.testing.target_determination.heuristics.interface import TestPrioritizations
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     get_previous_failures,
 )

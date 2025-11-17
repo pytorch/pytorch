@@ -255,34 +255,31 @@ class profile:
         self.custom_trace_id_callback = custom_trace_id_callback
         self.trace_id = ""
         if not self.use_cpu:
-            if not use_kineto:
-                raise AssertionError(
-                    "Device-only events supported only with Kineto (use_kineto=True)"
-                )
+            assert use_kineto, (
+                "Device-only events supported only with Kineto (use_kineto=True)"
+            )
 
         if self.use_device is not None:
             VALID_DEVICE_OPTIONS = ["cuda", "xpu", "mtia", "hpu"]
             if _get_privateuse1_backend_name() != "privateuseone":
                 VALID_DEVICE_OPTIONS.append(_get_privateuse1_backend_name())
             if self.use_device not in VALID_DEVICE_OPTIONS:
-                warn(
-                    f"The {self.use_device} is not a valid device option.", stacklevel=2
-                )
+                warn(f"The {self.use_device} is not a valid device option.")
                 self.use_device = None
 
             if self.use_device == "cuda" and not torch.cuda.is_available():
-                warn("CUDA is not available, disabling CUDA profiling", stacklevel=2)
+                warn("CUDA is not available, disabling CUDA profiling")
                 self.use_cuda = False
                 self.use_device = None
 
             if self.use_device == "xpu" and not torch.xpu.is_available():
-                warn("XPU is not available, disabling XPU profiling", stacklevel=2)
+                warn("XPU is not available, disabling XPU profiling")
                 self.use_device = None
 
             if self.use_device == "hpu" and not (
                 hasattr(torch, "hpu") and torch.hpu.is_available()
             ):
-                warn("HPU is not available, disabling HPU profiling", stacklevel=2)
+                warn("HPU is not available, disabling HPU profiling")
                 self.use_device = None
 
         self.kineto_activities = set()
@@ -292,44 +289,40 @@ class profile:
         self.profiler_kind = ProfilerState.KINETO
         if self.use_device == "cuda":
             if not use_kineto or ProfilerActivity.CUDA not in _supported_activities():
-                if not self.use_cpu:
-                    raise AssertionError("Legacy CUDA profiling requires use_cpu=True")
+                assert self.use_cpu, "Legacy CUDA profiling requires use_cpu=True"
                 self.profiler_kind = ProfilerState.KINETO_GPU_FALLBACK
             else:
                 self.kineto_activities.add(ProfilerActivity.CUDA)
         elif self.use_device == "xpu":
-            if not (use_kineto and ProfilerActivity.XPU in _supported_activities()):
-                raise AssertionError(
-                    "Legacy XPU profiling is not supported. Requires use_kineto=True on XPU devices."
-                )
+            assert use_kineto and ProfilerActivity.XPU in _supported_activities(), (
+                "Legacy XPU profiling is not supported. Requires use_kineto=True on XPU devices."
+            )
             self.kineto_activities.add(ProfilerActivity.XPU)
         elif self.use_device == "mtia":
-            if not (use_kineto and ProfilerActivity.MTIA in _supported_activities()):
-                raise AssertionError(
-                    "Legacy MTIA profiling is not supported. Requires use_kineto=True on MTIA devices."
-                )
+            assert use_kineto and ProfilerActivity.MTIA in _supported_activities(), (
+                "Legacy MTIA profiling is not supported. Requires use_kineto=True on MTIA devices."
+            )
             self.kineto_activities.add(ProfilerActivity.MTIA)
         elif self.use_device == "hpu":
-            if not (use_kineto and ProfilerActivity.HPU in _supported_activities()):
-                raise AssertionError(
-                    "Legacy HPU profiling is not supported. Requires use_kineto=True on HPU devices."
-                )
+            assert use_kineto and ProfilerActivity.HPU in _supported_activities(), (
+                "Legacy HPU profiling is not supported. Requires use_kineto=True on HPU devices."
+            )
             self.kineto_activities.add(ProfilerActivity.HPU)
         elif self.use_device is not None and self.use_device != "privateuseone":
             if (
                 not use_kineto
                 or ProfilerActivity.PrivateUse1 not in _supported_activities()
             ):
-                if not self.use_cpu:
-                    raise AssertionError(
-                        "Legacy custombackend profiling requires use_cpu=True"
-                    )
+                assert self.use_cpu, (
+                    "Legacy custombackend profiling requires use_cpu=True"
+                )
                 self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
             else:
                 self.kineto_activities.add(ProfilerActivity.PrivateUse1)
 
-        if len(self.kineto_activities) == 0:
-            raise AssertionError("No activities specified for the profiler")
+        assert len(self.kineto_activities) > 0, (
+            "No activities specified for the profiler"
+        )
 
     def default_trace_id(self):
         # Generate a UUID
@@ -479,8 +472,7 @@ class profile:
         top_level_events_only=False,
     ):
         self._ensure_function_events()
-        if self._function_events is None:
-            raise AssertionError("Expected profiling results")
+        assert self._function_events is not None
         return self._function_events.table(
             sort_by=sort_by,
             row_limit=row_limit,
@@ -508,10 +500,8 @@ class profile:
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
         self._ensure_function_events()
-        if self._function_events is None:
-            raise AssertionError("Expected profiling results")
-        if not self.with_stack:
-            raise AssertionError("export_stacks() requires with_stack=True")
+        assert self._function_events is not None, "Expected profiling results"
+        assert self.with_stack, "export_stacks() requires with_stack=True"
         return self._function_events.export_stacks(path, metric)
 
     def toggle_collection_dynamic(
@@ -529,8 +519,7 @@ class profile:
         group_by_overload_name=False,
     ):
         self._ensure_function_events()
-        if self._function_events is None:
-            raise AssertionError("Expected profiling results")
+        assert self._function_events is not None, "Expected profiling results"
         return self._function_events.key_averages(
             group_by_input_shape, group_by_stack_n, group_by_overload_name
         )
@@ -539,8 +528,7 @@ class profile:
 
     def total_average(self):
         self._ensure_function_events()
-        if self._function_events is None:
-            raise AssertionError("Expected profiling results")
+        assert self._function_events is not None, "Expected profiling results"
         return self._function_events.total_average()
 
     total_average.__doc__ = EventList.total_average.__doc__
@@ -552,8 +540,7 @@ class profile:
         The total time is a sum of all self times across all the events.
         """
         self._ensure_function_events()
-        if self._function_events is None:
-            raise AssertionError("Expected profiling results")
+        assert self._function_events is not None
         return self._function_events.self_cpu_time_total
 
     def _parse_kineto_results(self, result: _ProfilerResult):
@@ -809,8 +796,7 @@ class record_function(_ContextDecorator):
 
         # Local variable is needed by TorchScript to refine Optional[T] to T
         record = self.record
-        if record is None:
-            raise AssertionError("Expected record to be set")
+        assert record is not None
 
         # TODO: Too slow with __torch_function__ handling enabled
         # See https://github.com/pytorch/pytorch/issues/76410
@@ -847,8 +833,7 @@ class record_function(_ContextDecorator):
 
         # Local variable is needed by TorchScript to refine Optional[T] to T
         record = self.record
-        if record is None:
-            raise AssertionError("Expected record to be set")
+        assert record is not None
 
         # TODO: Too slow with __torch_function__ handling enabled
         # See https://github.com/pytorch/pytorch/issues/76410
@@ -1139,8 +1124,7 @@ def parse_nvprof_trace(path):
     for row in conn.execute(kernel_query):
         unique.see(row["marker_id"], row["runtime_id"])
         # 211 is cudaKernelLaunch for cuda >= 9.2
-        if row["cbid"] != 211:
-            raise AssertionError(f"Expected cbid to be 211, but got {row['cbid']}")
+        assert row["cbid"] == 211
         evt = functions_map[row["marker_id"]]
         evt.append_kernel(
             row["kernel_name"], 0, row["kernel_end"] - row["kernel_start"]
@@ -1226,10 +1210,9 @@ class KinetoStepTracker:
             if delta > 1:
                 warn(
                     "Profiler step count has increased more than 1 - "
-                    f"current_step = {cls._current_step} step dict =  {cls._step_dict}",
-                    stacklevel=2,
+                    f"current_step = {cls._current_step} step dict =  {cls._step_dict}"
                 )
-            for _ in range(delta):
+            for _ in range(0, delta):
                 _kineto_step()
             cls._current_step = new_step
         return cls._current_step

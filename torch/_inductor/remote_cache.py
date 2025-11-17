@@ -160,7 +160,6 @@ class RemoteCache(Generic[_T]):
             self.backend = override_cls()
         else:
             self.backend = backend
-        # pyrefly: ignore [invalid-type-var]
         self.serde = serde
 
     # See if the cache contains `key`. Returns `None` if the value is not
@@ -246,7 +245,6 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
     A Redis implementation of a remote/distributed cache.
     """
 
-    # pyrefly: ignore [missing-attribute]
     _redis: Optional[redis.Redis] = None
 
     def __init__(self, cache_id: str) -> None:
@@ -269,9 +267,7 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
             return None
 
         try:
-            # pyrefly: ignore [missing-attribute]
             value = self._redis.get(key)
-        # pyrefly: ignore [missing-attribute]
         except redis.exceptions.ConnectionError:
             # Redis is lazy and doesn't actually attempt to connect until the
             # first use. Mark is as unavailable now.
@@ -289,9 +285,7 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
             return
 
         try:
-            # pyrefly: ignore [missing-attribute]
             self._redis.set(key, data)
-        # pyrefly: ignore [missing-attribute]
         except redis.exceptions.ConnectionError:
             # Redis is lazy and doesn't actually attempt to connect until the
             # first use. Mark is as unavailable now.

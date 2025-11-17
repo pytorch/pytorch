@@ -112,7 +112,7 @@ using make_offset_index_sequence =
  * 2>());
  */
 template <class Tuple, size_t... Is>
-constexpr auto tuple_elements(Tuple t, std::index_sequence<Is...> /*unused*/) {
+constexpr auto tuple_elements(Tuple t, std::index_sequence<Is...>) {
   return std::tuple<std::tuple_element_t<Is, Tuple>...>(std::get<Is>(t)...);
 }
 
@@ -209,7 +209,7 @@ auto tuple_map(
     // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     std::tuple<Args...>&& tuple,
     const Mapper& mapper,
-    std::index_sequence<Indices...> /*unused*/) {
+    std::index_sequence<Indices...>) {
   return std::tuple<decltype(mapper(std::forward<Args>(std::get<Indices>(
       tuple))))...>(mapper(std::forward<Args>(std::get<Indices>(tuple)))...);
 }

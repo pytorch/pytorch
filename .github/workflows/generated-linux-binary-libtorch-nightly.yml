@@ -248,74 +248,6 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  libtorch-cuda12_9-shared-with-deps-release-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: libtorch
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: libtorch-cxx11-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      LIBTORCH_CONFIG: release
-      LIBTORCH_VARIANT: shared-with-deps
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: libtorch-cuda12_9-shared-with-deps-release
-      build_environment: linux-binary-libtorch
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-cuda12_9-shared-with-deps-release-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs:
-      - libtorch-cuda12_9-shared-with-deps-release-build
-      - get-label-type
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: libtorch
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: libtorch-cxx11-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      LIBTORCH_CONFIG: release
-      LIBTORCH_VARIANT: shared-with-deps
-      build_name: libtorch-cuda12_9-shared-with-deps-release
-      build_environment: linux-binary-libtorch
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu # 12.8+ builds need sm_70+ runner
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-cuda12_9-shared-with-deps-release-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: libtorch-cuda12_9-shared-with-deps-release-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: libtorch
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: libtorch-cxx11-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      LIBTORCH_CONFIG: release
-      LIBTORCH_VARIANT: shared-with-deps
-      build_name: libtorch-cuda12_9-shared-with-deps-release
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
-
   libtorch-cuda13_0-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
@@ -426,9 +358,6 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -544,9 +473,6 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm7.0
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm

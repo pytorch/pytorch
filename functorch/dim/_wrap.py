@@ -5,7 +5,7 @@ Python implementation of function wrapping functionality for functorch.dim.
 from __future__ import annotations
 
 import functools
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional
 
 import torch
 from torch.utils._pytree import tree_map
@@ -13,10 +13,6 @@ from torch.utils._pytree import tree_map
 from ._dim_entry import DimEntry
 from ._enable_all_layers import EnableAllLayers
 from ._tensor_info import TensorInfo
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 
 def handle_from_tensor(tensor: torch.Tensor) -> torch.Tensor:

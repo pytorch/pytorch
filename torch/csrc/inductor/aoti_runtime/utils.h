@@ -40,7 +40,7 @@ namespace torch::aot_inductor {
 
 using DeleterFnPtr = void (*)(void*);
 
-inline void noop_deleter(void* /*unused*/) {}
+inline void noop_deleter(void*) {}
 
 inline void delete_record_function_object(void* ptr) {
   AOTI_TORCH_ERROR_CODE_CHECK(aoti_record_function_end(

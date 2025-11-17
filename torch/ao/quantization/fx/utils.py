@@ -4,9 +4,8 @@ import functools
 import operator
 import warnings
 from collections import namedtuple
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -164,7 +163,7 @@ def get_qconv_prepack_op(conv_op: Callable) -> Callable:
         torch.nn.functional.conv_transpose2d: torch.ops.quantized.conv_transpose2d_prepack,
         torch.nn.functional.conv_transpose3d: torch.ops.quantized.conv_transpose3d_prepack,
     }
-    prepack_op = prepack_ops.get(conv_op)
+    prepack_op = prepack_ops.get(conv_op, None)
     assert prepack_op, f"Didn't find prepack op for {conv_op}"
     return prepack_op
 
@@ -704,7 +703,7 @@ def _maybe_get_custom_module_lstm_from_node_arg(
         return a.op == "call_function" and a.target == operator.getitem
 
     def match_tuple(a):
-        return a.op == "call_function" and a.target is tuple
+        return a.op == "call_function" and a.target == tuple
 
     def _match_pattern(match_pattern: list[Callable]) -> Optional[Node]:
         """
@@ -721,7 +720,7 @@ def _maybe_get_custom_module_lstm_from_node_arg(
                     a = a.args[0][0]  # type: ignore[assignment,index]
                 else:
                     a = a.args[0]  # type: ignore[assignment]
-        # pyrefly: ignore [bad-return]
+        # pyrefly: ignore  # bad-return
         return a
 
     all_match_patterns = [
@@ -797,7 +796,7 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
 
         # Iterate through users of this node to find tuple/getitem nodes to match
         for user in node.users:
-            if user.op == "call_function" and user.target is tuple:
+            if user.op == "call_function" and user.target == tuple:
                 for i, user_arg in enumerate(user.args[0]):  # type: ignore[arg-type]
                     if user_arg == node:
                         index_stack.append(i)
@@ -826,7 +825,7 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
     for pattern in matched_patterns:
         first_tuple = pattern[0]
         last_getitem = pattern[-1]
-        assert first_tuple.op == "call_function" and first_tuple.target is tuple
+        assert first_tuple.op == "call_function" and first_tuple.target == tuple
         assert (
             last_getitem.op == "call_function"
             and last_getitem.target == operator.getitem
@@ -890,8 +889,7 @@ def _qconfig_satisfies_dtype_config_constraints(
         if backend_quant_min is not None and backend_quant_max is not None:
             if app_quant_min is None or app_quant_max is None:
                 warnings.warn(
-                    f"QConfig {debug_string} must specify 'quant_min' and 'quant_max', ignoring {qconfig}",
-                    stacklevel=2,
+                    f"QConfig {debug_string} must specify 'quant_min' and 'quant_max', ignoring {qconfig}"
                 )
                 return False
             elif app_quant_min < backend_quant_min or app_quant_max > backend_quant_max:
@@ -899,23 +897,20 @@ def _qconfig_satisfies_dtype_config_constraints(
                     f"QConfig {debug_string} quantization range must fall within the backend's:\n"
                     f"QConfig range = ({app_quant_min}, {app_quant_max}), "
                     f"BackendConfig range = ({backend_quant_min}, {backend_quant_max}), "
-                    f"ignoring {qconfig}",
-                    stacklevel=2,
+                    f"ignoring {qconfig}"
                 )
                 return False
         # check scale min
         if backend_scale_min is not None:
             if app_scale_min is None:
                 warnings.warn(
-                    f"QConfig {debug_string} must specify 'eps', ignoring {qconfig}",
-                    stacklevel=2,
+                    f"QConfig {debug_string} must specify 'eps', ignoring {qconfig}"
                 )
                 return False
             if app_scale_min < backend_scale_min:
                 warnings.warn(
                     f"QConfig {debug_string} eps ({app_scale_min}) must be greater than or equal to "
-                    f"the backend's min scale value ({backend_scale_min}), ignoring {qconfig}",
-                    stacklevel=2,
+                    f"the backend's min scale value ({backend_scale_min}), ignoring {qconfig}"
                 )
                 return False
         # check fixed scale and zero point
@@ -939,8 +934,7 @@ def _qconfig_satisfies_dtype_config_constraints(
             ) and not isinstance(activation_post_process, FixedQParamsFakeQuantize):
                 warnings.warn(
                     f"QConfig must specify a FixedQParamsObserver or a FixedQParamsFakeQuantize "
-                    f"for fixed qparams ops, ignoring {qconfig}.\n{suggestion_str}",
-                    stacklevel=2,
+                    f"for fixed qparams ops, ignoring {qconfig}.\n{suggestion_str}"
                 )
                 return False
             if (
@@ -950,8 +944,7 @@ def _qconfig_satisfies_dtype_config_constraints(
                 warnings.warn(
                     f"QConfig fixed scale ({observer.scale}) and zero point ({observer.zero_point}) "
                     f"do not match the backend's ({backend_scale_exact_match} and {backend_zero_point_exact_match}), "
-                    f"ignoring {qconfig}.\n{suggestion_str}",
-                    stacklevel=2,
+                    f"ignoring {qconfig}.\n{suggestion_str}"
                 )
                 return False
         return True

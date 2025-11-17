@@ -163,7 +163,6 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
             ) -> None:
                 self.example_inputs = example_inputs
                 self.ast = ast.parse(self.source)
-                # pyrefly: ignore [missing-attribute]
                 self.visit(self.ast)
 
         cc = int(cuda_env.get_cuda_arch())

@@ -301,7 +301,7 @@ def repro_load_args(load_args: Any, save_dir: Optional[str]) -> tuple[Any]:
 def repro_common(
     options: Any, exported_program: ExportedProgram
 ) -> tuple[torch.fx.GraphModule, Any, Any]:
-    # pyrefly: ignore [bad-assignment]
+    # pyrefly: ignore  # bad-assignment
     torch._inductor.config.generate_intermediate_hooks = True
     mod = exported_program.module(check_guards=False)
     args, kwargs = exported_program.example_inputs
@@ -423,7 +423,7 @@ def repro_minify(
     ) -> bool:
         # Need to export first so the in_spec and out_spec are populated
         tuple_inputs = tuple(flat_example_inputs)
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         gm = export_for_aoti_minifier(
             gm, tuple_inputs, strict=strict, skip_export_error=skip_export_error
         )

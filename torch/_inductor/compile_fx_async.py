@@ -9,7 +9,7 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 from torch._inductor.output_code import CompiledFxGraphConstants, OutputCode
 
 from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile
-from .output_code import complex_memory_overlap  # noqa: F401
+from .output_code import complex_memory_overlap as complex_memory_overlap  # noqa: F401
 
 
 # When async compile works with cache, remove the disabling below

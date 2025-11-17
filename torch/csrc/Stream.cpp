@@ -74,7 +74,7 @@ static PyObject* THPStream_pynew(
     return nullptr;
   }
 
-  THPStream* self = reinterpret_cast<THPStream*>(ptr.get());
+  THPStream* self = (THPStream*)ptr.get();
 
   // If torch.Stream is not created from existing Stream, then create a new one.
   // It requires other device backends override getNewStream method. How the new
@@ -96,7 +96,7 @@ static PyObject* THPStream_pynew(
   self->device_type = static_cast<int64_t>(stream_opt->device_type());
   self->context = nullptr;
 
-  return static_cast<PyObject*>(ptr.release());
+  return (PyObject*)ptr.release();
   END_HANDLE_TH_ERRORS
 }
 
@@ -108,7 +108,7 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
     throw python_error();
   }
 
-  THPStream* self = reinterpret_cast<THPStream*>(ptr.get());
+  THPStream* self = (THPStream*)ptr.get();
   self->stream_id = stream.id();
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   self->device_index = static_cast<int64_t>(stream.device_index());
@@ -119,7 +119,7 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
 }
 
 static void THPStream_dealloc(THPStream* self) {
-  Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
+  Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
 static PyObject* THPStream_get_device(THPStream* self, void* unused) {
@@ -132,7 +132,7 @@ static PyObject* THPStream_get_device(THPStream* self, void* unused) {
 
 static PyObject* THPStream_query(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = reinterpret_cast<THPStream*>(_self);
+  auto self = (THPStream*)_self;
 
   return PyBool_FromLong(c10::Stream::unpack3(
                              self->stream_id,
@@ -146,7 +146,7 @@ static PyObject* THPStream_query(PyObject* _self, PyObject* noargs) {
 static PyObject* THPStream_synchronize(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
-    auto self = reinterpret_cast<THPStream*>(_self);
+    auto self = (THPStream*)_self;
 
     c10::Stream::unpack3(
         self->stream_id,
@@ -160,8 +160,8 @@ static PyObject* THPStream_synchronize(PyObject* _self, PyObject* noargs) {
 
 static PyObject* THPStream_wait_event(PyObject* _self, PyObject* _event) {
   HANDLE_TH_ERRORS {
-    auto self = reinterpret_cast<THPStream*>(_self);
-    auto event = reinterpret_cast<THPEvent*>(_event);
+    auto self = (THPStream*)_self;
+    auto event = (THPEvent*)_event;
     c10::Stream::unpack3(
         self->stream_id,
         static_cast<c10::DeviceIndex>(self->device_index),
@@ -174,8 +174,8 @@ static PyObject* THPStream_wait_event(PyObject* _self, PyObject* _event) {
 
 static PyObject* THPStream_wait_stream(PyObject* _self, PyObject* _other) {
   HANDLE_TH_ERRORS {
-    auto self = reinterpret_cast<THPStream*>(_self);
-    auto other_stream = reinterpret_cast<THPStream*>(_other);
+    auto self = (THPStream*)_self;
+    auto other_stream = (THPStream*)_other;
     c10::Event new_event(
         static_cast<c10::DeviceType>(other_stream->device_type),
         c10::EventFlag::PYTORCH_DEFAULT);
@@ -198,7 +198,7 @@ static PyObject* THPStream_record_event(
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  auto self = reinterpret_cast<THPStream*>(_self);
+  auto self = (THPStream*)_self;
   PyObject* _new_event = nullptr;
   PyObject* _event = Py_None;
 
@@ -222,13 +222,13 @@ static PyObject* THPStream_record_event(
         static_cast<c10::DeviceType>(self->device_type),
         c10::EventFlag::PYTORCH_DEFAULT);
   }
-  auto new_event = reinterpret_cast<THPEvent*>(_new_event);
+  auto new_event = (THPEvent*)_new_event;
   TORCH_CHECK(new_event, "event must not be null");
   new_event->event.record(c10::Stream::unpack3(
       self->stream_id,
       static_cast<c10::DeviceIndex>(self->device_index),
       static_cast<c10::DeviceType>(self->device_type)));
-  return reinterpret_cast<PyObject*>(new_event);
+  return (PyObject*)new_event;
   END_HANDLE_TH_ERRORS
 }
 
@@ -260,7 +260,7 @@ static PyObject* THPStream_eq(THPStream* self, THPStream* other) {
 
 static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   HANDLE_TH_ERRORS
-  auto self = reinterpret_cast<THPStream*>(_self);
+  auto self = (THPStream*)_self;
   c10::DeviceType stream_device_type =
       static_cast<c10::DeviceType>(self->device_type);
   // No operation is performed if the stream does not belong to an accelerator.
@@ -304,7 +304,7 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
 
 static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   HANDLE_TH_ERRORS
-  auto self = reinterpret_cast<THPStream*>(_self);
+  auto self = (THPStream*)_self;
   // No operation is performed if the stream does not belong to an accelerator.
   if (C10_UNLIKELY(!at::accelerator::isAccelerator(
           static_cast<c10::DeviceType>(self->device_type)))) {
@@ -323,7 +323,7 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   auto ctx_device_index = THPObjectPtr(py_device_index);
   TORCH_INTERNAL_ASSERT(
       ctx_stream.get(), "ctx_stream should be present on the context dict.");
-  auto prev_stream = reinterpret_cast<THPStream*>(ctx_stream.get());
+  auto prev_stream = (THPStream*)(ctx_stream.get());
   TORCH_INTERNAL_ASSERT(
       ctx_device_index.get(),
       "ctx_device_index should be present on the context dict.");
@@ -360,14 +360,10 @@ static PyObject* THPStream_richcompare(
   } else {
     switch (op) {
       case Py_EQ:
-        result = THPStream_eq(
-            reinterpret_cast<THPStream*>(self),
-            reinterpret_cast<THPStream*>(other));
+        result = THPStream_eq((THPStream*)self, (THPStream*)other);
         break;
       case Py_NE:
-        result = THPStream_ne(
-            reinterpret_cast<THPStream*>(self),
-            reinterpret_cast<THPStream*>(other));
+        result = THPStream_ne((THPStream*)self, (THPStream*)other);
         break;
       default:
         result = Py_False;
@@ -397,11 +393,7 @@ static const std::initializer_list<PyMemberDef> THPStream_members = {
     {nullptr}};
 
 static const std::initializer_list<PyGetSetDef> THPStream_properties = {
-    {"device",
-     reinterpret_cast<getter>(THPStream_get_device),
-     nullptr,
-     nullptr,
-     nullptr},
+    {"device", (getter)THPStream_get_device, nullptr, nullptr, nullptr},
     {nullptr}};
 
 static const std::initializer_list<PyMethodDef> THPStream_methods = {
@@ -413,7 +405,7 @@ static const std::initializer_list<PyMethodDef> THPStream_methods = {
      castPyCFunctionWithKeywords(THPStream_record_event),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {"__eq__", reinterpret_cast<PyCFunction>(THPStream_eq), METH_O, nullptr},
+    {"__eq__", (PyCFunction)THPStream_eq, METH_O, nullptr},
     {"__enter__", THPStream_enter, METH_NOARGS, nullptr},
     {"__exit__", THPStream_exit, METH_VARARGS, nullptr},
     {nullptr}};
@@ -423,16 +415,16 @@ static PyTypeObject THPStreamType = {
     "torch.Stream", /* tp_name */
     sizeof(THPStream), /* tp_basicsize */
     0, /* tp_itemsize */
-    reinterpret_cast<destructor>(THPStream_dealloc), /* tp_dealloc */
+    (destructor)THPStream_dealloc, /* tp_dealloc */
     0, /* tp_vectorcall_offset */
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
-    reinterpret_cast<reprfunc>(THPStream_repr), /* tp_repr */
+    (reprfunc)THPStream_repr, /* tp_repr */
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
-    reinterpret_cast<hashfunc>(THPStream_hash), /* tp_hash  */
+    (hashfunc)THPStream_hash, /* tp_hash  */
     nullptr, /* tp_call */
     nullptr, /* tp_str */
     nullptr, /* tp_getattro */
@@ -470,8 +462,7 @@ void THPStream_init(PyObject* module) {
     throw python_error();
   }
   Py_INCREF(&THPStreamType);
-  if (PyModule_AddObject(
-          module, "Stream", reinterpret_cast<PyObject*>(&THPStreamType)) < 0) {
+  if (PyModule_AddObject(module, "Stream", (PyObject*)&THPStreamType) < 0) {
     throw python_error();
   }
 }

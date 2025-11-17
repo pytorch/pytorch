@@ -87,14 +87,14 @@ struct FunctionExtractor {
       const std::shared_ptr<Graph>& graph);
 
   static void HandleNoScopeNodes(
-      scope_ctx_map& /*scope_ctxs*/,
+      scope_ctx_map&,
       const node_list& no_scope_nlist);
   std::tuple<scope_ctx_map, node_list> PartitionNodesByScope(Block* b);
   scope_ctx_map PartitionNodesByScope(const std::shared_ptr<Graph>& graph);
   static std::unordered_map<ScopePtr, scope_list> PartitionIdenticalScopes(
       scope_ctx_map& scope_ctxs);
   static scope_list SortScopesByMaxDepth(
-      std::unordered_map<ScopePtr, scope_list>& /*identical_scope_map*/);
+      std::unordered_map<ScopePtr, scope_list>&);
   Node* CreateFunctionDefNode(
       FunctionContext& func_ctx,
       const std::shared_ptr<Graph>& graph,
@@ -107,7 +107,7 @@ struct FunctionExtractor {
       const std::string& domain_name,
       const std::string& func_name);
 
-  static void DebugPrintScopeContexts(const scope_ctx_map& /*scope_ctxs*/);
+  static void DebugPrintScopeContexts(const scope_ctx_map&);
   static void DebugPrintGraphWithFunction(const std::shared_ptr<Graph>& g);
   static void DebugPrintConstantDiff(const FunctionContext&);
 

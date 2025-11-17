@@ -334,12 +334,12 @@ sympy==1.13.3
 #Pinned versions:
 #test that import:
 
-onnx==1.19.1
+onnx==1.18.0
 #Description: Required by onnx tests, and mypy and test_public_bindings.py when checking torch.onnx._internal
 #Pinned versions:
 #test that import:
 
-onnxscript==0.5.4
+onnxscript==0.5.3
 #Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
 #Pinned versions:
 #test that import:

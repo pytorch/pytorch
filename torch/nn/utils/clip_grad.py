@@ -41,11 +41,11 @@ def _no_grad(func: Callable[_P, _R]) -> Callable[_P, _R]:
 
     def _no_grad_wrapper(*args, **kwargs):
         with torch.no_grad():
-            # pyrefly: ignore [invalid-param-spec]
+            # pyrefly: ignore  # invalid-param-spec
             return func(*args, **kwargs)
 
     functools.update_wrapper(_no_grad_wrapper, func)
-    # pyrefly: ignore [bad-return]
+    # pyrefly: ignore  # bad-return
     return _no_grad_wrapper
 
 
@@ -283,7 +283,6 @@ def clip_grad_value_(
     clip_value = float(clip_value)
 
     grads = [p.grad for p in parameters if p.grad is not None]
-    # pyrefly: ignore [bad-argument-type]
     grouped_grads = _group_tensors_by_device_and_dtype([grads])
 
     for (device, _), ([grads], _) in grouped_grads.items():

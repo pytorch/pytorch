@@ -5,10 +5,9 @@ This module provides decorators and utilities for controlling TorchDynamo's beha
 import functools
 import inspect
 import weakref
-from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, Optional, overload, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -96,7 +95,7 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
             nonrecursive_disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_disable_msg = reason  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
-            # pyrefly: ignore [bad-return]
+            # pyrefly: ignore  # bad-return
             return nonrecursive_disable_wrapper
 
         if fn is None:
@@ -316,7 +315,7 @@ def forbid_in_graph(fn: Any) -> Any:
     if isinstance(fn, (list, tuple)):
         return [forbid_in_graph(x) for x in fn]
     assert callable(fn), "forbid_in_graph applies only to callables"
-    # pyrefly: ignore [missing-attribute]
+    # pyrefly: ignore  # missing-attribute
     fn._dynamo_forbidden = True
     return fn
 
@@ -493,16 +492,10 @@ def substitute_in_graph(
         def dispatch_fn(
             self: VariableBuilder, value: Callable[_P, _R]
         ) -> PolyfilledFunctionVariable:
-            if inspect.isclass(value):
-                guard_type = GuardBuilder.CLASS_MATCH
-            elif inspect.ismodule(value):
-                guard_type = GuardBuilder.MODULE_MATCH
-            else:
-                guard_type = GuardBuilder.ID_MATCH
             return PolyfilledFunctionVariable(
                 value,
                 source=self.source,
-                **self.install_guards(guard_type),
+                **self.install_guards(GuardBuilder.FUNCTION_MATCH),
             )
 
         id_dispatch_map[id(original_fn)] = id_dispatch_map[id(wrapped)] = dispatch_fn
@@ -670,28 +663,28 @@ def mark_dynamic(
 
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_dynamic_indices"):
-            # pyrefly: ignore [missing-attribute]
+            # pyrefly: ignore  # missing-attribute
             t._dynamo_dynamic_indices = set()
-            # pyrefly: ignore [missing-attribute]
+            # pyrefly: ignore  # missing-attribute
             t._dynamo_dynamic_range = set()
-            # pyrefly: ignore [missing-attribute]
+            # pyrefly: ignore  # missing-attribute
             t._dynamo_hint_overrides = {}
 
         if not hasattr(t, "_specialize_on"):
-            # pyrefly: ignore [missing-attribute]
+            # pyrefly: ignore  # missing-attribute
             t._specialize_on = {}
 
         if hint_override:
-            # pyrefly: ignore [missing-attribute]
+            # pyrefly: ignore  # missing-attribute
             t._dynamo_hint_overrides[index] = hint_override
         # TODO(voz): Should we bounds check?
-        # pyrefly: ignore [missing-attribute]
+        # pyrefly: ignore  # missing-attribute
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))  # type: ignore[arg-type]
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
         # TypeError: 'Attribute' object does not support item assignment
-        # pyrefly: ignore [missing-attribute]
+        # pyrefly: ignore  # missing-attribute
         if isinstance(t._specialize_on, dict):
             t._specialize_on[index] = specialize_on if specialize_on is not None else []
 
@@ -716,10 +709,10 @@ def maybe_mark_dynamic(t: Any, index: Union[int, list[Any], tuple[Any]]) -> None
 
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_weak_dynamic_indices"):
-            # pyrefly: ignore [missing-attribute]
+            # pyrefly: ignore  # missing-attribute
             t._dynamo_weak_dynamic_indices = set()
         # TODO(voz): Should we bounds check?
-        # pyrefly: ignore [missing-attribute]
+        # pyrefly: ignore  # missing-attribute
         t._dynamo_weak_dynamic_indices.add(index)
         return
 
@@ -771,11 +764,11 @@ def mark_static(
         # TODO: Make this configurable via a supported public API
         _apply_func_to_inner_tensors_of_same_dim(mark_static, t, index)
 
-    # pyrefly: ignore [bad-argument-type]
+    # pyrefly: ignore  # bad-argument-type
     if not isinstance(t, torch.Tensor) and issubclass(t, torch.nn.Module):
-        # pyrefly: ignore [missing-attribute]
+        # pyrefly: ignore  # missing-attribute
         t._dynamo_marked_static = True
-        # pyrefly: ignore [bad-return]
+        # pyrefly: ignore  # bad-return
         return t
 
     if not isinstance(t, torch.Tensor):

@@ -231,13 +231,6 @@ class TuningProcess:
             self.process.kill()
         self.close()
 
-    def restart(self) -> None:
-        """
-        Gracefully restarts the child process.
-        """
-        self.shutdown(wait=True)
-        self.start()
-
 
 class TuningProcessPool:
     """
@@ -318,16 +311,11 @@ class TuningProcessPool:
             )
             # Set to INF so this choice will be ignored
             return float("inf")
-        except Exception as process_exception:
+        except Exception:
             warnings.warn(
                 f"Failed to benchmark choice '{choice}'. It will be ignored. "
                 "Please debug the root cause in case the choice can bring perf gains."
             )
-            # An unspecified launch failure (cudaErrorLaunchFailure) corrupts the
-            # CUDA context, making it unrecoverable. All subsequent CUDA calls will
-            # fail as well. The process must be restarted to restore CUDA functionality.
-            if "cudaErrorLaunchFailure" in str(process_exception):
-                process.restart()
             # Set to INF so this choice will be ignored
             return float("inf")
         finally:

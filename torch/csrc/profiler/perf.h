@@ -88,7 +88,7 @@ class PerfProfiler {
 
   /* Disable counting and fill in the caller supplied container with delta
    * calculated from the start count values since last Enable() */
-  void Disable(perf_counters_t& /*vals*/);
+  void Disable(perf_counters_t&);
 
  private:
   uint64_t CalcDelta(uint64_t start, uint64_t end) const;

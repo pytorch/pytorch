@@ -16,9 +16,9 @@ computations.
 """
 
 import collections
-from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
+from collections.abc import ItemsView, KeysView, Sequence, ValuesView
 from enum import Enum
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
@@ -634,11 +634,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 # 1. one forgot to pass in a source
                 # 2. `mutation_type` is incorrect
                 assert source is not None
-
-
-def raise_type_error_exc(tx: "InstructionTranslator", msg_str: str) -> None:
-    msg = variables.ConstantVariable.create(msg_str)
-    raise_observed_exception(TypeError, tx, args=[msg])
 
 
 def typestr(*objs):

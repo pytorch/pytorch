@@ -60,7 +60,7 @@ class MapperMapDataPipe(MapDataPipe[_T_co]):
         self.fn = fn  # type: ignore[assignment]
 
     def __len__(self) -> int:
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         return len(self.datapipe)
 
     def __getitem__(self, index) -> _T_co:

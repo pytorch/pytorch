@@ -18,7 +18,7 @@ extern std::atomic<const MetalInterface*> g_metal_impl_registry;
 
 class MetalImplRegistrar {
  public:
-  explicit MetalImplRegistrar(MetalInterface* /*impl*/);
+  explicit MetalImplRegistrar(MetalInterface*);
 };
 
 at::Tensor& metal_copy_(at::Tensor& self, const at::Tensor& src);

@@ -96,7 +96,6 @@ class FSDPState(_State):
         for module in modules:
             _insert_module_state(module, self)
         self._modules = modules
-        # pyrefly: ignore [read-only]
         self._device = device
         self._device_handle = _get_device_handle(device.type)
         self._mp_policy = mp_policy
@@ -203,8 +202,7 @@ class FSDPState(_State):
 
     def _init_fqns(self) -> None:
         """Sets module and parameter FQN attributes for debugging."""
-        if not self._is_root:
-            raise AssertionError("Expected _is_root to be True")
+        assert self._is_root
         root_module = self._modules[0]
         param_to_fsdp_param: dict[nn.Parameter, FSDPParam] = {}
         module_to_fsdp_param_group: dict[nn.Module, FSDPParamGroup] = {}
@@ -223,10 +221,7 @@ class FSDPState(_State):
                 if module_fqn is None:
                     module_to_fsdp_param_group[module]._module_fqn = module_name
                 else:
-                    if not isinstance(module_fqn, str):
-                        raise AssertionError(
-                            f"Expected module_fqn to be str, got {type(module_fqn)}: {module_fqn}"
-                        )
+                    assert isinstance(module_fqn, str), f"{module_fqn}"
                     module_fqn += f", {module_name}"
                     module_to_fsdp_param_group[module]._module_fqn = module_fqn
 

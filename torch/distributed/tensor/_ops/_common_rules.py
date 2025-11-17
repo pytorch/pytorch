@@ -171,7 +171,6 @@ def einop_rule(
                             global_shape, input_spec.mesh, input_spec.placements
                         )
                         cost += prod(local_shape) * input_spec.mesh.size(mesh_dim)
-                # pyrefly: ignore [bad-argument-type]
                 costs.append(cost)
             d_to_keep_sharding = dims[costs.index(max(costs))]
             for d in dims:

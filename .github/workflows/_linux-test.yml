@@ -224,46 +224,6 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/download-td-artifacts
 
-      - name: Download Windows torch wheel for cross-compilation
-        if: matrix.win_torch_wheel_artifact != ''
-        uses: seemethere/download-artifact-s3@1da556a7aa0a088e3153970611f6c432d58e80e6 # v4.2.0
-        with:
-          name: ${{ matrix.win_torch_wheel_artifact }}
-          path: win-torch-wheel
-
-      - name: Extract Windows wheel and setup CUDA libraries
-        if: matrix.win_torch_wheel_artifact != ''
-        shell: bash
-        run: |
-          set -x
-
-          # Find the wheel file
-          WHEEL_FILE=$(find win-torch-wheel -name "*.whl" -type f | head -n 1)
-          if [ -z "$WHEEL_FILE" ]; then
-            echo "Error: No wheel file found in win-torch-wheel directory"
-            exit 1
-          fi
-          echo "Found wheel file: $WHEEL_FILE"
-
-          # Unzip the wheel file
-          unzip -q "$WHEEL_FILE" -d win-torch-wheel-extracted
-          echo "Extracted wheel contents"
-
-          # Setup CUDA libraries (cuda.lib and cudart.lib) directory
-          mkdir -p win-torch-wheel-extracted/lib/x64
-          if [ -f "win-torch-wheel/cuda.lib" ]; then
-            mv win-torch-wheel/cuda.lib win-torch-wheel-extracted/lib/x64/
-            echo "Moved cuda.lib to win-torch-wheel-extracted/lib/x64/"
-          fi
-          if [ -f "win-torch-wheel/cudart.lib" ]; then
-            mv win-torch-wheel/cudart.lib win-torch-wheel-extracted/lib/x64/
-            echo "Moved cudart.lib to win-torch-wheel-extracted/lib/x64/"
-          fi
-
-          # Verify CUDA libraries are present
-          echo "CUDA libraries:"
-          ls -la win-torch-wheel-extracted/lib/x64/ || echo "No CUDA libraries found"
-
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
@@ -429,6 +389,8 @@ jobs:
             "${DOCKER_IMAGE}" \
             ${DOCKER_SHELL_CMD}
           )
+          # Propagate download.pytorch.org IP to container
+          grep download.pytorch.org /etc/hosts | docker exec -i "${container_name}" sudo bash -c "/bin/cat >> /etc/hosts"
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
 
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then

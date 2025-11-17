@@ -63,7 +63,7 @@ class ExclusivelyOwned {
   explicit ExclusivelyOwned(T&& t) : repr_(EOT::moveToRepr(std::move(t))) {}
 
   template <class... Args>
-  explicit ExclusivelyOwned(std::in_place_t /*unused*/, Args&&... args)
+  explicit ExclusivelyOwned(std::in_place_t, Args&&... args)
       : repr_(EOT::createInPlace(std::forward<Args>(args)...)) {}
 
   ExclusivelyOwned(const ExclusivelyOwned&) = delete;

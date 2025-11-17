@@ -1059,6 +1059,11 @@
   LU: lu_factor_ex_jvp(A_t, LU, pivots, pivot)
   output_differentiability: [True, False, False]
 
+- name: linalg_lu_factor(Tensor A, *, bool pivot=True) -> (Tensor LU, Tensor pivots)
+  A: lu_factor_ex_backward(grad, LU, pivots, pivot)
+  LU: lu_factor_ex_jvp(A_t, LU, pivots, pivot)
+  output_differentiability: [True, False]
+
 - name: linalg_lu(Tensor A, *, bool pivot=True) -> (Tensor P, Tensor L, Tensor U)
   A: linalg_lu_backward(grad_L, grad_U, P, L, U, pivot)
   L: std::get<0>(linalg_lu_jvp(A_t, P, L, U, pivot))

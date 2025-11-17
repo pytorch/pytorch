@@ -132,15 +132,15 @@ std::ostream& operator<<(std::ostream& o, const uint128& b) {
   int div_base_log = 0;
   switch (flags & std::ios::basefield) {
     case std::ios::hex:
-      div = static_cast<uint64_t>(0x1000000000000000u); // 16^15
+      div = (uint64_t)0x1000000000000000u; // 16^15
       div_base_log = 15;
       break;
     case std::ios::oct:
-      div = static_cast<uint64_t>(01000000000000000000000u); // 8^21
+      div = (uint64_t)01000000000000000000000u; // 8^21
       div_base_log = 21;
       break;
     default: // std::ios::dec
-      div = static_cast<uint64_t>(10000000000000000000u); // 10^19
+      div = (uint64_t)10000000000000000000u; // 10^19
       div_base_log = 19;
       break;
   }

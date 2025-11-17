@@ -18,7 +18,7 @@ extern std::atomic<const VulkanImplInterface*> g_vulkan_impl_registry;
 
 class VulkanImplRegistrar {
  public:
-  explicit VulkanImplRegistrar(VulkanImplInterface* /*impl*/);
+  explicit VulkanImplRegistrar(VulkanImplInterface*);
 };
 
 at::Tensor& vulkan_copy_(at::Tensor& self, const at::Tensor& src);

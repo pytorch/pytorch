@@ -1,10 +1,9 @@
 import functools
 import os
-from typing import Any
+from typing import Any, Optional
 from typing_extensions import Unpack
 
 from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
-from .triton_helpers import get_constexprs
 
 
 class StaticallyLaunchedCudaKernel:
@@ -35,29 +34,21 @@ class StaticallyLaunchedCudaKernel:
     """
 
     def __init__(self, kernel: CompiledKernel) -> None:
-        # pyrefly: ignore [missing-attribute]
         self.name = kernel.src.fn.__name__
-        # pyrefly: ignore [missing-attribute]
         self.cubin_raw = kernel.asm.get("cubin", None)
-        # pyrefly: ignore [missing-attribute]
         self.cubin_path = kernel._cubin_path
 
         # Used by torch.compile to filter constants in older triton versions
-        # pyrefly: ignore [missing-attribute]
         self.arg_names = kernel.src.fn.arg_names
 
         # Const exprs that are declared by the triton kernel directly
         # Used to generate the kernel launcher's def args
-        # pyrefly: ignore [missing-attribute]
-        self.declared_constexprs = get_constexprs(kernel.src.fn)
+        self.declared_constexprs = kernel.src.fn.constexprs
 
-        # pyrefly: ignore [missing-attribute]
         self.hash = kernel.hash
 
         if triton_knobs is None:
-            # pyrefly: ignore [missing-attribute]
             launch_enter = kernel.__class__.launch_enter_hook
-            # pyrefly: ignore [missing-attribute]
             launch_exit = kernel.__class__.launch_exit_hook
         else:
             launch_enter = triton_knobs.runtime.launch_enter_hook
@@ -79,15 +70,12 @@ class StaticallyLaunchedCudaKernel:
             raise NotImplementedError(
                 "We don't support launch enter or launch exit hooks"
             )
-        # pyrefly: ignore [missing-attribute]
         self.num_warps = kernel.metadata.num_warps
         self.shared = (
-            # pyrefly: ignore [missing-attribute]
             kernel.shared if hasattr(kernel, "shared") else kernel.metadata.shared
         )
 
         def needs_scratch_arg(scratch_name: str, param_name: str) -> bool:
-            # pyrefly: ignore [missing-attribute]
             if hasattr(kernel.metadata, param_name):
                 if getattr(kernel.metadata, param_name) > 0:
                     raise NotImplementedError(
@@ -103,9 +91,10 @@ class StaticallyLaunchedCudaKernel:
         # same situation for profile scratch - triton-lang/triton#7258
         self.has_profile_scratch = needs_scratch_arg("Profile", "profile_scratch_size")
 
-        # pyrefly: ignore [missing-attribute]
         self.arg_tys = self.arg_ty_from_signature(kernel.src)
-        self.function: int | None = None  # Loaded by load_kernel(on the parent process)
+        self.function: Optional[int] = (
+            None  # Loaded by load_kernel(on the parent process)
+        )
         num_ctas = 1
         if hasattr(kernel, "num_ctas"):
             num_ctas = kernel.num_ctas
@@ -183,7 +172,6 @@ class StaticallyLaunchedCudaKernel:
     def arg_ty_from_signature(self, src: ASTSource) -> str:
         def index_key(i: Any) -> int:
             if isinstance(i, str):
-                # pyrefly: ignore [missing-attribute]
                 return src.fn.arg_names.index(i)
             elif isinstance(i, tuple):
                 # In triton 3.3, src.fn.constants has tuples as a key
@@ -191,7 +179,6 @@ class StaticallyLaunchedCudaKernel:
             else:
                 return i
 
-        # pyrefly: ignore [missing-attribute]
         signature = {index_key(key): value for key, value in src.signature.items()}
         # Triton uses these as the main way to filter out constants passed to their cubin
         constants = [index_key(key) for key in getattr(src, "constants", dict())]
@@ -213,7 +200,6 @@ class StaticallyLaunchedCudaKernel:
             if ty == "constexpr" or i in constants:
                 pass
             else:
-                # pyrefly: ignore [bad-argument-type]
                 params.append(self.extract_type(ty))
         return "".join(params)
 
@@ -251,7 +237,6 @@ class StaticallyLaunchedCudaKernel:
             if has_scratch:
                 arg_tys = arg_tys + "O"
                 args = (*args, None)
-        # pyrefly: ignore [bad-argument-type]
         assert len(args) == len(arg_tys)
 
         # TODO: can handle grid functions here or in C++, so
@@ -264,7 +249,6 @@ class StaticallyLaunchedCudaKernel:
             self.num_warps,
             self.shared,
             arg_tys,
-            # pyrefly: ignore [bad-argument-type]
             args,
             stream,
         )

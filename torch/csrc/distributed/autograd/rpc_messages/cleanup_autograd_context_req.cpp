@@ -25,7 +25,7 @@ c10::intrusive_ptr<rpc::Message> CleanupAutogradContextReq::toMessageImpl() && {
 std::unique_ptr<CleanupAutogradContextReq> CleanupAutogradContextReq::
     fromMessage(const rpc::Message& message) {
   // unpickle and get the context_id we need to clean up
-  auto payload = message.payload().data();
+  auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
   IValue ivalue_context_id = jit::unpickle(
       payload,

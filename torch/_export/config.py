@@ -15,7 +15,7 @@ from torch.utils._config_module import install_config_module
 
 # this flag controls whether we use new functional tracer. It
 # should be True in the long term.
-use_new_tracer_experimental = True
+use_new_tracer_experimental = False
 
 # this flag is used to control whether we want to instrument
 # fake tensor creation to track potential leaks. It is off

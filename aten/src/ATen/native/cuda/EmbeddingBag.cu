@@ -31,10 +31,16 @@
 
 #include <c10/macros/Macros.h>
 
+#if CUB_SUPPORTS_SCAN_BY_KEY()
 #include <thrust/iterator/reverse_iterator.h>
+#endif
 
 namespace at::native {
 
+#if !CUB_SUPPORTS_SCAN_BY_KEY()
+template<typename index_t>
+void embedding_dense_backward_cuda_scan(Tensor &sorted_indices, Tensor &count);
+#endif
 
 namespace {
 
@@ -193,6 +199,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
 
   if (scale_grad_by_freq) {
     count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+#if CUB_SUPPORTS_SCAN_BY_KEY()
     AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_backward_cuda_sum_avg", [&] () {
       cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
@@ -219,6 +226,11 @@ Tensor embedding_bag_backward_cuda_sum_avg(
         num_indices
       );
     });
+#else
+    AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_backward_cuda_sum_avg", [&] () {
+      embedding_dense_backward_cuda_scan<index_t>(sorted_indices, count);
+    });
+#endif
   }
   return embedding_backward_cuda_kernel(grad, orig_indices, sorted_indices,
       count, num_weights, padding_idx, mode == EmbeddingBagMode::MEAN, offset2bag,

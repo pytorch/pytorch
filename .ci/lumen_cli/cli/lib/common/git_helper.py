@@ -57,8 +57,8 @@ def clone_external_repo(target: str, repo: str, dst: str = "", update_submodules
         logger.info("Successfully cloned %s", target)
         return r, commit
 
-    except GitCommandError:
-        logger.exception("Git operation failed")
+    except GitCommandError as e:
+        logger.error("Git operation failed: %s", e)
         raise
 
 

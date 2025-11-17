@@ -826,7 +826,7 @@ class TestFuseFx(QuantizationTestCase):
         # check conv module has two inputs
         named_modules = dict(m.named_modules())
         for node in m.graph.nodes:
-            if node.op == "call_module" and type(named_modules[node.target]) is torch.nn.Conv2d:
+            if node.op == "call_module" and type(named_modules[node.target]) == torch.nn.Conv2d:
                 self.assertTrue(len(node.args) == 2, msg="Expecting the fused op to have two arguments")
 
     def test_fusion_pattern_with_matchallnode(self):
@@ -917,7 +917,7 @@ class TestQuantizeFx(QuantizationTestCase):
         m = torch.fx.symbolic_trace(M())
         modules = dict(m.named_modules())
         for n in m.graph.nodes:
-            if n.op == 'call_module' and type(modules[n.target]) is nn.ReLU:
+            if n.op == 'call_module' and type(modules[n.target]) == nn.ReLU:
                 self.assertTrue(_is_match(modules, n, pattern))
 
     def test_pattern_match_constant(self):

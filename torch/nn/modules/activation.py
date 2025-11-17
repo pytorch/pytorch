@@ -1077,7 +1077,7 @@ def _is_make_fx_tracing():
         # this can be triggered when dynamo inlining the module too.
         return (
             any(
-                type(x) is torch.fx.experimental.proxy_tensor.ProxyTorchDispatchMode
+                type(x) == torch.fx.experimental.proxy_tensor.ProxyTorchDispatchMode
                 for x in torch_dispatch_mode_stack
             )
             or torch.compiler.is_exporting()

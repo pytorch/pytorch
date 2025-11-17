@@ -1135,7 +1135,7 @@ torch.cuda.synchronize()
         for size, kernel_size, stride, dilation, ceil_mode in itertools.product(
             sizes, kernel_sizes, strides, dilations, ceil_modes
         ):
-            padding = random.sample(range(math.floor(kernel_size / 2) + 1), 1)
+            padding = random.sample(range(0, math.floor(kernel_size / 2) + 1), 1)
             check(
                 torch.randn(size, device=device, dtype=dtype),
                 kernel_size,

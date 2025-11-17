@@ -15,7 +15,7 @@ _IS_MONKEYTYPE_INSTALLED = True
 try:
     import monkeytype  # type: ignore[import]
 
-    # pyrefly: ignore [import-error]
+    # pyrefly: ignore  # import-error
     from monkeytype import trace as monkeytype_trace
     from monkeytype.config import _startswith, LIB_PATHS  # type: ignore[import]
     from monkeytype.db.base import (  # type: ignore[import]
@@ -68,7 +68,7 @@ def get_optional_of_element_type(types):
     from the list of consolidated types and returns `Optional[element type]`.
     TODO: To remove this check once Union support lands.
     """
-    elem_type = types[1] if type(None) is types[0] else types[0]
+    elem_type = types[1] if type(None) == types[0] else types[0]
     elem_type = get_type(elem_type)
 
     # Optional type is internally converted to Union[type, NoneType], which
@@ -89,7 +89,7 @@ if _IS_MONKEYTYPE_INSTALLED:
             super().__init__(store)
 
         def log(self, trace: CallTrace) -> None:
-            # pyrefly: ignore [missing-attribute]
+            # pyrefly: ignore  # missing-attribute
             self.traces.append(trace)
 
     class JitTypeTraceStore(CallTraceStore):
@@ -151,7 +151,7 @@ if _IS_MONKEYTYPE_INSTALLED:
 
         def trace_logger(self) -> JitTypeTraceStoreLogger:
             """Return a JitCallTraceStoreLogger that logs to the configured trace store."""
-            # pyrefly: ignore [bad-argument-count]
+            # pyrefly: ignore  # bad-argument-count
             return JitTypeTraceStoreLogger(self.trace_store())
 
         def trace_store(self) -> CallTraceStore:

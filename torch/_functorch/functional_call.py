@@ -230,7 +230,7 @@ def stack_module_state(
             "stack_module_state: Expected all models to have the same training/eval mode."
         )
     model0_typ = type(models[0])
-    if not all(type(m) is model0_typ for m in models):
+    if not all(type(m) == model0_typ for m in models):
         raise RuntimeError(
             "stack_module_state: Expected all models to be of the same class."
         )

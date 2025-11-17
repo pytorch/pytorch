@@ -139,10 +139,10 @@ inline constexpr bool less_than_lowest(const T& x) {
 
 C10_CLANG_DIAGNOSTIC_POP()
 
-HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
+namespace torch::headeronly {
 using c10::greater_than_max;
 using c10::is_negative;
 using c10::less_than_lowest;
 using c10::signs_differ;
 using c10::signum;
-HIDDEN_NAMESPACE_END(torch, headeronly)
+} // namespace torch::headeronly

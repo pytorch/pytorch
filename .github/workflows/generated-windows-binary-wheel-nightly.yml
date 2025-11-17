@@ -44,7 +44,7 @@ jobs:
   wheel-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -279,7 +279,7 @@ jobs:
   wheel-py3_10-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -517,7 +517,7 @@ jobs:
   wheel-py3_10-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -755,7 +755,7 @@ jobs:
   wheel-py3_10-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -993,7 +993,7 @@ jobs:
   wheel-py3_10-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1229,7 +1229,7 @@ jobs:
   wheel-py3_11-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1464,7 +1464,7 @@ jobs:
   wheel-py3_11-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1702,7 +1702,7 @@ jobs:
   wheel-py3_11-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1940,7 +1940,7 @@ jobs:
   wheel-py3_11-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2178,7 +2178,7 @@ jobs:
   wheel-py3_11-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2414,7 +2414,7 @@ jobs:
   wheel-py3_12-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2649,7 +2649,7 @@ jobs:
   wheel-py3_12-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2887,7 +2887,7 @@ jobs:
   wheel-py3_12-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3125,7 +3125,7 @@ jobs:
   wheel-py3_12-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3363,7 +3363,7 @@ jobs:
   wheel-py3_12-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3599,7 +3599,7 @@ jobs:
   wheel-py3_13-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3834,7 +3834,7 @@ jobs:
   wheel-py3_13-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -4072,7 +4072,7 @@ jobs:
   wheel-py3_13-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -4310,7 +4310,7 @@ jobs:
   wheel-py3_13-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -4548,7 +4548,7 @@ jobs:
   wheel-py3_13-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -4784,7 +4784,7 @@ jobs:
   wheel-py3_13t-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -5019,7 +5019,7 @@ jobs:
   wheel-py3_13t-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -5257,7 +5257,7 @@ jobs:
   wheel-py3_13t-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -5495,7 +5495,7 @@ jobs:
   wheel-py3_13t-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -5733,7 +5733,7 @@ jobs:
   wheel-py3_13t-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -5969,7 +5969,7 @@ jobs:
   wheel-py3_14-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -6204,7 +6204,7 @@ jobs:
   wheel-py3_14-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -6442,7 +6442,7 @@ jobs:
   wheel-py3_14-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -6680,7 +6680,7 @@ jobs:
   wheel-py3_14-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -6918,7 +6918,7 @@ jobs:
   wheel-py3_14-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -7154,7 +7154,7 @@ jobs:
   wheel-py3_14t-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -7389,7 +7389,7 @@ jobs:
   wheel-py3_14t-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -7627,7 +7627,7 @@ jobs:
   wheel-py3_14t-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -7865,7 +7865,7 @@ jobs:
   wheel-py3_14t-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -8103,7 +8103,7 @@ jobs:
   wheel-py3_14t-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch

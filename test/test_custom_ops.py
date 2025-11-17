@@ -22,6 +22,7 @@ import torch._custom_ops as custom_ops
 import torch.testing._internal.optests as optests
 import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
+from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import CustomOp, infer_schema
 from torch._library.fake_profile import (
@@ -36,7 +37,6 @@ from torch._library.fake_profile import (
 from torch._library.infer_schema import tuple_to_list
 from torch._library.opaque_object import make_opaque, OpaqueType
 from torch._utils_internal import get_file_path_2  # @manual
-from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal import custom_op_db
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -57,7 +57,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.custom_op_db import numpy_nonzero
-from torch.testing._internal.two_tensor import TwoTensor
 
 
 # Shadowed by `torch.testing._internal.common_utils.custom_op`
@@ -1065,16 +1064,6 @@ class TestCustomOp(CustomOpTestCaseBase):
 
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(x: Tensor, y: Callable) -> Tensor:
-                raise NotImplementedError
-
-            del foo
-
-        # Define a named tuple for a Point with x and y coordinates
-        Point = collections.namedtuple("Point", ["x", "y"])
-        with self.assertRaisesRegex(ValueError, "unsupported type"):
-
-            @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
-            def foo(x: Tensor, y: Point) -> Tensor:
                 raise NotImplementedError
 
             del foo
@@ -2563,111 +2552,6 @@ class TestCustomOpAPI(TestCase):
         expected = x.sin()
         sin_(x)
         self.assertEqual(x, expected)
-
-    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    def test_subclass_accessor_view_error(self):
-        @torch.library.custom_op(
-            "_torch_testing::_failing_two_tensor_accessor",
-            mutates_args=(),
-            schema="(Tensor(a) tx, SymInt idx) -> Tensor(a)",
-        )
-        def _failing_two_tensor_accessor(tx, idx):
-            return tx.view_as(tx)
-
-        def noop(*args):
-            pass
-
-        _failing_two_tensor_accessor.register_autograd(noop, setup_context=noop)
-
-        t = torch.rand(2)
-        with self.assertRaisesRegex(
-            RuntimeError, "Custom ops that are views do not support SymInt."
-        ):
-            torch.ops._torch_testing._failing_two_tensor_accessor(t, 2)
-
-        @torch.library.custom_op(
-            "_torch_testing::_failing_two_tensor_accessor_list",
-            mutates_args=(),
-            schema="(Tensor(a) tx, SymInt[] idx) -> Tensor(a)",
-        )
-        def _failing_two_tensor_accessor_list(tx, idx):
-            return tx.view_as(tx)
-
-        def noop(*args):
-            pass
-
-        _failing_two_tensor_accessor_list.register_autograd(noop, setup_context=noop)
-
-        t = torch.rand(2)
-        with self.assertRaisesRegex(
-            RuntimeError, "Custom ops that are views do not support SymInt."
-        ):
-            torch.ops._torch_testing._failing_two_tensor_accessor_list(t, (2,))
-
-    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    def test_subclass_accessor_view(self):
-        class MyTwoTensor(TwoTensor):
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args, kwargs):
-                if func is torch.ops._torch_testing._two_tensor_accessor.default:
-                    self.assertIsInstance(args[0], MyTwoTensor)
-                    self.assertIn(args[1], (0, 1))
-                    if args[1] == 0:
-                        res = args[0].a
-                    else:
-                        res = args[0].b
-                    # Always return a fresh Tensor!
-                    return res.view_as(res)
-                return super().__torch_dispatch__(func, types, args, kwargs)
-
-        @torch.library.custom_op(
-            "_torch_testing::_two_tensor_accessor",
-            mutates_args=(),
-            schema="(Tensor(a) tx, int idx) -> Tensor(a)",
-        )
-        def _two_tensor_accessor(tx, idx):
-            raise RuntimeError("Should never be called")
-
-        def backward(ctx, gO):
-            gI = gO.clone()
-            if ctx.idx == 0:
-                return MyTwoTensor(gI, torch.zeros_like(gO)), None
-            else:
-                return MyTwoTensor(torch.zeros_like(gO), gI), None
-
-        def setup_ctx(ctx, inputs, output):
-            ctx._is_pure_view = True
-            ctx.idx = inputs[1]
-
-        _two_tensor_accessor.register_autograd(backward, setup_context=setup_ctx)
-
-        x = torch.rand(3)
-        y = torch.rand(3)
-        z = MyTwoTensor(x, y, requires_grad=True)
-        res = torch.ops._torch_testing._two_tensor_accessor(z, 0)
-        res.sum().backward()
-        self.assertEqual(res, x)
-        self.assertTrue(res._is_view())
-        self.assertTrue(res._base is z)
-        self.assertEqual(z.grad, torch.ones_like(z.grad))
-
-        res = torch.ops._torch_testing._two_tensor_accessor(z, 1)
-        res.sum().backward()
-        self.assertEqual(res, y)
-        self.assertTrue(res._is_view())
-        self.assertTrue(res._base is z)
-        self.assertEqual(z.grad, TwoTensor(torch.ones(3), torch.ones(3)))
-
-        leaf = MyTwoTensor(torch.rand(3), torch.rand(3), requires_grad=True)
-        non_leaf = leaf.clone()
-        view_a = torch.ops._torch_testing._two_tensor_accessor(non_leaf, 0)
-        self.assertTrue(view_a._is_view())
-        self.assertTrue(view_a._base is non_leaf)
-        view_a *= 2
-        self.assertEqual(non_leaf.a, view_a)
-        self.assertNotEqual(leaf.a, view_a)
-        non_leaf.sum().backward()
-        self.assertEqual(leaf.grad, MyTwoTensor(2 * torch.ones(3), torch.ones(3)))
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_kwarg_only_tensors(self):

@@ -1,4 +1,3 @@
-#include <c10/core/AllocatorConfig.h>
 #include <torch/csrc/DeviceAccelerator.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 
@@ -136,10 +135,6 @@ void initModule(PyObject* module) {
 
   m.def("_accelerator_resetPeakStats", [](c10::DeviceIndex device_index) {
     at::accelerator::resetPeakStats(device_index);
-  });
-
-  m.def("_accelerator_setAllocatorSettings", [](std::string env) {
-    c10::CachingAllocator::setAllocatorSettings(env);
   });
 }
 

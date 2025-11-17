@@ -39,6 +39,6 @@ int register_linear_params() {
 }
 
 namespace {
-[[maybe_unused]] auto linear_params = register_linear_params();
+[[maybe_unused]] static auto linear_params = register_linear_params();
 } // namespace
 }  // namespace ao::sparse

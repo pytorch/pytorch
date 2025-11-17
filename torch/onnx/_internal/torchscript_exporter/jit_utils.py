@@ -298,12 +298,12 @@ def _create_node(
     for key, value in sorted(attributes.items()):
         if key in _SKIP_NODE_ATTRIBUTES:
             continue
-        # pyrefly: ignore [unbound-name]
+        # pyrefly: ignore  # unbound-name
         _add_attribute(node, key, value, aten=aten)
     if shape_inference:
-        # pyrefly: ignore [unbound-name]
+        # pyrefly: ignore  # unbound-name
         _C._jit_pass_onnx_node_shape_type_inference(node, params_dict, opset_version)
-    # pyrefly: ignore [unbound-name]
+    # pyrefly: ignore  # unbound-name
     return node
 
 

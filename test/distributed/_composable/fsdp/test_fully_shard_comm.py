@@ -1166,7 +1166,7 @@ class TestFullyShardPrefetch(FSDPTest):
             loss = model(inp)
             events.clear()
             loss.sum().backward()
-            expected_backward_events = [
+            expected_backward_events = expected_backward_events = [
                 ("unshard", "norm, output", TrainingState.PRE_BACKWARD),
                 # root explicit prefetch layers.2
                 ("unshard", "layers.2", TrainingState.PRE_BACKWARD),

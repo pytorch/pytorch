@@ -286,7 +286,7 @@ class LazyLinear(LazyModuleMixin, Linear):
     """
 
     cls_to_become = Linear  # type: ignore[assignment]
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     weight: UninitializedParameter
     bias: UninitializedParameter  # type: ignore[assignment]
 
@@ -296,20 +296,20 @@ class LazyLinear(LazyModuleMixin, Linear):
         factory_kwargs = {"device": device, "dtype": dtype}
         # bias is hardcoded to False to avoid creating tensor
         # that will soon be overwritten.
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         super().__init__(0, 0, False)
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         self.weight = UninitializedParameter(**factory_kwargs)
         self.out_features = out_features
         if bias:
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             self.bias = UninitializedParameter(**factory_kwargs)
 
     def reset_parameters(self) -> None:
         """
         Resets parameters based on their initialization used in ``__init__``.
         """
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         if not self.has_uninitialized_params() and self.in_features != 0:
             super().reset_parameters()
 
@@ -317,7 +317,7 @@ class LazyLinear(LazyModuleMixin, Linear):
         """
         Infers ``in_features`` based on ``input`` and initializes parameters.
         """
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         if self.has_uninitialized_params():
             with torch.no_grad():
                 self.in_features = input.shape[-1]

@@ -143,13 +143,13 @@ Tensor& cholesky_inverse_kernel_impl(Tensor& result, Tensor& infos, bool upper) 
  For more info see https://github.com/pytorch/pytorch/issues/145801#issuecomment-2631781776
 */
 template <typename T>
-inline
+static inline
 std::enable_if_t<std::is_floating_point_v<T>, int> lapack_work_to_int(const T val) {
     const auto next_after = std::nextafter(val, std::numeric_limits<T>::infinity());
     return std::max<int>(1, std::ceil(next_after));
 }
 template <typename T>
-inline
+static inline
 std::enable_if_t<c10::is_complex<T>::value, int> lapack_work_to_int(const T val) {
     return lapack_work_to_int(val.real());
 }
@@ -343,7 +343,7 @@ void linalg_eigh_kernel(const Tensor& eigenvalues, const Tensor& eigenvectors, c
   For further details, please see the LAPACK documentation for GEQRF.
 */
 template <typename scalar_t>
-void apply_geqrf(const Tensor& input, const Tensor& tau) {
+static void apply_geqrf(const Tensor& input, const Tensor& tau) {
 #if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
@@ -1039,7 +1039,7 @@ void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, Tr
 }
 
 template <typename scalar_t>
-void apply_svd(const Tensor& A,
+static void apply_svd(const Tensor& A,
                       const bool full_matrices,
                       const bool compute_uv,
                       const Tensor& U,
@@ -1157,103 +1157,103 @@ REGISTER_AVX512_DISPATCH(cholesky_stub, &cholesky_kernel)
 REGISTER_AVX2_DISPATCH(cholesky_stub, &cholesky_kernel)
 REGISTER_VSX_DISPATCH(cholesky_stub, &cholesky_kernel)
 REGISTER_ZVECTOR_DISPATCH(cholesky_stub, &cholesky_kernel)
-REGISTER_SVE256_DISPATCH(cholesky_stub, &cholesky_kernel)
+REGISTER_SVE_DISPATCH(cholesky_stub, &cholesky_kernel)
 
 REGISTER_ARCH_DISPATCH(cholesky_inverse_stub, DEFAULT, &cholesky_inverse_kernel_impl)
 REGISTER_AVX512_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl)
 REGISTER_AVX2_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl)
 REGISTER_VSX_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl)
 REGISTER_ZVECTOR_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl)
-REGISTER_SVE256_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl)
+REGISTER_SVE_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl)
 
 REGISTER_ARCH_DISPATCH(linalg_eig_stub, DEFAULT, &linalg_eig_kernel)
 REGISTER_AVX512_DISPATCH(linalg_eig_stub, &linalg_eig_kernel)
 REGISTER_AVX2_DISPATCH(linalg_eig_stub, &linalg_eig_kernel)
 REGISTER_VSX_DISPATCH(linalg_eig_stub, &linalg_eig_kernel)
 REGISTER_ZVECTOR_DISPATCH(linalg_eig_stub, &linalg_eig_kernel)
-REGISTER_SVE256_DISPATCH(linalg_eig_stub, &linalg_eig_kernel)
+REGISTER_SVE_DISPATCH(linalg_eig_stub, &linalg_eig_kernel)
 
 REGISTER_ARCH_DISPATCH(linalg_eigh_stub, DEFAULT, &linalg_eigh_kernel)
 REGISTER_AVX512_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel)
 REGISTER_AVX2_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel)
 REGISTER_VSX_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel)
 REGISTER_ZVECTOR_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel)
-REGISTER_SVE256_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel)
+REGISTER_SVE_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel)
 
 REGISTER_ARCH_DISPATCH(geqrf_stub, DEFAULT, &geqrf_kernel)
 REGISTER_AVX512_DISPATCH(geqrf_stub, &geqrf_kernel)
 REGISTER_AVX2_DISPATCH(geqrf_stub, &geqrf_kernel)
 REGISTER_VSX_DISPATCH(geqrf_stub, &geqrf_kernel)
 REGISTER_ZVECTOR_DISPATCH(geqrf_stub, &geqrf_kernel)
-REGISTER_SVE256_DISPATCH(geqrf_stub, &geqrf_kernel)
+REGISTER_SVE_DISPATCH(geqrf_stub, &geqrf_kernel)
 
 REGISTER_ARCH_DISPATCH(orgqr_stub, DEFAULT, &orgqr_kernel_impl)
 REGISTER_AVX512_DISPATCH(orgqr_stub, &orgqr_kernel_impl)
 REGISTER_AVX2_DISPATCH(orgqr_stub, &orgqr_kernel_impl)
 REGISTER_VSX_DISPATCH(orgqr_stub, &orgqr_kernel_impl)
 REGISTER_ZVECTOR_DISPATCH(orgqr_stub, &orgqr_kernel_impl)
-REGISTER_SVE256_DISPATCH(orgqr_stub, &orgqr_kernel_impl)
+REGISTER_SVE_DISPATCH(orgqr_stub, &orgqr_kernel_impl)
 
 REGISTER_ARCH_DISPATCH(ormqr_stub, DEFAULT, &ormqr_kernel)
 REGISTER_AVX512_DISPATCH(ormqr_stub, &ormqr_kernel)
 REGISTER_AVX2_DISPATCH(ormqr_stub, &ormqr_kernel)
 REGISTER_VSX_DISPATCH(ormqr_stub, &ormqr_kernel)
 REGISTER_ZVECTOR_DISPATCH(ormqr_stub, &ormqr_kernel)
-REGISTER_SVE256_DISPATCH(ormqr_stub, &ormqr_kernel)
+REGISTER_SVE_DISPATCH(ormqr_stub, &ormqr_kernel)
 
 REGISTER_ARCH_DISPATCH(lstsq_stub, DEFAULT, &lstsq_kernel)
 REGISTER_AVX512_DISPATCH(lstsq_stub, &lstsq_kernel)
 REGISTER_AVX2_DISPATCH(lstsq_stub, &lstsq_kernel)
 REGISTER_VSX_DISPATCH(lstsq_stub, &lstsq_kernel)
 REGISTER_ZVECTOR_DISPATCH(lstsq_stub, &lstsq_kernel)
-REGISTER_SVE256_DISPATCH(lstsq_stub, &lstsq_kernel)
+REGISTER_SVE_DISPATCH(lstsq_stub, &lstsq_kernel)
 
 REGISTER_ARCH_DISPATCH(triangular_solve_stub, DEFAULT, &triangular_solve_kernel)
 REGISTER_AVX512_DISPATCH(triangular_solve_stub, &triangular_solve_kernel)
 REGISTER_AVX2_DISPATCH(triangular_solve_stub, &triangular_solve_kernel)
 REGISTER_VSX_DISPATCH(triangular_solve_stub, &triangular_solve_kernel)
 REGISTER_ZVECTOR_DISPATCH(triangular_solve_stub, &triangular_solve_kernel)
-REGISTER_SVE256_DISPATCH(triangular_solve_stub, &triangular_solve_kernel)
+REGISTER_SVE_DISPATCH(triangular_solve_stub, &triangular_solve_kernel)
 
 REGISTER_ARCH_DISPATCH(lu_factor_stub, DEFAULT, &lu_factor_kernel)
 REGISTER_AVX512_DISPATCH(lu_factor_stub, &lu_factor_kernel)
 REGISTER_AVX2_DISPATCH(lu_factor_stub, &lu_factor_kernel)
 REGISTER_VSX_DISPATCH(lu_factor_stub, &lu_factor_kernel)
 REGISTER_ZVECTOR_DISPATCH(lu_factor_stub, &lu_factor_kernel)
-REGISTER_SVE256_DISPATCH(lu_factor_stub, &lu_factor_kernel)
+REGISTER_SVE_DISPATCH(lu_factor_stub, &lu_factor_kernel)
 
 REGISTER_ARCH_DISPATCH(ldl_factor_stub, DEFAULT, &ldl_factor_kernel)
 REGISTER_AVX512_DISPATCH(ldl_factor_stub, &ldl_factor_kernel)
 REGISTER_AVX2_DISPATCH(ldl_factor_stub, &ldl_factor_kernel)
 REGISTER_VSX_DISPATCH(ldl_factor_stub, &ldl_factor_kernel)
 REGISTER_ZVECTOR_DISPATCH(ldl_factor_stub, &ldl_factor_kernel)
-REGISTER_SVE256_DISPATCH(ldl_factor_stub, &ldl_factor_kernel)
+REGISTER_SVE_DISPATCH(ldl_factor_stub, &ldl_factor_kernel)
 
 REGISTER_ARCH_DISPATCH(ldl_solve_stub, DEFAULT, &ldl_solve_kernel)
 REGISTER_AVX512_DISPATCH(ldl_solve_stub, &ldl_solve_kernel)
 REGISTER_AVX2_DISPATCH(ldl_solve_stub, &ldl_solve_kernel)
 REGISTER_VSX_DISPATCH(ldl_solve_stub, &ldl_solve_kernel)
 REGISTER_ZVECTOR_DISPATCH(ldl_solve_stub, &ldl_solve_kernel)
-REGISTER_SVE256_DISPATCH(ldl_solve_stub, &ldl_solve_kernel)
+REGISTER_SVE_DISPATCH(ldl_solve_stub, &ldl_solve_kernel)
 
 REGISTER_ARCH_DISPATCH(lu_solve_stub, DEFAULT, &lu_solve_kernel)
 REGISTER_AVX512_DISPATCH(lu_solve_stub, &lu_solve_kernel)
 REGISTER_AVX2_DISPATCH(lu_solve_stub, &lu_solve_kernel)
 REGISTER_VSX_DISPATCH(lu_solve_stub, &lu_solve_kernel)
 REGISTER_ZVECTOR_DISPATCH(lu_solve_stub, &lu_solve_kernel)
-REGISTER_SVE256_DISPATCH(lu_solve_stub, &lu_solve_kernel)
+REGISTER_SVE_DISPATCH(lu_solve_stub, &lu_solve_kernel)
 
 REGISTER_ARCH_DISPATCH(svd_stub, DEFAULT, &svd_kernel)
 REGISTER_AVX512_DISPATCH(svd_stub, &svd_kernel)
 REGISTER_AVX2_DISPATCH(svd_stub, &svd_kernel)
 REGISTER_VSX_DISPATCH(svd_stub, &svd_kernel)
 REGISTER_ZVECTOR_DISPATCH(svd_stub, &svd_kernel)
-REGISTER_SVE256_DISPATCH(svd_stub, &svd_kernel)
+REGISTER_SVE_DISPATCH(svd_stub, &svd_kernel)
 
 REGISTER_ARCH_DISPATCH(unpack_pivots_stub, DEFAULT, &unpack_pivots_cpu_kernel)
 REGISTER_AVX512_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel)
 REGISTER_AVX2_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel)
 REGISTER_VSX_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel)
 REGISTER_ZVECTOR_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel)
-REGISTER_SVE256_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel)
+REGISTER_SVE_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel)
 } // namespace at::native

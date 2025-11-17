@@ -18,7 +18,7 @@ from .expanded_weights_utils import (
 @implements_per_sample_grads(F.group_norm)
 class GroupNormPerSampleGrad(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def forward(ctx, kwarg_names, _, *expanded_args_and_kwargs):
         expanded_args, expanded_kwargs = standard_kwargs(
             kwarg_names, expanded_args_and_kwargs
@@ -47,7 +47,7 @@ class GroupNormPerSampleGrad(torch.autograd.Function):
         return output
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def backward(ctx, grad_output):
         input, num_groups = ctx.input, ctx.num_groups
         weight, bias, eps = ctx.weight, ctx.bias, ctx.eps
@@ -97,7 +97,7 @@ class GroupNormPerSampleGrad(torch.autograd.Function):
                 weight,
                 lambda _: torch.einsum(
                     "ni...->ni",
-                    # pyrefly: ignore [unsupported-operation]
+                    # pyrefly: ignore  # unsupported-operation
                     F.group_norm(input, num_groups, eps=eps) * grad_output,
                 ),
             )

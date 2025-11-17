@@ -10,9 +10,6 @@ namespace torch::jit {
 
 using TypePtr = c10::TypePtr;
 
-TORCH_API void registerOpaqueType(const std::string& type_name);
-TORCH_API bool isRegisteredOpaqueType(const std::string& type_name);
-
 struct TORCH_API SchemaTypeParser {
   TypePtr parseBaseType();
   std::optional<c10::AliasInfo> parseAliasAnnotation();

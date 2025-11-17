@@ -20,13 +20,10 @@ def uniform_(types, args=(), kwargs=None, pg=None):
         b: the upper bound of the uniform distribution
     """
     validate_param(kwargs, "kwargs")
-    # pyrefly: ignore [unsupported-operation]
     sharded_tensor = kwargs["tensor"]
     validate_param(sharded_tensor, "tensor")
-    # pyrefly: ignore [unsupported-operation]
     a = kwargs["a"]
     validate_param(a, "a")
-    # pyrefly: ignore [unsupported-operation]
     b = kwargs["b"]
     validate_param(b, "b")
 
@@ -46,13 +43,10 @@ def normal_(types, args=(), kwargs=None, pg=None):
         std: the standard deviation of the normal distribution
     """
     validate_param(kwargs, "kwargs")
-    # pyrefly: ignore [unsupported-operation]
     sharded_tensor = kwargs["tensor"]
     validate_param(sharded_tensor, "tensor")
-    # pyrefly: ignore [unsupported-operation]
     mean = kwargs["mean"]
     validate_param(mean, "mean")
-    # pyrefly: ignore [unsupported-operation]
     std = kwargs["std"]
     validate_param(std, "std")
 
@@ -84,16 +78,12 @@ def kaiming_uniform_(types, args=(), kwargs=None, pg=None):
             recommended to use only with ``'relu'`` or ``'leaky_relu'`` (default).
     """
     validate_param(kwargs, "kwargs")
-    # pyrefly: ignore [unsupported-operation]
     sharded_tensor = kwargs["tensor"]
     validate_param(sharded_tensor, "tensor")
-    # pyrefly: ignore [unsupported-operation]
     a = kwargs["a"]
     validate_param(a, "a")
-    # pyrefly: ignore [unsupported-operation]
     mode = kwargs["mode"]
     validate_param(mode, "mode")
-    # pyrefly: ignore [unsupported-operation]
     nonlinearity = kwargs["nonlinearity"]
     validate_param(nonlinearity, "nonlinearity")
 
@@ -113,10 +103,8 @@ def constant_(types, args=(), kwargs=None, pg=None):
         val: the value to fill the tensor with
     """
     validate_param(kwargs, "kwargs")
-    # pyrefly: ignore [unsupported-operation]
     sharded_tensor = kwargs["tensor"]
     validate_param(sharded_tensor, "tensor")
-    # pyrefly: ignore [unsupported-operation]
     val = kwargs["val"]
     validate_param(val, "val")
     for shard in sharded_tensor.local_shards():
@@ -143,13 +131,12 @@ def register_tensor_creation_op(op):
         takes a ShardedTensor as argument, such as ``torch.zeros_like`` or
         ``torch.full_like``.
         """
-        creation_op = tensor_like_creation_op_map.get(op)
+        creation_op = tensor_like_creation_op_map.get(op, None)
         if creation_op is None:
             raise RuntimeError(f"Tensor creation {op} not supported!")
         if kwargs is None:
             kwargs = {}
 
-        # pyrefly: ignore [index-error]
         st = args[0]
 
         new_st = creation_op(st.sharding_spec(), st.size(), *args[1:], **kwargs)  # type: ignore[operator]

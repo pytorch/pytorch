@@ -67,9 +67,6 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map_only
 
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 OPTIMUS_EXCLUDE_POST_GRAD = [
     "activation_quantization_aten_pass",
     "inductor_autotune_lookup_table",
@@ -275,30 +272,6 @@ def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
 
 
 def do_bench_using_profiling(
-    fn: Callable[[], Any],
-    warmup: int = 25,
-    rep: int = 100,
-    is_vetted_benchmarking: bool = False,
-) -> float:
-    # We did't use decorator may_distort_benchmarking_result directly since that
-    # requires us to import torch._inductor.runtime.benchmarking into global scope.
-    # Importing torch._inductor.runtime.benchmarking will cause cuda initialization
-    # (because of calling torch.cuda.available in global scope)
-    # which cause failure in vllm when it create child processes. Check log:
-    #   https://gist.github.com/shunting314/c194e147bf981e58df095c14874dd65a
-    #
-    # Another way to solve the issue is to just move do_bench_using_profiling
-    # to torch._inductor.runtime.benchmarking and change all the call site.
-    # But that's not trivial due to so many call sites in and out of pytorch.
-
-    from torch._inductor.runtime.benchmarking import may_distort_benchmarking_result
-
-    return may_distort_benchmarking_result(_do_bench_using_profiling)(
-        fn, warmup, rep, is_vetted_benchmarking
-    )
-
-
-def _do_bench_using_profiling(
     fn: Callable[[], Any],
     warmup: int = 25,
     rep: int = 100,
@@ -705,7 +678,6 @@ def cache_property_on_self(fn: Callable[P, RV]) -> CachedMethod[P, RV]:
     """
     Variant of cache_on_self for properties. The only difference is the type signature.
     """
-    # pyrefly: ignore [bad-argument-type]
     return cache_on_self(fn)
 
 
@@ -718,7 +690,6 @@ def aggregate_origins(
         return functools.reduce(
             operator.or_,
             [
-                # pyrefly: ignore [missing-attribute]
                 node.node.origins
                 for node in node_schedule
                 if hasattr(node, "node") and node.node
@@ -763,6 +734,7 @@ def get_fused_kernel_name(
         ]
     else:
         raise NotImplementedError
+    sources = sources
     return "_".join(["fused"] + sources)
 
 
@@ -794,7 +766,7 @@ def get_kernel_metadata(
     # where `inductor_nodes` contains nodes from multiple graph instances
     # is not supported. An example of this is conditional statements.
     single_graph = None
-    if inductor_nodes:
+    if len(inductor_nodes):
         unique_graphs = OrderedSet(n.graph for n in inductor_nodes)
         if len(unique_graphs) == 1:
             single_graph = inductor_nodes[0].graph
@@ -1194,7 +1166,6 @@ def unload_xpu_triton_pyds() -> None:
                             result,
                             torch._inductor.runtime.triton_heuristics.TritonCompileResult,
                         ):
-                            # pyrefly: ignore [missing-attribute]
                             result.kernel.run.mod.__del__()
         del sys.modules[module_name]
 
@@ -1468,7 +1439,6 @@ class IndentedBuffer:
     ) -> None:
         if isinstance(other_code, IndentedBuffer):
             dedent = float("inf")
-            # pyrefly: ignore [bad-assignment]
             for line in other_code._lines:
                 if not isinstance(line, LineContext) and line:
                     dedent = min(dedent, len(line) - len(line.lstrip()))
@@ -2224,21 +2194,20 @@ def run_and_get_code(
 ) -> tuple[_T, list[str]]:
     from .graph import GraphLowering
 
-    source_codes: OrderedSet[str] = OrderedSet()
+    source_codes: list[str] = []
 
     def save_output_code(code: str) -> None:
-        source_codes.add(code)
+        source_codes.append(code)
 
     with mock.patch.object(GraphLowering, "save_output_code", save_output_code):
         torch._dynamo.reset()
         result = fn(*args, **kwargs)
-    return result, list(source_codes)
+    return result, source_codes
 
 
 def run_and_get_kernels(
     fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
 ) -> tuple[_T, list[str]]:
-    # pyrefly: ignore [bad-argument-type]
     result, source_codes = run_and_get_code(fn, *args, **kwargs)
     kernels = []
     for code in source_codes:
@@ -2299,7 +2268,6 @@ def get_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> list[str
 
 
 def get_triton_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> str:
-    # pyrefly: ignore [bad-argument-type]
     source_codes = get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
     assert 1 <= len(source_codes) <= 2, (
@@ -2311,7 +2279,6 @@ def get_triton_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> s
 def run_and_get_triton_code(
     fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
 ) -> str:
-    # pyrefly: ignore [bad-argument-type]
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
     assert 1 <= len(source_codes) <= 2, (
@@ -2663,7 +2630,7 @@ def is_collective(
         # TODO: this is a temporary solution to ensure that we can identify torchrec's
         # communication ops. But in order to allow better communication and computation
         # overlap, torchrec's communication ops should be not used.
-        type(node) is ir.FallbackKernel
+        type(node) == ir.FallbackKernel
         and (
             # NOTE: the `hasattr()` check is to bypass errors such as the following:
             # AttributeError: '_OpNamespace' 'torchrec' object has no attribute 'all_to_all_single'
@@ -2687,7 +2654,7 @@ def is_collective(
 def is_wait(node: Optional[Union[IRNode, Operation]]) -> bool:
     from . import ir
 
-    return type(node) is ir._WaitKernel
+    return type(node) == ir._WaitKernel
 
 
 def contains_collective(snode: BaseSchedulerNode) -> bool:
@@ -3650,64 +3617,7 @@ def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, An
         )
         force_patch_config(config_patches, "aot_inductor.dynamic_linkage", False)
 
-    cross_target_platform = config_patches.get(
-        "aot_inductor.cross_target_platform",
-        config.aot_inductor.cross_target_platform,
-    )
-
-    package_constants_in_so = config_patches.get(
-        "aot_inductor.package_constants_in_so",
-        config.aot_inductor.package_constants_in_so,
-    )
-
-    if cross_target_platform == "windows" and package_constants_in_so:
-        raise RuntimeError(
-            "config.aot_inductor.package_constants_in_so is not supported for windows cross-compilation. "
-            "Please use config.aot_inductor.package_constants_on_disk_format = binary_blob."
-        )
-
     return config_patches
-
-
-def determine_aoti_mmap_flags(consts_size: int) -> tuple[bool, bool]:
-    """
-    Decide whether we should mmap weights, and whether to store the weights with .so.
-
-    If force_mmap_weights or package_constants_on_disk_format == "binary_blob" configs are set, respect the config.
-
-    Returns tuple (use_external_weights, use_mmap_weights).
-    """
-
-    if (
-        config.aot_inductor.force_mmap_weights
-        and config.aot_inductor.package_constants_on_disk_format == "binary_blob"
-    ):
-        raise RuntimeError(
-            "config.aot_inductor.package_constants_on_disk_format = binary_blob and "
-            "config.aot_inductor.force_mmap_weights cannot both be True."
-        )
-
-    if config.aot_inductor.force_mmap_weights:
-        if config.aot_inductor.cross_target_platform == "windows":
-            raise RuntimeError(
-                "when cross_target_platform is windows, use_mmap_weights should not be true."
-            )
-        use_mmap_weights = True
-        use_external_weights = False
-        return use_external_weights, use_mmap_weights
-
-    if config.aot_inductor.package_constants_on_disk_format == "binary_blob":
-        use_external_weights = True
-        use_mmap_weights = False
-        return use_external_weights, use_mmap_weights
-
-    if consts_size <= 2_000_000_000:
-        return False, False
-
-    use_external_weights = False
-    use_mmap_weights = not config.is_fbcode()
-
-    return use_external_weights, use_mmap_weights
 
 
 def is_valid_aoti_model_name() -> bool:
@@ -3887,10 +3797,3 @@ def is_nonfreeable_buffers(dep: Dep) -> bool:
     return dep_name.startswith(
         ("primals_", "arg", "fwd_rng_state", "bwd_rng_state", "tangents")
     )
-
-
-# Make sure to also include your jinja templates within torch_package_data in setup.py, or this function won't be able to find them
-def load_template(name: str, template_dir: Path) -> str:
-    """Load a template file and return its content."""
-    with open(template_dir / f"{name}.py.jinja") as f:
-        return f.read()

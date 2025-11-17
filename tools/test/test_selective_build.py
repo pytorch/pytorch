@@ -88,7 +88,6 @@ operators:
         self.assertTrue(selector2.is_operator_selected("aten::sub.int"))
 
         selector_legacy_v1 = SelectiveBuilder.from_legacy_op_registration_allow_list(
-            # pyrefly: ignore [bad-argument-type]
             ["aten::add", "aten::add.int", "aten::mul.int"],
             False,
             False,
@@ -104,7 +103,6 @@ operators:
         )
 
         selector_legacy_v1 = SelectiveBuilder.from_legacy_op_registration_allow_list(
-            # pyrefly: ignore [bad-argument-type]
             ["aten::add", "aten::add.int", "aten::mul.int"],
             True,
             False,
@@ -120,7 +118,6 @@ operators:
         )
 
         selector_legacy_v1 = SelectiveBuilder.from_legacy_op_registration_allow_list(
-            # pyrefly: ignore [bad-argument-type]
             ["aten::add", "aten::add.int", "aten::mul.int"],
             False,
             True,

@@ -13,19 +13,24 @@ namespace at::native {
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
 struct sum_functor {
   void operator()(TensorIterator& iter) {
-    const auto sum_combine = [] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
-      return a + b;
-    };
-    constexpr bool is_16_bits = sizeof(scalar_t) == 2;
-    if constexpr (is_16_bits) {
+#ifdef USE_ROCM
+    // Half and BFloat16 can be packed in groups of up to 8 elements and
+    // can use *_DWORDX4 instructions to achieve that.
+    const bool is_16_bits =
+      ( (std::is_same<at::Half, scalar_t>::value) ||
+        (std::is_same<at::BFloat16, scalar_t>::value) );
+    if (is_16_bits) {
       gpu_reduce_kernel<scalar_t, out_t, /*vt0=*/4, /*input_vec_size=*/8>(
-        iter, func_wrapper<out_t>(sum_combine)
-      );
-    } else {
-      gpu_reduce_kernel<scalar_t, out_t>(
-        iter, func_wrapper<out_t>(sum_combine)
-      );
+        iter, func_wrapper<out_t>([] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
+          return a + b;
+        }));
+      return;
     }
+#endif
+    gpu_reduce_kernel<scalar_t, out_t>(
+        iter, func_wrapper<out_t>([] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
+          return a + b;
+        }));
   }
 };
 
@@ -72,8 +77,8 @@ struct nansum_functor_complex {
 #if AT_USE_JITERATOR()
   void operator()(TensorIterator& iter) {
     std::string func = jiterator_stringify(
-        arg_t combine(arg_t a, arg_t b) {
-          return a + (std::isnan(b) ? arg_t{0.} : b);
+        arg_t combine(arg_t a, scalar_t b) {
+          return a + (std::isnan(b) ? arg_t{0.} : arg_t{b});
         }
     );
     jitted_gpu_reduce_kernel<nansum_name, scalar_t, scalar_t>(

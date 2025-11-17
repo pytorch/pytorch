@@ -33,7 +33,7 @@ enum class AttributeKind {
 };
 static inline const char* toString(AttributeKind kind) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  static constexpr const char* names[] = {
+  static const char* names[] = {
       "f",
       "c",
       "cs",

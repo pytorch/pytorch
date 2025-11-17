@@ -2,7 +2,7 @@ import itertools
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Optional, Union
 
 import torch
 import torch.fx as fx
@@ -12,6 +12,14 @@ from torch.utils._pytree import tree_map_only
 
 
 log = logging.getLogger(__name__)
+
+
+def _is_wait_tensor(node: fx.Node) -> bool:
+    """Check if a node is a wait_tensor operation."""
+    return (
+        node.op == "call_function"
+        and node.target == torch.ops._c10d_functional.wait_tensor.default
+    )
 
 
 @dataclass(frozen=True)
@@ -117,11 +125,22 @@ class GraphAliasTracker:
     def _get_input_storages(self, node: fx.Node) -> OrderedSet[StorageKey]:
         """
         Get all storages from a node's inputs.
+
+        For wait_tensor operations, this includes both the direct inputs (the collective handle)
+        and all inputs from the corresponding collective start operation, since the wait
+        is what actually allows those inputs to be freed.
         """
         input_storages: OrderedSet[StorageKey] = OrderedSet()
 
         for input_node in node.all_input_nodes:
             input_storages.update(self.node_to_output_storages[input_node])
+
+        # Handle collective start/wait pairs: wait_tensor should also "use" all inputs
+        # from the collective start operation, since it's the wait that releases them
+        if _is_wait_tensor(node):
+            collective_start = node.args[0]
+            assert isinstance(collective_start, fx.Node)
+            input_storages.update(self.node_to_storage_uses[collective_start])
 
         return input_storages
 
@@ -143,7 +162,7 @@ class GraphAliasTracker:
         return self.node_to_storages_last_used[node]
 
 
-def _size_of_default(num_bytes: int | torch.SymInt) -> int:
+def _size_of_default(num_bytes: Union[int, torch.SymInt]) -> int:
     return hint_int(num_bytes, fallback=torch._inductor.config.unbacked_symint_fallback)
 
 
@@ -154,7 +173,7 @@ def device_filter(device: torch.device) -> bool:
 def build_memory_profile(
     graph: fx.Graph,
     is_releasable: Callable[[fx.Node], bool],
-    size_of: Callable[[int | torch.SymInt], int] | None = None,
+    size_of: Optional[Callable[[Union[int, torch.SymInt]], int]] = None,
 ) -> list[int]:
     """
     Function to estimate the memory profile of an input FX graph.
@@ -165,7 +184,7 @@ def build_memory_profile(
     - is_releasable (Callable[[fx.Node], bool]): A function that
       determines if a node's memory can be released (e.g. primal nodes
       cannot be released).
-    - size_of (Callable[[int | torch.SymInt], int]): A function that converts
+    - size_of (Callable[[Union[int, torch.SymInt]], int]): A function that converts
       byte counts (possibly symbolic) to concrete integers.
 
     Returns:
@@ -216,7 +235,7 @@ def build_memory_profile(
 def get_fwd_bwd_interactions(
     fwd_graph: fx.Graph,
     bwd_graph: fx.Graph,
-    size_of: Callable[[int | torch.SymInt], int] | None = None,
+    size_of: Optional[Callable[[Union[int, torch.SymInt]], int]] = None,
 ) -> tuple[int, OrderedSet[str]]:
     """
     Analyze the interactions between the forward (fwd) and backward (bwd) graphs
@@ -225,7 +244,7 @@ def get_fwd_bwd_interactions(
     Args:
     - fwd_graph (fx.Graph): The forward graph representing the forward pass.
     - bwd_graph (fx.Graph): The backward graph representing the backward pass.
-    - size_of (Callable[[int | torch.SymInt], int]): A function that converts
+    - size_of (Callable[[Union[int, torch.SymInt]], int]): A function that converts
       byte counts (possibly symbolic) to concrete integers.
 
     Returns:
@@ -284,15 +303,14 @@ def get_fwd_bwd_interactions(
     return bwd_baseline_memory, do_not_delete
 
 
-def _is_releasable(n: fx.Node) -> bool:
-    # Storages of primals cannot be released during fwd or bwd pass.
-    return not n.name.startswith("primals")
-
-
 def get_peak_memory(
     fwd_graph: fx.Graph,
     bwd_graph: fx.Graph,
 ) -> int:
+    def _is_releasable(n: fx.Node) -> bool:
+        # Storages of primals cannot be released during fwd or bwd pass.
+        return not n.name.startswith("primals")
+
     fwd_peak_memory = max(build_memory_profile(fwd_graph, _is_releasable))
 
     bwd_baseline_memory, bwd_do_not_delete = get_fwd_bwd_interactions(
@@ -312,143 +330,3 @@ def get_peak_memory(
         fwd_peak_memory,
         bwd_peak_memory,
     )
-
-
-class MemoryTracker:
-    """
-    Tracks memory usage for alternative scheduling orders of an FX graph.
-
-    This class enables tracking memory usage as nodes are scheduled in a different
-    order than the original graph.
-    """
-
-    def __init__(
-        self,
-        graph: fx.Graph,
-        is_releasable: Callable[[fx.Node], bool] | None = None,
-        device_filter: Callable[[torch.device], bool] | None = None,
-    ):
-        """
-        Initialize memory tracker for alternative scheduling of the given graph.
-
-        Args:
-            graph: FX graph to track memory for under alternative scheduling
-            is_releaseable: do we consider this input to the graph to release memory
-            upon final use, or is allocated for the duration of the graph ?
-            by default, we assume all nodes but those that start with "primals" to be releasable
-            device_filter: Function to determine which devices to track (default: non-CPU)
-        """
-
-        self.graph = graph
-        self.nodes = list(graph.nodes)
-        self.device_filter = device_filter or (lambda device: device.type != "cpu")
-        self.scheduled: OrderedSet[fx.Node] = OrderedSet()
-
-        # Memory tracking using GraphAliasTracker
-        self.alias_tracker = GraphAliasTracker(self.nodes)
-        self.current_live_storages: OrderedSet[StorageKey] = OrderedSet()
-        self.current_memory_bytes = 0
-        self.is_releasable = _is_releasable if is_releasable is None else is_releasable
-
-        # Initialize live storages with placeholders and get_attr nodes
-        for node in self.nodes:
-            if node.op in ("placeholder", "get_attr"):
-                fresh_allocations = self.alias_tracker.get_fresh_allocations(node)
-                for storage_key in fresh_allocations:
-                    if self.device_filter(storage_key.device):
-                        self.current_live_storages.add(storage_key)
-                        self.current_memory_bytes += self._get_storage_size(storage_key)
-
-        self.peak_memory = self.current_memory_bytes
-
-        log.debug(
-            "Memory tracker initialized with initial memory: %d MB",
-            self.current_memory_bytes // (1024 * 1024),
-        )
-
-    def schedule_node(self, node: fx.Node) -> None:
-        """
-        Schedule a node and update memory tracking for the new scheduling order.
-
-        Args:
-            node: The node being scheduled (potentially out of original order)
-        """
-        assert node not in self.scheduled, "should not schedule node twice"
-        self.scheduled.add(node)
-        self._update_memory_for_node(node)
-
-    def get_current_memory_bytes(self) -> int:
-        """Get current live memory in bytes under the current scheduling."""
-        return self.current_memory_bytes
-
-    def _get_storage_size(self, storage_key: StorageKey) -> int:
-        """Get the size of a storage in bytes, handling symbolic shapes."""
-        size_bytes = storage_key.storage.nbytes()
-        return hint_int(
-            size_bytes, fallback=torch._inductor.config.unbacked_symint_fallback
-        )
-
-    def _get_storages_freed_by_node(self, node: fx.Node) -> OrderedSet[StorageKey]:
-        """Get storages that would be freed if we schedule this node."""
-        freed_storages: OrderedSet[StorageKey] = OrderedSet()
-
-        input_storages = self.alias_tracker.get_storage_uses(node)
-        for storage_key in input_storages:
-            if not self.device_filter(storage_key.device):
-                continue
-
-            # Invariant: if a node uses a storage, it must be live
-            assert storage_key in self.current_live_storages, (
-                "all input storages should be currently allocated"
-            )
-
-            if not self.is_releasable(
-                self.alias_tracker.storage_to_allocator[storage_key]
-            ):
-                continue
-
-            all_uses = self.alias_tracker.storage_to_uses[storage_key]
-
-            # If no more unscheduled uses remain, the storage can be freed
-            if all(u in self.scheduled for u in all_uses):
-                freed_storages.add(storage_key)
-
-        return freed_storages
-
-    def _update_memory_for_node(self, node: fx.Node) -> None:
-        """Update memory tracking when a node is scheduled."""
-        if node.op in ("placeholder", "get_attr", "output"):
-            return
-
-        # Add fresh allocations
-        fresh_allocations = self.alias_tracker.get_fresh_allocations(node)
-        alloc_bytes = 0
-        for storage_key in fresh_allocations:
-            if (
-                self.device_filter(storage_key.device)
-                and storage_key not in self.current_live_storages
-            ):
-                size = self._get_storage_size(storage_key)
-                self.current_live_storages.add(storage_key)
-                self.current_memory_bytes += size
-                alloc_bytes += size
-
-        self.peak_memory = max(self.current_memory_bytes, self.peak_memory)
-
-        # Remove storages that are no longer used
-        storages_to_free = self._get_storages_freed_by_node(node)
-        freed_bytes = 0
-        for storage_key in storages_to_free:
-            if storage_key in self.current_live_storages:
-                size = self._get_storage_size(storage_key)
-                self.current_live_storages.remove(storage_key)
-                self.current_memory_bytes -= size
-                freed_bytes += size
-
-        log.debug(
-            "Scheduled %s: memory change %d allocs, %d frees, current memory: %d MB",
-            node.name,
-            len(fresh_allocations),
-            len(storages_to_free),
-            self.current_memory_bytes // (1024 * 1024),
-        )

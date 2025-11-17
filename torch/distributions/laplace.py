@@ -28,7 +28,7 @@ class Laplace(Distribution):
         scale (float or Tensor): scale of the distribution
     """
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
     support = constraints.real
     has_rsample = True

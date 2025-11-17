@@ -63,6 +63,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
+          # TODO: Removeme once 3.14 is out
           # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
           python-version: "3.10.4"
           freethreaded: false

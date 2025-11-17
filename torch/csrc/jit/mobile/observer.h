@@ -67,28 +67,26 @@ class MobileModuleObserver {
  public:
   virtual ~MobileModuleObserver() = default;
 
-  virtual void onEnterRunMethod(const int32_t /*unused*/) {}
+  virtual void onEnterRunMethod(const int32_t) {}
   virtual void onExitRunMethod(
-      const std::unordered_map<std::string, std::string>& /*unused*/,
-      const std::string& /*unused*/,
-      const int32_t /*unused*/) {}
+      const std::unordered_map<std::string, std::string>&,
+      const std::string&,
+      const int32_t) {}
   virtual void onFailRunMethod(
-      const std::unordered_map<std::string, std::string>& /*unused*/,
-      const std::string& /*unused*/,
-      const int32_t /*unused*/,
-      const char* /*unused*/) {}
-  virtual void onEnterLoadModel(const int32_t /*unused*/) {}
+      const std::unordered_map<std::string, std::string>&,
+      const std::string&,
+      const int32_t,
+      const char*) {}
+  virtual void onEnterLoadModel(const int32_t) {}
   virtual void onExitLoadModel(
-      const int32_t /*unused*/,
-      const std::unordered_map<std::string, std::string>& /*unused*/) {
+      const int32_t,
+      const std::unordered_map<std::string, std::string>&) {
   } // key: filename, value: file content
+  virtual void onFailLoadModel(const int32_t, const char*) {}
   virtual void onFailLoadModel(
-      const int32_t /*unused*/,
-      const char* /*unused*/) {}
-  virtual void onFailLoadModel(
-      const int32_t /*unused*/,
-      const char* /*unused*/,
-      const std::unordered_map<std::string, std::string>& /*unused*/) {}
+      const int32_t,
+      const char*,
+      const std::unordered_map<std::string, std::string>&) {}
   virtual std::vector<std::string> getDefaultExtraFiles() = 0;
   virtual std::unordered_map<std::string, std::string> processMetadataFromExtra(
       const std::unordered_map<std::string, std::string>&) = 0;

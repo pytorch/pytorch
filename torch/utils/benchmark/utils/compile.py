@@ -170,7 +170,7 @@ if HAS_TABULATE:
                             _disable_tensor_cores()
                             table.append([
                                 ("Training" if optimizer else "Inference"),
-                                # pyrefly: ignore [redundant-condition]
+                                # pyrefly: ignore  # redundant-condition
                                 backend if backend else "-",
                                 mode if mode is not None else "-",
                                 f"{compilation_time} ms " if compilation_time else "-",
@@ -191,5 +191,5 @@ if HAS_TABULATE:
                     ])
 
 
-        # pyrefly: ignore [not-callable]
+        # pyrefly: ignore  # not-callable
         return tabulate(table, headers=field_names, tablefmt="github")

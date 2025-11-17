@@ -502,10 +502,9 @@ def foreach_reduce(
         ):
             if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
                 continue
-            if unsharded_grad.size(shard_dim) % world_size != 0:
-                raise AssertionError(
-                    f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
-                )
+            assert unsharded_grad.size(shard_dim) % world_size == 0, (
+                f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
+            )
             chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
             unsharded_grads[i] = torch.cat(chunks, dim=0)
 
@@ -622,10 +621,7 @@ def foreach_reduce(
                     # ensure that the D2H copy finishes before the optimizer
                     fsdp_param.grad_offload_event = post_reduce_stream.record_event()
             if to_accumulate_grad:
-                if not isinstance(fsdp_param.sharded_param.grad, DTensor):
-                    raise AssertionError(
-                        f"Expected fsdp_param.sharded_param.grad to be DTensor, got {type(fsdp_param.sharded_param.grad)}"
-                    )
+                assert isinstance(fsdp_param.sharded_param.grad, DTensor)
                 fsdp_param.sharded_param.grad._local_tensor += new_sharded_grad
             else:
                 new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(

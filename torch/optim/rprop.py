@@ -246,13 +246,12 @@ def _single_tensor_rprop(
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch.compiler.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
-            if not (
+            assert (
                 param.device.type == step.device.type
                 and param.device.type in capturable_supported_devices
-            ):
-                raise AssertionError(
-                    f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-                )
+            ), (
+                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            )
 
         step += 1
 
@@ -310,20 +309,18 @@ def _multi_tensor_rprop(
     if len(params) == 0:
         return
 
-    if differentiable:
-        raise AssertionError("_foreach ops don't support autograd")
+    assert not differentiable, "_foreach ops don't support autograd"
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices()
-        if not all(
+        assert all(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ):
-            raise AssertionError(
-                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-            )
+        ), (
+            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+        )
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, prevs, step_sizes, state_steps]  # type: ignore[list-item]

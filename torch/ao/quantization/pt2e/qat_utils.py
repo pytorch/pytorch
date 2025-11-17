@@ -385,53 +385,28 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> dict[str, tuple[Node, Nod
             if n.op != "call_function":
                 continue
             if _is_conv_or_conv_transpose_node(n):
-                if conv_node is not None:
-                    raise AssertionError(
-                        f"Found multiple conv nodes in match, previous: {conv_node}, new: {n}"
-                    )
+                assert conv_node is None
                 conv_node = n
             if _is_bn_node(n):
-                if bn_node is not None:
-                    raise AssertionError(
-                        f"Found multiple bn nodes in match, previous: {bn_node}, new: {n}"
-                    )
+                assert bn_node is None
                 bn_node = n
             if n.target == operator.getitem:
-                if getitem_node is not None:
-                    raise AssertionError(
-                        f"Found multiple getitem nodes in match, previous: {getitem_node}, new: {n}"
-                    )
+                assert getitem_node is None
                 getitem_node = n
-        if conv_node is None:
-            raise AssertionError(
-                "Expected exactly one conv node in the match, found none"
-            )
-        if bn_node is None:
-            raise AssertionError(
-                "Expected exactly one bn node in the match, found none"
-            )
+        assert conv_node is not None
+        assert bn_node is not None
         return (conv_node, bn_node, getitem_node)
 
     def _get_q_dq_nodes(n: Node) -> tuple[Node, Node, Node]:
         """
         Return a 3-tuple of (orig_node, q_node, dq_node).
         """
-        if not _is_dequantize(n):
-            raise AssertionError(f"Expected a dequantize node, got: {n}")
+        assert _is_dequantize(n)
         q_node = n.args[0]
-        if not isinstance(q_node, Node):
-            raise AssertionError(
-                f"Expected quantize node to be a torch.fx.Node, got {type(q_node)}"
-            )
-        if not _is_quantize(q_node):
-            raise AssertionError(
-                f"Expected q_node to be a quantize node, got target={q_node.target}"
-            )
+        assert isinstance(q_node, Node)
+        assert _is_quantize(q_node)
         orig_node = q_node.args[0]
-        if not isinstance(orig_node, Node):
-            raise AssertionError(
-                f"Expected original node to be a torch.fx.Node, got {type(orig_node)}"
-            )
+        assert isinstance(orig_node, Node)
         return (orig_node, q_node, n)
 
     original_nodes = list(_filter_nodes_map(r.nodes_map).values())
@@ -439,10 +414,8 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> dict[str, tuple[Node, Nod
     r_conv, r_bn, r_getitem = _get_nodes(r.replacements)
 
     # Create the mapping from original node to replacement node
-    if o_getitem is not None:
-        raise AssertionError(f"Expected o_getitem to be None, got {o_getitem}")
-    if r_getitem is not None:
-        raise AssertionError(f"Expected r_getitem to be None, got {r_getitem}")
+    assert o_getitem is None
+    assert r_getitem is None
     mapping = {
         "conv": (o_conv, r_conv),
         "bn": (o_bn, r_bn),
@@ -454,22 +427,10 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> dict[str, tuple[Node, Nod
     (p_conv, _, _) = _get_nodes(list(r.nodes_map.keys()))
     (p_conv_input, p_conv_weight, *_) = p_conv.args
     (r_conv_input, r_conv_weight, *_) = r_conv.args
-    if not isinstance(p_conv_input, Node):
-        raise AssertionError(
-            f"Expected p_conv_input to be a Node, got {type(p_conv_input)}"
-        )
-    if not isinstance(p_conv_weight, Node):
-        raise AssertionError(
-            f"Expected p_conv_weight to be a Node, got {type(p_conv_weight)}"
-        )
-    if not isinstance(r_conv_input, Node):
-        raise AssertionError(
-            f"Expected r_conv_input to be a Node, got {type(r_conv_input)}"
-        )
-    if not isinstance(r_conv_weight, Node):
-        raise AssertionError(
-            f"Expected r_conv_weight to be a Node, got {type(r_conv_weight)}"
-        )
+    assert isinstance(p_conv_input, Node)
+    assert isinstance(p_conv_weight, Node)
+    assert isinstance(r_conv_input, Node)
+    assert isinstance(r_conv_weight, Node)
     o_conv_input = r.nodes_map[p_conv_input]
     o_conv_weight = r.nodes_map[p_conv_weight]
 
@@ -493,14 +454,8 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> dict[str, tuple[Node, Nod
     if len(p_conv.args) > 2 and len(r_conv.args) > 2:
         p_conv_bias = p_conv.args[2]
         r_conv_bias = r_conv.args[2]
-        if not isinstance(p_conv_bias, Node):
-            raise AssertionError(
-                f"Expected p_conv_bias to be a Node, got {type(p_conv_bias)}"
-            )
-        if not isinstance(r_conv_bias, Node):
-            raise AssertionError(
-                f"Expected r_conv_bias to be a Node, got {type(r_conv_bias)}"
-            )
+        assert isinstance(p_conv_bias, Node)
+        assert isinstance(r_conv_bias, Node)
         o_conv_bias = r.nodes_map[p_conv_bias]
 
         # If conv bias is quantized, extract the q - dq nodes
@@ -550,12 +505,8 @@ def _copy_over_literal_conv_args(original_node: Node, new_node: Node):
     Note: Unlike other tensor args like conv weights and biases, literal args are
     preserved in the original nodes after replacement, so we can access them here.
     """
-    if not _is_conv_or_conv_transpose_node(original_node):
-        raise AssertionError(
-            f"Expected original_node to be a conv node, got {original_node}"
-        )
-    if not _is_conv_or_conv_transpose_node(new_node):
-        raise AssertionError(f"Expected new_node to be a conv node, got {new_node}")
+    assert _is_conv_or_conv_transpose_node(original_node)
+    assert _is_conv_or_conv_transpose_node(new_node)
     # x, weight, bias, [stride, padding, dilation, transposed, output_padding, groups]
     new_args = list(new_node.args)
     if len(new_args) < 3:
@@ -574,14 +525,8 @@ def _update_conv_input_qspec_map_after_replacement(
     so the keys in the `input_qspec_map` will need to be updated to reflect
     the corresponding nodes in the replacement graph.
     """
-    if not _is_conv_or_conv_transpose_node(original_node):
-        raise AssertionError(
-            f"Expected original_node to be a conv node, got {original_node}"
-        )
-    if not _is_conv_or_conv_transpose_node(replacement_node):
-        raise AssertionError(
-            f"Expected replacement_node to be a conv node, got {replacement_node}"
-        )
+    assert _is_conv_or_conv_transpose_node(original_node)
+    assert _is_conv_or_conv_transpose_node(replacement_node)
     if "quantization_annotation" not in original_node.meta:
         return
     original_input_qspec_map = original_node.meta[
@@ -841,8 +786,8 @@ def _duplicate_dequantize_node(m: GraphModule):
 def _remove_extra_dequantize(m: GraphModule):
     """
     Removes duplicate dequant nodes in the graph, for an operator that has
-    multiple dequant nodes as a user. Replace them with a single dequant node
-    that can be shared across all uses. This should be seen as the "reverse"
+    multiple dequant nodes as a user, replace them with a single dequant node
+    that can be shared across all the uses. This should be seen as the "reverse"
     of `_duplicate_dequantize_node`.
     """
     dq_op = torch.ops.quantized_decomposed.dequantize_per_tensor
@@ -870,11 +815,7 @@ def _copy_over_q_dq_args(original_node: Node, replacement_node: Node):
     """
     # For quantize_per_tensor, scale and zp are literals and need to be copied
     # For quantize_per_channel, scale and zp are get_attr nodes and should be skipped
-    if original_node.target != replacement_node.target:
-        raise AssertionError(
-            "Expected original and replacement nodes to have the same target, got "
-            f"{original_node.target} != {replacement_node.target}"
-        )
+    assert original_node.target == replacement_node.target
     if original_node.target in (
         torch.ops.quantized_decomposed.quantize_per_tensor.default,
         torch.ops.quantized_decomposed.dequantize_per_tensor.default,
@@ -1032,10 +973,7 @@ def _fold_conv_bn_qat_helper(
         _copy_over_q_dq_args(*node_map["conv_weight_q"])
         _copy_over_q_dq_args(*node_map["conv_weight_dq"])
         if "conv_bias_q" in node_map:
-            if "conv_bias_dq" not in node_map:
-                raise AssertionError(
-                    "Expected 'conv_bias_dq' to be present in node_map when 'conv_bias_q' is present"
-                )
+            assert "conv_bias_dq" in node_map
             _copy_over_q_dq_args(*node_map["conv_bias_q"])
             _copy_over_q_dq_args(*node_map["conv_bias_dq"])
 

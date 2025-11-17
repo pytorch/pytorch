@@ -20,7 +20,7 @@
 
 namespace at {
 
-TORCH_API int _crash_if_asan(int /*arg*/);
+TORCH_API int _crash_if_asan(int);
 
 // Converts a TensorList (i.e. ArrayRef<Tensor> to vector of TensorImpl*)
 // NB: This is ONLY used by legacy TH bindings, and ONLY used by cat.

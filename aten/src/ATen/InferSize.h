@@ -4,7 +4,6 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/DimVector.h>
-#include <c10/util/Exception.h>
 #include <optional>
 #include <sstream>
 #include <vector>
@@ -27,7 +26,9 @@ inline void infer_size_impl(
   std::optional<int64_t> infer_dim;
   for (int64_t dim = 0, ndim = shape.size(); dim != ndim; dim++) {
     if (TORCH_GUARD_OR_FALSE(sym_eq(shape[dim], -1))) {
-      TORCH_CHECK(!infer_dim, "only one dimension can be inferred");
+      if (infer_dim) {
+        throw std::runtime_error("only one dimension can be inferred");
+      }
       infer_dim = dim;
     } else {
       // in case of unbacked shape[dim] we assume it's not -1 and add a runtime

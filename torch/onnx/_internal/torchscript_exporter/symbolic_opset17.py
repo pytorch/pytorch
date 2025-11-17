@@ -176,7 +176,7 @@ def stft(
         )
 
     # Get window and make sure it's the same size as `win_length` or `n_fft`
-    # pyrefly: ignore [bad-argument-type]
+    # pyrefly: ignore  # bad-argument-type
     n_win = symbolic_helper._get_tensor_dim_size(window, dim=0)
     if n_win is not None:
         win_length_default = win_length if win_length else n_fft
@@ -190,7 +190,7 @@ def stft(
             left, right = _compute_edge_sizes(n_fft, n_win)
             left_win = g.op("Constant", value_t=torch.zeros(left))
             right_win = g.op("Constant", value_t=torch.zeros(right))
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             window = g.op("Concat", left_win, window, right_win, axis_i=0)
 
     # Create window, if needed
@@ -215,7 +215,7 @@ def stft(
         window = g.op("Constant", value_t=torch_window)
     window = g.op(
         "Cast",
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         window,
         to_i=_type_utils.JitScalarType.from_value(signal).onnx_type(),
     )

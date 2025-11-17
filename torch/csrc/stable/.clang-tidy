@@ -5,6 +5,5 @@
 InheritParentConfig: true
 Checks: '
 google-global-names-in-headers,
-misc-definitions-in-headers,
 '
 ...

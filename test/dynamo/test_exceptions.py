@@ -127,7 +127,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 x = torch.sigmoid(x)
                 try:
                     x = torch.cos(x)
-                    raise AssertionError  # noqa: B904
+                    raise AssertionError
                 except AssertionError:
                     x = torch.cos(x)
 
@@ -631,7 +631,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise ZeroDivisionError
             except ZeroDivisionError:
                 try:
-                    raise ValueError  # noqa: B904
+                    raise ValueError
                 except ValueError:
                     pass
                 raise
@@ -681,7 +681,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 yield 1
             except ValueError:
                 try:
-                    raise TypeError  # noqa: B904
+                    raise TypeError
                 finally:
                     pass
 
@@ -711,7 +711,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise ValueError
             except ValueError:
                 try:
-                    raise TypeError  # noqa: B904
+                    raise TypeError
                 finally:
                     pass
 
@@ -941,22 +941,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             raise AttributeError(name="a")
 
         self.assertRaises(Unsupported, fn)
-
-    def test_stack_trace_from_observed_exception(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(16, 16)
-
-            def forward(self, x):
-                # no attribute w on self.linear
-                weight = self.linear.w
-                return torch.nn.functional.linear(x, weight)
-
-        x = (torch.randn(4, 16, requires_grad=True),)
-
-        with self.assertRaisesRegex(Exception, "weight = self.linear.w"):
-            torch._dynamo.functional_export._dynamo_graph_capture_for_export(Model())(x)
 
 
 instantiate_parametrized_tests(ExceptionTests)

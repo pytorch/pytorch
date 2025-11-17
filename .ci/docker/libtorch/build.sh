@@ -39,13 +39,9 @@ case ${DOCKER_TAG_PREFIX} in
         DOCKER_GPU_BUILD_ARG=""
         ;;
     rocm*)
-        # we want the patch version of 7.0 instead
-        if [[ "$GPU_ARCH_VERSION" == *"7.0"* ]]; then
-            GPU_ARCH_VERSION="${GPU_ARCH_VERSION}.2"
-        fi
         # we want the patch version of 6.4 instead
         if [[ "$GPU_ARCH_VERSION" == *"6.4"* ]]; then
-            GPU_ARCH_VERSION="${GPU_ARCH_VERSION}.4"
+            GPU_ARCH_VERSION="${GPU_ARCH_VERSION}.2"
         fi
         BASE_TARGET=rocm
         GPU_IMAGE=rocm/dev-ubuntu-22.04:${GPU_ARCH_VERSION}-complete

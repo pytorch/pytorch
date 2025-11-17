@@ -27,10 +27,10 @@ Example usage:
 
 import enum
 import threading
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field  # noqa: F811
-from typing import Any
+from typing import Any, Callable
 
 
 class CallbackTrigger(enum.Enum):

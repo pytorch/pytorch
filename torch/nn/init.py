@@ -500,7 +500,7 @@ def xavier_normal_(
 
 
 def _calculate_correct_fan(tensor: Tensor, mode: _FanMode) -> int:
-    # pyrefly: ignore [bad-assignment]
+    # pyrefly: ignore  # bad-assignment
     mode = mode.lower()
     valid_modes = ["fan_in", "fan_out"]
     if mode not in valid_modes:
@@ -565,7 +565,7 @@ def kaiming_uniform_(
         )
 
     if 0 in tensor.shape:
-        warnings.warn("Initializing zero-element tensors is a no-op", stacklevel=2)
+        warnings.warn("Initializing zero-element tensors is a no-op")
         return tensor
     fan = _calculate_correct_fan(tensor, mode)
     gain = calculate_gain(nonlinearity, a)
@@ -619,7 +619,7 @@ def kaiming_normal_(
         pass in a transposed weight matrix, i.e. ``nn.init.kaiming_normal_(w.T, ...)``.
     """
     if 0 in tensor.shape:
-        warnings.warn("Initializing zero-element tensors is a no-op", stacklevel=2)
+        warnings.warn("Initializing zero-element tensors is a no-op")
         return tensor
     fan = _calculate_correct_fan(tensor, mode)
     gain = calculate_gain(nonlinearity, a)

@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
-from collections.abc import Callable
-from typing import Any
+from typing import Any, Callable
 
 import torch
 import torch.ao.nn.qat as nnqat

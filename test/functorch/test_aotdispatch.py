@@ -2278,7 +2278,9 @@ def forward(self, primals_1):
     view = torch.ops.aten.view.default(mul, [-1])
     select = torch.ops.aten.select.int(mul, 0, 0)
     detach = torch.ops.aten.detach.default(select);  select = None
-    return (view, mul, detach)""",
+    detach_1 = torch.ops.aten.detach.default(detach);  detach = None
+    detach_2 = torch.ops.aten.detach.default(detach_1);  detach_1 = None
+    return (view, mul, detach_2)""",
         )
 
     def test_output_aliases_intermediate_inplace_view(self):
@@ -2604,170 +2606,6 @@ def forward(self, primals_1, primals_2):
             torch.ones(3, 3, requires_grad=True),
         ]
         self.verify_aot_autograd(f, inp_grad, test_mutation=True)
-
-    def test_fw_bw_mutation_no_functionalization1(self):
-        class FwBwMutation(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, a, b):
-                # input mutation
-                torch._foreach_mul_([b], [2])
-                x = b + 1
-                # intermediate mutation
-                torch._foreach_mul_([x], [3])
-                ctx.save_for_backward(x)
-                return x * a
-
-            @staticmethod
-            def backward(ctx, grad_output):
-                (x,) = ctx.saved_tensors
-                # bw mutation
-                torch._foreach_mul_([x], [4])
-                return grad_output * x, grad_output * x
-
-        def f(a, b):
-            return FwBwMutation.apply(a, b)
-
-        inps = [
-            torch.ones(3, 3, requires_grad=True),
-            torch.ones(3, 3, requires_grad=False),
-        ]
-        inps_ref = [
-            torch.ones(3, 3, requires_grad=True),
-            torch.ones(3, 3, requires_grad=False),
-        ]
-
-        fw_graph = [None]
-        bw_graph = [None]
-
-        def fw_compiler(gm, example_inputs):
-            fw_graph[0] = gm
-            return gm
-
-        def bw_compiler(gm, example_inputs):
-            bw_graph[0] = gm
-            return gm
-
-        compiled_f = compiled_function(
-            f,
-            fw_compiler,
-            bw_compiler,
-            dynamic=False,
-            partition_fn=default_partition,
-            keep_inference_input_mutations=True,
-            disable_functionalization=True,
-        )
-
-        out_ref = f(*inps_ref)
-        out = compiled_f(*inps)
-        self.assertEqual(out, out_ref)
-
-        out_ref.sum().backward()
-        out.sum().backward()
-        self.assertEqual(inps_ref[0].grad, inps[0].grad)
-
-        # important bit: there are 2 mutations in the fw
-        self.assertExpectedInline(
-            fw_graph[0].code.strip(),
-            """\
-def forward(self, primals_1, primals_2):
-    _foreach_mul_ = torch.ops.aten._foreach_mul_.ScalarList([primals_2], [2]);  _foreach_mul_ = None
-    add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
-    _foreach_mul__1 = torch.ops.aten._foreach_mul_.ScalarList([add], [3]);  _foreach_mul__1 = None
-    mul = torch.ops.aten.mul.Tensor(add, primals_1);  primals_1 = None
-    return (mul, add)""",
-        )
-
-        # important bit: there is 1 mutation in the bw
-        self.assertExpectedInline(
-            bw_graph[0].code.strip(),
-            """\
-def forward(self, add, tangents_1):
-    _foreach_mul__2 = torch.ops.aten._foreach_mul_.ScalarList([add], [4]);  _foreach_mul__2 = None
-    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, add);  tangents_1 = add = None
-    return (mul_1, None)""",
-        )
-
-    def test_fw_bw_mutation_no_functionalization2(self):
-        class FwBwMutation(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                # input mutation
-                torch._foreach_mul_([x], [2])
-                x = x + 1
-                # intermediate mutation
-                torch._foreach_mul_([x], [3])
-                ctx.save_for_backward(x)
-                return x
-
-            @staticmethod
-            def backward(ctx, grad_output):
-                (x,) = ctx.saved_tensors
-                # bw mutation
-                torch._foreach_mul_([x], [4])
-                return grad_output * x
-
-        def f(a, b):
-            out = FwBwMutation.apply(b)
-            return out * a
-
-        inps = [
-            torch.ones(3, 3, requires_grad=True),
-            torch.ones(3, 3, requires_grad=False),
-        ]
-        inps_ref = [
-            torch.ones(3, 3, requires_grad=True),
-            torch.ones(3, 3, requires_grad=False),
-        ]
-
-        fw_graph = [None]
-        bw_graph = [None]
-
-        def fw_compiler(gm, example_inputs):
-            fw_graph[0] = gm
-            return gm
-
-        def bw_compiler(gm, example_inputs):
-            bw_graph[0] = gm
-            return gm
-
-        compiled_f = compiled_function(
-            f,
-            fw_compiler,
-            bw_compiler,
-            dynamic=False,
-            partition_fn=default_partition,
-            keep_inference_input_mutations=True,
-            disable_functionalization=True,
-        )
-
-        out_ref = f(*inps_ref)
-        out = compiled_f(*inps)
-        self.assertEqual(out, out_ref)
-
-        out_ref.sum().backward()
-        out.sum().backward()
-        self.assertEqual(inps_ref[0].grad, inps[0].grad)
-
-        # important bit: there are 2 mutations in the fw
-        # (the mutation on an activation doesn't get moved to bw)
-        self.assertExpectedInline(
-            fw_graph[0].code.strip(),
-            """\
-def forward(self, primals_1, primals_2):
-    _foreach_mul_ = torch.ops.aten._foreach_mul_.ScalarList([primals_2], [2]);  _foreach_mul_ = None
-    add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
-    _foreach_mul__1 = torch.ops.aten._foreach_mul_.ScalarList([add], [3]);  _foreach_mul__1 = None
-    mul = torch.ops.aten.mul.Tensor(add, primals_1);  primals_1 = None
-    return (mul, add)""",
-        )
-
-        self.assertExpectedInline(
-            bw_graph[0].code.strip(),
-            """\
-def forward(self, add, tangents_1):
-    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, add);  tangents_1 = add = None
-    return (mul_1, None)""",
-        )
 
     def test_backward_mutation_metadata(self):
         class BwMutation(torch.autograd.Function):
@@ -5300,12 +5138,23 @@ class <lambda>(torch.nn.Module):
         relu: "f32[1, 3, 3, 3]" = torch.ops.aten.relu.default(getitem);  getitem = None
         detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  detach = None
         detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu)
+        detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
+        detach_3: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_2);  detach_2 = None
+        detach_4: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_3);  detach_3 = None
         sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
-        detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
+        detach_5: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
+        detach_6: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_5);  detach_5 = None
+        detach_7: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_6);  detach_6 = None
+        detach_8: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_7);  detach_7 = None
+        detach_9: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_8);  detach_8 = None
+        detach_10: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_9);  detach_9 = None
         ones_like: "f32[]" = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
         expand: "f32[1, 3, 3, 3]" = torch.ops.aten.expand.default(ones_like, [1, 3, 3, 3]);  ones_like = None
-        detach_3: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-        threshold_backward: "f32[1, 3, 3, 3]" = torch.ops.aten.threshold_backward.default(expand, detach_3, 0);  expand = detach_3 = None
+        detach_11: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_4);  detach_4 = None
+        detach_12: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_11);  detach_11 = None
+        detach_13: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_12);  detach_12 = None
+        detach_14: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_13);  detach_13 = None
+        threshold_backward: "f32[1, 3, 3, 3]" = torch.ops.aten.threshold_backward.default(expand, detach_14, 0);  expand = detach_14 = None
         native_batch_norm_backward = torch.ops.aten.native_batch_norm_backward.default(threshold_backward, convolution, arg2_1, getitem_3, getitem_4, getitem_1, getitem_2, True, 1e-05, [True, True, True]);  threshold_backward = convolution = arg2_1 = getitem_1 = getitem_2 = None
         getitem_5: "f32[1, 3, 3, 3]" = native_batch_norm_backward[0]
         getitem_6: "f32[3]" = native_batch_norm_backward[1]
@@ -5314,7 +5163,7 @@ class <lambda>(torch.nn.Module):
         getitem_8 = convolution_backward[0];  getitem_8 = None
         getitem_9: "f32[3, 1, 1, 1]" = convolution_backward[1]
         getitem_10: "f32[3]" = convolution_backward[2];  convolution_backward = None
-        return (getitem_3, getitem_4, add, sum_1, detach_2, getitem_9, getitem_10, getitem_6, getitem_7)
+        return (getitem_3, getitem_4, add, sum_1, detach_10, getitem_9, getitem_10, getitem_6, getitem_7)
         """,  # noqa: B950
         )
 
@@ -5382,12 +5231,14 @@ class <lambda>(torch.nn.Module):
         relu: "f32[1, 3, 3, 3]" = torch.ops.aten.relu.default(getitem);  getitem = None
         sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
         detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
+        detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach);  detach = None
+        detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
         return (
             getitem_3,  # InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=4))
             getitem_4,  # InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=5))
             add,  # InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=6))
             sum_1,  # PlainAOTOutput(idx=0)
-            detach,  # PlainAOTOutput(idx=1)
+            detach_2,  # PlainAOTOutput(idx=1)
         )
         """,  # noqa: B950
         )
@@ -6481,7 +6332,7 @@ def forward(self, tangents_1, tangents_2):
         self.assertEqual(out_ref[0].b, out_test[0].b)
         self.assertEqual(out_ref[1], out_test[1])
 
-        # We compiled our graph assuming type(grad_out[1]) is torch.Tensor,
+        # We compiled our graph assuming type(grad_out[1]) == torch.Tensor,
         # but we were wrong: in the below tests, it is a subclass.
         # This will eventually require a repartition + recompile
         with self.assertRaisesRegex(
@@ -8143,9 +7994,7 @@ aot_autograd_failures = {
     decorate(
         "linalg.pinv",
         "singular",
-        # This delta is coming entirely from the clone() on tangents
-        # in AOTDispatcher to make them contiguous
-        decorator=toleranceOverride({torch.float32: tol(atol=1e-02, rtol=1e-02)}),
+        decorator=toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-05)}),
     ),
     decorate(
         "nn.functional.interpolate",
@@ -8211,14 +8060,7 @@ symbolic_aot_autograd_failures = {
 }
 
 
-def _test_aot_autograd_helper(
-    self,
-    device,
-    dtype,
-    op,
-    dynamic=False,
-    disable_functionalization=False,
-):
+def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
     if not op.supports_autograd:
         self.skipTest("Op does not support autograd")
 
@@ -8249,7 +8091,6 @@ def _test_aot_autograd_helper(
                 check_gradients=True,
                 try_check_data_specialization=try_check_data_specialization,
                 skip_correctness_check=op.skip_correctness_check_compile_vs_eager,
-                disable_functionalization=disable_functionalization,
             )
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
@@ -8349,36 +8190,6 @@ class TestEagerFusionOpInfo(AOTTestCase):
     )
     def test_aot_autograd_symbolic_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op, dynamic=True)
-
-    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
-    @skipOps(
-        "TestEagerFusionOpInfo",
-        "test_aot_autograd_disable_functionalization_exhaustive",
-        aot_autograd_failures,
-    )
-    def test_aot_autograd_disable_functionalization_exhaustive(self, device, dtype, op):
-        _test_aot_autograd_helper(
-            self, device, dtype, op, disable_functionalization=True
-        )
-
-    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
-    @patch("functorch.compile.config.debug_assert", True)
-    @skipOps(
-        "TestEagerFusionOpInfo",
-        "test_aot_autograd_disable_functionalization_symbolic_exhaustive",
-        aot_autograd_failures | symbolic_aot_autograd_failures,
-    )
-    def test_aot_autograd_disable_functionalization_symbolic_exhaustive(
-        self, device, dtype, op
-    ):
-        _test_aot_autograd_helper(
-            self,
-            device,
-            dtype,
-            op,
-            dynamic=True,
-            disable_functionalization=True,
-        )
 
 
 aot_autograd_module_failures = set(

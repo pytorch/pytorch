@@ -114,7 +114,7 @@ def _find_manylinux_interpreters() -> list[str]:
                 )
 
         except subprocess.CalledProcessError as e:
-            logger.debug("Failed to get version for %s: %s", python_path, e)  # noqa:G200
+            logger.debug("Failed to get version for %s: %s", python_path, e)
             continue
     return interpreters
 

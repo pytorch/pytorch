@@ -229,10 +229,7 @@ def _get_edge_or_node_to_group_id(
                 qspec, edge_or_node_to_qspec, shared_with_map
             )
 
-            if not isinstance(input_edge, tuple):
-                raise AssertionError(
-                    f"input_edge must be a tuple (arg, user), got {type(input_edge)}"
-                )
+            assert isinstance(input_edge, tuple)
             arg, n = input_edge
             if n.meta["quantization_annotation"].allow_implicit_sharing:
                 # NOTE: the order is important here, we first share with other users and then share with previous
@@ -349,10 +346,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
 
     if not isinstance(arg, Node):
         return arg
-    if not isinstance(arg, Node):
-        raise AssertionError(
-            f"expect original argument to be a Node, but got: {type(arg)}"
-        )
+    assert isinstance(arg, Node)
     # default (no observer)
     new_arg = arg
 
@@ -360,10 +354,9 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     original_arg = arg
     while _is_activation_post_process_node(original_arg, named_modules):
         original_arg = original_arg.args[0]  # type: ignore[assignment]
-    if not isinstance(original_arg, Node):
-        raise AssertionError(
-            f"expect original argument to be a Node, but got: {type(original_arg)}"
-        )
+    assert isinstance(original_arg, Node), (
+        f"expect original argument to be a Node, but got: {type(original_arg)}"
+    )
 
     input_edge = (original_arg, node)
     if input_edge not in obs_or_fq_map:
@@ -373,7 +366,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     if input_edge_obs_or_fq is None:
         return new_arg
 
-    arg_as_output_obs_or_fq = obs_or_fq_map.get(original_arg)
+    arg_as_output_obs_or_fq = obs_or_fq_map.get(original_arg, None)
     # the arg is observed as the output and is using the same instance as the input_edge
     # we'll reuse the inserted observer/fake_quant
     if arg_as_output_obs_or_fq is not None and id(arg_as_output_obs_or_fq) == id(
@@ -398,10 +391,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         if id(maybe_obs_mod) == id(input_edge_obs_or_fq):
             return maybe_obs_node
 
-    if not isinstance(model.graph, Graph):
-        raise AssertionError(
-            f"Expected model.graph to be a torch.fx.Graph, got {type(model.graph)}"
-        )
+    assert isinstance(model.graph, Graph)
     new_arg = _insert_obs_or_fq(
         arg,
         input_edge_obs_or_fq,
@@ -454,13 +444,12 @@ def _maybe_insert_input_observers_for_node(
     # Clone has a memory_format kwarg, zeros_like has a pin_memory kwarg, and
     # gelu has a has an approximate kwarg that persist in exported graph.
     # This is just a work around for these.
-    if not (
+    assert (
         node.target == torch.ops.aten.clone.default
         or node.target == torch.ops.aten.zeros_like.default
         or node.target == torch.ops.aten.gelu.default
         or len(node.kwargs) == 0
-    ):
-        raise AssertionError(" expecting kwargs for aten op IR to be empty")
+    ), " expecting kwargs for aten op IR to be empty"
 
     # assign the new args to the node, inplace
     node.args = tuple(new_args)
@@ -508,7 +497,11 @@ def _maybe_insert_input_and_output_observers_for_node(
     is_qat: bool,
     model_device: Optional[torch.device] = None,
 ):
-    this_node_quantization_annotation = node.meta.get("quantization_annotation", None)
+    this_node_quantization_annotation = (
+        node.meta["quantization_annotation"]
+        if "quantization_annotation" in node.meta
+        else None
+    )
     if this_node_quantization_annotation is None:
         return
 

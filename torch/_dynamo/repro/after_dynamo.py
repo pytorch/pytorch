@@ -24,9 +24,9 @@ import os
 import shutil
 import sys
 import textwrap
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from importlib import import_module
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.fx as fx

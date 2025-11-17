@@ -724,8 +724,7 @@ def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=
         affects the outputs.
     """
     warnings.warn(
-        "nn.quantized.functional.upsample is deprecated. Use nn.quantized.functional.interpolate instead.",
-        stacklevel=2,
+        "nn.quantized.functional.upsample is deprecated. Use nn.quantized.functional.interpolate instead."
     )
     return interpolate(input, size, scale_factor, mode, align_corners)
 
@@ -750,8 +749,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     """
     # DeprecationWarning is ignored by default
     warnings.warn(
-        "nn.quantized.functional.upsample_bilinear is deprecated. Use nn.quantized.functional.interpolate instead.",
-        stacklevel=2,
+        "nn.quantized.functional.upsample_bilinear is deprecated. Use nn.quantized.functional.interpolate instead."
     )
     return interpolate(input, size, scale_factor, mode="bilinear", align_corners=True)
 
@@ -776,7 +774,6 @@ def upsample_nearest(input, size=None, scale_factor=None):
     """
     # DeprecationWarning is ignored by default
     warnings.warn(
-        "nn.quantized.functional.upsample_nearest is deprecated. Use nn.quantized.functional.interpolate instead.",
-        stacklevel=2,
+        "nn.quantized.functional.upsample_nearest is deprecated. Use nn.quantized.functional.interpolate instead."
     )
     return interpolate(input, size, scale_factor, mode="nearest")

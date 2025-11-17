@@ -138,8 +138,8 @@ void ExecutionFrame::updateMovableOutputs() {
 ExecutionFrame::ExecutionFrame(
     const Graph& graph,
     size_t numValues,
-    const std::vector<ValueId>& /*unused*/,
-    const std::vector<ValueId>& /*unused*/)
+    const std::vector<ValueId>&,
+    const std::vector<ValueId>&)
     : graph_(graph) {
   allValues_.resize(numValues);
 }

@@ -198,7 +198,7 @@ class MaskedTensor(torch.Tensor):
     def _validate_members(self):
         data = self._masked_data
         mask = self.get_mask()
-        if type(data) is not type(mask):
+        if type(data) != type(mask):
             raise TypeError(
                 f"data and mask must have the same type. Got {type(data)} and {type(mask)}"
             )
@@ -322,7 +322,7 @@ class MaskedTensor(torch.Tensor):
             "In the case that the semantics for the operator are not trivial, it would be appreciated "
             "to also include a proposal for the semantics."
         )
-        warnings.warn(msg, stacklevel=2)
+        warnings.warn(msg)
         return NotImplemented
 
     def __lt__(self, other):

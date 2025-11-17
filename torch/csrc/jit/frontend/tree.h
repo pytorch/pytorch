@@ -5,7 +5,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/jit/frontend/lexer.h>
@@ -38,10 +37,10 @@ struct Tree : c10::intrusive_ptr_target {
     return true;
   }
   virtual const SourceRange& range() const {
-    TORCH_CHECK(false, "is an Atom");
+    throw std::runtime_error("is an Atom");
   }
   virtual const std::string& stringValue() const {
-    TORCH_CHECK(false, "stringValue can only be called on TK_STRING");
+    throw std::runtime_error("stringValue can only be called on TK_STRING");
   }
   virtual const TreeList& trees() const {
     static const TreeList empty_trees = {};
@@ -80,16 +79,13 @@ struct Tree : c10::intrusive_ptr_target {
       int lineno,
       size_t expected_subtrees,
       bool allow_more) const {
-    TORCH_CHECK(
-        kind() == k,
-        filename,
-        ":",
-        lineno,
-        ": expecting kind '",
-        kindToString(k),
-        "' but found '",
-        kindToString(kind()),
-        "'\n");
+    if (kind() != k) {
+      std::stringstream ss;
+      ss << filename << ":" << lineno << ": expecting kind '" << kindToString(k)
+         << "' but found '" << kindToString(kind()) << "'\n";
+      range().highlight(ss);
+      throw std::runtime_error(ss.str());
+    }
     if (trees().size() < expected_subtrees ||
         (!allow_more && trees().size() != expected_subtrees)) {
       std::stringstream ss;
@@ -97,7 +93,7 @@ struct Tree : c10::intrusive_ptr_target {
          << expected_subtrees << " subtrees, but found only " << trees().size()
          << "\n";
       range().highlight(ss);
-      TORCH_CHECK(false, ss.str());
+      throw std::runtime_error(ss.str());
     }
   }
   ~Tree() override = default;

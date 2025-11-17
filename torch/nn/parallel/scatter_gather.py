@@ -56,16 +56,16 @@ def scatter(inputs, target_gpus, dim=0):
         if isinstance(obj, torch.Tensor):
             return Scatter.apply(target_gpus, None, dim, obj)
         if _is_namedtuple(obj):
-            # pyrefly: ignore [no-matching-overload]
+            # pyrefly: ignore  # no-matching-overload
             return [type(obj)(*args) for args in zip(*map(scatter_map, obj))]
         if isinstance(obj, tuple) and len(obj) > 0:
-            # pyrefly: ignore [no-matching-overload]
+            # pyrefly: ignore  # no-matching-overload
             return list(zip(*map(scatter_map, obj)))
         if isinstance(obj, list) and len(obj) > 0:
-            # pyrefly: ignore [no-matching-overload]
+            # pyrefly: ignore  # no-matching-overload
             return [list(i) for i in zip(*map(scatter_map, obj))]
         if isinstance(obj, dict) and len(obj) > 0:
-            # pyrefly: ignore [no-matching-overload]
+            # pyrefly: ignore  # no-matching-overload
             return [type(obj)(i) for i in zip(*map(scatter_map, obj.items()))]
         return [obj for _ in target_gpus]
 
@@ -127,12 +127,12 @@ def gather(outputs: Any, target_device: Union[int, torch.device], dim: int = 0) 
         if isinstance(out, dict):
             if not all(len(out) == len(d) for d in outputs):
                 raise ValueError("All dicts must have the same number of keys")
-            # pyrefly: ignore [not-callable]
+            # pyrefly: ignore  # not-callable
             return type(out)((k, gather_map([d[k] for d in outputs])) for k in out)
         if _is_namedtuple(out):
-            # pyrefly: ignore [no-matching-overload]
+            # pyrefly: ignore  # no-matching-overload
             return type(out)._make(map(gather_map, zip(*outputs)))
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore  # no-matching-overload
         return type(out)(map(gather_map, zip(*outputs)))
 
     # Recursive function calls like this create reference cycles.

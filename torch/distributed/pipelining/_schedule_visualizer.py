@@ -81,7 +81,6 @@ def get_schedule_ops(
         raise ValueError(f"Invalid schedule: {schedule_class}")
 
     # Instantiate the schedule class
-    # pyrefly: ignore [bad-instantiation, bad-argument-type]
     schedule_instance = schedule_class(stages, num_microbatches)
     assert schedule_instance.pipeline_order is not None
 

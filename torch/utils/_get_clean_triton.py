@@ -3,7 +3,6 @@ import argparse
 import os
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 
@@ -108,7 +107,7 @@ def process_file(
             env["TORCHINDUCTOR_DUMP_LAUNCH_PARAMS"] = "1"
 
             result = subprocess.run(
-                [sys.executable, input_filename],
+                ["python", input_filename],
                 env=env,
                 capture_output=True,
                 text=True,

@@ -10,7 +10,6 @@
 #include <vector>
 
 #include <c10/util/tempfile.h>
-#include <c10/util/Exception.h>
 
 #include <libshm/err.h>
 #include <libshm/socket.h>
@@ -97,9 +96,10 @@ int main(int argc, char* argv[]) {
   std::optional<c10::TempDir> tempdir;
   try {
     tempdir = c10::try_make_tempdir(/*name_prefix=*/"torch-shm-dir-");
-    TORCH_CHECK(
-        tempdir.has_value(),
-        "could not generate a random directory for manager socket");
+    if (!tempdir.has_value()) {
+      throw std::runtime_error(
+          "could not generate a random directory for manager socket");
+    }
 
     std::string tempfile = tempdir->name + "/manager.sock";
 

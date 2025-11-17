@@ -16,5 +16,4 @@ from torch.utils.data.datapipes.map.utils import (
 __all__ = ["Batcher", "Concater", "Mapper", "SequenceWrapper", "Shuffler", "Zipper"]
 
 # Please keep this list sorted
-if __all__ != sorted(__all__):
-    raise AssertionError("__all__ is not sorted")
+assert __all__ == sorted(__all__)

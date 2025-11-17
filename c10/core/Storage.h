@@ -78,7 +78,7 @@ struct C10_API Storage {
             resizable)) {}
 
  protected:
-  explicit Storage(unsafe_borrow_t /*unused*/, const Storage& rhs)
+  explicit Storage(unsafe_borrow_t, const Storage& rhs)
       : storage_impl_(c10::intrusive_ptr<c10::StorageImpl>::reclaim(
             rhs.storage_impl_.get())) {}
 

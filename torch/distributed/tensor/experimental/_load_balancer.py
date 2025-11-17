@@ -1,18 +1,15 @@
 # this file contains the `_LoadBalancer` class and its family of implementation
 # for different load-balancing strategies in tensor sharding.
-import functools
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, Union
 
 import torch
-from torch import Tensor
-from torch.nn.attention.flex_attention import BlockMask
 
 
 # make it private since it's still a prototype
 class _LoadBalancer(ABC):
     @abstractmethod
-    def _generate_indices(self, restore: bool = False) -> Optional[Tensor]:
+    def _generate_indices(self, restore: bool = False) -> Optional[torch.Tensor]:
         """
         Generate indices for load balancing.
         Args:
@@ -77,12 +74,14 @@ class _LoadBalancer(ABC):
 
 
 class _HeadTailLoadBalancer(_LoadBalancer):
-    def __init__(self, seq_length: int, world_size: int, device: str | torch.device):
+    def __init__(
+        self, seq_length: int, world_size: int, device: Union[str, torch.device]
+    ):
         self.seq_length = seq_length
         self.world_size = world_size
         self.device = device
 
-    def _generate_indices(self, restore: bool = False) -> Tensor:
+    def _generate_indices(self, restore: bool = False) -> torch.Tensor:
         """
         Generate head-and-tail load balancing indices or restore indices.
         Args:
@@ -123,7 +122,7 @@ class _HeadTailLoadBalancer(_LoadBalancer):
 
             This can also be done by tensor slicing. For the above example, the indices
             tensor for slicing is:
-                slice_indices = Tensor([0, 7, 1, 6, 2, 5, 3, 4])
+                slice_indices = torch.tensor([0, 7, 1, 6, 2, 5, 3, 4])
 
             After reordering QKV using the `slice_indices`, the corresponding mask matrix
             distributing over 2 devices becomes well-balanced:
@@ -140,7 +139,7 @@ class _HeadTailLoadBalancer(_LoadBalancer):
 
             To restore the reordering and putting the tensor back, slicing op can do the
             trick with a `restore_indices` such that:
-                slice_indices[restore_indices] == Tensor([0, 1, 2, ...])
+                slice_indices[restore_indices] == torch.tensor([0, 1, 2, ...])
 
             In this way, `reordered_Q[restore_indices]` will just be the original Q.
         """
@@ -180,7 +179,7 @@ class _PerDocumentHeadTailLoadBalancer(_LoadBalancer):
         self,
         seq_length_per_doc: list[list[int]],
         world_size: int,
-        device: str | torch.device,
+        device: Union[str, torch.device],
     ):
         """
         `seq_length_per_doc` has size (B, seq_len) if the load-balancing should vary
@@ -190,7 +189,7 @@ class _PerDocumentHeadTailLoadBalancer(_LoadBalancer):
         self.world_size = world_size
         self.device = device
 
-    def _generate_indices(self, restore: bool = False) -> Tensor:
+    def _generate_indices(self, restore: bool = False) -> torch.Tensor:
         """
         Generate the per-document head-and-tail rearrange indices so that after rearranging
         the input is load-balanced in per-document head-and-tail style.
@@ -259,7 +258,7 @@ class _PerDocumentHeadTailLoadBalancer(_LoadBalancer):
             ]
         )
 
-    def _generate_indices_for_batch(self, seq_length_per_doc, restore) -> Tensor:  # type: ignore[no-untyped-def]
+    def _generate_indices_for_batch(self, seq_length_per_doc, restore) -> torch.Tensor:  # type: ignore[no-untyped-def]
         world_size = self.world_size
         device = self.device
         assert all(
@@ -302,182 +301,8 @@ class _PerDocumentHeadTailLoadBalancer(_LoadBalancer):
         return indices_tensor
 
 
-class _PTRRLoadBalancer(_LoadBalancer):
-    """
-    Processing-Time based Round-Robin (PTRR) load balancer. This load balancer should
-    only be used for flex_attention() since it leverages `BlockMask`.
-    """
-
-    def __init__(
-        self,
-        block_mask: BlockMask,
-        world_size: int,
-    ):
-        """
-        `block_mask` must have shape (B, 1, seq_len, seq_len) or (1, 1, seq_len, seq_len).
-        """
-        self.block_mask = block_mask
-        self.world_size = world_size
-
-    @staticmethod
-    def ptrr_scheduling(process_time: Tensor, group_size: int) -> Tensor:
-        """
-        Separate the tasks into `group_size` groups using PTRR scheduling.
-        process_time:
-            1D tensor of size n, where n is the number of tasks. The value
-            is the process time of the task. Size `n` must be divisible by
-            `group_size`.
-        group_size:
-            the number of groups
-
-        Returns:
-        tasks_in_group (list[list[int]]):
-            A collection of list[int] and each list should have size `n // group_size`
-            (`group_size` lists in total). Each element is an index in the input
-            `process_time` (i.e. [0, len(process_time) - 1]).
-
-        Example:
-            process_time = [9, 14, 2, 20, 10, 15, 8, 14, 16, 19, 15, 3, 12, 1, 12, 10]
-            tasks_in_group = [
-                [3, 12, 13, 14],    # values = [1, 12, 12, 20], sum = 45
-                [2, 4, 7, 9],       # values = [2, 10, 14, 19], sum = 45
-                [1, 8, 11, 15],     # values = [14, 16, 3, 10], sum = 43
-                [0, 5, 6, 10]       # values = [9, 15, 8, 15], sum = 47
-            ]
-        """
-        assert process_time.ndim == 1
-
-        num_tasks = process_time.size(0)
-
-        if num_tasks % group_size != 0:
-            raise NotImplementedError(
-                f"num_tasks {num_tasks} must be divisible by group_size {group_size}"
-            )
-
-        device = process_time.device
-        _, sorted_indices_descending = torch.sort(
-            process_time, descending=True, stable=True
-        )  # if process time is tied, the order is preserved
-        sorted_indices_descending_reversed = torch.flip(
-            sorted_indices_descending.view(-1, group_size), dims=[1]
-        ).view(-1)
-        tasks_in_group = torch.where(
-            torch.arange(num_tasks, device=device) // group_size % 2 == 0,
-            sorted_indices_descending,
-            sorted_indices_descending_reversed,
-        )
-        tasks_in_group = tasks_in_group.view(-1, group_size).transpose(
-            0, 1
-        )  # (group_size, n // group_size)
-
-        # sort each group. This step should not have impact on correctness
-        # nor execution run time, but it helps users visualize the mask
-        tasks_in_group, _ = torch.sort(tasks_in_group, dim=1)
-        return tasks_in_group
-
-    def _generate_indices(self, restore: bool = False) -> Tensor:
-        """
-        Generate the PTRR reorder indices of shape `(1, seq_len)` or `(batch_size, seq_len)`.
-
-        Args:
-            restore:
-                If True, generate restore indices that map Processing-Time based Round-Robin
-                (PTRR) rearranged positions back to original positions. If False, generate
-                load balance indices that rearrange original positions to PTRR pattern.
-
-            Returns:
-                The generated indices of shape `(1, seq_len)` if the load-balancing is
-                identical within the batch (i.e. `BlockMask.shape[0] == 1`), or
-                `(batch_size, seq_len)` if the load-balancing should vary within the batch.
-
-        Warning:
-            For Multi-Head Attention, we require the masks over the head dimension are identical
-            (i.e. `self.block_mask` must have shape (B, 1, seq_len, seq_len) or (1, 1, seq_len, seq_len)).
-
-        Example:
-            Here is the document causal mask for attention whereq_len == kv_len == 16 * BLOCK_SIZE
-            (each entry is a block):
-                                        KV_index
-                    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  -> row value = 1
-                    [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  -> row value = 2
-                    [1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  -> row value = 3
-                    [1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  -> row value = 4
-                    [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  -> row value = 1
-                    [0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  -> row value = 2
-                    [0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]  -> row value = 3
-            Q_index [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]  -> row value = 4
-                    [0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0]  -> row value = 5
-                    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0]  -> row value = 6
-                    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0]  -> row value = 7
-                    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0]  -> row value = 8
-                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]  -> row value = 1
-                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0]  -> row value = 2
-                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0]  -> row value = 3
-                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1]  -> row value = 4
-
-            The reorder indices will be: [2, 3, 5, 6, 8, 11, 12, 13, 0, 1, 4, 7, 9, 10, 14, 15] and
-            the mask matrix will look like:
-                                        KV_index
-                    [1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  -> row value = 3
-                    [1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  -> row value = 4
-                    [0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  -> row value = 2
-                    [0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]  -> row value = 3
-                    [0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0]  -> row value = 5  rank 0 (sum=28)
-                    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0]  -> row value = 8
-                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]  -> row value = 1
-                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0]  -> row value = 2
-                    ------------------------------------------------
-                    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  -> row value = 1
-                    [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  -> row value = 2
-                    [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  -> row value = 1
-                    [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]  -> row value = 4
-                    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0]  -> row value = 6  rank 1 (sum=28)
-                    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0]  -> row value = 7
-                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0]  -> row value = 3
-                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1]  -> row value = 4
-        """
-        block_mask = self.block_mask
-        kv_num_blocks = block_mask.kv_num_blocks
-        full_kv_num_blocks = block_mask.full_kv_num_blocks
-        non_sparse_kv_num_blocks = (
-            kv_num_blocks + full_kv_num_blocks
-            if full_kv_num_blocks is not None
-            else kv_num_blocks
-        )
-        B, H, Q = non_sparse_kv_num_blocks.shape
-        # requirement: the masking is identical across heads (i.e. H == 1 in BlockMask)
-        non_sparse_kv_num_blocks = non_sparse_kv_num_blocks.view(-1, Q)  # (B, Q_BLK)
-
-        batch_ptrr = torch.vmap(
-            functools.partial(
-                _PTRRLoadBalancer.ptrr_scheduling,
-                group_size=self.world_size,
-            )
-        )
-        ptrr_indices = batch_ptrr(
-            non_sparse_kv_num_blocks
-        )  # (B, group_size, num_blks_in_group)
-        ptrr_indices = ptrr_indices.reshape(B, -1)  # (B, num_blocks)
-
-        # NOTE: only support the case where the qkv block size are equal
-        q_blk_size, kv_blk_size = block_mask.BLOCK_SIZE
-        assert q_blk_size == kv_blk_size, (
-            "for now only support q_blk_size == kv_blk_size"
-        )
-
-        indices = torch.arange(
-            q_blk_size * ptrr_indices.size(1), device=ptrr_indices.device
-        ).view(-1, q_blk_size)  # (NUM_BLOCKS, BLOCK_SIZE)
-        indices = indices[ptrr_indices].view(B, -1)  # (B, qkv_size)
-
-        if restore:
-            indices = torch.vmap(torch.argsort)(indices)
-
-        return indices
-
-
 def _create_default_load_balancer(
-    seq_length: int, world_size: int, device: str | torch.device
+    seq_length: int, world_size: int, device: Union[str, torch.device]
 ) -> Optional[_LoadBalancer]:
     from torch.distributed.tensor.experimental._attention import _cp_options
 

@@ -62,7 +62,7 @@ constexpr const char* unknown_eventname = "eventname not specified";
 #endif
 }  // namespace (anonymous)
 
-MapAllocator::MapAllocator(WithFd /*unused*/, std::string_view filename, int fd, int flags, size_t size)
+MapAllocator::MapAllocator(WithFd, std::string_view filename, int fd, int flags, size_t size)
   : filename_(filename.empty() ? unknown_filename : filename)
   , size_(0) // to be filled later
 #ifdef _WIN32
@@ -494,7 +494,7 @@ RefcountedMapAllocator::RefcountedMapAllocator(const char *filename, int flags, 
 
     initializeAlloc();
 }
-RefcountedMapAllocator::RefcountedMapAllocator(WithFd /*unused*/, const char *filename, int fd, int flags, size_t size)
+RefcountedMapAllocator::RefcountedMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size)
   : RefcountedMapAllocatorArgCheck(flags)
   , MapAllocator(WITH_FD, filename, flags, fd, size + map_alloc_alignment) {
 
@@ -614,7 +614,7 @@ at::DataPtr MapAllocator::makeDataPtr(std::string_view filename, int flags, size
   return {context->data(), context, &deleteMapAllocator, at::DeviceType::CPU};
 }
 
-at::DataPtr MapAllocator::makeDataPtr(WithFd /*unused*/, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
+at::DataPtr MapAllocator::makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
   auto* context = new MapAllocator(WITH_FD, filename, fd, flags, size);
   if (actual_size_out) *actual_size_out = context->size();
   return {context->data(), context, &deleteMapAllocator, at::DeviceType::CPU};
@@ -626,7 +626,7 @@ at::DataPtr RefcountedMapAllocator::makeDataPtr(const char *filename, int flags,
   return {context->data(), context, &deleteRefcountedMapAllocator, at::DeviceType::CPU};
 }
 
-at::DataPtr RefcountedMapAllocator::makeDataPtr(WithFd /*unused*/, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
+at::DataPtr RefcountedMapAllocator::makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
   auto* context = new RefcountedMapAllocator(WITH_FD, filename, fd, flags, size);
   if (actual_size_out) *actual_size_out = context->size() - map_alloc_alignment;
   return {context->data(), context, &deleteRefcountedMapAllocator, at::DeviceType::CPU};

@@ -123,7 +123,7 @@ class TransformedDistribution(Distribution):
         return new
 
     @constraints.dependent_property(is_discrete=False)
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def support(self):
         if not self.transforms:
             return self.base_dist.support

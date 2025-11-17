@@ -746,6 +746,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
             and (shape_env := loop_count.node.shape_env)
             and loop_count in shape_env.pending_fresh_unbacked_symbols
         ):
+            # pyrefly: ignore  # unbound-name
             shape_env.pending_fresh_unbacked_symbols.remove(loop_count)
 
         # Even when body function is not executed, we clone and unsqueeze the input

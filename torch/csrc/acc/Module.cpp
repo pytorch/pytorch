@@ -76,19 +76,18 @@ struct PythonDeviceGuard final : public c10::impl::DeviceGuardImplInterface {
   }
   void setDevice(c10::Device device) const override {}
   void uncheckedSetDevice(c10::Device device) const noexcept override {}
-  c10::Stream getStream(c10::Device /*unused*/) const noexcept override {
+  c10::Stream getStream(c10::Device) const noexcept override {
     // no-op
     return c10::Stream(c10::Stream::DEFAULT, getDevice());
   }
 
-  c10::Stream getNewStream(c10::Device /*unused*/, int priority = 0)
-      const override {
+  c10::Stream getNewStream(c10::Device, int priority = 0) const override {
     // no-op
     (void)priority;
     return c10::Stream(c10::Stream::DEFAULT, getDevice());
   }
 
-  c10::Stream exchangeStream(c10::Stream /*unused*/) const noexcept override {
+  c10::Stream exchangeStream(c10::Stream) const noexcept override {
     // no-op
     return c10::Stream(c10::Stream::DEFAULT, getDevice());
   }

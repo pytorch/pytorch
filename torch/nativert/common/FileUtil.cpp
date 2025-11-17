@@ -27,7 +27,7 @@ int unistd_close(int fh) {
 #endif
 }
 
-inline void incr(ssize_t /*unused*/) {}
+inline void incr(ssize_t) {}
 template <typename Offset>
 inline void incr(ssize_t n, Offset& offset) {
   offset += static_cast<Offset>(n);

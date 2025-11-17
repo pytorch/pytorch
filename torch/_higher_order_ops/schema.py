@@ -35,7 +35,7 @@ class HopArgumentInfoGen:
         kw_only: bool = False,
     ) -> HopArgumentInfo:
         if default_value is not None:
-            assert type(example_value) is type(default_value), (
+            assert type(example_value) == type(default_value), (
                 f"example_value type {type(example_value)} doesn't match default_value type: {type(default_value)}"
             )
 

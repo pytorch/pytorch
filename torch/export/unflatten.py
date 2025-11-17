@@ -301,7 +301,7 @@ class FlatArgsAdapter(abc.ABC):
         return []
 
 
-class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
+class UnflattenedModule(torch.nn.Module):
     def __init__(
         self,
         export_module: ExportedProgram,
@@ -340,7 +340,6 @@ class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
 
         _inplace_buffer_and_input_mutations(export_graph, self.graph_signature)
         _fix_nn_module_stacks(export_graph)
-        self._ty = _root_module_type(export_graph)
 
         self.ivals = _IVals()
         # for any intermediate value of a mutation that is read, track the mutation
@@ -859,17 +858,6 @@ def _inplace_buffer_and_input_mutations(
     output_node.args = ((user_outputs),)
 
 
-def _root_module_type(graph: torch.fx.Graph) -> Optional[str]:
-    for node in graph.nodes:
-        if "nn_module_stack" not in node.meta:
-            continue
-
-        for path, ty in node.meta["nn_module_stack"].values():
-            if not path:
-                return ty
-    return None
-
-
 def _fix_nn_module_stacks(graph):
     # For each nn module stack in the graph, check if the fqns in it represent a stack:
     # 1. Each fqn must be a prefix of the next fqn.
@@ -949,7 +937,7 @@ def _check_graph_equivalence(x: torch.nn.Module, y: torch.nn.Module):
                 for key, value in pytree.tree_map(arg_dump, node.kwargs).items()
             ]
             target = node.target if node.op in ("call_function", "get_attr") else ""
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             ret.append(f"{i}: {node.op}[{target}]({', '.join(args_dump)})")
             nodes_idx[id(node)] = i
         return "\n".join(ret)
@@ -1206,7 +1194,6 @@ class _ModuleFrame:
                     for k in kwargs_spec.context
                 }
             assert self.parent_call_module is not None
-            # pyrefly: ignore [bad-assignment]
             self.parent_call_module.args = tuple(arg_nodes)
             self.parent_call_module.kwargs = kwarg_nodes  # type: ignore[assignment]
 
@@ -1394,7 +1381,6 @@ class _ModuleFrame:
 
     def print(self, *args, **kwargs):
         if self.verbose:
-            # pyrefly: ignore [not-iterable]
             print(*args, **kwargs)
 
     def run_from(self, node_idx):
@@ -1488,7 +1474,7 @@ class _ModuleFrame:
                 self.seen_attrs[self.child_fqn].add(node.target)
 
             self.copy_node(node)
-            # pyrefly: ignore [unsupported-operation]
+            # pyrefly: ignore  # unsupported-operation
             node_idx += 1
 
 

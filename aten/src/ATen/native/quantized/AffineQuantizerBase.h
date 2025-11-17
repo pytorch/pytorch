@@ -31,7 +31,7 @@ TORCH_API float dequantize_vec(
     float* dst,
     size_t count = 8);
 template <typename SRC_T, typename DST_T>
-TORCH_API DST_T requantize_val(double /*src_scale*/, int64_t /*src_zero_point*/, double /*dst_scale*/, int64_t /*dst_zero_point*/, SRC_T src);
+TORCH_API DST_T requantize_val(double, int64_t, double, int64_t, SRC_T src);
 
 // Given a multiplier and a zero_point, requantize int32_t computed values back
 // to quantized values. See comment above

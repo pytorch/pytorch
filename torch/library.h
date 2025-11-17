@@ -115,7 +115,7 @@ class TORCH_API CppFunction final {
       Func* f,
       std::enable_if_t<
           c10::guts::is_function_type<Func>::value,
-          std::nullptr_t>  /*unused*/= nullptr)
+          std::nullptr_t> = nullptr)
       : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f)),
         cpp_signature_(c10::impl::CppSignature::make<Func>()),
         schema_(
@@ -129,7 +129,7 @@ class TORCH_API CppFunction final {
       FuncPtr f,
       std::enable_if_t<
           c10::is_compile_time_function_pointer<FuncPtr>::value,
-          std::nullptr_t>  /*unused*/= nullptr)
+          std::nullptr_t> = nullptr)
       : func_(c10::KernelFunction::makeFromUnboxedFunction(f)),
         cpp_signature_(
             c10::impl::CppSignature::make<typename FuncPtr::FuncType>()),
@@ -144,7 +144,7 @@ class TORCH_API CppFunction final {
       Lambda&& f,
       std::enable_if_t<
           c10::guts::is_functor<std::decay_t<Lambda>>::value,
-          std::nullptr_t>  /*unused*/= nullptr)
+          std::nullptr_t> = nullptr)
       : func_(c10::KernelFunction::makeFromUnboxedLambda(
             std::forward<Lambda>(f))),
         cpp_signature_(c10::impl::CppSignature::make<Lambda>()),
@@ -310,7 +310,7 @@ class TORCH_API CppFunction final {
 
   // The "setter" for dispatch_key_
   template <typename Func>
-  friend CppFunction dispatch(c10::DispatchKey /*k*/, Func&& /*raw_f*/);
+  friend CppFunction dispatch(c10::DispatchKey, Func&&);
 
   // The only class which actually pulls out values from CppFunction (does so
   // destructively, felt too lazy to write accessors that I don't even
@@ -746,14 +746,14 @@ class TORCH_API Library final {
   // These overloads cover cases when a SelectiveStr (see Note [Selective
   // build]) has been disabled at compile time.  In that case, don't generate
   // any code referencing the passed in functions at all.
-  Library& def(detail::SelectiveStr<false> /*unused*/, const std::vector<at::Tag>& tags [[maybe_unused]] = {}) & {
+  Library& def(detail::SelectiveStr<false>, const std::vector<at::Tag>& tags [[maybe_unused]] = {}) & {
     return *this;
   }
   Library& def(detail::SelectiveStr<true> raw_schema, const std::vector<at::Tag>& tags = {}) & {
     return def(raw_schema.operator const char*(), tags);
   }
   template <typename Func>
-  Library& def(detail::SelectiveStr<false> /*unused*/, Func&& /*raw_f*/, const std::vector<at::Tag>& tags [[maybe_unused]] = {}) & {
+  Library& def(detail::SelectiveStr<false>, Func&& /*raw_f*/, const std::vector<at::Tag>& tags [[maybe_unused]] = {}) & {
     return *this;
   }
   template <typename Func>
@@ -764,12 +764,12 @@ class TORCH_API Library final {
 
   template <typename Func>
   // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
-  Library& impl(detail::SelectiveStr<false> /*unused*/, Func&& /*raw_f*/) & {
+  Library& impl(detail::SelectiveStr<false>, Func&& /*raw_f*/) & {
     return *this;
   }
   template <typename Dispatch, typename Func>
   Library& impl(
-      detail::SelectiveStr<false> /*unused*/,
+      detail::SelectiveStr<false>,
       // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
       Dispatch&& /*key*/,
       // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
@@ -877,7 +877,7 @@ class TORCH_API Library final {
       const std::vector<at::Tag>& tags = {},
       _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) &;
   Library& _def(
-      std::variant<c10::OperatorName, c10::FunctionSchema>&& /*name_or_schema*/,
+      std::variant<c10::OperatorName, c10::FunctionSchema>&&,
       CppFunction&& f,
       const std::vector<at::Tag>& tags = {}) &;
   Library& _impl(

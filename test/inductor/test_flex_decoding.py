@@ -412,7 +412,7 @@ class TestFlexDecoding(InductorTestCase):
         sdpa_partial = create_attention(
             score_mod,
             block_mask,
-            enable_gqa=(Q_H != KV_H),
+            enable_gqa=(not Q_H == KV_H),
             kernel_options=kernel_options,
         )
         compiled_sdpa = torch.compile(sdpa_partial)
@@ -607,7 +607,7 @@ class TestFlexDecoding(InductorTestCase):
                 return_lse=True,
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
-                enable_gqa=(Q_H != KV_H),
+                enable_gqa=(not Q_H == KV_H),
             )
         else:
             compiled_lse = None
@@ -618,7 +618,7 @@ class TestFlexDecoding(InductorTestCase):
                 return_lse=False,
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
-                enable_gqa=(Q_H != KV_H),
+                enable_gqa=(not Q_H == KV_H),
             )
         return compiled_out, compiled_lse
 
@@ -664,7 +664,9 @@ class TestFlexDecoding(InductorTestCase):
         if block_mask is None:
             block_mask = create_block_mask(noop_mask, Q_B, 1, 1, KV_S, device=device)
 
-        sdpa_partial = create_attention(score_mod, block_mask, enable_gqa=(Q_H != KV_H))
+        sdpa_partial = create_attention(
+            score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
+        )
         golden_out, gold_lse = sdpa_partial(q_gold, k_gold, v_gold, return_lse=True)
         ref_out, ref_lse = sdpa_partial(q_ref, k_ref, v_ref, return_lse=True)
 
@@ -904,7 +906,7 @@ class TestFlexDecoding(InductorTestCase):
         sdpa_partial = create_attention(
             score_mod=score_mod,
             block_mask=None,
-            enable_gqa=(Hq != Hkv),
+            enable_gqa=(not Hq == Hkv),
         )
         compiled_sdpa = torch.compile(sdpa_partial)
         ref_out = sdpa_partial(q, k, v)
@@ -1142,7 +1144,7 @@ class TestFlexDecoding(InductorTestCase):
 
         def head_attention_mod(kv_head_num):
             head_type = torch.tensor(
-                [i % kv_head_num != 0 for i in range(kv_head_num)],
+                [False if i % kv_head_num == 0 else True for i in range(kv_head_num)],
                 dtype=torch.bool,
                 device=device,
             )

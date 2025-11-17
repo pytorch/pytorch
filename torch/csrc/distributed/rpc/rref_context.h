@@ -225,7 +225,7 @@ class TORCH_API RRefContext {
     c10::intrusive_ptr<JitFuture> confirmationFuture_;
   };
 
-  RRefContext(std::shared_ptr<RpcAgent> /*agent*/);
+  RRefContext(std::shared_ptr<RpcAgent>);
 
   c10::intrusive_ptr<UserRRef> createUserRRef(
       worker_id_t ownerId,

@@ -512,10 +512,7 @@ def schedule(
         wait >= 0 and warmup >= 0 and active > 0 and repeat >= 0 and skip_first >= 0
     ), "Invalid profiler schedule arguments"
     if warmup == 0:
-        warn(
-            "Profiler won't be using warmup, this can skew profiler results",
-            stacklevel=2,
-        )
+        warn("Profiler won't be using warmup, this can skew profiler results")
     return schedule_fn
 
 
@@ -933,8 +930,7 @@ class ExecutionTraceObserver(_ITraceObserver):
                 fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
             except Exception as e:
                 warn(
-                    f"Execution trace will not be recorded. Exception on creating default temporary file: {e}",
-                    stacklevel=2,
+                    f"Execution trace will not be recorded. Exception on creating default temporary file: {e}"
                 )
                 return None
             fp.close()
@@ -1019,10 +1015,7 @@ class ExecutionTraceObserver(_ITraceObserver):
                 try:
                     os.mkdir(resource_dir)
                 except Exception:
-                    warn(
-                        f"Execution trace exception when creating {resource_dir}",
-                        stacklevel=2,
-                    )
+                    warn(f"Execution trace exception when creating {resource_dir}")
                     return None
             else:
                 return None
@@ -1038,15 +1031,14 @@ class ExecutionTraceObserver(_ITraceObserver):
                 resource_dir = self.get_resources_dir()
             except Exception as e:
                 warn(
-                    f"Execution trace exception when generating resource directory: {e}",
-                    stacklevel=2,
+                    f"Execution trace exception when generating resource directory: {e}"
                 )
                 return
             if not resource_dir:
                 return
 
             # Save the kernel paths for the generated kernels
-            from torch._inductor.codecache import PyCodeCache
+            from torch._inductor.codecache import PyCodeCache as PyCodeCache
 
             kernel_files = [
                 v.__file__
@@ -1074,7 +1066,7 @@ class ExecutionTraceObserver(_ITraceObserver):
             try:
                 _save_triton_kernels()
             except Exception as e:
-                warn(f"Execution trace failed to save kernels: {e}", stacklevel=2)
+                warn(f"Execution trace failed to save kernels: {e}")
 
             _remove_execution_trace_observer()
             if self.output_file_path.endswith("gz"):

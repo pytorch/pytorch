@@ -83,7 +83,7 @@ class HopPartitionedGraph:
             val1: Union[torch.SymInt, torch.Tensor],
             val2: Union[torch.SymInt, torch.Tensor],
         ) -> bool:
-            if type(val1) is not type(val2):
+            if type(val1) != type(val2):
                 return False
 
             if isinstance(val1, torch.SymInt) and isinstance(val2, torch.SymInt):

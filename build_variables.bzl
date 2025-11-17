@@ -482,7 +482,6 @@ inductor_core_resources = [
     "torch/csrc/inductor/aoti_torch/oss_proxy_executor.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
     "torch/csrc/jit/serialization/pickle.cpp",
-    "torch/csrc/shim_common.cpp",
 ]
 
 libtorch_core_sources = sorted(
@@ -856,7 +855,6 @@ libtorch_python_cuda_core_sources = [
     "torch/csrc/cuda/Stream.cpp",
     "torch/csrc/cuda/Graph.cpp",
     "torch/csrc/cuda/MemPool.cpp",
-    "torch/csrc/cuda/GreenContext.cpp",
     "torch/csrc/cuda/shared/cudart.cpp",
     "torch/csrc/cuda/shared/nvtx.cpp",
     "torch/csrc/cuda/utils.cpp",

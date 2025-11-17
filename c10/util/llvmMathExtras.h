@@ -70,7 +70,7 @@ enum ZeroBehavior {
 namespace detail {
 template <typename T, std::size_t SizeOfT>
 struct TrailingZerosCounter {
-  static std::size_t count(T Val, ZeroBehavior /*unused*/) {
+  static std::size_t count(T Val, ZeroBehavior) {
     if (!Val)
       return std::numeric_limits<T>::digits;
     if (Val & 0x1)
@@ -147,7 +147,7 @@ std::size_t countTrailingZeros(T Val, ZeroBehavior ZB = ZB_Width) {
 namespace detail {
 template <typename T, std::size_t SizeOfT>
 struct LeadingZerosCounter {
-  static std::size_t count(T Val, ZeroBehavior /*unused*/) {
+  static std::size_t count(T Val, ZeroBehavior) {
     if (!Val)
       return std::numeric_limits<T>::digits;
 

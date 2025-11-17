@@ -126,7 +126,6 @@ def solve_for_tiling(expr: sympy.Expr) -> Optional[sympy.Expr]:
 
     # For the purposes of tiling/coalesced access, approximate ModularIndexing and FloorDiv
     # then check later
-    # pyrefly: ignore [missing-attribute]
     eq_1_expr_simplified = eq_1_expr.replace(ModularIndexing, indexing_div_rep).replace(
         FloorDiv, indexing_div_rep
     )
@@ -477,6 +476,7 @@ def extract_normalized_read_writes(
     (norm_pw_vars, norm_red_vars), ranges = index_vars_no_squeeze(
         pw_splits, red_splits, prefix="n"
     )
+    node = node
 
     for n in list(node.get_nodes()):
         if not isinstance(n, torch._inductor.scheduler.SchedulerNode):
@@ -575,7 +575,7 @@ def get_score(addr: sympy.Expr, var_ranges: dict[sympy.Symbol, int]) -> int:
     # TODO - deduplicate with candidate_tilings
     var_sizes = []
     for v in addr.free_symbols:
-        v_size = var_ranges.get(v)
+        v_size = var_ranges.get(v, None)
         # TODO - reason about indirect vars
         if not symbol_is_type(v, SymT.INDIRECT) and v_size is not None:
             var_sizes.append(v_size)

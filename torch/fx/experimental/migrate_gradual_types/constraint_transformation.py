@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 import copy
 import itertools
-from collections.abc import Callable
+from typing import Callable
 
 from torch.fx.experimental.migrate_gradual_types.constraint import (
     ApplyBroadcasting,

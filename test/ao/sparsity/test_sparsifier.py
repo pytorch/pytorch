@@ -291,7 +291,7 @@ class TestWeightNormSparsifier(TestCase):
             assert hasattr(module.parametrizations["weight"][0], "mask")
             # Check parametrization exists and is correct
             assert is_parametrized(module, "weight")
-            assert type(module.parametrizations.weight[0]) is FakeSparsity
+            assert type(module.parametrizations.weight[0]) == FakeSparsity
 
     def test_mask_squash(self):
         model = SimpleLinear()
@@ -415,7 +415,7 @@ class TestNearlyDiagonalSparsifier(TestCase):
             assert hasattr(module.parametrizations["weight"][0], "mask")
             # Check parametrization exists and is correct
             assert is_parametrized(module, "weight")
-            assert type(module.parametrizations.weight[0]) is FakeSparsity
+            assert type(module.parametrizations.weight[0]) == FakeSparsity
 
     def test_mask_squash(self):
         model = SimpleLinear()
@@ -472,8 +472,8 @@ class TestNearlyDiagonalSparsifier(TestCase):
         else:
             height, width = mask.shape
             dist_to_diagonal = nearliness // 2
-            for row in range(height):
-                for col in range(width):
+            for row in range(0, height):
+                for col in range(0, width):
                     if abs(row - col) <= dist_to_diagonal:
                         assert mask[row, col] == 1
                     else:

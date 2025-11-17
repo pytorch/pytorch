@@ -633,7 +633,7 @@ class TypedOperatorHandle<Return(Args...)> final : public OperatorHandle {
 
 namespace detail {
 template <class... Args>
-inline void unused_arg_(const Args&... /*unused*/) {}
+inline void unused_arg_(const Args&...) {}
 
 // CaptureKernelCall is intended to capture return values from Dispatcher
 // unboxed kernel calls. A record function may request to get outputs from the

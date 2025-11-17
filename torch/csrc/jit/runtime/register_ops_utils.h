@@ -418,8 +418,8 @@ struct OperatorGeneratorArgs {
 
   template <typename... Args>
   explicit constexpr OperatorGeneratorArgs(
-      torch::detail::SelectiveStr<false> /*unused*/,
-      Args... /*unused*/)
+      torch::detail::SelectiveStr<false>,
+      Args...)
       : schema_str(nullptr),
         isOperationCreator(false),
         operation(nullptr),

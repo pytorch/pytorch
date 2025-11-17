@@ -242,16 +242,6 @@ AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
     AOTInductorModelHandle model_handle,
     AOTInductorConstantMapHandle constant_map_handle);
 
-// Get the size of the constant blob
-AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantsBlobSize(
-    AOTInductorModelContainerHandle container_handle,
-    uint64_t* ret_size);
-
-// Load weights from a single blob in weight_blob_ptr
-AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsFromBlob(
-    AOTInductorModelContainerHandle container_handle,
-    const uint8_t* weight_blob_ptr);
-
 // Delete an AOTInductorModel created by AOTInductorModelCreate.
 AOTI_API AOTIRuntimeError
 AOTInductorModelDelete(AOTInductorModelHandle model_handle);

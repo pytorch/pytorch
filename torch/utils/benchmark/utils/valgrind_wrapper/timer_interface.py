@@ -145,8 +145,7 @@ class FunctionCounts:
         second: "FunctionCounts",
         merge_fn: Callable[[int], int]
     ) -> "FunctionCounts":
-        if self.inclusive != second.inclusive:
-            raise AssertionError("Cannot merge inclusive and exclusive counts.")
+        assert self.inclusive == second.inclusive, "Cannot merge inclusive and exclusive counts."
         counts: collections.defaultdict[str, int] = collections.defaultdict(int)
         for c, fn in self:
             counts[fn] += c
@@ -449,13 +448,13 @@ class GlobalsBridge:
         load_lines = []
         for name, wrapped_value in self._globals.items():
             if wrapped_value.setup is not None:
-                # pyrefly: ignore [bad-argument-type]
+                # pyrefly: ignore  # bad-argument-type
                 load_lines.append(textwrap.dedent(wrapped_value.setup))
 
             if wrapped_value.serialization == Serialization.PICKLE:
                 path = os.path.join(self._data_dir, f"{name}.pkl")
                 load_lines.append(
-                    # pyrefly: ignore [bad-argument-type]
+                    # pyrefly: ignore  # bad-argument-type
                     f"with open({repr(path)}, 'rb') as f:\n    {name} = pickle.load(f)")
                 with open(path, "wb") as f:
                     pickle.dump(wrapped_value.value, f)
@@ -465,13 +464,13 @@ class GlobalsBridge:
                 # TODO: Figure out if we can use torch.serialization.add_safe_globals here
                 # Using weights_only=False after the change in
                 # https://dev-discuss.pytorch.org/t/bc-breaking-change-torch-load-is-being-flipped-to-use-weights-only-true-by-default-in-the-nightlies-after-137602/2573
-                # pyrefly: ignore [bad-argument-type]
+                # pyrefly: ignore  # bad-argument-type
                 load_lines.append(f"{name} = torch.load({repr(path)}, weights_only=False)")
                 torch.save(wrapped_value.value, path)
 
             elif wrapped_value.serialization == Serialization.TORCH_JIT:
                 path = os.path.join(self._data_dir, f"{name}.pt")
-                # pyrefly: ignore [bad-argument-type]
+                # pyrefly: ignore  # bad-argument-type
                 load_lines.append(f"{name} = torch.jit.load({repr(path)})")
                 with open(path, "wb") as f:
                     torch.jit.save(wrapped_value.value, f)  # type: ignore[no-untyped-call]
@@ -497,8 +496,7 @@ class _ValgrindWrapper:
         else:
             print("Callgrind bindings are not present in `torch._C`. JIT-ing bindings.")
             self._bindings_module = cpp_jit.get_compat_bindings()
-            if not all(hasattr(self._bindings_module, symbol) for symbol in valgrind_symbols):
-                raise AssertionError("JIT-compiled callgrind bindings are missing required symbols")
+            assert all(hasattr(self._bindings_module, symbol) for symbol in valgrind_symbols)
             self._supported_platform = self._bindings_module._valgrind_supported_platform()
 
         self._commands_available: dict[str, bool] = {}
@@ -537,8 +535,7 @@ class _ValgrindWrapper:
     ) -> tuple[CallgrindStats, ...]:
         """Collect stats, and attach a reference run which can be used to filter interpreter overhead."""
         self._validate()
-        if not is_python and collect_baseline:
-            raise AssertionError("collect_baseline is only supported for Python timers")
+        assert is_python or not collect_baseline
 
         *task_stats, baseline_stats = self._invoke(
             task_spec=task_spec,
@@ -549,8 +546,7 @@ class _ValgrindWrapper:
             is_python=is_python,
             retain_out_file=retain_out_file,
         )
-        if len(task_stats) != repeats:
-            raise AssertionError("Unexpected number of task stats returned from _invoke")
+        assert len(task_stats) == repeats
 
         return tuple(
             CallgrindStats(
@@ -642,8 +638,7 @@ class _ValgrindWrapper:
 
                 run_loop_cmd = ["python", script_file]
             else:
-                if collect_baseline:
-                    raise AssertionError("collect_baseline must be False for non-Python timers")
+                assert not collect_baseline
                 run_loop_exec = cpp_jit.compile_callgrind_template(
                     stmt=task_spec.stmt,
                     setup=task_spec.setup,
@@ -709,8 +704,7 @@ class _ValgrindWrapper:
                             scan_state = ScanState.PARSING
 
                     else:
-                        if scan_state != ScanState.PARSING:
-                            raise AssertionError("Failed to enter PARSING state while parsing callgrind_annotate output")
+                        assert scan_state == ScanState.PARSING
                         fn_match = function_pattern.match(l)
                         if fn_match:
                             ir_str, file_function = fn_match.groups()
@@ -728,8 +722,7 @@ class _ValgrindWrapper:
                         else:
                             break
 
-                if scan_state != ScanState.PARSING:
-                    raise AssertionError(f"Failed to parse {fpath}")
+                assert scan_state == ScanState.PARSING, f"Failed to parse {fpath}"
                 return FunctionCounts(tuple(sorted(fn_counts, reverse=True)), inclusive=inclusive)
 
             def read_results(i: int) -> tuple[FunctionCounts, FunctionCounts, Optional[str]]:

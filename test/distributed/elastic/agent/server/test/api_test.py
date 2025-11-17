@@ -257,10 +257,7 @@ class RecordWorkerEventsTest(unittest.TestCase):
         self.assertEqual(failed_event.metadata["state"], "FAILED")
         self.assertEqual(failed_event.metadata["global_rank"], 0)
         md = json.loads(failed_event.metadata["metadata"])
-        self.assertEqual(
-            failed_event.metadata["raw_error"],
-            '{"message": "<NONE>", "errorTraits": {"category": "system_terminated_error", "retryability": "False"}}',
-        )
+        self.assertEqual(failed_event.metadata["raw_error"], '{"message": "<NONE>"}')
         self.assertEqual(md["exit_code"], [1])
         self.assertEqual(md["worker_pid"], [1000])
 
@@ -636,7 +633,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
         worker_group = agent.get_worker_group()
 
         num_restarts = 3
-        for _ in range(num_restarts):
+        for _ in range(0, num_restarts):
             agent._restart_workers(worker_group)
             self.assertEqual(WorkerState.HEALTHY, worker_group.state)
 

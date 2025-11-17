@@ -84,7 +84,7 @@ class _NSGraphMatchableSubgraphsIterator:
                 if is_match:
                     # navigate to the base node
                     for rev_fusion_idx in range(len(_reverse_fusion_ops) - 1):
-                        # pyrefly: ignore [bad-argument-type]
+                        # pyrefly: ignore  # bad-argument-type
                         self.seen_nodes.add(cur_start_node)
                         # for now, assume that there are no other nodes
                         # which need to be added to the stack
@@ -95,10 +95,10 @@ class _NSGraphMatchableSubgraphsIterator:
                             cur_base_op_node = cur_start_node
                     break
 
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             self.seen_nodes.add(cur_start_node)
             # add args of previous nodes to stack
-            # pyrefly: ignore [missing-attribute]
+            # pyrefly: ignore  # missing-attribute
             for arg in cur_start_node.all_input_nodes:
                 self._recursively_add_node_arg_to_stack(arg)
 
@@ -106,7 +106,7 @@ class _NSGraphMatchableSubgraphsIterator:
             # note: this check is done on the start_node, i.e.
             # if we are matching linear-relu in reverse, this would do the matchable
             # check on the linear
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             if not self._is_matchable(cur_base_op_node):
                 continue
 
@@ -120,10 +120,10 @@ class _NSGraphMatchableSubgraphsIterator:
                     continue
 
             return NSSubgraph(
-                # pyrefly: ignore [bad-argument-type]
+                # pyrefly: ignore  # bad-argument-type
                 start_node=cur_start_node,
                 end_node=cur_end_node,
-                # pyrefly: ignore [bad-argument-type]
+                # pyrefly: ignore  # bad-argument-type
                 base_op_node=cur_base_op_node,
             )
 
@@ -150,8 +150,7 @@ class _NSGraphMatchableSubgraphsIterator:
         if node.op == "call_function":
             return node.target not in self.non_matchable_functions
         elif node.op == "call_module":
-            if not isinstance(node.target, str):
-                raise AssertionError(f"Expected str, got {type(node.target)}")
+            assert isinstance(node.target, str)
             target_mod = getattr_from_fqn(self.gm, node.target)
             return not any(
                 isinstance(target_mod, t)  # type: ignore[arg-type]
@@ -229,29 +228,26 @@ def _get_subgraph_relationship_type(
         else:
             return SubgraphTypeRelationship.NOT_RELATED
     elif node_a.op == "call_module":
-        if (
-            subgraph_a.base_op_node != subgraph_a.start_node
-            or subgraph_b.base_op_node != subgraph_b.start_node
-        ):
-            raise AssertionError(
-                "Matching call_module patterns where base_op_node != start_node is not supported yet"
-            )
+        assert (
+            subgraph_a.base_op_node == subgraph_a.start_node
+            and subgraph_b.base_op_node == subgraph_b.start_node
+        ), (
+            "Matching call_module patterns where base_op_node != start_node is not supported yet"
+        )
         # for call_module, we need to look up the modules to do the type check
-        if not isinstance(node_a.target, str):
-            raise AssertionError(f"Expected str, got {type(node_a.target)}")
+        assert isinstance(node_a.target, str)
         mod_a = getattr_from_fqn(gm_a, node_a.target)
-        if not isinstance(node_b.target, str):
-            raise AssertionError(f"Expected str, got {type(node_b.target)}")
+        assert isinstance(node_b.target, str)
         mod_b = getattr_from_fqn(gm_b, node_b.target)
 
         key = (type(mod_a), type(mod_b))
 
         if key not in type_a_related_to_b:
-            if type(mod_a) is type(mod_b):
+            if type(mod_a) == type(mod_b):
                 return SubgraphTypeRelationship.EQUAL_BUT_UKNOWN
             else:
                 return SubgraphTypeRelationship.NOT_RELATED
-        elif type(mod_a) is type(mod_b):
+        elif type(mod_a) == type(mod_b):
             return SubgraphTypeRelationship.EQUAL
         else:
             return SubgraphTypeRelationship.RELATED_BUT_NOT_EQUAL
@@ -316,8 +312,7 @@ def _get_node_target_type(node: Node, gm: GraphModule) -> Optional[NSNodeTargetT
     if node.op in ("call_function", "call_method"):
         return node.target
     elif node.op == "call_module":
-        if not isinstance(node.target, str):
-            raise AssertionError(f"Expected str, got {type(node.target)}")
+        assert isinstance(node.target, str)
         mod = getattr_from_fqn(gm, node.target)
         return type(mod)
     return None
@@ -457,10 +452,9 @@ of subgraphs, and each pair of subgraphs is related to each other."""
             key_name_b = _get_name_for_subgraph(
                 cur_subgraph_b, gm_b, base_name_to_sets_of_related_ops, existing_names_b
             )
-            if key_name_a != key_name_b:
-                raise AssertionError(
-                    f"Subgraph names {key_name_a} and {key_name_b} do not match"
-                )
+            assert key_name_a == key_name_b, (
+                f"Subgraph names {key_name_a} and {key_name_b} do not match"
+            )
             results[key_name_a] = (cur_subgraph_a, cur_subgraph_b)
             continue
         elif cur_subgraph_a is None and cur_subgraph_b is None:
@@ -481,5 +475,4 @@ of subgraphs."""
     # subgraphs in their order of execution.
     results = collections.OrderedDict(reversed(results.items()))
 
-    # pyrefly: ignore [bad-return]
     return results

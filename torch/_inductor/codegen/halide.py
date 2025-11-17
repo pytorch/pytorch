@@ -636,7 +636,6 @@ class DimensionInfo:
             return "hl.Var()"
         if replacements:
             replacements = {**replacements}
-            # pyrefly: ignore [missing-attribute]
             for sym in expr.free_symbols:
                 if symbol_is_type(sym, SymT.TMP):
                     assert isinstance(sym, sympy.Symbol)
@@ -710,10 +709,8 @@ class HalideKernel(SIMDKernel):
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         return halide_type(dtype)
 
-    # pyrefly: ignore [bad-override]
     def create_cse_var(self, name, bounds=None, dtype=None, shape=None):
         self.body.writeline(f"{name} = hl.Func({name!r})")
-        # pyrefly: ignore [bad-argument-type]
         return HalideCSEVariable(name, bounds, dtype, shape)
 
     def finalize_indexing(self, indices: Sequence[sympy.Expr]):
@@ -731,7 +728,6 @@ class HalideKernel(SIMDKernel):
             self.index_replacements or self.halide_vars or self.reduction_renames
         )
         size_hint = functools.partial(V.graph.sizevars.size_hint, fallback=inf)  # type: ignore[arg-type]
-        # pyrefly: ignore [bad-assignment]
         indices = dict.fromkeys(map(super().prepare_indexing, indices))
         all_used_symbols = OrderedSet[Any]()
         sym_to_node = {
@@ -830,7 +826,6 @@ class HalideKernel(SIMDKernel):
                         handled_count = len(nodes)
                         had_fallback = True
                     sym = sympy_index_symbol(f"h{len(self.halide_vars)}")
-                    # pyrefly: ignore [missing-argument]
                     if tree.is_reduction:
                         self.reduction_renames[sym] = sympy_index_symbol(
                             f"hr{len(self.halide_vars)}"
@@ -1227,10 +1222,8 @@ class HalideKernel(SIMDKernel):
             parts = []
             stride = 1
             for i, sym in enumerate(self.reduction_renames):
-                # pyrefly: ignore [bad-argument-type]
                 parts.append(f"{index}[{i}]")
                 if stride != 1:
-                    # pyrefly: ignore [unsupported-operation]
                     parts[-1] += f"*{stride}"
                 stride *= self.halide_vars[sym]
             self.body.writeline(f"{result_var} = {' + '.join(parts)}")
@@ -1583,7 +1576,6 @@ class HalideKernel(SIMDKernel):
                     hint = self._autoscheduler_workarounds(
                         V.graph.sizevars.size_hint(dim.size, fallback=1), dims
                     )
-                    # pyrefly: ignore [bad-argument-type]
                     range_hints.append(f"hl.Range(0, {hint})")
                     if "out" not in arg.name:
                         code.writeline(f"{arg.name}.dim({i}).set_min(0)")

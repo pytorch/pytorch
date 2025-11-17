@@ -9,9 +9,8 @@ import logging
 import time
 from abc import abstractmethod
 from collections import defaultdict
-from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from tabulate import tabulate
 from tqdm import tqdm

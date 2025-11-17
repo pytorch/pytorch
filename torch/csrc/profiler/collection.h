@@ -447,7 +447,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
         extra_fields_{std::move(extra_fields)} {}
 
   template <EventType E>
-  static EventType deduceTag(const ExtraFields<E>& /*unused*/) {
+  static EventType deduceTag(const ExtraFields<E>&) {
     return E;
   }
 };
@@ -689,22 +689,21 @@ class TORCH_API RecordQueue {
 };
 
 TORCH_API bool get_record_concrete_inputs_enabled();
-TORCH_API void set_record_concrete_inputs_enabled_fn(
-    std::function<bool()> /*fn*/);
-TORCH_API void set_record_concrete_inputs_enabled_val(bool /*val*/);
+TORCH_API void set_record_concrete_inputs_enabled_fn(std::function<bool()>);
+TORCH_API void set_record_concrete_inputs_enabled_val(bool);
 
 TORCH_API bool get_fwd_bwd_enabled();
-TORCH_API void set_fwd_bwd_enabled_fn(std::function<bool()> /*fn*/);
-TORCH_API void set_fwd_bwd_enabled_val(bool /*val*/);
+TORCH_API void set_fwd_bwd_enabled_fn(std::function<bool()>);
+TORCH_API void set_fwd_bwd_enabled_val(bool);
 
 TORCH_API bool get_cuda_sync_enabled();
-TORCH_API void set_cuda_sync_enabled_fn(std::function<bool()> /*fn*/);
-TORCH_API void set_cuda_sync_enabled_val(bool /*val*/);
+TORCH_API void set_cuda_sync_enabled_fn(std::function<bool()>);
+TORCH_API void set_cuda_sync_enabled_val(bool);
 
 // Comms related RecordFunctions will record information about tensor storage
 // locations.
 TORCH_API bool get_record_tensor_addrs_enabled();
-TORCH_API void set_record_tensor_addrs_enabled_fn(std::function<bool()> /*fn*/);
-TORCH_API void set_record_tensor_addrs_enabled_val(bool /*val*/);
+TORCH_API void set_record_tensor_addrs_enabled_fn(std::function<bool()>);
+TORCH_API void set_record_tensor_addrs_enabled_val(bool);
 
 } // namespace torch::profiler::impl

@@ -40,16 +40,13 @@ class AdaroundFakeQuantizer(FakeQuantize):
         )
         # Populate quant_min/quant_max to observer_kwargs if valid
         if quant_min is not None and quant_max is not None:
-            if quant_min > quant_max:
-                raise AssertionError(
-                    "quant_min must be less than or equal to quant_max, "
-                    f"got quant_min:{quant_min}, quant_max:{quant_max}"
-                )
+            assert quant_min <= quant_max, (
+                "quant_min must be less than or equal to quant_max"
+            )
         self.qscheme: torch.qscheme = qscheme
         self.is_per_tensor: bool = is_per_tensor(qscheme)
         self.is_symmetric: bool = _is_symmetric_quant(qscheme)
-        if not self.is_symmetric:
-            raise AssertionError("Only symmetric quantization is supported")
+        assert self.is_symmetric, "Only symmetric quantization is supported"
         self.ch_axis: int = ch_axis
 
         self.scale = torch.tensor([], requires_grad=False)
@@ -108,8 +105,9 @@ class AdaroundFakeQuantizer(FakeQuantize):
         X_q = X / self.scale
         X_q_floor = torch.floor(X_q)
         residual = X_q - X_q_floor  # [0,1)
-        if not torch.all(torch.ge(residual, 0)):
-            raise AssertionError("residual should be non-negative in [0, 1)")
+        assert torch.all(torch.ge(residual, 0)), (
+            "residual should be non-negative [0, 1)"
+        )
         V_init = -torch.log((self.zeta - self.gamma) / (residual - self.gamma) - 1)
         self.V.data = V_init
 

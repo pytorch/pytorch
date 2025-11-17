@@ -623,8 +623,7 @@ class TestFP8Lowering(TestCase):
                 bias,
             )
 
-            FileCheck().check("SCALE_RECIPE_A : tl.constexpr = 0").run(code[0])
-            FileCheck().check("SCALE_RECIPE_B : tl.constexpr = 0").run(code[0])
+            FileCheck().check("SCALING_ROWWISE : tl.constexpr = False").run(code[0])
             self.assertEqual(y_eager.dtype, dtype)
             self.assertEqual(y_compiled.dtype, dtype)
             # depending on the kernel config (BLOCK_M size, etc) selected during Inductor
@@ -769,8 +768,7 @@ class TestFP8Lowering(TestCase):
                 bias,
             )
 
-        FileCheck().check("SCALE_RECIPE_A : tl.constexpr = 1").run(code[0])
-        FileCheck().check("SCALE_RECIPE_B : tl.constexpr = 1").run(code[0])
+        FileCheck().check("SCALING_ROWWISE : tl.constexpr = True").run(code[0])
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)

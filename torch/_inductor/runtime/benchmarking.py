@@ -1,10 +1,9 @@
-import functools
 import inspect
 import time
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Callable
+from typing import Any, Callable, Optional, Union
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
@@ -22,40 +21,6 @@ MILLISECONDS_PER_SECOND = 1000
 
 P = ParamSpec("P")
 T = TypeVar("T")
-
-
-def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any]:
-    from torch._inductor import config
-
-    if config.test_configs.distort_benchmarking_result == "":
-        return fn
-
-    def distort(
-        ms: list[float] | tuple[float] | float,
-    ) -> list[float] | tuple[float] | float:
-        if isinstance(ms, (list, tuple)):
-            return type(ms)(distort(val) for val in ms)  # type: ignore[misc]
-
-        distort_method = config.test_configs.distort_benchmarking_result
-        assert isinstance(ms, float)
-        if distort_method == "inverse":
-            return 1.0 / ms if ms else 0.0
-        elif distort_method == "random":
-            import random
-
-            return random.random()
-        else:
-            raise RuntimeError(f"Unrecognized distort method {distort_method}")
-
-    @functools.wraps(fn)
-    def wrapper(
-        *args: list[Any], **kwargs: dict[str, Any]
-    ) -> list[float] | tuple[float] | float:
-        ms = fn(*args, **kwargs)
-
-        return distort(ms)
-
-    return wrapper
 
 
 def may_ban_benchmarking() -> None:
@@ -123,7 +88,6 @@ class Benchmarker:
         - The runtime of `fn(*fn_args, **fn_kwargs)`, in milliseconds.
         """
         inferred_device = None
-        # pyrefly: ignore [bad-assignment]
         for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
             if not isinstance(arg_or_kwarg, torch.Tensor):
                 continue
@@ -195,9 +159,7 @@ class TritonBenchmarker(Benchmarker):
             raise NotImplementedError("requires Triton") from e
         return do_bench
 
-    @may_distort_benchmarking_result
     @time_and_count
-    # pyrefly: ignore [bad-override]
     def benchmark_gpu(
         self: Self,
         _callable: Callable[[], Any],
@@ -265,7 +227,6 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             ]
         )
 
-    @may_distort_benchmarking_result
     @time_and_count
     def benchmark_gpu(  # type: ignore[override]
         self: Self,
@@ -275,10 +236,10 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         benchmark_iters: int = 100,
         max_benchmark_duration: int = 25,
         return_mode: str = "min",
-        grad_to_none: list[torch.Tensor] | None = None,
+        grad_to_none: Optional[list[torch.Tensor]] = None,
         is_vetted_benchmarking: bool = False,
         **kwargs: Any,
-    ) -> float | list[float]:
+    ) -> Union[float, list[float]]:
         """Benchmark a GPU callable using a custom benchmarking implementation.
 
         Arguments:

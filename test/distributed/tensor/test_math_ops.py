@@ -13,7 +13,6 @@ from torch.distributed.tensor import (
     distribute_module,
     distribute_tensor,
     DTensor,
-    Partial,
     Replicate,
     Shard,
 )
@@ -651,41 +650,6 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(comm_counts[funcol.all_gather_into_tensor], 1)
 
     @with_comms
-    def test_vector_norm(self):
-        device_mesh = self.build_device_mesh()
-
-        grad = torch.randn(12, 8)
-
-        sharded_grad = distribute_tensor(grad, device_mesh, [Shard(0)])
-
-        # non-sharded op
-        out = torch.ops.aten.linalg_vector_norm(grad, 2)
-
-        # sharded op
-        sharded_out = torch.ops.aten.linalg_vector_norm(sharded_grad, 2)
-
-        self.assertEqual(sharded_out.full_tensor(), out)
-
-    @with_comms
-    def test_vector_norm_partial(self):
-        device_mesh = self.build_device_mesh()
-
-        rank = device_mesh.get_local_rank()
-        all_ranks = list(range(self.world_size))
-
-        local_grad = torch.tensor([rank, 1], dtype=torch.float32)
-        full_grad = torch.tensor([sum(all_ranks), self.world_size], dtype=torch.float32)
-
-        partial_grad = DTensor.from_local(local_grad, device_mesh, [Partial()])
-
-        # full result
-        out = torch.ops.aten.linalg_vector_norm(full_grad, 2)
-
-        # partial result
-        partial_out = torch.ops.aten.linalg_vector_norm(partial_grad, 2)
-        self.assertEqual(partial_out.full_tensor(), out)
-
-    @with_comms
     def test_foreach_norm(self):
         device_mesh = self.build_device_mesh()
 
@@ -703,33 +667,6 @@ class DistMathOpsTest(DTensorTestBase):
 
         for o, so in zip(out, sharded_out):
             self.assertEqual(so.full_tensor(), o)
-
-    @with_comms
-    def test_foreach_norm_partial(self):
-        device_mesh = self.build_device_mesh()
-
-        rank = device_mesh.get_local_rank()
-        all_ranks = list(range(self.world_size))
-
-        local_grad0 = torch.tensor([rank, 1], dtype=torch.float32)
-        local_grad1 = torch.tensor([rank + 1, 2], dtype=torch.float32)
-
-        grad0 = torch.tensor([sum(all_ranks), self.world_size], dtype=torch.float32)
-        grad1 = torch.tensor(
-            [sum(all_ranks) + self.world_size, 2 * self.world_size], dtype=torch.float32
-        )
-
-        partial_grad0 = DTensor.from_local(local_grad0, device_mesh, [Partial()])
-        partial_grad1 = DTensor.from_local(local_grad1, device_mesh, [Partial()])
-
-        # full result
-        out = torch.ops.aten._foreach_norm([grad0, grad1], 2)
-
-        # partial result
-        partial_out = torch.ops.aten._foreach_norm([partial_grad0, partial_grad1], 2)
-
-        for o, po in zip(out, partial_out):
-            self.assertEqual(po.full_tensor(), o)
 
     @with_comms
     def test_foreach_norm_different_mesh(self):

@@ -39,7 +39,7 @@ Tensor vdot_decomp(const Tensor& A, const Tensor& B) {
 // NB: I wrote this like this because we *might* want its for a future matmul
 // batch rule that isn't decomposed...
 // "tv" = tensor @ vector
-std::tuple<Tensor, std::optional<int64_t>> tv_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> tv_batch_rule(
     const Tensor& self, std::optional<int64_t> self_bdim,
     const Tensor& other, std::optional<int64_t> other_bdim) {
   if (self_bdim && other_bdim) {
@@ -66,7 +66,7 @@ std::tuple<Tensor, std::optional<int64_t>> tv_batch_rule(
   TORCH_INTERNAL_ASSERT(false, "can't get here");
 }
 
-std::tuple<Tensor, std::optional<int64_t>> mv_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> mv_batch_rule(
     const Tensor& self, std::optional<int64_t> self_bdim,
     const Tensor& other, std::optional<int64_t> other_bdim) {
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
@@ -79,7 +79,7 @@ std::tuple<Tensor, std::optional<int64_t>> mv_batch_rule(
   return tv_batch_rule(self, self_bdim, other, other_bdim);
 }
 
-std::tuple<Tensor, std::optional<int64_t>> mm_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> mm_batch_rule(
     const Tensor& self, std::optional<int64_t> self_bdim,
     const Tensor& other, std::optional<int64_t> other_bdim) {
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
@@ -94,7 +94,7 @@ std::tuple<Tensor, std::optional<int64_t>> mm_batch_rule(
   return std::make_tuple( at::matmul(self_, other_), 0 );
 }
 
-std::tuple<Tensor, std::optional<int64_t>> bmm_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> bmm_batch_rule(
     const Tensor& self, std::optional<int64_t> self_bdim,
     const Tensor& other, std::optional<int64_t> other_bdim) {
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
@@ -250,7 +250,7 @@ struct LinalgCheckMatrixBinaryRuleHelper<op_name, F, Func, typelist<A, B, T...>>
   }
 };
 
-void expect_at_least_rank(
+static void expect_at_least_rank(
     const Tensor& tensor,
     std::optional<int64_t> tensor_bdim,
     int64_t expected_rank,
@@ -472,7 +472,7 @@ atol_rtol_tensor_batch_rule(
   return std::make_tuple(Func(input_, atol_, rtol_, hermitian), 0);
 }
 
-std::tuple<Tensor, std::optional<int64_t>>
+static std::tuple<Tensor, std::optional<int64_t>>
 pinv_batch_rule(
     const Tensor& input, std::optional<int64_t> input_bdim, const std::optional<Tensor>& atol,
     const std::optional<int64_t> atol_bdim, const std::optional<Tensor>& rtol,

@@ -441,7 +441,7 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Reflection, align_corners>
 // See NOTE [ Grid Sample CPU Kernels ] for details.
 
 template<typename scalar_t>
-inline void
+static inline void
 mask_scatter_add(const scalar_t *src, scalar_t* base_addr,
                  const int_same_size_t<scalar_t> *offsets,
                  const int_same_size_t<scalar_t> *mask, int64_t len) {
@@ -1030,7 +1030,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
 // See NOTE [ Grid Sample CPU Kernels ] for details.
 
 template<typename scalar_t, typename ApplyFn>
-inline void grid_sample_2d_grid_slice_iterator(
+static inline void grid_sample_2d_grid_slice_iterator(
     const TensorAccessor<const scalar_t, 3>& grid_slice, const ApplyFn &apply_fn) {
   int64_t out_H = grid_slice.size(0);
   int64_t out_W = grid_slice.size(1);

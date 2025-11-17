@@ -5,14 +5,14 @@ Python polyfills for operator
 from __future__ import annotations
 
 import operator
-from typing import Any, overload, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import TypeVarTuple, Unpack
 
 from ..decorators import substitute_in_graph
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Iterable
 
 
 # Most unary and binary operators are handled by BuiltinVariable (e.g., `pos`, `add`)
@@ -30,12 +30,12 @@ _Us = TypeVarTuple("_Us")
 
 
 @overload
-# pyrefly: ignore [inconsistent-overload]
+# pyrefly: ignore  # inconsistent-overload
 def attrgetter(attr: str, /) -> Callable[[Any], _U]: ...
 
 
 @overload
-# pyrefly: ignore [inconsistent-overload]
+# pyrefly: ignore  # inconsistent-overload
 def attrgetter(
     attr1: str, attr2: str, /, *attrs: str
 ) -> Callable[[Any], tuple[_U1, _U2, Unpack[_Us]]]: ...
@@ -70,12 +70,12 @@ def attrgetter(*attrs: str) -> Callable[[Any], Any | tuple[Any, ...]]:
 
 
 @overload
-# pyrefly: ignore [inconsistent-overload]
+# pyrefly: ignore  # inconsistent-overload
 def itemgetter(item: _T, /) -> Callable[[Any], _U]: ...
 
 
 @overload
-# pyrefly: ignore [inconsistent-overload]
+# pyrefly: ignore  # inconsistent-overload
 def itemgetter(
     item1: _T1, item2: _T2, /, *items: Unpack[_Ts]
 ) -> Callable[[Any], tuple[_U1, _U2, Unpack[_Us]]]: ...

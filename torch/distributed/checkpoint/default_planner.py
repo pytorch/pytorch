@@ -313,8 +313,7 @@ class DefaultLoadPlanner(LoadPlanner):
         self.is_coordinator = is_coordinator
 
     def create_local_plan(self) -> LoadPlan:
-        if self.metadata is None:
-            raise AssertionError("self.metadata is not None")
+        assert self.metadata is not None
         if self.flatten_state_dict:
             # To support checkpoints that are saved before v2.4, we have to
             # differentiate if the missing keys are due to old checkpoints.
@@ -433,10 +432,8 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
         metadata: Optional[Metadata] = None,
         is_coordinator: bool = False,
     ) -> None:
-        if state_dict:
-            raise AssertionError("not state_dict")
-        if metadata is None:
-            raise AssertionError("metadata is not None")
+        assert not state_dict
+        assert metadata is not None
 
         # rebuild the state dict from the metadata
         for k, v in metadata.state_dict_metadata.items():
@@ -552,15 +549,13 @@ def create_default_global_save_plan(
         new_items = []
         for item in plan.items:
             if item.type != WriteItemType.SHARD:
-                if item.index.fqn in md:
-                    raise AssertionError("item.index.fqn not in md")
+                assert item.index.fqn not in md
 
             if item.type == WriteItemType.BYTE_IO:
                 md[item.index.fqn] = BytesStorageMetadata()
                 new_items.append(item)
             else:
-                if item.tensor_data is None:
-                    raise AssertionError("item.tensor_data is not None")
+                assert item.tensor_data is not None
                 tensor_md = cast(
                     TensorStorageMetadata,
                     md.setdefault(
@@ -580,11 +575,10 @@ def create_default_global_save_plan(
                     new_item = dataclasses.replace(item, index=new_index)
                 new_items.append(new_item)
 
-                if item.tensor_data.chunk is None:
-                    raise AssertionError(f"""
+                assert item.tensor_data.chunk is not None, f"""
                     Cannot create MD for tensor without bounds.
                     FQN: {item.index.fqn}
-                """)
+                """
                 tensor_md.chunks.append(item.tensor_data.chunk)
         new_plans.append(dataclasses.replace(plan, items=new_items))
     return (new_plans, Metadata(md))

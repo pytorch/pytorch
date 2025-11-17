@@ -4,7 +4,6 @@
 // See Note [Do not compile initializers with AVX]
 
 #include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec128/vec128_convert.h>
 #include <ATen/cpu/vec/vec128/vec128_float_neon.h>
 #include <ATen/cpu/vec/vec128/vec128_reduced_precision_common_neon.h>
 #include <ATen/cpu/vec/vec_base.h>
@@ -25,7 +24,6 @@ inline namespace CPU_CAPABILITY {
 //    https://bugs.llvm.org/show_bug.cgi?id=45824
 // Most likely we will do aarch32 support with inline asm.
 #if !defined(C10_MOBILE) && defined(__aarch64__)
-
 #ifdef __BIG_ENDIAN__
 #error "Big endian is not supported."
 #endif
@@ -421,6 +419,24 @@ Vectorized<c10::Half> inline operator+(
 #endif
 }
 
+inline void load_fp32_from_fp16(const c10::Half* data, Vectorized<float>& out) {
+  __at_align__ float values[Vectorized<float>::size()];
+  for (const auto k : c10::irange(Vectorized<float>::size())) {
+    values[k] = data[k];
+  }
+  out = Vectorized<float>::loadu(values);
+}
+
+inline void load_fp32_from_fp16(
+    const c10::Half* data,
+    Vectorized<float>& out1,
+    Vectorized<float>& out2) {
+  Vectorized<c10::Half> f16_vec = Vectorized<c10::Half>::loadu(data);
+  auto floats = convert_half_float(f16_vec);
+  out1 = std::get<0>(floats);
+  out2 = std::get<1>(floats);
+}
+
 template <>
 Vectorized<c10::Half> inline operator-(
     const Vectorized<c10::Half>& a,
@@ -569,6 +585,46 @@ inline Vectorized<c10::Half> Vectorized<c10::Half>::le(
   return (*this <= other) & Vectorized<c10::Half>(1);
 }
 
+// These are global functions, so the defaults in vec_base.h should
+// work fine if __ARM_FEATURE_FP16_VECTOR_ARITHMETIC is not available.
+#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
+template <>
+inline void convert(const float16_t* src, int16_t* dst, int64_t n) {
+  int64_t i;
+#ifndef __msvc_cl__
+#pragma unroll
+#endif
+  for (i = 0; i <= (n - Vectorized<c10::Half>::size());
+       i += Vectorized<c10::Half>::size()) {
+    vst1q_s16(dst + i, vcvtq_s16_f16(vld1q_f16(src + i)));
+  }
+#ifndef __msvc_cl__
+#pragma unroll
+#endif
+  for (; i < n; i++) {
+    dst[i] = static_cast<int16_t>(src[i]);
+  }
+}
+
+template <>
+inline void convert(const int16_t* src, float16_t* dst, int64_t n) {
+  int64_t i;
+#ifndef __msvc_cl__
+#pragma unroll
+#endif
+  for (i = 0; i <= (n - Vectorized<c10::Half>::size());
+       i += Vectorized<c10::Half>::size()) {
+    vst1q_f16(dst + i, vcvtq_f16_s16(vld1q_s16(src + i)));
+  }
+#ifndef __msvc_cl__
+#pragma unroll
+#endif
+  for (; i < n; i++) {
+    dst[i] = static_cast<float16_t>(src[i]);
+  }
+}
+#endif // __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
+
 template <>
 Vectorized<c10::Half> inline fmadd(
     const Vectorized<c10::Half>& a,
@@ -616,6 +672,53 @@ Vectorized<c10::Half> inline fnmsub(
   return -a * b - c;
 #endif
 }
+
+#else
+
+#define CONVERT_NON_VECTORIZED_INIT(type, name)                     \
+  inline std::tuple<Vectorized<float>, Vectorized<float>>           \
+      convert_##name##_float(const Vectorized<type>& a) {           \
+    constexpr int64_t K = Vectorized<type>::size();                 \
+    __at_align__ float arr[K];                                      \
+    __at_align__ type arr2[K];                                      \
+    a.store(arr2);                                                  \
+    convert(arr2, arr, K);                                          \
+    return std::make_tuple(                                         \
+        Vectorized<float>::loadu(arr),                              \
+        Vectorized<float>::loadu(arr + Vectorized<float>::size())); \
+  }                                                                 \
+  inline Vectorized<type> convert_float_##name(                     \
+      const Vectorized<float>& a, const Vectorized<float>& b) {     \
+    constexpr int64_t K = Vectorized<type>::size();                 \
+    __at_align__ float arr[K];                                      \
+    __at_align__ type arr2[K];                                      \
+    a.store(arr);                                                   \
+    b.store(arr + Vectorized<float>::size());                       \
+    convert(arr, arr2, K);                                          \
+    return Vectorized<type>::loadu(arr2);                           \
+  }
+
+#define LOAD_FP32_NON_VECTORIZED_INIT(type, name)                           \
+  inline void load_fp32_from_##name(                                        \
+      const type* data, Vectorized<float>& out) {                           \
+    __at_align__ float values[Vectorized<float>::size()];                   \
+    for (const auto k : c10::irange(Vectorized<float>::size())) {           \
+      values[k] = data[k];                                                  \
+    }                                                                       \
+    out = Vectorized<float>::loadu(values);                                 \
+  }                                                                         \
+                                                                            \
+  inline void load_fp32_from_##name(                                        \
+      const type* data, Vectorized<float>& out1, Vectorized<float>& out2) { \
+    load_fp32_from_##name(data, out1);                                      \
+    data += Vectorized<float>::size();                                      \
+    load_fp32_from_##name(data, out2);                                      \
+  }
+
+CONVERT_NON_VECTORIZED_INIT(Half, half)
+
+LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16)
+
 #endif // !defined(C10_MOBILE) && defined(__aarch64__)
 
 } // namespace CPU_CAPABILITY

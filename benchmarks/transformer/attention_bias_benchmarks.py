@@ -1,8 +1,7 @@
 import itertools
-from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from functools import partial
-from typing import Union
+from typing import Callable, Union
 
 import numpy as np
 from tabulate import tabulate

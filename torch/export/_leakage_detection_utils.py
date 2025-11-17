@@ -43,7 +43,7 @@ def _is_tracked_fake(obj: typing.Any) -> bool:
 
 def _is_gm_meta_like_dict(d: dict, o: typing.Any) -> bool:
     # Hope gm.meta was a custom dict we can assert on
-    return d.get("val") is o
+    return d.get("val", None) is o
 
 
 def _dict_is_attr_of_tracked_fake(d: dict) -> bool:

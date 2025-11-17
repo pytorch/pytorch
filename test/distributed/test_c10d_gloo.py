@@ -1459,7 +1459,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_reduce_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_gloo(
+        pg = pg = self._create_process_group_gloo(
             store, self.rank, self.world_size, self.opts()
         )
 

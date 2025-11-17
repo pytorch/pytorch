@@ -230,55 +230,6 @@ class TestConvolutionNN(NNTestCase):
         with self.assertRaisesRegex(ValueError, "groups must be a positive integer"):
             torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2, groups=-2)
 
-    def test_conv_aten_invalid_groups(self):
-        # test low-level aten ops with invalid groups parameter
-        grad_output = torch.randn(2, 4, 8, dtype=torch.double)
-        input = torch.randn(2, 5, 8, dtype=torch.double)
-        weight = torch.randn(5, 4, 3, dtype=torch.double)
-        bias_sizes = [4]
-        stride = [1]
-        padding = [1]
-        dilation = [1]
-        transposed = True
-        output_padding = [0]
-        output_mask = [True, True, True]
-
-        # test groups=0
-        with self.assertRaisesRegex(
-            RuntimeError, "expected groups to be greater than 0, but got groups=0"
-        ):
-            torch.ops.aten.convolution_backward(
-                grad_output,
-                input,
-                weight,
-                bias_sizes,
-                stride,
-                padding,
-                dilation,
-                transposed,
-                output_padding,
-                0,
-                output_mask,
-            )
-
-        # test groups=-1
-        with self.assertRaisesRegex(
-            RuntimeError, "expected groups to be greater than 0, but got groups=-1"
-        ):
-            torch.ops.aten.convolution_backward(
-                grad_output,
-                input,
-                weight,
-                bias_sizes,
-                stride,
-                padding,
-                dilation,
-                transposed,
-                output_padding,
-                -1,
-                output_mask,
-            )
-
     def test_conv3d_overflow_values(self):
         input = torch.full(
             (
@@ -1292,7 +1243,7 @@ class TestConvolutionNN(NNTestCase):
             kernel_x = torch.zeros([3, 1, 1, radius * 2 + 1], device=image.device)
             image = torch.nn.functional.conv2d(image, kernel_x, groups=image.shape[-3])
 
-        for i in range(128):
+        for i in range(0, 128):
             # This should not fail
             reproducer(radius=i)
 
@@ -3888,9 +3839,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
                         # This is because we have N111 weight that cannot handle
                         # the ambiguous memory_format
                         if w_f == torch.channels_last:
-                            if layer is nn.Conv2d and filter_size * c != 1:
+                            if layer == nn.Conv2d and filter_size * c != 1:
                                 output_format = torch.channels_last
-                            if layer is nn.ConvTranspose2d and filter_size * k != 1:
+                            if layer == nn.ConvTranspose2d and filter_size * k != 1:
                                 output_format = torch.channels_last
                     self._run_conv(
                         layer,

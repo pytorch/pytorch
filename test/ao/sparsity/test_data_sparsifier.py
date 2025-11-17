@@ -123,7 +123,7 @@ class _BaseDataSparsiferTestCase(TestCase):
 
         step_count = 3
 
-        for _ in range(step_count):
+        for _ in range(0, step_count):
             sparsifier.step()
         for some_data in all_data:
             name, data, _ = self._get_name_data_config(some_data)
@@ -710,15 +710,15 @@ class TestQuantizationUtils(TestCase):
             **sparse_config,
         )
 
-        assert type(model.emb1) is torch.ao.nn.quantized.modules.embedding_ops.Embedding
+        assert type(model.emb1) == torch.ao.nn.quantized.modules.embedding_ops.Embedding
         assert (
             type(model.embbag1)
-            is torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
+            == torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
         )
-        assert type(model.emb_seq[0] is nn.Embedding)
-        assert type(model.emb_seq[1] is nn.EmbeddingBag)
-        assert type(model.linear1) is nn.Linear
-        assert type(model.linear2) is nn.Linear
+        assert type(model.emb_seq[0] == nn.Embedding)
+        assert type(model.emb_seq[1] == nn.EmbeddingBag)
+        assert type(model.linear1) == nn.Linear
+        assert type(model.linear2) == nn.Linear
 
         dequant_emb1 = torch.dequantize(model.emb1.weight())
         dequant_embbag1 = torch.dequantize(model.embbag1.weight())
@@ -749,21 +749,19 @@ class TestQuantizationUtils(TestCase):
             model, DataNormSparsifier, sparsify_first=False, **sparse_config
         )
 
-        assert type(model.emb1) is torch.ao.nn.quantized.modules.embedding_ops.Embedding
+        assert type(model.emb1) == torch.ao.nn.quantized.modules.embedding_ops.Embedding
         assert (
             type(model.embbag1)
-            is torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
+            == torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
         )
-        assert (
-            type(model.emb_seq[0])
-            is torch.ao.nn.quantized.modules.embedding_ops.Embedding
+        assert type(
+            model.emb_seq[0] == torch.ao.nn.quantized.modules.embedding_ops.Embedding
         )
-        assert (
-            type(model.emb_seq[1])
-            is torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
+        assert type(
+            model.emb_seq[1] == torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
         )
-        assert type(model.linear1) is nn.Linear  # not quantized
-        assert type(model.linear2) is nn.Linear  # not quantized
+        assert type(model.linear1) == nn.Linear  # not quantized
+        assert type(model.linear2) == nn.Linear  # not quantized
 
         dequant_emb1 = torch.dequantize(model.emb1.weight())
         dequant_embbag1 = torch.dequantize(model.embbag1.weight())

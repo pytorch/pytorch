@@ -18,7 +18,7 @@ from torch.testing._internal.common_quantization import (
     LinearAddModel,
 )
 from torch.testing._internal.common_utils import TestCase
-from torch.utils import bundled_inputs
+from torch.utils import bundled_inputs as bundled_inputs
 
 
 class myMod(torch.nn.Module):

@@ -9,7 +9,7 @@ from torch.utils._python_dispatch import return_and_correct_aliasing
 # A simple tensor subclass that holds two tensors internally, and runs every op on both tensors.
 class TwoTensor(torch.Tensor):
     @staticmethod
-    def __new__(cls, a, b, outer_size=None, outer_stride=None, *, requires_grad=None):
+    def __new__(cls, a, b, outer_size=None, outer_stride=None):
         if outer_size is None:
             outer_size = a.size()
         if outer_stride is None:
@@ -28,7 +28,7 @@ class TwoTensor(torch.Tensor):
         kwargs["storage_offset"] = a.storage_offset()
         kwargs["device"] = a.device
         kwargs["layout"] = a.layout
-        kwargs["requires_grad"] = requires_grad or a.requires_grad
+        kwargs["requires_grad"] = a.requires_grad
         kwargs["dtype"] = a.dtype
         out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
 
@@ -39,7 +39,7 @@ class TwoTensor(torch.Tensor):
 
     @torch._disable_dynamo
     @mark_subclass_constructor_exportable_experimental
-    def __init__(self, a, b, outer_size=None, outer_stride=None, *, requires_grad=None):
+    def __init__(self, a, b, outer_size=None, outer_stride=None):
         self.a = a
         self.b = b
 
@@ -78,7 +78,7 @@ class TwoTensor(torch.Tensor):
         # our two inner tensors return the same value
         out_flat = [
             cls(o_a, o_b) if isinstance(o_a, torch.Tensor) else o_a
-            for o_a, o_b in zip(out_a_flat, out_b_flat, strict=True)
+            for o_a, o_b in zip(out_a_flat, out_b_flat)
         ]
         out = pytree.tree_unflatten(out_flat, spec)
         from torch._higher_order_ops.cond import cond_op

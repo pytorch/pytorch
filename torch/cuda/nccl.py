@@ -14,7 +14,7 @@ SUM = 0  # ncclRedOp_t
 
 def is_available(tensors):
     if not hasattr(torch._C, "_nccl_all_reduce"):
-        warnings.warn("PyTorch is not compiled with NCCL support", stacklevel=2)
+        warnings.warn("PyTorch is not compiled with NCCL support")
         return False
 
     devices = set()

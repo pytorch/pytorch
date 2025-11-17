@@ -901,13 +901,13 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
 };
 
 TORCH_API std::vector<ExprPtr> ExprHandleVectorToExprVector(
-    const std::vector<ExprHandle>& /*v*/);
+    const std::vector<ExprHandle>&);
 TORCH_API std::vector<ExprHandle> ExprVectorToExprHandleVector(
-    const std::vector<ExprPtr>& /*v*/);
+    const std::vector<ExprPtr>&);
 TORCH_API std::vector<VarPtr> VarHandleVectorToVarVector(
-    const std::vector<VarHandle>& /*v*/);
+    const std::vector<VarHandle>&);
 TORCH_API std::vector<VarHandle> VarVectorToVarHandleVector(
-    const std::vector<VarPtr>& /*v*/);
+    const std::vector<VarPtr>&);
 TORCH_API ExprPtr flatten_index(
     const std::vector<ExprPtr>& dims,
     const std::vector<ExprPtr>& indices,

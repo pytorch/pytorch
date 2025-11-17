@@ -53,7 +53,6 @@ class ElasticDistributedSampler(DistributedSampler[T]):
             raise TypeError("Dataset must be an instance of collections.abc.Sized")
 
         # Cast to Sized for mypy
-        # pyrefly: ignore [redundant-cast]
         sized_dataset = cast(Sized, dataset)
 
         if start_index >= len(sized_dataset):

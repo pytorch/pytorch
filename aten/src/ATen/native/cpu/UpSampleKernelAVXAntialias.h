@@ -35,7 +35,7 @@ Like PIL, Pillow is licensed under the open source HPND License
 
 namespace {
 
-inline __m128i mm_cvtsi32_si128(const uint8_t* C10_RESTRICT ptr, bool i32_aligned) {
+static inline __m128i mm_cvtsi32_si128(const uint8_t* C10_RESTRICT ptr, bool i32_aligned) {
   int32_t v;
   if (i32_aligned) {
     v = *(const int32_t*)ptr;
@@ -45,11 +45,11 @@ inline __m128i mm_cvtsi32_si128(const uint8_t* C10_RESTRICT ptr, bool i32_aligne
   return _mm_cvtsi32_si128(v);
 }
 
-inline __m128i mm_cvtepu8_epi32(const uint8_t* C10_RESTRICT ptr, bool i32_aligned) {
+static inline __m128i mm_cvtepu8_epi32(const uint8_t* C10_RESTRICT ptr, bool i32_aligned) {
   return _mm_cvtepu8_epi32(mm_cvtsi32_si128(ptr, i32_aligned));
 }
 
-inline void _write_endline_rgb_as_uint32(
+static inline void _write_endline_rgb_as_uint32(
     uint8_t* C10_RESTRICT output,
     uint32_t data
 ) {

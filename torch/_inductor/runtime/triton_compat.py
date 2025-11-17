@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any
+from typing import Any, Union
 
 import torch
 
@@ -17,7 +17,7 @@ if triton is not None:
     from triton import Config
     from triton.compiler import CompiledKernel
     from triton.runtime.autotuner import OutOfResources
-    from triton.runtime.jit import JITFunction, KernelInterface
+    from triton.runtime.jit import KernelInterface
 
     try:
         from triton.runtime.autotuner import PTXASError
@@ -37,7 +37,7 @@ if triton is not None:
 
         def GPUTarget(
             backend: str,
-            arch: int | str,
+            arch: Union[int, str],
             warp_size: int,
         ) -> Any:
             if torch.version.hip:
@@ -133,15 +133,12 @@ else:
         tensor = Any
         dtype = Any
 
-    class JITFunction:  # type: ignore[no-redef]
-        pass
-
     HAS_WARP_SPEC = False
     triton_key = _raise_error
     HAS_TRITON = False
 
 
-def cc_warp_size(cc: str | int) -> int:
+def cc_warp_size(cc: Union[str, int]) -> int:
     if torch.version.hip:
         cc_str = str(cc)
         if "gfx10" in cc_str or "gfx11" in cc_str:

@@ -55,7 +55,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests  # noqa: PLW0127
+load_tests = load_tests
 
 if platform == "darwin":
     LOOPBACK = "lo0"

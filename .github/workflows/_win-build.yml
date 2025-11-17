@@ -168,31 +168,6 @@ jobs:
         run: |
           .ci/pytorch/win-build.sh
 
-      # Collect Windows torch libs and CUDA libs for cross-compilation
-      - name: Collect Windows CUDA libs for cross-compilation
-        if: steps.build.outcome != 'skipped' && inputs.cuda-version != 'cpu'
-        shell: bash
-        run: |
-          set -ex
-
-          # Create directory structure if does not exist
-          mkdir -p /c/${{ github.run_id }}/build-results
-
-          # Copy CUDA libs
-          CUDA_PATH="/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${{ inputs.cuda-version }}"
-
-          if [ -f "${CUDA_PATH}/lib/x64/cuda.lib" ]; then
-            cp "${CUDA_PATH}/lib/x64/cuda.lib" /c/${{ github.run_id }}/build-results/
-          fi
-
-          if [ -f "${CUDA_PATH}/lib/x64/cudart.lib" ]; then
-            cp "${CUDA_PATH}/lib/x64/cudart.lib" /c/${{ github.run_id }}/build-results/
-          fi
-
-          # List collected files
-          echo "Collected CUDA libs:"
-          ls -lah /c/${{ github.run_id }}/build-results/*.lib
-
       # Upload to github so that people can click and download artifacts
       - name: Upload artifacts to s3
         if: steps.build.outcome != 'skipped'

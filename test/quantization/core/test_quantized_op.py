@@ -3053,7 +3053,7 @@ class TestQuantizedOps(TestCase):
                 lstm_quantized = torch.ao.quantization.convert(
                     lstm_prepared, convert_custom_config_dict=custom_config_dict
                 )
-                assert type(lstm_quantized[0]) is torch.ao.nn.quantized.LSTM
+                assert type(lstm_quantized[0]) == torch.ao.nn.quantized.LSTM
                 qy = lstm_quantized(qx)
 
                 snr = _snr(y, qy)
@@ -7045,8 +7045,8 @@ class TestQuantizedConv(TestCase):
         # ONEDNN only supports symmetric quantization of weight
         if W_zero_point is not None:
             W_zero_point = len(W_zero_point) * [0]
-        fp32_output = qconv_output_dtype is torch.float32
-        bfloat16_output = qconv_output_dtype is torch.bfloat16
+        fp32_output = True if qconv_output_dtype is torch.float32 else False
+        bfloat16_output = True if qconv_output_dtype is torch.bfloat16 else False
         if fp32_output or bfloat16_output:
             Y_scale = 1.0
             Y_zero_point = 0
@@ -7905,8 +7905,8 @@ class TestQuantizedConv(TestCase):
         weight_in_channel_last_format=False,
     ):
         # We assume FP8 quantization is always symmetric
-        fp32_output = qconv_output_dtype is torch.float32
-        bfloat16_output = qconv_output_dtype is torch.bfloat16
+        fp32_output = True if qconv_output_dtype is torch.float32 else False
+        bfloat16_output = True if qconv_output_dtype is torch.bfloat16 else False
         if fp32_output or bfloat16_output:
             Y_scale = 1.0
             X2_scale = 1.0

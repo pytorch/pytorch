@@ -63,7 +63,7 @@ def generate_coo_data(size, sparse_dim, nnz, dtype, device):
     indices = torch.rand(sparse_dim, nnz, device=device)
     indices.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(indices))
     indices = indices.to(torch.long)
-    # pyrefly: ignore [no-matching-overload]
+    # pyrefly: ignore  # no-matching-overload
     values = torch.rand([nnz, ], dtype=dtype, device=device)
     return indices, values
 

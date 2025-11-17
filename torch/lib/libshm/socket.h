@@ -58,13 +58,16 @@ class Socket {
         SYSCHECK_ERR_RETURN_NEG1(
             step_received =
                 ::read(socket_fd, buffer, num_bytes - bytes_received));
-        TORCH_CHECK(step_received != 0, "Other end has closed the connection");
+        if (step_received == 0)
+          throw std::runtime_error("Other end has closed the connection");
         bytes_received += step_received;
         buffer += step_received;
       } else if (pfd.revents & (POLLERR | POLLHUP)) {
-        TORCH_CHECK(false, "An error occurred while waiting for the data");
+        throw std::runtime_error(
+            "An error occurred while waiting for the data");
       } else {
-        TORCH_CHECK(false, "Shared memory manager connection has timed out");
+        throw std::runtime_error(
+            "Shared memory manager connection has timed out");
       }
     }
   }
@@ -153,9 +156,9 @@ class ClientSocket : public Socket {
     char buffer[3] = {0, 0, 0};
     send(&info, sizeof(info));
     recv(buffer, 2);
-    TORCH_CHECK(
-        strcmp(buffer, "OK") == 0,
-        "Shared memory manager didn't respond with an OK");
+    if (strcmp(buffer, "OK") != 0)
+      throw std::runtime_error(
+          "Shared memory manager didn't respond with an OK");
   }
 
   void register_deallocation(AllocInfo& info) {

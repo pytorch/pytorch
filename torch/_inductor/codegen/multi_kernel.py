@@ -306,7 +306,6 @@ class MultiKernelCall:
             # manually force a subkernel to ease perf testing
             picked_by_config = config.triton.multi_kernel - 2
             assert picked_by_config < len(self._kernels)
-            # pyrefly: ignore [bad-assignment]
             self.picked_kernel = picked_by_config
         elif not self.disable_cache:
             self.load_cache()
@@ -330,9 +329,7 @@ class MultiKernelCall:
         path = self.cache_file_path()
         if path.exists():
             with path.open() as fd:
-                # pyrefly: ignore [bad-assignment]
                 self.picked_kernel = int(fd.read())
-                # pyrefly: ignore [unsupported-operation]
                 assert self.picked_kernel >= 0 and self.picked_kernel < len(
                     self._kernels
                 )
@@ -602,6 +599,5 @@ class SizeHintMultiKernelCall(MultiKernelCall):
             self._dist_heuristic(shape_key, key) if key is not None else 2**62
             for key in self._kernel_hints
         ]
-        # pyrefly: ignore [bad-assignment]
         self.picked_kernel = dists.index(min(dists))
         self._cache_shape_choice(shape_key, self.picked_kernel)

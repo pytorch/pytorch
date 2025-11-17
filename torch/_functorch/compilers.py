@@ -361,7 +361,7 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
             input_meta += get_input_meta(args[1])
             return input_meta
         for arg in args:
-            if type(arg) is int or type(arg) is float:
+            if type(arg) == int or type(arg) == float:
                 input_meta.append((type(arg),))
             else:
                 input_meta.append(

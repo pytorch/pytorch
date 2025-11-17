@@ -34,7 +34,7 @@ class Gamma(ExponentialFamily):
             (often referred to as beta), rate = 1 / scale
     """
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     arg_constraints = {
         "concentration": constraints.positive,
         "rate": constraints.positive,
@@ -110,7 +110,7 @@ class Gamma(ExponentialFamily):
     def _natural_params(self) -> tuple[Tensor, Tensor]:
         return (self.concentration - 1, -self.rate)
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def _log_normalizer(self, x, y):
         return torch.lgamma(x + 1) + (x + 1) * torch.log(-y.reciprocal())
 

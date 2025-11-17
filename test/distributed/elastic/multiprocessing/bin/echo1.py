@@ -9,6 +9,7 @@
 import argparse
 import os
 import sys
+import time
 
 
 if __name__ == "__main__":
@@ -23,6 +24,6 @@ if __name__ == "__main__":
         print(f"exit {exitcode} from {rank}", file=sys.stderr)
         sys.exit(exitcode)
     else:
-        for msg in args.msg.split(","):
-            print(f"{msg} stdout from {rank}")
-            print(f"{msg} stderr from {rank}", file=sys.stderr)
+        time.sleep(1000)
+        print(f"{args.msg} stdout from {rank}")
+        print(f"{args.msg} stderr from {rank}", file=sys.stderr)

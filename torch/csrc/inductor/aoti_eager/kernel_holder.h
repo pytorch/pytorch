@@ -105,7 +105,7 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
   void init_aoti_kernel_cache();
   // Load the AOTIModelContainerRunner object from the given file path.
   std::shared_ptr<AOTIModelContainerRunner> load_aoti_model_runner(
-      const std::string& /*so_path*/);
+      const std::string&);
 };
 
 } // namespace torch::inductor

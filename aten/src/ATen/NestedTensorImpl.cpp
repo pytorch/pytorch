@@ -273,7 +273,7 @@ c10::SymInt NestedTensorImpl::sym_numel_custom() const {
   return NestedTensorImpl::numel_custom();
 }
 
-c10::SymBool NestedTensorImpl::sym_is_contiguous_custom(MemoryFormat /*memory_format*/) const {
+c10::SymBool NestedTensorImpl::sym_is_contiguous_custom(MemoryFormat) const {
   return nested_tensor_impl_is_contiguous(this);
 }
 IntArrayRef NestedTensorImpl::sizes_custom() const {

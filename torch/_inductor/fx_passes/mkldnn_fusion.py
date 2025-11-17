@@ -712,7 +712,6 @@ if torch._C._has_mkldnn:
             if any(_other_input_not_inplaceable(n, other_index) for n in binary_nodes):
                 return False
             if any(
-                # pyrefly: ignore [missing-attribute]
                 n.args[other_index].op in ["placeholder", "output"]
                 for n in binary_nodes
             ):

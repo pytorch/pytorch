@@ -235,7 +235,7 @@ class WeightNormSparsifier(BaseSparsifier):
             ww = self.norm_fn(getattr(module, tensor_name))
             tensor_mask = self._make_tensor_mask(
                 data=ww,
-                # pyrefly: ignore [missing-attribute]
+                # pyrefly: ignore  # missing-attribute
                 input_shape=ww.shape,
                 sparsity_level=sparsity_level,
                 sparse_block_shape=sparse_block_shape,

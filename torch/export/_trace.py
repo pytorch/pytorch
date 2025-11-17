@@ -10,7 +10,6 @@ import time
 import warnings
 from collections.abc import Callable
 from contextlib import contextmanager, nullcontext
-from itertools import chain
 from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
 
 
@@ -357,11 +356,24 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
             if add_root:
 
                 def normalize_path(path):
-                    if path == "L['self']":
-                        return ""
-                    if path.startswith("L['self']."):
-                        return path[len("L['self'].") :]
-                    return path
+                    try:
+                        parts = []
+
+                        class Path:
+                            def __getattr__(self, name):
+                                if name != "_modules":
+                                    parts.append(name)
+                                return self
+
+                            def __getitem__(self, idx):
+                                # pyrefly: ignore  # bad-argument-type
+                                parts.append(str(idx))
+                                return self
+
+                        eval(path, {"L": {"self": Path()}})
+                        return ".".join(parts)
+                    except Exception:  # TODO(zhxchen17) Remove this.
+                        return path
 
                 nn_module_stack = {
                     root_key: (root, root_cls.__module__ + "." + root_cls.__qualname__),
@@ -514,6 +526,7 @@ def _replace_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
                 simplify=True,
             )
         ):
+            # pyrefly: ignore  # unbound-name
             node.meta["unbacked_bindings"] = unbacked_bindings
 
 
@@ -680,22 +693,24 @@ def _restore_state_dict(
     Restores the state dict of the traced module to that of the original module.
     """
     param_buffer_table = _get_param_buffer_mapping(original_module, traced_module)
-    # Don't want to change the convention of previous call.
-    param_buffer_table_reverse = {v: k for k, v in param_buffer_table.items()}
+    # Since the graph module is flattened (no module hierarchy), we
+    # need to normalize the module by replacing "." with "_". If we
+    # don't, it will try to save the weight to a submodule which no
+    # longer exists.
+    for name, fqn in param_buffer_table.items():
+        param_buffer_table[name] = fqn.replace(".", "_")
 
     # Replace state dict attr names with the fqn
-    for name, _ in list(
-        chain(
-            original_module.named_parameters(remove_duplicate=False),
-            # pyrefly: ignore  # bad-argument-type
-            original_module.named_buffers(remove_duplicate=False),
-        )
-    ):
-        if name in param_buffer_table_reverse:
-            dynamo_name = param_buffer_table_reverse[name]
-            param = torch.fx.graph_module._get_attr(traced_module, dynamo_name)
-            torch.fx.graph_module._assign_attr(param, traced_module, name)
-            torch.fx.graph_module._del_attr(traced_module, dynamo_name)
+    for name, fqn in param_buffer_table.items():
+        if not hasattr(traced_module, name):
+            continue
+
+        attr = getattr(traced_module, name)
+        if isinstance(attr, torch.Tensor) and not isinstance(attr, torch.nn.Parameter):
+            traced_module.register_buffer(fqn, attr)
+        else:
+            setattr(traced_module, fqn, attr)
+        delattr(traced_module, name)
 
     # Replace graph getattr nodes with the correct name
     for node in traced_module.graph.nodes:
@@ -2113,7 +2128,7 @@ def _export_for_training(
                 if torch._export.config.error_on_lifted_constant_tensors:
                     raise RuntimeError(error_msg)
                 else:
-                    warnings.warn(error_msg, stacklevel=2)
+                    warnings.warn(error_msg)
 
     export_graph_signature = export_artifact.aten.sig
 
@@ -2189,8 +2204,7 @@ def _export_for_training(
                 f"This is likely result of torch.export.export not being able to track side effects "
                 f"that is happening outside of model scope.\n\n"
                 f"Leaked tensors:\n  {leak_details}\n\n"
-                f"Alternatively, please file a bug report to PyTorch team for further debugging help.",
-                stacklevel=2,
+                f"Alternatively, please file a bug report to PyTorch team for further debugging help."
             )
 
             del legit_leak

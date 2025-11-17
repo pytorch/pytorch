@@ -79,8 +79,8 @@ class C10_API uint128 {
   // Make msvc happy with using operator<<= from DivModImpl
   // which is a static function, and linker complained about missing
   // static version of this overload
-  friend uint128& operator<<=(uint128& /*self*/, int /*amount*/);
-  uint128& operator>>=(int /*amount*/);
+  friend uint128& operator<<=(uint128&, int);
+  uint128& operator>>=(int);
   uint128& operator&=(const uint128& b);
   uint128& operator|=(const uint128& b);
   uint128& operator^=(const uint128& b);

@@ -35,7 +35,7 @@ class Weibull(TransformedDistribution):
         "scale": constraints.positive,
         "concentration": constraints.positive,
     }
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     support = constraints.positive
 
     def __init__(
@@ -53,7 +53,7 @@ class Weibull(TransformedDistribution):
             PowerTransform(exponent=self.concentration_reciprocal),
             AffineTransform(loc=0, scale=self.scale),
         ]
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         super().__init__(base_dist, transforms, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):

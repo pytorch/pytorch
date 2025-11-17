@@ -124,7 +124,7 @@ class MixtureSameFamily(Distribution):
         return new
 
     @constraints.dependent_property
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def support(self):
         return MixtureSameFamilyConstraint(self._component_distribution.support)
 

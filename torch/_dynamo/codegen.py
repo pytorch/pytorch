@@ -16,8 +16,8 @@ import re
 import sys
 import types
 from collections import Counter
-from collections.abc import Callable, Iterable
-from typing import Any, Optional, TYPE_CHECKING, Union
+from collections.abc import Iterable
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch.nn
 from torch.utils._ordered_set import OrderedSet
@@ -295,7 +295,7 @@ class PyCodegen:
             output.extend(create_call_function(2, False))
         elif (
             isinstance(value, SymNodeVariable)
-            and value.python_type() is float
+            and value.python_type() == float
             and not self.tx.export
         ):
             # This is a little unusual; force the output convention to be a

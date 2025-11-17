@@ -100,7 +100,6 @@ class _ReplicateState(FSDPState):
         for module in modules:
             _insert_module_state(module, self)
         self._modules = modules
-        # pyrefly: ignore [read-only]
         self._device = device
         self._device_handle = _get_device_handle(device.type)
         self._mp_policy = mp_policy
@@ -151,7 +150,6 @@ class _ReplicateState(FSDPState):
                     )
                 state._is_root = False
             self._state_ctx.all_states.append(state)
-            # pyrefly: ignore [bad-argument-type]
             visited_states.add(state)
         if self._fsdp_param_group and self._auto_reshard_after_forward:
             # For the root, do not reshard after forward since for training,
@@ -228,7 +226,7 @@ def replicate_impl(
     # Place Replicate leftmost for highest priority in the method resolution order
     for module in modules:
         cls = module.__class__
-        new_cls = cls_to_replicate_cls.get(cls)
+        new_cls = cls_to_replicate_cls.get(cls, None)
         if not new_cls:
             dct = {"__deepcopy__": _unimplemented_deepcopy}
             new_cls = type(f"Replicate{cls.__name__}", (ReplicateModule, cls), dct)

@@ -55,7 +55,7 @@ from .eval_frame import (
     reset_code,
 )
 
-# pyrefly: ignore [deprecated]
+# pyrefly: ignore  # deprecated
 from .external_utils import is_compiling
 from .mutation_guard import GenerationTracker
 from .pgo import reset_code_state

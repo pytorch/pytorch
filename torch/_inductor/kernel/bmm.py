@@ -6,9 +6,8 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 
-from .. import config as inductor_config, ir, lowering as L
+from .. import ir, lowering as L
 from ..kernel_inputs import MMKernelInputs
-from ..lowering import lowerings, make_pointwise, make_reduction, transform_args
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -23,13 +22,8 @@ from ..utils import (
     use_cutlass_template,
     use_triton_template,
 )
-from ..virtualized import ops, V
-from .mm_common import (
-    _is_static_problem,
-    is_batch_stride_largest_or_zero,
-    mm_args,
-    use_native_matmul,
-)
+from ..virtualized import V
+from .mm_common import _is_static_problem, is_batch_stride_largest_or_zero, mm_args
 
 
 if TYPE_CHECKING:
@@ -119,7 +113,7 @@ bmm_template = TritonTemplate(
     cache_codegen_enabled_for_template=True,
 )
 
-aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
+aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out")
 aten_bmm_dtype = ExternKernelChoice(
     torch.bmm,
     "at::_bmm_out_dtype_cuda",
@@ -172,32 +166,6 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         if is_valid_to_require_contiguous(mat2):
             meta_mat2 = V.graph.current_node.args[1]
             mat2 = may_require_contiguous(mat2, meta_mat2)
-
-    if use_native_matmul(mat1, mat2):
-        mat1 = lowerings[aten.unsqueeze](mat1, -1)
-        mat2 = lowerings[aten.unsqueeze](mat2, 1)
-        args, kwargs = transform_args(
-            args=[mat1, mat2],
-            kwargs={},
-            broadcast=True,
-            type_promotion_kind=None,
-            convert_input_to_bool=False,
-        )  # Handles broadcasting the arguments
-
-        if inductor_config.triton.codegen_upcast_to_fp32 and mat1.dtype in [
-            torch.float16,
-            torch.bfloat16,
-        ]:
-
-            def _to_dtype(x):
-                return ops.to_dtype(x, mat1.dtype, use_compute_types=False)
-
-            args = [make_pointwise(_to_dtype)(x) for x in args]
-
-        mul_pointwise = make_pointwise(ops.dot)(*args)
-        dot_reduction = make_reduction("dot")(mul_pointwise, 2)
-
-        return dot_reduction
 
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2 = mm_args(
@@ -287,19 +255,6 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
     """
-    if use_native_matmul(mat1, mat2):
-        if beta == 0:
-            arg1 = 0
-        else:
-            arg1 = lowerings[aten.mul](beta, inp)
-
-        if alpha == 0:
-            arg2 = 0
-        else:
-            arg2 = lowerings[aten.mul](alpha, lowerings[aten.bmm](mat1, mat2))
-
-        return lowerings[aten.add](arg1, arg2)
-
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2, inp = mm_args(mat1, mat2, inp, layout=layout)
 

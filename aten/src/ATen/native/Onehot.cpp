@@ -34,16 +34,16 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
         }
     }
 
-    auto shape = self.sym_sizes().vec();
+    auto shape = self.sizes().vec();
 
     // empty tensor could be converted to one hot representation,
     // but shape inference is not possible.
-    if (self.sym_numel() == 0) {
+    if (self.numel() == 0) {
         if (num_classes <= 0) {
             TORCH_CHECK(false, "Can not infer total number of classes from empty tensor.");
         } else {
-            shape.emplace_back(num_classes);
-            return at::empty_symint(shape, self.options());
+            shape.push_back(num_classes);
+            return at::empty(shape, self.options());
         }
     }
 
@@ -66,8 +66,8 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
         }
     }
 
-    shape.emplace_back(num_classes);
-    Tensor ret = at::zeros_symint(shape, self.options());
+    shape.push_back(num_classes);
+    Tensor ret = at::zeros(shape, self.options());
     ret.scatter_(-1, self.unsqueeze(-1), 1);
     return ret;
 }

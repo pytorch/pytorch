@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable
+from typing import Callable
 
 from torch._inductor.utils import fresh_cache
 

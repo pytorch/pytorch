@@ -10,14 +10,13 @@ import operator
 import sys
 import traceback
 from collections import OrderedDict
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from dataclasses import fields, is_dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import torch
 import torch.fx.traceback as fx_traceback
 from torch._C import _fx_map_aggregate as map_aggregate, _fx_map_arg as map_arg
-from torch._logging import getArtifactLogger
 from torch.utils._traceback import CapturedTraceback
 
 from ._compatibility import compatibility
@@ -41,7 +40,6 @@ __all__ = [
 
 
 log = logging.getLogger(__name__)
-annotation_log = getArtifactLogger(__name__, "annotation")
 
 
 @compatibility(is_backward_compatible=False)
@@ -204,9 +202,7 @@ class TracerBase:
             # BWD pass we retrieve the sequence_nr stored on the current
             # executing autograd Node. See NOTE [ Sequence Number ].
             if current_meta.get("in_grad_fn", 0) > 0:
-                annotation_log.debug("seq_nr from current_meta")
                 new_seq_nr = current_meta["grad_fn_seq_nr"][-1]
-            annotation_log.debug("Assigning new_seq_nr %s to %s", new_seq_nr, node.name)
             node.meta["seq_nr"] = new_seq_nr
 
         elif self.module_stack:

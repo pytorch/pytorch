@@ -210,7 +210,7 @@ multinomial_with_replacement_apply(
   }
 }
 
-void multinomial_with_replacement_kernel_impl(
+static void multinomial_with_replacement_kernel_impl(
     Tensor& result,
     const Tensor& self,
     const int64_t n_sample,

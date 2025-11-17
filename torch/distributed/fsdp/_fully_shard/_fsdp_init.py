@@ -220,7 +220,6 @@ def _move_states_to_device(
     the future.
     """
     # Follow the logic in `nn.Module._apply`
-    # pyrefly: ignore [bad-argument-type]
     for tensor in itertools.chain(params, buffers):
         if tensor.device == device or tensor.device.type == "meta":
             # Keep meta-device tensors on meta device for deferred init

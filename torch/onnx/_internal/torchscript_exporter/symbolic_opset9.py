@@ -15,7 +15,6 @@ import math
 import sys
 import warnings
 from typing import TYPE_CHECKING
-from typing_extensions import deprecated
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -840,7 +839,7 @@ def t(g: jit_utils.GraphContext, self):
 def numpy_T(g: jit_utils.GraphContext, input):
     ndim = symbolic_helper._get_tensor_rank(input)
     assert ndim is not None
-    perm = list(reversed(range(ndim)))
+    perm = list(reversed(range(0, ndim)))
     return g.op("Transpose", input, perm_i=perm)
 
 
@@ -925,8 +924,7 @@ def embedding(
         warnings.warn(
             "Warning: ONNX export of embedding with padding_idx >= 0 "
             "for training mode. "
-            "ONNX does not support not updating the embedding vector at padding_idx during training.",
-            stacklevel=2,
+            "ONNX does not support not updating the embedding vector at padding_idx during training."
         )
 
     return g.op("Gather", weight, indices)
@@ -991,7 +989,7 @@ def transpose(g: jit_utils.GraphContext, self, dim0, dim1):
 @_onnx_symbolic("aten::permute")
 @symbolic_helper.parse_args("v", "is")
 def permute(g: jit_utils.GraphContext, self, dims):
-    if dims == list(range(len(dims))):
+    if dims == list(range(0, len(dims))):
         return self
     return g.op("Transpose", self, perm_i=dims)
 
@@ -1052,7 +1050,7 @@ def split(g: jit_utils.GraphContext, self, split_size_or_sizes, dim, _outputs=No
     leftover = size % split_size
     if leftover:
         splits.append(leftover)
-    # pyrefly: ignore [bad-argument-type]
+    # pyrefly: ignore  # bad-argument-type
     return g.op("Split", self, split_i=splits, axis_i=dim, outputs=_outputs)
 
 
@@ -1070,7 +1068,7 @@ def split_with_sizes(g: jit_utils.GraphContext, self, split_sizes, dim, _outputs
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "split_with_sizes", 9, 11, "Dynamic number of outputs not supported", self
         )
-    # pyrefly: ignore [bad-argument-type]
+    # pyrefly: ignore  # bad-argument-type
     return g.op("Split", self, split_i=split_sizes, axis_i=dim, outputs=_outputs)
 
 
@@ -1143,8 +1141,7 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
                 + "Axis is converted to "
                 + str(squeeze_dim + rank)
                 + " based on input shape at export time. "
-                + "Passing an tensor of different rank in execution will be incorrect.",
-                stacklevel=2,
+                + "Passing an tensor of different rank in execution will be incorrect."
             )
             squeeze_dim += rank
         else:
@@ -1163,8 +1160,7 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
             + " of the input "
             + "is not 1, the ONNX model will return an error. Opset version 11 supports squeezing on "
             + "non-singleton dimensions, it is recommended to export this model using opset "
-            + "version 11 or higher.",
-            stacklevel=2,
+            + "version 11 or higher."
         )
         return symbolic_helper._squeeze_helper(g, self, axes_i=[squeeze_dim])
     if dim_size > 1:
@@ -1177,8 +1173,7 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
             + ". The model will "
             + "be exported without the squeeze node. If the model is intended to be used with dynamic "
             + "input shapes, please use opset version 11 to "
-            + "export the model.",
-            stacklevel=2,
+            + "export the model."
         )
         return self
 
@@ -1186,8 +1181,7 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
         "This model contains a squeeze operation on dimension "
         + str(squeeze_dim)
         + ". If the model is "
-        + "intended to be used with dynamic input shapes, please use opset version 11 to export the model.",
-        stacklevel=2,
+        + "intended to be used with dynamic input shapes, please use opset version 11 to export the model."
     )
     return symbolic_helper._squeeze_helper(g, self, axes_i=[squeeze_dim])
 
@@ -1373,7 +1367,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
         )
     ceiled_output_dim = [
         math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / float(stride[i])) + 1
-        for i in range(len(padding))
+        for i in range(0, len(padding))
     ]
     # ensure last pooling starts inside
     ceiled_output_dim = [
@@ -1382,7 +1376,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
             if (((ceiled_output_dim[i] - 1) * stride[i]) >= (dim[i] + padding[i]))
             else ceiled_output_dim[i]
         )
-        for i in range(len(ceiled_output_dim))
+        for i in range(0, len(ceiled_output_dim))
     ]
     padding_ceil = [
         (
@@ -1397,7 +1391,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
                 )
             )
         )
-        for i in range(len(padding))
+        for i in range(0, len(padding))
     ]
     # ensure padding is not > kernel_size
     padding_ceil = [
@@ -1410,7 +1404,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
             if ((padding_ceil[i] + 2 * padding[i]) >= (kernel_size[i]))
             else int(padding_ceil[i])
         )
-        for i in range(len(padding_ceil))
+        for i in range(0, len(padding_ceil))
     ]
     return padding_ceil
 
@@ -1702,17 +1696,17 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
                 name, "input size not accessible", input
             )
         # verify if output size % input size = 0 for all dim
-        mod = [dim[i] % output_size[i] for i in range(len(dim))]
+        mod = [dim[i] % output_size[i] for i in range(0, len(dim))]
         if mod != [0] * len(mod):
             if output_size == [1] * len(output_size):
                 return g.op("GlobalMaxPool", input), None
             return symbolic_helper._unimplemented(
                 name, "output size that are not factor of input size", output_size_value
             )
-        k = [int(dim[i] / output_size[i]) for i in range(len(dim))]
+        k = [int(dim[i] / output_size[i]) for i in range(0, len(dim))]
         # call max_poolxd_with_indices to get indices in the output
         if type == "MaxPool":
-            # pyrefly: ignore [not-callable]
+            # pyrefly: ignore  # not-callable
             return fn(g, input, k, k, (0,) * len(dim), (1,) * len(dim), False)
         output = g.op(type, input, kernel_shape_i=tuple_fn(k), strides_i=tuple_fn(k))
         return output
@@ -1767,7 +1761,7 @@ def constant_pad_nd(g: jit_utils.GraphContext, input, padding, value):
         )
 
     padding = _convert_padding_node(padding)
-    # pyrefly: ignore [bad-argument-type]
+    # pyrefly: ignore  # bad-argument-type
     paddings = _prepare_onnx_paddings(symbolic_helper._get_tensor_rank(input), padding)
     return symbolic_helper._op_with_optional_float_cast(
         g, "Pad", input, pads_i=paddings, mode_s=mode, value_f=value, opset_before=11
@@ -1821,7 +1815,7 @@ def _pad_circular(g: jit_utils.GraphContext, input: _C.Value, pad: _C.Value):
 def reflection_pad(g: jit_utils.GraphContext, input, padding):
     mode = "reflect"
     padding = _convert_padding_node(padding)
-    # pyrefly: ignore [bad-argument-type]
+    # pyrefly: ignore  # bad-argument-type
     paddings = _prepare_onnx_paddings(symbolic_helper._get_tensor_rank(input), padding)
     return symbolic_helper._op_with_optional_float_cast(
         g, "Pad", input, pads_i=paddings, mode_s=mode, opset_before=11
@@ -1834,7 +1828,7 @@ def reflection_pad(g: jit_utils.GraphContext, input, padding):
 def replication_pad(g: jit_utils.GraphContext, input, padding):
     mode = "edge"
     padding = _convert_padding_node(padding)
-    # pyrefly: ignore [bad-argument-type]
+    # pyrefly: ignore  # bad-argument-type
     paddings = _prepare_onnx_paddings(symbolic_helper._get_tensor_rank(input), padding)
     return symbolic_helper._op_with_optional_float_cast(
         g, "Pad", input, pads_i=paddings, mode_s=mode, opset_before=11
@@ -1971,8 +1965,8 @@ def wrap_logical_op_with_cast_to(to_type):
     def decorator(fn):
         @functools.wraps(fn)
         def wrap_with_cast(g, input, other):
-            to_cast_func = globals()[f"_cast_{to_type}"]
-            return fn(g, to_cast_func(g, input, False), to_cast_func(g, other, False))
+            to_i = symbolic_helper.cast_pytorch_to_onnx[to_type]
+            return fn(g, g.op("Cast", input, to_i=to_i), g.op("Cast", other, to_i=to_i))
 
         return wrap_with_cast
 
@@ -2215,7 +2209,7 @@ def where(g: jit_utils.GraphContext, condition, self=None, other=None, _outputs=
         return symbolic_helper._unbind_helper(
             g, condition, g.op("Constant", value_t=torch.tensor(1)), _outputs
         )
-    # pyrefly: ignore [bad-argument-type]
+    # pyrefly: ignore  # bad-argument-type
     return g.op("Where", condition, self, other)
 
 
@@ -2391,7 +2385,7 @@ def _convolution_mode(
         "group_i": groups,
     }
 
-    # pyrefly: ignore [bad-argument-type]
+    # pyrefly: ignore  # bad-argument-type
     n = g.op("Conv", *args, **kwargs)
 
     if (
@@ -2736,12 +2730,12 @@ def native_layer_norm(
 
     # variance = e((x - e(x))^2), and (x - e(x)) is the numerator in the layer_norm formula
     if g.opset < 18:
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore  # no-matching-overload
         variance = g.op("ReduceMean", pow(g, numerator, two_cst), axes_i=axes)
     else:
         variance = g.op(
             "ReduceMean",
-            # pyrefly: ignore [no-matching-overload]
+            # pyrefly: ignore  # no-matching-overload
             pow(g, numerator, two_cst),
             g.op("Constant", value_t=torch.tensor(axes, dtype=torch.long)),
         )
@@ -2911,7 +2905,7 @@ def unfold(g: jit_utils.GraphContext, input, dimension, size, step):
             for low, hi in zip(low_indices, hi_indices)
         ]
         ndim = len(sizes)
-        perm = list(range(ndim))
+        perm = list(range(0, ndim))
         perm.append(perm.pop(dimension))
         unsqueeze = [
             symbolic_helper._unsqueeze_helper(
@@ -3080,12 +3074,12 @@ def pairwise_distance(g: jit_utils.GraphContext, input1, input2, p, eps, keepdim
     )
     summation = symbolic_helper._reducesum_helper(
         g,
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore  # no-matching-overload
         pow(g, sub(g, input1, input2), p),
         axes_i=[-1],
         keepdims_i=symbolic_helper._parse_arg(keepdim, "i"),
     )
-    # pyrefly: ignore [no-matching-overload]
+    # pyrefly: ignore  # no-matching-overload
     return pow(g, summation, inv_p)
 
 
@@ -3195,7 +3189,7 @@ def max(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
 @_onnx_symbolic("aten::maximum")
 @symbolic_helper.quantized_args(True, True)
 def maximum(g: jit_utils.GraphContext, input, other):
-    # pyrefly: ignore [no-matching-overload]
+    # pyrefly: ignore  # no-matching-overload
     return max(g, input, dim_or_y=other)
 
 
@@ -3208,7 +3202,7 @@ def min(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
 @_onnx_symbolic("aten::minimum")
 @symbolic_helper.quantized_args(True, True)
 def minimum(g: jit_utils.GraphContext, input, other):
-    # pyrefly: ignore [no-matching-overload]
+    # pyrefly: ignore  # no-matching-overload
     return min(g, input, dim_or_y=other)
 
 
@@ -3336,60 +3330,6 @@ def _unique2(g: jit_utils.GraphContext, input, sorted, return_inverse, return_co
     symbolic_helper._onnx_opset_unsupported("_unique2", 9, 11, input)
 
 
-@_onnx_symbolic("aten::_cast_Byte")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Byte(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.UINT8)
-
-
-@_onnx_symbolic("aten::_cast_Char")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Char(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT8)
-
-
-@_onnx_symbolic("aten::_cast_Short")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Short(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT16)
-
-
-@_onnx_symbolic("aten::_cast_Int")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Int(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT32)
-
-
-@_onnx_symbolic("aten::_cast_Long")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Long(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT64)
-
-
-@_onnx_symbolic("aten::_cast_Half")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Half(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.FLOAT16)
-
-
-@_onnx_symbolic("aten::_cast_Float")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Float(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.FLOAT)
-
-
-@_onnx_symbolic("aten::_cast_Double")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Double(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.DOUBLE)
-
-
-@_onnx_symbolic("aten::_cast_Bool")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Bool(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.BOOL)
-
-
 @_onnx_symbolic("aten::empty")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 def empty(
@@ -3505,7 +3445,7 @@ def zeros_like(
             input, _type_utils.JitScalarType.FLOAT
         )
     else:
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         scalar_type = _type_utils.JitScalarType(dtype)
     return g.op(
         "ConstantOfShape",
@@ -3565,7 +3505,7 @@ def ones_like(
             input, _type_utils.JitScalarType.FLOAT
         )
     else:
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         scalar_type = _type_utils.JitScalarType(dtype)
     return g.op(
         "ConstantOfShape",
@@ -3864,8 +3804,7 @@ def unsqueeze(g: jit_utils.GraphContext, self, dim):
                 + "Axis is converted to "
                 + str(dim + rank + 1)
                 + " based on input shape at export time. "
-                + "Passing an tensor of different rank in execution will be incorrect.",
-                stacklevel=2,
+                + "Passing an tensor of different rank in execution will be incorrect."
             )
             dim = dim + rank + 1
         else:
@@ -4272,8 +4211,7 @@ def _generic_rnn(
         + " can cause an error "
         + "when running the ONNX model with a different batch size. "
         + "Make sure to save the model with a batch size of 1, "
-        + "or define the initial states (h0/c0) as inputs of the model. ",
-        stacklevel=2,
+        + "or define the initial states (h0/c0) as inputs of the model. "
     )
 
     onnxActivations = [
@@ -5323,8 +5261,7 @@ def index(g: jit_utils.GraphContext, self, index):
             warnings.warn(
                 "Exporting aten::index operator with indices of type Byte. "
                 "Only 1-D indices are supported. In any other case, "
-                "this will produce an incorrect ONNX graph.",
-                stacklevel=2,
+                "this will produce an incorrect ONNX graph."
             )
             index = symbolic_helper._squeeze_helper(g, nonzero(g, index), [1])
         return index
@@ -5378,8 +5315,7 @@ def index(g: jit_utils.GraphContext, self, index):
                 f"{GLOBALS.export_onnx_opset_version}"
                 " is achieved by combination of multiple ONNX operators, "
                 "including Reshape, Transpose, Concat, and Gather. "
-                "If indices include negative values, the exported graph will produce incorrect results.",
-                stacklevel=2,
+                "If indices include negative values, the exported graph will produce incorrect results."
             )
             adv_idx_count = len(adv_idx_indices)
             shape_tensor = _shape_as_tensor(g, self)
@@ -5559,7 +5495,7 @@ def linalg_matrix_norm(
             g, g.op("Abs", self), axes_i=[dim[0]], keepdims_i=keepdim
         )
         if ord_value > 0:
-            # pyrefly: ignore [no-matching-overload]
+            # pyrefly: ignore  # no-matching-overload
             result, _indices = max(
                 g,
                 sum,
@@ -5567,7 +5503,7 @@ def linalg_matrix_norm(
                 keepdim=keepdim,
             )
         else:
-            # pyrefly: ignore [no-matching-overload]
+            # pyrefly: ignore  # no-matching-overload
             result, _indices = min(
                 g,
                 sum,
@@ -5931,9 +5867,9 @@ def as_strided(g: jit_utils.GraphContext, self, sizes, strides, offset=None):
             else:
                 ind = g.op("Add", ind, tmp_ind)
         if offset:
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             ind = g.op("Add", ind, g.op("Constant", torch.tensor([offset])))
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         return g.op("Gather", self_1d, ind)
 
 
@@ -6070,8 +6006,7 @@ def fill(g: jit_utils.GraphContext, self, value):
 def index_add(g: jit_utils.GraphContext, self, dim, index, other, alpha=None):
     warnings.warn(
         "Warning: ONNX export does not support duplicated values in 'index' field, "
-        + "this will cause the ONNX model to be incorrect.",
-        stacklevel=2,
+        + "this will cause the ONNX model to be incorrect."
     )
 
     # ONNX does not support "alpha" argument, unlike aten index_add
@@ -6217,7 +6152,7 @@ def _euclidean_dist(g: jit_utils.GraphContext, x1, x2):
     assert rank is not None
     x1_norm = symbolic_helper._reducesum_helper(
         g,
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore  # no-matching-overload
         pow(g, x1, symbolic_helper._generate_wrapped_number(g, 2.0)),
         axes_i=[-1],
         keepdims_i=True,
@@ -6225,7 +6160,7 @@ def _euclidean_dist(g: jit_utils.GraphContext, x1, x2):
     x1_pad = ones_like(g, x1_norm)
     x2_norm = symbolic_helper._reducesum_helper(
         g,
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore  # no-matching-overload
         pow(g, x2, symbolic_helper._generate_wrapped_number(g, 2.0)),
         axes_i=[-1],
         keepdims_i=True,

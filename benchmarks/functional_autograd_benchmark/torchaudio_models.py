@@ -367,7 +367,7 @@ class DeepSpeech(nn.Module):
         """
         seq_len = input_length
         for m in self.conv.modules():
-            if type(m) is nn.modules.conv.Conv2d:
+            if type(m) == nn.modules.conv.Conv2d:
                 seq_len = (
                     seq_len
                     + 2 * m.padding[1]

@@ -21,7 +21,17 @@ PYBIND11_MAKE_OPAQUE(std::vector<uint8_t>)
 
 namespace torch::dynamo {
 
+#if IS_PYTHON_3_11_PLUS
+
+std::vector<uint8_t> _PyOpcode_Caches_vec(
+    THP_PyOpcode_Caches,
+    THP_PyOpcode_Caches + THP_PyOpcode_Caches_size);
+
+#else
+
 std::vector<uint8_t> _PyOpcode_Caches_vec;
+
+#endif
 
 using torch::dynamo::autograd::torch_c_dynamo_compiled_autograd_init;
 
@@ -255,13 +265,6 @@ void initDynamoBindings(PyObject* torch) {
   m.def("_load_precompile_entry", &_load_precompile_entry);
   m.def("_debug_get_precompile_entries", &_debug_get_precompile_entries);
   py::bind_vector<std::vector<uint8_t>>(m, "VectorUInt8");
-  init_THPCaches();
-  if (THP_PyOpcode_Caches != nullptr) {
-    _PyOpcode_Caches_vec.insert(
-        _PyOpcode_Caches_vec.end(),
-        THP_PyOpcode_Caches,
-        THP_PyOpcode_Caches + THP_PyOpcode_Caches_size);
-  }
   m.attr("py_opcode_caches") = _PyOpcode_Caches_vec;
   m.def("code_framelocals_names", &code_framelocals_names);
   _register_functions(dynamo);

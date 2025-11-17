@@ -250,14 +250,6 @@ void FlightRecorder<EventType>::retire_id(
 }
 
 template <typename EventType>
-void FlightRecorder<EventType>::reset_all() {
-  std::lock_guard<std::mutex> guard(mutex_);
-  next_ = 0;
-  id_ = 0;
-  entries_.clear();
-}
-
-template <typename EventType>
 const c10::List<c10::IValue> FlightRecorder<EventType>::getCollectiveTrace(
     bool includeStacktraces,
     bool onlyActive) {

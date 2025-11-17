@@ -149,9 +149,9 @@ class EtcdStore(Store):
     # In case of `str`, utf-8 encoding is assumed.
     #
     def _encode(self, value) -> str:
-        if type(value) is bytes:
+        if type(value) == bytes:
             return b64encode(value).decode()
-        elif type(value) is str:
+        elif type(value) == str:
             return b64encode(value.encode()).decode()
         raise ValueError("Value must be of type str or bytes")
 
@@ -160,9 +160,9 @@ class EtcdStore(Store):
     # Return type is `bytes`, which is more convenient with the Store interface.
     #
     def _decode(self, value) -> bytes:
-        if type(value) is bytes:
+        if type(value) == bytes:
             return b64decode(value)
-        elif type(value) is str:
+        elif type(value) == str:
             return b64decode(value.encode())
         raise ValueError("Value must be of type str or bytes")
 

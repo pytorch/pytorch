@@ -6,7 +6,6 @@ import builtins
 import collections
 import contextlib
 import copy
-import gc
 import functools
 import inspect
 import io
@@ -20,7 +19,6 @@ import traceback
 import types
 import typing
 import unittest
-import weakref
 import warnings
 from math import sqrt
 from torch.multiprocessing import Process
@@ -37,8 +35,7 @@ from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from copy import deepcopy
 from collections import namedtuple
-from typing import Any, NamedTuple, Optional, Union
-from collections.abc import Callable
+from typing import Any, Callable, NamedTuple, Optional, Union
 
 import torch
 
@@ -1625,25 +1622,6 @@ class TestFX(JitTestCase):
         g.erase_node(neg)
 
         self.assertTrue(neg not in relu.users)
-
-    @skipIfTorchDynamo("Dynamo does not free right away")
-    def test_prepend_does_not_leak(self):
-        g = Graph()
-        x = g.placeholder("x")
-        relu = g.call_function(torch.relu, (x,))
-        neg = g.call_function(torch.neg, (x,))
-
-        relu.prepend(neg)
-
-        ref = weakref.ref(neg)
-        g.erase_node(neg)
-        del g
-        del x
-        del relu
-        del neg
-        gc.collect()
-
-        self.assertIsNone(ref())
 
     def test_remove_uses_with_custom_filter(self):
         g: torch.fx.Graph = Graph()
@@ -3605,7 +3583,7 @@ class TestFX(JitTestCase):
 
         class LeafTracerNotB(Tracer):
             def is_leaf_module(self, module, name):
-                return "b" not in name
+                return False if "b" in name else True
 
         # Recompile calls added "for fun", since they
         # chain __call__ wrappers.

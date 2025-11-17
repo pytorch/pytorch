@@ -100,7 +100,7 @@ class TORCH_API TensorBase {
   // Create a Tensor with a +0 reference count. Special care must be
   // taken to avoid decrementing this reference count at destruction
   // time. Intended to support MaybeOwnedTraits<Tensor>.
-  explicit TensorBase(unsafe_borrow_t /*unused*/, const TensorBase& rhs)
+  explicit TensorBase(unsafe_borrow_t, const TensorBase& rhs)
       : impl_(c10::intrusive_ptr<at::TensorImpl, UndefinedTensorImpl>(rhs.impl_.get(), c10::raw::DontIncreaseRefcount{})) {}
   friend MaybeOwnedTraits<TensorBase>;
 
@@ -111,7 +111,9 @@ class TORCH_API TensorBase {
   explicit TensorBase(
       c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl)
       : impl_(std::move(tensor_impl)) {
-    TORCH_CHECK(impl_.get(), "TensorImpl with nullptr is not supported");
+    if (impl_.get() == nullptr) {
+      throw std::runtime_error("TensorImpl with nullptr is not supported");
+    }
   }
   TensorBase(const TensorBase&) = default;
   TensorBase(TensorBase&&) noexcept = default;
@@ -952,7 +954,7 @@ protected:
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
 
 private:
-  TensorBase __dispatch_contiguous(c10::MemoryFormat /*memory_format*/) const;
+  TensorBase __dispatch_contiguous(c10::MemoryFormat) const;
 };
 
 inline DeviceIndex get_device(const TensorBase& self) {

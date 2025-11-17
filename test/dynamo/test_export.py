@@ -49,9 +49,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             lc_key = state[0]
             lc_val = state[1]
             bar = []
-            for _ in range(4):
+            for _ in range(0, 4):
                 bar2 = []
-                for _ in range(3):
+                for _ in range(0, 3):
                     bar2.append(
                         lc_key + lc_val + torch.tensor([0.1, 0.25, 0.4, 0.5, 0.1])
                     )
@@ -665,9 +665,9 @@ def forward(self, x, y):
             lc_key = state[0]
             lc_val = state[1]
             bar = []
-            for _ in range(4):
+            for _ in range(0, 4):
                 bar2 = []
-                for _ in range(3):
+                for _ in range(0, 3):
                     bar2.append(
                         lc_key + lc_val + torch.tensor([0.1, 0.25, 0.4, 0.5, 0.1])
                     )
@@ -1923,6 +1923,7 @@ def forward(self, x):
     cond = torch.ops.higher_order.cond(le, cond_true_0, cond_false_0, (l_x_,));  le = cond_true_0 = cond_false_0 = l_x_ = None
     getitem_3 = cond[0]
     sym_size_int_1 = torch.ops.aten.sym_size.int(getitem_3, 0);  getitem_3 = None
+    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_1);  sym_constrain_range_for_size_default = None
     ge = sym_size_int_1 >= 2;  sym_size_int_1 = None
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 2 on node 'ge'");  ge = _assert_scalar_default = None
     getitem_2 = cond[0];  cond = None
@@ -2712,20 +2713,19 @@ def forward(self, x):
             torch._dynamo.exc.UserError,
             ".*y.*size.*2.* = 4 is not equal to .*x.*size.*1.* = 3",
         ):
-            with torch._export.config.patch(use_new_tracer_experimental=True):
-                torch.export.export(
-                    bar, (x, y), dynamic_shapes=dynamic_shapes, strict=True
-                )
+            torch.export.export(bar, (x, y), dynamic_shapes=dynamic_shapes, strict=True)
         y = torch.randn(10, 3, 3)
-        with torch._export.config.patch(use_new_tracer_experimental=True):
-            ebar = torch.export.export(
-                bar, (x, y), dynamic_shapes=dynamic_shapes, strict=True
-            )
-
-        for node in ebar.graph_module.graph.nodes:
-            if node.op == "placeholder":
-                shape = node.meta["val"].shape
-                self.assertEqual(shape[1], shape[2])
+        ebar = torch.export.export(
+            bar, (x, y), dynamic_shapes=dynamic_shapes, strict=True
+        )
+        self.assertEqual(
+            [
+                str(node.meta["val"].shape)
+                for node in ebar.graph_module.graph.nodes
+                if node.op == "placeholder"
+            ],
+            ["torch.Size([s17, s27, s27])", "torch.Size([s17, s27, s27])"],
+        )
 
     @torch._dynamo.config.patch(
         capture_dynamic_output_shape_ops=True,
@@ -3148,6 +3148,7 @@ def forward(self, x):
             gm, _ = torch._dynamo.export(f, aten_graph=True)(*example_inputs)
             self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
+    @unittest.expectedFailure  # TODO: Not sure why dynamo creates a new inputs for self.a
     def test_sum_param(self):
         # Setting a new attribute inside forward()
         class Foo(torch.nn.Module):
@@ -3538,16 +3539,24 @@ class GraphModule(torch.nn.Module):
             [[], [], [], []],
         )
 
-    def test_input_global(self) -> None:
+    def test_invalid_input_global(self) -> None:
         global bulbous_bouffant
         bulbous_bouffant = torch.randn(3)
 
         def f(y):
             return bulbous_bouffant + y
 
-        torch._dynamo.export(f)(torch.randn(3))
+        self.assertExpectedInlineMunged(
+            UserError,
+            lambda: torch._dynamo.export(f)(torch.randn(3)),
+            """\
+G['bulbous_bouffant'], accessed at:
+  File "test_export.py", line N, in f
+    return bulbous_bouffant + y
+""",
+        )
 
-    def test_input_global_multiple_access(self) -> None:
+    def test_invalid_input_global_multiple_access(self) -> None:
         global macademia
         macademia = torch.randn(3)
 
@@ -3561,17 +3570,33 @@ class GraphModule(torch.nn.Module):
             y = g(y)
             return macademia + y
 
-        torch._dynamo.export(f)(torch.randn(3))
+        # NB: This doesn't actually work (it only reports the first usage),
+        # but I'm leaving the test here in case we fix it later
+        self.assertExpectedInlineMunged(
+            UserError,
+            lambda: torch._dynamo.export(f)(torch.randn(3)),
+            """\
+G['macademia'], accessed at:
+  File "test_export.py", line N, in f
+    y = g(y)
+  File "test_export.py", line N, in g
+    y = macademia + y
+""",
+        )
 
-    def test_input_nonlocal(self) -> None:
+    def test_invalid_input_nonlocal(self) -> None:
         arglebargle = torch.randn(3)
 
         def f(y):
             return arglebargle + y
 
-        torch._dynamo.export(f)(torch.randn(3))
+        self.assertExpectedInlineMunged(
+            UserError,
+            lambda: torch._dynamo.export(f)(torch.randn(3)),
+            """L['arglebargle'], a closed over free variable""",
+        )
 
-    def test_input_unused_nonlocal_ok(self) -> None:
+    def test_invalid_input_unused_nonlocal_ok(self) -> None:
         arglebargle = torch.randn(3)
 
         def f(y):

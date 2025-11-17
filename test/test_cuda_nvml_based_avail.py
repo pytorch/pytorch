@@ -127,7 +127,7 @@ class TestVisibleDeviceParses(TestCase):
             _transform_uuid_to_ordinals(["GPU-e4", "GPU-9e8d35e3"], uuids), [2, 1]
         )
         self.assertEqual(
-            _transform_uuid_to_ordinals(["GPU-9e8d35e3", "GPU-1", "GPU-47"], uuids),
+            _transform_uuid_to_ordinals("GPU-9e8d35e3,GPU-1,GPU-47".split(","), uuids),
             [1, 7, 5],
         )
         # First invalid UUID aborts parsing

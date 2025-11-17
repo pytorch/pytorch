@@ -65,7 +65,7 @@ c10::intrusive_ptr<Message> ScriptRemoteCall::toMessageImpl() && {
 
 std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(
     const Message& message) {
-  auto payload = message.payload().data();
+  auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
 
   auto value = jit::unpickle(

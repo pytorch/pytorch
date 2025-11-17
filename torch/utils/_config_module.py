@@ -614,9 +614,6 @@ class ConfigModule(ModuleType):
     def get_config_copy(self) -> dict[str, Any]:
         return self._get_dict()
 
-    def get_serializable_config_copy(self) -> dict[str, Any]:
-        return self._get_dict(ignored_keys=getattr(self, "_save_config_ignore", []))
-
     def patch(
         self,
         arg1: Optional[Union[str, dict[str, Any]]] = None,

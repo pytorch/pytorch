@@ -190,7 +190,7 @@ class CapabilityBasedPartitioner:
                 # Iterate through all the users of this node and update the partition map to indicate
                 # that there is a path from the partition id of this node to the target partition id.
                 for user_node in node.users:
-                    target_id = assignment.get(user_node)
+                    target_id = assignment.get(user_node, None)
                     if target_id is not None:
                         partition_map[id].add(target_id)
                         partition_map[id].update(partition_map[target_id])
@@ -267,9 +267,9 @@ class CapabilityBasedPartitioner:
 
             # node has tuple outputs, re-assign all following getitem node into node's partition
             if is_tuple_output:
-                id = assignment.get(node)  # type: ignore[arg-type]
+                id = assignment.get(node, None)  # type: ignore[arg-type]
                 for user in node.users:
-                    if assignment.get(user) != id:  # type: ignore[arg-type]
+                    if assignment.get(user, None) != id:  # type: ignore[arg-type]
                         nodes_reassignment[user] = id  # type: ignore[assignment]
         for node, id in nodes_reassignment.items():
             merge_single_node(node, None, id)

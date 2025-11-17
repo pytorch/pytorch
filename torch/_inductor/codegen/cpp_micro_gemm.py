@@ -15,6 +15,7 @@ from ..cpu_vec_isa import (
     VecAVX512,
     VecISA,
     VecNEON,
+    VecSVE128,
     VecSVE256,
 )
 from ..utils import IndentedBuffer, parallel_num_threads
@@ -418,6 +419,14 @@ def do_not_use_with_small_m_for_int8_woq(config, m, n, k, alpha, num_threads, **
     ),
     *generate_gemm_config(
         VecNEON,
+        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
+        input_dtype=torch.float,
+        input2_dtype=torch.float,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+    ),
+    *generate_gemm_config(
+        VecSVE128,
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.float,
         input2_dtype=torch.float,
@@ -965,7 +974,7 @@ def check_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
 
 def check_int8_bf16_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
     # We need avx512_bf16 to dequant int8 to bf16
-    vec_isa = kwargs.get("vec_isa")
+    vec_isa = kwargs.get("vec_isa", None)
     assert vec_isa is not None
     return vec_isa.is_avx512_bf16_supported() and check_amx_extra(
         config, m, n, k, alpha, num_threads, **kwargs
@@ -975,7 +984,7 @@ def check_int8_bf16_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
 # amx_fp16 need to be checked separately since it is not always supported when amx is supported
 def check_amx_fp16_extra(config, m, n, k, alpha, num_threads, **kwargs):
     assert config.input_dtype == torch.float16 and config.output_dtype == torch.float
-    vec_isa = kwargs.get("vec_isa")
+    vec_isa = kwargs.get("vec_isa", None)
     assert vec_isa is not None
     vnni_size = 2
     return vec_isa.is_amx_fp16_supported() and k % vnni_size == 0 and alpha == 1
@@ -1410,7 +1419,7 @@ class CppMicroBrgemm(CppMicroGemm):
 def check_woq_int4_extra(config, m, n, k, alpha, num_threads, **kwargs):
     if alpha != 1:
         return False
-    q_group_size = kwargs.get("q_group_size")
+    q_group_size = kwargs.get("q_group_size", None)
     assert q_group_size is not None
     if (
         q_group_size not in [32, 64, 128]

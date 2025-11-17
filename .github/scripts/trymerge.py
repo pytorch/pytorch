@@ -1092,7 +1092,7 @@ class GitHubPR:
         editor = node["editor"]
         return GitHubComment(
             body_text=node["bodyText"],
-            created_at=node.get("createdAt", ""),
+            created_at=node["createdAt"] if "createdAt" in node else "",
             author_login=node["author"]["login"],
             author_url=node["author"].get("url", None),
             author_association=node["authorAssociation"],
@@ -2042,6 +2042,10 @@ def validate_revert(
             f"[{', '.join(allowed_reverters)}], but instead is {author_association}."
         )
 
+    # Raises exception if matching rule is not found, but ignores all status checks
+    find_matching_merge_rule(
+        pr, repo, skip_mandatory_checks=True, skip_internal_checks=True
+    )
     commit_sha = get_pr_commit_sha(repo, pr)
     return (author_login, commit_sha)
 

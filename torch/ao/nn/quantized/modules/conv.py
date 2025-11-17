@@ -278,9 +278,9 @@ class _ConvNd(WeightedQuantizedModule):
     @staticmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
         if hasattr(mod, "weight_fake_quant"):
-            # assert type(mod) is cls.__QAT_MODULE, " nnq." + cls.__name__ + \
+            # assert type(mod) == cls.__QAT_MODULE, " nnq." + cls.__name__ + \
             # ".from_float only works for " + cls.__QAT_MODULE.__name__
-            if type(mod) is cls._NNIQAT_CONV_BN_MODULE:
+            if type(mod) == cls._NNIQAT_CONV_BN_MODULE:
                 mod.weight, mod.bias = fuse_conv_bn_weights(
                     mod.weight,
                     mod.bias,
@@ -296,7 +296,7 @@ class _ConvNd(WeightedQuantizedModule):
             weight_post_process = mod.weight_fake_quant
             activation_post_process = mod.activation_post_process
         else:
-            assert type(mod) is cls._FLOAT_MODULE, (
+            assert type(mod) == cls._FLOAT_MODULE, (
                 " nnq."
                 + cls.__name__
                 + ".from_float only works for "
@@ -408,7 +408,7 @@ class Conv1d(_ConvNd):
         factory_kwargs = {"device": device, "dtype": dtype}
         kernel_size = _single(kernel_size)
         stride = _single(stride)
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         padding = padding if isinstance(padding, str) else _single(padding)
         dilation = _single(dilation)
 
@@ -808,7 +808,7 @@ class _ConvTransposeNd(_ConvNd):
             + ".from_float only works for "
             + cls._FLOAT_MODULE.__name__  # type: ignore[attr-defined]
         )
-        assert type(mod) is cls._FLOAT_MODULE, msg
+        assert type(mod) == cls._FLOAT_MODULE, msg
         assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined."
         weight_post_process = mod.qconfig.weight()  # type: ignore[operator, union-attr]
         weight_post_process(mod.weight)

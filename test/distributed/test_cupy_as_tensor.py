@@ -7,13 +7,8 @@ from dataclasses import dataclass
 
 import torch
 from torch.multiprocessing.reductions import reduce_tensor
-from torch.testing._internal.common_cuda import SM100OrLater
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
-from torch.testing._internal.common_utils import (
-    requires_cuda_p2p_access,
-    run_tests,
-    skip_but_pass_in_sandcastle_if,
-)
+from torch.testing._internal.common_utils import requires_cuda_p2p_access, run_tests
 
 
 # So that tests are written in device-agnostic way
@@ -64,10 +59,6 @@ class CupyAsTensorTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skip_but_pass_in_sandcastle_if(
-        SM100OrLater,
-        "Fails if ran in docker environment without privileged access (https://github.com/pytorch/pytorch/issues/165170)",
-    )
     def test_cupy_as_tensor(self) -> None:
         """
         Test that torch.as_tensor works for cupy array interface

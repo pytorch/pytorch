@@ -5,15 +5,15 @@ import collections
 import functools
 import typing
 from enum import auto, Enum
+from typing import Optional, Union
 
-import torch
 from torch.utils._triton import has_triton_package
 
 
 # The following maximums only apply to runtime autotuning, when using FixedTritonConfig one may see larger values
 # NOTE: if these fail asserts submit a PR to increase them
 TRITON_MAX_BLOCK = {
-    "X": 8192 if torch.version.hip else 4096,
+    "X": 4096,
     "Y": 1024,
     "Z": 1024,
     "R0_": 4096 * 16,  # * 16 is multi-kernel only
@@ -89,13 +89,11 @@ if has_triton_package():
             divisible_by_16=None,
             equal_to_1=None,
         ):
-            # pyrefly: ignore [not-iterable]
             return {(x,): [["tt.divisibility", 16]] for x in divisible_by_16}
 
 else:
     # Define a namedtuple as a fallback when AttrsDescriptor is not available
     AttrsDescriptorWrapper = collections.namedtuple(  # type: ignore[no-redef, name-match]
-        # pyrefly: ignore [invalid-argument]
         "AttrsDescriptor",
         ["divisible_by_16", "equal_to_1"],
         defaults=[(), ()],
@@ -132,10 +130,10 @@ class DeviceProperties(typing.NamedTuple):
     index: int  # type: ignore[assignment]
     multi_processor_count: int
     cc: int
-    major: int | None = None
-    regs_per_multiprocessor: int | None = None
-    max_threads_per_multi_processor: int | None = None
-    warp_size: int | None = None
+    major: Optional[int] = None
+    regs_per_multiprocessor: Optional[int] = None
+    max_threads_per_multi_processor: Optional[int] = None
+    warp_size: Optional[int] = None
 
     @classmethod
     @functools.cache
@@ -176,10 +174,10 @@ class DeviceProperties(typing.NamedTuple):
 class HalideInputSpec(typing.NamedTuple):
     ctype: str
     name: str
-    shape: list[str] | None = None
-    stride: list[str] | None = None
-    offset: str | None = None
-    alias_of: str | None = None
+    shape: Optional[list[str]] = None
+    stride: Optional[list[str]] = None
+    offset: Optional[str] = None
+    alias_of: Optional[str] = None
 
     def bindings_type(self) -> str:
         if self.ctype in ("at::Half*", "at::BFloat16*"):
@@ -203,9 +201,9 @@ class HalideInputSpec(typing.NamedTuple):
 class HalideMeta(typing.NamedTuple):
     argtypes: list[HalideInputSpec]
     target: str
-    scheduler: str | None = None
-    scheduler_flags: dict[str, int | str] | None = None
-    cuda_device: int | None = None
+    scheduler: Optional[str] = None
+    scheduler_flags: Optional[dict[str, Union[int, str]]] = None
+    cuda_device: Optional[int] = None
 
     def args(self) -> list[str]:
         """Command line args to pass to halide generator"""

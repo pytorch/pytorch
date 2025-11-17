@@ -242,7 +242,7 @@ stable_diffusion_unet,pass_due_to_skip,0
 
 
 
-torch_multimodal_clip,pass,0
+torch_multimodal_clip,pass,3
 
 
 
@@ -254,7 +254,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,fail_accuracy,30
+vision_maskrcnn,fail_accuracy,29
 
 
 

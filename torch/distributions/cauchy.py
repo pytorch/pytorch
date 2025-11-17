@@ -31,7 +31,7 @@ class Cauchy(Distribution):
         scale (float or Tensor): half width at half maximum.
     """
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
     support = constraints.real
     has_rsample = True

@@ -117,7 +117,7 @@ def context_decorator(ctx, func):
 
     @functools.wraps(func)
     def decorate_context(*args, **kwargs):
-        # pyrefly: ignore [bad-context-manager]
+        # pyrefly: ignore  # bad-context-manager
         with ctx_factory():
             return func(*args, **kwargs)
 

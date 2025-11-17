@@ -1247,7 +1247,7 @@ class QuantizationTestCase(TestCase):
                }
             """
             # TODO: make img_data a single example instead of a list
-            if type(inputs) is list:
+            if type(inputs) == list:
                 inputs = inputs[0]
 
             if quant_type == QuantType.QAT:

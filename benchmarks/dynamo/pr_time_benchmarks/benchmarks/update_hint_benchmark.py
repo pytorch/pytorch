@@ -37,7 +37,7 @@ class Benchmark(BenchmarkBase):
         def f(a, b):
             xs = b.tolist()
             for x in xs:
-                torch._check(x >= 0)
+                torch._check_is_size(x)
                 torch._check(x <= self.N)
             return a.split(xs)
 

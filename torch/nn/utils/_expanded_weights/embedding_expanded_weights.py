@@ -14,7 +14,7 @@ from .expanded_weights_utils import (
 @implements_per_sample_grads(F.embedding)
 class EmbeddingPerSampleGrad(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def forward(
         ctx: Any, kwarg_names: list[str], _: Any, *expanded_args_and_kwargs: Any
     ) -> torch.Tensor:
@@ -35,7 +35,7 @@ class EmbeddingPerSampleGrad(torch.autograd.Function):
         return output
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def backward(
         ctx: Any, grad_output: torch.Tensor
     ) -> tuple[Optional[torch.Tensor], ...]:

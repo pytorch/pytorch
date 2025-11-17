@@ -55,7 +55,7 @@ torch.fx.node.Node.append(self, x: 'Node') -> None
 torch.fx.node.Node.format_node(self, placeholder_names: Optional[List[str]] = None, maybe_return_typename: Optional[List[str]] = None, include_tensor_metadata: bool = False) -> Optional[str]
 torch.fx.node.Node.insert_arg(self, idx: int, arg: torch.fx.node.Argument) -> None
 torch.fx.node.Node.prepend(self, x: 'Node') -> None
-torch.fx.node.Node.replace_all_uses_with(self, replace_with: 'Node', delete_user_cb: Optional[Callable[[Node], bool]] = None, propagate_meta: bool = False) -> List[Node]
+torch.fx.node.Node.replace_all_uses_with(self, replace_with: 'Node', delete_user_cb: Callable[[Node], bool] = <function <lambda>>, propagate_meta: bool = False) -> List[Node]
 torch.fx.node.Node.replace_input_with(self, old_input: 'Node', new_input: 'Node') -> None
 torch.fx.node.Node.update_arg(self, idx: int, arg: torch.fx.node.Argument) -> None
 torch.fx.node.Node.update_kwarg(self, key: str, arg: torch.fx.node.Argument) -> None

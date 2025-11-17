@@ -1,11 +1,8 @@
 # A Pyrefly configuration for PyTorch
 # Based on https://github.com/pytorch/pytorch/blob/main/mypy.ini
-python-version = "3.12"
-
 project-includes = [
     "torch",
     "caffe2",
-    "tools",
     "test/test_bundled_images.py",
     "test/test_bundled_inputs.py",
     "test/test_complex.py",
@@ -23,15 +20,9 @@ project-includes = [
 project-excludes = [
   # ==== below will be enabled directory by directory ====
   # ==== to test Pyrefly on a specific directory, simply comment it out ====
-  "torch/_inductor/codegen/triton.py",
-  "tools/linter/adapters/test_device_bias_linter.py",
-  "tools/code_analyzer/gen_operators_yaml.py",
-  "torch/_inductor/runtime/triton_heuristics.py",
-  "torch/_inductor/runtime/triton_helpers.py",
-  "torch/_inductor/runtime/halide_helpers.py",
-  # formatting issues, will turn on after adjusting where suppressions can be
-  # in import statements
-  "tools/flight_recorder/components/types.py",
+  "torch/_inductor/**",
+  "torch/distributed/**",
+  # formatting issues
   "torch/linalg/__init__.py",
   "torch/package/importer.py",
   "torch/package/_package_pickler.py",
@@ -41,11 +32,18 @@ project-excludes = [
   "torch/_export/utils.py",
   "torch/fx/experimental/unification/multipledispatch/__init__.py",
   "torch/nn/modules/__init__.py",
-  "torch/nn/modules/rnn.py", # only remove when parsing errors are fixed
-  "torch/_inductor/codecache.py",
-  "torch/distributed/elastic/metrics/__init__.py",
-  "torch/_inductor/fx_passes/bucketing.py",
   # ====
+  "benchmarks/instruction_counts/main.py",
+  "benchmarks/instruction_counts/definitions/setup.py",
+  "benchmarks/instruction_counts/applications/ci.py",
+  "benchmarks/instruction_counts/core/api.py",
+  "benchmarks/instruction_counts/core/expand.py",
+  "benchmarks/instruction_counts/core/types.py",
+  "benchmarks/instruction_counts/core/utils.py",
+  "benchmarks/instruction_counts/definitions/standard.py",
+  "benchmarks/instruction_counts/definitions/setup.py",
+  "benchmarks/instruction_counts/execution/runner.py",
+  "benchmarks/instruction_counts/execution/work.py",
   "torch/include/**",
   "torch/csrc/**",
   "torch/distributed/elastic/agent/server/api.py",
@@ -130,7 +128,5 @@ errors.bad-param-name-override = false
 # Mypy doesn't require that imports are explicitly imported, so be compatible with that.
 # Might be a good idea to turn this on in future.
 errors.implicit-import = false
-errors.deprecated = false # re-enable after we've fix import formatting
 permissive-ignores = true
 replace-imports-with-any = ["!sympy.printing.*", "sympy.*", "onnxscript.onnx_opset.*"]
-search-path = ["tools/experimental"]

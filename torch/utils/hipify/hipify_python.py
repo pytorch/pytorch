@@ -120,7 +120,6 @@ class GeneratedFileCleaner:
     def open(self, fn, *args, **kwargs):
         if not os.path.exists(fn):
             self.files_to_clean.add(os.path.abspath(fn))
-        # pyrefly: ignore [not-iterable]
         return open(fn, *args, **kwargs)
 
     def makedirs(self, dn, exist_ok=False):
@@ -549,8 +548,7 @@ def get_hip_file_path(rel_filepath, is_pytorch_extension=False):
     """
     # At the moment, some PyTorch source files are HIPified in place.  The predicate
     # is_out_of_place tells us if this is the case or not.
-    if os.path.isabs(rel_filepath):
-        raise AssertionError("rel_filepath must be a relative path")
+    assert not os.path.isabs(rel_filepath)
     if not is_pytorch_extension and not is_out_of_place(rel_filepath):
         return rel_filepath
 
@@ -617,8 +615,7 @@ def get_hip_file_path(rel_filepath, is_pytorch_extension=False):
 
 
 def is_out_of_place(rel_filepath):
-    if os.path.isabs(rel_filepath):
-        raise AssertionError("rel_filepath must be a relative path")
+    assert not os.path.isabs(rel_filepath)
     if rel_filepath.startswith("torch/"):
         return False
     if rel_filepath.startswith("third_party/nvfuser/"):
@@ -630,8 +627,7 @@ def is_out_of_place(rel_filepath):
 
 # Keep this synchronized with includes/ignores in build_amd.py
 def is_pytorch_file(rel_filepath):
-    if os.path.isabs(rel_filepath):
-        raise AssertionError("rel_filepath must be a relative path")
+    assert not os.path.isabs(rel_filepath)
     if rel_filepath.startswith("aten/"):
         if rel_filepath.startswith("aten/src/ATen/core/"):
             return False
@@ -639,8 +635,6 @@ def is_pytorch_file(rel_filepath):
     if rel_filepath.startswith("torch/"):
         return True
     if rel_filepath.startswith("third_party/nvfuser/"):
-        return True
-    if rel_filepath.startswith("third_party/fbgemm/"):
         return True
     if rel_filepath.startswith("tools/autograd/templates/"):
         return True
@@ -664,13 +658,12 @@ def is_special_file(rel_filepath):
     return False
 
 def is_caffe2_gpu_file(rel_filepath):
-    if os.path.isabs(rel_filepath):
-        raise AssertionError("rel_filepath must be a relative path")
+    assert not os.path.isabs(rel_filepath)
     if rel_filepath.startswith("c10/cuda"):
         return True
     filename = os.path.basename(rel_filepath)
     _, ext = os.path.splitext(filename)
-    # pyrefly: ignore [unsupported-operation]
+    # pyrefly: ignore  # unsupported-operation
     return ('gpu' in filename or ext in ['.cu', '.cuh']) and ('cudnn' not in filename)
 
 class TrieNode:
@@ -791,8 +784,7 @@ PYTORCH_MAP: dict[str, object] = {}
 PYTORCH_SPECIAL_MAP = {}
 
 for mapping in CUDA_TO_HIP_MAPPINGS:
-    if not isinstance(mapping, Mapping):
-        raise TypeError("Expected each mapping in CUDA_TO_HIP_MAPPINGS to be a Mapping")
+    assert isinstance(mapping, Mapping)
     for src, value in mapping.items():
         dst = value[0]
         meta_data = value[1:]
@@ -1146,7 +1138,7 @@ def hipify(
                                         out_of_place_only=out_of_place_only,
                                         is_pytorch_extension=is_pytorch_extension))
     all_files_set = set(all_files)
-    # pyrefly: ignore [bad-assignment]
+    # pyrefly: ignore  # bad-assignment
     for f in extra_files:
         if not os.path.isabs(f):
             f = os.path.join(output_directory, f)

@@ -17,6 +17,6 @@ struct alignas(4) qint32 {
 
 } // namespace c10
 
-HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
+namespace torch::headeronly {
 using c10::qint32;
-HIDDEN_NAMESPACE_END(torch, headeronly)
+} // namespace torch::headeronly

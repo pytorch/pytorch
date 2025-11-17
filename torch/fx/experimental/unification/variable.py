@@ -31,7 +31,7 @@ class Var:
     __repr__ = __str__
 
     def __eq__(self, other):
-        return type(self) is type(other) and self.token == other.token  # type: ignore[attr-defined]
+        return type(self) == type(other) and self.token == other.token  # type: ignore[attr-defined]
 
     def __hash__(self):
         return hash((type(self), self.token))  # type: ignore[attr-defined]
@@ -55,7 +55,7 @@ isvar
 
 @dispatch(object)  # type: ignore[no-redef]
 def isvar(o):
-    return _glv and hashable(o) and o in _glv
+    return not not _glv and hashable(o) and o in _glv
 
 
 @contextmanager

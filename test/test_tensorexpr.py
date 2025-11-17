@@ -1216,7 +1216,7 @@ class TestTensorExprFuser(BaseTestClass):
         @torch.jit.script
         def test(x: torch.Tensor, y: torch.Tensor, z: int) -> torch.Tensor:
             b = y
-            for i in range(z):
+            for i in range(0, z):
                 a = x + y
                 b = b + y
             return b

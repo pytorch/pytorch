@@ -686,7 +686,7 @@ class TestFindIndependentSubsetGreedy(TestCase):
             unsatisfied += 1
             assert unsatisfied <= len(desc)  # cycle or bad input?
             name, v = desc.popleft()
-            args = tuple(lookup.get(n) for n in v)
+            args = tuple(lookup.get(n, None) for n in v)
             if None in args:
                 desc.append((name, v))
                 continue

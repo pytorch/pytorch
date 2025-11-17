@@ -35,7 +35,7 @@ class WaitCounterBackendFactoryIf {
 };
 
 C10_API void registerWaitCounterBackend(
-    std::unique_ptr<WaitCounterBackendFactoryIf> /*factory*/);
+    std::unique_ptr<WaitCounterBackendFactoryIf>);
 
 C10_API std::vector<std::shared_ptr<WaitCounterBackendFactoryIf>>
 getRegisteredWaitCounterBackends();

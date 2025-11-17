@@ -60,7 +60,7 @@ class LKJCholesky(Distribution):
     Journal of Multivariate Analysis. 100. 10.1016/j.jmva.2009.04.008
     """
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     arg_constraints = {"concentration": constraints.positive}
     support = constraints.corr_cholesky
 

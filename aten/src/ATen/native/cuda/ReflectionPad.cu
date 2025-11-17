@@ -92,16 +92,6 @@ inline thrust::pair<int64_t, int64_t>  get_index_mapping2d(
     output_offset + output_y * output_dim_x + output_x);
 }
 
-__device__ __forceinline__ int64_t reflect_index(int64_t x, int64_t len) {
-  const int64_t two = (len - 1) * 2;
-  if (two <= 0) {
-    return 0;
-  }
-  int64_t m = x % two;
-  if (m < 0) m += two;
-  return (m < len) ? m : (two - m);
-}
-
 template<typename scalar_t>
 __global__ void reflection_pad1d_out_kernel(
     const scalar_t * input, scalar_t * output,
@@ -113,28 +103,6 @@ __global__ void reflection_pad1d_out_kernel(
   if (output_x < output_w) {
     auto index_pair = get_index_mapping1d(input_w, output_w, output_x, pad_l);
     output[index_pair.second] = input[index_pair.first];
-  }
-}
-
-template <typename scalar_t>
-__global__ void reflection_pad1d_flat(
-    const scalar_t* __restrict__ input,
-    scalar_t* __restrict__ output,
-    int64_t input_w, int64_t pad_l, int64_t pad_r,
-    int64_t out_w, int64_t plane_count) {
-
-  const int64_t bx = blockDim.x;
-  const int64_t tx = threadIdx.x;
-
-  const int64_t total = plane_count * out_w;
-  const int64_t grid_stride = static_cast<int64_t>(bx) * gridDim.x;
-  int64_t linear = static_cast<int64_t>(blockIdx.x) * bx + tx;
-
-  for (; linear < total; linear += grid_stride) {
-    const int64_t plane = linear / out_w;
-    const int64_t x = linear - plane * out_w;
-    const int64_t j = reflect_index(x - pad_l, input_w);
-    output[plane * out_w + x] = input[plane * input_w + j];
   }
 }
 
@@ -742,44 +710,25 @@ TORCH_IMPL_FUNC(reflection_pad1d_out_cuda)
   int64_t input_w = input_.size(dim_w);
   int64_t output_w = input_w + pad_l + pad_r;
 
+  dim3 block_size(output_w > 256 ? 256 : output_w);
+  dim3 grid_size((int)::ceil(output_w / 256.0), nplane, nbatch);
 
   Tensor input = input_.contiguous();
 
-  const int block_x = static_cast<int>(std::min<int64_t>(256, std::max<int64_t>(1, output_w)));
-  const cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-  const int max_x = prop->maxGridSize[0];
-  const int max_y = prop->maxGridSize[1];
-  const int max_z = prop->maxGridSize[2];
-
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, input.scalar_type(), "reflection_pad1d_out", [&] {
-    auto stream = at::cuda::getCurrentCUDAStream();
-
-    const int64_t gx = at::ceil_div(output_w, static_cast<int64_t>(block_x));
-
-    const bool fits3d = (nplane <= max_y) && (nbatch <= max_z) && (gx <= max_x);
-
-    if (fits3d) {
-      dim3 block(block_x, 1, 1);
-      dim3 grid(gx, static_cast<unsigned>(nplane), static_cast<unsigned>(nbatch));
-      reflection_pad1d_out_kernel<scalar_t><<<grid, block, 0, stream>>>(
-          input.const_data_ptr<scalar_t>(),
-          output.mutable_data_ptr<scalar_t>(),
-          input_w, pad_l, pad_r);
-    } else {
-      dim3 block(block_x, 1, 1);
-      const int64_t plane_count = nplane * nbatch;
-      const int64_t total_blocks = at::ceil_div(plane_count * output_w, static_cast<int64_t>(block_x));
-      const int grid_x = static_cast<int>(std::min<int64_t>(max_x, std::max<int64_t>(1, total_blocks)));
-      dim3 grid(grid_x, 1, 1);
-
-      reflection_pad1d_flat<scalar_t><<<grid, block, 0, stream>>>(
-          input.const_data_ptr<scalar_t>(),
-          output.mutable_data_ptr<scalar_t>(),
-          input_w, pad_l, pad_r, output_w, plane_count);
-    }
-
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-  });
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+      kHalf, kBFloat16, input.scalar_type(), "reflection_pad1d_out_template", [&] {
+        reflection_pad1d_out_kernel<<<
+            grid_size,
+            block_size,
+            0,
+            at::cuda::getCurrentCUDAStream()>>>(
+            input.const_data_ptr<scalar_t>(),
+            output.mutable_data_ptr<scalar_t>(),
+            input_w,
+            pad_l,
+            pad_r);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      });
 }
 
 TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cuda)(const Tensor& grad_output_,

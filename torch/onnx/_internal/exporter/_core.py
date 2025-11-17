@@ -132,10 +132,10 @@ class TorchTensor(ir.Tensor):
         # view the tensor as that dtype so that it is convertible to NumPy,
         # and then view it back to the proper dtype (using ml_dtypes obtained by
         # calling dtype.numpy()).
-        # pyrefly: ignore [missing-attribute]
+        # pyrefly: ignore  # missing-attribute
         if self.dtype == ir.DataType.BFLOAT16:
             return (
-                # pyrefly: ignore [missing-attribute]
+                # pyrefly: ignore  # missing-attribute
                 self.raw.view(torch.uint16).numpy(force=True).view(self.dtype.numpy())
             )
         if self.dtype in {
@@ -144,11 +144,11 @@ class TorchTensor(ir.Tensor):
             ir.DataType.FLOAT8E5M2,
             ir.DataType.FLOAT8E5M2FNUZ,
         }:
-            # pyrefly: ignore [missing-attribute]
+            # pyrefly: ignore  # missing-attribute
             return self.raw.view(torch.uint8).numpy(force=True).view(self.dtype.numpy())
         if self.dtype == ir.DataType.FLOAT4E2M1:
             return _type_casting.unpack_float4x2_as_uint8(self.raw).view(
-                # pyrefly: ignore [missing-attribute]
+                # pyrefly: ignore  # missing-attribute
                 self.dtype.numpy()
             )
 
@@ -160,8 +160,10 @@ class TorchTensor(ir.Tensor):
             return self.numpy()
         return self.numpy().__array__(dtype)
 
-    def _get_cbytes(self):
-        """Get a ctypes byte array pointing to the tensor data."""
+    def tobytes(self) -> bytes:
+        # Implement tobytes to support native PyTorch types so we can use types like bloat16
+        # Reading from memory directly is also more efficient because
+        # it avoids copying to a NumPy array
         import torch._subclasses.fake_tensor
 
         with torch._subclasses.fake_tensor.unset_fake_temporarily():
@@ -170,27 +172,17 @@ class TorchTensor(ir.Tensor):
 
         if isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor):
             raise TypeError(
-                # pyrefly: ignore [missing-attribute]
+                # pyrefly: ignore  # missing-attribute
                 f"Cannot take content out from the FakeTensor ('{self.name}'). Please replace the tensor "
                 "with a tensor backed by real data using ONNXProgram.apply_weights() "
                 "or save the model without initializers by setting include_initializers=False."
             )
 
-        # Return the tensor to ensure it is not garbage collected while the ctypes array is in use
-        return tensor, (
-            ctypes.c_ubyte * tensor.element_size() * tensor.numel()
-        ).from_address(tensor.data_ptr())
-
-    def tobytes(self) -> bytes:
-        # Implement tobytes to support native PyTorch types so we can use types like bloat16
-        # Reading from memory directly is also more efficient because
-        # it avoids copying to a NumPy array
-        _, data = self._get_cbytes()
-        return bytes(data)
-
-    def tofile(self, file) -> None:
-        _, data = self._get_cbytes()
-        return file.write(data)
+        return bytes(
+            (ctypes.c_ubyte * tensor.element_size() * tensor.numel()).from_address(
+                tensor.data_ptr()
+            )
+        )
 
 
 # https://github.com/pytorch/pytorch/blob/ee6cb6daa173896f8ea1876266a19775aaa4f610/torch/export/graph_signature.py#L56C1-L62C19
@@ -251,7 +243,7 @@ def _set_shape_type(
             if isinstance(dim, int):
                 dims.append(dim)
             else:
-                # pyrefly: ignore [bad-argument-type]
+                # pyrefly: ignore  # bad-argument-type
                 dims.append(str(dim.node))
 
         # If the dtype is set already (e.g. by the onnx_symbolic ops),
@@ -988,22 +980,16 @@ def _prepare_exported_program_for_export(
 ) -> torch.export.ExportedProgram:
     """Decompose and apply pre-export transformations to the exported program."""
 
-    with (
-        # Support the dynamism with 0/1 input dim
-        torch.fx.experimental._config.patch(backed_size_oblivious=True),  # type: ignore[attr-defined]
-    ):
-        # Decompose the graph given the implemented torch ops in ONNX
-        exported_program = _fx_passes.decompose_with_registry(
-            exported_program, registry
-        )
+    # Decompose the graph given the implemented torch ops in ONNX
+    exported_program = _fx_passes.decompose_with_registry(exported_program, registry)
 
-        graph_module = exported_program.graph_module
-        # Include explicit type promotion nodes
-        _fx_passes.insert_type_promotion_nodes(graph_module)
-        graph_module = _fx_passes.remove_assertion_nodes(graph_module)
-        # Reassign the graph module to save some runtime.
-        exported_program._graph_module = graph_module
-        return exported_program
+    graph_module = exported_program.graph_module
+    # Include explicit type promotion nodes
+    _fx_passes.insert_type_promotion_nodes(graph_module)
+    graph_module = _fx_passes.remove_assertion_nodes(graph_module)
+    # Reassign the graph module to save some runtime.
+    exported_program._graph_module = graph_module
+    return exported_program
 
 
 def _get_scope_name(scoped_name: str) -> tuple[str, str]:
@@ -1232,7 +1218,7 @@ def _exported_program_to_onnx_program(
     # so we need to get them from the name_* apis.
     for name, torch_tensor in itertools.chain(
         exported_program.named_parameters(),
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         exported_program.named_buffers(),
         exported_program.constants.items(),
     ):
@@ -1255,6 +1241,9 @@ def _exported_program_to_onnx_program(
 
     # TODO: Decide if we should keep mutated buffers as inputs/outputs
 
+    # TODO(justinchuby): Remove the hack
+    _ir_passes.add_torchlib_common_imports(model)
+
     # Collect and add opset imports to the model
     _ir_passes.add_opset_imports(model)
 
@@ -1265,7 +1254,6 @@ def _verbose_printer(verbose: bool | None) -> Callable[..., None]:
     """Prints messages based on `verbose`."""
     if verbose is False:
         return lambda *_, **__: None
-    # pyrefly: ignore [not-iterable]
     return lambda *args, **kwargs: print("[torch.onnx]", *args, **kwargs)
 
 
