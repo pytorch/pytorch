@@ -3336,7 +3336,7 @@ class TestMPS(TestCaseMPS):
         # Regression test for https://github.com/pytorch/pytorch/issues/167924
         counts = torch.tensor([0, 1, 0], device="mps")
         data = torch.arange(2, device="mps")
-        out_mps =  data.repeat_interleave(counts[1:3], dim=0)
+        out_mps = data.repeat_interleave(counts[1:], dim=0)
         out_cpu = data.cpu().repeat_interleave(counts.cpu()[1:], dim=0)
         self.assertEqual(out_mps.cpu(), out_cpu)
 
