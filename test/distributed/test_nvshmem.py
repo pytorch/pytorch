@@ -1438,11 +1438,61 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
         # topk expert indices are global expert indices.
         topk_node_idx, topk_expert_idx = router(inp)
 
+        allocator = symm_mem.get_mempool_allocator(self.device)
+        mempool = torch.cuda.MemPool(allocator)
+
         # Dedup dispatch
         from torch.nn.moe._dispatch import dedup_dispatch
 
         # A ratio between worst-case output buffer size versus input seqlen
         out_len_ratio = n_experts
+
+        def run():
+            return dedup_dispatch(
+                inp,
+                topk_node_idx,
+                topk_expert_idx,
+                n_experts,
+                self.inter_group,
+                self.intra_group,
+                out_len_ratio,
+                align,
+            )
+
+        # Compare results of two runs to make sure MemPool is not messing up tensors
+        with torch.cuda.use_mem_pool(mempool):
+            rv1 = run()
+            rv2 = run()
+
+        # Compare two returned tuples
+        def compare_results(rv1, rv2):
+            self.assertEqual(rv1[0], rv2[0])
+            self.assertEqual(rv1[1], rv2[1])
+            self.assertEqual(rv1[2], rv2[2])
+            intra_plan1 = rv1[3]
+            intra_plan2 = rv2[3]
+            self.assertEqual(intra_plan1.in_splits, intra_plan2.in_splits)
+            self.assertEqual(intra_plan1.out_splits, intra_plan2.out_splits)
+            self.assertEqual(intra_plan1.dst_offsets, intra_plan2.dst_offsets)
+            # We don't compare `src_offsets` because it's not used filled by the kernel, neither is it used later
+
+        compare_results(rv1, rv2)
+
+        # Copy out to compare with 3rd run below
+        import copy
+
+        copied_tuple = copy.deepcopy(rv1)
+
+        # Delete tensors to make room for reuse in 3rd run
+        del rv1, rv2
+
+        # A third run to (i) reuse tensors and (ii) compare results against golden test below
+        with torch.cuda.use_mem_pool(mempool):
+            rv3 = run()
+
+        compare_results(copied_tuple, rv3)
+
+        # Unpack
         (
             intra_out,
             topk_indices_intranode_out,
@@ -1450,17 +1500,7 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
             intra_plan,
             _inter_out,
             _recv_intra_inp_splits,
-        ) = dedup_dispatch(
-            inp,
-            topk_node_idx,
-            topk_expert_idx,
-            n_experts,
-            self.inter_group,
-            self.intra_group,
-            out_len_ratio,
-            align,
-        )
-        torch.cuda.synchronize(self.device)
+        ) = rv3
 
         # Numeric Verfication
         def verify():
