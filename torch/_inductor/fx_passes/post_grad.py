@@ -1615,11 +1615,15 @@ def relu_addmm_fusion(match: Match, mat1, mat2, *, inp, beta, alpha):
     ),
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[1],
-    extra_check=lambda *args, **kwargs: is_valid_addmm_activation_fusion(*args, activation="gelu", **kwargs),
+    extra_check=lambda *args, **kwargs: is_valid_addmm_activation_fusion(
+        *args, activation="gelu", **kwargs
+    ),
 )
 def gelu_addmm_fusion(match: Match, mat1, mat2, *, inp, beta, alpha, approximate):
     def replacement(inp, mat1, mat2, beta, alpha, approximate):
-        return aten._addmm_activation(inp, mat1, mat2, beta=beta, alpha=alpha, use_gelu=True)
+        return aten._addmm_activation(
+            inp, mat1, mat2, beta=beta, alpha=alpha, use_gelu=True
+        )
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(replacement, [inp, mat1, mat2, beta, alpha, approximate])

@@ -1232,7 +1232,9 @@ class TestPatternMatcher(TestCase):
         fusable_activations = (
             lambda *args, **kwargs: torch.nn.functional.relu(*args, **kwargs),
             # NOTE: only approximate="tanh" is fusable
-            lambda *args, **kwargs: torch.nn.functional.gelu(*args, approximate="tanh", **kwargs),
+            lambda *args, **kwargs: torch.nn.functional.gelu(
+                *args, approximate="tanh", **kwargs
+            ),
         )
         for activation in fusable_activations:
             for beta, alpha in itertools.product(betas, alphas):
@@ -1257,7 +1259,9 @@ class TestPatternMatcher(TestCase):
         # Cases Activation(Addmm) -> Activation(Addmm)
         non_fusable_activations = (
             torch.nn.functional.gelu,  # implies approximate="none"
-            lambda *args, **kwargs: torch.nn.functional.gelu(*args, approximate="none", **kwargs),
+            lambda *args, **kwargs: torch.nn.functional.gelu(
+                *args, approximate="none", **kwargs
+            ),
         )
         for activation in non_fusable_activations:
             for beta, alpha in itertools.product(betas, alphas):
