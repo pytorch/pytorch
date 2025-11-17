@@ -389,6 +389,13 @@ test_lazy_tensor_meta_reference_disabled() {
   export -n TORCH_DISABLE_FUNCTIONALIZATION_META_REFERENCE
 }
 
+test_dynamo_core() {
+  time python test/run_test.py \
+    --include-dynamo-core-tests \
+    --verbose \
+    --upload-artifacts-while-running
+  assert_git_not_dirty
+}
 
 test_dynamo_wrapped_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
@@ -1321,7 +1328,7 @@ test_libtorch_agnostic_targetting() {
     # Run tests with PyTorch 2.9 runtime (2.10 tests will be skipped automatically)
     echo ""
     echo "Running tests with PyTorch 2.9 runtime (using wheel built on PyTorch 2.10)..."
-    if time python test/cpp_extensions/test_libtorch_agnostic_versioned.py -v; then
+    if time python test/cpp_extensions/test_libtorch_agnostic.py -v; then
         echo ""
         echo "  Wheel built with current torch and TORCH_TARGET_VERSION 2_9_0 works with PyTorch 2.9 runtime!"
     else
@@ -1910,6 +1917,8 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   test_inductor_shard "${SHARD_NUMBER}"
 elif [[ "${TEST_CONFIG}" == *einops* ]]; then
   test_einops
+elif [[ "${TEST_CONFIG}" == *dynamo_core* ]]; then
+  test_dynamo_core
 elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   install_torchvision
   test_dynamo_wrapped_shard "${SHARD_NUMBER}"
