@@ -663,20 +663,20 @@ auto handle_torch_function_no_python_arg_parser(
     std::stringstream ss;
     ss << "Multiple dispatch failed for '";
     if (module_name && func_name) {
-      ss << module_name << "." << func_name;
+      ss << module_name << '.' << func_name;
     } else {
       py::handle fn = torch_api_function;
-      ss << py::str(fn.attr("__module__")) << "."
+      ss << py::str(fn.attr("__module__")) << '.'
          << py::str(fn.attr("__name__"));
     }
     ss << "'; all " << torch_function_name_str
        << " handlers returned NotImplemented:\n\n";
     if (mode_obj) {
-      ss << "  - mode object " << py::repr(mode_obj) << "\n";
+      ss << "  - mode object " << py::repr(mode_obj) << '\n';
     }
     for (auto& arg : overloaded_args) {
       ss << "  - tensor subclass " << py::repr(get_type_of_overloaded_arg(arg))
-         << "\n";
+         << '\n';
     }
     ss << "\nFor more information, try re-running with TORCH_LOGS=not_implemented";
     const std::string& tmp = ss.str();
@@ -1542,7 +1542,7 @@ std::string FunctionSignature::toString() const {
   // optionals, etc.
   std::ostringstream ss;
   bool keyword_already = false;
-  ss << "(";
+  ss << '(';
   int i = 0;
   for (auto& param : params) {
     if (i != 0) {
@@ -1552,13 +1552,13 @@ std::string FunctionSignature::toString() const {
       ss << "*, ";
       keyword_already = true;
     }
-    ss << param.type_name() << " " << param.name;
+    ss << param.type_name() << ' ' << param.name;
     if (param.optional) {
       ss << " = " << param.default_value;
     }
     i++;
   }
-  ss << ")";
+  ss << ')';
   return ss.str();
 }
 
