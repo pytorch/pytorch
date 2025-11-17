@@ -751,10 +751,10 @@ if __name__ == "__main__":
 
     def _read(name):
         if name == "-":
-            data = pickle.load(sys.stdin.buffer)
+            f = sys.stdin.buffer
         else:
-            with open(name, "rb") as f:
-                data = pickle.load(f)
+            f = open(name, "rb")
+        data = pickle.load(f)
         if isinstance(data, list):  # segments only...
             data = {"segments": data, "traces": []}
         return data

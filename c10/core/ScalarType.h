@@ -26,9 +26,6 @@
 
 #include <torch/headeronly/core/ScalarType.h>
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
-
 namespace c10 {
 
 // See [dtype Macros note] in torch/headeronly/core/ScalarType.h
@@ -206,12 +203,6 @@ inline bool isSignedType(ScalarType t) {
       break;
       // Do not add default here, but rather define behavior of every new entry
       // here.  `-Wswitch-enum` would raise a warning in those cases.
-      // TODO: get PyTorch to adopt exhaustive switches by default with a way to
-      // opt specific switches to being non-exhaustive.
-      // Exhaustive:
-      // `-Wswitch-enum`, `-Wswitch-default`, `-Wno-covered-switch-default`
-      // Non-Exhaustive:
-      // `-Wno-switch-enum`, `-Wswitch-default`, `-Wcovered-switch-default`
   }
   TORCH_CHECK(false, "Unknown ScalarType ", t);
 #undef CASE_ISSIGNED
@@ -297,5 +288,3 @@ C10_API std::pair<std::string, std::string> getDtypeNames(
 C10_API const std::unordered_map<std::string, ScalarType>& getStringToDtypeMap();
 
 } // namespace c10
-
-C10_DIAGNOSTIC_POP()

@@ -420,15 +420,13 @@ class _ExportPackage:
                     path = Path(base_directory) / f"{name}_input_{i}.pt"
                     torch.save(t, path)
 
-        # Detect if ROCm is being used
-        is_hip = torch.version.hip is not None
-        cmake_file_str = _get_make_file(package_name, model_names, use_cuda, is_hip)
+        cmake_file_str = _get_make_file(package_name, model_names, use_cuda)
 
         with open(Path(base_directory) / "CMakeLists.txt", "w") as file:
             file.write(cmake_file_str)
 
         main_file_str = _get_main_cpp_file(
-            package_name, model_names, use_cuda, example_inputs_map, is_hip
+            package_name, model_names, use_cuda, example_inputs_map
         )
         with open(Path(base_directory) / "main.cpp", "w") as file:
             file.write(main_file_str)

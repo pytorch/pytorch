@@ -2,7 +2,7 @@
 import warnings
 from collections import namedtuple
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Optional
 
 import torch
 from torch.sparse._semi_structured_conversions import (
@@ -63,11 +63,11 @@ class SparseSemiStructuredTensor(torch.Tensor):
     BACKEND: str
     SPARSE_DISPATCH: dict[Callable, Callable]
 
-    packed: torch.Tensor | None
-    meta: torch.Tensor | None
-    packed_t: torch.Tensor | None
-    meta_t: torch.Tensor | None
-    compressed_swizzled_bitmask: torch.Tensor | None
+    packed: Optional[torch.Tensor]
+    meta: Optional[torch.Tensor]
+    packed_t: Optional[torch.Tensor]
+    meta_t: Optional[torch.Tensor]
+    compressed_swizzled_bitmask: Optional[torch.Tensor]
     fuse_transpose_cusparselt: bool
     alg_id_cusparselt: int
 
@@ -77,11 +77,11 @@ class SparseSemiStructuredTensor(torch.Tensor):
     def __new__(  # noqa: PYI034
         cls,
         shape: torch.Size,
-        packed: torch.Tensor | None,
-        meta: torch.Tensor | None,
-        packed_t: torch.Tensor | None,
-        meta_t: torch.Tensor | None,
-        compressed_swizzled_bitmask: torch.Tensor | None,
+        packed: Optional[torch.Tensor],
+        meta: Optional[torch.Tensor],
+        packed_t: Optional[torch.Tensor],
+        meta_t: Optional[torch.Tensor],
+        compressed_swizzled_bitmask: Optional[torch.Tensor],
         fuse_transpose_cusparselt: bool = False,
         alg_id_cusparselt: int = 0,
         requires_grad: bool = False,
@@ -312,7 +312,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         self,
         B: torch.Tensor,
         *,
-        bias: torch.Tensor | None = None,
+        bias: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
         raise NotImplementedError
@@ -514,7 +514,7 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
         )
 
     def _mm(
-        self, B: torch.Tensor, *, bias: torch.Tensor | None = None, **kwargs
+        self, B: torch.Tensor, *, bias: Optional[torch.Tensor] = None, **kwargs
     ) -> torch.Tensor:
         if isinstance(B, SparseSemiStructuredTensor):
             raise ValueError(
@@ -643,7 +643,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
         )
 
     def _mm(
-        self, B: torch.Tensor, *, bias: torch.Tensor | None = None, **kwargs
+        self, B: torch.Tensor, *, bias: Optional[torch.Tensor] = None, **kwargs
     ) -> torch.Tensor:
         if isinstance(B, SparseSemiStructuredTensor):
             raise ValueError(

@@ -324,7 +324,7 @@ class basic_string_view final {
 
   constexpr size_type find(basic_string_view v, size_type pos = 0)
       const noexcept {
-    if (v.empty()) {
+    if (v.size() == 0) {
       return pos <= size() ? pos : npos;
     }
 
@@ -355,7 +355,7 @@ class basic_string_view final {
   constexpr size_type rfind(basic_string_view v, size_type pos = npos)
       const noexcept {
     // Write it iteratively. This is faster.
-    if (v.empty()) {
+    if (v.size() == 0) {
       return pos <= size() ? pos : size();
     }
 
@@ -509,7 +509,7 @@ class basic_string_view final {
   constexpr size_type find_last_if_(size_type pos, Condition&& condition)
       const noexcept {
     // Write it iteratively. This is faster.
-    if (!empty()) {
+    if (size() > 0) {
       pos = std::min(size() - 1, pos);
       do {
         if (condition(at_(pos))) {

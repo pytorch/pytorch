@@ -1,4 +1,5 @@
 from collections.abc import Iterable
+from typing import Optional
 
 import torch
 
@@ -54,7 +55,7 @@ def vector_to_parameters(vec: torch.Tensor, parameters: Iterable[torch.Tensor]) 
         pointer += num_param
 
 
-def _check_param_device(param: torch.Tensor, old_param_device: int | None) -> int:
+def _check_param_device(param: torch.Tensor, old_param_device: Optional[int]) -> int:
     r"""Check if the parameters are located on the same device.
 
     Currently, the conversion between model parameters and single vector form is not supported

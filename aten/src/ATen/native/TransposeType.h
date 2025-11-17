@@ -1,8 +1,6 @@
 #pragma once
 #include <c10/util/Exception.h>
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
-
 namespace at::native {
 
 // Used as an interface between the different BLAS-like libraries
@@ -23,5 +21,3 @@ static inline char to_blas(TransposeType trans) {
 }
 
 }  // namespace at::native
-
-C10_DIAGNOSTIC_POP()

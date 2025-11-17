@@ -100,9 +100,8 @@ class TailLogTest(unittest.TestCase):
         }
 
         dst = os.path.join(self.test_dir, "tailed_stdout.log")
-        dst_file = open(dst, "w", buffering=1)
         tail = TailLog(
-            name="writer", log_files=log_files, dst=dst_file, interval_sec=interval_sec
+            name="writer", log_files=log_files, dst=dst, interval_sec=interval_sec
         ).start()
         # sleep here is intentional to ensure that the log tail
         # can gracefully handle and wait for non-existent log files
@@ -118,11 +117,10 @@ class TailLogTest(unittest.TestCase):
         wait(futs, return_when=ALL_COMPLETED)
         self.assertFalse(tail.stopped())
         tail.stop()
-        dst_file.close()
 
         actual: dict[int, set[int]] = {}
-        with open(dst) as read_dst_file:
-            for line in read_dst_file:
+        with open(dst) as dst_file:
+            for line in dst_file:
                 header, num = line.split(":")
                 nums = actual.setdefault(header, set())
                 nums.add(int(num))
@@ -258,4 +256,4 @@ class TailLogTest(unittest.TestCase):
         tail = TailLog("writer", log_files={0: self.test_dir}, dst=sys.stdout).start()
         tail.stop()
 
-        mock_logger.exception.assert_called_once()
+        mock_logger.error.assert_called_once()

@@ -130,7 +130,7 @@ def main():
     options = parser.parse_args()
 
     optimizer_parameter_map = {}
-    for optimizer in OPTIMIZERS:
+    for optimizer in OPTIMIZERS.keys():
         sys.stderr.write(f"Evaluating {optimizer} ...\n")
         optimizer_parameter_map[optimizer] = run(
             optimizer, options.iterations, options.sample_every

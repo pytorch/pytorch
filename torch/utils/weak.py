@@ -28,7 +28,7 @@ class _IterationGuard:
     # exits.
     # This technique should be relatively thread-safe (since sets are).
 
-    def __init__(self, weakcontainer) -> None:
+    def __init__(self, weakcontainer):
         # Don't create cycles
         self.weakcontainer = ref(weakcontainer)
 
@@ -75,7 +75,7 @@ class _IterationGuard:
 class WeakIdRef(weakref.ref):
     __slots__ = ["_id"]
 
-    def __init__(self, key, callback=None) -> None:
+    def __init__(self, key, callback=None):
         # Unlike stock weakref, which preserves hash semantics of the
         # original object but lazily defers hash calls until the first
         # time the user attempts to hash the weakref, we can eagerly
@@ -119,7 +119,7 @@ class WeakIdRef(weakref.ref):
 class _WeakHashRef(weakref.ref):
     __slots__ = ["_id"]
 
-    def __init__(self, key, callback=None) -> None:
+    def __init__(self, key, callback=None):
         # Unlike stock weakref, which preserves hash semantics of the
         # original object but lazily defers hash calls until the first
         # time the user attempts to hash the weakref, we can eagerly
@@ -151,12 +151,12 @@ class _WeakHashRef(weakref.ref):
 
 # This is directly adapted from cpython/Lib/weakref.py
 class WeakIdKeyDictionary(MutableMapping):
-    def __init__(self, dict=None, ref_type=WeakIdRef) -> None:  # CHANGED
+    def __init__(self, dict=None, ref_type=WeakIdRef):  # CHANGED
         self.data = {}
 
         self.ref_type = ref_type  # CHANGED
 
-        def remove(k, selfref=ref(self)) -> None:
+        def remove(k, selfref=ref(self)):
             self = selfref()
             if self is not None:
                 if self._iterating:
@@ -175,7 +175,7 @@ class WeakIdKeyDictionary(MutableMapping):
         if dict is not None:
             self.update(dict)
 
-    def _commit_removals(self) -> None:
+    def _commit_removals(self):
         # NOTE: We don't need to call this method before mutating the dict,
         # because a dead weakref never compares equal to a live weakref,
         # even if they happened to refer to equal objects.
@@ -193,29 +193,29 @@ class WeakIdKeyDictionary(MutableMapping):
             except KeyError:
                 pass
 
-    def _scrub_removals(self) -> None:
+    def _scrub_removals(self):
         d = self.data
         self._pending_removals = [k for k in self._pending_removals if k in d]
         self._dirty_len = False
 
-    def __delitem__(self, key) -> None:
+    def __delitem__(self, key):
         self._dirty_len = True
         del self.data[self.ref_type(key)]  # CHANGED
 
     def __getitem__(self, key):
         return self.data[self.ref_type(key)]  # CHANGED
 
-    def __len__(self) -> int:
+    def __len__(self):
         if self._dirty_len and self._pending_removals:
             # self._pending_removals may still contain keys which were
             # explicitly removed, we have to scrub them (see issue #21173).
             self._scrub_removals()
         return len(self.data) - len(self._pending_removals)
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return f"<{self.__class__.__name__} at {id(self):#x}>"
 
-    def __setitem__(self, key, value) -> None:
+    def __setitem__(self, key, value):
         self.data[self.ref_type(key, self._remove)] = value  # CHANGED
 
     def copy(self):
@@ -243,7 +243,7 @@ class WeakIdKeyDictionary(MutableMapping):
     def get(self, key, default=None):
         return self.data.get(self.ref_type(key), default)  # CHANGED
 
-    def __contains__(self, key) -> bool:
+    def __contains__(self, key):
         try:
             wr = self.ref_type(key)  # CHANGED
         except TypeError:
@@ -303,7 +303,7 @@ class WeakIdKeyDictionary(MutableMapping):
             self.ref_type(key, self._remove), default
         )  # CHANGED
 
-    def update(self, dict=None, **kwargs) -> None:  # type: ignore[override]
+    def update(self, dict=None, **kwargs):  # type: ignore[override]
         d = self.data
         if dict is not None:
             if not hasattr(dict, "items"):
@@ -351,7 +351,7 @@ class TensorWeakRef:
 
     ref: WeakRef[Tensor]
 
-    def __init__(self, tensor: Tensor) -> None:
+    def __init__(self, tensor: Tensor):
         if not isinstance(tensor, Tensor):
             raise AssertionError(f"expected torch.Tensor, got {type(tensor)}.")
         self.ref = weakref.ref(tensor)

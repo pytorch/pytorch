@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/native/CompositeRandomAccessorCommon.h>
-#include <thrust/swap.h>
 #include <thrust/tuple.h>
 
 namespace at { namespace native {

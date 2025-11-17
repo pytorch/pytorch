@@ -1,6 +1,5 @@
 import collections
-from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import torch
 import torch.utils._pytree as pytree

@@ -22,9 +22,6 @@
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
 #include <ATen/native/cuda/GroupMM.h>
-#ifdef USE_ROCM
-#include <ATen/native/hip/ck_group_gemm.h>
-#endif
 #include <ATen/ceil_div.h>
 
 #ifdef USE_FBGEMM_GENAI
@@ -669,26 +666,12 @@ std::optional<c10::ScalarType> out_dtype) {
   // _scaled_mm_allowed_device is used here within _grouped_mm_cuda which seems incorrect since scale is not used.
   // the _grouped_mm_fallback should be safe for any ROCm GPU since it's just calling typical mm/bmm
   bool use_fast_path = false;
-  // On non CK system(w/ ROCm), make sure use_fast_path is false
-#if defined(USE_ROCM_CK_GEMM)
-  if (at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"})) {
-    use_fast_path = true;
-  }
-#endif //USE_ROCM_CK_GEMM
 #endif
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
   if (use_fast_path) {
     // fast path, no d2h sync needed
-#ifndef USE_ROCM
     at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);
-#else
-#if defined(USE_ROCM_CK_GEMM)
-    at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
-#else
-    TORCH_WARN("ROCm: Group Gemm through CK not selected.");
-#endif //USE_ROCM_CK_GEMM
-#endif
   } else {
     _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
   }

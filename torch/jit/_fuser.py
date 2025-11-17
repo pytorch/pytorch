@@ -83,7 +83,7 @@ def fuser(name):
 last_executed_optimized_graph = torch._C._last_executed_optimized_graph
 
 
-def _get_differentiable_graph_node(node, diff_node) -> None:
+def _get_differentiable_graph_node(node, diff_node):
     if node.kind() == "prim::DifferentiableGraph":
         diff_node.append(node)
     else:

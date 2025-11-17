@@ -1,11 +1,10 @@
 # Delete old branches
 import os
 import re
-from collections.abc import Callable
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from github_utils import gh_fetch_json_dict, gh_graphql
 from gitutils import GitRepo

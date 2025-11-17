@@ -161,7 +161,6 @@ class TestCheckpointProcessConfig(TestCase):
 
 class TestCheckpointProcess(TestCase):
     def setUp(self) -> None:
-        super().setUp()
         """Set up common test fixtures."""
         self.rank_info = RankInfo(
             global_world_size=1,

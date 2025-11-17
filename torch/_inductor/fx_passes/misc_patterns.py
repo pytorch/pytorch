@@ -113,7 +113,7 @@ class NumpyCompatNormalization:
                 signatures = () if signatures is None else signatures
                 replaceable_kwargs = OrderedSet()
                 for sig in signatures:
-                    for param_name in sig.parameters:
+                    for param_name in sig.parameters.keys():
                         if param_name in self.numpy_compat:
                             replaceable_kwargs.update(self.numpy_compat[param_name])
 

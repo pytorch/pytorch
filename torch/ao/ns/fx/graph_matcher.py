@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import collections
 import enum
-from typing import Any
+from typing import Any, Optional
 
 import torch
 from torch.ao.quantization import FakeQuantizeBase, ObserverBase
@@ -312,7 +312,7 @@ def _get_name_for_subgraph(
     return proposed_name
 
 
-def _get_node_target_type(node: Node, gm: GraphModule) -> NSNodeTargetType | None:
+def _get_node_target_type(node: Node, gm: GraphModule) -> Optional[NSNodeTargetType]:
     if node.op in ("call_function", "call_method"):
         return node.target
     elif node.op == "call_module":
@@ -326,8 +326,8 @@ def _get_node_target_type(node: Node, gm: GraphModule) -> NSNodeTargetType | Non
 def get_matching_subgraph_pairs(
     gm_a: GraphModule,
     gm_b: GraphModule,
-    base_name_to_sets_of_related_ops: dict[str, set[NSNodeTargetType]] | None = None,
-    unmatchable_types_map: dict[str, set[NSNodeTargetType]] | None = None,
+    base_name_to_sets_of_related_ops: Optional[dict[str, set[NSNodeTargetType]]] = None,
+    unmatchable_types_map: Optional[dict[str, set[NSNodeTargetType]]] = None,
 ) -> dict[str, tuple[NSSubgraph, NSSubgraph]]:
     """
     Matches matchable subgraphs of graph_a to graph_b.

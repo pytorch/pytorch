@@ -73,26 +73,7 @@ from tools.testing.test_selections import (
     ShardedTest,
     THRESHOLD,
 )
-
-
-try:
-    from tools.testing.upload_artifacts import (
-        parse_xml_and_upload_json,
-        upload_adhoc_failure_json,
-        zip_and_upload_artifacts,
-    )
-except ImportError:
-    # some imports in those files might fail, e.g., boto3 not installed. These
-    # functions are only needed under specific circumstances (CI) so we can
-    # define dummy functions here.
-    def parse_xml_and_upload_json():
-        pass
-
-    def zip_and_upload_artifacts(*args, **kwargs):
-        pass
-
-    def upload_adhoc_failure_json(*args, **kwargs):
-        pass
+from tools.testing.upload_artifacts import zip_and_upload_artifacts
 
 
 # Make sure to remove REPO_ROOT after import is done
@@ -267,7 +248,13 @@ S390X_BLOCKLIST = [
 
 XPU_BLOCKLIST = [
     "test_autograd",
+    "profiler/test_cpp_thread",
+    "profiler/test_execution_trace",
     "profiler/test_memory_profiler",
+    "profiler/test_profiler",
+    "profiler/test_profiler_tree",
+    "profiler/test_record_function",
+    "profiler/test_torch_tidy",
     "test_openreg",
 ]
 
@@ -640,7 +627,6 @@ def run_test(
                 output,
                 options.continue_through_error,
                 test_file,
-                options,
             )
         else:
             command.extend([f"--sc={stepcurrent_key}", "--print-items"])
@@ -727,7 +713,6 @@ def run_test_retries(
     output,
     continue_through_error,
     test_file,
-    options,
 ):
     # Run the test with -x to stop at first failure.  Rerun the test by itself.
     # If it succeeds, move on to the rest of the tests in a new process.  If it
@@ -745,16 +730,6 @@ def run_test_retries(
         print(s, file=output, flush=True)
 
     num_failures = defaultdict(int)
-
-    def read_pytest_cache(key: str) -> Any:
-        cache_file = (
-            REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key / key
-        )
-        try:
-            with open(cache_file) as f:
-                return f.read()
-        except FileNotFoundError:
-            return None
 
     print_items = ["--print-items"]
     sc_command = f"--sc={stepcurrent_key}"
@@ -776,11 +751,12 @@ def run_test_retries(
 
         # Read what just failed/ran
         try:
-            current_failure = read_pytest_cache("lastrun")
-            if current_failure is None:
-                raise FileNotFoundError
-            if current_failure == "null":
-                current_failure = f"'{test_file}'"
+            with open(
+                REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
+            ) as f:
+                current_failure = f.read()
+                if current_failure == "null":
+                    current_failure = f"'{test_file}'"
         except FileNotFoundError:
             print_to_file(
                 "No stepcurrent file found. Either pytest didn't get to run (e.g. import error)"
@@ -803,13 +779,6 @@ def run_test_retries(
             # This is for log classifier so it can prioritize consistently
             # failing tests instead of reruns. [1:-1] to remove quotes
             print_to_file(f"FAILED CONSISTENTLY: {current_failure[1:-1]}")
-            if (
-                read_pytest_cache("made_failing_xml") == "false"
-                and IS_CI
-                and options.upload_artifacts_while_running
-            ):
-                upload_adhoc_failure_json(test_file, current_failure[1:-1])
-
             if not continue_through_error:
                 print_to_file("Stopping at first consistent failure")
                 break
@@ -824,8 +793,8 @@ def run_test_retries(
             print_to_file("Retrying single test...")
         print_items = []  # do not continue printing them, massive waste of space
 
-    consistent_failures = [x[1:-1] for x in num_failures if num_failures[x] >= 3]
-    flaky_failures = [x[1:-1] for x in num_failures if 0 < num_failures[x] < 3]
+    consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
+    flaky_failures = [x[1:-1] for x in num_failures.keys() if 0 < num_failures[x] < 3]
     if len(flaky_failures) > 0:
         print_to_file(
             "The following tests failed and then succeeded when run in a new process"
@@ -1703,7 +1672,7 @@ def get_selected_tests(options) -> list[str]:
             ]
         )
 
-    if sys.version_info[:2] < (3, 13) or sys.version_info[:2] >= (3, 14):
+    if sys.version_info[:2] < (3, 13):
         # Skip tests for older Python versions as they may use syntax or features
         # not supported in those versions
         options.exclude.extend(
@@ -1857,14 +1826,9 @@ def run_test_module(
         test_name = test.name
 
         # Printing the date here can help diagnose which tests are slow
-        start = time.perf_counter()
-        print_to_stderr(f"Running {str(test)} ... [{datetime.now()}][{start}]")
+        print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
         handler = CUSTOM_HANDLERS.get(test_name, run_test)
         return_code = handler(test, test_directory, options)
-        end = time.perf_counter()
-        print_to_stderr(
-            f"Finished {str(test)} ... [{datetime.now()}][{end}], took {(end - start) / 60:.2f}min"
-        )
         assert isinstance(return_code, int) and not isinstance(return_code, bool), (
             f"While running {str(test)} got non integer return code {return_code}"
         )
@@ -1918,7 +1882,6 @@ def run_tests(
     def handle_complete(failure: Optional[TestFailure]):
         failed = failure is not None
         if IS_CI and options.upload_artifacts_while_running:
-            parse_xml_and_upload_json()
             zip_and_upload_artifacts(failed)
         if not failed:
             return False

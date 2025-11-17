@@ -93,9 +93,9 @@ def update_names_with_list(tensor, names, inplace):
 
 def update_names_with_mapping(tensor, rename_map, inplace):
     dim_map = build_dim_map(tensor)
-    for old_dim in rename_map:
+    for old_dim in rename_map.keys():
         new_dim = rename_map[old_dim]
-        if old_dim in dim_map:
+        if old_dim in dim_map.keys():
             dim_map[old_dim] = new_dim
         else:
             raise RuntimeError(

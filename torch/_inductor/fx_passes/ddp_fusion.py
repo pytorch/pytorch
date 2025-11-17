@@ -4,10 +4,10 @@ import inspect
 import logging
 import math
 import operator
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 import torch
 import torch.fx as fx

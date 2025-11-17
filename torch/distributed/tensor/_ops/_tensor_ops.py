@@ -36,7 +36,6 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.fx.experimental.symbolic_shapes import statically_known_true
 
 
 aten = torch.ops.aten
@@ -85,7 +84,6 @@ register_op_strategy(
         aten.clone.default,
         aten.contiguous.default,
         aten.detach.default,
-        aten.alias.default,
         aten.fill_.Scalar,
         aten.view.dtype,
         aten.zero_.default,
@@ -382,7 +380,7 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
         raise AssertionError(f"Expected int, got {type(dim)}")
     if start is None:
         start = 0
-    if end is None or statically_known_true(end > input_shape[dim]):
+    if end is None or end > input_shape[dim]:
         end = input_shape[dim]
     if not isinstance(start, IntLike):
         raise AssertionError(f"Expected IntLike, got {type(start)}")
@@ -396,20 +394,13 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
     start = normalize_dim(start, input_shape[dim])  # type: ignore[arg-type]
     end = normalize_dim(end, input_shape[dim])  # type: ignore[arg-type]
 
-    statically_redundant_slice = (
-        statically_known_true(start == 0)
-        and statically_known_true(end == input_shape[dim])
-        and statically_known_true(step == 1)
-    )
+    redundant_slice = start == 0 and end == input_shape[dim] and step == 1
 
     slice_strategy = OpStrategy([])
 
     for arg_strategy in input_strategy.strategies:
         arg_spec = arg_strategy.output_spec
-        if (
-            not is_tensor_dim_sharded(arg_spec, dim=slice_dim)
-            or statically_redundant_slice
-        ):
+        if not is_tensor_dim_sharded(arg_spec, dim=slice_dim) or redundant_slice:
             # only add the strategy if the slice dim is not sharded
             out_spec = DTensorSpec(mesh, arg_spec.placements)
             slice_strategy.strategies.append(

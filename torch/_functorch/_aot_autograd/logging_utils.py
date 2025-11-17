@@ -125,7 +125,9 @@ def setup_stacktrace_preservation_hooks(roots: list):
         node.register_prehook(get_prehook(forward_node_stack, node._sequence_nr()))
 
         special_stack = forward_node_stack.copy()
-        special_stack.append(fx_traceback.GRADIENT_ACC_SPECIAL_STACK)
+        special_stack.append(
+            "Gradient addition node due to multiple use of tensor around:"
+        )
         node.register_hook(get_posthook(special_stack, node._sequence_nr()))
 
 

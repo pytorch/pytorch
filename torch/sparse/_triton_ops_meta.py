@@ -217,8 +217,9 @@ def update(op, device_name, version, key, value):
 def dump():
     """Store the current runtime db state to the module file."""
     current_file = inspect.getfile(dump)
-    with open(current_file) as f:
-        current_content = f.read()
+    f = open(current_file)
+    current_content = f.read()
+    f.close()
     begin_data_str = "# BEGIN GENERATED DATA\n"
     begin_data_index = current_content.find(begin_data_str)
     end_data_index = current_content.find("    # END GENERATED DATA\n")
@@ -249,8 +250,9 @@ def dump():
         data_part.append("    },")
     new_content = part1 + "\n".join(data_part) + "\n" + part2
     if current_content != new_content:
-        with open(current_file, "w") as f:
-            f.write(new_content)
+        f = open(current_file, "w")
+        f.write(new_content)
+        f.close()
 
 
 def minimize(

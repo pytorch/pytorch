@@ -8,11 +8,11 @@ from torch._C import (
 
 
 class Warning:
-    def __init__(self, setter, getter) -> None:
+    def __init__(self, setter, getter):
         self.setter = setter
         self.getter = getter
 
-    def set_enabled(self, value) -> None:
+    def set_enabled(self, value):
         self.setter(value)
 
     def get_enabled(self):

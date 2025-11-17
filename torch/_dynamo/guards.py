@@ -2120,6 +2120,7 @@ class GuardBuilder(GuardBuilderBase):
             if not are_inline_hooks(hooks):
                 return None
 
+            pack_hook, unpack_hook = hooks
             return tuple(map(id, hooks))
 
         guard_hooks_ids = hooks_ids_fn(get_hooks())
@@ -2141,10 +2142,9 @@ class GuardBuilder(GuardBuilderBase):
         original_metadata = deepcopy(self.get(guard.name).__tensor_flatten__()[1])
         if hasattr(value, "__metadata_guard__"):
             verify_guard_fn_signature(value)
-            cls = type(value)
 
             def metadata_checker(x: Any) -> bool:
-                return cls.__metadata_guard__(
+                return value.__metadata_guard__(
                     original_metadata, x.__tensor_flatten__()[1]
                 )
 
@@ -2156,19 +2156,6 @@ class GuardBuilder(GuardBuilderBase):
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
         self.get_guard_manager(guard).add_lambda_guard(
             metadata_checker, get_verbose_code_parts(global_name, guard)
-        )
-
-    def DTENSOR_SPEC_MATCH(self, guard: Guard) -> None:
-        # Copied from DTensor __metadata_guard__
-        # TODO - Consider moving this to C++ if stable
-        value = deepcopy(self.get(guard.name))
-
-        def guard_fn(x: Any) -> bool:
-            return x._check_equals(value, skip_shapes=True)
-
-        code = f"__dtensor_spec_{id(guard_fn)}"
-        self.get_guard_manager(guard).add_lambda_guard(
-            guard_fn, get_verbose_code_parts(code, guard)
         )
 
     def EQUALS_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
@@ -2297,7 +2284,7 @@ class GuardBuilder(GuardBuilderBase):
                 # If guard_nn_modules is true, we will guard on the right set of guards
                 self._guard_on_attribute(guard, "training", GuardBuilder.CONSTANT_MATCH)  # type: ignore[arg-type]
         else:
-            exc.unimplemented(
+            exc.unimplemented_v2(
                 gb_type="Attempted to guard on uninitialized nn.Module",
                 context="",
                 explanation="Attempted to setup an NN_MODULE guard on uninitialized "

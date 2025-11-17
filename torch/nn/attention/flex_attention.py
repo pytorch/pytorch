@@ -10,7 +10,7 @@ import operator
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, NamedTuple, Union
+from typing import Any, NamedTuple, Optional, Union
 
 import torch
 from torch import Tensor
@@ -244,8 +244,8 @@ class AuxOutput(NamedTuple):
     Fields will be None if not requested, or contain the tensor if requested.
     """
 
-    lse: Tensor | None = None
-    max_scores: Tensor | None = None
+    lse: Optional[Tensor] = None
+    max_scores: Optional[Tensor] = None
 
 
 class _ModificationType(Enum):
@@ -293,9 +293,9 @@ def _get_mod_type(fn: Callable) -> _ModificationType:
 # Need to define it here so that Dynamo doesn't skip it
 def _vmap_for_bhqkv(
     fn: Callable,
-    prefix: tuple[int | None, ...],
-    suffix: tuple[int | None, ...] = (),
-    out_dims: Union[int, list[int | None]] = 0,
+    prefix: tuple[Optional[int], ...],
+    suffix: tuple[Optional[int], ...] = (),
+    out_dims: Union[int, list[Optional[int]]] = 0,
     group_dim: bool = False,
 ):
     """Used to vmap both score_mods and mask_mods over 4-dimensional/5-dimension inputs.
@@ -510,12 +510,12 @@ class BlockMask:
     seq_lengths: tuple[int, int]
     kv_num_blocks: Tensor
     kv_indices: Tensor
-    full_kv_num_blocks: Tensor | None
-    full_kv_indices: Tensor | None
-    q_num_blocks: Tensor | None
-    q_indices: Tensor | None
-    full_q_num_blocks: Tensor | None
-    full_q_indices: Tensor | None
+    full_kv_num_blocks: Optional[Tensor]
+    full_kv_indices: Optional[Tensor]
+    q_num_blocks: Optional[Tensor]
+    q_indices: Optional[Tensor]
+    full_q_num_blocks: Optional[Tensor]
+    full_q_indices: Optional[Tensor]
     BLOCK_SIZE: tuple[int, int]
     mask_mod: _mask_mod_signature
 
@@ -542,15 +542,15 @@ class BlockMask:
         seq_lengths: tuple[int, int],
         kv_num_blocks: Tensor,
         kv_indices: Tensor,
-        full_kv_num_blocks: Tensor | None,
-        full_kv_indices: Tensor | None,
-        q_num_blocks: Tensor | None,
-        q_indices: Tensor | None,
-        full_q_num_blocks: Tensor | None,
-        full_q_indices: Tensor | None,
+        full_kv_num_blocks: Optional[Tensor],
+        full_kv_indices: Optional[Tensor],
+        q_num_blocks: Optional[Tensor],
+        q_indices: Optional[Tensor],
+        full_q_num_blocks: Optional[Tensor],
+        full_q_indices: Optional[Tensor],
         BLOCK_SIZE: tuple[int, int],
         mask_mod: _mask_mod_signature,
-    ) -> None:
+    ):
         if kv_indices.dim() < 2:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
         assert kv_num_blocks is not None, "kv_num_blocks must be provided"
@@ -579,11 +579,11 @@ class BlockMask:
         cls,
         kv_num_blocks: Tensor,
         kv_indices: Tensor,
-        full_kv_num_blocks: Tensor | None = None,
-        full_kv_indices: Tensor | None = None,
+        full_kv_num_blocks: Optional[Tensor] = None,
+        full_kv_indices: Optional[Tensor] = None,
         BLOCK_SIZE: Union[int, tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
-        mask_mod: _mask_mod_signature | None = None,
-        seq_lengths: tuple[int, int] | None = None,
+        mask_mod: Optional[_mask_mod_signature] = None,
+        seq_lengths: Optional[tuple[int, int]] = None,
         compute_q_blocks: bool = True,
     ):
         """
@@ -682,7 +682,7 @@ class BlockMask:
         *batch_dims, _, _ = self.kv_indices.shape
         return tuple(batch_dims) + self.seq_lengths
 
-    def __str__(self) -> str:
+    def __str__(self):
         s = f"BlockMask(shape={self.shape}, sparsity={self.sparsity():.2f}%, \n"
         mask_str = self.to_string().strip()
         s += mask_str
@@ -760,8 +760,8 @@ class BlockMask:
             compute_q_blocks=self.q_indices is not None,
         )
 
-    def __repr__(self) -> str:
-        def shape_or_none(x: torch.Tensor | None):
+    def __repr__(self):
+        def shape_or_none(x: Optional[torch.Tensor]):
             return x.shape if x is not None else None
 
         return (
@@ -864,7 +864,7 @@ class BlockMask:
 
             vis = ", ".join(reversed(descriptors)) + "\n"
 
-            def summarize_section(section) -> str:
+            def summarize_section(section):
                 percentage = section.float().mean().item()
                 if percentage == 1:
                     return "█"
@@ -973,7 +973,7 @@ def _convert_mask_to_block_mask(
     Q_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
     KV_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
     separate_full_blocks: bool = False,
-) -> tuple[Tensor, Tensor | None]:
+) -> tuple[Tensor, Optional[Tensor]]:
     assert mask.dtype == torch.bool
     mask = _broadcast_to_dim(mask, 4)
 
@@ -1057,8 +1057,8 @@ def _convert_block_mask_to_mask(
 
 
 def _create_sparse_block_from_block_mask(
-    block_mask: tuple[Tensor, Tensor | None],
-    mask_mod: Callable | None,
+    block_mask: tuple[Tensor, Optional[Tensor]],
+    mask_mod: Optional[Callable],
     seq_lengths: tuple[int, int],
     Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
@@ -1067,7 +1067,9 @@ def _create_sparse_block_from_block_mask(
 
     partial_bm = _dense_to_ordered(partial_blocks)
     if full_blocks is not None:
-        full_bm: tuple[Tensor | None, Tensor | None] = _dense_to_ordered(full_blocks)
+        full_bm: tuple[Optional[Tensor], Optional[Tensor]] = _dense_to_ordered(
+            full_blocks
+        )
     else:
         full_bm = (None, None)
 
@@ -1084,11 +1086,11 @@ def _create_sparse_block_from_block_mask(
 
 def create_mask(
     mod_fn: Union[_score_mod_signature, _mask_mod_signature],
-    B: int | None,
-    H: int | None,
+    B: Optional[int],
+    H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
-    device: DeviceLikeType | None = None,
+    device: Optional[DeviceLikeType] = None,
 ) -> Tensor:
     r"""This function creates a mask tensor from a mod_fn function.
 
@@ -1135,11 +1137,11 @@ def create_mask(
 
 def create_block_mask(
     mask_mod: _mask_mod_signature,
-    B: int | None,
-    H: int | None,
+    B: Optional[int],
+    H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
-    device: DeviceLikeType | None = None,
+    device: Optional[DeviceLikeType] = None,
     BLOCK_SIZE: Union[int, tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
     _compile=False,
 ) -> BlockMask:
@@ -1238,7 +1240,7 @@ def _apply_kernel_options(
     value: Tensor,
     return_lse: bool,
     kernel_options,
-    return_aux: AuxRequest | None = None,
+    return_aux: Optional[AuxRequest] = None,
 ):
     kernel_options = {} if kernel_options is None else dict(kernel_options)
 
@@ -1287,7 +1289,7 @@ def _apply_kernel_options(
     return kernel_options
 
 
-def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor) -> None:
+def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
     if query.size(-1) != key.size(-1):
         raise ValueError(
             f"Expect query and key/value to have the same embedding dimension "
@@ -1295,7 +1297,7 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor) -> None:
         )
 
 
-def _validate_device(query: Tensor, key: Tensor, value: Tensor) -> None:
+def _validate_device(query: Tensor, key: Tensor, value: Tensor):
     """TODO: Remove once non cuda/cpu devices support is added
     We only need to check query since we have already that q,k,v are on the same device
     """
@@ -1370,14 +1372,14 @@ def flex_attention(
     query: Tensor,
     key: Tensor,
     value: Tensor,
-    score_mod: _score_mod_signature | None = None,
-    block_mask: BlockMask | None = None,
-    scale: float | None = None,
+    score_mod: Optional[_score_mod_signature] = None,
+    block_mask: Optional[BlockMask] = None,
+    scale: Optional[float] = None,
     enable_gqa: bool = False,
     return_lse: bool = False,
-    kernel_options: FlexKernelOptions | None = None,
+    kernel_options: Optional[FlexKernelOptions] = None,
     *,
-    return_aux: AuxRequest | None = None,
+    return_aux: Optional[AuxRequest] = None,
 ) -> Union[Tensor, tuple[Tensor, Tensor], tuple[Tensor, AuxOutput]]:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
@@ -1550,7 +1552,7 @@ def flex_attention(
         lse,
         max_scores,
         *,
-        return_aux: AuxRequest | None,
+        return_aux: Optional[AuxRequest],
         return_lse: bool,
     ):
         """Normalize stats and build return value (aux-aware, legacy-compatible)."""

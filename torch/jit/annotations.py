@@ -68,7 +68,7 @@ from torch._ops import OpOverloadPacket
 
 
 class Module:
-    def __init__(self, name, members) -> None:
+    def __init__(self, name, members):
         self.name = name
         self.members = members
 
@@ -95,7 +95,7 @@ class EvalEnv:
         "Await": _Await,
     }
 
-    def __init__(self, rcb) -> None:
+    def __init__(self, rcb):
         self.rcb = rcb
         if torch.distributed.rpc.is_available():
             # pyrefly: ignore [unsupported-operation]
@@ -178,7 +178,7 @@ def get_param_names(fn, n_args):
         return [str(i) for i in range(n_args)]
 
 
-def check_fn(fn, loc) -> None:
+def check_fn(fn, loc):
     # Make sure the function definition is not a class instantiation
     try:
         source = dedent("".join(get_source_lines_and_file(fn)[0]))
@@ -368,7 +368,7 @@ def get_enum_value_type(e: type[enum.Enum], loc):
     return res
 
 
-def is_tensor(ann) -> bool:
+def is_tensor(ann):
     if issubclass(ann, torch.Tensor):
         return True
 
@@ -397,7 +397,7 @@ def is_tensor(ann) -> bool:
     return False
 
 
-def _fake_rcb(inp) -> None:
+def _fake_rcb(inp):
     return None
 
 

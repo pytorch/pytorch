@@ -20,14 +20,8 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     skipIf,
-    skipXPUIf,
 )
-from torch.testing._internal.common_utils import (
-    parametrize,
-    run_tests,
-    TEST_WITH_SLOW,
-    TestCase,
-)
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
 
@@ -274,10 +268,7 @@ class TestUtils(TestCase):
 
 
 class TestAnalysis(TestCase):
-    @skipIf(
-        (not torch.xpu.is_available()) and (not SM80OrLater),
-        "Requires XPU or CUDA SM80",
-    )
+    @skipIf(not SM80OrLater, "Requires SM80")
     def test_noop(self):
         with (
             patch("sys.stdout", new_callable=StringIO) as mock_stdout,
@@ -286,10 +277,7 @@ class TestAnalysis(TestCase):
             main()
             self.assertEqual(mock_stdout.getvalue(), "")
 
-    @skipIf(
-        (not torch.xpu.is_available()) and (not SM80OrLater),
-        "Requires XPU or CUDA SM80",
-    )
+    @skipIf(not SM80OrLater, "Requires SM80")
     @dtypes(torch.float, torch.double, torch.float16)
     def test_diff(self, device, dtype):
         """
@@ -340,11 +328,7 @@ class TestAnalysis(TestCase):
         expected_flops = [4096000, 4096000, 223552896, 223552896, 0, 0, 0]
         verify_flops(self, expected_flops, out_profile)
 
-    @skipIf(
-        (not torch.xpu.is_available()) and (not SM80OrLater),
-        "Requires XPU or CUDA SM80",
-    )
-    @skipXPUIf(TEST_WITH_SLOW, "Skip because test too slow on XPU")
+    @skipIf(not SM80OrLater, "Requires SM80")
     @dtypes(torch.float, torch.double, torch.float16)
     @parametrize(
         "maxat",
@@ -398,11 +382,7 @@ class TestAnalysis(TestCase):
 
         verify_triton(comp_omni)
 
-    @skipIf(
-        (not torch.xpu.is_available()) and (not SM80OrLater),
-        "Requires XPU or CUDA SM80",
-    )
-    @skipXPUIf(TEST_WITH_SLOW, "Skip because test too slow on XPU")
+    @skipIf(not SM80OrLater, "Requires SM80")
     @dtypes(torch.float, torch.float16)
     @parametrize(
         "maxat",
@@ -487,7 +467,6 @@ class TestAnalysis(TestCase):
                         "aten::cudnn_convolution",
                         "aten::convolution",
                         "aten::_convolution",
-                        "aten::convolution_overrideable",
                     )
                 )
                 or "conv" in name
@@ -514,11 +493,7 @@ class TestAnalysis(TestCase):
         self.assertTrue(seen_baddbmm)
         self.assertTrue(seen_conv)
 
-    @skipIf(
-        (not torch.xpu.is_available()) and (not SM80OrLater),
-        "Requires XPU or CUDA SM80",
-    )
-    @skipXPUIf(TEST_WITH_SLOW, "Skip because test too slow on XPU")
+    @skipIf(not SM80OrLater, "Requires SM80")
     @dtypes(torch.float, torch.float16)
     @parametrize(
         "maxat",
@@ -568,10 +543,7 @@ class TestAnalysis(TestCase):
             if event["name"] == "triton_poi_fused_add_randn_sin_0":
                 event["args"]["kernel_num_gb"] = 0.002097168
 
-    @skipIf(
-        (not torch.xpu.is_available()) and (not SM80OrLater),
-        "Requires XPU or CUDA SM80",
-    )
+    @skipIf(not SM80OrLater, "Requires SM80")
     @dtypes(torch.float, torch.float16)
     def test_combine_profiles(self, device, dtype):
         """
@@ -647,10 +619,7 @@ class TestAnalysis(TestCase):
 
         # Verify device properties are present
         self.assertIn("deviceProperties", combined_profile)
-        # XPU currently does not have the deviceProperties like CUDA.
-        # See https://github.com/intel/torch-xpu-ops/issues/2247
-        if torch.cuda.is_available():
-            self.assertGreater(len(combined_profile["deviceProperties"]), 0)
+        self.assertGreater(len(combined_profile["deviceProperties"]), 0)
 
         # Verify some trace events from each original profile are present
         combined_event_names = {
@@ -668,7 +637,7 @@ class TestAnalysis(TestCase):
         self.assertTrue(profile3_event_names.intersection(combined_event_names))
 
 
-instantiate_device_type_tests(TestAnalysis, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestAnalysis, globals())
 
 if __name__ == "__main__":
     run_tests()

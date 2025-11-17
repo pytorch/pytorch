@@ -5,8 +5,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any, Callable, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -290,7 +289,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             "max_compute_pre_fetch",
             "custom_runtime_estimation",
             "insert_overlap_deps",
-            "collective_estimator",
         )
         for key in config_keys:
             if (val := getattr(dist_opts, key)) is not None:
@@ -1517,29 +1515,17 @@ def should_prefer_unfused_addmm(match):
 
 
 @register_graph_pattern(
-    CallFunction(
-        aten.addmm,
-        KeywordArg("inp"),
-        Arg(),
-        Arg(),
-        beta=KeywordArg("beta"),
-        alpha=KeywordArg("alpha"),
-    ),
+    CallFunction(aten.addmm, KeywordArg("inp"), Arg(), Arg()),
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[2],
     extra_check=should_prefer_unfused_addmm,
 )
-def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
-    def repl(inp, x1, x2, alpha, beta):
-        mm_result = x1 @ x2
-        if alpha != 1:
-            mm_result = alpha * mm_result
-        if beta != 1:
-            inp = beta * inp
-        return inp + mm_result
+def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
+    def repl(inp, x1, x2):
+        return x1 @ x2 + inp
 
     # pyrefly: ignore [bad-argument-type]
-    match.replace_by_example(repl, [inp, mat1, mat2, alpha, beta])
+    match.replace_by_example(repl, [inp, mat1, mat2])
 
 
 def is_valid_addmm_fusion(match):

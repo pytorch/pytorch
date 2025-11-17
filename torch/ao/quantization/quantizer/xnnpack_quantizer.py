@@ -4,7 +4,7 @@ from __future__ import annotations
 import copy
 import functools
 import typing_extensions
-from typing import Any, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch._dynamo as torchdynamo
@@ -284,12 +284,12 @@ class XNNPACKQuantizer(Quantizer):
 
     def __init__(self) -> None:
         super().__init__()
-        self.global_config: QuantizationConfig | None = None
+        self.global_config: Optional[QuantizationConfig] = None
         self.operator_type_config: dict[
-            torch._ops.OpOverloadPacket, QuantizationConfig | None
+            torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
         ] = {}
-        self.module_type_config: dict[Callable, QuantizationConfig | None] = {}
-        self.module_name_config: dict[str, QuantizationConfig | None] = {}
+        self.module_type_config: dict[Callable, Optional[QuantizationConfig]] = {}
+        self.module_name_config: dict[str, Optional[QuantizationConfig]] = {}
 
     @classmethod
     def get_supported_quantization_configs(cls) -> list[QuantizationConfig]:
@@ -300,7 +300,7 @@ class XNNPACKQuantizer(Quantizer):
 
     @classmethod
     def get_supported_operator_for_quantization_config(
-        cls, quantization_config: QuantizationConfig | None
+        cls, quantization_config: Optional[QuantizationConfig]
     ) -> list[OperatorPatternType]:
         if quantization_config is None:
             all_ops = []
@@ -341,14 +341,15 @@ class XNNPACKQuantizer(Quantizer):
         return self
 
     def set_module_name(
-        self, module_name: str, quantization_config: QuantizationConfig | None
+        self, module_name: str, quantization_config: Optional[QuantizationConfig]
     ):
         """Set quantization_config for a submodule with name: `module_name`, for example:
         quantizer.set_module_name("blocks.sub"), it will quantize all supported operator/operator
         patterns in the submodule with this module name with the given `quantization_config`
         """
-        if quantization_config is None:
-            raise AssertionError("quantization_config == None is not supported yet")
+        assert quantization_config is not None, (
+            " quantization_config == None is not supported yet"
+        )
         self.module_name_config[module_name] = quantization_config
         return self
 
@@ -371,8 +372,8 @@ class XNNPACKQuantizer(Quantizer):
     def _annotate_all_static_patterns(
         self,
         model: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig | None,
-        filter_fn: Callable[[Node], bool] | None = None,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> torch.fx.GraphModule:
         # TODO: implement the support for None to be canceling out previous annotations
         if quantization_config is None:
@@ -388,8 +389,8 @@ class XNNPACKQuantizer(Quantizer):
     def _annotate_all_dynamic_patterns(
         self,
         model: torch.fx.GraphModule,
-        quantization_config: QuantizationConfig | None,
-        filter_fn: Callable[[Node], bool] | None = None,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> torch.fx.GraphModule:
         # TODO: implement the support for None to be canceling out previous annotations
         if quantization_config is None:

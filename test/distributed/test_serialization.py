@@ -25,7 +25,6 @@ class MyClass:
 
 class TestSerialization(TestCase):
     def setUp(self) -> None:
-        super().setUp()
         # disable debug asserts
         self._old_debug = os.environ.get(DEBUG_ENV)
         os.environ[DEBUG_ENV] = "0"

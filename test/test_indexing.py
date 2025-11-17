@@ -17,14 +17,12 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCPU,
     dtypesIfCUDA,
     dtypesIfMPS,
-    dtypesIfXPU,
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyCPU,
+    onlyCUDA,
     onlyNativeDeviceTypes,
-    onlyOn,
     skipXLA,
-    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import (
     all_mps_types_and,
@@ -40,7 +38,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_CUDA,
     TEST_MPS,
-    TEST_XPU,
     TestCase,
     xfailIfTorchDynamo,
 )
@@ -601,8 +598,8 @@ class TestIndexing(TestCase):
 
         # test invalid index fails
         reference = torch.empty(10, dtype=dtype, device=device)
-        # can't test cuda/xpu because it is a device assert
-        if reference.device.type == "cpu":
+        # can't test cuda because it is a device assert
+        if not reference.is_cuda:
             for err_idx in (10, -11):
                 with self.assertRaisesRegex(IndexError, r"out of"):
                     reference[err_idx]
@@ -747,7 +744,7 @@ class TestIndexing(TestCase):
             assert_get_eq(reference, indexer)
             assert_set_eq(reference, indexer, 212)
             assert_set_eq(reference, indexer, get_set_tensor(reference, indexer))
-            if torch.accelerator.is_available():
+            if torch.cuda.is_available():
                 assert_backward_eq(reference, indexer)
 
         reference = torch.arange(0.0, 1296, dtype=dtype, device=device).view(3, 9, 8, 6)
@@ -1012,7 +1009,7 @@ class TestIndexing(TestCase):
     @skipIfTorchDynamo(
         "This test causes SIGKILL when running with dynamo, https://github.com/pytorch/pytorch/issues/88472"
     )
-    @serialTest(TEST_CUDA or TEST_XPU or TEST_MPS)
+    @serialTest(TEST_CUDA or TEST_MPS)
     def test_index_put_accumulate_large_tensor(self, device):
         # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
         N = (1 << 31) + 5
@@ -1089,7 +1086,7 @@ class TestIndexing(TestCase):
         out_cpu = t.index_put_(indices, values2d, accumulate=True)
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyCUDA
     def test_index_put_large_indices(self, device):
         def generate_indices(num_indices: int, index_range: int):
             indices = []
@@ -1141,7 +1138,7 @@ class TestIndexing(TestCase):
             a_dev.index_put_(indices=[b_dev], values=c_dev, accumulate=True)
             self.assertEqual(a_dev.cpu(), a)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyCUDA
     def test_index_put_accumulate_non_contiguous(self, device):
         t = torch.zeros((5, 2, 2))
         t_dev = t.to(device)
@@ -1160,7 +1157,7 @@ class TestIndexing(TestCase):
 
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyCUDA
     def test_index_put_deterministic_with_optional_tensors(self, device):
         def func(x, i, v):
             with DeterministicGuard(True):
@@ -1191,7 +1188,7 @@ class TestIndexing(TestCase):
         indices = torch.tensor([1, 4, 3])
         indices_dev = indices.to(device)
         val = torch.randn(4)
-        out_cuda = func1(t_dev, indices_dev, val.to(device))
+        out_cuda = func1(t_dev, indices_dev, val.cuda())
         out_cpu = func1(t, indices, val)
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
@@ -1324,14 +1321,6 @@ class TestIndexing(TestCase):
         torch.float8_e5m2,
         torch.float8_e4m3fn,
     )
-    @dtypesIfXPU(
-        torch.cfloat,
-        torch.cdouble,
-        torch.half,
-        torch.long,
-        torch.bool,
-        torch.bfloat16,
-    )
     @dtypesIfMPS(torch.float, torch.float16, torch.long, torch.bool)
     def test_index_put_src_datatype(self, device, dtype):
         src = torch.ones(3, 2, 4, device=device, dtype=dtype)
@@ -1343,7 +1332,6 @@ class TestIndexing(TestCase):
     @dtypes(torch.float, torch.bfloat16, torch.long, torch.bool)
     @dtypesIfCPU(torch.float, torch.long, torch.bfloat16, torch.bool)
     @dtypesIfCUDA(torch.half, torch.long, torch.bfloat16, torch.bool)
-    @dtypesIfXPU(torch.half, torch.long, torch.bfloat16, torch.bool)
     def test_index_src_datatype(self, device, dtype):
         src = torch.ones(3, 2, 4, device=device, dtype=dtype)
         # test index
@@ -1642,7 +1630,7 @@ class TestIndexing(TestCase):
 
         self.assertRaisesRegex(IndexError, "invalid index", runner)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyCUDA
     def test_invalid_device(self, device):
         idx = torch.tensor([0, 1])
         b = torch.zeros(5, device=device)
@@ -1654,7 +1642,7 @@ class TestIndexing(TestCase):
                 lambda: torch.index_put_(b, (idx,), c, accumulate=accumulate),
             )
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyCUDA
     def test_cpu_indices(self, device):
         idx = torch.tensor([0, 1])
         b = torch.zeros(2, device=device)
@@ -1730,7 +1718,7 @@ class TestIndexing(TestCase):
         with self.assertRaisesRegex(IndexError, "Dimension out of range"):
             torch.take_along_dim(t, indices, dim=7)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyCUDA
     @dtypes(torch.float)
     def test_gather_take_along_dim_cross_device(self, device, dtype):
         shape = (2, 3, 1, 4)
@@ -1760,7 +1748,7 @@ class TestIndexing(TestCase):
         ):
             torch.take_along_dim(t.cpu(), indices, dim=0)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyCUDA
     def test_cuda_broadcast_index_use_deterministic_algorithms(self, device):
         with DeterministicGuard(True):
             idx1 = torch.tensor([0])
@@ -1981,7 +1969,6 @@ class TestIndexing(TestCase):
         return (x, index, src)
 
     @onlyNativeDeviceTypes
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1973")
     @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/161029
     def test_index_copy_deterministic(self, device: torch.device) -> None:
         for dim in range(3):
@@ -2024,7 +2011,6 @@ class TestIndexing(TestCase):
                     self.assertEqual(y_nd, y0, atol=1e-3, rtol=1e-5)
 
     @onlyNativeDeviceTypes
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1973")
     def test_index_put_non_accumulate_deterministic(self, device) -> None:
         with DeterministicGuard(True):
             for i in range(3):
@@ -2062,7 +2048,6 @@ class TestIndexing(TestCase):
     # The test fails for zero-dimensional tensors on XLA
     @onlyNativeDeviceTypes
     @dtypes(*all_types_complex_float8_and(torch.half, torch.bool, torch.bfloat16))
-    @dtypesIfXPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
     def test_index_select(self, device, dtype):
         num_src, num_out = 3, 5
@@ -2376,8 +2361,8 @@ class NumpyTests(TestCase):
     def test_trivial_fancy_out_of_bounds(self, device):
         a = torch.zeros(5, device=device)
         ind = torch.ones(20, dtype=torch.int64, device=device)
-        if a.device.type in ["cuda", "xpu"]:
-            raise unittest.SkipTest("CUDA/XPU asserts instead of raising an exception")
+        if a.is_cuda:
+            raise unittest.SkipTest("CUDA asserts instead of raising an exception")
         ind[-1] = 10
         self.assertRaises(IndexError, a.__getitem__, ind)
         self.assertRaises(IndexError, a.__setitem__, ind, 0)
@@ -2412,9 +2397,9 @@ class NumpyTests(TestCase):
 
 
 instantiate_device_type_tests(
-    TestIndexing, globals(), except_for="meta", allow_mps=True, allow_xpu=True
+    TestIndexing, globals(), except_for="meta", allow_mps=True
 )
-instantiate_device_type_tests(NumpyTests, globals(), except_for="meta", allow_xpu=True)
+instantiate_device_type_tests(NumpyTests, globals(), except_for="meta")
 
 if __name__ == "__main__":
     run_tests()

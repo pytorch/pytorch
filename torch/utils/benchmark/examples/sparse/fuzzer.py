@@ -8,7 +8,7 @@ import sys
 
 import torch.utils.benchmark as benchmark_utils
 
-def main() -> None:
+def main():
     add_fuzzer = benchmark_utils.Fuzzer(
         parameters=[
             [

@@ -3,7 +3,7 @@
 import torch._C
 
 
-def format_time(time_us=None, time_ms=None, time_s=None) -> str:
+def format_time(time_us=None, time_ms=None, time_s=None):
     """Define time formatting."""
     if sum([time_us is not None, time_ms is not None, time_s is not None]) != 1:
         raise AssertionError("Expected only one of time_us, time_ms, time_s is given.")
@@ -27,7 +27,7 @@ def format_time(time_us=None, time_ms=None, time_s=None) -> str:
 
 
 class ExecutionStats:
-    def __init__(self, c_stats, benchmark_config) -> None:
+    def __init__(self, c_stats, benchmark_config):
         self._c_stats = c_stats
         self.benchmark_config = benchmark_config
 
@@ -49,7 +49,7 @@ class ExecutionStats:
         return self.num_iters * (
             self.latency_avg_ms / 1000.0) / self.benchmark_config.num_calling_threads
 
-    def __str__(self) -> str:
+    def __str__(self):
         return '\n'.join([
             "Average latency per example: " + format_time(time_ms=self.latency_avg_ms),
             f"Total number of iterations: {self.num_iters}",
@@ -93,7 +93,7 @@ class ThroughputBenchmark:
         >>> print("Number of iterations: {}".format(stats.num_iters))
     """
 
-    def __init__(self, module) -> None:
+    def __init__(self, module):
         if isinstance(module, torch.jit.ScriptModule):
             self._benchmark = torch._C.ThroughputBenchmark(module._c)
         else:
@@ -109,7 +109,7 @@ class ThroughputBenchmark:
         """
         return self._benchmark.run_once(*args, **kwargs)
 
-    def add_input(self, *args, **kwargs) -> None:
+    def add_input(self, *args, **kwargs):
         """
         Store a single input to a module into the benchmark memory and keep it there.
 

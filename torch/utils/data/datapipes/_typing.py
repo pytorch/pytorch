@@ -235,10 +235,10 @@ def issubinstance(data, data_type):
 class _DataPipeType:
     r"""Save type annotation in `param`."""
 
-    def __init__(self, param) -> None:
+    def __init__(self, param):
         self.param = param
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return _type_repr(self.param)
 
     def __eq__(self, other):
@@ -300,7 +300,7 @@ class _DataPipeMeta(GenericMeta):
         )
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
-    def __init__(self, name, bases, namespace, **kwargs) -> None:
+    def __init__(self, name, bases, namespace, **kwargs):
         super().__init__(name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
     # TODO: Fix isinstance bug
@@ -388,7 +388,7 @@ class _IterDataPipeMeta(_DataPipeMeta):
             reset_func = namespace["reset"]
 
             @functools.wraps(reset_func)
-            def conditional_reset(*args, **kwargs) -> None:
+            def conditional_reset(*args, **kwargs):
                 r"""
                 Only execute DataPipe's `reset()` method if `_SnapshotState` is `Iterating` or `NotStarted`.
 
@@ -413,7 +413,7 @@ class _IterDataPipeMeta(_DataPipeMeta):
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
 
-def _dp_init_subclass(sub_cls, *args, **kwargs) -> None:
+def _dp_init_subclass(sub_cls, *args, **kwargs):
     # Add function for datapipe instance to reinforce the type
     sub_cls.reinforce_type = reinforce_type
 

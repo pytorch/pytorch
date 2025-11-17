@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import math
 import operator
-from typing import NoReturn
+from typing import Union
 
 import sympy
 
@@ -10,7 +10,6 @@ from torch.utils._sympy.functions import (
     _keep_float,
     BitwiseFn_bitwise_and,
     BitwiseFn_bitwise_or,
-    BitwiseFn_bitwise_xor,
     FloatPow,
     FloatTrueDiv,
     FloorDiv,
@@ -140,7 +139,7 @@ class ReferenceAnalysis:
         return FloorDiv(a, b)
 
     @staticmethod
-    def truncdiv(a, b) -> NoReturn:
+    def truncdiv(a, b):
         raise NotImplementedError("TODO: truncdiv")
 
     @staticmethod
@@ -208,10 +207,6 @@ class ReferenceAnalysis:
     def bitwise_or(a, b):
         return BitwiseFn_bitwise_or(a, b)
 
-    @staticmethod
-    def bitwise_xor(a, b):
-        return BitwiseFn_bitwise_xor(a, b)
-
 
 # Unlike ReferenceAnalysis, does NOT sympyify, instead, works with plain
 # Python types and is FX traceable.  Inheritance here is purely for code
@@ -262,11 +257,11 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
         raise NotImplementedError(f"to_dtype {dtype} NYI")
 
     @staticmethod
-    def exp(x) -> NoReturn:
+    def exp(x):
         raise AssertionError("exp is not valid shape sympy expr")
 
     @staticmethod
-    def log(x) -> NoReturn:
+    def log(x):
         raise AssertionError("log is not valid shape sympy expr")
 
     @staticmethod
@@ -332,10 +327,6 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     def bitwise_or(a, b):
         return a | b
 
-    @staticmethod
-    def bitwise_xor(a, b):
-        return a ^ b
-
 
 # Like PythonReferenceAnalysis, but some export-unfriendly choices of
 # operators to make things faster
@@ -368,7 +359,7 @@ class TensorReferenceAnalysis:
     # function isn't traced correctly.  Here for completeness.
     @staticmethod
     def constant(c, dtype):
-        d: int | float | bool
+        d: Union[int, float, bool]
         if dtype is torch.int64:
             d = int(c)
         elif dtype is torch.double:
@@ -394,10 +385,6 @@ class TensorReferenceAnalysis:
     @staticmethod
     def bitwise_or(a, b):
         return torch.ops.aten.bitwise_or(a, b)
-
-    @staticmethod
-    def bitwise_xor(a, b):
-        return torch.ops.aten.bitwise_xor(a, b)
 
     @staticmethod
     def eq(a, b):
@@ -461,7 +448,7 @@ class TensorReferenceAnalysis:
         return _to_dtype(x, dtype)
 
     @staticmethod
-    def mod(x, y) -> NoReturn:
+    def mod(x, y):
         # TODO: https://github.com/pytorch/pytorch/pull/133654
         raise NotImplementedError(
             "no C-style modulus operation available from frontend atm"
@@ -497,7 +484,7 @@ class TensorReferenceAnalysis:
         return torch.ops.aten.div.Tensor_mode(a, b, rounding_mode="floor")
 
     @staticmethod
-    def truncdiv(a, b) -> NoReturn:
+    def truncdiv(a, b):
         raise NotImplementedError(
             "no C-style truncdiv operation available from frontend atm"
         )
@@ -588,7 +575,7 @@ class TensorReferenceAnalysis:
         return torch.ops.aten.round.default(a)
 
     @staticmethod
-    def round_decimal(a, b) -> NoReturn:
+    def round_decimal(a, b):
         raise NotImplementedError(
             "round decimal doesn't support Tensor second argument atm"
         )

@@ -110,9 +110,6 @@ class TORCH_API MPSStream {
     return _stream;
   }
 
-  MTLBuffer_t getErrorBuffer();
-  void checkLastError();
-
  private:
   Stream _stream;
   MTLCommandQueue_t _commandQueue = nil;
@@ -124,8 +121,6 @@ class TORCH_API MPSStream {
   dispatch_queue_t _serialQueue = nullptr;
   // CommitAndContinue is enabled by default
   bool _enableCommitAndContinue = true;
-  // Buffer that contains last raised error
-  MTLBuffer_t _errorBuffer = nil;
 
   // use synchronize() to access any of these commit functions outside MPSStream
   void commit();
@@ -160,7 +155,4 @@ class TORCH_API MPSStreamImpl {
   MPSStreamImpl();
 };
 
-#ifdef __OBJC__
-void dispatch_sync_with_rethrow(dispatch_queue_t queue, void (^block)());
-#endif
 } // namespace at::mps

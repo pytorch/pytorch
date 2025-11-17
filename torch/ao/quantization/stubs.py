@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Optional
 
 import torch
 from torch import nn
@@ -17,7 +17,7 @@ class QuantStub(nn.Module):
             if qconfig is not provided, we will get qconfig from parent modules
     """
 
-    def __init__(self, qconfig: QConfig | None = None):
+    def __init__(self, qconfig: Optional[QConfig] = None):
         super().__init__()
         if qconfig:
             self.qconfig = qconfig
@@ -35,7 +35,7 @@ class DeQuantStub(nn.Module):
             if qconfig is not provided, we will get qconfig from parent modules
     """
 
-    def __init__(self, qconfig: Any | None = None):
+    def __init__(self, qconfig: Optional[Any] = None):
         super().__init__()
         if qconfig:
             self.qconfig = qconfig

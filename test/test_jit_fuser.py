@@ -995,5 +995,4 @@ class TestFuser(JitTestCase):
 
 
 if __name__ == '__main__':
-    if sys.version_info < (3, 14):
-        run_tests()
+    run_tests()

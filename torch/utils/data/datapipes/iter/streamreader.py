@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from io import IOBase
+from typing import Optional
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
@@ -30,8 +31,8 @@ class StreamReaderIterDataPipe(IterDataPipe[tuple[str, bytes]]):
     """
 
     def __init__(
-        self, datapipe: IterDataPipe[tuple[str, IOBase]], chunk: int | None = None
-    ) -> None:
+        self, datapipe: IterDataPipe[tuple[str, IOBase]], chunk: Optional[int] = None
+    ):
         self.datapipe = datapipe
         self.chunk = chunk
 

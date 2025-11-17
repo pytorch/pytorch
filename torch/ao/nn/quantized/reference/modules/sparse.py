@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any
+from typing import Any, Optional
 
 import torch.nn as nn
 import torch.nn.functional as F
@@ -23,15 +23,15 @@ class Embedding(nn.Embedding, ReferenceQuantizedModule):
         self,
         num_embeddings: int,
         embedding_dim: int,
-        padding_idx: int | None = None,
-        max_norm: float | None = None,
+        padding_idx: Optional[int] = None,
+        max_norm: Optional[float] = None,
         norm_type: float = 2.0,
         scale_grad_by_freq: bool = False,
         sparse: bool = False,
-        _weight: Tensor | None = None,
+        _weight: Optional[Tensor] = None,
         device=None,
         dtype=None,
-        weight_qparams: dict[str, Any] | None = None,
+        weight_qparams: Optional[dict[str, Any]] = None,
     ) -> None:
         super().__init__(
             num_embeddings,
@@ -92,17 +92,17 @@ class EmbeddingBag(nn.EmbeddingBag, ReferenceQuantizedModule):
         self,
         num_embeddings: int,
         embedding_dim: int,
-        max_norm: float | None = None,
+        max_norm: Optional[float] = None,
         norm_type: float = 2.0,
         scale_grad_by_freq: bool = False,
         mode: str = "mean",
         sparse: bool = False,
-        _weight: Tensor | None = None,
+        _weight: Optional[Tensor] = None,
         include_last_offset: bool = False,
-        padding_idx: int | None = None,
+        padding_idx: Optional[int] = None,
         device=None,
         dtype=None,
-        weight_qparams: dict[str, Any] | None = None,
+        weight_qparams: Optional[dict[str, Any]] = None,
     ) -> None:
         super().__init__(
             num_embeddings,
@@ -126,8 +126,8 @@ class EmbeddingBag(nn.EmbeddingBag, ReferenceQuantizedModule):
     def forward(
         self,
         input: Tensor,
-        offsets: Tensor | None = None,
-        per_sample_weights: Tensor | None = None,
+        offsets: Optional[Tensor] = None,
+        per_sample_weights: Optional[Tensor] = None,
     ) -> Tensor:
         weight_quant_dequant = self.get_weight()
         return F.embedding_bag(

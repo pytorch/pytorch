@@ -78,7 +78,7 @@ class TestModuleContainers(JitTestCase):
                     x = mod(x)
                     values.append(x)
 
-                for key in self.moduledict:
+                for key in self.moduledict.keys():
                     names.append(key)
 
                 return x, names
@@ -306,7 +306,7 @@ class TestModuleContainers(JitTestCase):
 
                 assert "submod" in self.moduledict, "__contains__ fails for ModuleDict"
 
-                for key in self.moduledict:
+                for key in self.moduledict.keys():
                     assert key == "submod", "keys() fails for ModuleDict"
 
                 for item in self.moduledict.items():

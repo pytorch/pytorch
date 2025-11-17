@@ -388,7 +388,6 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
 #ifndef USE_ROCM
   at::Half halpha;
   at::Half hbeta;
-  uint32_t mask = -1;
 #endif
   void * alpha_ptr = &alpha;
   void * beta_ptr = &beta;
@@ -428,7 +427,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
     auto fp16_reduction = at::globalContext().allowFP16ReductionCuBLAS();
     if (fp16_reduction !=
         at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK) {
-      mask =
+      uint32_t mask =
           fp16_reduction ==
                   at::CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK
               ? (CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE |
@@ -445,7 +444,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
     auto bf16_reduction = at::globalContext().allowBF16ReductionCuBLAS();
     if (bf16_reduction !=
         at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK) {
-      mask =
+      uint32_t mask =
           bf16_reduction ==
                   at::CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK
               ? (CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE |
@@ -512,41 +511,17 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
   cublasStatus_t cublasStatus = CUBLAS_STATUS_SUCCESS;
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
-  // on Blackwell+, we fake a n > 1 matmul when querying heuristics
-  // to prevent cuBLASLt from dispatching to a GEMV kernel for batch-invariance
-#ifndef USE_ROCM
-  const bool lie_to_cublaslt = mask == CUBLASLT_REDUCTION_SCHEME_NONE && n == 1 && at::cuda::getCurrentDeviceProperties()->major >= 10;
-#else
-  const bool lie_to_cublaslt = false;
-#endif
-  if (lie_to_cublaslt) {
-     CuBlasLtMatrixLayout FakeBdesc(abType, k, 2, ldb, opb == CUBLAS_OP_T);
-     CuBlasLtMatrixLayout FakeCdesc(cType, m, 2, ldc);
-
-     TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
-        ltHandle,
-        computeDesc.descriptor(),
-        Adesc.descriptor(),
-        FakeBdesc.descriptor(),
-        FakeCdesc.descriptor(),
-        FakeCdesc.descriptor(),
-        preference.descriptor(),
-        1,
-        &heuristicResult,
-        &returnedResult));
-  } else {
-    TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
-        ltHandle,
-        computeDesc.descriptor(),
-        Adesc.descriptor(),
-        Bdesc.descriptor(),
-        Cdesc.descriptor(),
-        Cdesc.descriptor(),
-        preference.descriptor(),
-        1,
-        &heuristicResult,
-        &returnedResult));
-  }
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+      ltHandle,
+      computeDesc.descriptor(),
+      Adesc.descriptor(),
+      Bdesc.descriptor(),
+      Cdesc.descriptor(),
+      Cdesc.descriptor(),
+      preference.descriptor(),
+      1,
+      &heuristicResult,
+      &returnedResult));
   if (returnedResult == 0) {
     cublasStatus = CUBLAS_STATUS_NOT_SUPPORTED;
   }
@@ -1597,7 +1572,7 @@ bool gemm_and_bias(
   }
 
   using opmath_t = at::opmath_type<Dtype>;
-  opmath_t beta_val = bias ? 0 : 1; // bias is added in epilogue unless nullptr
+  opmath_t beta_val = 0; // bias is added in epilogue
 
   cudaDataType_t abType = CUDA_R_32F;
   cudaDataType_t cType = CUDA_R_32F;
@@ -1686,22 +1661,15 @@ bool gemm_and_bias(
     _syncCurrentWithCarveoutStream(stream, true);
   }
 #endif
-  const auto epilogue = [&]() -> cublasLtEpilogue_t {
-    // The cuBLAS documentation indicates that
-    // *_<ACTIVATION>_BIAS = *_<ACTIVATION>,
-    // but we keep it verbose here for clarity.
-    switch (activation) {
-      case GEMMAndBiasActivationEpilogue::RELU:
-        return bias ? CUBLASLT_EPILOGUE_RELU_BIAS : CUBLASLT_EPILOGUE_RELU;
-      case GEMMAndBiasActivationEpilogue::GELU:
-        return bias ? CUBLASLT_EPILOGUE_GELU_BIAS : CUBLASLT_EPILOGUE_GELU;
-      default:
-        return bias ? CUBLASLT_EPILOGUE_BIAS : CUBLASLT_EPILOGUE_DEFAULT;
-    }
-  }();
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
+  cublasLtEpilogue_t epilogue = CUBLASLT_EPILOGUE_BIAS;
+  if (activation == GEMMAndBiasActivationEpilogue::RELU) {
+    epilogue = CUBLASLT_EPILOGUE_RELU_BIAS;
+  } else if (activation == GEMMAndBiasActivationEpilogue::GELU) {
+    epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
+  }
 
-  if (bias) {
+  if (bias != nullptr) {
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
   }
 

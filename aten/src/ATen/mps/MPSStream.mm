@@ -3,13 +3,13 @@
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSStream.h>
-#include <c10/metal/error.h>
 
 @interface MPSGraphExecutionDescriptor ()
 @property(readwrite, atomic) BOOL enableCommitAndContinue;
 @end
 
 namespace at::mps {
+
 //-----------------------------------------------------------------
 //  MPSStream
 //-----------------------------------------------------------------
@@ -30,10 +30,6 @@ MPSStream::MPSStream(Stream stream) : _stream(stream) {
   // Choose level which optimizes for GPU
   _compilationDescriptor.optimizationLevel = MPSGraphOptimizationLevel0;
   _executionDescriptor.compilationDescriptor = _compilationDescriptor;
-
-  _errorBuffer = [MPSDevice::getInstance()->device() newBufferWithLength:sizeof(c10::metal::ErrorMessages)
-                                                                 options:MTLResourceStorageModeShared];
-  std::memset([_errorBuffer contents], 0, 1024);
 }
 
 MPSStream::~MPSStream() {
@@ -42,8 +38,6 @@ MPSStream::~MPSStream() {
   [_executionDescriptor release];
   [_compilationDescriptor release];
   _executionDescriptor = nil;
-  [_errorBuffer release];
-  _errorBuffer = nil;
   _compilationDescriptor = nil;
 
   assert(_commandBuffer == nil);
@@ -110,7 +104,6 @@ void MPSStream::commitAndWait() {
     [_prevCommandBuffer waitUntilCompleted];
     [_prevCommandBuffer release];
     _prevCommandBuffer = nil;
-    checkLastError();
   }
 
   if (_commandBuffer) {
@@ -118,7 +111,6 @@ void MPSStream::commitAndWait() {
     [_commandBuffer waitUntilCompleted];
     [_commandBuffer release];
     _commandBuffer = nil;
-    checkLastError();
   }
 }
 
@@ -161,7 +153,7 @@ void MPSStream::fill(id<MTLBuffer> buffer, uint8_t value, size_t length, size_t 
   if (length == 0) {
     return;
   }
-  dispatch_sync_with_rethrow(_serialQueue, ^() {
+  dispatch_sync(_serialQueue, ^() {
     @autoreleasepool {
       endKernelCoalescing();
       id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer() blitCommandEncoder];
@@ -191,7 +183,7 @@ void MPSStream::copy(id<MTLBuffer> srcBuffer,
                      size_t dstOffset,
                      uint64_t profileId,
                      SyncType syncType) {
-  dispatch_sync_with_rethrow(_serialQueue, ^() {
+  dispatch_sync(_serialQueue, ^() {
     @autoreleasepool {
       endKernelCoalescing();
       id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer() blitCommandEncoder];
@@ -244,7 +236,7 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
   auto& profiler = getMPSProfiler();
   const bool isGraphProfilingEnabled = profiler.isOperationProfilingEnabled();
 
-  dispatch_sync_with_rethrow(_serialQueue, ^() {
+  dispatch_sync(_serialQueue, ^() {
     endKernelCoalescing();
     if (isGraphProfilingEnabled) {
       // this function call is only relevant for interval-based Signposts
@@ -274,24 +266,6 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
   });
 }
 
-id<MTLBuffer> MPSStream::getErrorBuffer() {
-  return _errorBuffer;
-}
-
-void MPSStream::checkLastError() {
-  auto msgs = reinterpret_cast<c10::metal::ErrorMessages*>([_errorBuffer contents]);
-  const auto& msg = msgs->msg[0];
-  if (!msgs) {
-    return;
-  }
-  unsigned int count = 0;
-  std::swap(count, msgs->count);
-  if (!count) {
-    return;
-  }
-  throw c10::AcceleratorError({msg.func, msg.file, msg.line}, 1, msg.message);
-}
-
 //-----------------------------------------------------------------
 //  MPSStreamImpl
 //-----------------------------------------------------------------
@@ -313,21 +287,6 @@ MPSStream* getCurrentMPSStream() {
 
 MPSStream* getDefaultMPSStream() {
   return MPSStreamImpl::getInstance();
-}
-
-// Helper methods
-void dispatch_sync_with_rethrow(dispatch_queue_t queue, void (^block)()) {
-  __block std::optional<std::exception_ptr> block_exception;
-  dispatch_sync(queue, ^() {
-    try {
-      block();
-    } catch (...) {
-      block_exception = std::current_exception();
-    }
-  });
-  if (block_exception) {
-    std::rethrow_exception(*block_exception);
-  }
 }
 
 } // namespace at::mps

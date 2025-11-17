@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 
 number = Union[int, float]

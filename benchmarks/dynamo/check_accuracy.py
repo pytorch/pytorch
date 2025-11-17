@@ -50,7 +50,6 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 "mobilenet_v2",
                 "pytorch_CycleGAN_and_pix2pix",
                 "pytorch_stargan",
-                "repvgg_a2",
                 "resnet152",
                 "resnet18",
                 "resnet50",

@@ -4,22 +4,20 @@ r"""Contains definitions of the methods used by the _BaseDataLoaderIter to fetch
 This logic is shared in both single- and multi-processing data loading.
 """
 
-from typing import NoReturn
-
 
 class _BaseDatasetFetcher:
-    def __init__(self, dataset, auto_collation, collate_fn, drop_last) -> None:
+    def __init__(self, dataset, auto_collation, collate_fn, drop_last):
         self.dataset = dataset
         self.auto_collation = auto_collation
         self.collate_fn = collate_fn
         self.drop_last = drop_last
 
-    def fetch(self, possibly_batched_index) -> NoReturn:
+    def fetch(self, possibly_batched_index):
         raise NotImplementedError
 
 
 class _IterableDatasetFetcher(_BaseDatasetFetcher):
-    def __init__(self, dataset, auto_collation, collate_fn, drop_last) -> None:
+    def __init__(self, dataset, auto_collation, collate_fn, drop_last):
         super().__init__(dataset, auto_collation, collate_fn, drop_last)
         self.dataset_iter = iter(dataset)
         self.ended = False

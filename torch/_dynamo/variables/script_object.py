@@ -19,17 +19,16 @@ by limiting operations to known-safe patterns and failing fast for unsafe usage.
 """
 
 import functools
-from collections.abc import Callable, Iterable
-from typing import Any, TYPE_CHECKING, TypeVar
+from collections.abc import Callable
+from typing import Any, Iterable, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
 from torch._guards import Source
-from torch._library.opaque_object import is_opaque_type, OpaqueTypeStr
 from torch.fx.proxy import Proxy
 
 from .. import graph_break_hints
-from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
+from ..exc import unimplemented_v2, UnsafeScriptObjectError, Unsupported
 from .base import VariableTracker
 from .user_defined import UserDefinedObjectVariable
 
@@ -62,7 +61,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
     @classmethod
     def is_matching_cls(cls, user_cls: type) -> bool:
-        return issubclass(user_cls, torch.ScriptObject) or is_opaque_type(user_cls)
+        return issubclass(user_cls, torch.ScriptObject)
 
     @staticmethod
     def create(proxy: Proxy, value: Any, **options: Any) -> "TorchScriptObjectVariable":
@@ -81,16 +80,6 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         "Dynamo cannot safely trace script object due to graph break."
     )
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if getattr(self.value, "script_class_name", "") == OpaqueTypeStr:
-            unimplemented(
-                gb_type="Attempted to access attributes/methods on an OpaqueObject",
-                context=f"value={self.value}, attr={name}",
-                explanation="Attribute/method access of OpaqueObjects is not supported.",
-                hints=[
-                    "Use custom operators instead of direct attribute/method access.",
-                ],
-            )
-
         from torch._higher_order_ops.torchbind import call_torchbind
 
         from ..source import AttrSource
@@ -98,7 +87,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
         method = getattr(self.value, name, None)
         if method is None:
-            unimplemented(
+            unimplemented_v2(
                 gb_type="FakeScriptObject missing method implementation",
                 context=f"value={self.value}, method={name}",
                 explanation=f"TorchScript object {self.value} doesn't define the method {name}.",
@@ -109,7 +98,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             )
 
         if not callable(method):
-            unimplemented(
+            unimplemented_v2(
                 gb_type="Attempted to access non-callable attribute of TorchScript object",
                 context=f"value={self.value}, method={name}",
                 explanation="Attribute accesses of TorchScript objects to non-callable attributes are not supported.",
@@ -139,7 +128,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         args: Iterable[Any],
         kwargs: dict[str, Any],
     ) -> VariableTracker:
-        unimplemented(
+        unimplemented_v2(
             gb_type="Weird method call on TorchScript object",
             context=f"value={self.value}, method={name}",
             explanation=(

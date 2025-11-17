@@ -8,7 +8,7 @@ import os
 import sys
 import textwrap
 from itertools import chain, count
-from typing import Any, Optional, Protocol, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, Protocol, TYPE_CHECKING, Union
 
 import sympy
 
@@ -37,7 +37,7 @@ from .wrapper import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
 
     from ..graph import GraphLowering
 
@@ -221,9 +221,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 """
             )
 
-        for device in V.graph.device_types:
-            if device != "meta":
-                self.add_device_include(device)
+        self.add_device_include(self.device)
 
         if V.graph.aot_mode:
             if config.aot_inductor.dynamic_linkage:
@@ -633,7 +631,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 debug_printer_manager.codegen_model_inputs_value_print(
                     input_args_to_print=[
                         input_key
-                        for input_key in V.graph.graph_inputs
+                        for input_key in V.graph.graph_inputs.keys()
                         if input_key.startswith("arg")
                     ]
                 )
@@ -813,7 +811,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
             all_cuda = all(
                 V.graph.get_original_value_of_constant(name).is_cuda
-                for name in V.graph.constants
+                for name in V.graph.constants.keys()
                 if name not in V.graph.folded_constants
             )
             for idx, name in enumerate(V.graph.constants.keys()):
@@ -1425,13 +1423,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         src_is_tensor,
         reduce,
         kwargs,
-        device,
     ):
         reduce = self._get_scatter_reduce_enum(reduce)
 
         # call the ABI shim function instead of the ATen one
-        self.add_device_include(device)
-        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, device)
+        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, self.device)
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
         cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
         inputs_wrapped = [str(x) for x in inputs]
@@ -2951,7 +2947,6 @@ if (!custom_op_wrapper) {
                 return functools.reduce(
                     lambda a, b: a | b,
                     [
-                        # pyrefly: ignore [missing-attribute]
                         node.node.get_stack_traces()
                         for node in node_schedule
                         if hasattr(node, "node") and node.node

@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Callable
+from typing import Callable
 
 import torch
 from torch._inductor.fx_passes.bucketing import (

@@ -56,7 +56,6 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
-from torch._library.opaque_object import is_opaque_type
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
 from torch.export.dynamic_shapes import _ConstraintTarget
@@ -99,8 +98,8 @@ from .exc import (
     BackendCompilerFailed,
     exceptions_allowed_to_be_fallback,
     SkipFrame,
-    unimplemented,
-    unimplemented_with_warning,
+    unimplemented_v2,
+    unimplemented_v2_with_warning,
 )
 from .graph_bytecode_inputs import has_user_objects, index_to_bytecode_constructor
 from .graph_deduplication import apply_graph_deduplication
@@ -763,7 +762,7 @@ class OutputGraph(OutputGraphCommon):
     def get_backward_state_proxy(self) -> torch.fx.Proxy:
         if self.backward_state_proxy is None:
             if self.export:
-                unimplemented(
+                unimplemented_v2(
                     gb_type="backward_state does not support export",
                     context="",
                     explanation="Compiled autograd doesn't work with `torch.export`.",
@@ -1543,7 +1542,7 @@ class OutputGraph(OutputGraphCommon):
                 )
             )
             tmp_vars = []
-            for constructor in index_to_bytecode_constructor.values():
+            for constructor in reversed(index_to_bytecode_constructor.values()):
                 constructor(codegen)
                 var_name = (
                     self.new_var()
@@ -1846,7 +1845,7 @@ class OutputGraph(OutputGraphCommon):
                 [create_instruction("DELETE_FAST", argval=graph_output_var)]
             )
 
-        if torch._dynamo.config.side_effect_replay_policy in ["warn", "error"]:
+        if self.export:
             from torch.export._trace import _ExportModuleSpecTrackerDict
 
             potential_side_effects = []
@@ -1882,16 +1881,10 @@ class OutputGraph(OutputGraphCommon):
             ]
 
             if side_effect_refs:
-                if torch._dynamo.config.side_effect_replay_policy == "warn":
-                    warnings.warn(
-                        f"While compiling, we found certain side effects happened in the model.forward. "
-                        f"Here are the list of potential sources you can double check: {side_effect_refs}"
-                    )
-                else:
-                    raise RuntimeError(
-                        f"While compiling, we found certain side effects happened in the model.forward. "
-                        f"Here are the list of potential sources you can double check: {side_effect_refs}"
-                    )
+                warnings.warn(
+                    f"While exporting, we found certain side effects happened in the model.forward. "
+                    f"Here are the list of potential sources you can double check: {side_effect_refs}"
+                )
 
         return all_stack_locals_metas
 
@@ -1937,8 +1930,7 @@ class OutputGraph(OutputGraphCommon):
                 assert self.backward_state_var is not None
                 cg.append_output(cg.create_load(self.backward_state_var))
                 cg.store_attr(name)
-        if config.replay_side_effects:
-            self.side_effects.codegen_hooks(cg)
+        self.side_effects.codegen_hooks(cg)
 
         # TODO get debug_locals working for nested graph breaks
         # Return variables used for logging at the end
@@ -1953,8 +1945,7 @@ class OutputGraph(OutputGraphCommon):
         self.codegen_cells(tx, cg)
 
         cg.restore_stack(stack_values, value_from_source=not tx.export)
-        if config.replay_side_effects:
-            self.side_effects.codegen_update_mutated(cg)
+        self.side_effects.codegen_update_mutated(cg)
 
     def cleanup_graph(self) -> None:
         """
@@ -2412,7 +2403,7 @@ class OutputGraph(OutputGraphCommon):
                 raise BackendCompilerFailed(
                     self.compiler_fn, e, inspect.currentframe()
                 ).with_traceback(e.__traceback__) from None
-            unimplemented_with_warning(
+            unimplemented_v2_with_warning(
                 e,
                 self.root_tx.f_code,
                 gb_type="Backend compiler exception",
@@ -2596,7 +2587,7 @@ class OutputGraph(OutputGraphCommon):
                             real_script_obj
                         ):
                             flat_dict = dict(real_script_obj.__obj_flatten__())  # type: ignore[attr-defined]
-                            for attr in flat_dict:
+                            for attr in flat_dict.keys():
                                 fake_attr_val = getattr(
                                     fake_script_obj.wrapped_obj, attr
                                 )
@@ -2605,8 +2596,6 @@ class OutputGraph(OutputGraphCommon):
                                     lambda t: update_used_symbols(used_symbols, t),
                                     fake_attr_val,
                                 )
-                        continue
-                    if is_opaque_type(type(node.meta["grapharg"].example)):
                         continue
                     fake = (
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
@@ -2817,7 +2806,7 @@ def check_pt2_compliant_op(
     def encountered_non_compliant_op(target: torch._ops.OpOverload, msg: str) -> None:
         output_graph.non_compliant_ops.add(target)
         if config.only_allow_pt2_compliant_ops:
-            unimplemented(
+            unimplemented_v2(
                 gb_type="Encountered non-PT2-compliant op",
                 context="",
                 explanation=msg + " " + err_epilogue,
@@ -2859,7 +2848,7 @@ def check_pt2_compliant_op(
                 target._qualified_op_name, *args, **kwargs
             )
         except RuntimeError as e:
-            unimplemented(
+            unimplemented_v2(
                 gb_type="Error when attempting to resolve op packet",
                 context="",
                 explanation=str(e),
@@ -3005,11 +2994,6 @@ class SubgraphTracer(fx.Tracer):
             raise RuntimeError(
                 "Inference mode is supposed to be disabled during compilation. Please open an issue."
             )
-
-        self.tracked_tensor_or_symint_vt: OrderedSet[VariableTracker] = OrderedSet()
-
-    def record_tensor_or_symint_vt(self, vt):
-        self.tracked_tensor_or_symint_vt.add(vt)
 
     # preserve original meta if it is available
     def _maybe_preserve_original_meta(
@@ -3163,7 +3147,7 @@ class SubgraphTracer(fx.Tracer):
         elif kind == "call_module":
             if self.parent is not None:
                 # TODO can remove once inline_inbuilt_nn_modules is always True
-                unimplemented(
+                unimplemented_v2(
                     gb_type="Invoking an nn.Module inside a higher order operator",
                     context=f"Higher order op name: {self.source_target}",
                     explanation="This is not supported.",
@@ -3197,7 +3181,7 @@ class SubgraphTracer(fx.Tracer):
                 elif kind == "call_module":
                     if self.parent is not None:
                         # TODO can remove once inline_inbuilt_nn_modules is always True
-                        unimplemented(
+                        unimplemented_v2(
                             gb_type="Invoking an nn.Module inside a HigherOrderOperator",
                             context="",
                             explanation="This is not supported.",
@@ -3271,7 +3255,7 @@ class SubgraphTracer(fx.Tracer):
     def remove_node(self, node: fx.Node) -> None:
         if len(node.users) > 0:
             user_graph_nodes: list[torch.fx.Node] = []
-            for user in node.users:
+            for user in node.users.keys():
                 # For the case where user.graph == self.graph, that is a real bug and will raise
                 # properly.
                 if user.graph != self.graph:

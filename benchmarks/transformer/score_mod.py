@@ -125,17 +125,6 @@ AttentionType = Literal[
 ]
 DtypeString = Literal["bfloat16", "float16", "float32"]
 SpeedupType = Literal["fwd", "bwd"]
-# Operator Name mapping
-backend_to_operator_name = {
-    "math": "math attention kernel",
-    "efficient": "efficient attention kernel",
-    "cudnn": "cudnn attention kernel",
-    "fav2": "flash attention 2 kernel",
-    "fav3": "flash attention 3 kernel",
-    "fakv": "flash attention kv cache kernel",
-    "og-eager": "eager attention kernel",
-    "flex": "flex attention kernel",
-}
 
 
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
@@ -1276,14 +1265,12 @@ def _output_json_for_dashboard(
                 model: ModelInfo
                 metric: MetricInfo
 
-            operator_name = backend_to_operator_name.get(backend, backend)
-
             # Benchmark extra info
             benchmark_extra_info = {
                 "input_config": input_config,
                 "device": device,
                 "arch": device_arch,
-                "operator_name": operator_name,
+                "operator_name": backend,
                 "attn_type": config.attn_type,
                 "shape": str(config.shape),
                 "max_autotune": config.max_autotune,
@@ -1301,7 +1288,7 @@ def _output_json_for_dashboard(
                     type="attention-benchmark",
                     origins=["pytorch"],
                     extra_info={
-                        "operator_name": operator_name,
+                        "operator_name": backend,
                         "attn_type": config.attn_type,
                     },
                 ),
@@ -1328,7 +1315,7 @@ def _output_json_for_dashboard(
                         type="attention-benchmark",
                         origins=["pytorch"],
                         extra_info={
-                            "operator_name": operator_name,
+                            "operator_name": backend,
                         },
                     ),
                     metric=MetricInfo(
@@ -1354,7 +1341,7 @@ def _output_json_for_dashboard(
                         type="attention-benchmark",
                         origins=["pytorch"],
                         extra_info={
-                            "operator_name": operator_name,
+                            "operator_name": backend,
                         },
                     ),
                     metric=MetricInfo(
@@ -1384,7 +1371,7 @@ def _output_json_for_dashboard(
                         type="attention-benchmark",
                         origins=["pytorch"],
                         extra_info={
-                            "operator_name": operator_name,
+                            "operator_name": backend,
                         },
                     ),
                     metric=MetricInfo(

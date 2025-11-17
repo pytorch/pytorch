@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from collections import defaultdict
 from collections.abc import Callable, Iterator, Sized
-from typing import Any, NoReturn, TypeVar
+from typing import Any, Optional, TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import DataChunk, IterDataPipe
@@ -18,7 +18,7 @@ __all__ = [
 _T_co = TypeVar("_T_co", covariant=True)
 
 
-def __getattr__(name: str) -> NoReturn:
+def __getattr__(name: str):
     raise AttributeError(f"module {__name__} has no attribute {name}")
 
 
@@ -110,7 +110,7 @@ class UnBatcherIterDataPipe(IterDataPipe):
         [0, 1, 2, 3, 4, 5, 6]
     """
 
-    def __init__(self, datapipe: IterDataPipe, unbatch_level: int = 1) -> None:
+    def __init__(self, datapipe: IterDataPipe, unbatch_level: int = 1):
         self.datapipe = datapipe
         self.unbatch_level = unbatch_level
 
@@ -199,10 +199,10 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         *,
         keep_key: bool = False,
         buffer_size: int = 10000,
-        group_size: int | None = None,
-        guaranteed_group_size: int | None = None,
+        group_size: Optional[int] = None,
+        guaranteed_group_size: Optional[int] = None,
         drop_remaining: bool = False,
-    ) -> None:
+    ):
         _check_unpickable_fn(group_key_fn)
         # pyrefly: ignore [invalid-type-var]
         self.datapipe = datapipe
@@ -234,7 +234,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         biggest_key = None
         biggest_size = 0
         result_to_yield = None
-        for findkey in self.buffer_elements:
+        for findkey in self.buffer_elements.keys():
             if len(self.buffer_elements[findkey]) > biggest_size:
                 biggest_size = len(self.buffer_elements[findkey])
                 biggest_key = findkey
@@ -322,5 +322,5 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         self.curr_buffer_size = 0
         self.buffer_elements = defaultdict(list)
 
-    def __del__(self) -> None:
+    def __del__(self):
         self.buffer_elements.clear()

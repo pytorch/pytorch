@@ -1,5 +1,6 @@
 from collections.abc import Iterable, Iterator
 from io import IOBase
+from typing import Optional
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
@@ -47,13 +48,13 @@ class FileOpenerIterDataPipe(IterDataPipe[tuple[str, IOBase]]):
         self,
         datapipe: Iterable[str],
         mode: str = "r",
-        encoding: str | None = None,
+        encoding: Optional[str] = None,
         length: int = -1,
-    ) -> None:
+    ):
         super().__init__()
         self.datapipe: Iterable[str] = datapipe
         self.mode: str = mode
-        self.encoding: str | None = encoding
+        self.encoding: Optional[str] = encoding
 
         if self.mode not in ("b", "t", "rb", "rt", "r"):
             raise ValueError(f"Invalid mode {mode}")

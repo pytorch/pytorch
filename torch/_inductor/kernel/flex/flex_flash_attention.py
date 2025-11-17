@@ -3,9 +3,8 @@
 
 import functools
 import importlib
-from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, Optional
+from typing import Any, Callable, Optional, Sequence
 
 import sympy
 from sympy import Expr, Integer

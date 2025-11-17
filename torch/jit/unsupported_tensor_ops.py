@@ -5,7 +5,7 @@ from typing import Any
 import torch.jit
 
 
-def execWrapper(code, glob, loc) -> None:
+def execWrapper(code, glob, loc):
     exec(code, glob, loc)
 
 

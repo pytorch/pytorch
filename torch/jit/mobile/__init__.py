@@ -56,7 +56,7 @@ def _load_for_lite_interpreter(f, map_location=None):
 
 
 class LiteScriptModule:
-    def __init__(self, cpp_module) -> None:
+    def __init__(self, cpp_module):
         self._c = cpp_module
         super().__init__()
 

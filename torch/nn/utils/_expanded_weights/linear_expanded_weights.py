@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -39,7 +40,7 @@ class LinearPerSampleGrad(torch.autograd.Function):
     def backward(ctx, grad_output):
         input, weight = ctx.args
         bias = ctx.kwargs["bias"]
-        results: list[torch.Tensor | None] = []
+        results: list[Optional[torch.Tensor]] = []
         results.append(None)  # for kwarg_names
         results.append(None)  # for op reference
 

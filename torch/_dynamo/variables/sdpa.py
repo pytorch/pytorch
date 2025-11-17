@@ -1,13 +1,12 @@
-from collections.abc import Sequence
 from inspect import getattr_static
-from typing import Any, TYPE_CHECKING, TypeGuard
+from typing import Any, Sequence, TYPE_CHECKING, TypeGuard
 
 from torch._guards import Source
 from torch.backends.cuda import SDPAParams
 from torch.fx.proxy import Proxy
 
 from ..bytecode_transformation import create_call_function
-from ..exc import unimplemented
+from ..exc import Unsupported
 from ..source import AttrSource
 from .base import VariableTracker
 
@@ -71,16 +70,10 @@ class SDPAParamsVariable(VariableTracker):
         try:
             getattr_static(torch._C._SDPAParams, name)
         except AttributeError:
-            import torch._dynamo.graph_break_hints as graph_break_hints
-
-            unimplemented(
-                gb_type="unsupported torch._C._SDPAParams attribute",
-                context=f"name: {name}",
-                explanation=f"Unable to fetch attribute {name} from torch._C._SDPAParams.",
-                hints=[
-                    *graph_break_hints.USER_ERROR,
-                ],
-            )
+            # Using raise from is too verbose here
+            raise Unsupported(
+                f"Unsupported torch._C._SDPAParams attribute {name}"
+            ) from None
 
         proxy = GetAttrVariable.create_getattr_proxy(self.as_proxy(), name)
         if self.source is not None:

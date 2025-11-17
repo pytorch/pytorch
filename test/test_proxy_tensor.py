@@ -32,7 +32,6 @@ import re
 
 import functools
 import itertools
-from pathlib import Path
 
 aten = torch.ops.aten
 
@@ -61,7 +60,9 @@ def process_failures():
 
     and processes them into a list of opinfo xfails
     """
-    failures = [i.strip() for i in Path('pytest_failures').read_text().splitlines()]
+    f = open('pytest_failures')
+    failures = f.readlines()
+    failures = [i.strip() for i in failures]
 
     def process_failure_string(s, matcher):
         out = re.search(matcher, s)
@@ -795,27 +796,6 @@ def forward(self, x_1):
             return torch.ops.aten.nll_loss_forward(a, b, None, 1, 10)
 
         self._test(f, [torch.randn(1, 10), torch.zeros(1, dtype=torch.long)])
-
-    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
-    def test_T244632748(self):
-        class TestModule(torch.nn.Module):
-            def forward(self, x):
-                return x + (x.shape[0] * 2)
-
-        mod = TestModule()
-        sample = torch.randn((5, 5)).to("cuda")
-        dim0 = torch.export.Dim.DYNAMIC(max=100)
-        dynamic_shapes = {"x": (dim0, torch.export.Dim.STATIC)}
-        ep = torch.export.export(mod, (sample,), dynamic_shapes=dynamic_shapes)
-        gm = ep.module()
-        symint = list(gm.graph.nodes)[3].meta["val"]
-        list(gm.graph.nodes)[3].replace_all_uses_with(symint)
-        gm.graph.eliminate_dead_code()
-
-        inductor_fx = torch._inductor.aot_compile(
-            gm, (sample,), options={"fx_wrapper": True, "compile_threads": 1}
-        )
-
 
 class TestGenericProxyTensorReal(TestGenericProxyTensor):
     tracing_mode = "real"
@@ -2007,6 +1987,7 @@ only_real_tensor_failures = {
 }
 
 only_fake_tensor_failures = {
+    xfail('narrow'),
     xfail('tensor_split'),
 }
 

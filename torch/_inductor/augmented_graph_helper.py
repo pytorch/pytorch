@@ -164,7 +164,7 @@ class AugmentedGraphHelper:
                 self.extra_uses[new_node].add(updated_use)
 
         # Clean up erased nodes
-        for old_node in erased_merge_sets:
+        for old_node in erased_merge_sets.keys():
             self.extra_deps[old_node].clear()
             self.extra_uses[old_node].clear()
             del self.merge_sets[old_node]

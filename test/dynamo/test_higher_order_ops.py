@@ -131,7 +131,7 @@ def default_args_generator(seed_value):
         yield new_args
 
 
-class HigherOrderOpTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def _assert_wrap_fallback(self, func, args, setup=lambda: None):
         counters.clear()
         backend = EagerAndRecordGraphs()
@@ -249,7 +249,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
 
         # when testing with dynamic shape, symbols are lifted as input
         arg_count = ifdynstaticdefault(2, 3)
-        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 1)
+        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count)
 
     def test_return_captured_vars(self):
         freevar1 = torch.randn(3)
@@ -267,7 +267,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         # be the input.
         # when testing with dynamic shape, a symbol is lifted as input
         arg_count = ifdynstaticdefault(3, 4)
-        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 1)
+        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 4)
 
     def test_return_captured_var_used_multiple_times(self):
         freevar = torch.randn(3)
@@ -282,7 +282,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         x = torch.randn(3)
         # when testing with dynamic shape, a symbol is lifted as input
         arg_count = ifdynstaticdefault(3, 4)
-        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 2)
+        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 3)
 
     def test_capture_untracked_global(self):
         def f(x):
@@ -762,15 +762,15 @@ class GraphModule(torch.nn.Module):
         def forward(self, s77: "Sym(s77)", l_x_: "f32[s77]", u0: "Sym(u0)", c: "i64[u0, 1]"):
             wrap_body_0 = self.wrap_body_0
             wrap = torch.ops.higher_order.wrap(wrap_body_0, s77, l_x_, u0, c);  wrap_body_0 = s77 = l_x_ = u0 = c = None
-            getitem: "f32[s77]" = wrap[0]
-            getitem_1: "f32[u0, 1]" = wrap[1];  wrap = None
-            return (getitem, getitem_1)
+            child: "f32[s77]" = wrap[0]
+            child_1: "f32[u0, 1]" = wrap[1];  wrap = None
+            return (child, child_1)
 
         class wrap_body_0(torch.nn.Module):
             def forward(self, s77: "Sym(s77)", l_x_: "f32[s77]", u0: "Sym(u0)", c: "i64[u0, 1]"):
-                sin: "f32[s77]" = l_x_.sin();  l_x_ = None
-                sin_1: "f32[u0, 1]" = c.sin();  c = None
-                return (sin, sin_1)
+                child: "f32[s77]" = l_x_.sin();  l_x_ = None
+                child_1: "f32[u0, 1]" = c.sin();  c = None
+                return (child, child_1)
 """,
             )
         else:
@@ -801,15 +801,15 @@ class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[3]", u0: "Sym(u0)", c: "i64[u0, 1]"):
             wrap_body_0 = self.wrap_body_0
             wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_, u0, c);  wrap_body_0 = l_x_ = u0 = c = None
-            getitem: "f32[3]" = wrap[0]
-            getitem_1: "f32[u0, 1]" = wrap[1];  wrap = None
-            return (getitem, getitem_1)
+            child: "f32[3]" = wrap[0]
+            child_1: "f32[u0, 1]" = wrap[1];  wrap = None
+            return (child, child_1)
 
         class wrap_body_0(torch.nn.Module):
             def forward(self, l_x_: "f32[3]", u0: "Sym(u0)", c: "i64[u0, 1]"):
-                sin: "f32[3]" = l_x_.sin();  l_x_ = None
-                sin_1: "f32[u0, 1]" = c.sin();  c = None
-                return (sin, sin_1)
+                child: "f32[3]" = l_x_.sin();  l_x_ = None
+                child_1: "f32[u0, 1]" = c.sin();  c = None
+                return (child, child_1)
 """,
             )
 
@@ -922,16 +922,16 @@ class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[3]", size: "Sym(u0)", c: "i64[u0, 1]"):
             wrap_body_0 = self.wrap_body_0
             wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_, size, c);  wrap_body_0 = l_x_ = size = c = None
-            getitem: "f32[3]" = wrap[0]
-            getitem_1: "f32[u0, 1]" = wrap[1];  wrap = None
-            return (getitem, getitem_1)
+            child: "f32[3]" = wrap[0]
+            child_1: "f32[u0, 1]" = wrap[1];  wrap = None
+            return (child, child_1)
 
         class wrap_body_0(torch.nn.Module):
             def forward(self, l_x_: "f32[3]", size: "Sym(u0)", c: "i64[u0, 1]"):
                 sin: "f32[3]" = l_x_.sin();  l_x_ = None
-                add: "f32[3]" = sin + size;  sin = size = None
-                sin_1: "f32[u0, 1]" = c.sin();  c = None
-                return (add, sin_1)
+                child: "f32[3]" = sin + size;  sin = size = None
+                child_1: "f32[u0, 1]" = c.sin();  c = None
+                return (child, child_1)
 """,
             )
 
@@ -2458,10 +2458,10 @@ class GraphModule(torch.nn.Module):
 
     class wrap_body_0(torch.nn.Module):
         def forward(self, l_arg1_0_: "f32[3]", l_arg2_0_: "f32[3]"):
-            add: "f32[3]" = l_arg1_0_ + 1;  l_arg1_0_ = None
+            child: "f32[3]" = l_arg1_0_ + 1;  l_arg1_0_ = None
 
-            add_1: "f32[3]" = l_arg2_0_ + 1;  l_arg2_0_ = None
-            return (add, add_1)
+            child_1: "f32[3]" = l_arg2_0_ + 1;  l_arg2_0_ = None
+            return (child, child_1)
 """,
         )
 
@@ -2655,9 +2655,9 @@ class GraphModule(torch.nn.Module):
 
     class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[2, 3]"):
-            sin: "f32[2, 3]" = l_x_.sin()
-            cos: "f32[2, 3]" = l_x_.cos();  l_x_ = None
-            return (sin, cos)
+            child: "f32[2, 3]" = l_x_.sin()
+            child_1: "f32[2, 3]" = l_x_.cos();  l_x_ = None
+            return (child, child_1)
 """,
         )
 
@@ -2687,13 +2687,13 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
-        getitem: "f32[3]" = wrap[0];  wrap = None
-        return (getitem,)
+        value: "f32[3]" = wrap[0];  wrap = None
+        return (value,)
 
     class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[3]"):
-            neg: "f32[3]" = -l_x_;  l_x_ = None
-            return (neg,)
+            child: "f32[3]" = -l_x_;  l_x_ = None
+            return (child,)
 """,
         )
 
@@ -3318,17 +3318,17 @@ class GraphModule(torch.nn.Module):
 
         hints_wrapper_body_1 = self.hints_wrapper_body_1
         hints_wrapper = torch.ops.higher_order.hints_wrapper(hints_wrapper_body_1, (x, l_y_), {}, hints = {'outer_body': True});  hints_wrapper_body_1 = x = l_y_ = None
-        getitem: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
-        return (getitem,)
+        res: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
+        return (res,)
 
     class hints_wrapper_body_1(torch.nn.Module):
         def forward(self, x: "f32[2, 4]", l_y_: "f32[4]"):
             hints_wrapper_body_0 = self.hints_wrapper_body_0
             hints_wrapper = torch.ops.higher_order.hints_wrapper(hints_wrapper_body_0, (x, l_y_), {}, hints = {'inner_body': True});  hints_wrapper_body_0 = x = l_y_ = None
-            getitem: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
+            x_1: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
 
-            x_1: "f32[2, 4]" = torch.abs(getitem);  getitem = None
-            return (x_1,)
+            x_2: "f32[2, 4]" = torch.abs(x_1);  x_1 = None
+            return (x_2,)
 
         class hints_wrapper_body_0(torch.nn.Module):
             def forward(self, x: "f32[2, 4]", l_y_: "f32[4]"):
@@ -3354,7 +3354,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2, 4)
         y = torch.ones(4)
 
-        msg = "hints_wrapper: improper args/kwargs"
+        msg = "hints_wrapper - key hints not provided"
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn_with_hints, backend=cnt)(x, y)
 
@@ -3396,9 +3396,7 @@ class GraphModule(torch.nn.Module):
             fn_with_hints(x, y)
 
 
-class HigherOrderOpVmapGuardTests(
-    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks, LoggingTestCase
-):
+class HigherOrderOpVmapGuardTests(LoggingTestCase):
     @make_logging_test(recompiles=True)
     def test_vmap_grad_guard_ok(self, records):
         vmap = torch.vmap
@@ -3667,9 +3665,7 @@ class HigherOrderOpVmapGuardTests(
         self.assertGreater(len(records), 0)
 
 
-class FuncTorchHigherOrderOpTests(
-    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
-):
+class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def tearDown(self):
         # Ensure that in the case of a test failure, the next test won't fail
         # because of a previous call to _vmap_increment_nesting that wasn't undone
@@ -4520,9 +4516,12 @@ class GraphModule(torch.nn.Module):
             model, params, inputs, targets
         )
         self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertIn(
-            "torch.func.functional_call capture is disabled",
-            next(iter(counters["graph_break"].keys())),
+        self.assertEqual(
+            {
+                "torch.func.functional_call capture is disabled, it can be "
+                "turned on by setting `torch._dynamo.config.inline_inbuilt_nn_modules=True`": 1,
+            },
+            dict(counters["graph_break"]),
         )
         self.assertEqual(actual, expected)
 
@@ -6786,9 +6785,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(expected, actual)
 
 
-class ActivationCheckpointingTests(
-    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
-):
+class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
         cloned_args = []
         for arg in args:
@@ -7179,7 +7176,7 @@ xfail_hops_compile = {
 }
 
 
-class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
     @requires_cuda_and_triton
     @parametrize("backend", ("aot_eager", "inductor"))
     @ops(

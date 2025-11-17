@@ -35,7 +35,7 @@ def _ge(lhs: Any, rhs: Any) -> bool:
 
 
 class NestedIntNode:
-    def __init__(self, t_id: int, coeff: int) -> None:
+    def __init__(self, t_id: int, coeff: int):
         self.t_id = t_id
         self.coeff = coeff
 

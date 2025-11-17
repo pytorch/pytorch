@@ -119,7 +119,7 @@ class TestBaseSparsifier(TestCase):
         for idx in range(len(sparsifier0.groups)):
             mg0 = sparsifier0.groups[idx]
             mg1 = sparsifier1.groups[idx]
-            for key in mg0:
+            for key in mg0.keys():
                 assert key in mg1
                 if key == "module":
                     # We cannot compare modules as they are different

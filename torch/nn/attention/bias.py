@@ -2,6 +2,7 @@
 """Defines bias subclasses that work with scaled_dot_product_attention"""
 
 from enum import auto, IntEnum
+from typing import Optional
 from warnings import warn
 
 import torch
@@ -116,7 +117,7 @@ class CausalBias(torch.Tensor):
     .. warning:: This class is a prototype and subject to change.
     """
 
-    def __init__(self, variant: CausalVariant, seq_len_q: int, seq_len_kv: int) -> None:
+    def __init__(self, variant: CausalVariant, seq_len_q: int, seq_len_kv: int):
         """
         Initializes the CausalBias instance with a specified variant and sequence lengths.
 
@@ -154,7 +155,7 @@ class CausalBias(torch.Tensor):
         )
 
     # pyrefly: ignore [bad-return]
-    def _materialize(self, device: torch.device | None = None) -> torch.Tensor:
+    def _materialize(self, device: Optional[torch.device] = None) -> torch.Tensor:
         """
         Materializes the causal bias into a tensor form.
 
@@ -182,7 +183,7 @@ class CausalBias(torch.Tensor):
         attn_mask: "CausalBias",
         dropout_p: float = 0.0,
         is_causal: bool = False,
-        scale: float | None = None,
+        scale: Optional[float] = None,
         enable_gqa: bool = False,
     ) -> torch.Tensor:
         r"""
@@ -295,7 +296,7 @@ class CausalBias(torch.Tensor):
             return cls._dispatch(*args, **kwargs)
         return super().__torch_function__(func, types, args, kwargs)
 
-    def __repr__(self) -> str:  # type:ignore[override]
+    def __repr__(self):  # type:ignore[override]
         return self._materialize().__repr__()
 
 

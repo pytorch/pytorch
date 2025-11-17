@@ -576,14 +576,14 @@ static void _mkldnn_gemm_i8i8i32_with_blas(
         n,
         k,
         alpha,
-        static_cast<int8_t*>(self.data_ptr()),
+        (int8_t*)self.data_ptr(),
         lda,
         ao,
-        static_cast<int8_t*>(mat2.data_ptr()),
+        (int8_t*)mat2.data_ptr(),
         ldb,
         bo,
         beta,
-        static_cast<int32_t*>(result.data_ptr()),
+        (int32_t*)result.data_ptr(),
         ldc,
         &co);
   }

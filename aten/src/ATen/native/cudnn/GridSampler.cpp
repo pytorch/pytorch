@@ -44,7 +44,6 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
-#include <array>
 
 #include <ATen/TensorUtils.h>
 #include <c10/util/irange.h>
@@ -60,11 +59,11 @@ void setSamplerDescriptor(
     SpatialTransformerDescriptor& desc,
     cudnnDataType_t dataType,
     const at::Tensor& tensor) {
-  std::array<int, 4> inputSize{0};
+  int inputSize[4] = {0};
   for (const auto i : c10::irange(tensor.dim())) {
-    inputSize[i] = static_cast<int>(tensor.size(i));
+    inputSize[i] = (int)tensor.size(i);
   }
-  desc.set(dataType, 4, inputSize.data());
+  desc.set(dataType, 4, inputSize);
 }
 
 void checkGridSize(CheckedFrom c, TensorArg grid, TensorArg input) {
