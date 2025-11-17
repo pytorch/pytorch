@@ -236,6 +236,20 @@ inline torch::stable::Tensor clone(const torch::stable::Tensor& self) {
   return to<torch::stable::Tensor>(stack[0]);
 }
 
+#if TORCH_FEATURE_VERSION >= (((0ULL + 2) << 56) | ((0ULL + 8 << 48)))
+
+inline torch::stable::Tensor op(
+    const torch::stable::Tensor& self,
+    const dummy_types::Dummy& dummy) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{from(self), from(dummy)};
+  TORCH_ERROR_CODE_CHECK(aoti_torch_call_dispatcher_v2(
+      "aten::_test_versioning", "", stack.data(), TORCH_ABI_VERSION));
+  return to<torch::stable::Tensor>(stack[0]);
+}
+
+#endif
+
 #if TORCH_FEATURE_VERSION >= (((0ULL + 2) << 56) | ((0ULL + 10) << 48))
 
 // New ops should be added here if they do not use aoti_torch_call_dispatcher

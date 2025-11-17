@@ -16,6 +16,10 @@
 #include <unordered_map>
 #include <vector>
 
+namespace dummy_types {
+struct Dummy;
+}
+
 namespace torch::jit {
 struct Node;
 struct Value;
@@ -371,6 +375,11 @@ TORCH_API void addInputs(
     Node* n,
     const char* name,
     const c10::intrusive_ptr<c10::ivalue::Object>& obj);
+
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const dummy_types::Dummy& value);
 
 TORCH_API void ensureUniqueIfOutOfPlaced(
     const char* name,

@@ -1917,6 +1917,7 @@ class BaseTy(Enum):
     SymInt = auto()
     SymBool = auto()
     GraphModule = auto()
+    Dummy = auto()
 
 
 @dataclass(frozen=True)

@@ -81,6 +81,7 @@ tensorGeometryT = BaseCppType("at", "TensorGeometry")
 SymIntT = BaseCppType("c10", "SymInt")
 SymBoolT = BaseCppType("c10", "SymBool")
 symIntArrayRefT = BaseCppType("c10", "SymIntArrayRef")
+dummyT = BaseCppType("dummy_types", "Dummy")
 
 # Types representing template parameters.  Technically, we probably shouldn't
 # represent them this way in codegen, but it was pretty convenient.
@@ -127,6 +128,7 @@ BaseTypeToCppMapping: dict[BaseTy, BaseCppType] = {
     BaseTy.Stream: streamT,
     BaseTy.SymInt: SymIntT,
     BaseTy.SymBool: SymBoolT,
+    BaseTy.Dummy: dummyT,
 }
 
 # CTypes encode C++ type structure as needed for translation.
