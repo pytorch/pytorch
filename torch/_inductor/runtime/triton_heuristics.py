@@ -22,9 +22,9 @@ from typing import Any, Generic, Literal, TYPE_CHECKING, TypeVar, Union
 
 import torch
 from torch._dynamo.utils import counters, set_feature_use
-from torch._environment import is_fbcode
 from torch._inductor import metrics
 from torch._prims_common import compute_required_storage_length
+from torch.utils._debug_mode import get_active_debug_mode
 from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
@@ -1337,6 +1337,17 @@ class CachingAutotuner(KernelInterface):
         benchmark_run=False,
         **kwargs,
     ):  # type:ignore[override]
+        """Launch triton kernel call and return result."""
+        debug_mode = get_active_debug_mode()
+        debug_call = None
+        if debug_mode:
+            arg_names = list(self.triton_meta.get("signature", {}).keys())
+            kernel_kwargs = dict(zip(arg_names, args))
+            kernel_kwargs.update(kwargs)
+            debug_call = debug_mode.record_triton_kernel(
+                kernel_name=self.fn.__name__, kwargs=kernel_kwargs
+            )
+
         if hasattr(triton, "set_allocator"):
 
             def alloc_fn(size: int, align: int, stream: int | None):
@@ -1392,17 +1403,21 @@ class CachingAutotuner(KernelInterface):
                 args_without_constexprs,
                 profiler_kwargs,
             ):
-                return launcher(
+                result = launcher(
                     *args,
                     **kwargs,
                     stream=stream,
                 )
         else:
-            return launcher(
+            result = launcher(
                 *args,
                 **kwargs,
                 stream=stream,
             )
+
+        if debug_call:
+            debug_call.finalize(self.get_device_interface())
+        return result
 
     def _interpret_args_grid(
         self, args: tuple[Any, ...], cfg: Config
@@ -1593,9 +1608,8 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
             return None
 
         def check_can_launch() -> StaticallyLaunchedCudaKernel:
-            if triton_meta.get("device_type") != "cuda":
-                # Only cuda kernels
-                raise CannotStaticallyLaunchKernel("Non-cuda device")
+            if triton_meta.get("device_type") not in ("cuda", "hip"):
+                raise CannotStaticallyLaunchKernel("Non-cuda/ROCm device")
 
             if torch._inductor.config.cpp_wrapper:
                 # If we're running with cpp wrapper, it doesn't
@@ -1621,10 +1635,11 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
                     "static launch does not support launch attributes"
                 )
 
+            binary_ext = "hsaco" if triton_meta.get("device_type") == "hip" else "cubin"
             cubin_location = os.path.join(
                 triton_cache_dir(triton_meta.get("device", 0)),
                 triton_hash_to_path_key(kernel.hash),
-                f"{kernel.src.fn.__name__}.cubin",
+                f"{kernel.src.fn.__name__}.{binary_ext}",
             )
 
             if not os.path.exists(cubin_location):
@@ -1656,10 +1671,11 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         When loading from cache on disk, we want to reload cubin
         files from their appropriate location on disc.
         """
+        binary_ext = "hsaco" if torch.version.hip else "cubin"
         cubin_location = os.path.join(
             triton_cache_dir(self.compile_meta.get("device", 0)),
             triton_hash_to_path_key(self.kernel.hash),
-            f"{self.kernel.name}.cubin",
+            f"{self.kernel.name}.{binary_ext}",
         )
         if not os.path.exists(cubin_location):
             if self.kernel.cubin_raw is not None:
@@ -2453,9 +2469,8 @@ def triton_config_reduction(
             rnumels[prefix] *= 2
 
     if num_warps is None:
-        if reduction_hint == ReductionHint.INNER and not is_fbcode():
-            # r is contiguous, so ensure that each thread has 8 elements for
-            # vectorized loads, assuming bf16/fp16
+        if reduction_hint == ReductionHint.INNER:
+            # r is contiguous, ensure at least 8 elements per thread
             # xblock is usually 1-2, default to giving each thread more work
             num_warps = r // 128
         else:
@@ -2925,7 +2940,7 @@ def _reduction_configs(
         )
 
     contiguous_config = make_config(
-        2 if rnumel <= 2048 and not is_fbcode() else 1,  # 1024 or less is persistent
+        2 if rnumel <= 2048 else 1,  # 1024 or less is persistent
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
@@ -2938,7 +2953,7 @@ def _reduction_configs(
     outer_config = make_config(64, 8, register_intensive=register_intensive)
     # TODO (paulzhan): Test heuristic on AMD and internal testing
     # for correctness
-    if not torch.version.hip and not is_fbcode():
+    if not torch.version.hip:
         outer_config = outer_config_opt()
 
     configs = []
@@ -3607,24 +3622,13 @@ def user_autotune(
     )
 
 
-def foreach(triton_meta, filename=None, inductor_meta=None):
+def foreach(triton_meta, num_warps, filename=None, inductor_meta=None):
     """
     Compile a triton foreach kernel
     """
-    configs = []
-
-    # Naive autotuning path for num_warps
-    if not (
-        inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise")
-    ):
-        configs.append(triton.Config({}, num_stages=1, num_warps=8))
-    else:
-        for warps in [1, 2, 4, 8]:
-            configs.append(triton.Config({}, num_stages=1, num_warps=warps))
-
     return cached_autotune(
         None,
-        configs,
+        [triton.Config({}, num_stages=1, num_warps=num_warps)],
         triton_meta=triton_meta,
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,
