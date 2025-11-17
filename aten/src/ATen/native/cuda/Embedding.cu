@@ -53,8 +53,8 @@ __global__ void embedding_backward_feature_kernel
 {
   extern __shared__ char buf[];
   accscalar_t* smem = (accscalar_t*)buf;
-  accscalar_t* my_s = smem + C10_WARP_SIZE*threadIdx.y;
-  int* indices_batch = (int*)(buf + sizeof(accscalar_t)*C10_WARP_SIZE*blockDim.y);
+  accscalar_t* my_s = smem + warpSize*threadIdx.y;
+  int* indices_batch = (int*)(buf + sizeof(accscalar_t)*warpSize*blockDim.y);
 
   const int s = (int)stride; // OK to make int, we don't expect 2 billion+ embedding row size
 
@@ -117,7 +117,7 @@ __global__ void embedding_backward_feature_kernel
 #else
             first_remaining_peer = __ffs(matchmask) - 1;
 #endif
-            my_s[threadIdx.x] += smem[threadIdx.x + C10_WARP_SIZE*first_remaining_peer];
+            my_s[threadIdx.x] += smem[threadIdx.x + warpSize*first_remaining_peer];
             matchmask ^= (1 << first_remaining_peer);
           }
           if(f < s)
@@ -165,7 +165,7 @@ __global__ void embedding_backward_kernel(
 
       #pragma unroll
       for (int ii = 0; ii < SZ; ii++) {
-        int feature_dim = start_feature + ii * C10_WARP_SIZE;
+        int feature_dim = start_feature + ii * warpSize;
         if (feature_dim < stride) {
           gradient[ii] = static_cast<accscalar_t>(grad_output[grad_row + feature_dim]);
           weight[ii] = static_cast<accscalar_t>(grad_weight[weight_row + feature_dim]);
@@ -179,7 +179,7 @@ __global__ void embedding_backward_kernel(
 
       #pragma unroll
       for (int ii = 0; ii < SZ; ii++) {
-        int feature_dim = start_feature + ii * C10_WARP_SIZE;
+        int feature_dim = start_feature + ii * warpSize;
         if (feature_dim < stride) {
             grad_weight[weight_row + feature_dim] = static_cast<scalar_t>(weight[ii]);
         }

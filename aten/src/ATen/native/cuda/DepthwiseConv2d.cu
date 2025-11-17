@@ -310,9 +310,9 @@ __global__ void conv_depthwise2d_grad_weight_kernel(
 
   acc_t grad(0);
 
-  const int laneId = threadIdx.x % C10_WARP_SIZE;
-  const int batch = threadIdx.x / C10_WARP_SIZE;
-  const int nwarps = blockDim.x / C10_WARP_SIZE;
+  const int laneId = threadIdx.x % warpSize;
+  const int batch = threadIdx.x / warpSize;
+  const int nwarps = blockDim.x / warpSize;
   const int imageElements = outputWidth * outputHeight;
   // Use warp per item.  In the original kernel, a threadblock was used to sum over NHW.
   // Here, we use a warp to sum values over HW dimension, and if batchSize is larger than the
@@ -324,7 +324,7 @@ __global__ void conv_depthwise2d_grad_weight_kernel(
   // bring a nice speed-up.
   for (int batchIdx = batch; batchIdx < batchSize; batchIdx += nwarps){
     // Warp-stride loop over elements in a batch item
-    for (index_t idx = laneId; idx < imageElements; idx += C10_WARP_SIZE) {
+    for (index_t idx = laneId; idx < imageElements; idx += warpSize) {
     // Need to calculate the following: batch position, and offset into the grad_output
     // in height, and width. We can intuit the corresponding position in the input from
     // the other parameters we have

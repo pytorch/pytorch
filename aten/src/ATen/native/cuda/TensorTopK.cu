@@ -421,13 +421,13 @@ __global__ void computeBlockwiseWithinKCounts(
   // do warp reduction followed by shared memory reduction to get the total count
   // non-active thread should not load, and non-active warp should not do reduction.
   bool warp_is_active, thread_is_active;
-  int warp = tidx / C10_WARP_SIZE;
+  int warp = tidx / warpSize;
   if (largest) {
-    int end_of_warp = warp * C10_WARP_SIZE + C10_WARP_SIZE - 1;
+    int end_of_warp = warp * warpSize + warpSize - 1;
     warp_is_active = end_of_warp > desired_digit;
     thread_is_active = tidx > desired_digit;
   } else {
-    int start_of_warp = warp * C10_WARP_SIZE;
+    int start_of_warp = warp * warpSize;
     warp_is_active = start_of_warp < desired_digit;
     thread_is_active = tidx < desired_digit;
   }
@@ -436,19 +436,20 @@ __global__ void computeBlockwiseWithinKCounts(
     if (thread_is_active) {
       count = doLdg(counts + block_idx * RADIX_DIGITS + tidx);
     }
-    for (int offset = C10_WARP_SIZE / 2; offset > 0; offset /= 2) {
+    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
       count += WARP_SHFL_DOWN(count, offset);
     }
   }
 
-  constexpr int num_warps = RADIX_DIGITS / C10_WARP_SIZE;
-  __shared__ uint32_t warp_counts[num_warps];
-  if (tidx % C10_WARP_SIZE == 0) {
+  constexpr int SHMEM_SIZE = RADIX_DIGITS / C10_WARP_SIZE;
+  const int num_warps = RADIX_DIGITS / warpSize;
+  __shared__ uint32_t warp_counts[SHMEM_SIZE];
+  if (tidx % warpSize == 0) {
     warp_counts[warp] = count;
   }
   __syncthreads();
 #ifdef USE_ROCM
-  CUDA_KERNEL_ASSERT(RADIX_DIGITS < C10_WARP_SIZE * C10_WARP_SIZE);
+  CUDA_KERNEL_ASSERT(RADIX_DIGITS < warpSize * warpSize);
 #else
   static_assert(RADIX_DIGITS < C10_WARP_SIZE * C10_WARP_SIZE,
     "Assuming only 1 warp is needed for final reduction");

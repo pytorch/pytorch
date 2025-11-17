@@ -342,11 +342,17 @@ static inline int __host__ C10_WARP_SIZE_INTERNAL() {
 }
 
 static inline constexpr int __device__ C10_WARP_SIZE_INTERNAL() {
+// amdgcnspirv target needs a dynamic warp size, but we set it to
+// the largest possible size to correctly size static-sized arrays
+#if __SPIRV__
+  return 64;
+#else
 #if defined(__GFX9__)
   return 64;
 #else // __GFX9__
   return 32;
 #endif // __GFX9__
+#endif
 }
 #else // __HIPCC__
 static inline int C10_WARP_SIZE_INTERNAL() {

@@ -24,7 +24,7 @@ __device__ void inclusiveBinaryPrefixScan(T* smem, bool in, T* out, BinaryFuncti
   T carry = __popc(vote);
 #endif
 
-  int warp = threadIdx.x / C10_WARP_SIZE;
+  int warp = threadIdx.x / warpSize;
 
   // Per each warp, write out a value
   if (getLaneId() == 0) {
@@ -37,7 +37,7 @@ __device__ void inclusiveBinaryPrefixScan(T* smem, bool in, T* out, BinaryFuncti
   // warp shuffle scan for CC 3.0+
   if (threadIdx.x == 0) {
     int current = 0;
-    for (int i = 0; i < blockDim.x / C10_WARP_SIZE; ++i) {
+    for (int i = 0; i < blockDim.x / warpSize; ++i) {
       T v = smem[i];
       smem[i] = binop(smem[i], current);
       current = binop(current, v);
@@ -68,7 +68,7 @@ __device__ void exclusiveBinaryPrefixScan(T* smem, bool in, T* out, T* carry, Bi
   *out -= (T) in;
 
   // The outgoing carry for all threads is the last warp's sum
-  *carry = smem[at::ceil_div<int>(blockDim.x, C10_WARP_SIZE) - 1];
+  *carry = smem[at::ceil_div<int>(blockDim.x, warpSize) - 1];
 
   if (KillWARDependency) {
     __syncthreads();

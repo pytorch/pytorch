@@ -231,7 +231,7 @@ __global__ void coalesceValuesKernel(
       #pragma unroll
       for (int ii = 0; ii < SZ; ii++)
       {
-        int featureDim = startFeature + ii * C10_WARP_SIZE;
+        int featureDim = startFeature + ii * warpSize;
         if (featureDim < stride)
         {
           tmp[ii] += static_cast<Acctype>(values[valueRow + featureDim]);
@@ -241,7 +241,7 @@ __global__ void coalesceValuesKernel(
     #pragma unroll
     for (int ii = 0; ii < SZ; ii++)
     {
-      int featureDim = startFeature + ii * C10_WARP_SIZE;
+      int featureDim = startFeature + ii * warpSize;
       if (featureDim < stride)
       {
         newValues[newValueRow + featureDim] = static_cast<Dtype>(tmp[ii]);
@@ -297,7 +297,7 @@ __global__ void coalesceValuesKernel(
       #pragma unroll
       for (int ii = 0; ii < SZ; ii++)
       {
-        int featureDim = startFeature + ii * C10_WARP_SIZE;
+        int featureDim = startFeature + ii * warpSize;
         if (featureDim < stride)
         {
           tmp[ii] |= values[valueRow + featureDim];
@@ -307,7 +307,7 @@ __global__ void coalesceValuesKernel(
     #pragma unroll
     for (int ii = 0; ii < SZ; ii++)
     {
-      int featureDim = startFeature + ii * C10_WARP_SIZE;
+      int featureDim = startFeature + ii * warpSize;
       if (featureDim < stride)
       {
         newValues[newValueRow + featureDim] = tmp[ii];

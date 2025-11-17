@@ -204,7 +204,7 @@ __device__ WelfordDataLN compute_stats(
       }
     }
     // intra-warp reduction
-    for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
+    for (int offset = (warpSize >> 1); offset > 0; offset >>= 1) {
         WelfordDataLN wdB{WARP_SHFL_DOWN(wd.mean, offset), WARP_SHFL_DOWN(wd.sigma2, offset), WARP_SHFL_DOWN(wd.count, offset)};
         wd = cuWelfordCombine<rms_norm>(wd, wdB);
     }
@@ -818,7 +818,11 @@ __launch_bounds__(block_dim_x * block_dim_y)
   } else {
     // The caller requested a full reduction so we must reduce across
     // warps using shared memory and warp shuffles.
+#ifdef USE_ROCM
+    CUDA_KERNEL_ASSERT(rows_per_thread_y <= warpSize);
+#else
     static_assert(rows_per_thread_y <= C10_WARP_SIZE);
+#endif
     alignas(sizeof(double)) extern __shared__ char s_data1[];
     T_ACC* s_data_typed = reinterpret_cast<T_ACC*>(&s_data1);
     T_ACC* s_dg;
@@ -834,11 +838,15 @@ __launch_bounds__(block_dim_x * block_dim_y)
     // Load transposed so that a warp holds an entire column
     // Because block_dim_x != block_dim_y in the general case, we need
     // some code to handle the general case.
+#ifdef USE_ROCM
+    CUDA_KERNEL_ASSERT(block_dim_x * block_dim_y % warpSize == 0);
+#else
     static_assert(block_dim_x * block_dim_y % C10_WARP_SIZE == 0);
-    constexpr int warps_available_to_reduce = block_dim_x * block_dim_y / C10_WARP_SIZE;
+#endif
+    const int warps_available_to_reduce = block_dim_x * block_dim_y / warpSize;
     int thread_id = threadIdx.y * block_dim_x + threadIdx.x;
-    int warp_id = thread_id / C10_WARP_SIZE;
-    int lane_id = thread_id & (C10_WARP_SIZE - 1);
+    int warp_id = thread_id / warpSize;
+    int lane_id = thread_id & (warpSize - 1);
     #pragma unroll
     for (int i = warp_id; i < block_dim_x; i += warps_available_to_reduce) {
       T_ACC reg_db, reg_dg;

@@ -24,15 +24,15 @@ __global__ static void compute_cuda_kernel(
       cumsum_ptr[size - 1]);
 
   int64_t idx = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
-  int64_t stride = (blockDim.x * gridDim.x) / C10_WARP_SIZE;
-  int warp_id = idx / C10_WARP_SIZE;
-  int tid_in_warp = idx % C10_WARP_SIZE;
+  int64_t stride = (blockDim.x * gridDim.x) / warpSize;
+  int warp_id = idx / warpSize;
+  int tid_in_warp = idx % warpSize;
   for (int64_t i = warp_id; i < size; i += stride) {
     int64_t end = cumsum_ptr[i];
     index_t repeat = repeat_ptr[i];
     CUDA_KERNEL_ASSERT(repeat >= 0);
     int64_t start = end - repeat;
-    for (int64_t j = start + tid_in_warp; j < end; j += C10_WARP_SIZE) {
+    for (int64_t j = start + tid_in_warp; j < end; j += warpSize) {
       result_ptr[j] = i;
     }
   }
