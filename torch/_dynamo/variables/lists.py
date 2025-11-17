@@ -1356,7 +1356,7 @@ class NamedTupleVariable(UserDefinedTupleVariable):
     def __init__(
         self,
         items: list[VariableTracker],
-        tuple_cls: type,
+        tuple_cls: type[tuple],
         dynamic_attributes: Optional[dict[str, VariableTracker]] = None,
         **kwargs,
     ) -> None:
@@ -1382,7 +1382,7 @@ class NamedTupleVariable(UserDefinedTupleVariable):
             dummy_value = tuple_cls([None] * num_fields)
         else:
             # Namedtuple: positional arguments
-            dummy_value = tuple_cls(*([None] * num_fields))
+            dummy_value = tuple_cls(*([None] * num_fields))  # type: ignore[arg-type]
 
         super().__init__(
             value=dummy_value,
@@ -1489,7 +1489,7 @@ class NamedTupleVariable(UserDefinedTupleVariable):
         if self.is_structseq():
             create_fn = self.tuple_cls
         else:
-            create_fn = self.tuple_cls._make
+            create_fn = self.tuple_cls._make  # type: ignore[attr-defined]
 
         codegen.add_push_null(
             lambda: codegen.append_output(
