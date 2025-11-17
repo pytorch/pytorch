@@ -1905,8 +1905,8 @@ class Graph {
   std::unordered_map<std::string, SymInt> sym_int_values;
   std::unordered_map<std::string, SymBool> sym_bool_values;
   bool is_single_tensor_return = false;
-  std::unordered_map<std::string, CustomObjArgument> custom_obj_values = {};
-  std::unordered_map<std::string, SymFloat> sym_float_values = {};
+  std::unordered_map<std::string, CustomObjArgument> custom_obj_values;
+  std::unordered_map<std::string, SymFloat> sym_float_values;
 
  public:
 
@@ -3027,8 +3027,8 @@ class GraphModule {
   Graph graph;
   GraphSignature signature;
   std::vector<ModuleCallEntry> module_call_graph;
-  std::unordered_map<std::string, std::string> metadata = {};
-  std::unordered_map<std::string, NamedTupleDef> treespec_namedtuple_fields = {};
+  std::unordered_map<std::string, std::string> metadata;
+  std::unordered_map<std::string, NamedTupleDef> treespec_namedtuple_fields;
 
  public:
 
@@ -3109,9 +3109,9 @@ class ExportedProgram {
   std::unordered_map<std::string, int64_t> opset_version;
   std::unordered_map<std::string, RangeConstraint> range_constraints;
   SchemaVersion schema_version;
-  std::vector<std::string> verifiers = {};
+  std::vector<std::string> verifiers;
   std::string torch_version = "<=2.4";
-  std::vector<std::string> guards_code = {};
+  std::vector<std::string> guards_code;
 
  public:
 
