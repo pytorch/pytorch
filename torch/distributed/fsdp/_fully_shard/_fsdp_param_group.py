@@ -445,6 +445,9 @@ class FSDPParamGroup:
             logger.debug("%s", self._with_fqn("FSDP::pre_forward"))
         with record_function(self._with_fqn("FSDP::pre_forward")):
             self._training_state = TrainingState.FORWARD
+            # Update training_state on all FSDPParams
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.training_state = TrainingState.FORWARD
             self.unshard(self.unshard_async_op)
             self.wait_for_unshard()
             args, kwargs = self._register_post_backward_hook(args, kwargs)
@@ -464,6 +467,9 @@ class FSDPParamGroup:
                 self.reshard()
                 self._record_post_forward()
             self._training_state = TrainingState.IDLE
+            # Update training_state on all FSDPParams
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.training_state = TrainingState.IDLE
             return output
 
     def _record_post_forward(self) -> None:
@@ -487,6 +493,9 @@ class FSDPParamGroup:
             logger.debug("%s", self._with_fqn("FSDP::pre_backward"))
         with record_function(self._with_fqn("FSDP::pre_backward")):
             self._training_state = TrainingState.PRE_BACKWARD
+            # Update training_state on all FSDPParams
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.training_state = TrainingState.PRE_BACKWARD
             self.unshard(self.unshard_async_op)  # no-op if prefetched
             self.wait_for_unshard()
             if default_prefetch and not compiled_autograd_enabled():
@@ -498,6 +507,9 @@ class FSDPParamGroup:
         if not compiled_autograd_enabled():
             logger.debug("%s", self._with_fqn("FSDP::post_backward"))
         self._training_state = TrainingState.POST_BACKWARD
+        # Update training_state on all FSDPParams
+        for fsdp_param in self.fsdp_params:
+            fsdp_param.training_state = TrainingState.POST_BACKWARD
         with record_function(self._with_fqn("FSDP::post_backward_accumulate")):
             for fsdp_param in self.fsdp_params:
                 fsdp_param.accumulate_unsharded_grad_if_needed()
@@ -697,10 +709,16 @@ class FSDPParamGroup:
     def use_training_state(self, training_state: TrainingState):
         old_training_state = self._training_state
         self._training_state = training_state
+        # Update training_state on all FSDPParams
+        for fsdp_param in self.fsdp_params:
+            fsdp_param.training_state = training_state
         try:
             yield
         finally:
             self._training_state = old_training_state
+            # Restore training_state on all FSDPParams
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.training_state = old_training_state
 
     # Hook Registration #
     def _register_post_backward_hook(
