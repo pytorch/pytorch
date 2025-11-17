@@ -95,6 +95,19 @@ set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%
 
 :cuda_build_end
 
+:: OpenReg builds require CPU-only configuration (no CUDA/ROCm/XPU)
+:: OpenReg uses CPU to simulate an accelerator backend for testing
+if not "%BUILD_ENVIRONMENT%"=="" (
+  echo %BUILD_ENVIRONMENT% | findstr /i "openreg" >nul
+  if not errorlevel 1 (
+    echo Configuring OpenReg build with CPU-only settings
+    set USE_CUDA=0
+    set USE_ROCM=0
+    set USE_XPU=0
+    set BUILD_TEST=0
+  )
+)
+
 set DISTUTILS_USE_SDK=1
 set PATH=%TMP_DIR_WIN%\bin;C:\Program Files\CMake\bin;%PATH%
 

@@ -231,6 +231,15 @@ if [[ "${BUILD_ENVIRONMENT}" == *-pch* ]]; then
     export USE_PRECOMPILED_HEADERS=1
 fi
 
+# OpenReg builds require CPU-only configuration (no CUDA/ROCm/XPU)
+# OpenReg uses CPU to simulate an accelerator backend for testing
+if [[ "${BUILD_ENVIRONMENT}" == *openreg* ]]; then
+  export USE_CUDA=0
+  export USE_ROCM=0
+  export USE_XPU=0
+  export BUILD_TEST=0  # Skip C++ tests for faster builds
+fi
+
 if [[ "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
   export BUILD_STATIC_RUNTIME_BENCHMARK=ON
 fi

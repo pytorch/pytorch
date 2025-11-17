@@ -2003,6 +2003,10 @@ elif [[ "${TEST_CONFIG}" == "b200-symm-mem" ]]; then
   test_h100_symm_mem
 elif [[ "${TEST_CONFIG}" == h100_cutlass_backend ]]; then
   test_h100_cutlass_backend
+elif [[ "${TEST_CONFIG}" == openreg ]]; then
+  # OpenReg tests - run test_openreg which builds and tests the OpenReg C++ extension
+  # OpenReg is a CPU-based test backend that simulates an accelerator
+  python test/run_test.py -v test_openreg
 else
   install_torchvision
   install_monkeytype
