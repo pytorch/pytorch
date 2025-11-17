@@ -70,7 +70,7 @@ class TestSubprocess(TestCase):
         torch._dynamo.reset()
         FxCompile._reset_stats()
 
-        TestCase.setUp(self)
+        super().setUp()
 
         self._stack = contextlib.ExitStack()
         self._stack.enter_context(
@@ -182,7 +182,7 @@ class TestSubprocess(TestCase):
         @torch.compile(fullgraph=True, backend="inductor")
         def model_add(x, y):
             out = x
-            for i in range(500):
+            for _ in range(500):
                 out = torch.add(out, y)
             return out
 

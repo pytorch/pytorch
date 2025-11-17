@@ -27,10 +27,10 @@ class TestGraphBreakRegistryLinter(unittest.TestCase):
             json.dump({}, f)
 
         self.callsite_file = self.test_data_dir / "callsite_test.py"
-        callsite_content = """from torch._dynamo.exc import unimplemented_v2
+        callsite_content = """from torch._dynamo.exc import unimplemented
 
 def test(self):
-    unimplemented_v2(
+    unimplemented(
         gb_type="testing",
         context="testing",
         explanation="testing",
@@ -101,9 +101,9 @@ def test(self):
         with open(self.registry_path, "w") as f:
             json.dump(registry_data, f, indent=2)
 
-        renamed_callsite_content = """from torch._dynamo.exc import unimplemented_v2
+        renamed_callsite_content = """from torch._dynamo.exc import unimplemented
 def test(self):
-    unimplemented_v2(gb_type="renamed_testing", context="testing", explanation="testing", hints=["testing"])
+    unimplemented(gb_type="renamed_testing", context="testing", explanation="testing", hints=["testing"])
 """
         with open(self.callsite_file, "w") as f:
             f.write(renamed_callsite_content)
@@ -168,9 +168,9 @@ def test(self):
         with open(self.registry_path, "w") as f:
             json.dump(registry_data, f, indent=2)
 
-        updated_callsite_content = """from torch._dynamo.exc import unimplemented_v2
+        updated_callsite_content = """from torch._dynamo.exc import unimplemented
 def test(self):
-    unimplemented_v2(gb_type="testing", context="new_context", explanation="new_explanation", hints=["new_hint"])
+    unimplemented(gb_type="testing", context="new_context", explanation="new_explanation", hints=["new_hint"])
 """
         with open(self.callsite_file, "w") as f:
             f.write(updated_callsite_content)
@@ -255,9 +255,9 @@ def test(self):
         with open(self.registry_path, "w") as f:
             json.dump(registry_data, f, indent=2)
 
-        new_callsite_content = """from torch._dynamo.exc import unimplemented_v2
+        new_callsite_content = """from torch._dynamo.exc import unimplemented
 def test(self):
-    unimplemented_v2(
+    unimplemented(
         gb_type="completely_new_testing",
         context="completely_new_context",
         explanation="completely_new_explanation",
@@ -330,11 +330,11 @@ def test(self):
 
             init_py.touch()
 
-            dynamic_hints_callsite = """from torch._dynamo.exc import unimplemented_v2
+            dynamic_hints_callsite = """from torch._dynamo.exc import unimplemented
 from torch._dynamo import graph_break_hints
 
 def test(self):
-    unimplemented_v2(
+    unimplemented(
         gb_type="testing_with_graph_break_hints",
         context="testing_with_graph_break_hints",
         explanation="testing_with_graph_break_hints",

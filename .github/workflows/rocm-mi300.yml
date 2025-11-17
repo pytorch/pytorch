@@ -6,6 +6,7 @@ on:
       - main
       - release/*
     tags:
+      - ciflow/rocm/*
       - ciflow/rocm-mi300/*
   workflow_dispatch:
   schedule:
@@ -45,7 +46,6 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-noble-rocm-py3.12-mi300
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
-      sync-tag: rocm-build
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.gfx942.1" },

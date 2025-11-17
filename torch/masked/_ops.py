@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import ParamSpec, TypeAlias
+from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING, TypeAlias, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 from torch import sym_float, Tensor
@@ -43,7 +44,8 @@ def _apply_docstring_templates(func: Callable[_P, _T]) -> Callable[_P, _T]:
         warnings.warn(
             f"No documentation string available for {func.__name__}."
             " PyTorch team should run `python tools/update_masked_docs.py`"
-            " to generate the missing docstrings."
+            " to generate the missing docstrings.",
+            stacklevel=2,
         )
     else:
         func.__doc__ = doc_string
@@ -427,7 +429,7 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
             return torch.tensor(-torch.inf, dtype=dtype, device=device)
         elif torch.is_signed(input) or dtype == torch.uint8:
             return torch.tensor(torch.iinfo(dtype).min, dtype=dtype, device=device)
-    elif op_name in {"logsumexp"}:
+    elif op_name == "logsumexp":
         if torch.is_floating_point(input):
             return torch.tensor(-torch.inf, dtype=dtype, device=device)
         elif torch.is_complex(input):
@@ -482,6 +484,7 @@ def _canonical_dim(dim: DimOrDims, ndim: int) -> tuple[int, ...]:
             raise IndexError(
                 f"Dimension out of range (expected to be in range of [{-ndim}, {ndim - 1}], but got {d})"
             )
+        # pyrefly: ignore [bad-argument-type]
         dims.append(d % ndim)
     return tuple(sorted(dims))
 
@@ -1014,6 +1017,7 @@ def _combine_input_and_mask(
 
     class Combine(torch.autograd.Function):
         @staticmethod
+        # pyrefly: ignore [bad-override]
         def forward(ctx, input, mask):
             """Return input with masked-out elements eliminated for the given operations."""
             ctx.save_for_backward(mask)
@@ -1024,6 +1028,7 @@ def _combine_input_and_mask(
             return helper(input, mask)
 
         @staticmethod
+        # pyrefly: ignore [bad-override]
         def backward(ctx, grad_output):
             (mask,) = ctx.saved_tensors
             grad_data = (
@@ -1398,15 +1403,18 @@ elements, have ``nan`` values.
     if input.layout == torch.strided:
         if mask is None:
             # TODO: compute count analytically
+            # pyrefly: ignore [no-matching-overload]
             count = sum(
                 torch.ones(input.shape, dtype=torch.int64, device=input.device),
                 dim,
                 keepdim=keepdim,
             )
+            # pyrefly: ignore [no-matching-overload]
             total = sum(input, dim, keepdim=keepdim, dtype=dtype)
         else:
             inmask = _input_mask(input, mask=mask)
             count = inmask.sum(dim=dim, keepdim=bool(keepdim))
+            # pyrefly: ignore [no-matching-overload]
             total = sum(input, dim, keepdim=keepdim, dtype=dtype, mask=inmask)
         return total / count
     elif input.layout == torch.sparse_csr:
@@ -1617,15 +1625,18 @@ def _std_var(
     if input.layout == torch.strided:
         if mask is None:
             # TODO: compute count analytically
+            # pyrefly: ignore [no-matching-overload]
             count = sum(
                 torch.ones(input.shape, dtype=torch.int64, device=input.device),
                 dim,
                 keepdim=True,
             )
+            # pyrefly: ignore [no-matching-overload]
             sample_total = sum(input, dim, keepdim=True, dtype=dtype)
         else:
             inmask = _input_mask(input, mask=mask)
             count = inmask.sum(dim=dim, keepdim=True)
+            # pyrefly: ignore [no-matching-overload]
             sample_total = sum(input, dim, keepdim=True, dtype=dtype, mask=inmask)
         # TODO: replace torch.subtract/divide/square/maximum with
         # masked subtract/divide/square/maximum when these will be
@@ -1633,6 +1644,7 @@ def _std_var(
         sample_mean = torch.divide(sample_total, count)
         x = torch.subtract(input, sample_mean)
         if mask is None:
+            # pyrefly: ignore [no-matching-overload]
             total = sum(x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype)
         else:
             total = sum(

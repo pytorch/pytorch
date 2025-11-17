@@ -5,10 +5,11 @@ import functools
 import inspect
 import logging
 import math
+import sys
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -24,6 +25,7 @@ from torch._export.passes.lift_constants_pass import ConstantAttrMap
 from torch._export.utils import _fakify_params_buffers
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
@@ -101,6 +103,7 @@ class _KeyPathTrie:
             assert len(kp) > 0
             k, *kp = kp  # type: ignore[assignment]
             node = node[k]
+        # pyrefly: ignore [bad-return]
         return node, kp
 
 
@@ -139,6 +142,7 @@ def key_path_to_source(
         source: Source = LocalSource("args")
     else:
         source, kp = sourced_prefixes.get(kp)
+
     for k in kp:
         if isinstance(k, SequenceKey):
             source = GetItemSource(source, k.idx)
@@ -354,10 +358,12 @@ def _override_builtin_ops():
     original_min = builtins.min
     original_pow = math.pow
 
+    # pyrefly: ignore [bad-assignment]
     builtins.max = functools.partial(
         _tensor_min_max, real_callable=original_max, tensor_callable=torch.maximum
     )
 
+    # pyrefly: ignore [bad-assignment]
     builtins.min = functools.partial(
         _tensor_min_max, real_callable=original_min, tensor_callable=torch.minimum
     )
@@ -417,6 +423,14 @@ def make_fake_inputs(
         if isinstance(nn_module.forward, functools.partial):
             # functools handles nesting by itself, no need to recurse
             code = nn_module.forward.func.__code__
+        elif (
+            sys.version_info >= (3, 14)
+            and (fwd := getattr(nn_module.forward, "__func__", None))
+            and isinstance(fwd, functools.partial)
+        ):
+            # functools.partial is now a method descriptor:
+            # https://docs.python.org/3/whatsnew/3.14.html#changes-in-the-python-api
+            code = fwd.func.__code__
         else:
             code = nn_module.forward.__code__
         co_fields = {
@@ -942,7 +956,9 @@ def _fakify_script_objects(
 
     try:
         for obj, fqns in constant_attrs.items():
-            if torch._library.fake_class_registry._is_script_object(obj):
+            if torch._library.fake_class_registry._is_script_object(
+                obj
+            ) or is_opaque_type(obj):
                 fake_script_obj = _maybe_fakify_obj(obj)
                 for fqn in fqns:
                     cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
@@ -1083,6 +1099,7 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
 
                 def run():
                     # Run sequence.
+                    # pyrefly: ignore [index-error]
                     t = args[0]
                     for _method, _args in sequence:
                         t = _method(t, *_args)
