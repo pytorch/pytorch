@@ -8,7 +8,7 @@
 
 #include <ATen/core/function.h>
 #include <c10/util/Exception.h>
-#include <c10/util/FileSystem.h>
+#include <c10/util/StringUtil.h>
 #include <c10/util/env.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/error_report.h>
@@ -113,7 +113,12 @@ void JitLoggingConfig::parse() {
 bool is_enabled(const char* cfname, JitLoggingLevels level) {
   const auto& files_to_levels =
       JitLoggingConfig::getInstance().getFilesToLevels();
-  const auto fname_no_ext = c10::filesystem::path(cfname).stem().string();
+  std::string fname{cfname};
+  fname = c10::detail::StripBasename(fname);
+  const auto end_index = fname.find_last_of('.') == std::string::npos
+      ? fname.size()
+      : fname.find_last_of('.');
+  const auto fname_no_ext = fname.substr(0, end_index);
 
   const auto it = files_to_levels.find(fname_no_ext);
   if (it == files_to_levels.end()) {
@@ -154,9 +159,9 @@ std::string jit_log_prefix(
     int l,
     const std::string& in_str) {
   std::stringstream prefix_ss;
-  prefix_ss << '[';
-  prefix_ss << level << ' ';
-  prefix_ss << c10::filesystem::path(fn).filename() << ':';
+  prefix_ss << ‘[’;
+  prefix_ss << level << ‘ ’;
+  prefix_ss << c10::detail::StripBasename(std::string(fn)) << ‘:’;
   prefix_ss << std::setfill('0') << std::setw(3) << l;
   prefix_ss << "] ";
 
