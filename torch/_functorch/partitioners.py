@@ -1076,17 +1076,13 @@ def default_partition(
     saved_sym_nodes = []
 
     def is_tensor(node):
-        # This node returns a single tensor output
-        return (
-            "tensor_meta" in node.meta
-            and node.op == "call_function"
-            and isinstance(node.meta.get("val"), torch._subclasses.FakeTensor)
+        return "tensor_meta" in node.meta or isinstance(
+            node.meta.get("val"), torch._subclasses.FakeTensor
         )
 
     def is_multi_output(node):
         return (
-            not is_tensor(node)
-            and all(user.target == operator.getitem for user in node.users)
+            all(user.target == operator.getitem for user in node.users)
             and len(node.users) > 0
         )
 
@@ -1127,8 +1123,9 @@ def default_partition(
             )
             saved_values.append(node)
             continue
-        if node.op == "call_function":
-            assert is_tensor(node), f"{node}"
+        assert is_tensor(node) or not node.op == "call_function", (
+            f"Expected {node} to be a tensor"
+        )
         backward_usages = [n for n in node.users if n.name not in forward_node_names]
         if all(is_sym_node(n) for n in backward_usages):
             # If we have a tensor in the forward, where only its sizes/strides are needed in the backward,
@@ -1159,6 +1156,17 @@ def default_partition(
         num_fwd_outputs=num_fwd_outputs,
         static_lifetime_input_nodes=static_lifetime_input_nodes,
     )
+
+    # Run DCE while overriding the definition of is_impure_node
+    def is_not_collective(node):
+        if node.target is torch.ops._c10d_functional.wait_tensor.default:
+            return False
+        if node.target is torch.ops._c10d_functional.all_gather_into_tensor.default:
+            return False
+        return True
+
+    fw_module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
+    bw_module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
 
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
