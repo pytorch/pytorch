@@ -12,6 +12,10 @@ template <typename, typename...>
 class class_;
 }
 
+namespace torch::utils {
+class PyObjectPreservation;
+}
+
 namespace c10 {
 class intrusive_ptr_target;
 namespace raw {
@@ -33,6 +37,8 @@ constexpr uint64_t kImpracticallyHugeWeakReferenceCount =
 constexpr uint64_t kReferenceCountOne = 1;
 constexpr uint64_t kWeakReferenceCountOne = (kReferenceCountOne << 32);
 constexpr uint64_t kUniqueRef = (kReferenceCountOne | kWeakReferenceCountOne);
+// Indicates whether the object has a PyObject wrapper.
+constexpr uint64_t kHasPyObject = (uint64_t(1) << 63);
 
 template <class TTarget>
 struct intrusive_target_default_null_type final {
@@ -55,7 +61,11 @@ inline uint32_t refcount(uint64_t combined_refcount) {
 }
 
 inline uint32_t weakcount(uint64_t combined_refcount) {
-  return static_cast<uint32_t>(combined_refcount >> 32);
+  return static_cast<uint32_t>((combined_refcount & ~kHasPyObject) >> 32);
+}
+
+inline bool has_pyobject(uint64_t combined_refcount) {
+  return (combined_refcount & kHasPyObject) != 0;
 }
 
 // The only requirement for refcount increment is that it happens-before
@@ -64,12 +74,6 @@ inline uint64_t atomic_combined_refcount_increment(
     std::atomic<uint64_t>& combined_refcount,
     uint64_t inc) {
   return combined_refcount.fetch_add(inc, std::memory_order_relaxed) + inc;
-}
-
-inline uint32_t atomic_refcount_increment(
-    std::atomic<uint64_t>& combined_refcount) {
-  return detail::refcount(atomic_combined_refcount_increment(
-      combined_refcount, kReferenceCountOne));
 }
 
 inline uint32_t atomic_weakcount_increment(
@@ -98,6 +102,11 @@ inline uint32_t atomic_weakcount_decrement(
   return detail::weakcount(atomic_combined_refcount_decrement(
       combined_refcount, kWeakReferenceCountOne));
 }
+
+template <class T, class = void>
+struct TargetTraits {
+  static constexpr bool can_have_pyobject = false;
+};
 
 } // namespace detail
 
@@ -155,6 +164,23 @@ class C10_API intrusive_ptr_target {
   // we can atomically operate on both at the same time for performance
   // and defined behaviors.
   //
+  // Note [PyObject preservation for Tensor and Storages]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // intrusive_ptr has special support for preserving PyObject wrappers
+  // for TensorImpl and StorageImpl. The most significant bit (kHasPyObject) of
+  // the combined_refcount_ is used to indicate whether the object has a
+  // PyObject wrapper.
+  //
+  //   - The PyObject, if it exists, holds a strong reference to the
+  //     intrusive_ptr_target.
+  //
+  //   - When the refcount goes from 1 to 2, we incref the PyObject.
+  //
+  //   - When the refcount goes from 2 to 1, we decref the PyObject.
+  //
+  // In other words, the intrusive_ptr keeps the PyObject alive as long as there
+  // are other C++ references to the intrusive_ptr_target.
+
   mutable std::atomic<uint64_t> combined_refcount_;
   static_assert(sizeof(std::atomic<uint64_t>) == 8);
   static_assert(alignof(std::atomic<uint64_t>) == 8);
@@ -171,6 +197,8 @@ class C10_API intrusive_ptr_target {
 
   template <typename T>
   friend struct ExclusivelyOwnedTensorTraits;
+
+  friend class torch::utils::PyObjectPreservation;
 
  protected:
   // protected destructor. We never want to destruct intrusive_ptr_target*
@@ -255,6 +283,16 @@ class C10_API intrusive_ptr_target {
    */
   virtual void release_resources() {}
 
+  /**
+   * These two methods are called when the refcount transitions between one
+   * and two and the object has a PyObject wrapper.
+   */
+  virtual void incref_pyobject() const {}
+  virtual void decref_pyobject() const {}
+  virtual bool try_incref_pyobject() const {
+    return false;
+  }
+
   uint32_t refcount(std::memory_order order = std::memory_order_relaxed) const {
     return detail::refcount(combined_refcount_.load(order));
   }
@@ -264,6 +302,19 @@ class C10_API intrusive_ptr_target {
     return detail::weakcount(combined_refcount_.load(order));
   }
 };
+
+namespace detail {
+
+#ifndef C10_MOBILE
+template <>
+struct TargetTraits<c10::intrusive_ptr_target> {
+  // A generic intrusive_ptr<intrusive_ptr_target> may actually be a TensorImpl
+  // or StorageImpl, so we have to allow for PyObject support.
+  static constexpr bool can_have_pyobject = true;
+};
+#endif
+
+} // namespace detail
 
 template <class TTarget, class NullType>
 class weak_intrusive_ptr;
@@ -314,18 +365,34 @@ class intrusive_ptr final {
 
   void retain_() {
     if (target_ != NullType::singleton()) {
-      uint32_t new_refcount =
-          detail::atomic_refcount_increment(target_->combined_refcount_);
+      uint64_t combined = detail::atomic_combined_refcount_increment(
+          target_->combined_refcount_, detail::kReferenceCountOne);
+      uint32_t new_refcount = detail::refcount(combined);
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           new_refcount != 1,
           "intrusive_ptr: Cannot increase refcount after it reached zero.");
+
+      if constexpr (detail::TargetTraits<TTarget>::can_have_pyobject) {
+        // If the refcount transitioned from 1 to 2, we need to incref the
+        // PyObject. In other words, we need to ensure that the PyObject stays
+        // alive now that we have a C++ reference to this object in addition to
+        // the PyObject itself.
+        if (C10_UNLIKELY(
+                detail::has_pyobject(combined) &&
+                detail::refcount(combined) == 2)) {
+          target_->incref_pyobject();
+        }
+      } else {
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+            !detail::has_pyobject(combined),
+            "TargetTraits indicates that type cannot have PyObject, but refcount has PyObject bit set.");
+      }
     }
   }
 
   void reset_() noexcept {
     if (target_ != NullType::singleton()) {
-      if (target_->combined_refcount_.load(std::memory_order_acquire) ==
-          detail::kUniqueRef) {
+      if (is_uniquely_owned()) {
         // Both counts are 1, so there are no weak references and
         // we are releasing the last strong reference. No other
         // threads can observe the effects of this target_ deletion
@@ -337,9 +404,10 @@ class intrusive_ptr final {
 
       auto combined_refcount = detail::atomic_combined_refcount_decrement(
           target_->combined_refcount_, detail::kReferenceCountOne);
-      if (detail::refcount(combined_refcount) == 0) {
-        bool should_delete =
-            (combined_refcount == detail::kWeakReferenceCountOne);
+      uint32_t new_refcount = detail::refcount(combined_refcount);
+      bool has_pyobject = detail::has_pyobject(combined_refcount);
+      if (new_refcount == 0) {
+        bool should_delete = detail::weakcount(combined_refcount) == 1;
         // See comment above about weakcount. As long as refcount>0,
         // weakcount is one larger than the actual number of weak references.
         // So we need to decrement it here.
@@ -356,6 +424,18 @@ class intrusive_ptr final {
         if (should_delete) {
           delete target_;
         }
+      } else if constexpr (detail::TargetTraits<TTarget>::can_have_pyobject) {
+        // If the refcount transitioned from 2 to 1, we need to decref the
+        // PyObject. In other words, we don't want to keep the PyObject alive if
+        // there are no C++ references to this object other than the PyObject
+        // itself.
+        if (C10_UNLIKELY(has_pyobject && new_refcount == 1)) {
+          target_->decref_pyobject();
+        }
+      } else {
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+            !has_pyobject,
+            "TargetTraits indicates that type cannot have PyObject, but refcount has PyObject bit set.");
       }
     }
   }
@@ -520,6 +600,16 @@ class intrusive_ptr final {
 
   bool unique() const noexcept {
     return use_count() == 1;
+  }
+
+  /**
+   * Stronger than unique() in that it must not have any weakrefs as well.
+   */
+  bool is_uniquely_owned() const noexcept {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(target_ != NullType::singleton());
+    uint64_t combined =
+        target_->combined_refcount_.load(std::memory_order_acquire);
+    return (combined & ~detail::kHasPyObject) == detail::kUniqueRef;
   }
 
   /**
@@ -932,6 +1022,7 @@ class weak_intrusive_ptr final {
     if (target_ == NullType::singleton()) {
       return intrusive_ptr<TTarget, NullType>();
     } else {
+      bool increfed = false;
       auto combined_refcount =
           target_->combined_refcount_.load(std::memory_order_relaxed);
       do {
@@ -940,11 +1031,30 @@ class weak_intrusive_ptr final {
           // Return nullptr.
           return intrusive_ptr<TTarget, NullType>();
         }
+        if constexpr (detail::TargetTraits<TTarget>::can_have_pyobject) {
+          if (detail::has_pyobject(combined_refcount) &&
+              detail::refcount(combined_refcount) == 1 && !increfed) {
+            // Object has a python wrapper with no other C++ references.
+            // We need to to incref the Python object before we acquire a
+            // strong reference to the C++ object to avoid a situation
+            // where the Python object is deallocated concurrently.
+            if (!target_->try_incref_pyobject()) {
+              return intrusive_ptr<TTarget, NullType>();
+            }
+            increfed = true;
+          }
+        }
       } while (!target_->combined_refcount_.compare_exchange_weak(
           combined_refcount,
           combined_refcount + detail::kReferenceCountOne,
           std::memory_order_acquire,
           std::memory_order_relaxed));
+
+      if constexpr (detail::TargetTraits<TTarget>::can_have_pyobject) {
+        if (increfed && detail::refcount(combined_refcount) != 1) {
+          target_->decref_pyobject();
+        }
+      }
 
       return intrusive_ptr<TTarget, NullType>(
           target_, raw::DontIncreaseRefcount{});
@@ -1060,7 +1170,18 @@ namespace intrusive_ptr {
 // NullType::singleton to this function
 inline void incref(intrusive_ptr_target* self) {
   if (self) {
-    detail::atomic_refcount_increment(self->combined_refcount_);
+    uint64_t combined = detail::atomic_combined_refcount_increment(
+        self->combined_refcount_, detail::kReferenceCountOne);
+
+#ifndef C10_MOBILE
+    if (C10_UNLIKELY(
+            detail::has_pyobject(combined) &&
+            detail::refcount(combined) == 2)) {
+      self->incref_pyobject();
+    }
+#else
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!detail::has_pyobject(combined));
+#endif
   }
 }
 
