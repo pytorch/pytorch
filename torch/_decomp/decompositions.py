@@ -4106,6 +4106,10 @@ def _nll_loss_forward(
     # self can be [N, C] or [C]
     # target can be [N] or []
 
+    # Ensure input is at least 2D to avoid gather errors
+    if self.dim() == 1:
+        self = self.unsqueeze(1)
+
     n_dims = self.dim()
     channel_dim = 1
     if n_dims < 2:
