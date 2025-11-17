@@ -1,6 +1,18 @@
+import operator
+
 import sympy
 
 import torch
+
+from ..pattern_matcher import (
+    CallFunction,
+    Ignored,
+    KeywordArg,
+    ListOf,
+    Match,
+    MULTIPLE,
+    PatternExpr,
+)
 
 
 def _fn(a: torch.Tensor, b: torch.Tensor, num_chunks: int, orig_out: torch.Tensor):
@@ -73,11 +85,29 @@ def split_mms(gm: torch.fx.GraphModule, min_m_size: int, num_chunks: int = 2):
 
         g.erase_node(mm_n)
 
+
 from torch._inductor.fx_passes.micro_pipeline_tp import _ReduceScatterMatch
 
-def split_mm_split_cat_rs(gm: torch.fx.GraphModule):
+
+def split_mm_split_cat_rs(
+    gm: torch.fx.GraphModule, min_m_size: int, num_chunks: int = 2
+):
     g = gm.graph
+    aten = torch.ops.aten
     c10d = torch.ops._c10d_functional
+
+    def reduce_scatter_template(inp: PatternExpr, users: int):
+        return CallFunction(
+            c10d.wait_tensor.default,
+            CallFunction(
+                c10d.reduce_scatter_tensor.default,
+                inp,
+                KeywordArg("reduce_op"),
+                Ignored(),
+                KeywordArg("group_name"),
+                _users=users,
+            ),
+        )
 
     # Matches funcol.reduce_scatter_tensor with scatter_dim > 0
     non_zero_dim_reduce_scatter_pattern_single_user = reduce_scatter_template(
@@ -117,7 +147,9 @@ def split_mm_split_cat_rs(gm: torch.fx.GraphModule):
                     )
                 )
     reduce_scatters = list(reversed(reduce_scatters))
-    process_mamtul_reduce_scatter(reduce_scatters)
+    for reduce_scatter in reduce_scatters:
+        process_matmul_reduce_scatter(reduce_scatter)
+
 
 def process_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     (
@@ -135,3 +167,4 @@ def process_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         reduce_scatter.scatter_dim,
         reduce_scatter.group_name,
     )
+    print(f"XXX process_matmul_reduce_scatter:{reduce_scatter}")

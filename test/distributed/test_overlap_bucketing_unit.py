@@ -620,6 +620,99 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             exactly=True,
         ).run(graph_str)
 
+    def test_mm_split_cat_rs(self):
+        # add_29: "bf16[2, 8192, 1024][8388608, 1024, 1]cuda:0"
+        # permute_87: "bf16[3584, 8192][1, 3584]cuda:0"
+        # view_198: "bf16[16384, 3584][3584, 1]cuda:0"
+        # mm_55: "bf16[16384, 8192][8192, 1]cuda:0" = torch.ops.aten.mm.default(view_198, permute_87)
+        # view_199: "bf16[2, 8192, 8192][67108864, 8192, 1]cuda:0" = torch.ops.aten.reshape.default(mm_55, [2, 8192, 8192]);  mm_55 = None
+        # split_33 = torch.ops.aten.split.Tensor(view_199, 1024, 2);  view_199 = None
+        # getitem_336: "bf16[2, 8192, 1024][67108864, 8192, 1]cuda:0" = split_33[0]
+        # getitem_337: "bf16[2, 8192, 1024][67108864, 8192, 1]cuda:0" = split_33[1]
+        # getitem_338: "bf16[2, 8192, 1024][67108864, 8192, 1]cuda:0" = split_33[2]
+        # getitem_339: "bf16[2, 8192, 1024][67108864, 8192, 1]cuda:0" = split_33[3]
+        # getitem_340: "bf16[2, 8192, 1024][67108864, 8192, 1]cuda:0" = split_33[4]
+        # getitem_341: "bf16[2, 8192, 1024][67108864, 8192, 1]cuda:0" = split_33[5]
+        # getitem_342: "bf16[2, 8192, 1024][67108864, 8192, 1]cuda:0" = split_33[6]
+        # getitem_343: "bf16[2, 8192, 1024][67108864, 8192, 1]cuda:0" = split_33[7];  split_33 = None
+        # cat_32: "bf16[16, 8192, 1024][8388608, 1024, 1]cuda:0" = torch.ops.aten.cat.default([getitem_336, getitem_337, getitem_338, getitem_339, getitem_340, getitem_341, getitem_342, getitem_343]);  getitem_336 = getitem_337 = getitem_338 = getitem_339 = getitem_340 = getitem_341 = getitem_342 = getitem_343 = None
+        # reduce_scatter_tensor_7: "bf16[2, 8192, 1024][8388608, 1024, 1]cuda:0" = torch.ops._c10d_functional.reduce_scatter_tensor.default(cat_32, 'sum', 8, '9');  cat_32 = None
+        # wait_tensor_121: "bf16[2, 8192, 1024][8388608, 1024, 1]cuda:0" = torch.ops._c10d_functional.wait_tensor.default(reduce_scatter_tensor_7);  reduce_scatter_tensor_7 = None
+        # add_31: "bf16[2, 8192, 1024][8388608, 1024, 1]cuda:0" = torch.ops.aten.add.Tensor(add_29, wait_tensor_121);  add_29 = wait_tensor_121 = None
+
+        def func(add_29, permute_87, view_198):
+            mm_55 = torch.ops.aten.mm.default(view_198, permute_87)
+            view_199 = torch.ops.aten.reshape.default(mm_55, [2, 8192, 8192])
+            mm_55 = None
+            split_33 = torch.ops.aten.split.Tensor(view_199, 1024, 2)
+            view_199 = None
+            getitem_336 = split_33[0]
+            getitem_337 = split_33[1]
+            getitem_338 = split_33[2]
+            getitem_339 = split_33[3]
+            getitem_340 = split_33[4]
+            getitem_341 = split_33[5]
+            getitem_342 = split_33[6]
+            getitem_343 = split_33[7]
+            split_33 = None
+            cat_32 = torch.ops.aten.cat.default(
+                [
+                    getitem_336,
+                    getitem_337,
+                    getitem_338,
+                    getitem_339,
+                    getitem_340,
+                    getitem_341,
+                    getitem_342,
+                    getitem_343,
+                ]
+            )
+            reduce_scatter_tensor_7 = (
+                torch.ops._c10d_functional.reduce_scatter_tensor.default(
+                    cat_32, "sum", 8, "9"
+                )
+            )
+            wait_tensor_121 = torch.ops._c10d_functional.wait_tensor.default(
+                reduce_scatter_tensor_7
+            )
+            add_31 = torch.ops.aten.add.Tensor(add_29, wait_tensor_121)
+            return add_31
+
+        def inps():
+            return (
+                torch.randn(2, 8192, 1024, dtype=torch.bfloat16, device=self.device),
+                torch.randn(3584, 8192, dtype=torch.bfloat16, device=self.device),
+                torch.randn(16384, 3584, dtype=torch.bfloat16, device=self.device),
+            )
+
+        fake_tensor_mode = FakeTensorMode()
+        with fake_tensor_mode:
+            ins = inps()
+            gm = make_fx(func)(*ins)
+
+        print(f"XXX GM:{gm.graph}")
+        from torch._inductor.fx_passes.decompose_mm import split_mm_split_cat_rs
+
+        split_mm_split_cat_rs(gm, 16384, 4)
+        graph_str = str(gm.graph)
+        FileCheck().check_count(
+            "torch.ops.aten.mm",
+            4,
+            exactly=True,
+        ).check_count(
+            "torch.ops.aten.split.Tensor",
+            4,
+            exactly=True,
+        ).check_count(
+            "torch.ops.aten.cat.default",
+            4,
+            exactly=True,
+        ).check_count(
+            "torch.ops._c10d_functional.reduce_scatter_tensor.default",
+            4,
+            exactly=True,
+        ).run(graph_str)
+
 
 if __name__ == "__main__":
     run_tests()
