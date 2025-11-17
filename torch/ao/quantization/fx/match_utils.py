@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import sys
 from collections.abc import Callable, Iterable
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch.ao.quantization.qconfig import QConfigAny
@@ -17,10 +17,10 @@ __all__: list[str] = []
 
 # TODO(future PR): the 1st argument is typed as `List[Node]`, but a better type
 # would be a recursive `List[Union[Node, Tuple[Union[Node, ...]]]]`
-_MatchResult = tuple[Node, list[Node], Optional[Pattern], QuantizeHandler]
+_MatchResult = tuple[Node, list[Node], Pattern | None, QuantizeHandler]
 
 _MatchResultWithQConfig = tuple[
-    Node, list[Node], Optional[Pattern], QuantizeHandler, QConfigAny
+    Node, list[Node], Pattern | None, QuantizeHandler, QConfigAny
 ]
 
 
@@ -83,9 +83,9 @@ def _find_matches(
     modules: dict[str, torch.nn.Module],
     patterns: dict[Pattern, QuantizeHandler],
     root_node_getter_mapping: dict[Pattern, Callable],
-    standalone_module_names: Optional[list[str]] = None,
-    standalone_module_classes: Optional[list[type]] = None,
-    custom_module_classes: Optional[list[Any]] = None,
+    standalone_module_names: list[str] | None = None,
+    standalone_module_classes: list[type] | None = None,
+    custom_module_classes: list[Any] | None = None,
 ) -> dict[str, _MatchResult]:
     """
     Matches the nodes in the input graph to quantization patterns, and

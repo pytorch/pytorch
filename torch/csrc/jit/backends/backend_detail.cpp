@@ -305,8 +305,8 @@ Module codegen_backend_module(
         TORCH_INTERNAL_ASSERT(default_value.has_value());
         std::stringstream def_ss, fwd_ss;
         // Annotate type of the arg
-        def_ss << name << ": " << arg.type()->annotation_str(nullptr) << "=";
-        fwd_ss << name << "=" << name;
+        def_ss << name << ": " << arg.type()->annotation_str(nullptr) << '=';
+        fwd_ss << name << '=' << name;
         default_value->repr(
             def_ss, [](std::ostream&, const IValue&) -> bool { return false; });
         def_inputs.emplace_back(def_ss.str());
@@ -337,18 +337,18 @@ Module codegen_backend_module(
 
     if (out_tuple_ty) {
       auto tuple_elements = out_tuple_ty->elements();
-      type_check_ss << tuple_elements[0]->annotation_str() << ")";
+      type_check_ss << tuple_elements[0]->annotation_str() << ')';
       type_checks.emplace_back(type_check_ss.str());
       for (unsigned i = 1, e = tuple_elements.size(); i < e; ++i) {
         type_check_ss.str(std::string());
         type_check_ss.clear();
         out_ss << ", _" << i;
         type_check_ss << "assert isinstance(_" << i << ", "
-                      << tuple_elements[i]->annotation_str() << ")";
+                      << tuple_elements[i]->annotation_str() << ')';
         type_checks.emplace_back(type_check_ss.str());
       }
     } else {
-      type_check_ss << out_ty->annotation_str() << ")";
+      type_check_ss << out_ty->annotation_str() << ')';
       type_checks.emplace_back(type_check_ss.str());
     }
 
@@ -364,7 +364,7 @@ Module codegen_backend_module(
     // If the output type is a single element tuple then add an extra comma
     // to ensure the final output maintains this type.
     if (out_tuple_ty && out_tuple_ty->elements().size() == 1) {
-      out_ss << ",";
+      out_ss << ',';
     }
 
     method_te.s("ret", out_ss.str());

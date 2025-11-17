@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, Sequence, TYPE_CHECKING
+from typing import Optional, Sequence, TYPE_CHECKING  # noqa: UP035
 
 from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
     opset20 as op20,
@@ -117,7 +117,7 @@ def aten_scaled_dot_product_attention_23(
             else attn_mask
         )
         attn_weight = torch.softmax(
-            (Q @ K.transpose(-2, -1) *  attn_mask, dim=-1
+            (Q @ K.transpose(-2, -1) * scale_factor) + attn_mask, dim=-1
         )
         attn_weight = torch.dropout(attn_weight, dropout_p)
         return attn_weight @ V
