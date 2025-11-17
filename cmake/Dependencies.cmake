@@ -1299,12 +1299,6 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   set(BUILD_SHARED_LIBS OFF)
   set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
   set(ONNX_USE_LITE_PROTO ${CAFFE2_USE_LITE_PROTO})
-  # If linking local protobuf, make sure ONNX has the same protobuf
-  # patches as Caffe2 and Caffe proto. This forces some functions to
-  # not be inline and instead route back to the statically-linked protobuf.
-  if(CAFFE2_LINK_LOCAL_PROTOBUF)
-    set(ONNX_PROTO_POST_BUILD_SCRIPT ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake)
-  endif()
   if(ONNX_ML)
     add_definitions(-DONNX_ML=1)
   endif()
