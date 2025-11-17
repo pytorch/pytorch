@@ -57,6 +57,44 @@ _isnan
 Philox4_32
 randn
 
+# torch/headeronly/Metaprogramming.h
+infer_function_traits_t
+make_function_traits_t
+tuple_elements
+tuple_map
+tuple_slice
+tuple_take
+
+# torch/headeronly/TypeList.h
+# false_t => tested through from_tuple_t and various other APIs
+all
+concat_t
+contains
+count_if
+drop_if_nonempty_t
+drop_t
+filter_t
+find_if
+from_tuple_t
+head_t
+head_with_default_t
+map_t
+map_types_to_values
+reverse_t
+size
+take_t
+to_tuple_t
+true_for_any_type
+typelist
+
+# torch/headeronly/TypeTraits.h
+is_equality_comparable
+is_function_type
+is_hashable
+is_instantiation_of
+is_stateless_lambda
+is_type_condition
+
 # ATen/cpu/vec/vec.h
 Vectorized
 clamp_min
@@ -123,6 +161,7 @@ COMPILE_TIME_MAX_DEVICE_TYPES
 NumScalarTypes
 ScalarType
 # dummy_int1_7_t, dummy_uint1_7_t tested through ScalarType
+CppTypeToScalarType
 ScalarTypeToCPPTypeT
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_F8NZ
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX
@@ -158,3 +197,10 @@ AT_ALL_TYPES
 AT_ALL_TYPES_AND_COMPLEX
 THO_DISPATCH_V2
 # THO_EMPTY, THO_DISPATCH_CASE, THO_DISPATCH_SWITCH, THO_PRIVATE_CASE_TYPE_USING_HINT are tested through THO_DISPATCH_V2
+
+# torch/headeronly/core/TensorAccessor.h
+HeaderOnlyTensorAccessor
+HeaderOnlyGenericPackedTensorAccessor
+# HeaderOnlyTensorAccessorBase and
+# HeaderOnlyGenericPackedTensorAccessorBase are tested through
+# HeaderOnlyTensorAccessor and HeaderOnlyGenericPackedTensorAccessor

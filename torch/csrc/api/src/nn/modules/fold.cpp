@@ -17,7 +17,7 @@ void FoldImpl::pretty_print(std::ostream& stream) const {
          << ", kernel_size=" << options.kernel_size()
          << ", dilation=" << options.dilation()
          << ", padding=" << options.padding() << ", stride=" << options.stride()
-         << ")";
+         << ')';
 }
 
 Tensor FoldImpl::forward(const Tensor& input) {
@@ -40,7 +40,7 @@ void UnfoldImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Unfold(kernel_size=" << options.kernel_size()
          << ", dilation=" << options.dilation()
          << ", padding=" << options.padding() << ", stride=" << options.stride()
-         << ")";
+         << ')';
 }
 
 Tensor UnfoldImpl::forward(const Tensor& input) {
