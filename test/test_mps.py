@@ -3332,6 +3332,14 @@ class TestMPS(TestCaseMPS):
         helper(shape=(10, 15, 8), num_repeats=torch.randint(0, 100, (15, ), device="mps"), dim=1)
         helper(shape=(10, 15, 30), num_repeats=torch.randint(0, 100, (30, ), device="mps"), dim=2)
 
+    def test_repeat_interleave_offset(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/167924
+        counts = torch.tensor([0, 1, 0], device="mps")
+        data = torch.arange(2, device="mps")
+        out_mps = data.repeat_interleave(counts[1:], dim=0)
+        out_cpu = data.cpu().repeat_interleave(counts.cpu()[1:], dim=0)
+        self.assertEqual(out_mps.cpu(), out_cpu)
+
     def test_count_nonzero(self):
         def helper(dtype):
             n = [
