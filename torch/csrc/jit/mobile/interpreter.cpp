@@ -95,11 +95,11 @@ bool InterpreterState::run(Stack& stack) {
         debug_handle = *handle;
       }
 
-      // std::cout << "RUNNING " << pc << " " << code.instructions_[pc];
+      // std::cout << "RUNNING " << pc << ' ' << code.instructions_[pc];
       // if (inst.op == OP) {
       //   std::cout << ", " << code.op_names_[inst.X].name;
       //   if (!code.op_names_[inst.X].overload_name.empty()) {
-      //     std::cout << "." << code.op_names_[inst.X].overload_name;
+      //     std::cout << '.' << code.op_names_[inst.X].overload_name;
       //   }
       // }
       // std::cout << std::endl;

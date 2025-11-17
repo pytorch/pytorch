@@ -79,6 +79,12 @@ Tensor toNonOptPrimal(const std::optional<Tensor>& t) {
   return Tensor();
 }
 
+void update_wrapped_number(Tensor& input, Tensor& output) {
+  if (input.unsafeGetTensorImpl()->is_wrapped_number()) {
+    output.unsafeGetTensorImpl()->set_wrapped_number(true);
+  }
+}
+
 void copy_range(variable_list& out, IndexRange range, const Tensor& t) {
   TORCH_CHECK(range.second <= out.size());
   TORCH_CHECK(
@@ -3326,7 +3332,14 @@ std::tuple<Tensor, Tensor> atan2_backward(
   if (!grad.defined()) {
     return std::tuple<Tensor, Tensor>{Tensor(), Tensor()};
   }
-  auto recip = (self * self + other * other).reciprocal();
+  auto denom = self * self + other * other;
+  auto recip = denom.reciprocal();
+  if (at::areAnyTensorSubclassLike({self, other, denom, recip}) ||
+      at::GradMode::is_enabled()) {
+    recip = recip.masked_fill(denom == 0, 0);
+  } else {
+    recip.masked_fill_(denom == 0, 0);
+  }
   return std::tuple<Tensor, Tensor>{
       output_mask[0] ? grad * other * recip : Tensor(),
       output_mask[1] ? grad * -self * recip : Tensor()};

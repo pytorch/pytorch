@@ -1251,10 +1251,10 @@ def proxy_args_kwargs(args: Any, kwargs: Any) -> tuple[tuple[Any, ...], dict[str
         proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
         return proxy_args, proxy_kwargs
     except NotImplementedError as e:
-        from .exc import unimplemented_v2
+        from .exc import unimplemented
         from .variables.base import typestr
 
-        unimplemented_v2(
+        unimplemented(
             gb_type="Failed to convert args/kwargs to proxy",
             context=f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}",
             explanation="Missing `as_proxy()` implementation for some arg/kwarg.",
@@ -2248,12 +2248,15 @@ def skip_frame_if_in_functorch_mode(val: torch.Tensor) -> None:
     try:
         val.data_ptr()  # will throw for functorch tensors
     except RuntimeError as e:
-        from .exc import SkipFrame
+        from .exc import format_skip_frame_message, SkipFrame
 
         # This will be GradTrackingTensor/BatchedTensor/etc
         functorch_subclass_name = re.sub(r"\(.*", "", repr(val))
         raise SkipFrame(
-            f"torch.compile cannot be run in context: {functorch_subclass_name}"
+            format_skip_frame_message(
+                None,
+                f"torch.compile cannot be run in context: {functorch_subclass_name}",
+            )
         ) from e
 
 
@@ -2756,9 +2759,9 @@ def _get_fake_tensor(vt: VariableTracker) -> Any:
     fake_tensor = vt.as_proxy().node.meta.get("example_value")
     if not is_fake(fake_tensor):
         from . import graph_break_hints
-        from .exc import unimplemented_v2
+        from .exc import unimplemented
 
-        unimplemented_v2(
+        unimplemented(
             gb_type="Cannot check Tensor object identity without its fake value",
             context=str(fake_tensor),
             explanation="TensorVariable is missing a fake example_value.",
@@ -2843,7 +2846,7 @@ def key_is_id(
 
 
 def key_to_id(value: Any) -> list[Any]:
-    return [id(k) if key_is_id(k) else k for k in value.keys()]
+    return [id(k) if key_is_id(k) else k for k in value]
 
 
 def const_repr(x: Any, *, local: Any) -> str:
@@ -2929,11 +2932,11 @@ def wrap_fake_exception(fn: Callable[[], Any]) -> Any:
     try:
         return fn()
     except UnsupportedFakeTensorException as e:
-        from .exc import unimplemented_v2
+        from .exc import unimplemented
 
         msg = f"Encountered exception ({e.reason}) during fake tensor propagation."
         log.warning(msg)
-        unimplemented_v2(
+        unimplemented(
             gb_type="Fake tensor propagation exception",
             context=str(e.reason),
             explanation=msg,
@@ -3263,7 +3266,7 @@ def same(
                 log_error=log_error,
                 use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
             )
-            for key in ref.__dict__.keys()
+            for key in ref.__dict__
         )
     else:
         raise RuntimeError(f"unsupported type: {type(ref).__name__}")
@@ -3326,11 +3329,11 @@ def extract_fake_example_value(node: torch.fx.Node, required: bool = True) -> An
     if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
     elif required:
-        from torch._dynamo.exc import unimplemented_v2
+        from torch._dynamo.exc import unimplemented
 
         from . import graph_break_hints
 
-        unimplemented_v2(
+        unimplemented(
             gb_type="Missing FakeTensor example value",
             context=str(node),
             explanation=f"`FakeTensor` example value was required for {node} but not available.",
@@ -3385,7 +3388,7 @@ def get_fake_value(
 
     from .exc import (
         TorchRuntimeError,
-        unimplemented_v2,
+        unimplemented,
         Unsupported,
         UserError,
         UserErrorType,
@@ -3479,7 +3482,7 @@ def get_fake_value(
                     "Consider wrapping the operator into a PyTorch-understood custom operator "
                     "(see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html)",
                 ]
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Data dependent operator",
                 context=str(cause.func),
                 explanation=f"Operator `{cause.func}` has a non-Tensor output "
@@ -3490,7 +3493,7 @@ def get_fake_value(
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
             if not torch._dynamo.config.capture_dynamic_output_shape_ops:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Dynamic shape operator",
                     context=str(cause.func),
                     explanation=f"Operator `{cause.func}`'s output shape depends on input Tensor data.",
@@ -3500,7 +3503,7 @@ def get_fake_value(
                     ],
                 )
             else:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Dynamic shape operator (no meta kernel)",
                     context=str(cause.func),
                     explanation=f"Operator `{cause.func}` does not have a meta kernel that supports dynamic output shapes",
@@ -3524,7 +3527,7 @@ def get_fake_value(
                         f"module `{module}` and you may need to `import {module}`"
                         f"({ctx}), otherwise "
                     )
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Operator does not support running with fake tensors",
                 context=f"unsupported operator: {cause.func}",
                 explanation="",
@@ -3545,7 +3548,7 @@ def get_fake_value(
         elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         elif isinstance(cause, TypeError) and "argument" in str(cause):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="TypeError when making fake tensor call",
                 context=f"TypeError {node.target}: {cause}",
                 explanation="",
@@ -3623,9 +3626,9 @@ def run_node(
                 return node.target(*args, **kwargs)  # type: ignore[operator]
             elif op == "call_method":
                 if not hasattr(args[0], node.target):  # type: ignore[arg-type]
-                    from .exc import unimplemented_v2
+                    from .exc import unimplemented
 
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Missing attribute when running call_method node",
                         context="",
                         explanation=make_error_message("attribute not defined"),
@@ -3643,7 +3646,7 @@ def run_node(
 
         except (NotImplementedError, UnsupportedFakeTensorException) as e:
             # NB: mimic how wrap_fake_exception does it
-            from .exc import unimplemented_v2
+            from .exc import unimplemented
 
             hints = []
             if isinstance(e, NotImplementedError):
@@ -3651,7 +3654,7 @@ def run_node(
                     "If the op is a PyTorch op, please file an issue to PyTorch.",
                 ]
 
-            unimplemented_v2(
+            unimplemented(
                 gb_type="NotImplementedError/UnsupportedFakeTensorException when running FX node",
                 context="",
                 explanation=make_error_message(e),
@@ -4766,6 +4769,10 @@ def _extract_tensor_dict(t: torch.Tensor) -> dict[str, Any]:
 
 def build_stream(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Stream:
     return torch._C.Stream(*args, **kwargs)
+
+
+def build_event(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Event:
+    return torch._C.Event(*args, **kwargs)
 
 
 class CompileTimeInstructionCounter:

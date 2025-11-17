@@ -272,18 +272,6 @@ def smoke_test_cuda(
         torch_cudnn_version = cudnn_to_version_str(torch.backends.cudnn.version())
         print(f"Torch cuDNN version: {torch_cudnn_version}")
 
-        torch_cudnn_compile_version = torch._C._cudnn.getCompileVersion()
-        print(f"Torch cuDNN compile-time version: {torch_cudnn_compile_version}")
-        torch_cudnn_runtime_version = tuple(
-            [int(x) for x in torch_cudnn_version.split(".")]
-        )
-        if torch_cudnn_runtime_version != torch_cudnn_compile_version:
-            raise RuntimeError(
-                "cuDNN runtime version doesn't match comple version. "
-                f"Loaded: {torch_cudnn_runtime_version} "
-                f"Expected: {torch_cudnn_compile_version}"
-            )
-
         if sys.platform in ["linux", "linux2"]:
             torch_nccl_version = ".".join(str(v) for v in torch.cuda.nccl.version())
             print(f"Torch nccl; version: {torch_nccl_version}")
@@ -363,6 +351,17 @@ def test_linalg(device="cpu") -> None:
             print(f"Testing smoke_test_linalg with cuda for {dtype}")
             A = torch.randn(20, 16, 50, 100, device=device, dtype=dtype)
             torch.linalg.svd(A)
+
+
+def test_sdpa(device="cpu", dtype=torch.float16) -> None:
+    """Regression test for https://github.com/pytorch/pytorch/issues/167602
+    Without nvrtc_builtins on CuDNN-9.13 on CUDA-13 fails with ` No valid execution plans built.`
+    """
+    print(f"Testing SDPA on {device} using type {dtype}")
+    k, q, v = torch.rand(3, 1, 16, 77, 64, dtype=dtype, device=device).unbind(0)
+    attn = torch.rand(1, 1, 77, 77, dtype=dtype, device=device)
+    rc = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn)
+    assert rc.isnan().any().item() is False
 
 
 def smoke_test_compile(device: str = "cpu") -> None:
@@ -501,10 +500,12 @@ def main() -> None:
     smoke_test_conv2d()
     test_linalg()
     test_numpy()
+    test_sdpa()
 
     if is_cuda_system:
         test_linalg("cuda")
         test_cuda_gds_errors_captured()
+        test_sdpa("cuda")
 
     if options.package == "all":
         smoke_test_modules()

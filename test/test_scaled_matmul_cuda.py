@@ -1243,8 +1243,12 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("base_dtype", [torch.bfloat16, torch.float16, torch.float32])
+    @parametrize("shapes", [
+        (128, 512, 256),
+    ])
     @with_tf32_off
-    def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):
+    def test_scaled_mm_vs_emulated_row_wise(self, base_dtype, shapes):
+        M, K, N = shapes
         # Fp32 out_dtype is only supported by cuBLAS, which however only started
         # shipping row-wise kernels in CUDA 12.9, and only for sm90+.
         if base_dtype is torch.float32:
@@ -1265,11 +1269,11 @@ class TestFP8Matmul(TestCase):
         input_dtype = e4m3_type
         output_dtype = base_dtype
 
-        x = torch.randn(16, 16, device="cuda", dtype=base_dtype)
-        y = torch.randn(32, 16, device="cuda", dtype=base_dtype).t()
+        x = torch.randn(M, K, device="cuda", dtype=base_dtype)
+        y = torch.randn(N, K, device="cuda", dtype=base_dtype).t()
         bias = None
         if base_dtype in {torch.bfloat16, torch.float16}:
-            bias = torch.randn((32,), device="cuda", dtype=base_dtype)
+            bias = torch.randn((N,), device="cuda", dtype=base_dtype)
 
         x_scales = tensor_to_scale(x, input_dtype, dim=1).float()
         y_scales = tensor_to_scale(y, input_dtype, dim=0).float()
@@ -1299,6 +1303,11 @@ class TestFP8Matmul(TestCase):
                 atol, rtol = 2e-3, 2e-3
 
             self.assertEqual(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
+
+            cosine_sim = torch.nn.functional.cosine_similarity(
+                out_emulated.flatten().float(), out_scaled_mm.flatten().float(), dim=0
+            )
+            self.assertGreaterEqual(float(cosine_sim), 0.999)
 
         # only cuBLAS supports rowwise with fp32 output and cuBLAS only supports
         # rowwise on SM 9.0
@@ -1713,7 +1722,8 @@ class TestFP8Matmul(TestCase):
 
             prof.export_chrome_trace(f.name)
             if torch.version.hip:
-                events = [evt for evt in json.load(open(f.name))["traceEvents"] if evt.get("cat", "") == "kernel"]
+                with open(f.name) as file:
+                    events = [evt for evt in json.load(file)["traceEvents"] if evt.get("cat", "") == "kernel"]
                 # events were returned out of order; need to be sorted on "ts" timestamp
                 events = sorted(events, key=lambda x: x['ts'])
                 # ROCm carveout is invisible except for kernels running slower on fewer CUs
@@ -1736,11 +1746,12 @@ class TestFP8Matmul(TestCase):
                 self.assertTrue(no_carveout != carveout)
                 self.assertTrue(carveout_0 != carveout)
             else:
-                no_carveout, carveout_0, carveout_66, no_carveout_again = [
-                    math.prod(evt.get("args", {}).get("grid", []))
-                    for evt in json.load(open(f.name))["traceEvents"]
-                    if evt.get("cat", "") == "kernel"
-                ]
+                with open(f.name) as file:
+                    no_carveout, carveout_0, carveout_66, no_carveout_again = [
+                        math.prod(evt.get("args", {}).get("grid", []))
+                        for evt in json.load(file)["traceEvents"]
+                        if evt.get("cat", "") == "kernel"
+                    ]
 
                 self.assertEqual(no_carveout, no_carveout_again)
                 capability = torch.cuda.get_device_capability()
@@ -1864,6 +1875,8 @@ class TestFP8Matmul(TestCase):
     ], name_fn=lambda mkn: f"{mkn[0]}_{mkn[1]}_{mkn[2]}")
     @parametrize("recipe", ["mxfp8", "mxfp4", "nvfp4"])
     def test_blockwise_mxfp8_nvfp4_mxfp4_numerics(self, test_case_name, fast_accum, mkn, recipe) -> None:
+        if torch.version.hip and recipe == "nvfp4":
+            raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
         if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
             raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
 
