@@ -15320,9 +15320,24 @@ graph():
 
         inp = torch.randn(4, 4)
         gm = export(Foo(), (inp,)).run_decompositions().module()
-        self.assertExpectedInline(
-            str(gm.graph).strip(),
-            """\
+        if is_strict_v2_test(self._testMethodName):
+            self.assertExpectedInline(
+                str(gm.graph).strip(),
+                """\
+graph():
+    %x : [num_users=4] = placeholder[target=x]
+    %_guards_fn : [num_users=0] = call_module[target=_guards_fn](args = (%x,), kwargs = {})
+    %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%x,), kwargs = {})
+    %cos : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
+    %add_12 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%sin, %cos), kwargs = {})
+    %cos_1 : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
+    %add_25 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_12, %cos_1), kwargs = {})
+    return (add_25,)""",
+            )
+        else:
+            self.assertExpectedInline(
+                str(gm.graph).strip(),
+                """\
 graph():
     %x : [num_users=4] = placeholder[target=x]
     %_guards_fn : [num_users=0] = call_module[target=_guards_fn](args = (%x,), kwargs = {})
@@ -15332,7 +15347,7 @@ graph():
     %cos_1 : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %cos_1), kwargs = {})
     return (add_1,)""",
-        )
+            )
 
         self.assertEqual(gm(inp), Foo()(inp))
 

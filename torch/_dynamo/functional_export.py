@@ -733,58 +733,8 @@ def dynamo_graph_capture_for_export(
                 constraints=constraints,
             )
 
-        if out.backend_input is not None:
-            # Normal path with tensor computation
-            # TODO filter out side effects.
-            pyt = pytreeify(out, mod, args, kwargs)
-
-            graph_module = pyt.graph_module
-
-            # Set up codegen using shared utility
-            _setup_graph_module_codegen(
-                graph_module,
-                mod,
-                args,
-                kwargs,
-                pyt.in_spec,
-                pyt.out_spec,
-                pyt.in_shuffle_graph,
-                pyt.out_shuffle_graph,
-                pyt.num_flat_args,
-                pyt.root,
-            )
-
-            normalize_graph_module(graph_module)
-            if pyt.root is not None:
-                graph_module._parameters = pyt.root._parameters.copy()
-                graph_module._buffers = pyt.root._buffers.copy()
-                assert all(not hasattr(graph_module, m) for m in pyt.root._modules)
-                graph_module._modules.update(pyt.root._modules)
-                graph_module._non_persistent_buffers_set = (
-                    pyt.root._non_persistent_buffers_set.copy()
-                )
-                annotations = torch.nn.Module.__dict__.get("__annotations__", None)
-                for name, value in pyt.root.__dict__.items():
-                    if annotations and name not in annotations:
-                        graph_module.__dict__[name] = value
-            graph_module._in_spec = pyt.in_spec
-            graph_module._out_spec = pyt.out_spec
-            assert not hasattr(graph_module, "_in_shuffle_graph")
-            assert not hasattr(graph_module, "_out_shuffle_graph")
-            graph_module._in_shuffle_graph = pyt.in_shuffle_graph
-            graph_module._out_shuffle_graph = pyt.out_shuffle_graph
-            delattr(graph_module, "_param_name_to_source")
-            graph_module.recompile()
-
-            # Set up metadata using shared utility
-            _setup_graph_module_metadata(
-                graph_module,
-                out.backend_input.fake_mode,
-                out.backend_input.tensor_to_context,
-                out.graph_capture_output.output_graph.export_metadata.module_call_spec,
-            )
-        else:
-            graph_module = _create_graph_module_for_no_tensor_computation(
+        if out.backend_input is None:
+            return _create_graph_module_for_no_tensor_computation(
                 mod,
                 args,
                 kwargs,
@@ -793,6 +743,56 @@ def dynamo_graph_capture_for_export(
                 out.graph_capture_output.output_graph.export_metadata.module_call_spec,
             )
 
+
+        # Normal path with tensor computation
+        # TODO filter out side effects.
+        pyt = pytreeify(out, mod, args, kwargs)
+
+        graph_module = pyt.graph_module
+
+        # Set up codegen using shared utility
+        _setup_graph_module_codegen(
+            graph_module,
+            mod,
+            args,
+            kwargs,
+            pyt.in_spec,
+            pyt.out_spec,
+            pyt.in_shuffle_graph,
+            pyt.out_shuffle_graph,
+            pyt.num_flat_args,
+            pyt.root,
+        )
+
+        normalize_graph_module(graph_module)
+        if pyt.root is not None:
+            graph_module._parameters = pyt.root._parameters.copy()
+            graph_module._buffers = pyt.root._buffers.copy()
+            assert all(not hasattr(graph_module, m) for m in pyt.root._modules)
+            graph_module._modules.update(pyt.root._modules)
+            graph_module._non_persistent_buffers_set = (
+                pyt.root._non_persistent_buffers_set.copy()
+            )
+            annotations = torch.nn.Module.__dict__.get("__annotations__", None)
+            for name, value in pyt.root.__dict__.items():
+                if annotations and name not in annotations:
+                    graph_module.__dict__[name] = value
+        graph_module._in_spec = pyt.in_spec
+        graph_module._out_spec = pyt.out_spec
+        assert not hasattr(graph_module, "_in_shuffle_graph")
+        assert not hasattr(graph_module, "_out_shuffle_graph")
+        graph_module._in_shuffle_graph = pyt.in_shuffle_graph
+        graph_module._out_shuffle_graph = pyt.out_shuffle_graph
+        delattr(graph_module, "_param_name_to_source")
+        graph_module.recompile()
+
+        # Set up metadata using shared utility
+        _setup_graph_module_metadata(
+            graph_module,
+            out.backend_input.fake_mode,
+            out.backend_input.tensor_to_context,
+            out.graph_capture_output.output_graph.export_metadata.module_call_spec,
+        )
         return graph_module
 
     return inner
