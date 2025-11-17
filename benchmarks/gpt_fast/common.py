@@ -1,6 +1,5 @@
 import dataclasses
-from collections.abc import Callable
-from typing import Optional
+from typing import Callable, Optional
 
 
 all_experiments: dict[str, Callable] = {}

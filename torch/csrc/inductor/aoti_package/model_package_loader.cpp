@@ -102,10 +102,11 @@ std::string create_temp_dir() {
   }
 #else
   std::string temp_dir = "/tmp/XXXXXX";
-  TORCH_CHECK(
-      mkdtemp(temp_dir.data()) != nullptr,
-      "Failed to create temporary directory: ",
-      c10::utils::str_error(errno));
+  if (mkdtemp(temp_dir.data()) == nullptr) {
+    throw std::runtime_error(
+        std::string("Failed to create temporary directory: ") +
+        c10::utils::str_error(errno));
+  }
   return temp_dir;
 #endif
 }
@@ -155,7 +156,9 @@ namespace torch::inductor {
 
 namespace {
 const nlohmann::json& load_json_file(const std::string& json_path) {
-  TORCH_CHECK(file_exists(json_path), "File not found: ", json_path);
+  if (!file_exists(json_path)) {
+    throw std::runtime_error("File not found: " + json_path);
+  }
 
   std::ifstream json_file(json_path);
   TORCH_CHECK(json_file.is_open());
@@ -412,25 +415,32 @@ std::string compile_so(
       get_cpp_compile_command(filename, obj_filenames, linker_flags);
 
   // Run the commands to generate a .so file
-  TORCH_CHECK(system(compile_cmd.c_str()) == 0, "Failed to compile cpp file.");
-  TORCH_CHECK(system(link_cmd.c_str()) == 0, "Failed to link files.");
+  int status = system(compile_cmd.c_str());
+  if (status != 0) {
+    throw std::runtime_error("Failed to compile cpp file.");
+  }
+  status = system(link_cmd.c_str());
+  if (status != 0) {
+    throw std::runtime_error("Failed to link files.");
+  }
 
   // Move the mmapped weights onto the .so
   std::string serialized_weights_path = filename + "_serialized_weights.bin";
   if (file_exists(serialized_weights_path)) {
     std::ifstream serialized_weights_file(
         serialized_weights_path, std::ios::binary);
-    TORCH_CHECK(
-        serialized_weights_file.is_open(),
-        "Failed to open serialized weights file");
-
+    if (!serialized_weights_file.is_open()) {
+      throw std::runtime_error("Failed to open serialized weights file");
+    }
     std::vector<char> serialized_weights(
         (std::istreambuf_iterator<char>(serialized_weights_file)),
         std::istreambuf_iterator<char>());
     serialized_weights_file.close();
 
     std::ofstream output_so_file(output_so, std::ios::binary | std::ios::app);
-    TORCH_CHECK(output_so_file.is_open(), "Failed to open output .so file");
+    if (!output_so_file.is_open()) {
+      throw std::runtime_error("Failed to open output .so file");
+    }
     // Page align the weights
     std::streampos so_size = output_so_file.tellp();
     std::vector<char> padding(16384 - so_size % 16384, ' ');
@@ -485,11 +495,12 @@ class RAIIMinizArchive {
  public:
   RAIIMinizArchive(const std::string& zip_path) {
     mz_zip_zero_struct(&_zip_archive);
-    TORCH_CHECK(
-        mz_zip_reader_init_file(
-            &_zip_archive, normalize_path_separator(zip_path).c_str(), 0),
-        "Failed to initialize zip archive: ",
-        mz_zip_get_error_string(mz_zip_get_last_error(&_zip_archive)));
+    if (!mz_zip_reader_init_file(
+            &_zip_archive, normalize_path_separator(zip_path).c_str(), 0)) {
+      throw std::runtime_error(fmt::format(
+          "Failed to initialize zip archive: {}",
+          mz_zip_get_error_string(mz_zip_get_last_error(&_zip_archive))));
+    }
   }
   RAIIMinizArchive(const RAIIMinizArchive&) = delete;
   RAIIMinizArchive& operator=(const RAIIMinizArchive&) = delete;
@@ -511,18 +522,18 @@ class RAIIMinizArchive {
       // terminator
       const auto zip_filename_len{
           mz_zip_reader_get_filename(&_zip_archive, i, nullptr, 0)};
-      TORCH_CHECK(
-          zip_filename_len, "Failed to read zip filename length at index ", i);
-
+      if (!zip_filename_len) {
+        throw std::runtime_error(
+            fmt::format("Failed to read zip filename length at index {}", i));
+      }
       // std::string implicitly appends a character for the null terminator
       std::string zip_filename(zip_filename_len - 1, '\0');
-      TORCH_CHECK(
-          mz_zip_reader_get_filename(
-              &_zip_archive, i, zip_filename.data(), zip_filename_len),
-          "Failed to read zip filename at index ",
-          i);
-
-      zip_filenames.emplace_back(std::move(zip_filename));
+      if (!mz_zip_reader_get_filename(
+              &_zip_archive, i, zip_filename.data(), zip_filename_len)) {
+        throw std::runtime_error(
+            fmt::format("Failed to read zip filename at index {}", i));
+      }
+      zip_filenames.emplace_back(zip_filename);
     }
 
     return zip_filenames;
@@ -540,25 +551,18 @@ class RAIIMinizArchive {
             0)) {
 #ifdef _WIN32
       DWORD dwErrCode = GetLastError();
-      TORCH_CHECK(
-          false,
-          "Failed to extract zip file ",
+      throw std::runtime_error(fmt::format(
+          "Failed to extract zip file {} to destination file {}, error code: {}, mz_zip error string: {}",
           zip_filename,
-          " to destination file ",
           path_dest_filename,
-          ", error code: ",
           dwErrCode,
-          " mz_zip error string: ",
-          mz_zip_get_error_string(mz_zip_get_last_error(&_zip_archive)));
+          mz_zip_get_error_string(mz_zip_get_last_error(&_zip_archive))));
 #else
-      TORCH_CHECK(
-          false,
-          "Failed to extract zip file ",
+      throw std::runtime_error(fmt::format(
+          "Failed to extract zip file {} to destination file {}, mz_zip error string: {}",
           zip_filename,
-          " to destination file ",
           path_dest_filename,
-          ", mz_zip error string: ",
-          mz_zip_get_error_string(mz_zip_get_last_error(&_zip_archive)));
+          mz_zip_get_error_string(mz_zip_get_last_error(&_zip_archive))));
 #endif
     }
   }
@@ -574,7 +578,9 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
   // Open the zip archive
   RAIIMinizArchive zip_archive{model_package_path};
   auto found_filenames{zip_archive.get_filenames()};
-  TORCH_CHECK(!found_filenames.empty(), "No files found in zip archive.");
+  if (found_filenames.empty()) {
+    throw std::runtime_error("No files found in zip archive.");
+  }
 
   // Find the file prefix (similar to constructor logic)
   std::string file_prefix;
@@ -618,13 +624,15 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
       model_names_str += model_name_tmp + "\n";
     }
 
-    TORCH_CHECK(
-        "Failed to find a generated cpp file or so file for model '",
-        model_name,
-        "' in the zip archive.\n\nAvailable models in the archive:\n",
-        model_names_str,
-        "\n\nTo load a specific model, please provide its name using the `model_name` parameter when calling AOTIModelPackageLoader() or torch._inductor.package.load_package.\n\n",
-        "The following files were loaded from the archive:\n",
+    throw std::runtime_error(
+        "Failed to find a generated cpp file or so file for model '" +
+        model_name +
+        "' in the zip archive.\n\n"
+        "Available models in the archive:\n" +
+        model_names_str +
+        "\n\n"
+        "To load a specific model, please provide its name using the `model_name` parameter when calling AOTIModelPackageLoader() or torch._inductor.package.load_package.\n\n"
+        "The following files were loaded from the archive:\n" +
         found_filenames_str);
   }
 
@@ -635,15 +643,17 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
 
   // Create the parent directory if it doesn't exist
   size_t parent_path_idx = output_path_str.find_last_of(k_separator);
-  TORCH_CHECK(
-      parent_path_idx != std::string::npos,
-      "Failed to find parent path in " + output_path_str);
+  if (parent_path_idx == std::string::npos) {
+    throw std::runtime_error(
+        "Failed to find parent path in " + output_path_str);
+  }
   std::string parent_path = output_path_str.substr(0, parent_path_idx);
-  TORCH_CHECK(
-      recursive_mkdir(parent_path),
-      "Failed to create directory " + parent_path,
-      ": ",
-      c10::utils::str_error(errno));
+  if (!recursive_mkdir(parent_path)) {
+    throw std::runtime_error(fmt::format(
+        "Failed to create directory {}: {}",
+        parent_path,
+        c10::utils::str_error(errno)));
+  }
 
   LOG(INFO) << "Extract file: " << metadata_filename << " to "
             << output_path_str;
@@ -669,19 +679,23 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     const size_t num_runners,
     const c10::DeviceIndex device_index) {
   if (run_single_threaded) {
-    TORCH_CHECK(
-        num_runners == 1,
-        "num_runners must be 1 when run_single_threaded is true");
+    if (num_runners != 1) {
+      throw std::runtime_error(
+          "num_runners must be 1 when run_single_threaded is true");
+    }
   } else {
-    TORCH_CHECK(
-        num_runners >= 1,
-        "num_runners must be >=1 when run_single_threaded is false");
+    if (num_runners < 1) {
+      throw std::runtime_error(
+          "num_runners must be >=1 when run_single_threaded is false");
+    }
   }
 
   // Extract all files within the zipfile to a temporary directory
   RAIIMinizArchive zip_archive{model_package_path};
   auto found_filenames{zip_archive.get_filenames()};
-  TORCH_CHECK(!found_filenames.empty(), "No files found in zip archive.");
+  if (found_filenames.empty()) {
+    throw std::runtime_error("No files found in zip archive.");
+  }
 
   // All the paths are prepended with a tmp/ directory. We need to find the
   // prefix.
@@ -704,7 +718,6 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 
   std::string so_filename;
   std::string cpp_filename;
-  std::string weight_blob_filename;
   std::vector<std::string> obj_filenames;
   std::string model_directory = normalize_path_separator(
       file_prefix + "data" + k_separator + "aotinductor" + k_separator +
@@ -744,16 +757,17 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 
       // Create the parent directory if it doesn't exist
       size_t parent_path_idx = output_file_path.find_last_of(k_separator);
-      TORCH_CHECK(
-          parent_path_idx != std::string::npos,
-          "Failed to find parent path in " + output_file_path);
-
+      if (parent_path_idx == std::string::npos) {
+        throw std::runtime_error(
+            "Failed to find parent path in " + output_file_path);
+      }
       std::string parent_path = output_file_path.substr(0, parent_path_idx);
-      TORCH_CHECK(
-          recursive_mkdir(parent_path),
-          "Failed to create directory " + parent_path,
-          ": ",
-          c10::utils::str_error(errno));
+      if (!recursive_mkdir(parent_path)) {
+        throw std::runtime_error(fmt::format(
+            "Failed to create directory {}: {}",
+            parent_path,
+            c10::utils::str_error(errno)));
+      }
 
       // Extracts file to the temp directory
       zip_archive.extract_file(zip_filename_str, output_path_str);
@@ -768,8 +782,6 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
           obj_filenames.push_back(output_file_path);
         } else if (filename_extension == extension_file_ext()) {
           so_filename = output_file_path;
-        } else if (filename_extension == ".blob") {
-          weight_blob_filename = output_file_path;
         }
       }
     }
@@ -786,14 +798,15 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       model_names_str += model_name_tmp + "\n";
     }
 
-    TORCH_CHECK(
-        false,
-        "Failed to find a generated cpp file or so file for model '",
-        model_name,
-        "' in the zip archive.\n\nAvailable models in the archive:\n",
-        model_names_str,
-        "\n\nTo load a specific model, please provide its name using the `model_name` parameter when calling AOTIModelPackageLoader() or torch._inductor.package.load_package.\n\n",
-        "The following files were loaded from the archive:\n",
+    throw std::runtime_error(
+        "Failed to find a generated cpp file or so file for model '" +
+        model_name +
+        "' in the zip archive.\n\n"
+        "Available models in the archive:\n" +
+        model_names_str +
+        "\n\n"
+        "To load a specific model, please provide its name using the `model_name` parameter when calling AOTIModelPackageLoader() or torch._inductor.package.load_package.\n\n"
+        "The following files were loaded from the archive:\n" +
         found_filenames_str);
   }
 
@@ -807,15 +820,17 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 
   // Construct the runner depending on the device information
   std::string device_key = metadata_["AOTI_DEVICE_KEY"];
-  TORCH_CHECK(!device_key.empty(), "No device information found.");
+
+  if (device_key.empty()) {
+    throw std::runtime_error("No device information found.");
+  }
 
   std::unordered_map<std::string, CreateAOTIModelRunnerFunc>
       registered_aoti_runner = getAOTIModelRunnerRegistry();
 
-  TORCH_CHECK(
-      registered_aoti_runner.find(device_key) != registered_aoti_runner.end(),
-      "Unsupported device key found: ",
-      device_key);
+  if (registered_aoti_runner.find(device_key) == registered_aoti_runner.end()) {
+    throw std::runtime_error("Unsupported device key found: " + device_key);
+  }
 
   c10::Device device = c10::Device(device_key);
   device.set_index(device_index);
@@ -823,10 +838,6 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   std::string cubin_dir = temp_dir_ + k_separator + model_directory;
   runner_ = registered_aoti_runner[device_key](
       so_path, num_runners, device.str(), cubin_dir, run_single_threaded);
-
-  if (weight_blob_filename != "") {
-    runner_->update_constant_buffer_from_blob(weight_blob_filename);
-  }
 }
 
 AOTIModelPackageLoader::~AOTIModelPackageLoader() {
@@ -878,7 +889,7 @@ void AOTIModelPackageLoader::load_constants(
     if (fqn_to_constant_name.find(it.first) != fqn_to_constant_name.end()) {
       updated_constants_map.emplace(fqn_to_constant_name[it.first], it.second);
     } else {
-      TORCH_CHECK(false, "Constant not found: ", it.first);
+      throw std::runtime_error("Constant not found: " + it.first);
     }
   }
 

@@ -461,11 +461,10 @@ def generate_ttir(
         }
     else:
         # In older versions of Triton, the signature does not include constexpr args
-        constexprs = [p.num for p in kernel.params if p.is_constexpr]
         signature = {
             name: get_signature_value(i, arg)
             for i, (name, arg) in enumerate(ordered_args.items())
-            if i not in constexprs
+            if i not in kernel.constexprs
         }
 
     triton._C.libtriton.ir.load_dialects(context)
@@ -1900,16 +1899,14 @@ class TritonHOPifier:
 
         assert len(grids) != 0
         if isinstance(variable.kernel, JITFunction):
-            constexprs = [p.num for p in variable.kernel.params if p.is_constexpr]
-            arg_names = [p.name for p in variable.kernel.params]
+            constexprs = variable.kernel.constexprs
         else:
             # If we are looking at an @triton.autotune decorator, the nested function should be a JITFunction
             # This is because we don't support @triton.heuristics or nested @triton.autotune decorators yet
             assert isinstance(variable.kernel, Autotuner)
-            constexprs = [p.num for p in variable.kernel.fn.params if p.is_constexpr]
-            arg_names = [p.name for p in variable.kernel.fn.params]
+            constexprs = variable.kernel.fn.constexprs
 
-        for idx, arg_name in enumerate(arg_names):
+        for idx, arg_name in enumerate(variable.kernel.arg_names):
             if idx in constexprs:
                 if arg_name in combined_args_raw:
                     # [Note: Specialize tl.constexpr args in user-defined triton kernels]

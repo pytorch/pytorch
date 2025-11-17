@@ -88,13 +88,9 @@ def get_device(device):
     return torch.empty([]).device  # default device
 
 
-# pyrefly: ignore [bad-argument-type]
 @register_graph_pattern(CallFunctionVarArgs(aten.rand.default), pass_dict=patterns)
-# pyrefly: ignore [bad-argument-type]
 @register_graph_pattern(CallFunctionVarArgs(aten.rand.generator), pass_dict=patterns)
-# pyrefly: ignore [bad-argument-type]
 @register_graph_pattern(CallFunctionVarArgs(aten.randn.default), pass_dict=patterns)
-# pyrefly: ignore [bad-argument-type]
 @register_graph_pattern(CallFunctionVarArgs(aten.randn.generator), pass_dict=patterns)
 def replace_random(
     match: Match,
@@ -124,11 +120,9 @@ def replace_random(
         match.output_node().target.overloadpacket  # type: ignore[union-attr]
     ]  # type: ignore[union-attr]
     device = get_device(device)
-    # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(replacement, [size])
 
 
-# pyrefly: ignore [bad-argument-type]
 @register_graph_pattern(CallFunctionVarArgs(aten.randint.low), pass_dict=patterns)
 def replace_randint(
     match: Match,
@@ -146,5 +140,4 @@ def replace_randint(
         return result.to(dtype)
 
     device = get_device(device)
-    # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(replacement, [low, high, size])

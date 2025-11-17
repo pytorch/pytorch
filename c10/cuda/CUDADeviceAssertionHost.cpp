@@ -1,6 +1,8 @@
 #include <c10/cuda/CUDADeviceAssertionHost.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/util/Backtrace.h>
+#include <c10/util/Exception.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <cuda_runtime.h>

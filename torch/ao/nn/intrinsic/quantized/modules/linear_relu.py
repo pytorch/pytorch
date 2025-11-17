@@ -94,7 +94,7 @@ class LinearLeakyReLU(nnq.Linear):
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
-        assert type(mod) is nni.LinearLeakyReLU, (
+        assert type(mod) == nni.LinearLeakyReLU, (
             "Input float module should be LinearLeakyReLU"
         )
         assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
@@ -163,7 +163,7 @@ class LinearTanh(nnq.Linear):
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
-        assert type(mod) is nni.LinearTanh, "Input float module should be LinearTanh"
+        assert type(mod) == nni.LinearTanh, "Input float module should be LinearTanh"
         assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
         activation_post_process = mod.activation_post_process
         mod = mod[0]

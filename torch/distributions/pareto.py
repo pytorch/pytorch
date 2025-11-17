@@ -39,7 +39,7 @@ class Pareto(TransformedDistribution):
         self.scale, self.alpha = broadcast_all(scale, alpha)
         base_dist = Exponential(self.alpha, validate_args=validate_args)
         transforms = [ExpTransform(), AffineTransform(loc=0, scale=self.scale)]
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         super().__init__(base_dist, transforms, validate_args=validate_args)
 
     def expand(

@@ -30,7 +30,7 @@ from . import config
 from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile, log
 from .debug import DebugContext
 from .graph import GraphLowering
-from .output_code import complex_memory_overlap  # noqa: F401
+from .output_code import complex_memory_overlap as complex_memory_overlap  # noqa: F401
 from .virtualized import V
 
 
@@ -445,7 +445,7 @@ class _SerializedFxCompile(FxCompile):
             # we can't cache (or serialize)
             FxGraphCache._check_for_hop(gm)
         except BypassFxGraphCache as e:
-            log.debug("Skipping %s compile: %s", type(self), e)  # noqa: G200
+            log.debug("Skipping %s compile: %s", type(self), e)
             return None
 
         context = torch._guards.TracingContext.try_get()

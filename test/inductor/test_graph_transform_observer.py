@@ -22,7 +22,7 @@ except ImportError:
     HAS_PYDOT = False
 
 
-HAS_DOT = shutil.which("dot") is not None
+HAS_DOT = True if shutil.which("dot") is not None else False
 
 
 class TestGraphTransformObserver(TestCase):

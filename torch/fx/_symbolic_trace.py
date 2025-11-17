@@ -9,10 +9,10 @@ import logging
 import math
 import os
 import warnings
-from collections.abc import Callable
 from itertools import chain
 from types import CodeType, FunctionType, ModuleType
-from typing import Any, get_args, NamedTuple, Optional, TypeAlias, Union
+from typing import Any, Callable, get_args, NamedTuple, Optional, Union
+from typing_extensions import TypeAlias
 
 import torch
 import torch.utils._pytree as pytree
@@ -927,11 +927,7 @@ class Tracer(TracerBase):
 
                     return out
                 # Union[int, bool] == bool in Python <= 3.6
-                if (
-                    type(x) is bool
-                    or type(x) in base_types
-                    and type(x) is not torch.Tensor
-                ):
+                if type(x) == bool or type(x) in base_types and type(x) != torch.Tensor:
                     torch._assert(
                         out == x,
                         f"{name} has been specialized to have value {x} but got another value",

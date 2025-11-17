@@ -276,6 +276,7 @@ def tensorify_python_scalars(
                     ):
                         transform = True
                         try:
+                            # pyrefly: ignore  # unbound-name
                             proxy = _sympy_interp(zf.node.expr)
                         except NotImplementedError:
                             transform = False
@@ -302,6 +303,7 @@ def tensorify_python_scalars(
                         args.append(a)
 
                 if transform:
+                    # pyrefly: ignore  # unbound-name
                     replacement_proxy = replacement_op(*args)
 
                     # pyrefly: ignore  # missing-attribute

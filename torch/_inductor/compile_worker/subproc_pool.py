@@ -170,7 +170,6 @@ class SubprocPool:
                 log_path = config.get_worker_log_path()
 
         if log_path:
-            # pyrefly: ignore [bad-assignment]
             self.log_file = open(log_path, "w")
 
         self.process = subprocess.Popen(
@@ -205,7 +204,6 @@ class SubprocPool:
         self, job_fn: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
     ) -> Future[_T]:
         if args or kwargs:
-            # pyrefly: ignore [bad-assignment]
             job_fn = functools.partial(job_fn, *args, **kwargs)
         job_data = self.pickler.dumps(job_fn)
         future: Future[_T]
@@ -284,8 +282,8 @@ class SubprocPool:
             self.process.wait(300)
             if self.log_file:
                 self.log_file.close()
-        except OSError:
-            log.warning("Ignored OSError in pool shutdown", exc_info=True)
+        except OSError as e:
+            log.warning("Ignored OSError in pool shutdown:  %s", e)
         finally:
             with self.futures_lock:
                 for future in self.pending_futures.values():

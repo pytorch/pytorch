@@ -89,8 +89,7 @@ class _Checkpointer:
             process_group=self.process_group,
             planner=self.save_planner,
         )
-        if not isinstance(response, Future):
-            raise AssertionError("response should be a Future instance")
+        assert isinstance(response, Future)
         return response
 
     def load(self, state_dict: dict[str, Any]) -> None:

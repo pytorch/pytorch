@@ -110,9 +110,9 @@ class ApplyLogSumExp {
   using ElementCompute = ElementCompute_;
   using ElementLSE = ElementLSE_;
 
-  static int constexpr kElementsPerAccess = ElementsPerAccess;
-  static int constexpr kCount = kElementsPerAccess;
-  static constexpr ScaleType::Kind kScale =
+  static int const kElementsPerAccess = ElementsPerAccess;
+  static int const kCount = kElementsPerAccess;
+  static const ScaleType::Kind kScale =
       cutlass::epilogue::thread::ScaleType::NoBetaScaling;
 
   using FragmentOutput = Array<ElementOutput, kCount>;

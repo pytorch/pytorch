@@ -60,7 +60,7 @@ struct alignas(2) bits16 {
 
 } // namespace c10
 
-HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
+namespace torch::headeronly {
 
 using c10::bits16;
 using c10::bits1x8;
@@ -68,4 +68,4 @@ using c10::bits2x4;
 using c10::bits4x2;
 using c10::bits8;
 
-HIDDEN_NAMESPACE_END(torch, headeronly)
+} // namespace torch::headeronly

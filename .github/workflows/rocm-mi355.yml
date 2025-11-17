@@ -1,9 +1,6 @@
 name: rocm-mi355
 
 on:
-  push:
-    tags:
-      - ciflow/rocm-mi355/*
   workflow_dispatch:
   schedule:
     - cron: 30 11,1 * * *  # about 4:30am PDT and 6:30pm PDT
@@ -42,14 +39,15 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-noble-rocm-py3.12-mi355
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
+      sync-tag: rocm-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.mi355.1" },
-          { config: "default", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.mi355.1" },
-          { config: "default", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.mi355.1" },
-          { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.mi355.1" },
-          { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.mi355.1" },
-          { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.mi355.1" },
+          { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.mi355.2" },
+          { config: "default", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.mi355.2" },
+          { config: "default", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.mi355.2" },
+          { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.mi355.2" },
+          { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.mi355.2" },
+          { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.mi355.2" },
         ]}
     secrets: inherit
 
@@ -66,7 +64,5 @@ jobs:
       build-environment: linux-noble-rocm-py3.12-mi355
       docker-image: ${{ needs.linux-noble-rocm-py3_12-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-rocm-py3_12-build.outputs.test-matrix }}
-      tests-to-include: >-
-                        ${{ github.event_name == 'schedule' && 'test_nn test_torch test_cuda test_ops test_unary_ufuncs test_binary_ufuncs test_autograd inductor/test_torchinductor test_matmul_cuda test_scaled_matmul_cuda'
-                           || '' }}
+      tests-to-include: "test_nn test_torch test_cuda test_ops test_unary_ufuncs test_binary_ufuncs test_autograd inductor/test_torchinductor"
     secrets: inherit

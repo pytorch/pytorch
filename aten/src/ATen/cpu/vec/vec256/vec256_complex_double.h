@@ -342,19 +342,19 @@ class Vectorized<c10::complex<double>> {
     return _mm256_cmp_pd(values, other.values, _CMP_NEQ_UQ);
   }
   Vectorized<c10::complex<double>> operator<(
-      const Vectorized<c10::complex<double>>& /*unused*/) const {
+      const Vectorized<c10::complex<double>>&) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vectorized<c10::complex<double>> operator<=(
-      const Vectorized<c10::complex<double>>& /*unused*/) const {
+      const Vectorized<c10::complex<double>>&) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vectorized<c10::complex<double>> operator>(
-      const Vectorized<c10::complex<double>>& /*unused*/) const {
+      const Vectorized<c10::complex<double>>&) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vectorized<c10::complex<double>> operator>=(
-      const Vectorized<c10::complex<double>>& /*unused*/) const {
+      const Vectorized<c10::complex<double>>&) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
 

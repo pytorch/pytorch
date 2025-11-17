@@ -336,7 +336,7 @@ class C10_API Scalar {
     } else if (isBoolean()) {
       return ScalarType::Bool;
     } else {
-      TORCH_CHECK(false, "Unknown scalar type.");
+      throw std::runtime_error("Unknown scalar type.");
     }
   }
 
@@ -428,7 +428,7 @@ class C10_API Scalar {
       typename std::enable_if_t<
           std::is_integral_v<T> && !std::is_same_v<T, bool>,
           bool>* = nullptr>
-  Scalar(T vv, bool /*unused*/) : tag(Tag::HAS_i) {
+  Scalar(T vv, bool) : tag(Tag::HAS_i) {
     v.i = convert<decltype(v.i), T>(vv);
   }
 
@@ -437,14 +437,14 @@ class C10_API Scalar {
       typename std::enable_if_t<
           !std::is_integral_v<T> && !c10::is_complex<T>::value,
           bool>* = nullptr>
-  Scalar(T vv, bool /*unused*/) : tag(Tag::HAS_d) {
+  Scalar(T vv, bool) : tag(Tag::HAS_d) {
     v.d = convert<decltype(v.d), T>(vv);
   }
 
   template <
       typename T,
       typename std::enable_if_t<c10::is_complex<T>::value, bool>* = nullptr>
-  Scalar(T vv, bool /*unused*/) : tag(Tag::HAS_z) {
+  Scalar(T vv, bool) : tag(Tag::HAS_z) {
     v.z = convert<decltype(v.z), T>(vv);
   }
 };

@@ -290,13 +290,12 @@ def _single_tensor_rmsprop(
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch.compiler.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
-            if not (
+            assert (
                 param.device.type == step.device.type
                 and param.device.type in capturable_supported_devices
-            ):
-                raise AssertionError(
-                    f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-                )
+            ), (
+                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            )
 
         grad = grads[i]
         grad = grad if not maximize else -grad
@@ -361,20 +360,18 @@ def _multi_tensor_rmsprop(
     if len(params) == 0:
         return
 
-    if differentiable:
-        raise AssertionError("_foreach ops don't support autograd")
+    assert not differentiable, "_foreach ops don't support autograd"
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices()
-        if not all(
+        assert all(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ):
-            raise AssertionError(
-                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-            )
+        ), (
+            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+        )
 
     lr = _to_scalar(lr)
 

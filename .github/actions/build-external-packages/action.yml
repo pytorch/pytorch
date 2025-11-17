@@ -65,7 +65,7 @@ runs:
           cd .ci/lumen_cli
           python3 -m pip install -e .
         )
-        MAX_JOBS="$(nproc --ignore=10)"
+        MAX_JOBS="$(nproc --ignore=6)"
         export MAX_JOBS
 
         # Split the comma-separated list and build each target

@@ -19,13 +19,11 @@ from typing import NamedTuple
 # PyTorch directory root
 def scm_root() -> str:
     path = os.path.abspath(os.getcwd())
-    # pyrefly: ignore [bad-assignment]
     while True:
         if os.path.exists(os.path.join(path, ".git")):
             return path
         if os.path.isdir(os.path.join(path, ".hg")):
             return path
-        # pyrefly: ignore [bad-argument-type]
         n = len(path)
         path = os.path.dirname(path)
         if len(path) == n:

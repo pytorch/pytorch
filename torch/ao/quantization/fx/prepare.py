@@ -130,7 +130,7 @@ def _get_qspec_for_arg(
 ) -> Optional[QuantizationSpecBase]:
     while _is_activation_post_process_node(arg, named_modules):
         arg = arg.args[0]  # type: ignore[assignment]
-    return input_qspec_map.get(arg)
+    return input_qspec_map.get(arg, None)
 
 
 def _create_obs_or_fq_from_qspec(
@@ -166,7 +166,7 @@ def _create_obs_or_fq_from_qspec(
         }
         edge_or_nodes = quantization_spec.derived_from
         obs_or_fqs = [obs_or_fq_map[k] for k in edge_or_nodes]
-        # pyrefly: ignore [unsupported-operation]
+        # pyrefly: ignore  # unsupported-operation
         kwargs["obs_or_fqs"] = obs_or_fqs
         return _DerivedObserverOrFakeQuantize.with_args(**kwargs)()
     elif isinstance(quantization_spec, FixedQParamsQuantizationSpec):
@@ -939,7 +939,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
             if maybe_obs_node.op == "call_module":
                 maybe_obs_mod = named_modules[maybe_obs_node.target]  # type: ignore[index]
                 if (
-                    type(maybe_obs_mod) is type(arg_as_input_act_obs_or_fq)
+                    type(maybe_obs_mod) == type(arg_as_input_act_obs_or_fq)
                     and maybe_obs_mod.dtype == arg_as_input_target_dtype  # type: ignore[possibly-undefined]
                 ):
                     arg_as_input_act_obs_or_fq = maybe_obs_mod  # type: ignore[assignment]
@@ -1055,9 +1055,7 @@ def _maybe_insert_input_equalization_observers_for_node(
         return
 
     if is_branch:
-        warnings.warn(
-            f"Cannot equalize {node} because it is part of a branch.", stacklevel=2
-        )
+        warnings.warn(f"Cannot equalize {node} because it is part of a branch.")
         return
 
     new_args = []
@@ -2088,11 +2086,11 @@ def prepare(
 
     root_node_getter_mapping = get_fusion_pattern_to_root_node_getter(backend_config)
 
-    # pyrefly: ignore [bad-argument-type]
+    # pyrefly: ignore  # bad-argument-type
     _update_qconfig_for_fusion(model, qconfig_mapping)
-    # pyrefly: ignore [bad-argument-type]
+    # pyrefly: ignore  # bad-argument-type
     _update_qconfig_for_fusion(model, _equalization_config)
-    # pyrefly: ignore [bad-argument-type]
+    # pyrefly: ignore  # bad-argument-type
     flattened_qconfig_dict = _get_flattened_qconfig_dict(qconfig_mapping)
     # TODO: support regex as well
     propagate_qconfig_(model, flattened_qconfig_dict, prepare_custom_config.to_dict())
@@ -2100,7 +2098,7 @@ def prepare(
     if is_qat:
         module_to_qat_module = get_module_to_qat_module(backend_config)
         _qat_swap_modules(model, module_to_qat_module)
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         _update_qconfig_for_qat(qconfig_mapping, backend_config)
 
     # mapping from fully qualified module name to module instance
@@ -2117,7 +2115,7 @@ def prepare(
         model,
         named_modules,
         model.graph,
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         _equalization_config,
         node_name_to_scope,
     )
@@ -2125,7 +2123,7 @@ def prepare(
         model,
         named_modules,
         model.graph,
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         qconfig_mapping,
         node_name_to_scope,
     )
@@ -2187,7 +2185,7 @@ def prepare(
         node_name_to_scope,
         prepare_custom_config,
         equalization_node_name_to_qconfig,
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         qconfig_mapping,
         is_qat,
         observed_node_names,

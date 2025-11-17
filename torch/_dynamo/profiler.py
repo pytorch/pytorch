@@ -49,11 +49,11 @@ class ProfileMetrics:
         if isinstance(other, int):
             other = ProfileMetrics(other, other, other)
         return ProfileMetrics(
-            # pyrefly: ignore [no-matching-overload]
+            # pyrefly: ignore  # no-matching-overload
             self.microseconds / max(1, other.microseconds),
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             self.operators / max(1, other.operators),
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             self.fusions / max(1, other.fusions),
         )
 

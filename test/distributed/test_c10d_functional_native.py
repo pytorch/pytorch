@@ -938,9 +938,6 @@ class CompileTest(TestCase):
         assert "torch.ops._c10d_functional.wait_tensor.default" in code
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @unittest.skipIf(
-        torch._inductor.config.triton.native_matmul, "no extern_kernels.mm"
-    )
     @fresh_cache()
     def test_inductor_reuse_buffer_after_inplace_collective(self):
         def func(arg: torch.Tensor) -> torch.Tensor:

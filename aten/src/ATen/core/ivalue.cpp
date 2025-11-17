@@ -7,7 +7,6 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <ATen/core/type_factory.h>
-#include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
@@ -413,7 +412,7 @@ size_t IValue::hash(const IValue& v) {
     case Tag::Enum:
     case Tag::Stream:
     case Tag::Uninitialized:
-      TORCH_CHECK(false,
+      throw std::runtime_error(
           "unhashable type: '" + v.type()->repr_str() + "'");
   }
   // the above switch should be exhaustive

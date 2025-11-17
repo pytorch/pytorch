@@ -79,9 +79,9 @@ __all__ = [
 logger = get_logger(__name__)
 
 
-JSON = dict[str, Any]
+JSON = dict
 
-_EMPTY_ERROR_DATA: dict[str, Any] = {"message": "<NONE>"}
+_EMPTY_ERROR_DATA = {"message": "<NONE>"}
 _NOT_AVAILABLE = "<N/A>"
 
 _R = TypeVar("_R")
@@ -143,10 +143,6 @@ class ProcessFailure:
                     f" received by PID {self.pid}"
                 )
             else:
-                self.error_file_data["errorTraits"] = {
-                    "category": "system_terminated_error",
-                    "retryability": "False",
-                }
                 self.message = "To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html"
 
     def _get_error_data(self, error_file_data: dict[str, Any]) -> tuple[str, int]:

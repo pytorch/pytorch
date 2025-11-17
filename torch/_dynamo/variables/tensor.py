@@ -23,7 +23,6 @@ import operator
 import textwrap
 import traceback
 import types
-from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
 import sympy
@@ -62,7 +61,6 @@ from ..utils import (
     object_has_getattribute,
     product,
     proxy_args_kwargs,
-    raise_args_mismatch,
     set_example_value,
     tensortype_to_dtype,
 )
@@ -202,19 +200,6 @@ class TensorVariable(VariableTracker):
             # no need to rename inputs
             _is_name_set = self.proxy.node.op == "placeholder"
         self._is_name_set: bool = _is_name_set
-
-    def synchronize_attributes(self, tx, target_cls=None):
-        from .builder import get_specialized_props, infer_subclass_type
-
-        if target_cls is None:
-            target_cls = type(self)
-
-        example_value = self.proxy.node.meta.get("example_value")
-        specialized_props = get_specialized_props(
-            target_cls, tx, example_value, infer_subclass_type(example_value)
-        )
-        for k, v in specialized_props.items():
-            setattr(self, k, v)
 
     def debug_repr(self):
         # TODO: strip off fake tensor from repr here
@@ -518,7 +503,7 @@ class TensorVariable(VariableTracker):
                 # these attributes are implemented under tp_getset, which appear
                 # as `getset_descriptor`s, (compared to, say, methods which appear
                 # as `method_descriptor`s)
-                if type(static_attr) is not types.GetSetDescriptorType:
+                if type(static_attr) != types.GetSetDescriptorType:
                     return None
 
                 proxy = GetAttrVariable.create_getattr_proxy(self.as_proxy(), name)
@@ -1111,26 +1096,20 @@ class TensorVariable(VariableTracker):
             #   value.requires_grad is True => self.has_grad_fn becomes True
 
             # Not sure if __setitem__ can ever save activations, disabling just in case
-
-            # Ignore fresh unbacked symbols that could arise from the internal indexing (selection),
-            # that happen in code like t[idx] += 1 when idx is unbacked. Namely the selection
-            # during 'setitem'.
-            # When the selection happens if idx is unbacked we allocate a new unbacked symbol for the
-            # storage offset in select_meta, but the output of the operation 'setitem' does not depend
-            # on the selection.
-            with (
-                torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
-                tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-                if tx.fake_mode and tx.fake_mode.shape_env
-                else nullcontext(),
-            ):
+            with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
                 get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
 
-            vt = value
-            if isinstance(vt, variables.lazy.LazyVariableTracker):
-                vt = variables.lazy.LazyVariableTracker.realize_all(vt)
+            example_value = self.proxy.node.meta.get("example_value")
+            from .builder import get_specialized_props, infer_subclass_type
 
-            self.synchronize_attributes(tx, type(vt))
+            if isinstance(value, variables.lazy.LazyVariableTracker):
+                value = variables.lazy.LazyVariableTracker.realize_all(value)
+
+            specialized_props = get_specialized_props(
+                type(value), tx, example_value, infer_subclass_type(example_value)
+            )
+            for k, v in specialized_props.items():
+                setattr(self, k, v)
 
         if config.use_graph_deduplication or config.track_nodes_for_deduplication:
             tx.output.region_tracker.add_node_mutation(proxy.node, 0)
@@ -1375,7 +1354,7 @@ class TensorVariable(VariableTracker):
         if (len(args) == 1 and isinstance(args[0], SizeVariable)) or (
             len(args) >= 1
             and all(
-                isinstance(a, ConstantVariable) and a.python_type() is int for a in args
+                isinstance(a, ConstantVariable) and a.python_type() == int for a in args
             )
         ):
             from ..symbolic_convert import InstructionTranslator
@@ -1762,13 +1741,8 @@ class UntypedStorageVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "size":
-            if args or kwargs:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "0 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
+            assert not args
+            assert not kwargs
             result = self.example_value.size()
             if not has_free_symbols(result):
                 # avoid creating a node in the graph
@@ -1787,8 +1761,7 @@ class UntypedStorageVariable(VariableTracker):
                     ),
                 )
         if name == "resize_" and len(args) == 1:
-            if kwargs:
-                raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
+            assert not kwargs
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.inductor.resize_storage_bytes_,

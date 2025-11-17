@@ -218,7 +218,7 @@ def _dump_DDP_relevant_env_vars():
     ]
     formatted_output = ""
     for var in relevant_env_vars:
-        value = os.environ.get(var, "N/A")
+        value = os.environ[var] if var in os.environ else "N/A"
         formatted_output += f"env:{var}={value}\n"
     print(formatted_output)
 
@@ -241,7 +241,7 @@ class _BufferCommHook:
 # is completed.
 class _DDPSink(Function):
     @staticmethod
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def forward(ctx, ddp_weakref, *inputs):
         # set_materialize_grads(False) will ensure that None gradients stay as
         # None and are not filled with zeros.
@@ -692,7 +692,7 @@ class DistributedDataParallel(Module, Joinable):
         elif process_group is None and device_mesh is None:
             self.process_group = _get_default_group()
         elif device_mesh is None:
-            # pyrefly: ignore [bad-assignment]
+            # pyrefly: ignore  # bad-assignment
             self.process_group = process_group
         else:
             if device_mesh.ndim != 1:
@@ -701,8 +701,9 @@ class DistributedDataParallel(Module, Joinable):
                 )
             self.device_mesh = device_mesh
             self.process_group = device_mesh.get_group(mesh_dim=0)
+            from torch.distributed.device_mesh import _mesh_resources
 
-            root_mesh = device_mesh._get_root_mesh()
+            root_mesh = _mesh_resources.get_root_mesh(device_mesh)
             # if a root mesh is not the same as device_mesh,
             # meaning the device_mesh is sliced out from the root mesh.
             if root_mesh != device_mesh:
@@ -774,19 +775,19 @@ class DistributedDataParallel(Module, Joinable):
                     "DistributedDataParallel device_ids and output_device arguments "
                     "only work with single-device/multiple-device GPU modules or CPU modules, "
                     f"but got device_ids {device_ids}, output_device {output_device}, "
-                    f"and module parameters { ({p.device for p in self._module_parameters}) }.",
+                    f"and module parameters { ({p.device for p in self._module_parameters}) }.",  # noqa: E201,E202
                 )
 
             self.device_ids = None
             self.output_device = None
         else:
-            # pyrefly: ignore [bad-assignment]
+            # pyrefly: ignore  # bad-assignment
             self.device_ids = [_get_device_index(x, True) for x in device_ids]
 
             if output_device is None:
                 output_device = device_ids[0]
 
-            # pyrefly: ignore [bad-assignment]
+            # pyrefly: ignore  # bad-assignment
             self.output_device = _get_device_index(output_device, True)
 
         self.static_graph = False
@@ -936,7 +937,7 @@ class DistributedDataParallel(Module, Joinable):
         # enabled.
         self._accum_grad_hooks: list[RemovableHandle] = []
         if self._use_python_reducer:
-            # pyrefly: ignore [bad-assignment]
+            # pyrefly: ignore  # bad-assignment
             torch._inductor.config._fuse_ddp_communication = True
             torch._inductor.config._fuse_ddp_bucket_size = bucket_cap_mb
             # Directly adding this to the trace rule will disturb the users
@@ -2365,8 +2366,7 @@ class DistributedDataParallel(Module, Joinable):
         # If self.static_graph has been set, no need to set it again
         if self.static_graph:
             warnings.warn(
-                "You've set static_graph to be True, no need to set it again.",
-                stacklevel=2,
+                "You've set static_graph to be True, no need to set it again."
             )
             return
         self.static_graph = True
@@ -2380,8 +2380,7 @@ class DistributedDataParallel(Module, Joinable):
                 "`_set_static_graph` will detect unused parameters automatically, so "
                 "you do not need to set find_unused_parameters=true, just be sure these "
                 "unused parameters will not change during training loop while calling "
-                "`_set_static_graph`.",
-                stacklevel=2,
+                "`_set_static_graph`."
             )
 
     def _remove_autograd_hooks(self):

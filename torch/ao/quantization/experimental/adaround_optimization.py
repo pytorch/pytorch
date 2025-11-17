@@ -127,6 +127,7 @@ class AdaptiveRoundingOptimizer:
     @torch.no_grad()
     def feed_forward(self, x, weight, module):
         if isinstance(module, torch.nn.Conv1d):
+            # pyrefly: ignore  # no-matching-overload
             out = torch.nn.functional.conv1d(
                 x,
                 weight,
@@ -187,10 +188,9 @@ class AdaptiveRoundingOptimizer:
         inp, out, fp_in = self.get_data_inp_out(module, q_module, self.data)
 
         print("==================== Before adaround ====================")
-        if torch.abs(out[0] - module(fp_in[0])).sum().item() != 0:
-            raise AssertionError(
-                "In-placed activation is detected, please do not use activation in-placed"
-            )
+        assert torch.abs(out[0] - module(fp_in[0])).sum().item() == 0, (
+            "In-placed activation is detected, please do not use activation in-placed"
+        )
         # Stack the tensors in each list into a single tensor
         # Assuming inp and out are your lists of tensors
         inp_tensor = torch.vstack(inp)

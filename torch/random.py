@@ -184,7 +184,7 @@ def fork_rng(
                 f"and suppress this warning, set the '{_devices_kw}' keyword argument to "
                 f"`range(torch.{device_type}.device_count())`."
             )
-            warnings.warn(message, stacklevel=2)
+            warnings.warn(message)
             _fork_rng_warned_already = True
         devices = list(range(num_devices))
     else:

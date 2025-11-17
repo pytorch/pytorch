@@ -263,14 +263,13 @@ def _single_tensor_adadelta(
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
-        if not all(
+        assert all(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ):
-            raise AssertionError(
-                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-            )
+        ), (
+            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+        )
 
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
@@ -318,22 +317,20 @@ def _multi_tensor_adadelta(
     capturable: bool,
     has_complex: bool,
 ):
-    if differentiable:
-        raise AssertionError("_foreach ops don't support autograd")
+    assert not differentiable, "_foreach ops don't support autograd"
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
-        if not all(
+        assert all(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ):
-            raise AssertionError(
-                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-            )
+        ), (
+            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+        )
 
     if len(params) == 0:
         return

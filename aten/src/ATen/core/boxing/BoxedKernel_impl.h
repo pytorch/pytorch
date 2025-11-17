@@ -11,9 +11,9 @@ inline BoxedKernel::BoxedKernel(
 
 template <BoxedKernel::BoxedKernelFunction* func>
 inline void BoxedKernel::make_boxed_function(
-    OperatorKernel* /*unused*/,
+    OperatorKernel*,
     const OperatorHandle& opHandle,
-    DispatchKeySet /*unused*/,
+    DispatchKeySet,
     Stack* stack) {
   // Note that we're dropping the DispatchKeySet argument.
   // See Note [Plumbing Keys Through The Dispatcher 2] for details.
@@ -22,7 +22,7 @@ inline void BoxedKernel::make_boxed_function(
 
 template <BoxedKernel::BoxedKernelFunction_withDispatchKeys* func>
 inline void BoxedKernel::make_boxed_function(
-    OperatorKernel* /*unused*/,
+    OperatorKernel*,
     const OperatorHandle& opHandle,
     DispatchKeySet ks,
     Stack* stack) {

@@ -1,4 +1,4 @@
-from typing import Any, NewType, Optional
+from typing import Any, NewType
 
 import torch
 
@@ -150,38 +150,3 @@ def set_payload(opaque_object: torch._C.ScriptObject, payload: Any) -> None:
             f"Tried to get the payload from a non-OpaqueObject of type `{type_}`"
         )
     torch._C._set_opaque_object_payload(opaque_object, payload)
-
-
-_OPAQUE_TYPES: dict[Any, str] = {}
-
-
-def register_opaque_type(cls: Any, name: Optional[str] = None) -> None:
-    """
-    Registers the given type as an opaque type which allows this to be consumed
-    by a custom operator.
-
-    Args:
-        cls (type): The class to register as an opaque type.
-        name (str): A unique qualified name of the type.
-    """
-    if name is None:
-        name = cls.__name__
-
-    if "." in name:
-        # The schema_type_parser will break up types with periods
-        raise ValueError(
-            f"Unable to accept name, {name}, for this opaque type as it contains a '.'"
-        )
-    _OPAQUE_TYPES[cls] = name
-
-    torch._C._register_opaque_type(name)
-
-
-def is_opaque_type(cls: Any) -> bool:
-    """
-    Checks if the given type is an opaque type.
-    """
-    if cls not in _OPAQUE_TYPES:
-        return False
-
-    return torch._C._is_opaque_type_registered(_OPAQUE_TYPES[cls])

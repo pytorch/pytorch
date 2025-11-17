@@ -36,12 +36,12 @@ def check_onnx_opset_operator(
     # but the op's attributes can optionally be
     # specified as well
     assert len(ops) == len(graph.node)
-    for i in range(len(ops)):
+    for i in range(0, len(ops)):
         assert graph.node[i].op_type == ops[i]["op_name"]
         if "attributes" in ops[i]:
             attributes = ops[i]["attributes"]
             assert len(attributes) == len(graph.node[i].attribute)
-            for j in range(len(attributes)):
+            for j in range(0, len(attributes)):
                 for attribute_field in attributes[j].keys():
                     assert attributes[j][attribute_field] == getattr(
                         graph.node[i].attribute[j], attribute_field

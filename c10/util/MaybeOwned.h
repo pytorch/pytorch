@@ -82,7 +82,7 @@ class MaybeOwned final {
 
   /// Don't use this; use owned() instead.
   template <class... Args>
-  explicit MaybeOwned(std::in_place_t /*unused*/, Args&&... args)
+  explicit MaybeOwned(std::in_place_t, Args&&... args)
       : isBorrowed_(false), own_(std::forward<Args>(args)...) {}
 
  public:
@@ -177,7 +177,7 @@ class MaybeOwned final {
   }
 
   template <class... Args>
-  static MaybeOwned owned(std::in_place_t /*unused*/, Args&&... args) {
+  static MaybeOwned owned(std::in_place_t, Args&&... args) {
     return MaybeOwned(std::in_place, std::forward<Args>(args)...);
   }
 

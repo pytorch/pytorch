@@ -12,7 +12,6 @@ import torch.distributed._symmetric_memory as symm_mem
 import torch.distributed._symmetric_memory._nvshmem_triton as nvshmem
 from torch._inductor.runtime.triton_compat import triton
 from torch.distributed._symmetric_memory._nvshmem_triton import requires_nvshmem
-from torch.testing._internal.common_cuda import SM100OrLater
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -265,10 +264,6 @@ def my_reduce_kernel(
     nvshmem.reduce(team_handle, dest_tensor, source_tensor, nreduce, operation)
 
 
-@skip_but_pass_in_sandcastle_if(
-    SM100OrLater,
-    "Skipping all NVSHMEM Triton tests due to https://github.com/pytorch/pytorch/issues/162897",
-)
 @instantiate_parametrized_tests
 class NVSHMEMTritonTest(MultiProcContinuousTest):
     def _init_device(self) -> None:
@@ -1141,8 +1136,9 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         vals[0, ::2] = 1
         vals[0, 1::2] = 2
         vals[1] = 1
-        for rank in range(world_size):
-            vals[2, rank] = 1 if (rank // 2) % 2 == 0 else 2
+        vals2 = vals[2].view(-1, 2, 2)
+        vals2[:, 0] = 1
+        vals2[:, 1] = 2
         expected = vals.prod(-1).tolist()
 
         # Synchronize before reduction

@@ -163,13 +163,8 @@ if [[ "$(uname)" != Darwin ]]; then
   MEMORY_LIMIT_MAX_JOBS=12
   NUM_CPUS=$(( $(nproc) - 2 ))
 
-  if [[ "$(uname)" == Linux ]]; then
-    # Defaults here for **binary** linux builds so they can be changed in one place
-    export MAX_JOBS=${MAX_JOBS:-$(( ${NUM_CPUS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${NUM_CPUS} ))}
-  else
-    # For other builds
-    export MAX_JOBS=${NUM_CPUS}
-  fi
+  # Defaults here for **binary** linux builds so they can be changed in one place
+  export MAX_JOBS=${MAX_JOBS:-$(( ${NUM_CPUS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${NUM_CPUS} ))}
 
   cat >>"$envfile" <<EOL
   export MAX_JOBS="${MAX_JOBS}"

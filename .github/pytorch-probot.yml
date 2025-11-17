@@ -3,7 +3,6 @@ ciflow_tracking_issue: 64124
 ciflow_push_tags:
 - ciflow/b200
 - ciflow/b200-symm-mem
-- ciflow/b200-distributed
 - ciflow/binaries
 - ciflow/binaries_libtorch
 - ciflow/binaries_wheel
@@ -16,8 +15,7 @@ ciflow_push_tags:
 - ciflow/inductor-micro-benchmark
 - ciflow/inductor-micro-benchmark-cpu-x86
 - ciflow/inductor-perf-compare
-- ciflow/inductor-perf-test-nightly-rocm-mi300
-- ciflow/inductor-perf-test-nightly-rocm-mi355
+- ciflow/inductor-perf-test-nightly-rocm
 - ciflow/inductor-perf-test-nightly-x86-zen
 - ciflow/inductor-periodic
 - ciflow/inductor-rocm
@@ -32,8 +30,6 @@ ciflow_push_tags:
 - ciflow/riscv64
 - ciflow/rocm
 - ciflow/rocm-mi300
-- ciflow/rocm-mi355
-- ciflow/rocm-navi31
 - ciflow/s390
 - ciflow/slow
 - ciflow/torchbench

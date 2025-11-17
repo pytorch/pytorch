@@ -11,7 +11,6 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
 using namespace at;
@@ -19,7 +18,7 @@ using namespace torch;
 using namespace torch::cuda::nccl;
 using namespace torch::cuda::nccl::detail;
 
-static constexpr const char* COMM_CAPSULE_NAME = "torch.cuda.nccl.Communicator";
+static const char* COMM_CAPSULE_NAME = "torch.cuda.nccl.Communicator";
 
 PyObject* THCPModule_nccl_version(PyObject* self, PyObject* args) {
   return PyLong_FromUnsignedLongLong(version());
@@ -64,9 +63,10 @@ static std::vector<std::optional<at::cuda::CUDAStream>> unpack_streams(
     return std::vector<std::optional<at::cuda::CUDAStream>>(size, std::nullopt);
   }
   auto streams = THPUtils_PySequence_to_CUDAStreamList(obj);
-  TORCH_CHECK(
-      streams.size() == size,
-      "number of streams is not equal to number of inputs");
+  if (streams.size() != size) {
+    throw std::runtime_error(
+        "number of streams is not equal to number of inputs");
+  }
   return streams;
 }
 
@@ -90,9 +90,10 @@ static std::vector<ncclComm_t> unpack_comms(PyObject* obj, size_t size) {
       comms[i] = unpack_nccl_comm(PySequence_Fast_GET_ITEM(seq.get(), i));
     }
   }
-  TORCH_CHECK(
-      comms.size() == size,
-      "number of communicators is not equal to number of inputs");
+  if (comms.size() != size) {
+    throw std::runtime_error(
+        "number of communicators is not equal to number of inputs");
+  }
   return comms;
 }
 
@@ -140,7 +141,7 @@ PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
         "nccl_reduce",
         1,
         "(sequence[Tensor] inputs, Tensor output, int root,"
-        " int op, sequence[torch.cuda.Stream or None])");
+        " int op, sequence[torch.cuda.Stream or None]");
     return nullptr;
   }
 

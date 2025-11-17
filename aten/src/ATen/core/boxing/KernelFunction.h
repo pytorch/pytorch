@@ -229,7 +229,7 @@ class TORCH_API KernelFunction final {
    * &unboxed_func>();
    */
   template <class FuncPtr, bool AllowLegacyTypes = false>
-  static KernelFunction makeFromUnboxedFunction(FuncPtr /*func_ptr*/);
+  static KernelFunction makeFromUnboxedFunction(FuncPtr);
 
   /**
    * Create a KernelFunction from an unboxed function.
@@ -271,7 +271,7 @@ class TORCH_API KernelFunction final {
 
   std::string dumpState() const;
   // For testing internal invariants only
-  bool _equalsBoxedAndUnboxed(const KernelFunction& /*other*/) const;
+  bool _equalsBoxedAndUnboxed(const KernelFunction&) const;
 
   // Register a token to be invalidated when this KernelFunction is destroyed
   void registerToken(std::weak_ptr<KernelToken> token) const;

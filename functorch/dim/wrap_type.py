@@ -5,7 +5,6 @@
 # LICENSE file in the root directory of this source tree.
 
 import functools
-from collections.abc import Callable
 from types import (
     BuiltinMethodType,
     FunctionType,
@@ -13,7 +12,7 @@ from types import (
     MethodDescriptorType,
     WrapperDescriptorType,
 )
-from typing import Any
+from typing import Any, Callable
 
 
 FUNC_TYPES = (

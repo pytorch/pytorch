@@ -26,23 +26,11 @@ jobs:
       id-token: write
       contents: read
 
-  get-label-type:
-    name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
-
   linux-jammy-rocm-py3_10-build:
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
     name: linux-jammy-rocm-py3.10
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-rocm-py3.10
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       sync-tag: rocm-build
@@ -70,4 +58,30 @@ jobs:
       build-environment: linux-jammy-rocm-py3.10
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
+    secrets: inherit
+
+  linux-jammy-rocm-py3_10-gfx1100-test:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    permissions:
+      id-token: write
+      contents: read
+    name: linux-jammy-rocm-py3_10-gfx1100
+    uses: ./.github/workflows/_rocm-test.yml
+    needs:
+      - linux-jammy-rocm-py3_10-build
+      - target-determination
+    with:
+      build-environment: linux-jammy-rocm-py3.10
+      docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx1100" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx1100" },
+        ]}
+      tests-to-include: >
+         test_nn test_torch test_cuda test_ops test_unary_ufuncs test_binary_ufuncs
+         test_autograd inductor/test_torchinductor inductor/test_kernel_benchmark
+         inductor/test_pad_mm inductor/test_benchmark_fusion inductor/test_aot_inductor
+         inductor/test_torchinductor inductor/test_decompose_mem_bound_mm
+         inductor/test_flex_attention inductor/test_max_autotune
     secrets: inherit

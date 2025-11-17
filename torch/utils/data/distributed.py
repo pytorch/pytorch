@@ -125,19 +125,13 @@ class DistributedSampler(Sampler[_T_co]):
         else:
             # remove tail of data to make it evenly divisible.
             indices = indices[: self.total_size]
-        if len(indices) != self.total_size:
-            raise AssertionError(
-                f"Number of indices ({len(indices)}) does not match total_size ({self.total_size})"
-            )
+        assert len(indices) == self.total_size
 
         # subsample
         indices = indices[self.rank : self.total_size : self.num_replicas]
-        if len(indices) != self.num_samples:
-            raise AssertionError(
-                f"Number of subsampled indices ({len(indices)}) does not match num_samples ({self.num_samples})"
-            )
+        assert len(indices) == self.num_samples
 
-        # pyrefly: ignore [bad-return]
+        # pyrefly: ignore  # bad-return
         return iter(indices)
 
     def __len__(self) -> int:

@@ -163,17 +163,9 @@ class BackendCompilerFailed(ShortenTraceback):
 
 
 class Unsupported(TorchDynamoException):
-    def __init__(
-        self,
-        msg: str,
-        *,
-        case_name: Optional[str] = None,
-        real_stack: None | StackSummary = None,
-    ) -> None:
+    def __init__(self, msg: str, *, case_name: Optional[str] = None) -> None:
         super().__init__(msg)
-        if not real_stack:
-            real_stack = torch._guards.TracingContext.extract_stack()
-        self.real_stack = real_stack
+        self.real_stack = torch._guards.TracingContext.extract_stack()
         self.msg = msg
         self.category: Optional[str] = None
         self.add_to_stats()
@@ -308,9 +300,7 @@ class PackageError(TorchDynamoException):
 
 class ObservedException(TorchDynamoException):
     # An exception observed during the tracing. This exception is used by Dynamo to handle exceptions.
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.real_stack: StackSummary = torch._guards.TracingContext.extract_stack()
+    pass
 
 
 class ObservedUserStopIteration(ObservedException):
@@ -384,7 +374,7 @@ def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedExc
         observed_exception_map[exc_type] = type(  # type: ignore[assignment]
             f"Observed{name}Error", (ObservedException,), {}
         )
-    # pyrefly: ignore [index-error]
+    # pyrefly: ignore  # index-error
     return observed_exception_map[exc_type]
 
 
@@ -394,22 +384,14 @@ def raise_observed_exception(
     *,
     args: Optional[list[Any]] = None,
     kwargs: Optional[dict[str, Any]] = None,
-    msg: Optional[str] = None,
 ) -> NoReturn:
     from .variables import BuiltinVariable
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
-    # If a message is provided but no args, use the message as the first argument
-    if msg is not None and (args is None or len(args) == 0):
-        args = [msg]
     exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
     tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
-    raised_exc = get_dynamo_observed_exception(exc_type)
-    # Store the original exception arguments for better error messages
-    if args:
-        raise raised_exc(*args)
-    raise raised_exc
+    raise get_dynamo_observed_exception(exc_type)
 
 
 def handle_observed_exception(tx: Any) -> None:
@@ -550,8 +532,8 @@ def _load_gb_type_to_gb_id_map() -> dict[str, Any]:
         )
         with open(registry_path) as f:
             registry = json.load(f)
-    except Exception:
-        log.exception("Error accessing the registry file")
+    except Exception as e:
+        log.error("Error accessing the registry file: %s", e)
         registry = {}
 
     mapping = {}
@@ -616,10 +598,7 @@ def unimplemented_v2(
     if log_warning:
         log.warning(msg)
     if from_exc is not _NOTHING:
-        past_real_stack = None
-        if hasattr(from_exc, "real_stack"):
-            past_real_stack = from_exc.real_stack
-        raise Unsupported(msg, real_stack=past_real_stack) from from_exc
+        raise Unsupported(msg) from from_exc
     raise Unsupported(msg)
 
 

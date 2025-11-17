@@ -70,9 +70,7 @@ class Dep(abc.ABC):
 
 @dataclasses.dataclass(frozen=True)
 class MemoryDep(Dep):
-    # pyrefly: ignore [bad-override]
     name: str
-    # pyrefly: ignore [bad-override]
     index: sympy.Expr
     var_names: tuple[sympy.Symbol, ...]
     size: tuple[sympy.Expr, ...]
@@ -151,7 +149,7 @@ class MemoryDep(Dep):
         stride_to_index = {s: i for i, s in enumerate(self_strides)}
         order = [stride_to_index[s] for s in other_strides]
 
-        assert OrderedSet(order) == OrderedSet(range(self.num_vars))
+        assert OrderedSet(order) == OrderedSet(range(0, self.num_vars))
         return order
 
     def get_offset(self) -> sympy.Expr:
@@ -308,13 +306,11 @@ class MemoryDep(Dep):
 
 @dataclasses.dataclass(frozen=True)
 class StarDep(Dep):
-    # pyrefly: ignore [bad-override]
     name: str
     mode: Optional[str] = None
 
     # depends on the entire buffer
     @property
-    # pyrefly: ignore [bad-override]
     def index(self) -> sympy.Expr:
         raise NotImplementedError("StarDep does not have an index")
 
@@ -363,7 +359,6 @@ class StarDep(Dep):
 @dataclasses.dataclass(frozen=True)
 class WeakDep(Dep):
     # Fake dependency on unused buffer
-    # pyrefly: ignore [bad-override]
     name: str
     # Buffer that is doing the mutation
     mutating_buf: str
@@ -380,7 +375,6 @@ class WeakDep(Dep):
         return OrderedSet()
 
     @property
-    # pyrefly: ignore [bad-override]
     def index(self) -> sympy.Expr:
         raise NotImplementedError("WeakDep does not have an index")
 
@@ -668,11 +662,8 @@ def extract_read_writes(
         range_vars = [*itertools.chain.from_iterable(args)]
 
     return ReadWrites(
-        # pyrefly: ignore [missing-attribute]
         OrderedSet(inner._reads),
-        # pyrefly: ignore [missing-attribute]
         OrderedSet(inner._writes),
-        # pyrefly: ignore [missing-attribute]
         inner._index_exprs,
         range_vars,
         var_ranges,

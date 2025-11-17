@@ -71,7 +71,6 @@ def quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(
                 nrows // 16, 16
             )
         ).view(-1)
-    # pyrefly: ignore  # unbound-name
     outp = outp.index_copy(1, cols_permuted, outp)
 
     # interleave_column_major_tensor

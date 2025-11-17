@@ -39,7 +39,7 @@ struct HostBlock {
 };
 
 template <typename B>
-struct alignas(hardware_destructive_interference_size) FreeBlockList {
+struct alignas(64) FreeBlockList {
   std::mutex mutex_;
   std::deque<B*> list_;
 };
@@ -122,7 +122,7 @@ struct TORCH_API HostStats {
 // Struct containing memory allocator summary statistics for host, as they
 // are staged for reporting. This is a temporary struct that is used to
 // avoid locking the allocator while collecting stats.
-struct alignas(hardware_destructive_interference_size) HostStatsStaged {
+struct alignas(64) HostStatsStaged {
   std::mutex timing_mutex_;
   // COUNT: total allocations (active + free)
   // LOCK: access to this stat is protected by the allocator's blocks_mutex_
@@ -669,7 +669,7 @@ struct CachingHostAllocatorImpl {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for query_event");
   }
 
-  alignas(hardware_destructive_interference_size) std::mutex blocks_mutex_;
+  alignas(64) std::mutex blocks_mutex_;
   ska::flat_hash_set<B*> blocks_; // block list
   ska::flat_hash_map<void*, B*> ptr_to_block_;
 
@@ -677,17 +677,17 @@ struct CachingHostAllocatorImpl {
   // size. This allows us to quickly find a free block of the right size.
   // We use deque to store per size free list and guard the list with its own
   // mutex.
-  alignas(hardware_destructive_interference_size) std::vector<FreeBlockList<B>> free_list_ =
+  alignas(64) std::vector<FreeBlockList<B>> free_list_ =
       std::vector<FreeBlockList<B>>(MAX_SIZE_INDEX);
 
-  alignas(hardware_destructive_interference_size) std::mutex events_mutex_;
+  alignas(64) std::mutex events_mutex_;
   std::deque<std::pair<E, B*>> events_; // event queue paired with block
 
   // Indicates whether the object is active.
   // Set to false in the destructor to signal background threads to stop.
   std::atomic<bool> active_{true};
 protected:
-  alignas(hardware_destructive_interference_size) HostStatsStaged stats_;
+  alignas(64) HostStatsStaged stats_;
 };
 
 struct TORCH_API HostAllocator : public at::Allocator {

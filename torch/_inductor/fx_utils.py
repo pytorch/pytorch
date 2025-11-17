@@ -98,7 +98,7 @@ class FakeTensorUpdater:
             return statically_known_true(sym_eq(new, old))
 
         def is_fake_tensor_same(new, old, *, node):
-            if type(new) is not type(old):
+            if type(new) != type(old):
                 return False
             if isinstance(new, (list, tuple)):
                 if len(new) != len(old):
@@ -238,7 +238,6 @@ class FakeTensorUpdater:
                 symbol_to_path := compute_unbacked_bindings(shape_env, new_fake_tensor)
             ):
                 # Refresh the bindings to the new symbols
-
                 node.meta["unbacked_bindings"] = symbol_to_path
 
             existing_storages[get_node_storage(node)] += 1

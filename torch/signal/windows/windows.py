@@ -326,7 +326,7 @@ def gaussian(
         requires_grad=requires_grad,
     )
 
-    return torch.exp(-(k**2))  # pyrefly: ignore [unsupported-operation]
+    return torch.exp(-(k**2))  # pyrefly: ignore  # unsupported-operation
 
 
 @_add_docstr(

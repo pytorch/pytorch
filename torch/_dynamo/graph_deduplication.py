@@ -456,10 +456,8 @@ def _add_mutation_dependencies(
             for user in mutated_arg.users:
                 if user is node:
                     continue
-                # pyrefly: ignore [unsupported-operation]
                 elif user < node:
                     node_to_additional_deps[node].add(user)
-                # pyrefly: ignore [unsupported-operation]
                 elif user > node:
                     node_to_additional_deps[user].add(node)
 

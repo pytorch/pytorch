@@ -27,7 +27,7 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.utils import get_layout_constraint_tag
-from torch._prims_common import (  # pyrefly: ignore  # deprecated
+from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
     check,
@@ -160,7 +160,6 @@ def group_foreach_args(arg_pairs: Iterable[Union[tuple[Any, Any], Any]]):
                 break
         assert device is not None, "foreach op should have at least one tensor arg"
         if unpack_args:
-            # pyrefly: ignore [bad-unpacking]
             (args,) = args
         out[(device, use_foreach)].append((i, args))
     return out
@@ -263,7 +262,6 @@ def decode_dtype(dtype: int):
     if not isinstance(dtype, int):
         return dtype
     assert dtype in DTYPE_ID_LOOKUP, f"id {dtype} missing from DTYPE_ID_LOOKUP"
-    # pyrefly: ignore [bad-assignment]
     dtype = DTYPE_ID_LOOKUP[dtype]
     return dtype
 
@@ -560,9 +558,7 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
         return inputs
     if all(isinstance(x, (int, float, sympy.Basic)) for x in inputs):
         dtype = override_return_dtype or get_promoted_dtype(
-            *inputs,
-            # pyrefly: ignore [bad-argument-type]
-            type_promotion_kind=type_promotion_kind,
+            *inputs, type_promotion_kind=type_promotion_kind
         )
 
         def const_func(x):
@@ -619,9 +615,7 @@ def make_pointwise(
         inputs = promote_constants(inputs, override_return_dtype)
         if allow_alpha:
             if alpha is not None and alpha != 1:
-                # pyrefly: ignore [bad-assignment]
                 inputs = list(inputs)
-                # pyrefly: ignore [unsupported-operation]
                 inputs[-1] = mul(inputs[-1], alpha)
         else:
             assert alpha is None
@@ -671,14 +665,12 @@ def make_pointwise(
         if not override_device:
             device = None
             for i in inputs:
-                # pyrefly: ignore [missing-attribute]
                 if is_gpu(i.get_device().type):
                     device = i.get_device()
                     break
             if not device:
                 device = inputs[0].get_device()
 
-        # pyrefly: ignore [unbound-name]
         device = override_device or device
 
         return Pointwise.create(
@@ -733,7 +725,6 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 outputs[output_ind] = output
 
                 if (
-                    # pyrefly: ignore [unbound-name]
                     V.graph.has_feature(device, BackendFeature.FOREACH)
                     and use_foreach
                     and realize_outputs
@@ -742,7 +733,6 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                     operation_list.append(output.get_operation_name())
 
             if operation_list:
-                # pyrefly: ignore [unbound-name]
                 V.graph.register_operation_list(operation_list)
 
         assert all(x is not None for x in outputs)
@@ -1303,7 +1293,6 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
     new_size = sym_size
 
     if start_index is not None:
-        x.realize()
         # we shouldn't have allocated storage offset symbol if start index was determinable
         assert sym_storage is None
         new_storage_offset = x.get_layout().offset + start_index * x.get_stride()[dim]
@@ -1957,9 +1946,6 @@ def select(x, dim, idx):
             # Additionally, we want to avoid accidental unbacked unsqueeze semantics. To resolve this,
             # we use as_strided instead.
             # Removing this branch will cause test_unbacked_select_index_with_check to fail.
-
-            # before accessing size, stride, and offset we need to realize.
-            x.realize()
             new_size = x.get_size()
             new_stride = x.get_stride()
             new_storage_offset = x.get_layout().offset + new_stride[dim] * actual_index
@@ -1983,8 +1969,6 @@ def select(x, dim, idx):
     assert len(unbacked_bindings) == 1, unbacked_bindings
     unbacked_offset_sym, _ = next(iter(unbacked_bindings.items()))
 
-    # before accessing size, stride, and offset we need to realize.
-    x.realize()
     new_size = x.get_size()
     new_stride = x.get_stride()
     new_storage_offset = unbacked_offset_sym
@@ -2145,9 +2129,6 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
         return True
 
     if t.is_meta:
-        return True
-
-    if t.is_sparse:
         return True
 
     if t.dtype == torch.float8_e8m0fnu:
@@ -2384,7 +2365,7 @@ make_fallback(aten.randint)
 
 @register_lowering(aten.rand)
 def rand(*args, **kwargs):
-    if kwargs.get("generator") is not None:
+    if kwargs.get("generator", None) is not None:
         return fallback_rand_generator(*args, **kwargs)
     elif config.fallback_random:
         kwargs.pop("generator", None)
@@ -2394,7 +2375,7 @@ def rand(*args, **kwargs):
 
 @register_lowering(aten.randn)
 def randn(*args, **kwargs):
-    if kwargs.get("generator") is not None:
+    if kwargs.get("generator", None) is not None:
         return fallback_randn_generator(*args, **kwargs)
     elif config.fallback_random:
         kwargs.pop("generator", None)
@@ -3091,10 +3072,8 @@ def copy(self, src, non_blocking=False):
         src = tensor(src, dtype=self.get_dtype(), device=self.get_device())
     x = src
     if self.get_device() != src.get_device():
-        # pyrefly: ignore [bad-argument-type]
         x = to_device(x, self.get_device())
     if self.get_dtype() != src.get_dtype():
-        # pyrefly: ignore [bad-argument-type]
         x = to_dtype(x, self.get_dtype())
 
     if self.get_size() != src.get_size():
@@ -3118,7 +3097,6 @@ def clone_preserve_reinterpret_view(x):
     reinterpret_view_layouts = []
     if isinstance(x, TensorBox) and isinstance(x.data, ir.ReinterpretView):
         x = x.data  # unwrap TensorBox
-        # pyrefly: ignore [bad-assignment]
         while isinstance(x, ir.ReinterpretView):
             reinterpret_view_layouts.append(x.get_layout())
             x = x.data
@@ -3165,14 +3143,8 @@ def select_scatter(x, src, dim: int, index: int):
     assert x.get_dtype() == src.get_dtype()
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
-    if V.graph.sizevars.guard_or_false(sympy.Lt(index, 0)):
+    if V.graph.sizevars.evaluate_expr(sympy.Lt(index, 0)):
         index = index + x.get_size()[dim]
-    elif V.graph.sizevars.guard_or_false(sympy.Ge(index, 0)):
-        pass
-    else:
-        # unbacked index
-        return fallback_handler(aten.select_scatter.default)(x, src, dim, index)
-
     V.graph.sizevars.check_leq(0, index)  # type: ignore[arg-type]
     V.graph.sizevars.check_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
     src = expand(unsqueeze(src, dim), x.get_size())
@@ -3203,7 +3175,6 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
 
-    # pyrefly: ignore [bad-argument-type]
     start, end = ir.SliceView.normalize_start_end(x, dim, start, end)
 
     src_size = list(x.get_size())
@@ -3526,7 +3497,6 @@ def new_constant(fill_value):
         assert isinstance(size, (list, tuple))
         assert_nyi(not pin_memory, "pin_memory")
         assert_nyi(layout in (None, torch.strided), f"layout={layout}")
-        # pyrefly: ignore [bad-argument-type]
         dtype = decode_dtype(dtype) or x.get_dtype()
         device = device or x.get_device()
         size = [sympy.Integer(s) for s in size]
@@ -3559,7 +3529,6 @@ def empty_strided(
     assert isinstance(stride, (list, tuple, type(None)))
     assert_nyi(not pin_memory, "pin_memory")
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
-    # pyrefly: ignore [bad-argument-type]
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
     device = device or torch.tensor(0.0).device
     device = decode_device(device)
@@ -4218,7 +4187,6 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
             return src_loader(idx)
         else:
             # src is a scalar
-            # pyrefly: ignore [bad-argument-type]
             return ops.constant(src, self.get_dtype())
 
     def backend_reduce_str(reduce):
@@ -4572,7 +4540,6 @@ def constant_boundary_condition(
 ):
     h = x.get_size()[-dim:]
     x_loader = x.make_loader()
-    # pyrefly: ignore [unsupported-operation]
     padding_h = padding or [0] * dim
 
     def load(index):
@@ -4581,7 +4548,6 @@ def constant_boundary_condition(
 
         mask = functools.reduce(
             ops.and_,
-            # pyrefly: ignore [no-matching-overload]
             [range_mask(ih[i], h[i] + padding_h[i], -padding_h[i]) for i in range(dim)],
         )
         return (
@@ -5463,7 +5429,6 @@ def upsample_nearest2d_backward(
     inp_h = V.graph.sizevars.guard_int(inp_h)
     inp_w = V.graph.sizevars.guard_int(inp_w)
 
-    # pyrefly: ignore [not-iterable]
     *_batch, out_h, out_w = input_size
 
     if inp_h % out_h == 0 and inp_w % out_w == 0:
@@ -5496,7 +5461,6 @@ def upsample_nearest2d_backward(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=fn,
-        # pyrefly: ignore [no-matching-overload]
         ranges=list(input_size),
     )
 
@@ -6352,7 +6316,6 @@ def pow(a, b):
     if isinstance(a, Number):
         if a == 1:
             return full_like(b, 1)
-        # pyrefly: ignore [missing-attribute]
         if a == 2 and is_float_dtype(b.get_dtype()):
             return exp2(b)
 
@@ -6500,7 +6463,6 @@ def div_prim(a, b):
     # see https://github.com/pytorch/pytorch/issues/157959
     if (divisor := get_constant_value(b)) is not None and a.get_device().type != "cpu":
         # Replace divide by constant with multiply by reciprocal
-
         if divisor.value == 0:
             reciprocal = math.copysign(float("inf"), divisor.value)
         else:

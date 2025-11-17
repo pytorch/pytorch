@@ -3641,7 +3641,7 @@ Tensor& transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
 namespace {
 // Transpose implementation for sparse compressed layouts
 // NB: We assume that dim1,dim0 have already been wrapped
-inline Tensor sparse_compressed_transpose(
+static inline Tensor sparse_compressed_transpose(
     const Tensor& self,
     int64_t dim0,
     int64_t dim1) {

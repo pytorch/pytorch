@@ -13,8 +13,7 @@ def get_enum(reduction: str) -> int:
     elif reduction == "elementwise_mean":
         warnings.warn(
             "reduction='elementwise_mean' is deprecated. "
-            "Please use reduction='mean' instead.",
-            stacklevel=2,
+            "Please use reduction='mean' instead."
         )
         ret = 1
     elif reduction == "sum":
@@ -49,7 +48,7 @@ def legacy_get_string(
     else:
         ret = "none"
     if emit_warning:
-        warnings.warn(warning.format(ret), stacklevel=2)
+        warnings.warn(warning.format(ret))
     return ret
 
 

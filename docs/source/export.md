@@ -44,9 +44,9 @@ following invariants. More specifications about the IR can be found
 - **Normalized**: There are no Python semantics within the graph. Submodules
   from the original programs are inlined to form one fully flattened
   computational graph.
-- **Graph properties**: By default, the graph may contain both functional and
-  non-functional operators (including mutations). To obtain a purely functional
-  graph, use `run_decompositions()` which removes mutations and aliasing.
+- **Graph properties**: The graph is purely functional, meaning it does not
+  contain operations with side effects such as mutations or aliasing. It does
+  not mutate any intermediate values, parameters, or buffers.
 - **Metadata**: The graph contains metadata captured during tracing, such as a
   stacktrace from user's code.
 
@@ -56,8 +56,8 @@ Under the hood, `torch.export` leverages the following latest technologies:
   called the Frame Evaluation API to safely trace PyTorch graphs. This
   provides a massively improved graph capturing experience, with much fewer
   rewrites needed in order to fully trace the PyTorch code.
-- **AOT Autograd** ensures the graph is decomposed/lowered to the ATen operator
-  set. When using `run_decompositions()`, it can also provide functionalization.
+- **AOT Autograd** provides a functionalized PyTorch graph and ensures the graph
+  is decomposed/lowered to the ATen operator set.
 - **Torch FX (torch.fx)** is the underlying representation of the graph,
   allowing flexible Python-based transformations.
 
@@ -444,31 +444,23 @@ saved_exported_program = torch.export.load('exported_program.pt2')
 
 (training-export)=
 
-## Export IR: Training vs Inference
+## Export IR, Decompositions
 
 The graph produced by `torch.export` returns a graph containing only
 [ATen operators](https://pytorch.org/cppdocs/#aten), which are the basic unit of
-computation in PyTorch. Export provides different IR levels based on your use case:
+computation in PyTorch. As there are over
+3000 ATen operators, export provides a way to narrow down the operator set used
+in the graph based on certain characteristics, creating different IRs.
 
-| IR Type | How to Obtain | Properties | Operator Count | Use Case |
-|---------|---------------|------------|----------------|----------|
-| Training IR | `torch.export.export()` (default) | May contain mutations | ~3000 | Training with autograd |
-| Inference IR | `ep.run_decompositions(decomp_table={})` | Purely functional | ~2000 | Inference deployment |
-| Core ATen IR | `ep.run_decompositions(decomp_table=None)` | Purely functional, highly decomposed | ~180 | Minimal backend support |
-
-### Training IR (Default)
-
-By default, export produces a **Training IR** which contains all ATen
-operators, including both functional and non-functional (mutating) operators.
-A functional operator is one that does not contain any mutations or aliasing
-of the inputs, while non-functional operators may modify their inputs in-place.
+By default, export produces the most generic IR which contains all ATen
+operators, including both functional and non-functional operators. A functional
+operator is one that does not contain any mutations or aliasing of the inputs.
 You can find a list of all ATen operators
 [here](https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/native/native_functions.yaml)
 and you can inspect if an operator is functional by checking
 `op._schema.is_mutable`.
 
-This Training IR, which may contain mutations, is designed for training use
-cases and can be used with eager PyTorch Autograd.
+This generic IR can be used to train in eager PyTorch Autograd.
 
 ```{code-cell}
 import torch
@@ -488,18 +480,15 @@ ep_for_training = torch.export.export(M(), (torch.randn(1, 1, 3, 3),))
 print(ep_for_training.graph_module.print_readable(print_output=False))
 ```
 
-### Inference IR (via run_decompositions)
+However, if you want to use the IR for inference, or decrease the amount of
+operators being used, you can lower the graph through the
+{func}`ExportedProgram.run_decompositions` API. This method decomposes the
+ATen operators into the ones specified in the decomposition table, and
+functionalizes the graph.
 
-To obtain an **Inference IR** suitable for deployment, use the
-{func}`ExportedProgram.run_decompositions` API. This method automatically:
-1. Functionalizes the graph (removes all mutations and converts them to functional equivalents)
-2. Optionally decomposes ATen operators based on the provided decomposition table
-
-This produces a purely functional graph ideal for inference scenarios.
-
-By specifying an empty decomposition table (`decomp_table={}`), you get just
-the functionalization without additional decompositions. This produces an
-Inference IR with ~2000 functional operators (compared to 3000+ in Training IR).
+By specifying an empty set, we're only performing functionalization, and does
+not do any additional decompositions. This results in an IR which contains ~2000
+operators (instead of the 3000 operators above), and is ideal for inference cases.
 
 ```{code-cell}
 import torch
@@ -525,14 +514,11 @@ As we can see, the previously in-place operator,
 `torch.ops.aten.add_.default` has now been replaced with
 `torch.ops.aten.add.default`, a functional operator.
 
-### Core ATen IR
-
-We can further lower the Inference IR to the
+We can also further lower this exported program to an operator set which only
+contains the
 `Core ATen Operator Set <https://pytorch.org/docs/main/torch.compiler_ir.html#core-aten-ir>`__,
-which contains only ~180 operators. This is achieved by passing `decomp_table=None`
-(which uses the default decomposition table) to `run_decompositions()`. This IR
-is optimal for backends who want to minimize the number of operators they need
-to implement.
+which is a collection of only ~180 operators. This IR is optimal for backends
+who do not want to reimplement all ATen operators.
 
 ```{code-cell}
 import torch

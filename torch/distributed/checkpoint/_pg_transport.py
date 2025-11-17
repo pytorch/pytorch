@@ -193,12 +193,12 @@ def _cast_tensor(tensor: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
     caveat that the cast tensor may be larger than the original tensor due to
     the differences in striding.
     """
-    if type(tensor) is not torch.Tensor:
-        raise AssertionError(f"can only cast standard tensors not {type(tensor)}")
+    assert type(tensor) is torch.Tensor, (
+        f"can only cast standard tensors not {type(tensor)}"
+    )
     storage = tensor.untyped_storage()
     ret = torch.tensor(storage, dtype=dtype, device=tensor.device)
-    if ret.untyped_storage() is not storage:
-        raise AssertionError("storage should be the same")
+    assert ret.untyped_storage() is storage, "storage should be the same"
     return ret
 
 
@@ -227,7 +227,6 @@ class PGTransport:
         self._work: list[Work] = []
         self._pg = pg
         self._timeout = timeout
-        # pyrefly: ignore [read-only]
         self._device = device
         self._state_dict = state_dict
 
@@ -317,8 +316,9 @@ class PGTransport:
                 if isinstance(inplace, DTensor):
                     inplace = inplace._local_tensor
                 t = _cast_tensor(inplace, torch.uint8)
-                if t.nbytes != v.nbytes:
-                    raise AssertionError("inplace tensor storage must be the same size")
+                assert t.nbytes == v.nbytes, (
+                    "inplace tensor storage must be the same size"
+                )
             else:
                 t = torch.empty(v.nbytes, dtype=torch.uint8, device=self._device)
 
@@ -345,7 +345,6 @@ class PGTransport:
                 values.append(recv(path, v))
             elif isinstance(v, _DTensorMeta):
                 tensor = recv(path, v.local)
-                # pyrefly: ignore [bad-argument-type, bad-argument-count, unexpected-keyword]
                 values.append(DTensor(tensor, v.spec, requires_grad=False))
             elif isinstance(v, _ShardedTensorMeta):
                 # Receive all local shards that were sent to us

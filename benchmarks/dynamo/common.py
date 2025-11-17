@@ -50,7 +50,6 @@ from torch._dynamo.testing import (
     reset_rng_state,
     same,
 )
-from torch._dynamo.utils import bitwise_same
 from torch._logging.scribe import open_source_signpost
 
 
@@ -1060,8 +1059,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             frozen_model_iter_fn = export_nativert(model, example_inputs)
         elif args.torchscript_jit_trace:
             frozen_model_iter_fn = torchscript_jit_trace(model, example_inputs)
-        elif args.aot_precompile:
-            frozen_model_iter_fn = aot_precompile(model, example_inputs)
         else:
             if kwargs["hf_llm"]:
                 # If it's an llm, we want to optimize model.forward, and use
@@ -1497,37 +1494,6 @@ def export(model, example_inputs):
     return opt_export
 
 
-def aot_precompile(model, example_inputs):
-    example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-
-    with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
-        save_path = f.name
-
-    with fresh_cache(), torch._dynamo.config.patch("enable_aot_compile", True):
-        compiled_fn = torch.compile(
-            model,
-            fullgraph=True,
-            options={"guard_filter_fn": lambda guards: [False for _ in guards]},
-        ).forward.aot_compile((example_args, example_kwargs))
-
-        compiled_fn.save_compiled_function(save_path)
-
-        torch._dynamo.reset()
-        with open(save_path, "rb") as f:
-            load_start_time = time.perf_counter()
-            loaded_fn = torch.compiler.load_compiled_function(f)
-            load_end_time = time.perf_counter()
-            print(
-                f"AOT Precompile loading time: {load_end_time - load_start_time} seconds"
-            )
-
-            def opt_aot_precompile(_, example_inputs, collect_outputs=False):
-                example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-                return loaded_fn(model, *example_args, **example_kwargs)
-
-            return opt_aot_precompile
-
-
 def export_nativert(model, example_inputs):
     optimized = NativeRTCache.load(model, example_inputs)
 
@@ -1751,8 +1717,8 @@ def maybe_snapshot_memory(should_snapshot_memory, suffix):
                         f"{output_filename.rstrip('.csv')}_{suffix}.pickle",
                     )
                 )
-            except Exception:
-                log.exception("Failed to save memory snapshot")
+            except Exception as e:
+                log.error("Failed to save memory snapshot, %s", e)
 
             torch.cuda.memory._record_memory_history(enabled=None)
 
@@ -2284,11 +2250,9 @@ class BenchmarkRunner:
                     )
                 ):
                     is_same = False
-            except Exception as e:
+            except Exception:
                 # Sometimes torch.allclose may throw RuntimeError
-                exception_string = str(e)
-                accuracy_status = f"fail_exception: {exception_string}"
-                return record_status(accuracy_status, dynamo_start_stats=start_stats)
+                is_same = False
 
             if not is_same:
                 accuracy_status = "eager_two_runs_differ"
@@ -2309,7 +2273,6 @@ class BenchmarkRunner:
                     or self.args.export_aot_inductor
                     or self.args.export_nativert
                     or self.args.torchscript_jit_trace
-                    or self.args.aot_precompile
                 ):
                     # apply export on module directly
                     # no need for n iterations
@@ -2358,40 +2321,6 @@ class BenchmarkRunner:
                         new_result = process_fn(new_result)
                         fp64_outputs = process_fn(fp64_outputs)
 
-                if (
-                    self.args.save_model_outputs_to
-                    and self.args.compare_model_outputs_with
-                    and self.args.save_model_outputs_to
-                    == self.args.compare_model_outputs_with
-                ):
-                    log.warning(
-                        "args.save_model_outputs_to and args.compare_model_outputs_with points to the same path."
-                        "Result will be undefined."
-                    )
-
-                if self.args.save_model_outputs_to:
-                    print(f"Save model outputs to: {self.args.save_model_outputs_to}")
-                    torch.save(new_result, self.args.save_model_outputs_to)
-
-                if self.args.compare_model_outputs_with:
-                    print(
-                        f"Load model outputs from {self.args.compare_model_outputs_with} to compare"
-                    )
-                    saved_result = torch.load(self.args.compare_model_outputs_with)
-                    is_bitwise_same = bitwise_same(saved_result, new_result)
-                    if not is_bitwise_same:
-                        print(
-                            "The result is not bitwise equivalent to the previously saved result"
-                        )
-                        return record_status(
-                            "not_bitwise_equivalent", dynamo_start_stats=start_stats
-                        )
-
-                    print(
-                        "The result is bitwise equivalent to the previously saved result"
-                    )
-                    del saved_result
-
                 if not same(
                     correct_result,
                     new_result,
@@ -2405,11 +2334,9 @@ class BenchmarkRunner:
                     force_max_multiplier=force_max_multiplier,
                 ):
                     is_same = False
-            except Exception as e:
+            except Exception:
                 # Sometimes torch.allclose may throw RuntimeError
-                exception_string = str(e)
-                accuracy_status = f"fail_exception: {exception_string}"
-                return record_status(accuracy_status, dynamo_start_stats=start_stats)
+                is_same = False
 
             if not is_same:
                 if self.args.skip_accuracy_check:
@@ -2767,7 +2694,6 @@ class BenchmarkRunner:
                 self.args.export_aot_inductor
                 or self.args.export_nativert
                 or self.args.torchscript_jit_trace
-                or self.args.aot_precompile
             ):
                 optimized_model_iter_fn = optimize_ctx
             else:
@@ -3435,17 +3361,6 @@ def parse_args(args=None):
         help="Enables caching precompile, serializing artifacts to DynamoCache between runs",
     )
 
-    parser.add_argument(
-        "--save-model-outputs-to",
-        default="",
-        help="Specify the path to save model output to so we can load later for comparison",
-    )
-    parser.add_argument(
-        "--compare-model-outputs-with",
-        default="",
-        help="Specify the path for the saved model outputs to compare against",
-    )
-
     group_latency = parser.add_mutually_exclusive_group()
     group_latency.add_argument(
         "--cold-start-latency",
@@ -3543,11 +3458,6 @@ def parse_args(args=None):
         "--export-aot-inductor",
         action="store_true",
         help="Measure pass rate with Export+AOTInductor",
-    )
-    group.add_argument(
-        "--aot-precompile",
-        action="store_true",
-        help="Measure pass rate with AOT Precompile",
     )
     group.add_argument(
         "--export-nativert",
@@ -3730,43 +3640,6 @@ def write_csv_when_exception(args, name: str, status: str, device=None):
         write_outputs(output_filename, headers, row)
 
 
-def setup_determinism_for_accuracy_test(args):
-    if args.only is not None and args.only not in {
-        "alexnet",
-        "Background_Matting",
-        "pytorch_CycleGAN_and_pix2pix",
-        "pytorch_unet",
-        "Super_SloMo",
-        "vgg16",
-        # https://github.com/pytorch/pytorch/issues/96724
-        "Wav2Vec2ForCTC",
-        "Wav2Vec2ForPreTraining",
-        "sam",
-        "sam_fast",
-        "resnet50_quantized_qat",
-        "mobilenet_v2_quantized_qat",
-        "detectron2_maskrcnn",
-        "detectron2_maskrcnn_r_101_c4",
-        "detectron2_maskrcnn_r_101_fpn",
-        "detectron2_maskrcnn_r_50_c4",
-        "detectron2_maskrcnn_r_50_fpn",
-        "detectron2_fasterrcnn_r_101_c4",
-        "detectron2_fasterrcnn_r_101_dc5",
-        "detectron2_fasterrcnn_r_101_fpn",
-        "detectron2_fasterrcnn_r_50_c4",
-        "detectron2_fasterrcnn_r_50_dc5",
-        "detectron2_fasterrcnn_r_50_fpn",
-    }:
-        # some of the models do not support use_deterministic_algorithms
-        torch.use_deterministic_algorithms(True)
-    if args.devices == ["xpu"]:
-        torch.use_deterministic_algorithms(True, warn_only=True)
-
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    torch.backends.mkldnn.deterministic = True
-
-
 def run(runner, args, original_dir=None):
     # Pass the parsed args object to benchmark runner object
     torch._dynamo.reset()
@@ -3832,9 +3705,36 @@ def run(runner, args, original_dir=None):
             # TODO - Using train mode for timm_models and HF models. Move to train mode for Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
-
-        setup_determinism_for_accuracy_test(args)
-
+        if args.only is not None and args.only not in {
+            "alexnet",
+            "Background_Matting",
+            "pytorch_CycleGAN_and_pix2pix",
+            "pytorch_unet",
+            "Super_SloMo",
+            "vgg16",
+            # https://github.com/pytorch/pytorch/issues/96724
+            "Wav2Vec2ForCTC",
+            "Wav2Vec2ForPreTraining",
+            "sam",
+            "sam_fast",
+            "resnet50_quantized_qat",
+            "mobilenet_v2_quantized_qat",
+            "detectron2_maskrcnn",
+            "detectron2_maskrcnn_r_101_c4",
+            "detectron2_maskrcnn_r_101_fpn",
+            "detectron2_maskrcnn_r_50_c4",
+            "detectron2_maskrcnn_r_50_fpn",
+            "detectron2_fasterrcnn_r_101_c4",
+            "detectron2_fasterrcnn_r_101_dc5",
+            "detectron2_fasterrcnn_r_101_fpn",
+            "detectron2_fasterrcnn_r_50_c4",
+            "detectron2_fasterrcnn_r_50_dc5",
+            "detectron2_fasterrcnn_r_50_fpn",
+        }:
+            # some of the models do not support use_deterministic_algorithms
+            torch.use_deterministic_algorithms(True)
+        if args.devices == ["xpu"]:
+            torch.use_deterministic_algorithms(True, warn_only=True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         if args.only is not None and args.only in {
             "nvidia_deeprecommender",
@@ -3843,9 +3743,13 @@ def run(runner, args, original_dir=None):
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
+        torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
+        torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = False
         torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(False)
+
+        torch.backends.mkldnn.deterministic = True
 
         # Remove randomness when torch manual seed is called
         patch_torch_manual_seed()
@@ -3979,10 +3883,6 @@ def run(runner, args, original_dir=None):
         optimize_ctx = export
         experiment = speedup_experiment
         output_filename = "export.csv"
-    elif args.aot_precompile:
-        optimize_ctx = aot_precompile
-        experiment = speedup_experiment
-        output_filename = "aot_precompile.csv"
     elif args.export_nativert:
         optimize_ctx = export_nativert
         experiment = speedup_experiment
@@ -4064,7 +3964,7 @@ def run(runner, args, original_dir=None):
         else:
             optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = (
-            speedup_experiment if args.backend != "torchao" else latency_experiment
+            speedup_experiment if not args.backend == "torchao" else latency_experiment
         )
         if args.accuracy:
             output_filename = f"accuracy_{args.backend}.csv"

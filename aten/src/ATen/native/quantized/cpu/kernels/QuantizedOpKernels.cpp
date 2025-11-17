@@ -608,7 +608,7 @@ void qrelu_kernel(const Tensor& qx, Tensor& qy) {
   });
 }
 
-void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
+static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
                                    const Scalar& negval_) {
   int64_t i_zp = qx.q_zero_point();
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
@@ -660,7 +660,7 @@ void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
   });
 }
 
-void qprelu_out_kernel(Tensor& out,
+static void qprelu_out_kernel(Tensor& out,
                               const Tensor& qx,
                               const Tensor& qw) {
   int32_t i_zp = static_cast<int32_t>(qx.q_zero_point());
@@ -3551,7 +3551,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
 
 #if defined(__ARM_NEON__) || defined(__aarch64__)
 
-constexpr static int PARALLEL_THRESHOLD = 1 << 20;
+const static int PARALLEL_THRESHOLD = 1 << 20;
 
 // Generic template defaults to naive quantize implementation
 template <typename T>

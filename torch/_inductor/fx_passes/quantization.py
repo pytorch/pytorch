@@ -531,7 +531,7 @@ def _register_quantized_linear_unary_lowering(
         )
 
         # bias
-        b = kwargs.get("b")
+        b = kwargs["b"] if "b" in kwargs else None
 
         # Output QParams
         o_inv_scale = kwargs["output_scale"]
@@ -593,7 +593,7 @@ def _register_quantized_linear_binary_lowering(
             kwargs["w_zp"],
         )
         # bias
-        b = kwargs.get("b")
+        b = kwargs["b"] if "b" in kwargs else None
         # Output QParams
         o_inv_scale = kwargs["output_scale"]
         o_zero_point = kwargs["output_zero_point"]
@@ -885,10 +885,10 @@ def _register_quantized_maxpool2d_lowering(
     def qmaxpool2d(match: Match, *args, **kwargs):
         x = kwargs["x"]
         kernel_size = kwargs["kernel_size"]
-        stride = kwargs.get("stride")
-        padding = kwargs.get("padding", 0)
-        dilation = kwargs.get("dilation", 1)
-        ceil_mode = kwargs.get("ceil_mode", False)
+        stride = kwargs["stride"] if ("stride" in kwargs) else None
+        padding = kwargs["padding"] if ("padding" in kwargs) else 0
+        dilation = kwargs["dilation"] if ("dilation" in kwargs) else 1
+        ceil_mode = kwargs["ceil_mode"] if ("ceil_mode" in kwargs) else False
 
         if padding == 0:
             padding = [0, 0]
@@ -1976,7 +1976,7 @@ def _register_qlinear_weight_prepack_pass(
         )
 
         # Params
-        bias = kwargs.get("b")
+        bias = kwargs["b"] if "b" in kwargs else None
 
         x_shape = qx.meta.get("tensor_meta").shape
         if has_free_symbols(x_shape):
@@ -2451,7 +2451,7 @@ def _register_linear_dynamic_fp16_weight_prepack_pass(
         # find params
         x = kwargs["x"]
         w = kwargs["w"]
-        bias = kwargs.get("b")
+        bias = kwargs["b"] if "b" in kwargs else None
 
         # find linear node
         nodes_to_find = [aten.addmm.default, aten.mm.default, aten.bmm.default]
@@ -2727,7 +2727,7 @@ def _register_smooth_quant_int_mm_pattern():
             pass_number=pass_number,
         )
         def _int_mm_weight_prepack(match: Match, *args, **kwargs):
-            bias = kwargs.get("bias")
+            bias = kwargs.get("bias", None)
             x = kwargs["a"]
             weight = kwargs["b"]
             dtype = kwargs["dtype"]
@@ -2794,7 +2794,7 @@ def _register_smooth_quant_int_mm_pattern():
                 else:
                     # onednn.qlinear does not support per-channel quantization of x
                     # so in this case, we have to apply x scale and add bias ourselves after qlinear
-                    in_shape = kwargs.get("in_shape")
+                    in_shape = kwargs.get("in_shape", None)
                     if in_shape is None:
                         x_reshaped = x
                     else:
@@ -2826,8 +2826,8 @@ def _register_smooth_quant_int_mm_pattern():
 
                     # Add bias and reshape
                     has_outer_reshape = (
-                        kwargs.get("out_shape_with_bias") is not None
-                        or kwargs.get("out_shape_no_bias") is not None
+                        kwargs.get("out_shape_with_bias", None) is not None
+                        or kwargs.get("out_shape_no_bias", None) is not None
                     )
 
                     if has_outer_reshape:
@@ -3276,7 +3276,7 @@ def _register_qlinear_post_op_fusion_pass(
         )
 
         # bias
-        b = kwargs.get("b")
+        b = kwargs["b"] if "b" in kwargs else None
 
         # Output QParams
         o_inv_scale = (

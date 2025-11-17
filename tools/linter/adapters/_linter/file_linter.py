@@ -112,7 +112,6 @@ class FileLinter:
         first_results = None
         original = replacement = pf.contents
 
-        # pyrefly: ignore [bad-assignment]
         while True:
             try:
                 results = sorted(self._lint(pf), key=LintResult.sort_key)

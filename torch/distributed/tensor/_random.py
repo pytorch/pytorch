@@ -43,8 +43,7 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
     else:
         # TODO: Logs way too much
         warnings.warn(
-            f"DTensor random operators may not have complete support on {device_mesh.device_type} device mesh",
-            stacklevel=2,
+            f"DTensor random operators may not have complete support on {device_mesh.device_type} device mesh"
         )
         return False
 
@@ -73,8 +72,7 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     if not is_rng_supported_mesh(device_mesh):
         warnings.warn(
             "DTensor manual_seed() may not have complete support "
-            f"on {device_mesh.device_type} device mesh",
-            stacklevel=2,
+            f"on {device_mesh.device_type} device mesh"
         )
         return
 
@@ -152,7 +150,6 @@ class _RNGStateTracker:
     """
 
     def __init__(self, device: torch.device):
-        # pyrefly: ignore [read-only]
         self._device = device
         self._device_handle = _get_device_handle(self._device.type)
         if not (self._device_handle and self._device_handle.is_available()):

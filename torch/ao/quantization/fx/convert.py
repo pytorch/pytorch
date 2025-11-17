@@ -3,7 +3,7 @@
 import copy
 import operator
 import warnings
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 from torch.ao.quantization import CUSTOM_KEY, NUMERIC_DEBUG_HANDLE_KEY
@@ -60,10 +60,6 @@ from .utils import (
     graph_module_from_producer_nodes,
     node_arg_is_weight,
 )
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 
 __all__ = [
@@ -597,8 +593,7 @@ def _maybe_recursive_remove_dequantize(arg: Any, node: Node, graph: Graph) -> No
             _maybe_recursive_remove_dequantize(arg_element, node, graph)
     else:
         warnings.warn(
-            f"Unsupported node type in recursive remove dequantize: {type(arg)}",
-            stacklevel=2,
+            f"Unsupported node type in recursive remove dequantize: {type(arg)}"
         )
 
 
@@ -1198,8 +1193,7 @@ def convert(
                     _maybe_recursive_remove_dequantize(output, return_node, model.graph)
             else:
                 warnings.warn(
-                    f"Unsupported node type for output_quantized_idxs: {type(output)}",
-                    stacklevel=2,
+                    f"Unsupported node type for output_quantized_idxs: {type(output)}"
                 )
         elif node.op == "call_module":
             mod = _get_module(node, modules)

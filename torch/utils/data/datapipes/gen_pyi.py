@@ -8,7 +8,7 @@ from typing_extensions import deprecated
 
 try:
     from torchgen.api.python import format_function_signature
-    from torchgen.utils import FileManager
+    from torchgen.utils import FileManager as FileManager
 except ImportError:
     import sys
 

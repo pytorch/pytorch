@@ -1,8 +1,7 @@
 import collections
 import functools
 import inspect
-from collections.abc import Callable
-from typing import Any, final, Optional, Union
+from typing import Any, Callable, final, Optional, Union
 from typing_extensions import Self
 
 from ..utils import is_function_or_wrapper
@@ -34,7 +33,6 @@ class LazyCache:
             self.vt = builder.VariableBuilder(tx, self.source)(self.value)
 
         if self.name_hint is not None:
-            # pyrefly: ignore [missing-attribute]
             self.vt.set_name_hint(self.name_hint)
 
         del self.value
@@ -106,13 +104,9 @@ class LazyVariableTracker(VariableTracker):
             self._cache.name_hint = name
 
     def __str__(self) -> str:
-        variable_info = "LazyVariableTracker("
         if self.is_realized():
-            variable_info += f"realized: {repr(self.unwrap())})"
-        else:
-            variable_info += f"unrealized: {self.peek_type()})"
-
-        return variable_info
+            return repr(self.unwrap())
+        return super().__repr__()
 
     def __getattr__(self, item: str) -> Any:
         return getattr(self.realize(), item)

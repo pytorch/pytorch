@@ -662,7 +662,7 @@ void svd_cusolver(const Tensor& A,
   const auto n = A.size(-1);
   const auto k = std::min(m, n);
 
-  static constexpr const char* check_svd_doc = "Check doc at https://pytorch.org/docs/stable/generated/torch.linalg.svd.html";
+  static const char* check_svd_doc = "Check doc at https://pytorch.org/docs/stable/generated/torch.linalg.svd.html";
 
   // The default heuristic is to use gesvdj driver
 #ifdef USE_ROCM

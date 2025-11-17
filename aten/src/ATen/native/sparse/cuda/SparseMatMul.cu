@@ -40,7 +40,15 @@
 #include <thrust/iterator/discard_iterator.h>
 
 
+#if defined(__CUDACC__) && (defined(CUSPARSE_VERSION) || (defined(USE_ROCM) && ROCM_VERSION >= 60300))
+#define IS_CUSPARSE11_AVAILABLE() 1
+#else
+#define IS_CUSPARSE11_AVAILABLE() 0
+#endif
+
+#if IS_CUSPARSE11_AVAILABLE()
 #include <library_types.h>
+#endif
 
 namespace at::native {
 
@@ -95,9 +103,17 @@ struct csrMatrixRef {
   int nnz_{0};
   std::vector<int> size_{};
 
-  cusparseSpMatDescr_t description_{0};
+  #if IS_CUSPARSE11_AVAILABLE()
+    cusparseSpMatDescr_t description_{0};
+  #else
+    cusparseMatDescr_t description_{0};
+  #endif
 
-  csrMatrixRef() = default;
+  csrMatrixRef() {
+    #if !IS_CUSPARSE11_AVAILABLE()
+      create_general_description_(description_);
+    #endif
+  }
 
   csrMatrixRef(
       int* csr_indices,
@@ -110,6 +126,7 @@ struct csrMatrixRef {
         csr_values_{csr_values},
         nnz_{nnz},
         size_{size} {
+    #if IS_CUSPARSE11_AVAILABLE()
       cudaDataType cuda_data_type = at::cuda::getCudaDataType<scalar_t>();
       TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
         &description_,
@@ -123,10 +140,17 @@ struct csrMatrixRef {
         CUSPARSE_INDEX_32I,
         CUSPARSE_INDEX_BASE_ZERO,
         cuda_data_type));
+    #else
+      create_general_description_(description_);
+    #endif
   }
 
   ~csrMatrixRef() {
-    cusparseDestroySpMat(description_);
+    #if IS_CUSPARSE11_AVAILABLE()
+      cusparseDestroySpMat(description_);
+    #else
+      cusparseDestroyMatDescr(description_);
+    #endif
   }
 
   int size(int index) const {
@@ -171,6 +195,8 @@ struct csrOutput {
     return size_.at(index);
   }
 };
+
+#if IS_CUSPARSE11_AVAILABLE()
 
 // RAII guard helps to support cuSparse 11 API for `A @ B` operation
 // This generic template exists because with cuSparse the `scalar_t` type could be a double or float
@@ -370,6 +396,284 @@ template struct CusparseMatrixMultiplyOp<float>;
 
 template struct CusparseMatrixMultiplyOp<double>;
 
+#else // if not IS_CUSPARSE11_AVAILABLE()
+
+using DcsrMatrixRef = csrMatrixRef<double>;
+using ScsrMatrixRef = csrMatrixRef<float>;
+
+// RAII guard helps to support cuSparse 10 API for `A @ B` operation
+// This generic template exists because with cuSparse the `scalar_t` type could be a double or float
+template <class scalar_t>
+struct CusparseMatrixMultiplyOp {
+  csrOutput operator()(
+      const csrMatrixRef<scalar_t>& lhs,
+      const csrMatrixRef<scalar_t>& rhs,
+      Tensor &output_values,
+      Tensor &output_indices)
+  {
+    static_assert(false&&sizeof(scalar_t), "cusparse csr sparse-sparse MM only supports data type of float and double.");
+  }
+};
+
+// Specializacion for `A @ B` operation for double values with cuSparse
+template<> struct CusparseMatrixMultiplyOp<double> {
+  csrgemm2Info_t gemm2Info_;
+
+  CusparseMatrixMultiplyOp() {
+    TORCH_CUDASPARSE_CHECK(cusparseCreateCsrgemm2Info(&gemm2Info_));
+  }
+  ~CusparseMatrixMultiplyOp() {
+    cusparseDestroyCsrgemm2Info(gemm2Info_);
+  }
+
+  csrOutput operator ()(
+      const DcsrMatrixRef& lhs,
+      const DcsrMatrixRef& rhs,
+      Tensor &output_values,
+      Tensor &output_indices) {
+    double alpha = 1.0;
+    DcsrMatrixRef empty;
+    return Dgemm2(lhs, rhs, empty, &alpha, nullptr, output_values, output_indices);
+  }
+
+  csrOutput Dgemm2(
+      const DcsrMatrixRef& A,
+      const DcsrMatrixRef& B,
+      const DcsrMatrixRef& C,
+      const double* alpha,
+      const double* beta,
+      Tensor &output_values,
+      Tensor &output_indices) {
+    void* buffer_{nullptr};
+    cusparseHandle_t cusparseHandle_ = at::cuda::getCurrentCUDASparseHandle();
+    TORCH_CUDASPARSE_CHECK(cusparseSetPointerMode(cusparseHandle_, CUSPARSE_POINTER_MODE_HOST));
+
+    csrOutput out({A.size(0), B.size(1)});
+    int innerSize = confirm_mult_size(A.size_, B.size_);
+    out.csr_pointers_ = at::empty({out.size(0) + 1}, output_indices.options().dtype(kInt));
+
+    // Compute needed buffer size
+    size_t new_bubber_sz;
+    TORCH_CUDASPARSE_CHECK(cusparseDcsrgemm2_bufferSizeExt(
+        cusparseHandle_,
+        out.size(0),
+        out.size(1),
+        innerSize,
+        alpha,
+        A.description_,
+        A.nnz_,
+        A.csr_pointers_,
+        A.csr_indices_,
+        B.description_,
+        B.nnz_,
+        B.csr_pointers_,
+        B.csr_indices_,
+        beta,
+        C.description_,
+        C.nnz_,
+        C.csr_pointers_,
+        C.csr_indices_,
+        gemm2Info_,
+        &new_bubber_sz));
+
+    // (Re)allocate buffer if needed
+    auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+    at::DataPtr data_ptr = allocator.allocate(new_bubber_sz);
+    buffer_ = data_ptr.get();
+
+    // Find the resulting non-zero pattern.
+    TORCH_CUDASPARSE_CHECK(cusparseXcsrgemm2Nnz(
+        cusparseHandle_,
+        out.size(0),
+        out.size(1),
+        innerSize,
+        A.description_,
+        A.nnz_,
+        A.csr_pointers_,
+        A.csr_indices_,
+        B.description_,
+        B.nnz_,
+        B.csr_pointers_,
+        B.csr_indices_,
+        C.description_,
+        C.nnz_,
+        C.csr_pointers_,
+        C.csr_indices_,
+        out.description_,
+        out.csr_pointers_.data_ptr<int>(),
+        &out.nnz_,
+        gemm2Info_,
+        buffer_));
+
+    out.csr_indices_ = at::empty({out.nnz_}, output_indices.options().dtype(kInt));
+    out.csr_values_ = at::empty({out.nnz_}, output_values.options());
+
+    // Perform the gemm2 operation for doubles
+    // out = alpha ∗ A ∗ B + beta ∗ C
+    TORCH_CUDASPARSE_CHECK(cusparseDcsrgemm2(
+        cusparseHandle_,
+        out.size(0),
+        out.size(1),
+        innerSize,
+        alpha,
+        A.description_,
+        A.nnz_,
+        A.csr_values_,
+        A.csr_pointers_,
+        A.csr_indices_,
+        B.description_,
+        B.nnz_,
+        B.csr_values_,
+        B.csr_pointers_,
+        B.csr_indices_,
+        beta,
+        C.description_,
+        C.nnz_,
+        C.csr_values_,
+        C.csr_pointers_,
+        C.csr_indices_,
+        out.description_,
+        out.csr_values_.data_ptr<double>(),
+        out.csr_pointers_.data_ptr<int>(),
+        out.csr_indices_.data_ptr<int>(),
+        gemm2Info_,
+        buffer_));
+    return out;
+  }
+};
+
+// Specializacion for `A @ B` operation for float values with cuSparse
+template<> struct CusparseMatrixMultiplyOp<float> {
+  csrgemm2Info_t gemm2Info_;
+
+  CusparseMatrixMultiplyOp() {
+    TORCH_CUDASPARSE_CHECK(cusparseCreateCsrgemm2Info(&gemm2Info_));
+
+  }
+  ~CusparseMatrixMultiplyOp() {
+    cusparseDestroyCsrgemm2Info(gemm2Info_);
+  }
+  csrOutput operator()(
+      const ScsrMatrixRef& lhs,
+      const ScsrMatrixRef& rhs,
+      Tensor &output_values,
+      Tensor &output_indices) {
+    float alpha = 1.0;
+    ScsrMatrixRef empty;
+    return Sgemm2(lhs, rhs, empty, &alpha, nullptr, output_values, output_indices);
+  }
+
+  csrOutput Sgemm2(
+      const ScsrMatrixRef& A,
+      const ScsrMatrixRef& B,
+      const ScsrMatrixRef& C,
+      const float* alpha,
+      const float* beta,
+      Tensor &output_values,
+      Tensor &output_indices) {
+    void* buffer_{nullptr};
+    cusparseHandle_t cusparseHandle_ = at::cuda::getCurrentCUDASparseHandle();
+    TORCH_CUDASPARSE_CHECK(cusparseSetPointerMode(cusparseHandle_, CUSPARSE_POINTER_MODE_HOST));
+
+    csrOutput out({A.size(0), B.size(1)});
+
+    int innerSize = confirm_mult_size(A.size_, B.size_);
+
+    out.csr_pointers_ = at::empty({out.size(0) + 1}, output_indices.options().dtype(kInt));
+
+    // Compute needed buffer size
+    size_t new_bubber_sz;
+    TORCH_CUDASPARSE_CHECK(cusparseScsrgemm2_bufferSizeExt(
+        cusparseHandle_,
+        out.size(0),
+        out.size(1),
+        innerSize,
+        alpha,
+        A.description_,
+        A.nnz_,
+        A.csr_pointers_,
+        A.csr_indices_,
+        B.description_,
+        B.nnz_,
+        B.csr_pointers_,
+        B.csr_indices_,
+        beta,
+        C.description_,
+        C.nnz_,
+        C.csr_pointers_,
+        C.csr_indices_,
+        gemm2Info_,
+        &new_bubber_sz));
+
+    auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+    at::DataPtr data_ptr = allocator.allocate(new_bubber_sz);
+    buffer_ = data_ptr.get();
+
+    // Find the resulting non-zero pattern.
+    TORCH_CUDASPARSE_CHECK(cusparseXcsrgemm2Nnz(
+        cusparseHandle_,
+        out.size(0),
+        out.size(1),
+        innerSize,
+        A.description_,
+        A.nnz_,
+        A.csr_pointers_,
+        A.csr_indices_,
+        B.description_,
+        B.nnz_,
+        B.csr_pointers_,
+        B.csr_indices_,
+        C.description_,
+        C.nnz_,
+        C.csr_pointers_,
+        C.csr_indices_,
+        out.description_,
+        out.csr_pointers_.data_ptr<int>(),
+        &out.nnz_,
+        gemm2Info_,
+        buffer_));
+
+    out.csr_indices_ = at::empty({out.nnz_}, output_indices.options().dtype(kInt));
+    out.csr_values_ = at::empty({out.nnz_}, output_values.options());
+
+    // Perform the gemm2 operation for doubles
+    // out = alpha ∗ A ∗ B + beta ∗ C
+    TORCH_CUDASPARSE_CHECK(cusparseScsrgemm2(
+        cusparseHandle_,
+        out.size(0),
+        out.size(1),
+        innerSize,
+        alpha,
+        A.description_,
+        A.nnz_,
+        A.csr_values_,
+        A.csr_pointers_,
+        A.csr_indices_,
+        B.description_,
+        B.nnz_,
+        B.csr_values_,
+        B.csr_pointers_,
+        B.csr_indices_,
+        beta,
+        C.description_,
+        C.nnz_,
+        C.csr_values_,
+        C.csr_pointers_,
+        C.csr_indices_,
+        out.description_,
+        out.csr_values_.data_ptr<float>(),
+        out.csr_pointers_.data_ptr<int>(),
+        out.csr_indices_.data_ptr<int>(),
+        gemm2Info_,
+        buffer_));
+    return out;
+  }
+};
+
+
+
+#endif // IS_CUSPARSE11_AVAILABLE()
+
 template <typename scalar_t>
 void sparse_sparse_matmul_cuda_kernel(
     Tensor& result,
@@ -511,14 +815,18 @@ Tensor sparse_sparse_matmul_cuda(const Tensor& mat1_, const Tensor& mat2_) {
   auto output = at::native::empty_like(mat1_);
   output.sparse_resize_and_clear_({mat1_.size(0), mat2_.size(1)}, mat1_.sparse_dim(), 0);
 
-#if !defined(USE_ROCM)
+#if IS_CUSPARSE11_AVAILABLE() && !defined(USE_ROCM)
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, mat1_.scalar_type(), "sparse_matmul", [&] {
       sparse_sparse_matmul_cuda_kernel<scalar_t>(output, mat1_.coalesce(), mat2_.coalesce());
   });
-#else
+#elif IS_CUSPARSE11_AVAILABLE() && defined(USE_ROCM)
   // ROCm does not support half and bfloat16 types for sparse_matmul
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(mat1_.scalar_type(), "sparse_matmul", [&] {
       sparse_sparse_matmul_cuda_kernel<scalar_t>(output, mat1_.coalesce(), mat2_.coalesce());
+  });
+#else
+  AT_DISPATCH_FLOATING_TYPES(mat1_.scalar_type(), "sparse_matmul", [&] {
+    sparse_sparse_matmul_cuda_kernel<scalar_t>(output, mat1_.coalesce(), mat2_.coalesce());
   });
 #endif
   return output;

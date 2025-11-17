@@ -91,7 +91,7 @@ class Independent(Distribution, Generic[D]):
         return self.base_dist.has_enumerate_support
 
     @constraints.dependent_property
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def support(self):
         result = self.base_dist.support
         if self.reinterpreted_batch_ndims:

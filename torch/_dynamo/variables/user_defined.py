@@ -87,13 +87,12 @@ from ..utils import (
     namedtuple_fields,
     object_has_getattribute,
     proxy_args_kwargs,
-    raise_args_mismatch,
     set_methods,
     tensortype_to_dtype,
     tuple_methods,
     unpatched_nn_module_getattr,
 )
-from .base import raise_type_error_exc, ValueMutationNew, VariableTracker
+from .base import ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
 from .lists import SizeVariable
 
@@ -278,11 +277,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
             if type(self.value) is type:
-                raise_observed_exception(
-                    AttributeError,
-                    tx,
-                    msg=f"type object '{self.value.__name__}' has no attribute '{name}'",
-                )
+                raise_observed_exception(AttributeError, tx)
             else:
                 # Cannot reason about classes with a custom metaclass
                 # See: test_functions::test_getattr_metaclass
@@ -298,8 +293,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return VariableTracker.build(tx, obj.__get__(self.value), source)
         elif isinstance(obj, classmethod):
             if isinstance(obj.__func__, property):
-                fget_vt = VariableTracker.build(tx, obj.__func__.fget)
-                return fget_vt.call_function(tx, [self], {})
+                return variables.UserFunctionVariable(obj.__func__.fget).call_function(
+                    tx, [self], {}
+                )
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif isinstance(obj, types.ClassMethodDescriptorType):
             # e.g.: inspect.getattr_static(dict, "fromkeys")
@@ -441,13 +437,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and isinstance(args[0], UserDefinedClassVariable)
             and args[0].value is collections.OrderedDict
         ):
-            if kwargs and len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
+            assert len(args) == 1
+            assert len(kwargs) == 0
             return variables.ConstDictVariable(
                 {}, collections.OrderedDict, mutation_type=ValueMutationNew()
             )
@@ -596,10 +587,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif self.value is warnings.catch_warnings and not args:
             return variables.CatchWarningsCtxManagerVariable.create(tx, kwargs)
         elif self.value is torch.cuda.device and not kwargs and len(args) == 1:
-            if not args[0].is_python_constant():
-                raise_type_error_exc(
-                    tx, "torch.cuda.device() requires a constant argument"
-                )
+            assert args[0].is_python_constant()
             return variables.CUDADeviceVariable.create(tx, args[0].as_python_constant())
         elif (
             issubclass(type(self.value), type)
@@ -701,13 +689,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             fields = namedtuple_fields(self.value)
             # check if this a quasi-namedtuple or a real one
             if self.value.__module__ == "torch.return_types":
-                if kwargs or len(args) != 1:
-                    raise_args_mismatch(
-                        tx,
-                        "torch.return_types",
-                        "1 args and 0 kwargs",
-                        f"{len(args)} args and {len(kwargs)} kwargs",
-                    )
+                assert len(args) == 1
+                assert not kwargs
                 items = args[0].force_unpack_var_sequence(tx)
             else:
                 field_defaults = self.value._field_defaults
@@ -1382,11 +1365,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
             if isinstance(result, variables.DeletedVariable):
-                raise_observed_exception(
-                    AttributeError,
-                    tx,
-                    msg=f"'{type(self.value).__name__}' object has no attribute '{name}'",
-                )
+                raise_observed_exception(AttributeError, tx)
             return result
 
         if name == "__dict__":
@@ -1479,8 +1458,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # Get the getter function
                 source = AttrSource(source, "fget")
 
-            fget_vt = VariableTracker.build(tx, subobj.fget, source=source)
-            return fget_vt.call_function(tx, [self], {})
+            # Avoid using UserMethodVariable here because there is no way to
+            # access the method object here. Direct inline by creating the
+            # UserFunctionVariable.
+            return variables.UserFunctionVariable(
+                subobj.fget, source=source
+            ).call_function(tx, [self], {})
         elif isinstance(subobj, _collections._tuplegetter):
             # namedtuple fields are represented by _tuplegetter, and here we
             # emulate its `__get__`, which is implemented in C.
@@ -1658,11 +1641,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return VariableTracker.build(tx, subobj)
 
         # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.
-        raise_observed_exception(
-            AttributeError,
-            tx,
-            msg=f"'{type(self.value).__name__}' object has no attribute '{name}'",
-        )
+        raise_observed_exception(AttributeError, tx)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -1693,7 +1672,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
         def __eq__(self, other):
             return (
-                type(self) is type(other)
+                type(self) == type(other)
                 and self.cls == other.cls
                 and self.fields == other.fields
             )
@@ -1814,7 +1793,7 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        fn_variable = VariableTracker.build(tx, self.value.forward.__func__)
+        fn_variable = variables.UserFunctionVariable(self.value.forward.__func__)
         args = [self] + args
         return tx.inline_user_function_return(
             fn_variable,

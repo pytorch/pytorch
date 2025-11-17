@@ -874,27 +874,10 @@ std::optional<py::object> _maybe_handle_torch_function(
   std::vector<PyObject*> overloaded_args;
   const auto args_size = args.size();
   size_t total_arg_num = args_size + kwargs.size();
-  PyObject* const args_ptr = args.ptr();
   for (const auto i : c10::irange(args_size)) {
-    // Because pybind object indexing is implemented generically for
-    // all objects, operator[] returns py::object instead of
-    // py::handle, so args[i].ptr() would cause a reference count
-    // round trip. This has enough overhead that I noticed it while
-    // profiling and came here to fix it. In contrast,
-    // PyTuple_GetItem returns a borrowed reference, so no counting
-    // overhead.
-    static_assert(
-        std::is_base_of_v<py::tuple, std::decay_t<decltype(args)>>,
-        "Use of PyTuple_GetItem below requires that args is a tuple!");
-
-    // Using PyTuple_GetItem instead of PyTuple_GET_ITEM out of an
-    // abundance of caution and for robustness under maintenance. If
-    // you're here looking for further performance improvements, you
-    // can probably switch to PyTuple_GET_ITEM.
-    auto* const args_i_ptr = PyTuple_GetItem(args_ptr, i);
-    is_tensor_and_append_overloaded(args_i_ptr, &overloaded_args);
+    is_tensor_and_append_overloaded(args[i].ptr(), &overloaded_args);
     is_tensor_list_and_append_overloaded(
-        args_i_ptr,
+        args[i].ptr(),
         &overloaded_args,
         static_cast<int>(total_arg_num),
         false /* throw_error */);

@@ -31,7 +31,7 @@ bool UndefinedTensorImpl::has_storage() const {
 }
 #endif
 
-void UndefinedTensorImpl::set_storage_offset(int64_t /*storage_offset*/) {
+void UndefinedTensorImpl::set_storage_offset(int64_t) {
   TORCH_CHECK(false, "set_storage_offset() called on an undefined Tensor");
 }
 

@@ -145,7 +145,7 @@ programmatically since the settings become fixed. Use the C++ or Python APIs ins
 | PYTORCH_TUNABLEOP_VERBOSE | Default is 0. Set to 1 to enable basic logging. 2 for basic tuning status. 3 for full trace. |
 | PYTORCH_TUNABLEOP_VERBOSE_FILENAME | Default is "err" for stderr. Set to "out" for stdout or a filename for capturing verbose logging. |
 | PYTORCH_TUNABLEOP_FILENAME | Default is 'tunableop_results.csv'. |
-| PYTORCH_TUNABLEOP_NUMERICAL_CHECK | Default is off. Set 'atol_rtol' to enable, for example "1e-5_1e-5". |
+| PYTORCH_TUNABLEOP_NUMERICAL_CHECK | Default is 0. Set to 1 to enable. |
 | PYTORCH_TUNABLEOP_ROCBLAS_ENABLED | Default is 1. Set to 0 to disable rocblas being considered during tuning. |
 | PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED | Default is 1. Set to 0 to disable hipblaslt being considered during tuning. |
 | PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS | Default is 30. Unit is milliseconds. |
@@ -173,9 +173,10 @@ All python APIs exist in the `torch.cuda.tunable` module.
 | get_max_tuning_iterations() -> int | |
 | set_filename(filename: str, insert_device_ordinal: bool = False) -> None | |
 | get_filename() -> str | |
-| set_numerical_check_tolerances(enable: bool, atol: float, rtol: float) -> None | Enable or disable numerical checking; atol and rtol default to 1e-5.
 | get_results() -> Tuple[str, str, str, float] | |
 | get_validators() -> Tuple[str, str] | |
+| write_file_on_exit(val: bool) -> None | Default is True. |
+| write_file(filename: Optional[str] = None) -> None | If filename not given, it will call get_filename(). |
 | read_file(filename: Optional[str] = None) -> None | If filename not given, it will call get_filename(). |
 | tune_gemm_in_file(filename: str) -> None | read an untuned file and tune GEMMs in it. |
 | mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None: -> None | read one or more untuned files and tune all unique GEMMs on one or more GPUs. |

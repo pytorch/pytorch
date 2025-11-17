@@ -1,6 +1,5 @@
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 
-#include <c10/util/Exception.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/context/context.h>
@@ -97,7 +96,7 @@ SerializedPyObj serializePyObject(IValue value) {
     std::string err_msg = e.what();
     e.restore();
     PyErr_Clear();
-    TORCH_CHECK(false, err_msg);
+    throw std::runtime_error(err_msg);
   }
 }
 

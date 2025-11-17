@@ -14,6 +14,7 @@ from torch.distributed._shard.sharded_tensor import (
 )
 from torch.distributed._shard.sharding_spec import ShardMetadata
 from torch.distributed._shard.sharding_spec.chunk_sharding_spec import ChunkShardingSpec
+from torch.distributed.device_mesh import _mesh_resources
 from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
 from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
 from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
@@ -134,11 +135,9 @@ def _rewrite_spec_if_needed(
             break
     if rewrite:
         spec = copy.deepcopy(spec)
-        # pyrefly: ignore [missing-attribute]
         for i, placement in enumerate(spec.placements):
             placement = cast(_remote_device, placement)
             if placement.rank() == rank and placement.device() != tensor.device:
-                # pyrefly: ignore [missing-attribute]
                 spec.placements[i] = _remote_device(f"rank:{rank}/{tensor.device}")
 
     return spec
@@ -228,7 +227,7 @@ def _chunk_dtensor(
 
     The local rank will gets its corresponding chunk as the local tensor to create a DTensor.
     """
-    root_mesh = device_mesh._get_root_mesh() if device_mesh is not None else None
+    root_mesh = _mesh_resources.get_root_mesh(device_mesh)
     if root_mesh is None:
         raise RuntimeError("No parent device_mesh is found for FSDP device_mesh.")
     if root_mesh.ndim < 2:
@@ -305,7 +304,7 @@ def _all_gather_dtensor(
     placements = list(copy.deepcopy(tensor.placements))
     # FSDP + TP: [Shard(0), tp_placement] -> [Replicate(), tp_placement]
     # HSDP + TP: [Replicate(), Shard(0), tp_placement] -> [Replicate(), Replicate(), tp_placement]
-    for i in range(len(placements) - 1):
+    for i in range(0, len(placements) - 1):
         placements[i] = Replicate()
     tensor = tensor.redistribute(
         device_mesh=tensor.device_mesh,

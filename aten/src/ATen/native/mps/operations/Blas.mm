@@ -54,10 +54,6 @@ Tensor dot_mps(const Tensor& self, const Tensor& other) {
   using namespace mps;
   using CachedGraph = MPSBinaryCachedGraph;
 
-  if (self.numel() == 0 & other.numel() == 0) {
-    return zeros({}, self.options());
-  }
-
   dot_check(self, other);
 
   auto output = at::empty({}, self.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);

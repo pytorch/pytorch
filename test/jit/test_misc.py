@@ -12,11 +12,7 @@ import torch.testing._internal.jit_utils
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from torch import jit
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import (
-    freeze_rng_state,
-    raise_on_run_directly,
-    skipIfTorchDynamo,
-)
+from torch.testing._internal.common_utils import freeze_rng_state, raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase, make_global, RUN_CUDA_HALF
 
 
@@ -436,54 +432,6 @@ class TestMisc(JitTestCase):
         ret = func()
         self.assertTrue(ret.numel() == 1)
         self.assertTrue(len(ret.size()) == 1)
-
-    @skipIfTorchDynamo("The test case only test the parser. No need to wrap dynamo.")
-    def test_parse_ir_single_inf(self):
-        ir = """
-        graph():
-          %12 : float = prim::Constant[value=inf]()
-          return (%12)
-        """
-        graph = torch._C.parse_ir(ir, True)
-        func = torch._C._create_function_from_graph("forward", graph)
-        ret = func()
-        self.assertTrue(ret == float("inf"))
-
-    @skipIfTorchDynamo("The test case only test the parser. No need to wrap dynamo.")
-    def test_parse_ir_single_minus_inf(self):
-        ir = """
-        graph():
-          %12 : float = prim::Constant[value=-inf]()
-          return (%12)
-        """
-        graph = torch._C.parse_ir(ir, True)
-        func = torch._C._create_function_from_graph("forward", graph)
-        ret = func()
-        self.assertTrue(ret == float("-inf"))
-
-    @skipIfTorchDynamo("The test case only test the parser. No need to wrap dynamo.")
-    def test_parse_ir_bool_true(self):
-        ir = """
-        graph():
-          %12 : bool = prim::Constant[value=True]()
-          return (%12)
-        """
-        graph = torch._C.parse_ir(ir, True)
-        func = torch._C._create_function_from_graph("forward", graph)
-        ret = func()
-        self.assertTrue(ret == True)  # noqa: E712
-
-    @skipIfTorchDynamo("The test case only test the parser. No need to wrap dynamo.")
-    def test_parse_ir_bool_false(self):
-        ir = """
-        graph():
-          %12 : bool = prim::Constant[value=False]()
-          return (%12)
-        """
-        graph = torch._C.parse_ir(ir, True)
-        func = torch._C._create_function_from_graph("forward", graph)
-        ret = func()
-        self.assertTrue(ret == False)  # noqa: E712
 
     def test_script_many_decorators(self):
         def no_op_decorator(f):

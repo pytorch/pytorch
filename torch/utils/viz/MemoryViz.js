@@ -33,12 +33,12 @@ function version_space() {
   };
 }
 
-function Segment(addr, size, stream, frames, version, user_metadata) {
-  return {addr, size, stream, version, frames, user_metadata};
+function Segment(addr, size, stream, frames, version) {
+  return {addr, size, stream, version, frames};
 }
 
-function Block(addr, size, requested_size, frames, free_requested, version, user_metadata) {
-  return {addr, size, requested_size, frames, free_requested, version, user_metadata};
+function Block(addr, size, requested_size, frames, free_requested, version) {
+  return {addr, size, requested_size, frames, free_requested, version};
 }
 
 function EventSelector(outer, events, stack_info, memory_view) {
@@ -140,9 +140,7 @@ function eventStack(e, allocated, reserved) {
       reserved,
     )} reserved)\n${event}`;
   }
-  const user_metadata_str = format_user_metadata(e.user_metadata);
-  const frames_str = format_frames(e.frames);
-  return event + '\n' + (user_metadata_str ? user_metadata_str + '\n' : '') + frames_str;
+  return event + '\n' + format_frames(e.frames);
 }
 
 function hashCode(num) {
@@ -218,7 +216,6 @@ function MemoryView(outer, stack_info, snapshot, device) {
         seg.stream,
         seg.frames || [],
         seg.version,
-        seg.user_metadata,
       ),
     );
     for (const b of seg.blocks) {
@@ -232,7 +229,6 @@ function MemoryView(outer, stack_info, snapshot, device) {
         b.frames,
         b.state === 'active_pending_free',
         b.version,
-        b.user_metadata,
       );
     }
   }
@@ -311,7 +307,6 @@ function MemoryView(outer, stack_info, snapshot, device) {
             event.frames,
             false,
             event.version,
-            event.user_metadata,
           );
           break;
         case 'free_requested':
@@ -325,7 +320,6 @@ function MemoryView(outer, stack_info, snapshot, device) {
             event.frames,
             true,
             event.version,
-            event.user_metadata,
           );
           break;
         case 'alloc':
@@ -341,7 +335,6 @@ function MemoryView(outer, stack_info, snapshot, device) {
               event.stream,
               event.frames,
               event.version,
-              event.user_metadata,
             ),
           );
           break;
@@ -355,7 +348,6 @@ function MemoryView(outer, stack_info, snapshot, device) {
               event.stream,
               event.frames,
               event.version,
-              event.user_metadata,
             ),
           );
           break;
@@ -434,17 +426,13 @@ function MemoryView(outer, stack_info, snapshot, device) {
           if (t.internal_free > 0) {
             internal = ` (${(t.internal_free / free) * 100}% internal)`;
           }
-          const user_metadata_str = format_user_metadata(t.user_metadata);
-          const frames_str = format_frames(t.frames);
           return (
             `s${t.addr.toString(16)}_${t.version}: segment ${formatSize(
               t.size,
             )} allocated, ` +
             `${formatSize(free)} free${internal} (stream ${
               t.stream
-            })\n` +
-            (user_metadata_str ? user_metadata_str + '\n' : '') +
-            frames_str
+            })\n${format_frames(t.frames)}`
           );
         },
         d => {
@@ -505,15 +493,12 @@ function MemoryView(outer, stack_info, snapshot, device) {
           if (t.free_requested) {
             requested = ' (block freed but waiting due to record_stream)';
           }
-          const user_metadata_str = format_user_metadata(t.user_metadata);
-          const frames_str = format_frames(t.frames);
           return (
             `b${t.addr.toString(16)}_${t.version} ` +
             `${formatSize(t.requested_size)} allocation${requested} (stream ${
               t.segment.stream
             })\n` +
-            (user_metadata_str ? user_metadata_str + '\n' : '') +
-            frames_str
+            format_frames(t.frames)
           );
         },
         removeStroke,
@@ -539,15 +524,12 @@ function MemoryView(outer, stack_info, snapshot, device) {
         d => {
           addStroke(d);
           const t = d.datum();
-          const user_metadata_str = format_user_metadata(t.user_metadata);
-          const frames_str = format_frames(t.frames);
           return (
             `Free space lost due to rounding ${formatSize(
               t.size - t.requested_size,
             )}` +
             ` (stream ${t.segment.stream})\n` +
-            (user_metadata_str ? user_metadata_str + '\n' : '') +
-            frames_str
+            format_frames(t.frames)
           );
         },
         removeStroke,
@@ -776,23 +758,6 @@ function frameFilter({name, filename}) {
   }
 
   return true;
-}
-
-function format_user_metadata(user_metadata) {
-  if (!user_metadata) {
-    return '';
-  }
-  // Handle string metadata
-  if (typeof user_metadata === 'string') {
-    return `User Metadata:\n  ${user_metadata}`;
-  }
-  // Handle object metadata
-  if (typeof user_metadata === 'object' && Object.keys(user_metadata).length === 0) {
-    return '';
-  }
-  const metadata_lines = Object.entries(user_metadata)
-    .map(([key, value]) => `  ${key}: ${value}`);
-  return 'User Metadata:\n' + metadata_lines.join('\n');
 }
 
 function format_frames(frames) {
@@ -1026,10 +991,6 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
       }
       if (!elem.action.includes('alloc')) {
         text = `${text}\nalloc not recorded, stack trace for free:`;
-      }
-      const user_metadata_str = format_user_metadata(elem.user_metadata);
-      if (user_metadata_str) {
-        text = `${text}\n${user_metadata_str}`;
       }
       text = `${text}\n${format_frames(elem.frames)}`;
       return text;

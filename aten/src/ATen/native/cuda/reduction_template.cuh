@@ -466,11 +466,7 @@ struct ReduceJitOp {
 
     __syncthreads();
 
-    #if defined(USE_ROCM) || defined(FBCODE_CAFFE2)
     for (int offset = 1; offset < dim_x; offset <<= 1) {
-    #else
-    for (int offset = dim_x >> 1; offset > 0; offset >>= 1) {
-    #endif
       #pragma unroll
       for (int i = 0; i < output_vec_size; i++) {
         arg_t other = reducer::warp_shfl_down(value[i], offset);

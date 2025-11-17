@@ -504,7 +504,6 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
         if any(type(node) is OuterLoopFusedSchedulerNode for node in (node1, node2)):
             return cls(
                 node1.scheduler,
-                # pyrefly: ignore [bad-argument-type]
                 (
                     list(node1.get_outer_nodes())
                     if type(node1) is OuterLoopFusedSchedulerNode
@@ -1212,7 +1211,7 @@ class CppVecOverrides(CppOverrides):
             return wrapper
 
         for name, method in vars(CppVecOverrides).items():
-            if getattr(method, "__class__", None) is staticmethod and name not in [
+            if getattr(method, "__class__", None) == staticmethod and name not in [
                 "masked",
                 "index_expr",
             ]:
@@ -1717,7 +1716,6 @@ class CppVecOverrides(CppOverrides):
                     body_vec_var.dtype = dtype
                     other_vec_var.dtype = dtype
                     overrides: type[Union[CppOverrides, CppVecOverrides]] = (
-                        # pyrefly: ignore [bad-assignment]
                         V.kernel.overrides
                     )  # type: ignore[has-type]
                     code.writeline(
@@ -1761,7 +1759,6 @@ class CppVecOverrides(CppOverrides):
             csevar = V.kernel._load_or_store_non_contiguous(  # type: ignore[assignment]
                 None, index, dtype, V.kernel.compute
             )
-        # pyrefly: ignore [missing-attribute]
         csevar.update_on_args("index_expr", (expr, dtype), {})
         return csevar
 
@@ -2039,7 +2036,6 @@ class CppKernel(Kernel):
                 # mask's dtype should be bool
                 mask.dtype = torch.bool
 
-        # pyrefly: ignore [bad-assignment]
         self._load_mask = mask
         try:
             yield mask
@@ -2367,7 +2363,6 @@ class CppKernel(Kernel):
                 sympy_index_symbol_with_prefix(SymT.XBLOCK, n)
                 for n in range(len(self.ranges))
             ]
-            # pyrefly: ignore [bad-assignment]
             self.reduction_depth = len(lengths)
         return (
             self.itervars[: self.reduction_depth],
@@ -2609,15 +2604,13 @@ class CppKernel(Kernel):
                     var_id = i
                     break
             if (
-                type(self) is CppKernel
+                type(self) == CppKernel
                 and var_id
                 and start == 0
                 and end == self.ranges[var_id]
             ):
                 end = 1
-            # pyrefly: ignore [bad-argument-type]
             conditions.append(f"{var} >= {cexpr_index(start)}")
-            # pyrefly: ignore [bad-argument-type]
             conditions.append(f"{var} < {cexpr_index(end)}")
             return True
 
@@ -4092,7 +4085,6 @@ class CppKernelProxy(CppKernel):
                     and (dt := get_output_dtype(_node)) in DTYPE_LOWP_FP
                 ):
                     # No need to promote to float if all users are ops that accepts lowp fp input
-                    # pyrefly: ignore [bad-argument-type]
                     if all(is_lowp_fp_sink(user, dt) for user in _node.users):
                         continue
                     ops = _node.args[0]
@@ -4103,14 +4095,12 @@ class CppKernelProxy(CppKernel):
                         _node.replace_all_uses_with(
                             to_type_node, lambda n: n is not to_type_node
                         )
-                        # pyrefly: ignore [bad-assignment]
                         metrics.cpp_to_dtype_count += 1
                 elif (
                     _node.target == "store"
                     and (dt := get_input_dtype(_node)) in DTYPE_LOWP_FP
                 ):
                     ops, name, _, value_var, _ = _node.args
-                    # pyrefly: ignore [bad-argument-type]
                     if is_lowp_fp_source_no_promote(value_var, dt):
                         continue
                     dtype = V.graph.get_dtype(name)
@@ -4119,7 +4109,6 @@ class CppKernelProxy(CppKernel):
                             "to_dtype", args=(ops, value_var, dtype)
                         )
                         _node.replace_input_with(value_var, to_type_node)
-                        # pyrefly: ignore [bad-assignment]
                         metrics.cpp_to_dtype_count += 1
                 elif _node.target == "reduction":
                     (
@@ -4189,7 +4178,6 @@ class CppKernelProxy(CppKernel):
                                     "to_dtype", args=(ops, value_var, src_dtype)
                                 )
                                 _node.replace_input_with(value_var, to_type_node)
-                                # pyrefly: ignore [bad-assignment]
                                 metrics.cpp_to_dtype_count += 1
 
                     # to_dtype_bitcast act as a lowp fp source:
@@ -4208,7 +4196,6 @@ class CppKernelProxy(CppKernel):
                                 _node.replace_all_uses_with(
                                     to_type_node, lambda n: n is not to_type_node
                                 )
-                                # pyrefly: ignore [bad-assignment]
                                 metrics.cpp_to_dtype_count += 1
 
             def eliminate_to_dtype(sub_graph: torch.fx.Graph):
@@ -4302,7 +4289,6 @@ class CppKernelProxy(CppKernel):
             with kernel_group.new_kernel(cls, *args) as kernel:
                 # Ugly hack to maintain the metrics kernel count since
                 # we only count in CppKernelProxy, not those contained in it
-                # pyrefly: ignore [bad-assignment]
                 metrics.generated_kernel_count -= 1
 
                 run(kernel)
@@ -4374,7 +4360,6 @@ class CppKernelProxy(CppKernel):
                     )
 
             if len(tiling_indices) == 1:
-                # pyrefly: ignore [bad-assignment]
                 metrics.generated_cpp_vec_kernel_count += 1
                 loop = self.loop_nest.tile(tiling_indices[0], factor=tiling_factors[0])
                 vec_kernel = codegen_kernel(
@@ -4401,7 +4386,6 @@ class CppKernelProxy(CppKernel):
                     and tiling_factors[0] == tiling_factors[1]
                 )
 
-                # pyrefly: ignore [bad-assignment]
                 metrics.generated_cpp_vec_kernel_count += 2
                 outer_loop = self.loop_nest.tile(
                     tiling_indices[0], factor=tiling_factors[0]
@@ -4550,7 +4534,7 @@ class CppKernelProxy(CppKernel):
             assert isinstance(main_loop_kernel, self.vec_kernel_cls)
 
             # Prefix
-            if type(tail_loop_kernel) is self.kernel_cls:
+            if type(tail_loop_kernel) == self.kernel_cls:
                 # if tail loop kernel is a scalar kernel, we need to extend tmp_acc -> tmp_acc_arr[] to
                 # hold the temporary inner loop acc result for outer tail loop
                 tail_loop_kernel.finalize_reduction_prefix(
@@ -4578,7 +4562,7 @@ class CppKernelProxy(CppKernel):
                     suffix_buf, "C10_UNLIKELY", outer_loop.var
                 ):
                     stack.enter_context(suffix_buf.indent())
-                    if type(tail_loop_kernel) is self.kernel_cls:
+                    if type(tail_loop_kernel) == self.kernel_cls:
                         reduction_vars = tail_loop_kernel.reduction_var_names
                         for name in reduction_vars:
                             new_name = f"{name}_arr[{outer_loop.var}_tail - {cexpr_index(outer_loop.tiled_size)}]"
@@ -5150,12 +5134,10 @@ class CppScheduling(BaseScheduling):
                             contiguous_index_expr = 0
                             stride = 1
                             for var, range in reversed(
-                                # pyrefly: ignore [missing-attribute]
                                 scheduler_node._body.var_ranges.items()
                             ):
                                 contiguous_index_expr += stride * var
                                 stride *= range
-                            # pyrefly: ignore [missing-attribute]
                             write_index_expr = scheduler_node._body.get_write_expr(
                                 scheduler_buffer.get_name()
                             )
@@ -5224,7 +5206,6 @@ class CppScheduling(BaseScheduling):
                             )
                             local_buffers.append(local_buffer_used)
                             local_to_global_buffers[local_buffer_used.name] = []  # type: ignore[index]
-                        # pyrefly: ignore [index-error]
                         local_to_global_buffers[local_buffer_used.name].append(
                             global_buffer,
                         )
@@ -5469,7 +5450,6 @@ class CppScheduling(BaseScheduling):
         wrapper = V.graph.wrapper_code
         debug_handle = set_kernel_post_grad_provenance_tracing(
             node_schedule,  # type: ignore[arg-type]
-            # pyrefly: ignore [bad-argument-type]
             kernel_name,
         )
         wrapper.write_provenance_debug_handle(kernel_name, debug_handle)
@@ -5791,7 +5771,6 @@ class LoopNest:
         loop = self.loops[par_depth.start_depth]
         loop.parallel = par_depth.parallel_depth
         if loop.is_reduction:
-            # pyrefly: ignore [bad-assignment]
             metrics.parallel_reduction_count += 1
         for i in range(par_depth.start_depth + 1, par_depth.parallel_depth):
             self.loops[i].collapsed = True

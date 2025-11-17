@@ -9,7 +9,6 @@ namespace torch::utils {
 void initializeMemoryFormats();
 
 // This methods returns a borrowed reference!
-TORCH_PYTHON_API PyObject* getTHPMemoryFormat(
-    c10::MemoryFormat /*memory_format*/);
+TORCH_PYTHON_API PyObject* getTHPMemoryFormat(c10::MemoryFormat);
 
 } // namespace torch::utils

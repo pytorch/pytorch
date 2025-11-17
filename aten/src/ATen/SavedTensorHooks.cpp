@@ -13,7 +13,7 @@ namespace {
   // and left at true for the rest of the execution.
   // It's an optimization so that users who never use default hooks don't need to
   // read the thread_local variables pack_hook_ and unpack_hook_.
-  bool is_initialized(false);
+  static bool is_initialized(false);
 }
 
 static void assertSavedTensorHooksNotDisabled() {

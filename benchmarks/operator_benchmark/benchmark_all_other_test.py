@@ -7,7 +7,6 @@ from pt import (  # noqa: F401
     binary_inplace_test,
     binary_test,
     bmm_test,
-    boolean_test,
     cat_test,
     channel_shuffle_test,
     chunk_test,

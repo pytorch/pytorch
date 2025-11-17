@@ -259,20 +259,11 @@ inline void winograd_f2k3_input_transform_inplace__rvv(
   const vfloat32m1_t wd1 = __riscv_vfadd_vv_f32m1(d1, d2, 4);
   const vfloat32m1_t wd2 = __riscv_vfsub_vv_f32m1(d2, d1, 4);
   const vfloat32m1_t wd3 = __riscv_vfsub_vv_f32m1(d1, d3, 4);
-  /* GCC 14.2 (RISC-V RVV) ICE workaround:
-   * Avoid single-statement read-modify-write on MEM_REF like:
-   *   *input_tile_val =
-   *     __riscv_vset_v_f32m1_f32m1x4(*input_tile_val, idx, val);
-   * This triggers an ICE during GIMPLE lower (gsi_replace / riscv_gimple_fold_builtin)
-   * with -march=rv64gcv. Use a temporary then write back.
-   * Do NOT refactor into the single-statement form. Clang is unaffected.
-   */
-  vfloat32m1x4_t tmp_input_tile_val = *input_tile_val;
-  tmp_input_tile_val = __riscv_vset_v_f32m1_f32m1x4(tmp_input_tile_val, 0, wd0);
-  tmp_input_tile_val = __riscv_vset_v_f32m1_f32m1x4(tmp_input_tile_val, 1, wd1);
-  tmp_input_tile_val = __riscv_vset_v_f32m1_f32m1x4(tmp_input_tile_val, 2, wd2);
-  tmp_input_tile_val = __riscv_vset_v_f32m1_f32m1x4(tmp_input_tile_val, 3, wd3);
-  *input_tile_val = tmp_input_tile_val;
+
+  *input_tile_val = __riscv_vset_v_f32m1_f32m1x4(*input_tile_val, 0, wd0);
+  *input_tile_val = __riscv_vset_v_f32m1_f32m1x4(*input_tile_val, 1, wd1);
+  *input_tile_val = __riscv_vset_v_f32m1_f32m1x4(*input_tile_val, 2, wd2);
+  *input_tile_val = __riscv_vset_v_f32m1_f32m1x4(*input_tile_val, 3, wd3);
 }
 
 inline void winograd_f2k3_output_transform_inplace__rvv(
@@ -286,15 +277,9 @@ inline void winograd_f2k3_output_transform_inplace__rvv(
   const vfloat32m1_t wm0 = __riscv_vfadd_vv_f32m1(m0_plus_m1, m2, 4);
   const vfloat32m1_t m1_sub_m2 = __riscv_vfsub_vv_f32m1(m1, m2, 4);
   const vfloat32m1_t wm1 = __riscv_vfsub_vv_f32m1(m1_sub_m2, m3, 4);
-  /* GCC 14.2 (RISC-V RVV) ICE workaround — see note above.
-   * Keep the temporary + write-back pattern to avoid ICE.
-   * Do NOT rewrite into:
-   *   *input_tile_val = __riscv_vset_v_f32m1_f32m1x4(*input_tile_val, idx, val);
-   */
-  vfloat32m1x4_t tmp_output_tile_val = *input_tile_val;
-  tmp_output_tile_val = __riscv_vset_v_f32m1_f32m1x4(tmp_output_tile_val, 0, wm0);
-  tmp_output_tile_val = __riscv_vset_v_f32m1_f32m1x4(tmp_output_tile_val, 1, wm1);
-  *input_tile_val = tmp_output_tile_val;
+
+  *input_tile_val = __riscv_vset_v_f32m1_f32m1x4(*input_tile_val, 0, wm0);
+  *input_tile_val = __riscv_vset_v_f32m1_f32m1x4(*input_tile_val, 1, wm1);
 }
 
 inline vfloat32m1_t
@@ -315,17 +300,11 @@ inline void winograd_f2k3_kernel_transform__rvv(
   const vfloat32m1_t const_half = __riscv_vfmv_v_f_f32m1(0.5f, 4);
   const vfloat32m1_t g0_plus_g2 = __riscv_vfadd_vv_f32m1(g0, g2, 4);
   vfloat32m1_t half_g0_plus_g2 =  __riscv_vfmul_vv_f32m1(const_half, g0_plus_g2, 4);
-  /* GCC 14.2 (RISC-V RVV) ICE workaround — see note above.
-   * Keep the temporary + write-back pattern to avoid ICE.
-   * Do NOT rewrite into:
-   *   *transform = __riscv_vset_v_f32m1_f32m1x4(*transform, idx, val);
-   */
-  vfloat32m1x4_t tmp_transform = *transform;
-  tmp_transform = __riscv_vset_v_f32m1_f32m1x4(tmp_transform, 0, g0);
-  tmp_transform = __riscv_vset_v_f32m1_f32m1x4(tmp_transform, 1, vmuladdq_f32(half_g0_plus_g2, const_half, g1));
-  tmp_transform = __riscv_vset_v_f32m1_f32m1x4(tmp_transform, 2, vmulsubq_f32(half_g0_plus_g2, const_half, g1));
-  tmp_transform = __riscv_vset_v_f32m1_f32m1x4(tmp_transform, 3, g2);
-  *transform = tmp_transform;
+
+  *transform = __riscv_vset_v_f32m1_f32m1x4(*transform, 0, g0);
+  *transform = __riscv_vset_v_f32m1_f32m1x4(*transform, 1, vmuladdq_f32(half_g0_plus_g2, const_half, g1));
+  *transform = __riscv_vset_v_f32m1_f32m1x4(*transform, 2, vmulsubq_f32(half_g0_plus_g2, const_half, g1));
+  *transform = __riscv_vset_v_f32m1_f32m1x4(*transform, 3, g2);
 }
 
 inline vfloat32m1x4_t v4f_transpose4x4__rvv(const vfloat32m1x4_t m) {
@@ -473,11 +452,11 @@ void convolution_depthwise3x3_winograd_impl(
 #else
 
 void convolution_depthwise3x3_winograd_impl(
-    const Arguments& /*unused*/,
-    const float* const /*unused*/,
-    const float* const /*unused*/,
-    const float* const /*unused*/,
-    float* const /*unused*/) {
+    const Arguments&,
+    const float* const,
+    const float* const,
+    const float* const,
+    float* const) {
 }
 
 #endif /* __ARM_NEON__ */

@@ -225,7 +225,7 @@ class File {
     while (count > 0) {
       auto rv = syscall([this, buf, count] { return ::read(fd_, buf, count); });
       SYSASSERT(rv, "read");
-      buf = static_cast<uint8_t*>(buf) + rv;
+      buf = (uint8_t*)buf + rv;
       count -= rv;
     }
   }

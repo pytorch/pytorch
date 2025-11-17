@@ -399,9 +399,7 @@ class intrusive_ptr final {
   // This constructor will not increase the ref counter for you.
   // We use the tagged dispatch mechanism to explicitly mark this constructor
   // to not increase the refcount
-  explicit intrusive_ptr(
-      TTarget* target,
-      raw::DontIncreaseRefcount /*unused*/) noexcept
+  explicit intrusive_ptr(TTarget* target, raw::DontIncreaseRefcount) noexcept
       : target_(target) {}
 
   explicit intrusive_ptr(std::unique_ptr<TTarget> rhs) noexcept

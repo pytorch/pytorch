@@ -266,41 +266,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
         compiled_out = compiled_fn(mesh)
         self.assertEqual(opt_fn, compiled_out)
 
-    def test_get_local_rank_compile(self):
-        mesh = init_device_mesh(
-            self.device_type, (self.world_size,), mesh_dim_names=("dp",)
-        )
-
-        def fn_with_str_arg(x):
-            local_rank = x.device_mesh.get_local_rank("dp")
-            return x * local_rank
-
-        x = DTensor.from_local(torch.rand(4, 4), mesh, [Shard(0)], run_check=False)
-        ref = fn_with_str_arg(x)
-
-        opt_fn = torch.compile(fn_with_str_arg, backend="aot_eager", fullgraph=True)
-        res = opt_fn(x)
-        self.assertEqual(res, ref)
-
-        def fn_with_int_arg(x):
-            local_rank = x.device_mesh.get_local_rank(0)
-            return x * local_rank
-
-        ref2 = fn_with_int_arg(x)
-        opt_fn2 = torch.compile(fn_with_int_arg, backend="aot_eager", fullgraph=True)
-        res2 = opt_fn2(x)
-        self.assertEqual(res2, ref2)
-
-        def fn_without_arg(x):
-            # will fail if device_mesh.ndim > 1
-            local_rank = x.device_mesh.get_local_rank()
-            return x + local_rank
-
-        ref3 = fn_without_arg(x)
-        opt_fn3 = torch.compile(fn_without_arg, backend="aot_eager", fullgraph=True)
-        res3 = opt_fn3(x)
-        self.assertEqual(res3, ref3)
-
     def test_fakify_dtensor(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -994,9 +959,6 @@ def forward(self, primals_1):
         out_dt = torch.matmul(tmp_dt, y_dt)
         out_dt.sum().backward()
 
-    @unittest.skipIf(
-        torch._inductor.config.triton.native_matmul, "Matmul is now generated"
-    )
     def _test_tp_compile_comm_reordering(self):
         class FakeAttention(nn.Module):
             def __init__(self) -> None:

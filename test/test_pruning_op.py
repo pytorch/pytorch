@@ -18,7 +18,7 @@ class PruningOpTest(TestCase):
     def _generate_rowwise_mask(self, embedding_rows):
         indicator = torch.from_numpy((np.random.random_sample(embedding_rows)).astype(np.float32))
         threshold = float(np.random.random_sample())
-        mask = torch.BoolTensor([val >= threshold for val in indicator])
+        mask = torch.BoolTensor([True if val >= threshold else False for val in indicator])
         return mask
 
     def _test_rowwise_prune_op(self, embedding_rows, embedding_dims, indices_type, weights_dtype):

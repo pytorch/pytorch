@@ -265,12 +265,6 @@ class ParallelForkServerShouldWorkTest(TestCase, _TestMultiProcessing):
 )
 class ParallelForkServerPerfTest(TestCase):
 
-    @unittest.skipIf(
-        sys.version_info >= (3, 13, 8),
-        "Python 3.13.8+ changed forkserver module caching behavior",
-        # https://docs.python.org/3.13/whatsnew/changelog.html
-        # gh-126631
-    )
     def test_forkserver_perf(self):
 
         start_method = 'forkserver'

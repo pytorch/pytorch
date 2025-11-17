@@ -44,7 +44,7 @@ class Kumaraswamy(TransformedDistribution):
         "concentration1": constraints.positive,
         "concentration0": constraints.positive,
     }
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     support = constraints.unit_interval
     has_rsample = True
 
@@ -67,7 +67,7 @@ class Kumaraswamy(TransformedDistribution):
             AffineTransform(loc=1.0, scale=-1.0),
             PowerTransform(exponent=self.concentration1.reciprocal()),
         ]
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         super().__init__(base_dist, transforms, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):

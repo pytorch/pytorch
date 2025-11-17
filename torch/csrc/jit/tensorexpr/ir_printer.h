@@ -15,9 +15,9 @@ class TORCH_API IRPrinter : public IRVisitor {
  public:
   explicit IRPrinter(std::ostream& os) : printer_os_(this, os) {}
 
-  void print(ExprHandle /*expr*/);
-  void print(Expr& /*expr*/);
-  void print(Stmt& /*stmt*/);
+  void print(ExprHandle);
+  void print(Expr&);
+  void print(Stmt&);
   void visit(const AddPtr& v) override;
   void visit(const SubPtr& v) override;
   void visit(const MulPtr& v) override;
@@ -105,12 +105,10 @@ class TORCH_API IRPrinter : public IRVisitor {
   UniqueNameManager name_manager_;
 };
 
-TORCH_API std::ostream& operator<<(std::ostream& stream, const Expr& /*expr*/);
-TORCH_API std::ostream& operator<<(
-    std::ostream& stream,
-    const ExprHandle& /*expr*/);
-TORCH_API std::ostream& operator<<(std::ostream& stream, const Stmt& /*stmt*/);
-TORCH_API std::ostream& operator<<(std::ostream& stream, const Tensor& /*t*/);
+TORCH_API std::ostream& operator<<(std::ostream& stream, const Expr&);
+TORCH_API std::ostream& operator<<(std::ostream& stream, const ExprHandle&);
+TORCH_API std::ostream& operator<<(std::ostream& stream, const Stmt&);
+TORCH_API std::ostream& operator<<(std::ostream& stream, const Tensor&);
 
 TORCH_API void print(const ExprPtr& expr);
 TORCH_API void print(const StmtPtr& stmt);

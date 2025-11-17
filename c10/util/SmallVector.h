@@ -215,7 +215,7 @@ class SmallVectorTemplateCommon
       class ItTy,
       std::enable_if_t<!std::is_same_v<std::remove_const_t<ItTy>, T*>, bool> =
           false>
-  void assertSafeToReferenceAfterClear(ItTy /*unused*/, ItTy /*unused*/) {}
+  void assertSafeToReferenceAfterClear(ItTy, ItTy) {}
 
   /// Check whether any part of the range will be invalidated by growing.
   void assertSafeToAddRange(const T* From, const T* To) {
@@ -228,7 +228,7 @@ class SmallVectorTemplateCommon
       class ItTy,
       std::enable_if_t<!std::is_same_v<std::remove_const_t<ItTy>, T*>, bool> =
           false>
-  void assertSafeToAddRange(ItTy /*unused*/, ItTy /*unused*/) {}
+  void assertSafeToAddRange(ItTy, ItTy) {}
 
   /// Reserve enough space to add one element, and return the updated element
   /// pointer in case it was a reference to the storage.
@@ -538,7 +538,7 @@ class SmallVectorTemplateBase<T, true> : public SmallVectorTemplateCommon<T> {
   SmallVectorTemplateBase(size_t Size) : SmallVectorTemplateCommon<T>(Size) {}
 
   // No need to do a destroy loop for POD's.
-  static void destroy_range(T* /*unused*/, T* /*unused*/) {}
+  static void destroy_range(T*, T*) {}
 
   /// Move the range [I, E) onto the uninitialized memory
   /// starting with "Dest", constructing elements into it as needed.
@@ -563,8 +563,8 @@ class SmallVectorTemplateBase<T, true> : public SmallVectorTemplateCommon<T> {
       T1* I,
       T1* E,
       T2* Dest,
-      std::enable_if_t<std::is_same_v<std::remove_const_t<T1>, T2>>* /*unused*/
-      = nullptr) {
+      std::enable_if_t<std::is_same_v<std::remove_const_t<T1>, T2>>* =
+          nullptr) {
     // Use memcpy for PODs iterated by pointers (which includes SmallVector
     // iterators): std::uninitialized_copy optimizes to memmove, but we can
     // use memcpy here. Note that I and E are iterators and thus might be

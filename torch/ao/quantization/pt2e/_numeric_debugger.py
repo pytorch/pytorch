@@ -97,7 +97,7 @@ def _tensor_shape_equals(x: object, y: object) -> bool:
         return all_equal
     else:
         log.debug("Comparing non Tensors: %s and %s, they must be equal", x, y)
-        return type(x) is type(y) and x == y
+        return type(x) == type(y) and x == y
 
 
 def _loss_fn(

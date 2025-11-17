@@ -526,41 +526,6 @@ namespace {
             [](const vec& v) { return v.expm1(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
-    TYPED_TEST(Exponents, ExpU20) {
-        using vec = TypeParam;
-        using VT = ValueType<TypeParam>;
-        using UVT = UvalueType<TypeParam>;
-
-        // Explicit edge values
-        VT v_too_small = VT(-100.0); // much less than -87.3
-        VT exp_too_small = std::exp(v_too_small);
-        VT v_neg_edge = VT(-0x1.5d5e2ap+6f);   // just at the edge
-        VT exp_neg_edge = std::exp(v_neg_edge);
-        VT v_zero = VT(0.0);         // middle, normal case
-        VT exp_zero = std::exp(v_zero);
-        VT v_pos_edge = VT(0x1.5d5e2ap+6f);    // just at the edge
-        VT exp_pos_edge = std::exp(v_pos_edge);
-        VT v_too_large = VT(100.0);  // much more than 87.3
-        VT exp_too_large = std::exp(v_too_large);
-
-        auto test_case = TestingCase<vec>::getBuilder()
-            // Randoms in normal range, but the .addCustom() below guarantees we hit the special/fallback cases
-            .addDomain(CheckWithinDomains<UVT>{{{-100, 100}}, false, getDefaultTolerance<UVT>()})
-            .addCustom({ {v_too_small}, exp_too_small })
-            .addCustom({ {v_neg_edge}, exp_neg_edge })
-            .addCustom({ {v_zero}, exp_zero })
-            .addCustom({ {v_pos_edge}, exp_pos_edge })
-            .addCustom({ {v_too_large}, exp_too_large })
-            .setTrialCount(65536)
-            .setTestSeed(TestSeed());
-
-        test_unary<vec>(
-            NAME_INFO(exp_u20_edge_cases),
-            RESOLVE_OVERLOAD(std::exp),
-            [](const vec& v) { return v.exp_u20(); },
-            test_case
-        );
-    }
     TYPED_TEST(ErrorFunctions, Erf) {
         using vec = TypeParam;
         test_unary<vec>(

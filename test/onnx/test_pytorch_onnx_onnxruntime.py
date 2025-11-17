@@ -4879,7 +4879,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipScriptTest()
     def test_rnn_no_bias(self):
         def make_model(layers, packed_sequence):
-            batch_first = packed_sequence == 2
+            batch_first = True if packed_sequence == 2 else False
             model = torch.nn.RNN(
                 RNN_INPUT_SIZE,
                 RNN_HIDDEN_SIZE,
@@ -4900,7 +4900,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             return model
 
         def make_input(batch_size, layers, packed_sequence):
-            batch_first = packed_sequence == 2
+            batch_first = True if packed_sequence == 2 else False
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
             seq_lengths = sorted(map(int, seq_lengths), reverse=True)
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]

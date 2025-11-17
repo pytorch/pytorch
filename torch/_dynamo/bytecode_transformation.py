@@ -21,8 +21,8 @@ import itertools
 import sys
 import types
 import uuid
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from typing import Any, cast, Optional, TYPE_CHECKING, Union
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
 from . import config
 from .bytecode_analysis import (
@@ -923,7 +923,7 @@ def devirtualize_jumps(instructions: list[Instruction]) -> None:
                 inst.arg = abs(
                     int(target.offset - inst.offset - instruction_size(inst))
                 )
-                # pyrefly: ignore [unsupported-operation]
+                # pyrefly: ignore  # unsupported-operation
                 inst.arg //= 2
             inst.argval = target.offset
             inst.argrepr = f"to {target.offset}"
@@ -1375,7 +1375,7 @@ def update_offsets(instructions: Sequence[Instruction]) -> None:
     offset = 0
     for inst in instructions:
         inst.offset = offset
-        # pyrefly: ignore [unsupported-operation]
+        # pyrefly: ignore  # unsupported-operation
         offset += instruction_size(inst)
 
 

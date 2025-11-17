@@ -36,7 +36,7 @@ PyTypeObject THPLayoutType = {
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
-    reinterpret_cast<reprfunc>(THPLayout_repr), /* tp_repr */
+    (reprfunc)THPLayout_repr, /* tp_repr */
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
@@ -72,8 +72,7 @@ void THPLayout_init(PyObject* module) {
     throw python_error();
   }
   Py_INCREF(&THPLayoutType);
-  if (PyModule_AddObject(
-          module, "layout", reinterpret_cast<PyObject*>(&THPLayoutType)) != 0) {
+  if (PyModule_AddObject(module, "layout", (PyObject*)&THPLayoutType) != 0) {
     throw python_error();
   }
 }

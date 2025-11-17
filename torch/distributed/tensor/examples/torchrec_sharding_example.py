@@ -90,11 +90,8 @@ class LocalShardsWrapper(torch.Tensor):
         # TODO: we shall continually extend this function to support more ops if needed
         if func in supported_ops:
             res_shards_list = [
-                func(shard, *args[1:], **kwargs)
-                # pyrefly: ignore [index-error]
-                for shard in args[0].shards
+                func(shard, *args[1:], **kwargs) for shard in args[0].shards
             ]
-            # pyrefly: ignore [index-error]
             return LocalShardsWrapper(res_shards_list, args[0].shard_offsets)
         else:
             raise NotImplementedError(
@@ -144,7 +141,6 @@ def run_torchrec_row_wise_even_sharding_example(rank, world_size):
     local_tensor = torch.randn(local_shard_shape, device=device)
     # row-wise sharding: one shard per rank
     # create the local shards wrapper
-    # pyrefly: ignore [no-matching-overload]
     local_shards_wrapper = LocalShardsWrapper(
         local_shards=[local_tensor],
         offsets=[local_shard_offset],
@@ -223,7 +219,6 @@ def run_torchrec_row_wise_uneven_sharding_example(rank, world_size):
     # local shards
     # row-wise sharding: one shard per rank
     # create the local shards wrapper
-    # pyrefly: ignore [no-matching-overload]
     local_shards_wrapper = LocalShardsWrapper(
         local_shards=[local_tensor],
         offsets=[local_shard_offset],
@@ -302,7 +297,6 @@ def run_torchrec_table_wise_sharding_example(rank, world_size):
         local_shard_offset = torch.Size((0, 0))
         # wrap local shards into a wrapper
         local_shards_wrapper = (
-            # pyrefly: ignore [no-matching-overload]
             LocalShardsWrapper(
                 local_shards=[local_tensor],
                 offsets=[local_shard_offset],

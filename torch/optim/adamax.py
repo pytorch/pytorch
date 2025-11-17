@@ -253,13 +253,12 @@ def _single_tensor_adamax(
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch.compiler.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
-            if not (
+            assert (
                 param.device.type == step_t.device.type
                 and param.device.type in capturable_supported_devices
-            ):
-                raise AssertionError(
-                    f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-                )
+            ), (
+                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            )
 
         # update step
         step_t += 1
@@ -320,8 +319,7 @@ def _multi_tensor_adamax(
     capturable: bool,
     has_complex: bool,
 ):
-    if differentiable:
-        raise AssertionError("_foreach ops don't support autograd")
+    assert not differentiable, "_foreach ops don't support autograd"
 
     if len(params) == 0:
         return
@@ -331,14 +329,13 @@ def _multi_tensor_adamax(
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
-        if not all(
+        assert all(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ):
-            raise AssertionError(
-                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-            )
+        ), (
+            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+        )
 
     lr = _to_scalar(lr)
 

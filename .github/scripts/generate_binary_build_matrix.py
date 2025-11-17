@@ -16,18 +16,16 @@ from typing import Optional
 
 
 # NOTE: Please also update the CUDA sources in `PIP_SOURCES` in tools/nightly.py when changing this
-CUDA_ARCHES = ["12.6", "12.8", "12.9", "13.0"]
+CUDA_ARCHES = ["12.6", "12.8", "13.0"]
 CUDA_STABLE = "12.8"
 CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
     "12.8": "12.8.1",
-    "12.9": "12.9.1",
     "13.0": "13.0.0",
 }
 CUDA_ARCHES_CUDNN_VERSION = {
     "12.6": "9",
     "12.8": "9",
-    "12.9": "9",
     "13.0": "9",
 }
 
@@ -40,7 +38,7 @@ CPU_AARCH64_ARCH = ["cpu-aarch64"]
 
 CPU_S390X_ARCH = ["cpu-s390x"]
 
-CUDA_AARCH64_ARCHES = ["12.6-aarch64", "12.8-aarch64", "12.9-aarch64", "13.0-aarch64"]
+CUDA_AARCH64_ARCHES = ["12.6-aarch64", "12.8-aarch64", "13.0-aarch64"]
 
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
@@ -77,23 +75,6 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-nvtx-cu12==12.8.90; platform_system == 'Linux' | "
         "nvidia-nvjitlink-cu12==12.8.93; platform_system == 'Linux' | "
         "nvidia-cufile-cu12==1.13.1.3; platform_system == 'Linux'"
-    ),
-    "12.9": (
-        "nvidia-cuda-nvrtc-cu12==12.9.86; platform_system == 'Linux' | "
-        "nvidia-cuda-runtime-cu12==12.9.79; platform_system == 'Linux' | "
-        "nvidia-cuda-cupti-cu12==12.9.79; platform_system == 'Linux' | "
-        "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | "
-        "nvidia-cublas-cu12==12.9.1.4; platform_system == 'Linux' | "
-        "nvidia-cufft-cu12==11.4.1.4; platform_system == 'Linux' | "
-        "nvidia-curand-cu12==10.3.10.19; platform_system == 'Linux' | "
-        "nvidia-cusolver-cu12==11.7.5.82; platform_system == 'Linux' | "
-        "nvidia-cusparse-cu12==12.5.10.65; platform_system == 'Linux' | "
-        "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu12==3.3.20; platform_system == 'Linux' | "
-        "nvidia-nvtx-cu12==12.9.79; platform_system == 'Linux' | "
-        "nvidia-nvjitlink-cu12==12.9.86; platform_system == 'Linux' | "
-        "nvidia-cufile-cu12==1.14.1.1; platform_system == 'Linux'"
     ),
     "13.0": (
         "nvidia-cuda-nvrtc==13.0.48; platform_system == 'Linux' | "
@@ -241,11 +222,7 @@ def generate_libtorch_matrix(
             arches += CUDA_ARCHES
             arches += ROCM_ARCHES
         elif os == "windows":
-            # TODO (huydhn): Only build CUDA 12.9 for Linux. This logic is to be cleaned up
-            # in 2.10
-            windows_cuda_arches = CUDA_ARCHES.copy()
-            windows_cuda_arches.remove("12.9")
-            arches += windows_cuda_arches
+            arches += CUDA_ARCHES
     if libtorch_variants is None:
         libtorch_variants = [
             "shared-with-deps",
@@ -309,11 +286,7 @@ def generate_wheels_matrix(
         if os == "linux":
             arches += CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
         elif os == "windows":
-            # TODO (huydhn): Only build CUDA 12.9 for Linux. This logic is to be cleaned up
-            # in 2.10
-            windows_cuda_arches = CUDA_ARCHES.copy()
-            windows_cuda_arches.remove("12.9")
-            arches += windows_cuda_arches + XPU_ARCHES
+            arches += CUDA_ARCHES + XPU_ARCHES
         elif os == "linux-aarch64":
             # Separate new if as the CPU type is different and
             # uses different build/test scripts
@@ -349,7 +322,7 @@ def generate_wheels_matrix(
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
             if (
-                arch_version in ["13.0", "12.9", "12.8", "12.6"]
+                arch_version in ["13.0", "12.8", "12.6"]
                 and os == "linux"
                 or arch_version in CUDA_AARCH64_ARCHES
             ):
@@ -413,6 +386,5 @@ def generate_wheels_matrix(
 
 
 validate_nccl_dep_consistency("13.0")
-validate_nccl_dep_consistency("12.9")
 validate_nccl_dep_consistency("12.8")
 validate_nccl_dep_consistency("12.6")

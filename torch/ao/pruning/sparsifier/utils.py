@@ -51,7 +51,7 @@ def swap_module(
             new_mod.register_forward_hook(hook_fn)
 
         # respect device affinity when swapping modules
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         devices = {p.device for p in chain(mod.parameters(), mod.buffers())}
         assert len(devices) <= 1, (
             f"swap_module only works with cpu or single-device CUDA modules, but got devices {devices}"

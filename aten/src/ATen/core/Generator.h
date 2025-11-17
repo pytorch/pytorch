@@ -59,7 +59,9 @@ struct TORCH_API Generator {
 
   explicit Generator(c10::intrusive_ptr<c10::GeneratorImpl> gen_impl)
    : impl_(std::move(gen_impl)) {
-    TORCH_CHECK(impl_.get(), "GeneratorImpl with nullptr is not supported");
+    if (impl_.get() == nullptr) {
+      throw std::runtime_error("GeneratorImpl with nullptr is not supported");
+    }
   }
 
   bool operator==(const Generator& rhs) const {

@@ -35,21 +35,22 @@ def convolution_rules(op_schema: OpSchema) -> OutputSharding:
     assert isinstance(padding, list)
     assert isinstance(dilation, list)
     assert isinstance(weight_shape, torch.Size)
-    out_conv_shape = [
-        (d + 2 * padding[i] - dilation[i] * (weight_shape[i + 1] - 1) - 1) // stride[i]
-        + 1
-        for (i, d) in enumerate(in_shape[2:])
-    ]
-    output_shape = [in_shape[0], weight_shape[0]] + out_conv_shape
-    output_stride = [1]
-    for i in range(1, len(output_shape)):
-        output_stride.insert(0, output_stride[0] * output_shape[-i])
+    N, H_in, W_in = in_shape[0], in_shape[2], in_shape[3]
+    C_out = weight_shape[0]
+    H_out = (H_in + 2 * padding[0] - dilation[0] * (weight_shape[2] - 1) - 1) // stride[
+        0
+    ] + 1
+    W_out = (W_in + 2 * padding[1] - dilation[1] * (weight_shape[3] - 1) - 1) // stride[
+        1
+    ] + 1
+    output_shape = [N, C_out, H_out, W_out]
+    output_stride = (C_out * H_out * W_out, H_out * W_out, W_out, 1)
     output_dim_map = input_spec.dim_map
     pending_sums = input_spec.sums
 
     tensor_meta = TensorMeta(
         torch.Size(output_shape),
-        tuple(output_stride),
+        output_stride,
         input_spec.tensor_meta.dtype,
     )
     return OutputSharding(

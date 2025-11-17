@@ -31,9 +31,9 @@ import logging
 import sys
 import traceback
 import types
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from types import FunctionType
-from typing import Any, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 from unittest.mock import patch
 from weakref import WeakKeyDictionary
@@ -79,7 +79,6 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     AttributeMutationNew,
-    raise_type_error_exc,
     ValueMutationNew,
     VariableTracker,
 )
@@ -1321,20 +1320,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def const_getattr(self, tx, name):
         if name == "__name__":
-            return self.get_name()
-        if name == "__code__":
-            return self.get_code()
-        if name == "__defaults__":
-            d = getattr(self, "defaults", None)
-            return d.as_python_constant() if d else None
+            return self.fn_name.as_python_constant()
         return super().const_getattr(tx, name)
-
-    def call_obj_hasattr(self, tx: "InstructionTranslator", name):
-        if name == "__code__":
-            return variables.ConstantVariable.create(hasattr(self, "code"))
-        if name == "__defaults__":
-            return variables.ConstantVariable.create(hasattr(self, "defaults"))
-        return super().call_obj_hasattr(tx, name)
 
     def has_self(self):
         return False
@@ -2106,8 +2093,8 @@ class PolyfilledFunctionVariable(VariableTracker):
             return self.call_function(tx, args, kwargs)
 
         method = getattr(self.fn, name, None)
-        if not (method or is_function(method)):
-            raise_type_error_exc(tx, f"Cannot find callable {name} in {self.fn}")
+        assert method is not None, f"Member {name} not found in {self.fn}"
+        assert is_function(method), f"Member {name} is not callable in {self.fn}"
         options = {}
         if self.source:
             options["source"] = AttrSource(self.source, name)
@@ -2466,11 +2453,7 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
             )
 
         if self.rank == 1:
-            if len(args) + len(kwargs) != 4:
-                raise_type_error_exc(
-                    tx,
-                    f"TMA metadata rank=1 requires exactly 4 arguments, got {len(args) + len(kwargs)}",
-                )
+            assert len(args) + len(kwargs) == 4
             dims = [
                 kwargs["dim"] if "dim" in kwargs else args[1],
             ]
@@ -2478,11 +2461,7 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
                 kwargs["block_dim"] if "block_dim" in kwargs else args[2],
             ]
         else:
-            if len(args) + len(kwargs) != 6:
-                raise_type_error_exc(
-                    tx,
-                    f"TMA metadata rank=2 requires exactly 6 arguments, got {len(args) + len(kwargs)}",
-                )
+            assert len(args) + len(kwargs) == 6
             dims = [
                 kwargs["dim1"] if "dim1" in kwargs else args[1],
                 kwargs["dim0"] if "dim0" in kwargs else args[2],

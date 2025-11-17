@@ -341,22 +341,16 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
   }
 };
 
+template <typename T, typename KeyType>
 struct MHAGraphCache {
-  using KeyType = MHACacheKeyWrapper;
-  using ValueType = std::unique_ptr<fe::graph::Graph>;
-  using MapType =
-      std::unordered_map<KeyType, ValueType, ParamsWrapperHash<KeyType>>;
-  using iterator = typename MapType::iterator;
-  using const_iterator = typename MapType::const_iterator;
-
-  MapType engine_cache;
+  std::unordered_map<KeyType, T, ParamsWrapperHash<KeyType>> engine_cache;
   int count = 0;
   int hits = 0;
 
   // no mutexes here as caches are now thread local for v8, can also return a
   // pointer to the Execution Plan if we know it will not be invalidated by
   // another thread
-  iterator find(const KeyType& key) {
+  T* find(const KeyType& key) {
     static bool flag =
         c10::utils::check_env("TORCH_CUDNN_SDPA_CACHE_DEBUG") == true;
     if (flag && count) {
@@ -369,19 +363,15 @@ struct MHAGraphCache {
     }
     count++;
     auto it = engine_cache.find(key);
-    if (it != engine_cache.end()) {
-      hits++;
+    if (it == engine_cache.end()) {
+      return nullptr;
     }
-    return it;
+    hits++;
+    return &(it->second);
   }
 
-  const_iterator end() const {
-    return engine_cache.end();
-  }
-
-  template <typename... Args>
-  std::pair<iterator, bool> try_emplace(const KeyType& key, Args&&... args) {
-    return engine_cache.try_emplace(key, std::forward<Args>(args)...);
+  void update(const KeyType& key, T& results) {
+    engine_cache.insert_or_assign(key, std::move(results));
   }
 };
 
@@ -390,14 +380,16 @@ struct MHAGraphCache {
 // https://docs.nvidia.com/deeplearning/cudnn/backend/latest/release-notes.html
 // We also leak the caches to workaround potential teardown race issues.
 
-MHAGraphCache& getMHAGraphCache_() {
-  thread_local MHAGraphCache* instance{new MHAGraphCache()};
-  return *instance;
+auto& getMHAGraphCache_() {
+  thread_local auto& instance =
+      *new MHAGraphCache<std::shared_ptr<fe::graph::Graph>, MHACacheKeyWrapper>;
+  return instance;
 }
 
-MHAGraphCache& getMHAGraphBackwardCache_() {
-  thread_local MHAGraphCache* instance{new MHAGraphCache()};
-  return *instance;
+auto& getMHAGraphBackwardCache_() {
+  thread_local auto& instance =
+      *new MHAGraphCache<std::shared_ptr<fe::graph::Graph>, MHACacheKeyWrapper>;
+  return instance;
 }
 
 namespace {
@@ -445,7 +437,7 @@ auto fixSizeOneDimStrideSDPA(
 
 } // namespace
 
-std::unique_ptr<fe::graph::Graph> build_graph(
+auto build_graph(
     int64_t b,
     int64_t h,
     int64_t s_q,
@@ -469,7 +461,7 @@ std::unique_ptr<fe::graph::Graph> build_graph(
   if (q.scalar_type() == kBFloat16) {
     dtype = fe::DataType_t::BFLOAT16;
   }
-  auto mha_graph = std::make_unique<fe::graph::Graph>();
+  auto mha_graph = std::make_shared<fe::graph::Graph>();
   // We're baking in float accumulation and scale types
   // in theory the graph may support other types, but they
   // have not been tested
@@ -487,7 +479,9 @@ std::unique_ptr<fe::graph::Graph> build_graph(
   auto scaled_dot_product_flash_attention_options =
       fe::graph::SDPA_attributes()
           .set_name("CUDNN_SDPA")
-          .set_generate_stats(return_softmaxstats)
+          .set_is_inference(return_softmaxstats == false)
+          // TODO(eqy): switch to this API once cuDNN FE is upgraded
+          // .set_generate_stats(return_softmaxstats)
           .set_causal_mask(is_causal)
           .set_attn_scale(attn_scale);
   if (use_ragged_in_dense(q, k, v, o, attn_bias.has_value())) {
@@ -537,13 +531,15 @@ std::unique_ptr<fe::graph::Graph> build_graph(
       fe::graph::Tensor_attributes().set_uid(K).set_name("K"));
   auto V_ = mha_graph->tensor(
       fe::graph::Tensor_attributes().set_uid(V).set_name("V"));
+  std::optional<std::shared_ptr<fe::graph::Tensor_attributes>> bias;
   if (attn_bias.has_value()) {
-    scaled_dot_product_flash_attention_options.set_bias(
+    bias =
         mha_graph->tensor(fe::graph::Tensor_attributes()
                               .set_uid(BIAS)
                               .set_name("bias")
                               .set_dim(attn_bias.value().sizes().vec())
-                              .set_stride(attn_bias.value().strides().vec())));
+                              .set_stride(attn_bias.value().strides().vec()));
+    scaled_dot_product_flash_attention_options.set_bias(bias.value());
   }
 
   auto [O_, Stats] =
@@ -644,7 +640,7 @@ std::unique_ptr<fe::graph::Graph> build_graph(
   return mha_graph;
 }
 
-std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
+auto build_graph_nestedtensor(
     int64_t b,
     int64_t h_q,
     int64_t h_k,
@@ -672,7 +668,7 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
   if (q.scalar_type() == kBFloat16) {
     dtype = fe::DataType_t::BFLOAT16;
   }
-  auto mha_graph = std::make_unique<fe::graph::Graph>();
+  auto mha_graph = std::make_shared<fe::graph::Graph>();
   // We're baking in float accumulation and scale types
   // in theory the graph may support other types, but they
   // have not been tested
@@ -705,7 +701,9 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
   auto scaled_dot_product_flash_attention_options =
       fe::graph::SDPA_attributes()
           .set_name("CUDNN_SDPA_NESTEDTENSOR")
-          .set_generate_stats(return_softmaxstats)
+          .set_is_inference(return_softmaxstats == false)
+          // TODO(eqy): switch to this API once cuDNN FE is upgraded
+          // .set_generate_stats(return_softmaxstats)
           .set_causal_mask(is_causal)
           .set_attn_scale(attn_scale)
           .set_seq_len_q(SEQ_LEN_Q_)
@@ -768,16 +766,18 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
                                        v_strides[strideidx0],
                                        v_strides[strideidx1],
                                        v_strides[strideidx2]}));
+  std::optional<std::shared_ptr<fe::graph::Tensor_attributes>> bias;
   if (attn_bias.has_value()) {
     TORCH_CHECK(
         false,
         "attn_bias not yet supportd with cuDNN Attention and NestedTensor");
-    scaled_dot_product_flash_attention_options.set_bias(
+    bias =
         mha_graph->tensor(fe::graph::Tensor_attributes()
                               .set_uid(BIAS)
                               .set_name("bias")
                               .set_dim(attn_bias.value().sizes().vec())
-                              .set_stride(attn_bias.value().strides().vec())));
+                              .set_stride(attn_bias.value().strides().vec()));
+    scaled_dot_product_flash_attention_options.set_bias(bias.value());
   }
   auto RAG_Q_OFF_ =
       mha_graph->tensor(fe::graph::Tensor_attributes()
@@ -847,7 +847,7 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
   return mha_graph;
 }
 
-std::unique_ptr<fe::graph::Graph> build_graph_backward(
+auto build_graph_backward(
     int64_t b,
     int64_t h,
     int64_t s_q,
@@ -874,7 +874,7 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward(
   if (q.scalar_type() == kBFloat16) {
     dtype = fe::DataType_t::BFLOAT16;
   }
-  auto mha_graph = std::make_unique<fe::graph::Graph>();
+  auto mha_graph = std::make_shared<fe::graph::Graph>();
   // We're baking in float accumulation and scale types
   // in theory the graph may support other types, but they
   // have not been tested
@@ -919,13 +919,15 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward(
       fe::graph::Tensor_attributes().set_uid(K).set_name("K"));
   auto V_ = mha_graph->tensor(
       fe::graph::Tensor_attributes().set_uid(V).set_name("V"));
+  std::optional<std::shared_ptr<fe::graph::Tensor_attributes>> bias;
   if (attn_bias.has_value()) {
-    sdpa_backward_options.set_bias(
+    bias =
         mha_graph->tensor(fe::graph::Tensor_attributes()
                               .set_uid(BIAS)
                               .set_name("bias")
                               .set_dim(attn_bias.value().sizes().vec())
-                              .set_stride(attn_bias.value().strides().vec())));
+                              .set_stride(attn_bias.value().strides().vec()));
+    sdpa_backward_options.set_bias(bias.value());
   }
   if (dropout_probability != 0.0f) {
     auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
@@ -1059,7 +1061,7 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward(
   return mha_graph;
 }
 
-std::unique_ptr<fe::graph::Graph> build_graph_backward_nestedtensor(
+auto build_graph_backward_nestedtensor(
     int64_t b,
     int64_t h_q,
     int64_t h_k,
@@ -1090,7 +1092,7 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward_nestedtensor(
   if (q.scalar_type() == kBFloat16) {
     dtype = fe::DataType_t::BFLOAT16;
   }
-  auto mha_graph = std::make_unique<fe::graph::Graph>();
+  auto mha_graph = std::make_shared<fe::graph::Graph>();
   // We're baking in float accumulation and scale types
   // in theory the graph may support other types, but they
   // have not been tested
@@ -1193,16 +1195,18 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward_nestedtensor(
                                        o_strides[strideidx1],
                                        o_strides[strideidx2]}));
 
+  std::optional<std::shared_ptr<fe::graph::Tensor_attributes>> bias;
   if (attn_bias.has_value()) {
     TORCH_CHECK(
         false,
         "attn_bias not yet supportd with cuDNN Attention and NestedTensor");
-    sdpa_backward_options.set_bias(
+    bias =
         mha_graph->tensor(fe::graph::Tensor_attributes()
                               .set_uid(BIAS)
                               .set_name("bias")
                               .set_dim(attn_bias.value().sizes().vec())
-                              .set_stride(attn_bias.value().strides().vec())));
+                              .set_stride(attn_bias.value().strides().vec()));
+    sdpa_backward_options.set_bias(bias.value());
   }
   auto RAG_Q_OFF_ =
       mha_graph->tensor(fe::graph::Tensor_attributes()
@@ -1374,7 +1378,7 @@ void run_cudnn_SDP_fprop(
   // NB: The key initialization will round up sequence length, stride data etc.
   // if use_ragged_in_dense is enabled (to allow multiple sequence lengths to
   // reuse the same cached value/graph)
-  MHACacheKeyWrapper key(
+  auto key = MHACacheKeyWrapper(
       b,
       h,
       s_q,
@@ -1389,9 +1393,12 @@ void run_cudnn_SDP_fprop(
       is_causal,
       return_softmaxstats,
       false);
-  auto [cache_it, not_found] = getMHAGraphCache_().try_emplace(key, nullptr);
-  if (not_found) {
-    cache_it->second = build_graph(
+  auto graph_ptr = getMHAGraphCache_().find(key);
+  std::shared_ptr<fe::graph::Graph> mha_graph;
+  if (graph_ptr) {
+    mha_graph = *graph_ptr;
+  } else {
+    mha_graph = build_graph(
         b,
         h,
         s_q,
@@ -1412,39 +1419,39 @@ void run_cudnn_SDP_fprop(
         _dropoutoffset,
         handle);
   }
-  const fe::graph::Graph& mha_graph = *cache_it->second;
   std::unordered_map<int64_t, void*> variant_pack = {
-      {Q, q.mutable_data_ptr()},
-      {K, k.mutable_data_ptr()},
-      {V, v.mutable_data_ptr()},
+      {Q, q.data_ptr()},
+      {K, k.data_ptr()},
+      {V, v.data_ptr()},
       {SCALE, &scaling_factor},
-      {O, o.mutable_data_ptr()}};
+      {O, o.data_ptr()}};
   if (return_softmaxstats) {
-    variant_pack[LSE] = softmaxstats.mutable_data_ptr();
+    variant_pack[LSE] = softmaxstats.data_ptr();
   }
   if (attn_bias.has_value()) {
-    variant_pack[BIAS] = attn_bias.value().mutable_data_ptr();
+    variant_pack[BIAS] = attn_bias.value().data_ptr();
   }
   if (dropout_probability != 0.0f) {
-    variant_pack[SEED] = _dropoutseed.mutable_data_ptr();
-    variant_pack[OFFSET] = _dropoutoffset.mutable_data_ptr();
+    variant_pack[SEED] = _dropoutseed.data_ptr();
+    variant_pack[OFFSET] = _dropoutoffset.data_ptr();
   }
   if (use_ragged_in_dense(q, k, v, o, attn_bias.has_value())) {
-    variant_pack[SEQ_LEN_Q] = seqlen_q.mutable_data_ptr();
-    variant_pack[SEQ_LEN_KV] = seqlen_kv.mutable_data_ptr();
-    variant_pack[RAG_Q_OFF] = rag_off_q.mutable_data_ptr();
-    variant_pack[RAG_K_OFF] = rag_off_k.mutable_data_ptr();
-    variant_pack[RAG_V_OFF] = rag_off_v.mutable_data_ptr();
-    variant_pack[RAG_O_OFF] = rag_off_o.mutable_data_ptr();
+    variant_pack[SEQ_LEN_Q] = seqlen_q.data_ptr();
+    variant_pack[SEQ_LEN_KV] = seqlen_kv.data_ptr();
+    variant_pack[RAG_Q_OFF] = rag_off_q.data_ptr();
+    variant_pack[RAG_K_OFF] = rag_off_k.data_ptr();
+    variant_pack[RAG_V_OFF] = rag_off_v.data_ptr();
+    variant_pack[RAG_O_OFF] = rag_off_o.data_ptr();
     if (return_softmaxstats) {
-      variant_pack[RAG_LSE_OFF] = rag_off_lse.mutable_data_ptr();
+      variant_pack[RAG_LSE_OFF] = rag_off_lse.data_ptr();
     }
   }
-  auto workspace_size = mha_graph.get_workspace_size();
+  auto workspace_size = mha_graph->get_workspace_size();
   auto workspace_ptr =
       c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
   TORCH_CHECK(
-      mha_graph.execute(handle, variant_pack, workspace_ptr.get()).is_good());
+      mha_graph->execute(handle, variant_pack, workspace_ptr.get()).is_good());
+  getMHAGraphCache_().update(key, mha_graph);
 }
 
 void run_cudnn_SDP_fprop_nestedtensor(
@@ -1484,7 +1491,7 @@ void run_cudnn_SDP_fprop_nestedtensor(
     softmaxstats = at::empty({q.size(0), h_q, 1}, q.options().dtype(kFloat));
   }
 
-  MHACacheKeyWrapper key(
+  auto key = MHACacheKeyWrapper(
       b,
       h_q,
       s_q, // max-seqlen-q
@@ -1499,12 +1506,13 @@ void run_cudnn_SDP_fprop_nestedtensor(
       is_causal,
       return_softmaxstats,
       true);
+  auto graph_ptr = getMHAGraphCache_().find(key);
+  std::shared_ptr<fe::graph::Graph> mha_graph;
 
-  MHAGraphCache& cache = getMHAGraphCache_();
-  auto cache_it = cache.find(key);
-  std::unique_ptr<fe::graph::Graph> mha_graph_storage;
-  if (cache_it == cache.end()) {
-    mha_graph_storage = build_graph_nestedtensor(
+  if (graph_ptr) {
+    mha_graph = *graph_ptr;
+  } else {
+    mha_graph = build_graph_nestedtensor(
         b,
         h_q,
         h_k,
@@ -1529,44 +1537,40 @@ void run_cudnn_SDP_fprop_nestedtensor(
         dropoutoffset,
         handle);
   }
-  const fe::graph::Graph& mha_graph =
-      mha_graph_storage ? *mha_graph_storage : *cache_it->second;
-
   auto seqlen_q = at::diff(cum_seqlen_q, 1, 0);
   auto seqlen_kv = at::diff(cum_seqlen_kv, 1, 0);
-  auto rag_q_off = cum_seqlen_q.mul(q.stride(-3));
-  auto rag_k_off = cum_seqlen_kv.mul(k.stride(-3));
-  auto rag_v_off = cum_seqlen_kv.mul(v.stride(-3));
-  auto rag_o_off = cum_seqlen_q.mul(o.stride(-3));
+  auto rag_q_off = cum_seqlen_q.mul(h_q * d_qk);
+  auto rag_k_off = cum_seqlen_kv.mul(h_k * d_v);
+  auto rag_v_off = cum_seqlen_kv.mul(h_v * d_v);
   auto rag_stats_off = cum_seqlen_q.mul(h_q);
   std::unordered_map<int64_t, void*> variant_pack = {
-      {Q, q.mutable_data_ptr()},
-      {K, k.mutable_data_ptr()},
-      {V, v.mutable_data_ptr()},
+      {Q, q.data_ptr()},
+      {K, k.data_ptr()},
+      {V, v.data_ptr()},
       {SCALE, &scaling_factor},
-      {O, o.mutable_data_ptr()},
-      {RAG_Q_OFF, rag_q_off.mutable_data_ptr()},
-      {RAG_O_OFF, rag_o_off.mutable_data_ptr()},
-      {RAG_K_OFF, rag_k_off.mutable_data_ptr()},
-      {RAG_V_OFF, rag_v_off.mutable_data_ptr()},
-      {SEQ_LEN_Q, seqlen_q.mutable_data_ptr()},
-      {SEQ_LEN_KV, seqlen_kv.mutable_data_ptr()}};
+      {O, o.data_ptr()},
+      {RAG_Q_OFF, rag_q_off.data_ptr()},
+      {RAG_O_OFF, rag_q_off.data_ptr()},
+      {RAG_K_OFF, rag_k_off.data_ptr()},
+      {RAG_V_OFF, rag_v_off.data_ptr()},
+      {SEQ_LEN_Q, seqlen_q.data_ptr()},
+      {SEQ_LEN_KV, seqlen_kv.data_ptr()}};
   if (return_softmaxstats) {
-    variant_pack[LSE] = softmaxstats.mutable_data_ptr();
-    variant_pack[RAG_LSE_OFF] = rag_stats_off.mutable_data_ptr();
+    variant_pack[LSE] = softmaxstats.data_ptr();
+    variant_pack[RAG_LSE_OFF] = rag_stats_off.data_ptr();
   }
   if (dropout_probability != 0.0f) {
-    variant_pack[SEED] = dropoutseed.mutable_data_ptr();
-    variant_pack[OFFSET] = dropoutoffset.mutable_data_ptr();
+    variant_pack[SEED] = dropoutseed.data_ptr();
+    variant_pack[OFFSET] = dropoutoffset.data_ptr();
   }
   if (attn_bias.has_value()) {
     TORCH_CHECK("bias not supported with nestedtensor");
   }
-  auto workspace_size = mha_graph.get_workspace_size();
+  auto workspace_size = mha_graph->get_workspace_size();
   auto workspace_ptr =
       c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
   TORCH_CHECK(
-      mha_graph.execute(handle, variant_pack, workspace_ptr.get()).is_good());
+      mha_graph->execute(handle, variant_pack, workspace_ptr.get()).is_good());
 }
 
 void run_cudnn_SDP_bprop(
@@ -1648,7 +1652,7 @@ void run_cudnn_SDP_bprop(
   }
 
   cudnnHandle_t handle = getCudnnHandle();
-  MHACacheKeyWrapper key(
+  auto key = MHACacheKeyWrapper(
       b,
       h,
       s_q,
@@ -1663,10 +1667,12 @@ void run_cudnn_SDP_bprop(
       is_causal,
       true,
       false);
-  auto [cache_it, not_found] =
-      getMHAGraphBackwardCache_().try_emplace(key, nullptr);
-  if (not_found) {
-    cache_it->second = build_graph_backward(
+  auto graph_backward_ptr = getMHAGraphBackwardCache_().find(key);
+  std::shared_ptr<fe::graph::Graph> mha_graph;
+  if (graph_backward_ptr) {
+    mha_graph = *graph_backward_ptr;
+  } else {
+    mha_graph = build_graph_backward(
         b,
         h,
         s_q,
@@ -1690,44 +1696,43 @@ void run_cudnn_SDP_bprop(
         _dropoutoffset,
         handle);
   }
-  const fe::graph::Graph& mha_graph = *cache_it->second;
-
   std::unordered_map<int64_t, void*> variant_pack = {
       // inputs
-      {Q, q.mutable_data_ptr()},
-      {K, k.mutable_data_ptr()},
-      {V, v.mutable_data_ptr()},
-      {O, o.mutable_data_ptr()},
-      {DO, dO_.mutable_data_ptr()},
-      {LSE, softmaxstats.mutable_data_ptr()},
+      {Q, q.data_ptr()},
+      {K, k.data_ptr()},
+      {V, v.data_ptr()},
+      {O, o.data_ptr()},
+      {DO, dO_.data_ptr()},
+      {LSE, softmaxstats.data_ptr()},
       // outputs
-      {DQ, dQ.mutable_data_ptr()},
-      {DK, dK.mutable_data_ptr()},
-      {DV, dV.mutable_data_ptr()},
+      {DQ, dQ.data_ptr()},
+      {DK, dK.data_ptr()},
+      {DV, dV.data_ptr()},
       {SCALE, &scaling_factor}};
   if (dropout_probability != 0.0f) {
-    variant_pack[SEED] = _dropoutseed.mutable_data_ptr();
-    variant_pack[OFFSET] = _dropoutoffset.mutable_data_ptr();
+    variant_pack[SEED] = _dropoutseed.data_ptr();
+    variant_pack[OFFSET] = _dropoutoffset.data_ptr();
   }
   if (attn_bias.has_value()) {
-    variant_pack[BIAS] = attn_bias.value().mutable_data_ptr();
+    variant_pack[BIAS] = attn_bias.value().data_ptr();
   }
   if (use_ragged_in_dense(q, k, v, o, attn_bias.has_value())) {
-    variant_pack[SEQ_LEN_Q] = seqlen_q.mutable_data_ptr();
-    variant_pack[SEQ_LEN_KV] = seqlen_kv.mutable_data_ptr();
-    variant_pack[RAG_Q_OFF] = rag_off_q.mutable_data_ptr();
-    variant_pack[RAG_K_OFF] = rag_off_k.mutable_data_ptr();
-    variant_pack[RAG_V_OFF] = rag_off_v.mutable_data_ptr();
-    variant_pack[RAG_O_OFF] = rag_off_o.mutable_data_ptr();
-    variant_pack[RAG_LSE_OFF] = rag_off_lse.mutable_data_ptr();
+    variant_pack[SEQ_LEN_Q] = seqlen_q.data_ptr();
+    variant_pack[SEQ_LEN_KV] = seqlen_kv.data_ptr();
+    variant_pack[RAG_Q_OFF] = rag_off_q.data_ptr();
+    variant_pack[RAG_K_OFF] = rag_off_k.data_ptr();
+    variant_pack[RAG_V_OFF] = rag_off_v.data_ptr();
+    variant_pack[RAG_O_OFF] = rag_off_o.data_ptr();
+    variant_pack[RAG_LSE_OFF] = rag_off_lse.data_ptr();
   }
 
-  auto workspace_size = mha_graph.get_workspace_size();
+  auto workspace_size = mha_graph->get_workspace_size();
   auto workspace_ptr =
       c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
   TORCH_CHECK(!workspace_size || workspace_ptr.get());
   TORCH_CHECK(
-      mha_graph.execute(handle, variant_pack, workspace_ptr.get()).is_good());
+      mha_graph->execute(handle, variant_pack, workspace_ptr.get()).is_good());
+  getMHAGraphBackwardCache_().update(key, mha_graph);
 }
 
 void run_cudnn_SDP_bprop_nestedtensor(
@@ -1770,10 +1775,9 @@ void run_cudnn_SDP_bprop_nestedtensor(
 
   auto seqlen_q = at::diff(cum_seqlen_q, 1, 0);
   auto seqlen_kv = at::diff(cum_seqlen_kv, 1, 0);
-  auto rag_q_off = cum_seqlen_q.mul(q.stride(-3));
-  auto rag_k_off = cum_seqlen_kv.mul(k.stride(-3));
-  auto rag_v_off = cum_seqlen_kv.mul(v.stride(-3));
-  auto rag_o_off = cum_seqlen_q.mul(o.stride(-3));
+  auto rag_q_off = cum_seqlen_q.mul(h_q * d_qk);
+  auto rag_k_off = cum_seqlen_kv.mul(h_k * d_v);
+  auto rag_v_off = cum_seqlen_kv.mul(h_v * d_v);
   auto rag_stats_off = cum_seqlen_q.mul(h_q);
 
   auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -1787,7 +1791,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
 
   cudnnHandle_t handle = getCudnnHandle();
 
-  MHACacheKeyWrapper key(
+  auto key = MHACacheKeyWrapper(
       b,
       h_q,
       s_q, // max-seqlen-q
@@ -1802,12 +1806,13 @@ void run_cudnn_SDP_bprop_nestedtensor(
       is_causal,
       true,
       true);
+  auto graph_ptr = getMHAGraphCache_().find(key);
+  std::shared_ptr<fe::graph::Graph> mha_graph;
 
-  MHAGraphCache& cache = getMHAGraphCache_();
-  auto cache_it = cache.find(key);
-  std::unique_ptr<fe::graph::Graph> mha_graph_storage;
-  if (cache_it == cache.end()) {
-    mha_graph_storage = build_graph_backward_nestedtensor(
+  if (graph_ptr) {
+    mha_graph = *graph_ptr;
+  } else {
+    mha_graph = build_graph_backward_nestedtensor(
         b,
         h_q,
         h_k,
@@ -1835,43 +1840,41 @@ void run_cudnn_SDP_bprop_nestedtensor(
         dropoutoffset,
         handle);
   }
-  const fe::graph::Graph& mha_graph =
-      mha_graph_storage ? *mha_graph_storage : *cache_it->second;
 
   std::unordered_map<int64_t, void*> variant_pack = {
       // inputs
-      {Q, q.mutable_data_ptr()},
-      {K, k.mutable_data_ptr()},
-      {V, v.mutable_data_ptr()},
-      {O, o.mutable_data_ptr()},
-      {DO, dO_.mutable_data_ptr()},
-      {LSE, softmaxstats.mutable_data_ptr()},
+      {Q, q.data_ptr()},
+      {K, k.data_ptr()},
+      {V, v.data_ptr()},
+      {O, o.data_ptr()},
+      {DO, dO_.data_ptr()},
+      {LSE, softmaxstats.data_ptr()},
       // outputs
-      {DQ, dQ.mutable_data_ptr()},
-      {DK, dK.mutable_data_ptr()},
-      {DV, dV.mutable_data_ptr()},
+      {DQ, dQ.data_ptr()},
+      {DK, dK.data_ptr()},
+      {DV, dV.data_ptr()},
       {SCALE, &scaling_factor},
-      {RAG_Q_OFF, rag_q_off.mutable_data_ptr()},
-      {RAG_O_OFF, rag_o_off.mutable_data_ptr()},
-      {RAG_K_OFF, rag_k_off.mutable_data_ptr()},
-      {RAG_V_OFF, rag_v_off.mutable_data_ptr()},
-      {RAG_LSE_OFF, rag_stats_off.mutable_data_ptr()},
-      {SEQ_LEN_Q, seqlen_q.mutable_data_ptr()},
-      {SEQ_LEN_KV, seqlen_kv.mutable_data_ptr()}};
+      {RAG_Q_OFF, rag_q_off.data_ptr()},
+      {RAG_O_OFF, rag_q_off.data_ptr()},
+      {RAG_K_OFF, rag_k_off.data_ptr()},
+      {RAG_V_OFF, rag_v_off.data_ptr()},
+      {RAG_LSE_OFF, rag_stats_off.data_ptr()},
+      {SEQ_LEN_Q, seqlen_q.data_ptr()},
+      {SEQ_LEN_KV, seqlen_kv.data_ptr()}};
   if (dropout_probability != 0.0f) {
-    variant_pack[SEED] = _dropoutseed.mutable_data_ptr();
-    variant_pack[OFFSET] = _dropoutoffset.mutable_data_ptr();
+    variant_pack[SEED] = _dropoutseed.data_ptr();
+    variant_pack[OFFSET] = _dropoutoffset.data_ptr();
   }
   TORCH_CHECK(
       !attn_bias.has_value(),
       "attn_bias not yet supportd with cuDNN Attention and NestedTensor");
 
-  auto workspace_size = mha_graph.get_workspace_size();
+  auto workspace_size = mha_graph->get_workspace_size();
   auto workspace_ptr =
       c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
   TORCH_CHECK(!workspace_size || workspace_ptr.get());
   TORCH_CHECK(
-      mha_graph.execute(handle, variant_pack, workspace_ptr.get()).is_good());
+      mha_graph->execute(handle, variant_pack, workspace_ptr.get()).is_good());
 }
 
 } // namespace native

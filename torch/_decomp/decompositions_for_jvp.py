@@ -147,7 +147,7 @@ def native_layer_norm_backward(
     inner_dims = input_shape[axis:]
     outer_dims = input_shape[:axis]
     inner_dim_indices = list(range(axis, input_ndim))
-    outer_dim_indices = list(range(axis))
+    outer_dim_indices = list(range(0, axis))
 
     N = 1
     for i in inner_dims:

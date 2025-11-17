@@ -840,55 +840,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    def test_compile_selective_checkpoint_must_not_recompute_gemm_no_functionalization(
-        self, device
-    ):
-        def selective_checkpointing_context_fn():
-            no_recompute_list = [
-                torch.ops.aten.mm.default,
-            ]
-            return create_selective_checkpoint_contexts(
-                _get_custom_policy(no_recompute_list=no_recompute_list)
-            )
-
-        def gn(x, y):
-            return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
-
-        def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(
-                gn,
-                x,
-                y,
-                use_reentrant=False,
-                context_fn=selective_checkpointing_context_fn,
-            )
-
-        x = torch.randn(4, 4, requires_grad=True, device=device)
-        y = torch.randn(4, 4, requires_grad=True, device=device)
-
-        fw_compiler = functools.partial(
-            count_ops,
-            freq=1,
-            op=torch.ops.aten.sigmoid.default,
-        )
-        bw_compiler = functools.partial(
-            count_ops,
-            # Main check here is just that sigmoid is properly recomputed
-            # (we will see a sigmoid() and sigmoid_backward() in the bw graph)
-            freq=1,
-            op=torch.ops.aten.sigmoid.default,
-        )
-        backend = aot_autograd(
-            fw_compiler=fw_compiler,
-            bw_compiler=bw_compiler,
-            partition_fn=min_cut_rematerialization_partition,
-            disable_functionalization=True,
-        )
-        self._validate(fn, backend, x, y)
-        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
-
-    @requires_cuda_and_triton
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     def test_compile_selective_checkpoint_triton_kernel(self, device):
         # Copy of the above test, but make sure that having a triton kernel in the
         # region does not error.
@@ -1646,29 +1597,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         x = torch.randn(1, 1)
 
         self.assertEqual(opt_fn(x), fn(x))
-
-    @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=True)
-    def test_nonlocal_mutation(self):
-        counter = 0
-
-        def gn(x):
-            nonlocal counter
-            counter += 1
-            return torch.sin(x)
-
-        def fn(x):
-            return torch.utils.checkpoint.checkpoint(gn, x, use_reentrant=True)
-
-        x = torch.randn(4, 4, requires_grad=True)
-        fn(x).sum().backward()
-        # The mutation is reapplied in the backward as well
-        self.assertEqual(counter, 2)
-        counter = 0
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        opt_fn(x).sum().backward()
-        # The mutation is not reapplied in the backward because the flag was on.
-        self.assertEqual(counter, 1)
 
 
 devices = ["cuda", "hpu"]

@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import inspect
 import logging
-from collections.abc import Callable
 from functools import wraps
 from queue import Queue
+from typing import Callable
 
 import torch.nn as nn
 from torch.fx._compatibility import compatibility

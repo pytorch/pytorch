@@ -1952,7 +1952,7 @@ def _unravel_index(indices: Tensor, shape: Union[int, Sequence[int]]) -> Tensor:
     )
 
     if isinstance(shape, (int, torch.SymInt)):
-        shape = torch.Size([shape])  # pyrefly: ignore [bad-argument-type]
+        shape = torch.Size([shape])  # pyrefly: ignore  # bad-argument-type
     else:
         for dim in shape:
             torch._check_type(

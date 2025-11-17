@@ -79,7 +79,7 @@ assert torch.get_default_dtype() is torch.float32
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests  # noqa: PLW0127
+load_tests = load_tests
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
 
@@ -1836,6 +1836,30 @@ class TestTorchDeviceType(TestCase):
                 lambda: op_call(a),
                 '_bincount_cuda',
                 False)
+
+    # Ensures that kthvalue throws nondeterministic alerts in the correct cases
+    @dtypes(torch.double)
+    def test_nondeterministic_alert_kthvalue(self, device, dtype):
+        def test_func(call_type):
+            S = 10
+            k = 5
+            a = torch.randn(S, device=device)
+            if call_type == 'function':
+                torch.kthvalue(a, k)
+            elif call_type == 'method':
+                a.kthvalue(k)
+            elif call_type == 'out':
+                values = torch.empty_like(a)
+                indices = torch.empty((), device=device, dtype=torch.long)
+                torch.kthvalue(a, k, out=(values, indices))
+            else:
+                self.fail(f"'{call_type}' is not a valid call type")
+
+        for call_type in ['function', 'method', 'out']:
+            self.check_nondeterministic_alert(
+                lambda: test_func('function'),
+                'kthvalue CUDA',
+                torch.device(device).type == 'cuda')
 
     @skipIfMPS
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
@@ -8400,7 +8424,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_Size_iter(self):
         for sizes in [iter([1, 2, 3, 4, 5]), range(1, 6)]:
             x = torch.Size(sizes)
-            for i in range(5):
+            for i in range(0, 5):
                 self.assertEqual(x[i], i + 1)
 
     def test_t_not_2d_error(self):
@@ -10471,7 +10495,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_no_cuda_monkeypatch(self):
         # Note that this is not in test_cuda.py as this whole file is skipped when cuda
         # is not available.
-        with self.assertRaisesRegex(RuntimeError, "torch.cuda.Stream requires CUDA support"):
+        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class Stream"):
             torch.cuda.Stream()
 
         with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class Event"):

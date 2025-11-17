@@ -314,8 +314,8 @@ parseWireSections(const void* data, size_t data_size) {
   return out;
 }
 
-static constexpr const char* kMeta = "meta";
-static constexpr const char* kPayload = "payload";
+static const char* kMeta = "meta";
+static const char* kPayload = "payload";
 } // namespace
 
 c10::List<at::Tensor> cloneSparseTensors(
@@ -507,7 +507,8 @@ std::vector<at::IValue> readWrappedPayload(
       " but additional payload size is ",
       additionalPayloadSize);
   auto wrappedPayloadBegin =
-      message.payload().data() + payload.size() - additionalPayloadSize;
+      static_cast<const char*>(message.payload().data()) + payload.size() -
+      additionalPayloadSize;
   std::vector<torch::Tensor> tensorTable;
   IValue tuple = jit::unpickle(
       wrappedPayloadBegin,

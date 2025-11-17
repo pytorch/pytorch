@@ -238,7 +238,6 @@ def _local_map_wrapped(
 
             flat_local_args.append(arg)
 
-    # pyrefly: ignore [bad-argument-type]
     local_args = pytree.tree_unflatten(flat_local_args, args_spec)
 
     out = func(*local_args, **kwargs)
@@ -272,7 +271,6 @@ def _local_map_wrapped(
 
                 flat_dist_out.append(out)
 
-        # pyrefly: ignore [bad-argument-type]
         return pytree.tree_unflatten(flat_dist_out, out_spec)
     else:
         return out

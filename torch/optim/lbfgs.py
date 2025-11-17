@@ -307,8 +307,7 @@ class LBFGS(Optimizer):
             # view as to avoid deprecated pointwise semantics
             p.add_(update[offset : offset + numel].view_as(p), alpha=step_size)
             offset += numel
-        if offset != self._numel():
-            raise AssertionError(f"Expected offset {offset} to equal {self._numel()}")
+        assert offset == self._numel()
 
     def _clone_param(self):
         return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
@@ -332,10 +331,7 @@ class LBFGS(Optimizer):
             closure (Callable): A closure that reevaluates the model
                 and returns the loss.
         """
-        if len(self.param_groups) != 1:
-            raise AssertionError(
-                f"Expected exactly one param_group, but got {len(self.param_groups)}"
-            )
+        assert len(self.param_groups) == 1
 
         # Make sure the closure is always called with grad enabled
         closure = torch.enable_grad()(closure)

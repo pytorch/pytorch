@@ -167,7 +167,7 @@ def scaled_dot_product_attention(
     # NOTE: onnx-script has different logic here, because the attribute perms in
     # transpose needs list of ints
     key_shape_builtin = symbolic_helper._get_tensor_rank(key)
-    # pyrefly: ignore [no-matching-overload]
+    # pyrefly: ignore  # no-matching-overload
     key_transposed_axes = list(range(key_shape_builtin))
     key_transposed_axes[-1], key_transposed_axes[-2] = (
         key_transposed_axes[-2],
@@ -177,9 +177,9 @@ def scaled_dot_product_attention(
 
     # https://github.com/pytorch/pytorch/blob/12da0c70378b5be9135c6fda62a9863bce4a4818/aten/src/ATen/native/transformers/attention.cpp#L653
     # Scale q, k before matmul for stability see https://tinyurl.com/sudb9s96 for math
-    # pyrefly: ignore [bad-argument-type]
+    # pyrefly: ignore  # bad-argument-type
     query_scaled = g.op("Mul", query, g.op("Sqrt", scale))
-    # pyrefly: ignore [bad-argument-type]
+    # pyrefly: ignore  # bad-argument-type
     key_transposed_scaled = g.op("Mul", key_transposed, g.op("Sqrt", scale))
     mul_qk = g.op("MatMul", query_scaled, key_transposed_scaled)
 
@@ -193,7 +193,7 @@ def scaled_dot_product_attention(
         # Turn the Boolean mask to float: attn_mask.masked_fill(not attn_mask, -float('inf'))
         const_zero = g.op("Constant", value_t=torch.tensor([0.0]))
         const_neg_inf = g.op("Constant", value_t=torch.tensor([-float("inf")]))
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         attn_mask = g.op("Where", attn_mask, const_zero, const_neg_inf)
         mul_qk_add = g.op("Add", mul_qk, attn_mask)
         attn_weight = g.op("Softmax", mul_qk_add, axis_i=-1)
@@ -207,7 +207,7 @@ def scaled_dot_product_attention(
         _type_utils.JitScalarType.HALF,
         _type_utils.JitScalarType.BFLOAT16,
     ):
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         mul_qk_add = g.op("Add", mul_qk, attn_mask)
         attn_weight = g.op("Softmax", mul_qk_add, axis_i=-1)
     else:

@@ -819,7 +819,7 @@ def arange(g: jit_utils.GraphContext, *args):
             "Constant",
             value_t=torch.tensor(1, dtype=type_.dtype()),
         )
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         return g.op("Range", start_default, end, delta_default)
     elif len(args) == 4 or len(args) == 7:
         if len(args) == 4:
@@ -831,7 +831,7 @@ def arange(g: jit_utils.GraphContext, *args):
         _, end, start, step = symbolic_helper._arange_cast_helper(
             g, start=args[0], end=args[1], step=args[2], dtype=dtype
         )
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         return g.op("Range", start, end, step)
     elif len(args) == 6:
         # aten::arange(Scalar start, Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
@@ -843,7 +843,7 @@ def arange(g: jit_utils.GraphContext, *args):
             "Constant",
             value_t=torch.tensor(1, dtype=type_.dtype()),
         )
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         return g.op("Range", start, end, delta_default)
     else:
         return symbolic_helper._unimplemented(
@@ -914,8 +914,7 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
             + str(dim_size)
             + ". The model will "
             + "be exported without the squeeze node. If the model is intended to be used with dynamic "
-            + "input shapes, please export with dynamic_axes argument.",
-            stacklevel=2,
+            + "input shapes, please export with dynamic_axes argument."
         )
         return self
     return symbolic_helper._squeeze_helper(g, self, [dim])

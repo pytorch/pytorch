@@ -6,8 +6,8 @@ Visualization tools for operation stacks and graphs as DAGs.
 
 import subprocess
 
-from torchfuzz.ops_fuzzer import OperationGraph
-from torchfuzz.tensor_fuzzer import TensorSpec
+from ops_fuzzer import OperationGraph
+from tensor_fuzzer import TensorSpec
 
 
 def save_and_render_dot(dot_content: str, filename: str = "operation_stack"):

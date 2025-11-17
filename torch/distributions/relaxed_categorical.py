@@ -38,7 +38,7 @@ class ExpRelaxedCategorical(Distribution):
     (Jang et al., 2017)
     """
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
     support = (
         constraints.real_vector
@@ -128,10 +128,10 @@ class RelaxedOneHotCategorical(TransformedDistribution):
     """
 
     arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     support = constraints.simplex
     has_rsample = True
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     base_dist: ExpRelaxedCategorical
 
     def __init__(

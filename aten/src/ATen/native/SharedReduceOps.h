@@ -346,17 +346,17 @@ template<typename acc_t>
 struct AbsSwitch {};
 
 template<typename scalar_t, typename acc_t>
-inline C10_DEVICE acc_t abs_if_complex(scalar_t data, AbsSwitch<acc_t> /*unused*/) {
+inline C10_DEVICE acc_t abs_if_complex(scalar_t data, AbsSwitch<acc_t>) {
   return static_cast<acc_t>(data);
 }
 
 template<typename scalar_t, typename acc_t>
-inline C10_DEVICE acc_t abs_if_complex(std::complex<scalar_t> data, AbsSwitch<acc_t> /*unused*/) {
+inline C10_DEVICE acc_t abs_if_complex(std::complex<scalar_t> data, AbsSwitch<acc_t>) {
   return static_cast<acc_t>(std::abs(data));
 }
 
 template<typename scalar_t, typename acc_t>
-inline C10_DEVICE acc_t abs_if_complex(c10::complex<scalar_t> data, AbsSwitch<acc_t> /*unused*/) {
+inline C10_DEVICE acc_t abs_if_complex(c10::complex<scalar_t> data, AbsSwitch<acc_t>) {
   return static_cast<acc_t>(std::abs(at::opmath_type<c10::complex<scalar_t>>(data)));
 }
 

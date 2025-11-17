@@ -2,6 +2,6 @@
 
 namespace c10::detail {
 
-void deleteNothing(void* /*unused*/) {}
+void deleteNothing(void*) {}
 
 } // namespace c10::detail

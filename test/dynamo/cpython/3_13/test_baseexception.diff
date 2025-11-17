@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_baseexception.py b/test/dynamo/cpython/3_13/test_baseexception.py
-index e599b02c17d..057b6ec01b9 100644
+index e599b02c17d..750d7a84fb4 100644
 --- a/test/dynamo/cpython/3_13/test_baseexception.py
 +++ b/test/dynamo/cpython/3_13/test_baseexception.py
 @@ -1,10 +1,64 @@
@@ -78,27 +78,7 @@ index e599b02c17d..057b6ec01b9 100644
          self.assertEqual(len(exc_set), 0, "%s not accounted for" % exc_set)
  
      interface_tests = ("length", "args", "str", "repr")
-@@ -122,12 +173,13 @@ class ExceptionClassTests(unittest.TestCase):
-         # in PyObject_SetAttr.
-         import gc
-         d = {}
--        class HashThisKeyWillClearTheDict(str):
--            def __hash__(self) -> int:
--                d.clear()
--                return super().__hash__()
--        class Value(str):
--            pass
-+        with torch._dynamo.error_on_graph_break(False):
-+            class HashThisKeyWillClearTheDict(str):
-+                def __hash__(self) -> int:
-+                    d.clear()
-+                    return super().__hash__()
-+            class Value(str):
-+                pass
-         exc = Exception()
- 
-         d[HashThisKeyWillClearTheDict()] = Value()  # refcount of Value() is 1 now
-@@ -142,7 +194,7 @@ class ExceptionClassTests(unittest.TestCase):
+@@ -142,7 +193,7 @@ class ExceptionClassTests(unittest.TestCase):
          gc.collect()
  
  
@@ -107,31 +87,7 @@ index e599b02c17d..057b6ec01b9 100644
  
      """Test usage of exceptions"""
  
-@@ -182,8 +234,9 @@ class UsageTests(unittest.TestCase):
-         # BaseException; the ability was not possible until BaseException's
-         # introduction so no need to support new-style objects that do not
-         # inherit from it.
--        class NewStyleClass(object):
--            pass
-+        with torch._dynamo.error_on_graph_break(False):
-+            class NewStyleClass(object):
-+                pass
-         self.raise_fails(NewStyleClass)
-         self.raise_fails(NewStyleClass())
- 
-@@ -194,8 +247,9 @@ class UsageTests(unittest.TestCase):
-     def test_catch_non_BaseException(self):
-         # Trying to catch an object that does not inherit from BaseException
-         # is not allowed.
--        class NonBaseException(object):
--            pass
-+        with torch._dynamo.error_on_graph_break(False):
-+            class NonBaseException(object):
-+                pass
-         self.catch_fails(NonBaseException)
-         self.catch_fails(NonBaseException())
- 
-@@ -208,5 +262,5 @@ class UsageTests(unittest.TestCase):
+@@ -208,5 +259,5 @@ class UsageTests(unittest.TestCase):
          self.catch_fails("spam")
  
  

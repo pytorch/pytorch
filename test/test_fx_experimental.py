@@ -12,8 +12,7 @@ import tempfile
 import typing
 import unittest
 from types import BuiltinFunctionType
-from typing import NamedTuple, Optional, Union
-from collections.abc import Callable
+from typing import Callable, NamedTuple, Optional, Union
 
 import torch
 import torch.fx.experimental.meta_tracer

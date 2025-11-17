@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/core/AllocatorConfig.h>
 #include <c10/core/CachingDeviceAllocator.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
@@ -50,8 +49,9 @@ namespace c10::cuda::CUDACachingAllocator {
 
 // Preserved only for BC reasons
 // NOLINTNEXTLINE(misc-unused-using-decls)
-using c10::CachingAllocator::kLargeBuffer;
 using c10::CachingDeviceAllocator::DeviceStats;
+
+extern const size_t kLargeBuffer;
 
 typedef std::shared_ptr<GatheredContext> (*CreateContextFn)();
 
@@ -118,8 +118,7 @@ struct TraceEntry {
       MempoolId_t mempool,
       approx_time_t time,
       std::shared_ptr<GatheredContext> context = nullptr,
-      std::string compile_context = "",
-      std::string user_metadata = "")
+      std::string compile_context = "")
       : action_(action),
         device_(device),
         addr_(addr),
@@ -127,8 +126,7 @@ struct TraceEntry {
         stream_(stream),
         size_(size),
         mempool_(std::move(mempool)),
-        compile_context_(std::move(compile_context)),
-        user_metadata_(std::move(user_metadata)) {
+        compile_context_(std::move(compile_context)) {
     time_.approx_t_ = time;
   }
   Action action_;
@@ -140,7 +138,6 @@ struct TraceEntry {
   MempoolId_t mempool_;
   trace_time_ time_{};
   std::string compile_context_;
-  std::string user_metadata_;
 };
 
 // Calls made by record_function will save annotations
@@ -300,10 +297,6 @@ class CUDAAllocator : public DeviceAllocator {
       const std::vector<std::pair<std::string, std::string>>& /*md*/) {}
   virtual void pushCompileContext(std::string& md) {}
   virtual void popCompileContext() {}
-  virtual void setUserMetadata(const std::string& metadata) {}
-  virtual std::string getUserMetadata() {
-    return "";
-  }
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
 
   // Attached AllocatorTraceTracker callbacks will be called while the
@@ -541,14 +534,6 @@ inline void enablePeerAccess(
     c10::DeviceIndex dev,
     c10::DeviceIndex dev_to_access) {
   get()->enablePeerAccess(dev, dev_to_access);
-}
-
-inline void setUserMetadata(const std::string& metadata) {
-  get()->setUserMetadata(metadata);
-}
-
-inline std::string getUserMetadata() {
-  return get()->getUserMetadata();
 }
 
 } // namespace c10::cuda::CUDACachingAllocator

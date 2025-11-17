@@ -96,7 +96,7 @@ def split(g: jit_utils.GraphContext, self, split_size_or_sizes, dim, _outputs=No
 
     split_val = symbolic_helper._node_get(split_size_or_sizes.node(), "value")
     if split_val.dim() > 0:
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         return g.op("Split", self, split_size_or_sizes, axis_i=dim, outputs=_outputs)
     split_size = symbolic_helper._get_const(split_size_or_sizes, "i", "split_size")
 
@@ -113,7 +113,7 @@ def split(g: jit_utils.GraphContext, self, split_size_or_sizes, dim, _outputs=No
     if leftover:
         splits.append(leftover)
     splits = g.op("Constant", value_t=torch.tensor(splits))
-    # pyrefly: ignore [bad-argument-type]
+    # pyrefly: ignore  # bad-argument-type
     return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
 
 
@@ -188,7 +188,7 @@ def tensor_split(
         splits = g.op(
             "Constant", value_t=torch.tensor(splits + leftover, dtype=torch.long)
         )
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
 
     if (
@@ -314,7 +314,7 @@ def where(g: jit_utils.GraphContext, condition, self=None, other=None, _outputs=
         return symbolic_helper._unbind_helper(
             g, condition, g.op("Constant", value_t=torch.tensor(1)), _outputs
         )
-    # pyrefly: ignore [bad-argument-type]
+    # pyrefly: ignore  # bad-argument-type
     return g.op("Where", condition, self, other)
 
 

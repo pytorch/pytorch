@@ -154,34 +154,34 @@ class FlatbufferLoader final {
 };
 
 IValue parseList(
-    FlatbufferLoader& /*loader*/,
+    FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue);
 IValue parseTensor(
-    FlatbufferLoader& /*loader*/,
+    FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue);
 IValue parseTuple(
-    FlatbufferLoader& /*loader*/,
+    FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue);
 IValue parseDict(
-    FlatbufferLoader& /*loader*/,
+    FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue);
 IValue parseObject(
-    FlatbufferLoader& /*loader*/,
+    FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue);
 IValue parseIntList(
-    FlatbufferLoader& /*unused*/,
+    FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue);
 IValue parseDoubleList(
-    FlatbufferLoader& /*unused*/,
+    FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue);
 IValue parseBoolList(
-    FlatbufferLoader& /*unused*/,
+    FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue);
 IValue parseBasic(
-    FlatbufferLoader& /*unused*/,
+    FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue);
 IValue parseEnum(
-    FlatbufferLoader& /*loader*/,
+    FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue);
 
 TypePtr resolveType(
@@ -442,7 +442,7 @@ IValue parseEnum(
 }
 
 IValue parseBasic(
-    FlatbufferLoader& /*unused*/,
+    FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue) {
   switch (ivalue.val_type()) {
     case mobile::serialization::IValueUnion::NONE:
@@ -546,21 +546,21 @@ std::vector<T> parseListNative(const U* list) {
 }
 
 IValue parseIntList(
-    FlatbufferLoader& /*unused*/,
+    FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue) {
   const auto& list = ivalue.val_as_IntList();
   return parseListNative<int64_t>(list);
 }
 
 IValue parseDoubleList(
-    FlatbufferLoader& /*unused*/,
+    FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue) {
   const auto& list = ivalue.val_as_DoubleList();
   return parseListNative<double>(list);
 }
 
 IValue parseBoolList(
-    FlatbufferLoader& /*unused*/,
+    FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue) {
   const auto& list = ivalue.val_as_BoolList();
   std::vector<uint8_t> res = parseListNative<uint8_t>(list);
@@ -690,8 +690,8 @@ IValue FlatbufferLoader::parseIValue(
       *this, *ivalue);
 }
 
-void deleteNothing2(void* /*unused*/);
-void deleteNothing2(void* /*unused*/) {}
+void deleteNothing2(void*);
+void deleteNothing2(void*) {}
 
 c10::Storage FlatbufferLoader::getStorage(uint32_t index) {
   TORCH_CHECK(index < storage_loaded_.size());
@@ -760,7 +760,7 @@ void FlatbufferLoader::extractJitSourceAndConstants(
 mobile::Module parse_and_initialize_mobile_module(
     void* data,
     size_t size,
-    std::optional<at::Device> /*unused*/,
+    std::optional<at::Device>,
     ExtraFilesMap* extra_files,
     bool should_copy_tensor_memory) {
   // TODO(T128189662): If not copying, enforce that data is aligned to
@@ -806,7 +806,7 @@ mobile::Module parse_and_initialize_mobile_module_for_jit(
     size_t size,
     ExtraFilesMap& jit_sources,
     std::vector<IValue>& jit_constants,
-    std::optional<at::Device> /*unused*/,
+    std::optional<at::Device>,
     ExtraFilesMap* extra_files) {
   TORCH_CHECK(
       mobile::serialization::ModuleBufferHasIdentifier(data), "Format error");

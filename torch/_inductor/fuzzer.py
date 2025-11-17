@@ -108,12 +108,10 @@ class TypeExemplars:
         """
         Return an example of a class.
         """
-        # pyrefly: ignore [bad-argument-type, bad-argument-count]
         return TypeExemplars.TYPE_EXEMPLARS.get(t.__name__, None)
 
     @staticmethod
     def contains(t: type[T]) -> bool:
-        # pyrefly: ignore [bad-argument-type, bad-argument-count]
         return t.__name__ in TypeExemplars.TYPE_EXEMPLARS
 
 
@@ -220,15 +218,15 @@ class SamplingMethod(Enum):
         if field_name in TYPE_OVERRIDES:
             return random.choice(TYPE_OVERRIDES[field_name])
 
-        if type_hint is bool:
+        if type_hint == bool:
             return random.choice([True, False]) if random_sample else not default
-        elif type_hint is int:
+        elif type_hint == int:
             # NOTE initially tried to use negation of the value, but it doesn't work because most types are ints
             # when they should be natural numbers + zero. Python types to cover these values aren't super convenient.
             return random.randint(0, 1000)
-        elif type_hint is float:
+        elif type_hint == float:
             return random.uniform(0, 1000)
-        elif type_hint is str:
+        elif type_hint == str:
             characters = string.ascii_letters + string.digits + string.punctuation
             return "".join(
                 random.choice(characters) for _ in range(random.randint(1, 20))
@@ -306,11 +304,11 @@ class SamplingMethod(Enum):
                 new_type = random.choice(type_hint.__args__)
             else:
                 new_type = random.choice(
-                    [t for t in type_hint.__args__ if t is not type(default)]
+                    [t for t in type_hint.__args__ if t != type(default)]
                 )
             try:
                 new_default = new_type()
-            except Exception:
+            except Exception:  # noqa: E722
                 # if default constructor doesn't work, try None
                 new_default = None
 
@@ -779,7 +777,7 @@ class ConfigFuzzer:
         test_model_fn = self.test_model_fn_factory()
         try:
             test_model_fn()
-        except Exception as exc:
+        except Exception as exc:  # noqa: E722
             return handle_return(
                 "Eager exception", Status.FAILED_RUN_EAGER_EXCEPTION, True, exc
             )
@@ -788,7 +786,7 @@ class ConfigFuzzer:
         try:
             test_model_fn2 = self.test_model_fn_factory()
             comp = torch.compile(test_model_fn2, backend="inductor")
-        except Exception as exc:
+        except Exception as exc:  # noqa: E722
             return handle_return(
                 "Exception compiling", Status.FAILED_COMPILE, True, exc
             )
@@ -796,7 +794,7 @@ class ConfigFuzzer:
         # try running compiled
         try:
             compile_result = comp()
-        except Exception as exc:
+        except Exception as exc:  # noqa: E722
             return handle_return(
                 "Exception running compiled",
                 Status.FAILED_RUN_COMPILE_EXCEPTION,

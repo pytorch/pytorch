@@ -289,7 +289,7 @@ def build_opt_kwarg_db():
 
                 has_tensor_lr = False
                 for key, val in kwargs.items():
-                    if (key != "lr" and key != "betas") and (
+                    if (not key == "lr" and not key == "betas") and (
                         not isinstance(val, bool) or (isinstance(val, bool) and val)
                     ):
                         name += "_" + key
@@ -450,7 +450,7 @@ def make_test(
                 stack.enter_context(config.patch({"triton.cudagraphs": True}))
 
             kwargs_compiled = deepcopy(kwargs)
-            if isinstance(kwargs.get("lr"), torch.Tensor):
+            if isinstance(kwargs.get("lr", None), torch.Tensor):
                 kwargs["lr"] = kwargs["lr"].to(device)
                 kwargs_compiled["lr"] = kwargs_compiled["lr"].to(device)
 

@@ -231,7 +231,7 @@ const auto lcm_string = jiterator_stringify(
 const auto digamma_string = jiterator_stringify(
   template <typename T>
   T digamma(T x) {
-    static constexpr double PI_f64 = 3.14159265358979323846;
+    static const double PI_f64 = 3.14159265358979323846;
 
     // Short-circuits if x is +/- 0 and returns -/+ ∞ per the C++ standard
     if (x == 0) {
@@ -3072,9 +3072,9 @@ template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_digamma(scalar_t in) {
   // [C++ Standard Reference: Gamma Function] https://en.cppreference.com/w/cpp/numeric/math/tgamma
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
-  static constexpr double PI_f64 = 3.14159265358979323846;
-  constexpr accscalar_t PSI_10 = 2.25175258906672110764;
-  constexpr accscalar_t A[] = {
+  static const double PI_f64 = 3.14159265358979323846;
+  const accscalar_t PSI_10 = 2.25175258906672110764;
+  const accscalar_t A[] = {
       8.33333333333333333333E-2,
       -2.10927960927960927961E-2,
       7.57575757575757575758E-3,

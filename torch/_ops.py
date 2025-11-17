@@ -628,13 +628,11 @@ def unset_mode_pre_dispatch(mode_key, schema_check=False):
         assert mode_key is None
 
     def _unset_mode():
-        # NOTE: Using `is` rather than `==` to work around slow enum comparison in
-        # pybind11.
-        if mode_key is torch._C._TorchDispatchModeKey.PROXY:
+        if mode_key == torch._C._TorchDispatchModeKey.PROXY:
             current_mode = current_mode_stack_pre_dispatch.get(0)
             mode_stack_state_for_pre_dispatch().set(0, None)
             return current_mode
-        elif mode_key is torch._C._TorchDispatchModeKey.FUNCTIONAL:
+        elif mode_key == torch._C._TorchDispatchModeKey.FUNCTIONAL:
             current_mode = current_mode_stack_pre_dispatch.get(1)
             mode_stack_state_for_pre_dispatch().set(1, None)
             return current_mode
@@ -715,11 +713,13 @@ def _len_torch_dispatch_stack_pre_dispatch():
 
 
 def _get_dispatch_mode_pre_dispatch(mode_key):
-    # NOTE: Using `is` rather than `==` to work around slow enum comparison in pybind11.
-    if mode_key is torch._C._TorchDispatchModeKey.PROXY:
+    assert mode_key in (
+        torch._C._TorchDispatchModeKey.PROXY,
+        torch._C._TorchDispatchModeKey.FUNCTIONAL,
+    )
+    if mode_key == torch._C._TorchDispatchModeKey.PROXY:
         return mode_stack_state_for_pre_dispatch().get(0)
     else:
-        assert mode_key is torch._C._TorchDispatchModeKey.FUNCTIONAL
         return mode_stack_state_for_pre_dispatch().get(1)
 
 
@@ -880,7 +880,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
         elif torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), dk):
             return self._op_dk(dk, *args, **kwargs)
         else:
-            return NotImplemented  # pyrefly: ignore [bad-return]
+            return NotImplemented  # pyrefly: ignore  # bad-return
 
     # Remove a dispatch key from the dispatch cache.  This will force it to get
     # recomputed the next time.  Does nothing
@@ -985,9 +985,9 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
         r = self.py_kernels.get(final_key, final_key)
         if cache_result:
-            self._dispatch_cache[key] = r  # pyrefly: ignore [unsupported-operation]
+            self._dispatch_cache[key] = r  # pyrefly: ignore  # unsupported-operation
             add_cached_op(self)
-        return r  # pyrefly: ignore [bad-return]
+        return r  # pyrefly: ignore  # bad-return
 
     def name(self):
         return self._name
@@ -1117,7 +1117,7 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
             )
 
         assert isinstance(handler, Callable)  # type: ignore[arg-type]
-        return handler(*args, **kwargs)  # pyrefly: ignore [bad-return]
+        return handler(*args, **kwargs)  # pyrefly: ignore  # bad-return
 
 
 def _must_dispatch_in_python(args, kwargs):
@@ -1409,7 +1409,7 @@ class _HigherOrderNamespace(types.ModuleType):
 
     def __getattr__(self, name: str) -> HigherOrderOperator:
         # Following _OpNamespace.__getattr__, we cache the op on this object.
-        op = _higher_order_ops.get(name)
+        op = _higher_order_ops.get(name, None)
         if op is None:
             raise AttributeError(
                 f"'_HigherOrderNamespace' 'torch.ops.higher_order' object has no attribute '{name}'"

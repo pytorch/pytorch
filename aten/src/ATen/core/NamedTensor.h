@@ -27,11 +27,11 @@ struct TORCH_API NamedTensorMeta final : public c10::NamedTensorMetaInterface {
     HasNonWildcard
   };
 
-  explicit NamedTensorMeta(HAS_NON_WILDCARD /*unused*/, DimnameList names)
+  explicit NamedTensorMeta(HAS_NON_WILDCARD, DimnameList names)
     : names_(names.vec()) {
     check_invariants();
   }
-  explicit NamedTensorMeta(HAS_NON_WILDCARD /*unused*/, std::vector<Dimname>&& names)
+  explicit NamedTensorMeta(HAS_NON_WILDCARD, std::vector<Dimname>&& names)
     : names_(std::move(names)) {
     check_invariants();
   }
@@ -52,13 +52,13 @@ struct TORCH_API NamedTensorMeta final : public c10::NamedTensorMetaInterface {
       std::any_of(names_.begin(), names_.end(), [](const Dimname& n) { return !n.isWildcard(); }));
   }
 
-  void set_names(HAS_NON_WILDCARD /*unused*/, DimnameList new_names) {
+  void set_names(HAS_NON_WILDCARD, DimnameList new_names) {
     TORCH_INTERNAL_ASSERT(new_names.size() == names_.size());
     std::copy(new_names.begin(), new_names.end(), names_.begin());
     check_invariants();
   }
 
-  void set_names(HAS_NON_WILDCARD /*unused*/, std::vector<Dimname>&& new_names) {
+  void set_names(HAS_NON_WILDCARD, std::vector<Dimname>&& new_names) {
     TORCH_INTERNAL_ASSERT(new_names.size() == names_.size());
     names_ = std::move(new_names);
     check_invariants();

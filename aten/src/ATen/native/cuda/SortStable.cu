@@ -21,15 +21,9 @@ namespace {
 struct offset_t {
   int stride;
   int begin;
-  __device__ int operator[](int i) const {
+  __device__ int operator[](int i) {
     return stride * (begin + i);
   }
-#if CCCL_VERSION >= 3001000
-  __device__ offset_t& operator+=(int i) {
-    begin += i;
-    return *this;
-  }
-#endif
 };
 // Segmented sort by full sort algorithm:.
 // Say we are sorting a (2, 3) tensor. We have in flattened form:

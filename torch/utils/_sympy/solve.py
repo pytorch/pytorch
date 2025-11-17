@@ -21,7 +21,7 @@ INEQUALITY_TYPES = (sympy.Gt, sympy.Ge, sympy.Lt, sympy.Le)
 
 
 def mirror_rel_op(type: type) -> Optional[type[sympy.Rel]]:
-    return _MIRROR_REL_OP.get(type)
+    return _MIRROR_REL_OP.get(type, None)
 
 
 # Tries to simplify 'expr', so as to leave only 'thing' in the left-hand side.
@@ -77,8 +77,7 @@ def try_solve(
         if e is None:
             continue
 
-        if not isinstance(e, sympy.Rel):
-            raise AssertionError("expected sympy.Rel")
+        assert isinstance(e, sympy.Rel)
 
         for _ in range(trials):
             trial = _try_isolate_lhs(e, thing, floordiv_inequality=floordiv_inequality)
@@ -129,8 +128,7 @@ def _try_isolate_lhs(
             if isinstance(e, INEQUALITY_TYPES) and other.is_negative:
                 op = mirror_rel_op(op)  # type: ignore[assignment]
 
-            if op is None:
-                raise AssertionError("expected op to be not None")
+            assert op is not None
             e = op(lhs, rhs)
 
     ################################################################################

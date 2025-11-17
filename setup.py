@@ -156,10 +156,6 @@
 #   USE_ROCM_KERNEL_ASSERT=1
 #     Enable kernel assert in ROCm platform
 #
-#   USE_LAYERNORM_FAST_RECIPROCAL
-#     If set, enables the use of builtin functions for fast reciprocals (1/x) w.r.t.
-#     layer normalization. Default: enabled.
-#
 #   USE_ROCM_CK_GEMM=1
 #     Enable building CK GEMM backend in ROCm platform
 #
@@ -229,7 +225,7 @@
 #
 #   USE_MIMALLOC
 #      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
-#      By default, It is only enabled on Windows and AArch64.
+#      By default, It is only enabled on Windows.
 #
 #   BUILD_LIBTORCH_WHL
 #      Builds libtorch.so and its dependencies as a wheel

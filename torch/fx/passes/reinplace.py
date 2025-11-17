@@ -2,9 +2,8 @@
 import _operator
 import itertools
 from collections import defaultdict
-from collections.abc import Callable
 from enum import Enum
-from typing import Any
+from typing import Any, Callable
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -543,7 +542,7 @@ def reinplace(gm, *sample_args):
                 continue
             if len(node.target._schema.arguments) < 1:
                 continue
-            if type(node.target._schema.arguments[0].type) is not torch.TensorType:
+            if type(node.target._schema.arguments[0].type) != torch.TensorType:
                 continue
 
             # Step 1a: Check that the self argument we're attempting to reinplace

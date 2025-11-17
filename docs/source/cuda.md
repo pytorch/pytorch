@@ -176,6 +176,10 @@
 .. autoclass:: torch.cuda.use_mem_pool
 ```
 
+% FIXME The following doesn't seem to exist. Is it supposed to?
+% https://github.com/pytorch/pytorch/issues/27785
+% .. autofunction:: reset_max_memory_reserved
+
 ## NVIDIA Tools Extension (NVTX)
 
 ```{eval-rst}
@@ -258,28 +262,6 @@ See the docs for {class}`~torch.cuda.gds.GdsFile` for an example of how to use t
 
 ```
 
-## Green Contexts (experimental)
-
-`torch.cuda.green_contexts` provides thin wrappers around the CUDA Green Context APIs
-to enable more general carveout of SM resources for CUDA kernels.
-
-These APIs can be used in PyTorch with CUDA versions greater than or equal to 12.8.
-
-See the docs for {class}`~torch.cuda.green_contexts.GreenContext` for an example of how to use these.
-
-```{eval-rst}
-.. currentmodule:: torch.cuda.green_contexts
-```
-
-```{eval-rst}
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    GreenContext
-```
-
-
 % This module needs to be documented. Adding here in the meantime
 
 % for tracking purposes
@@ -290,10 +272,6 @@ See the docs for {class}`~torch.cuda.green_contexts.GreenContext` for an example
 
 ```{eval-rst}
 .. py:module:: torch.cuda.gds
-```
-
-```{eval-rst}
-.. py:module:: torch.cuda.green_contexts
 ```
 
 ```{eval-rst}

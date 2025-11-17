@@ -863,7 +863,6 @@ static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
             saved_variables.append(f"{type.cpp_type()} {name};")
 
             if type in MISC_GETTER_DEFS:
-                # pyrefly: ignore [index-error]
                 getter_def, body = MISC_GETTER_DEFS[type]
                 getter_definitions.append(
                     getter_def.substitute(op=info.op, name=name, body=body)
@@ -1034,7 +1033,6 @@ static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     unpack_ivalues = []
     for typ, name in zip(apply_functional_args_ref_types, apply_functional_args):
         typ = typ.removesuffix("&")
-        # pyrefly: ignore [bad-argument-type]
         unpack_ivalues.append(f"auto {name} = packed_args.unpack<{typ}>();")
 
     schema_args = [f"std::array<bool, {len(input_name_to_idx)}>"]

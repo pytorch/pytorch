@@ -12,15 +12,15 @@ class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(num_features, eps, momentum, True, True, **factory_kwargs)
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         self.register_buffer("scale", torch.tensor(1.0, **factory_kwargs))
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         self.register_buffer("zero_point", torch.tensor(0, **factory_kwargs))
 
     @staticmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
         activation_post_process = mod.activation_post_process
-        if type(mod) is cls._NNI_BN_RELU_MODULE:
+        if type(mod) == cls._NNI_BN_RELU_MODULE:
             mod = mod[0]
         scale, zero_point = activation_post_process.calculate_qparams()
         new_mod = cls(mod.num_features, mod.eps)

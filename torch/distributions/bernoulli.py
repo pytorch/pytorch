@@ -39,7 +39,7 @@ class Bernoulli(ExponentialFamily):
         validate_args (bool, optional): whether to validate arguments, None by default
     """
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
     support = constraints.boolean
     has_enumerate_support = True
@@ -57,12 +57,12 @@ class Bernoulli(ExponentialFamily):
             )
         if probs is not None:
             is_scalar = isinstance(probs, _Number)
-            # pyrefly: ignore [read-only]
+            # pyrefly: ignore  # read-only
             (self.probs,) = broadcast_all(probs)
         else:
             assert logits is not None  # helps mypy
             is_scalar = isinstance(logits, _Number)
-            # pyrefly: ignore [read-only]
+            # pyrefly: ignore  # read-only
             (self.logits,) = broadcast_all(logits)
         self._param = self.probs if probs is not None else self.logits
         if is_scalar:
@@ -140,6 +140,6 @@ class Bernoulli(ExponentialFamily):
     def _natural_params(self) -> tuple[Tensor]:
         return (torch.logit(self.probs),)
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def _log_normalizer(self, x):
         return torch.log1p(torch.exp(x))

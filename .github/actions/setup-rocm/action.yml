@@ -111,23 +111,3 @@ runs:
         # This video group ID maps to subgid 1 inside the docker image due to the /etc/subgid entries.
         # The group name corresponding to group ID 1 can change depending on the OS, so both are necessary.
         echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd $DEVICE_FLAG --group-add video --group-add $render_gid --group-add daemon --group-add bin --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --network=host" >> "${GITHUB_ENV}"
-
-    - name: configure aws credentials
-      id: aws_creds
-      uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
-      with:
-        role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
-        aws-region: us-east-1
-        role-duration-seconds: 18000
-
-    - name: Login to Amazon ECR
-      id: login-ecr
-      continue-on-error: true
-      uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
-
-    - name: Preserve github env variables for use in docker
-      shell: bash
-      run: |
-        env | grep '^GITHUB' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
-        env | grep '^CI' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
-        env | grep '^RUNNER' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"

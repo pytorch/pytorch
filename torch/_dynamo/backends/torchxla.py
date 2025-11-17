@@ -1,6 +1,5 @@
 import logging
-from collections.abc import Callable
-from typing import Any
+from typing import Any, Callable
 
 import torch
 from functorch.compile import make_boxed_func

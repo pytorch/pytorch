@@ -202,51 +202,6 @@ class TestExportAPIDynamo(common_utils.TestCase):
             dynamic_axes={"b": [0, 1, 2], "b_out": [0, 1, 2]},
         )
 
-    def test_from_dynamic_axes_to_dynamic_shapes_deprecation_warning(self):
-        with self.assertWarnsRegex(
-            DeprecationWarning,
-            "from_dynamic_axes_to_dynamic_shapes is deprecated and will be removed in a future release. "
-            "This function converts 'dynamic_axes' format \\(including custom axis names\\) to 'dynamic_shapes' format. "
-            "Instead of relying on this conversion, provide 'dynamic_shapes' directly with custom names.",
-        ):
-            self.assert_export(
-                SampleModelForDynamicShapes(),
-                (torch.randn(2, 2, 3), {"b": torch.randn(2, 2, 3)}),
-                dynamic_axes={
-                    "x": [0, 1, 2],
-                    "b": [0, 1, 2],
-                },
-            )
-
-    def test_from_dynamic_axes_to_dynamic_shapes_keeps_custom_axis_names(self):
-        model = SampleModelForDynamicShapes()
-        input = (
-            torch.randn(2, 2, 3),
-            {"b": torch.randn(2, 2, 3)},
-        )
-        dynamic_axes = {
-            "x": {0: "customx_x_0", 1: "customx_x_1", 2: "customx_x_2"},
-            "b": {0: "customb_b_0", 1: "customb_b_1", 2: "customb_b_2"},
-            "x_out": {0: "customx_out_x_0", 1: "customx_out_x_1", 2: "customx_out_x_2"},
-            "b_out": {0: "customb_out_b_0", 1: "customb_out_b_1", 2: "customb_out_b_2"},
-        }
-        onnx_program = torch.onnx.export(
-            model,
-            input,
-            dynamic_axes=dynamic_axes,
-            input_names=["x", "b"],
-            output_names=["x_out", "b_out"],
-            dynamo=True,
-        )
-
-        # Check whether the dynamic dimension names are preserved
-        self.assertIs(onnx_program.model.graph.inputs[0].shape[0].value, "customx_x_0")
-        self.assertIs(onnx_program.model.graph.inputs[0].shape[1].value, "customx_x_1")
-        self.assertIs(onnx_program.model.graph.inputs[0].shape[2].value, "customx_x_2")
-        self.assertIs(onnx_program.model.graph.inputs[1].shape[0].value, "customb_b_0")
-        self.assertIs(onnx_program.model.graph.inputs[1].shape[1].value, "customb_b_1")
-        self.assertIs(onnx_program.model.graph.inputs[1].shape[2].value, "customb_b_2")
-
     def test_saved_f_exists_after_export(self):
         with common_utils.TemporaryFileName(suffix=".onnx") as path:
             _ = torch.onnx.export(
@@ -571,43 +526,6 @@ class TestCustomTranslationTable(common_utils.TestCase):
             all_nodes_decomp = [n.op_type for n in onnx_program_decomp.model.graph]
             self.assertIn("Add", all_nodes_decomp)
             self.assertNotIn("Sub", all_nodes_decomp)
-
-    def test_01_specialization_with_run_decomp_is_supported(self):
-        # Phi3RMSNorm changes and redo shape inference after `run_decompositions` call
-        # We ned this test to make sure everything we do on fx graph is covered by
-        # backed_size_oblivious
-        class Phi3RMSNorm(torch.nn.Module):
-            def __init__(self, hidden_size, eps=1e-6):
-                """
-                Phi3RMSNorm is equivalent to T5LayerNorm
-                """
-                super().__init__()
-                self.weight = torch.nn.Parameter(torch.ones(hidden_size))
-                self.variance_epsilon = eps
-
-            def forward(self, hidden_states):
-                input_dtype = hidden_states.dtype
-                hidden_states = hidden_states.to(torch.float32)
-                variance = hidden_states.pow(2).mean(-1, keepdim=True)
-                hidden_states = hidden_states * torch.rsqrt(
-                    variance + self.variance_epsilon
-                )
-                return self.weight * hidden_states.to(input_dtype)
-
-        op = torch.onnx.export(
-            Phi3RMSNorm(256).eval(),
-            args=(),
-            kwargs={"hidden_states": torch.rand((1, 32, 256))},
-            dynamic_shapes={
-                "hidden_states": {
-                    0: "batch_size",
-                    1: "seq_len",
-                }
-            },
-            dynamo=True,
-        )
-        # batch size is not fixed to 1
-        self.assertNotEqual(op.model.graph.outputs[0].shape[0], 1)
 
 
 if __name__ == "__main__":

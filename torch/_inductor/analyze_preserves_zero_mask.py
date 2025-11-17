@@ -106,7 +106,6 @@ class RecordLowPrecisionOps(DefaultHandler):
         pass
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
     def indirect_indexing(*args: Any, **kwargs: Any) -> sympy.Expr:
         return sympy.S.Zero
 

@@ -72,7 +72,7 @@ try:
 except ImportError as e:
     # In FBCode we separate FX out into a separate target for the sake of dev
     # velocity. These are covered by a separate test target `quantization_fx`
-    log.warning(e)  # noqa:G200
+    log.warning(e)
 
 # PyTorch 2 Export Quantization
 try:
@@ -94,7 +94,7 @@ try:
 except ImportError as e:
     # In FBCode we separate PT2 out into a separate target for the sake of dev
     # velocity. These are covered by a separate test target `quantization_pt2e`
-    log.warning(e)  # noqa:G200
+    log.warning(e)
 
 try:
     from quantization.fx.test_numeric_suite_fx import TestFXGraphMatcher  # noqa: F401
@@ -103,7 +103,7 @@ try:
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteNShadows  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIsModels  # noqa: F401
 except ImportError as e:
-    log.warning(e)  # noqa:G200
+    log.warning(e)
 
 # Test the model report module
 try:
@@ -115,19 +115,19 @@ try:
     from quantization.fx.test_model_report_fx import TestFxDetectOutliers  # noqa: F401
     from quantization.fx.test_model_report_fx import TestFxModelReportVisualizer  # noqa: F401
 except ImportError as e:
-    log.warning(e)  # noqa:G200
+    log.warning(e)
 
 # Equalization for FX mode
 try:
     from quantization.fx.test_equalize_fx import TestEqualizeFx  # noqa: F401
 except ImportError as e:
-    log.warning(e)  # noqa:G200
+    log.warning(e)
 
 # Backward Compatibility. Tests serialization and BC for quantized modules.
 try:
     from quantization.bc.test_backward_compatibility import TestSerialization  # noqa: F401
 except ImportError as e:
-    log.warning(e)  # noqa:G200
+    log.warning(e)
 
 # JIT Graph Mode Quantization
 from quantization.jit.test_quantize_jit import TestQuantizeJit  # noqa: F401
@@ -146,29 +146,29 @@ from quantization.ao_migration.test_ao_migration import TestAOMigrationNNIntrins
 try:
     from quantization.ao_migration.test_quantization_fx import TestAOMigrationQuantizationFx  # noqa: F401
 except ImportError as e:
-    log.warning(e)  # noqa:G200
+    log.warning(e)
 
 # Experimental functionality
 try:
     from quantization.core.experimental.test_bits import TestBitsCPU  # noqa: F401
 except ImportError as e:
-    log.warning(e)  # noqa:G200
+    log.warning(e)
 try:
     from quantization.core.experimental.test_bits import TestBitsCUDA  # noqa: F401
 except ImportError as e:
-    log.warning(e)  # noqa:G200
+    log.warning(e)
 try:
     from quantization.core.experimental.test_floatx import TestFloat8DtypeCPU  # noqa: F401
 except ImportError as e:
-    log.warning(e)  # noqa:G200
+    log.warning(e)
 try:
     from quantization.core.experimental.test_floatx import TestFloat8DtypeCUDA  # noqa: F401
 except ImportError as e:
-    log.warning(e)  # noqa:G200
+    log.warning(e)
 try:
     from quantization.core.experimental.test_floatx import TestFloat8DtypeCPUOnlyCPU  # noqa: F401
 except ImportError as e:
-    log.warning(e)  # noqa:G200
+    log.warning(e)
 
 if __name__ == '__main__':
     run_tests()

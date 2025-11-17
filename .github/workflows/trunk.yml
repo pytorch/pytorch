@@ -56,7 +56,7 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
       build-generates-artifacts: false
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: "linux.c7i.4xlarge"
+      runner: "linux.4xlarge"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -180,48 +180,14 @@ jobs:
       disable-monitor: false
     secrets: inherit
 
-  win-vs2022-cuda12_8-py3-build:
-    name: win-vs2022-cuda12.8-py3
+  win-vs2022-cuda12_6-py3-build:
+    name: win-vs2022-cuda12.6-py3
     uses: ./.github/workflows/_win-build.yml
     needs: get-label-type
     with:
-      build-environment: win-vs2022-cuda12.8-py3
-      cuda-version: "12.8"
+      build-environment: win-vs2022-cuda12.6-py3
+      cuda-version: "12.6"
       runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
-    secrets: inherit
-
-  linux-jammy-rocm-py3_10-build:
-    if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/trunk') }}
-    name: linux-jammy-rocm-py3.10
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-rocm-py3.10
-      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
-      sync-tag: rocm-build
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-        ]}
-    secrets: inherit
-
-  linux-jammy-rocm-py3_10-test:
-    if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/trunk') }}
-    permissions:
-      id-token: write
-      contents: read
-    name: linux-jammy-rocm-py3.10
-    uses: ./.github/workflows/_rocm-test.yml
-    needs:
-      - linux-jammy-rocm-py3_10-build
-      - target-determination
-    with:
-      build-environment: linux-jammy-rocm-py3.10
-      docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
-      tests-to-include: "test_nn test_torch test_cuda test_ops test_unary_ufuncs test_binary_ufuncs test_autograd inductor/test_torchinductor"
     secrets: inherit
 
   inductor-build:
@@ -232,23 +198,6 @@ jobs:
       build-environment: linux-jammy-cuda12.8-py3.12-gcc9-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.0'
-    secrets: inherit
-
-  # Test cross-compiled models with Windows libs extracted from wheel
-  cross-compile-linux-test:
-    name: cross-compile-linux-test
-    uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - linux-jammy-cuda12_8-py3_10-gcc11-build
-      - get-label-type
-      - win-vs2022-cuda12_8-py3-build
-    with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11
-      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.docker-image }}
-      test-matrix: |
-        { include: [
-          { config: "aoti_cross_compile_for_windows", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu", win_torch_wheel_artifact: "win-vs2022-cuda12.8-py3" },
-        ]}
     secrets: inherit
 
   verify-cachebench-cpu-build:
@@ -299,15 +248,4 @@ jobs:
       build-environment: linux-jammy-py3-clang12-executorch
       docker-image: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.test-matrix }}
-    secrets: inherit
-
-  linux-jammy-py3_10-gcc11-full-debug-build-only:
-    name: linux-jammy-py3.10-gcc11-full-debug-build-only
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: linux.2xlarge.memory
-      build-environment: linux-jammy-py3.10-gcc11-full-debug-build-only
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11
     secrets: inherit

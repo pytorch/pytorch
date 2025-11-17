@@ -42,10 +42,9 @@ class SparseAdam(Optimizer):
         sparse_params = []
         complex_params = []
         for index, param_group in enumerate(self.param_groups):
-            if not isinstance(param_group, dict):
-                raise AssertionError(
-                    f"param_groups must be a list of dicts, but got {type(param_group)}"
-                )
+            assert isinstance(param_group, dict), (
+                f"param_groups must be a list of dicts, but got {type(param_group)}"
+            )
             # given param group, convert given params to a list first before iterating
             for d_index, d_param in enumerate(param_group["params"]):
                 if d_param.is_sparse:

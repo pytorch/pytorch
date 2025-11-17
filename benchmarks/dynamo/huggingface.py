@@ -124,7 +124,7 @@ with open(MODELS_FILENAME) as fh:
             continue
         batch_size = int(batch_size)
         BATCH_SIZE_KNOWN_MODELS[model_name] = batch_size
-assert BATCH_SIZE_KNOWN_MODELS
+assert len(BATCH_SIZE_KNOWN_MODELS)
 
 
 try:

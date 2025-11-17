@@ -162,7 +162,7 @@ def coalesce(layout: Layout, profile: LayoutProfile = None) -> Layout:
         assert len(layout) >= len(profile)
         return make_layout(
             chain(
-                (coalesce(layout[i], profile[i]) for i in range(len(profile))),  # type: ignore[arg-type]
+                (coalesce(layout[i], profile[i]) for i in range(0, len(profile))),  # type: ignore[arg-type]
                 (layout[i] for i in range(len(profile), len(layout))),
             )
         )
@@ -203,7 +203,7 @@ def filter(layout: Layout, profile: LayoutProfile = None) -> Layout:
         assert len(layout) >= len(profile)
         return make_layout(
             chain(
-                (filter(layout[i], profile[i]) for i in range(len(profile))),  # type: ignore[arg-type]
+                (filter(layout[i], profile[i]) for i in range(0, len(profile))),  # type: ignore[arg-type]
                 (layout[i] for i in range(len(profile), len(layout))),
             )
         )
@@ -233,7 +233,7 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
         assert len(layoutA) >= len(layoutB)
         return make_layout(
             chain(
-                (composition(layoutA[i], layoutB[i]) for i in range(len(layoutB))),  # type: ignore[arg-type]
+                (composition(layoutA[i], layoutB[i]) for i in range(0, len(layoutB))),  # type: ignore[arg-type]
                 (layoutA[i] for i in range(len(layoutB), len(layoutA))),
             )
         )
@@ -371,7 +371,7 @@ def logical_divide(layoutA: Layout, layoutB: LayoutInput) -> Layout:
             chain(
                 (
                     logical_divide(layoutA[i], layoutB[i])  # type: ignore[arg-type]
-                    for i in range(len(layoutB))
+                    for i in range(0, len(layoutB))
                 ),
                 (layoutA[i] for i in range(len(layoutB), len(layoutA))),
             )
@@ -396,7 +396,7 @@ def logical_product(layoutA: Layout, layoutB: LayoutInput) -> Layout:
             chain(
                 (
                     logical_product(layoutA[i], layoutB[i])  # type: ignore[arg-type]
-                    for i in range(len(layoutB))
+                    for i in range(0, len(layoutB))
                 ),
                 (layoutA[i] for i in range(len(layoutB), len(layoutA))),
             )
@@ -421,14 +421,14 @@ def hier_unzip(
         # A layout with shape ((A,a),(B,b),(C,c))
         split = make_layout(
             hier_unzip(splitter, layoutA[i], layoutB[i])  # type: ignore[arg-type]
-            for i in range(len(layoutB))
+            for i in range(0, len(layoutB))
         )
         # Gather to shape ((A,B,C,...),(a,b,c,...,y,z))
         return make_layout(
-            make_layout(split[i][0] for i in range(len(layoutB))),  # type: ignore[arg-type]
+            make_layout(split[i][0] for i in range(0, len(layoutB))),  # type: ignore[arg-type]
             make_layout(
                 chain(  # type: ignore[arg-type]
-                    (split[i][1] for i in range(len(layoutB))),
+                    (split[i][1] for i in range(0, len(layoutB))),
                     (layoutA[i] for i in range(len(layoutB), len(layoutA))),
                 )
             ),

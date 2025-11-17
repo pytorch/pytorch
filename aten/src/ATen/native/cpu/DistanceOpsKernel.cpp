@@ -422,19 +422,19 @@ void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, const double 
   });
 }
 
-void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
+static void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "pdist_backward", [&] {
     Dist<scalar_t>::apply_backward_pdist(result, grad, self, p, dist);
   });
 }
 
-void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, const double p) {
+static void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, const double p) {
   AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cdist", [&] {
     Dist<scalar_t>::apply_cdist(result, x1, x2, p);
   });
 }
 
-void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& x1, const Tensor& x2, const double p, const Tensor& dist) {
+static void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& x1, const Tensor& x2, const double p, const Tensor& dist) {
   AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cdist_backward", [&] {
     Dist<scalar_t>::apply_backward_cdist(result, grad, x1, x2, p, dist);
   });

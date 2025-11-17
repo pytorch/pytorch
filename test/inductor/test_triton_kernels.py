@@ -3005,7 +3005,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             mask = offsets < n_elements
             x = tl.load(in_ptr0 + offsets, mask=mask)
             y = tl.load(in_ptr1 + offsets, mask=mask)
-            for i in range(BLOCK_SIZE):
+            for i in range(0, BLOCK_SIZE):
                 i = tl.multiple_of(i, 1)
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
@@ -3160,7 +3160,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             x = tl.load(x_block_ptr)
 
             # Compute gating
-            for c2 in range(tl.cdiv(C2, BLOCK_SIZE_C2)):
+            for c2 in range(0, tl.cdiv(C2, BLOCK_SIZE_C2)):
                 # Compute block pointers
                 offs_c2 = c2 * BLOCK_SIZE_C2 + tl.arange(0, BLOCK_SIZE_C2)
                 o_block_ptr = O_ptr + offs_m[:, None] * C2 + offs_c2[None, :]

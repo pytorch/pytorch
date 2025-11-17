@@ -14,16 +14,16 @@ using namespace at;
 
 namespace {
 
-constexpr auto int_min = std::numeric_limits<int>::min();
-constexpr auto int_max = std::numeric_limits<int>::max();
-constexpr auto long_min = std::numeric_limits<int64_t>::min();
-constexpr auto long_max = std::numeric_limits<int64_t>::max();
-constexpr auto float_lowest = std::numeric_limits<float>::lowest();
-constexpr auto float_min = std::numeric_limits<float>::min();
-constexpr auto float_max = std::numeric_limits<float>::max();
-constexpr auto double_lowest = std::numeric_limits<double>::lowest();
-constexpr auto double_min = std::numeric_limits<double>::min();
-constexpr auto double_max = std::numeric_limits<double>::max();
+const auto int_min = std::numeric_limits<int>::min();
+const auto int_max = std::numeric_limits<int>::max();
+const auto long_min = std::numeric_limits<int64_t>::min();
+const auto long_max = std::numeric_limits<int64_t>::max();
+const auto float_lowest = std::numeric_limits<float>::lowest();
+const auto float_min = std::numeric_limits<float>::min();
+const auto float_max = std::numeric_limits<float>::max();
+const auto double_lowest = std::numeric_limits<double>::lowest();
+const auto double_min = std::numeric_limits<double>::min();
+const auto double_max = std::numeric_limits<double>::max();
 
 const std::vector<int> ints {
   int_min,

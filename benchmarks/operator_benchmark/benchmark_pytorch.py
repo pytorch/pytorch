@@ -113,7 +113,7 @@ class TorchBenchmarkBase(torch.nn.Module):
             value = kargs[key]
             test_name_str.append(
                 ("" if key in skip_key_list else key)
-                + str(value if type(value) is not bool else int(value))
+                + str(value if type(value) != bool else int(value))
             )
         name = (self.module_name() + "_" + "_".join(test_name_str)).replace(" ", "")
         return name

@@ -1,8 +1,7 @@
 import logging
 import os
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
@@ -85,6 +84,7 @@ def get_source_partitions(
         if (source_fn_st := node.meta.get("source_fn_stack", None)) is None and (
             torch_fn := node.meta.get("torch_fn", None)
         ) is not None:
+            # pyrefly: ignore  # unbound-name
             node_fqn, source_fn = torch_fn
             source_fn_name = source_fn.split(".")[1]
             if source_fn_name in wanted_sources:

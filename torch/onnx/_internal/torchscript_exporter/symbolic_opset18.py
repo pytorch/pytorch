@@ -151,7 +151,7 @@ def max(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
 @_onnx_symbolic("aten::maximum")
 @symbolic_helper.quantized_args(True, True)
 def maximum(g: jit_utils.GraphContext, input, other):
-    # pyrefly: ignore [no-matching-overload]
+    # pyrefly: ignore  # no-matching-overload
     return max(g, input, dim_or_y=other)
 
 
@@ -164,7 +164,7 @@ def min(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
 @_onnx_symbolic("aten::minimum")
 @symbolic_helper.quantized_args(True, True)
 def minimum(g: jit_utils.GraphContext, input, other):
-    # pyrefly: ignore [no-matching-overload]
+    # pyrefly: ignore  # no-matching-overload
     return min(g, input, dim_or_y=other)
 
 

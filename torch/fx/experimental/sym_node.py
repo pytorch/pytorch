@@ -560,6 +560,20 @@ class SymNode:
             self.expr, f"{file}:{line}", fx_node=self.fx_node
         )
 
+    def expect_size(self, file, line):
+        from torch.fx.experimental.symbolic_shapes import _advise_is_size
+
+        b = self.ge(self.wrap_int(0))
+        # Generate a deferred runtime assert
+        r = b.expect_true(file, line)
+        # Refine compile time range, but only if it's unbacked.
+        # If you refine range for hinted variables, you can end up making
+        # improper deductions since compile time reasoning may be
+        # incompatible with runtime reasoning.
+        if r and not self.has_hint():
+            _advise_is_size(SymInt(self))
+        return r
+
     def statically_known_true(self, file, line):
         from torch.fx.experimental.symbolic_shapes import statically_known_true
 
@@ -1678,8 +1692,6 @@ def _make_user_magic(method, user_type):
     def get_constant(x: Union[SymInt, int, SymFloat, float, SymBool, bool]):
         if isinstance(x, (int, float, bool)):
             return x
-        if isinstance(x, SymInt):
-            return x.node.guard_int("", 0)
         if isinstance(x, SymBool):
             return x.node.guard_bool("", 0)
         raise AssertionError("expect to be called with constant SymBools")

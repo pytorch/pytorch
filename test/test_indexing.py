@@ -902,7 +902,7 @@ class TestIndexing(TestCase):
         # Set window size
         W = 10
         # Generate a list of lists, containing overlapping window indices
-        indices = [range(i, i + W) for i in range(N - W)]
+        indices = [range(i, i + W) for i in range(0, N - W)]
 
         for i in [len(indices), 100, 32]:
             windowed_data = t[indices[:i]]
@@ -2030,13 +2030,13 @@ class TestIndexing(TestCase):
                 self.assertEqual(output, input_list)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    @dtypesIfMPS(*all_mps_types_and(torch.bool))  # TODO: Add torch.cfloat here
+    @expectedFailureMPS
     def test_index_fill(self, device, dtype):
         x = torch.tensor([[1, 2], [4, 5]], dtype=dtype, device=device)
         index = torch.tensor([0], device=device)
         x.index_fill_(1, index, 0)
         self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=dtype, device=device))
-        if not x.is_complex() and device != "meta":
+        if not x.is_complex() and not device == "meta":
             with self.assertRaisesRegex(RuntimeError, r"Scalar"):
                 x.index_fill_(1, index, 1 + 1j)
         # Make sure that the result stays 0-dim while applied to

@@ -1284,7 +1284,7 @@ class MetaConverter(Generic[_TensorT]):
 
                     # Fake inner tensors of view subclasses will come from the mapping built above.
                     visited_id = self.describer.get_tensor_id(visited_t)
-                    fake_visited_t = real_to_fake_mapping.get(visited_id)
+                    fake_visited_t = real_to_fake_mapping.get(visited_id, None)
                     if fake_visited_t is not None:
                         return fake_visited_t
 

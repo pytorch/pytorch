@@ -1823,7 +1823,7 @@ class TestFxModelReportVisualizer(QuantizationTestCase):
             plottable_set = set()
 
             for feature_name in b_1_linear_features:
-                if type(b_1_linear_features[feature_name]) is torch.Tensor:
+                if type(b_1_linear_features[feature_name]) == torch.Tensor:
                     plottable_set.add(feature_name)
 
             returned_plottable_feats = mod_rep_visualizer.get_all_unique_feature_names()

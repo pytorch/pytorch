@@ -524,11 +524,8 @@ aten::_scaled_dot_product_flash_attention_for_cpu_backward
 aten::_scaled_dot_product_fused_attention_overrideable
 aten::_scaled_dot_product_fused_attention_overrideable_backward
 aten::_scaled_grouped_mm
-aten::_scaled_grouped_mm_v2
 aten::_scaled_mm
 aten::_scaled_mm.out
-aten::_scaled_mm_v2
-aten::_scaled_mm_v2.out
 aten::_segment_reduce_backward
 aten::_segment_reduce_backward.out
 aten::_slow_conv2d_backward.grad_input

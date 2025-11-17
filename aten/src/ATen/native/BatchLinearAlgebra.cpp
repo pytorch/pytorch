@@ -2060,7 +2060,7 @@ std::tuple<Tensor, Tensor> linalg_lu_factor(const Tensor& A, bool pivot) {
 }
 
 // TODO Deprecate this function in favour of linalg_lu_factor_ex
-std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool compute_pivots, bool /*unused*/) {
+std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool compute_pivots, bool) {
    TORCH_WARN_ONCE(
     "torch.lu is deprecated in favor of torch.linalg.lu_factor / torch.linalg.lu_factor_ex and will be ",
     "removed in a future PyTorch release.\n",

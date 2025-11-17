@@ -48,9 +48,7 @@ def signatures_match(decomposition_sig, torch_op_sig):
         inspect_empty = inspect._empty  # type: ignore[attr-defined]
         for field in ["name", "annotation"]:
             if field == "name" and decomp_param.name == "self":
-                warnings.warn(
-                    "PyTorch uses 'input' instead of 'self' on public api", stacklevel=2
-                )
+                warnings.warn("PyTorch uses 'input' instead of 'self' on public api")
 
             if getattr(decomp_param, field) != getattr(op_param, field):
                 return False
@@ -132,7 +130,7 @@ def var_decomposition(
         else:
             raise RuntimeError("correction must be int or float")
 
-    # pyrefly: ignore [no-matching-overload]
+    # pyrefly: ignore  # no-matching-overload
     return sum / max(0, denom)
 
 

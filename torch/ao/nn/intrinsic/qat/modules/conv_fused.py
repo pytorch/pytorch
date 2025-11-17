@@ -361,7 +361,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         """
         # The ignore is because _FLOAT_MODULE is a TypeVar here where the bound
         # has no __name__ (code is fine though)
-        assert type(mod) is cls._FLOAT_MODULE, (
+        assert type(mod) == cls._FLOAT_MODULE, (
             "qat."
             + cls.__name__
             + ".from_float only works for "
@@ -620,7 +620,7 @@ class ConvReLU1d(nnqat.Conv1d, nni._FusedModule):
             dilation=dilation,
             groups=groups,
             bias=bias,
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             padding_mode=padding_mode,
             qconfig=qconfig,
         )
@@ -821,7 +821,7 @@ class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
             dilation=dilation,
             groups=groups,
             bias=bias,
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             padding_mode=padding_mode,
             qconfig=qconfig,
         )
@@ -1023,7 +1023,7 @@ class ConvReLU3d(nnqat.Conv3d, nni._FusedModule):
             dilation=dilation,
             groups=groups,
             bias=bias,
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             padding_mode=padding_mode,
             qconfig=qconfig,
         )

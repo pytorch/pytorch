@@ -3,7 +3,7 @@ import itertools
 import operator
 import typing
 from collections.abc import Sequence
-from typing import Any, Callable
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch._inductor.runtime.runtime_utils
@@ -83,10 +83,12 @@ def check_dtype(a: Tensor, b: Tensor) -> bool:
     return a.is_floating_point() and b.is_floating_point()
 
 
-def should_pad_common(mat1: Tensor, mat2: Tensor, input: Tensor | None = None) -> bool:
+def should_pad_common(
+    mat1: Tensor, mat2: Tensor, input: Optional[Tensor] = None
+) -> bool:
     # It's fine we have symbolic shapes or strides as long as they
     # have hints. Later, we will make sure we only pad non-symbolic dimensions.
-    def valid_shape_and_stride(t: Tensor | None) -> bool:
+    def valid_shape_and_stride(t: Optional[Tensor]) -> bool:
         if t is None:
             return True
 
@@ -95,7 +97,6 @@ def should_pad_common(mat1: Tensor, mat2: Tensor, input: Tensor | None = None) -
             if isinstance(x, int):
                 continue
             elif utils.is_symbolic(x):
-                # pyrefly: ignore [missing-attribute]
                 if not x.node.has_hint():
                     return False
                 symbolic_cnt += 1
@@ -105,7 +106,6 @@ def should_pad_common(mat1: Tensor, mat2: Tensor, input: Tensor | None = None) -
         if symbolic_cnt == len(t.size()):
             return False
         return all(
-            # pyrefly: ignore [missing-attribute]
             isinstance(x, int) or (utils.is_symbolic(x) and x.node.has_hint())
             for x in t.stride()
         )
@@ -118,7 +118,7 @@ def should_pad_common(mat1: Tensor, mat2: Tensor, input: Tensor | None = None) -
     )
 
 
-def get_padded_length(x: int | torch.SymInt, alignment_size: int) -> int:
+def get_padded_length(x: Union[int, torch.SymInt], alignment_size: int) -> int:
     # we don't pad x if it is symbolic
     if isinstance(x, torch.SymInt) or alignment_size == 0 or x % alignment_size == 0:
         return 0
@@ -151,7 +151,7 @@ def should_pad_addmm(match: Match) -> bool:
 
 
 def pad_addmm(
-    input: Tensor | None,
+    input: Optional[Tensor],
     mat1: Tensor,
     mat2: Tensor,
     m_padded_length: int,
@@ -193,7 +193,7 @@ def pad_addmm(
 
 
 def addmm_replace(
-    input: Tensor | None,
+    input: Optional[Tensor],
     mat1: Tensor,
     mat2: Tensor,
     beta: float = 1.0,
@@ -273,7 +273,7 @@ def should_pad_bench_key(
     mat1: Tensor,
     mat2: Tensor,
     op: torch._ops.OpOverloadPacket,
-    input: Tensor | None = None,
+    input: Optional[Tensor] = None,
     is_base_time_key: bool = False,
 ) -> str:
     def tensor_key(t: Tensor) -> tuple[torch.Size, tuple[int, ...], torch.dtype]:
@@ -283,7 +283,7 @@ def should_pad_bench_key(
         None if mat1.dtype != torch.float32 else torch.backends.cuda.matmul.allow_tf32
     )
 
-    def fmt_pad(name: str) -> str | None:
+    def fmt_pad(name: str) -> Optional[str]:
         if is_base_time_key:
             return None
         return f"exclude_pad:{should_exclude_padding_time(match, name)}"
@@ -399,7 +399,6 @@ def should_pad_bench(*args: Any, **kwargs: Any) -> bool:
 def get_do_bench() -> Callable[[Callable[[], Any]], float]:
     with dynamo_timed("pad_mm_benchmark_get_do_bench"):
         return functools.partial(
-            # pyrefly: ignore [bad-argument-type]
             torch._inductor.runtime.benchmarking.benchmarker.benchmark_gpu,
             warmup=5,
         )
@@ -410,7 +409,7 @@ def _should_pad_bench(
     mat1: Tensor,
     mat2: Tensor,
     op: torch._ops.OpOverloadPacket,
-    input: Tensor | None = None,
+    input: Optional[Tensor] = None,
 ) -> bool:
     do_bench = get_do_bench()
 
@@ -438,7 +437,7 @@ def _should_pad_bench(
             return False
 
         def realize_symbols(
-            ds: torch.Size | tuple[torch.SymInt, ...],
+            ds: Union[torch.Size, tuple[torch.SymInt, ...]],
         ) -> list[int]:
             return [d if isinstance(d, int) else d.node.hint for d in ds]
 
@@ -484,7 +483,6 @@ def _should_pad_bench(
         def realize_tensor(t):
             if isinstance(t, FakeTensor):
                 size_hints = realize_symbols(t.size())
-                # pyrefly: ignore [bad-argument-type]
                 stride_hint = realize_symbols(t.stride())
                 real_size = (
                     sum((d - 1) * s for d, s in zip(size_hints, stride_hint)) + 1
@@ -679,10 +677,10 @@ def run_autoheuristic(
     ori_time: float,
     ori_time_key: str,
     key: str,
-) -> bool | None:
+) -> Optional[bool]:
     def feedback_fn(
         choice: str,
-    ) -> float | None:
+    ) -> Optional[float]:
         if choice == orig_choice:
             return do_bench(orig_bench_fn)
         elif choice == pad_choice:
@@ -717,7 +715,7 @@ def run_autoheuristic(
     )
     choice = autoheuristic.get_choice()
     choice2should_pad = {orig_choice: False, pad_choice: True, "autotune": None}
-    ah_should_pad = choice2should_pad.get(choice)
+    ah_should_pad = choice2should_pad.get(choice, None)
 
     if torch._inductor.config.collect_autoheuristic(name):
         ah_ori_time = autoheuristic.get_collected_feedback(orig_choice)
@@ -919,9 +917,7 @@ def _pad_mm_init() -> None:
             pattern,
             replacement,
             args,
-            # pyrefly: ignore [bad-argument-type]
             joint_fwd_bwd,
-            # pyrefly: ignore [bad-argument-type]
             patterns,
             extra_check=extra_check,
             scalar_workaround=workaround,
@@ -932,9 +928,7 @@ def _pad_mm_init() -> None:
             pattern,
             replacement,
             args,
-            # pyrefly: ignore [bad-argument-type]
             fwd_only,
-            # pyrefly: ignore [bad-argument-type]
             patterns,
             extra_check=extra_check,
             scalar_workaround=workaround,

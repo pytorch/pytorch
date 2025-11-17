@@ -46,8 +46,6 @@ from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import (
     CompileCounter,
-    CompileCounterWithBackend,
-    EagerAndRecordGraphs,
     rand_strided,
     same,
     skipIfNotPy312,
@@ -55,7 +53,6 @@ from torch._dynamo.testing import (
 )
 from torch._inductor.utils import fresh_cache
 from torch.nn import functional as F
-from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -3251,7 +3248,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_rewrite_assert_with_non_string_msg(self):
         def f(x):
             b = x.sin()
-            assert x[0] == 2, f"Error {x}: {x.size()}"
+            assert x[0] == 2, x.size()
             return x.cos() + b
 
         torch._dynamo.utils.counters.clear()
@@ -4471,7 +4468,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         compiled_fn = torch.compile(func, backend=cnt, fullgraph=True)
         requires_grad = func is not func1
-        for _ in range(5):
+        for _ in range(0, 5):
             # Inputs
             eager_a = torch.ones([6], requires_grad=requires_grad)
             compiled_a = torch.ones([6], requires_grad=requires_grad)
@@ -4623,7 +4620,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.rand([2, 2])
         self.assertEqual(opt_fn(x, counter), fn(x, counter))
         self.assertEqual(counter[0], 2)
-        for _ in range(10):
+        for _ in range(0, 10):
             opt_fn(x, counter)
         self.assertEqual(counter[0], 12)
         if torch._dynamo.config.assume_static_by_default:
@@ -4784,7 +4781,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_contains_range_constprop(self):
         def fn(x):
             # dynamo should const prop to False
-            if 3 in range(10):
+            if 3 in range(0, 10):
                 return x + 1
             else:
                 return x + 2
@@ -5818,31 +5815,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             return torch.sin(x)
 
         fn(torch.rand(4))
-
-    def test_export_vs_dynamo_for_multiheadattention(self):
-        # More details at https://github.com/pytorch/pytorch/issues/164062
-
-        # Ensure that both dynamo and export do not take the fast path.
-        with torch.no_grad():
-            inp = torch.randn(1, 2, 64)
-            mha = nn.MultiheadAttention(64, 2, dropout=0.1, batch_first=True)
-            mha.eval()
-
-            backend = EagerAndRecordGraphs()
-            mha_compile = torch.compile(mha, backend=backend, fullgraph=True)
-            mha_compile(inp, inp, inp)
-            torch.compiler.reset()
-
-            mha_export = torch._dynamo.export(mha)(inp, inp, inp)
-
-            compile_nodes = backend.graphs[0].graph.find_nodes(
-                op="call_function", target=torch._native_multi_head_attention
-            )
-            export_nodes = mha_export.graph_module.graph.find_nodes(
-                op="call_function", target=torch._native_multi_head_attention
-            )
-            self.assertEqual(len(compile_nodes), 0)
-            self.assertEqual(len(export_nodes), 0)
 
     def test_negative_floor_div_solve(self):
         class CompiledClass(nn.Module):
@@ -7370,102 +7342,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             "https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0264.html"
         )
         self.assertEqual(explain_output.break_reasons[0].reason, expected_msg)
-
-    @parametrize("backend", ["eager", "inductor"])
-    def test_issue164247(self, backend: str):
-        if backend == "inductor" and torch._dynamo.config.dynamic_shapes:
-            raise unittest.SkipTest(
-                "Skip only in dynamic-shapes wrapper (known issue #157612)"
-            )
-
-        class MixedFakeModeModel(nn.Module):
-            def __init__(self, dim=64):
-                super().__init__()
-                self.dim = dim
-                self.lin = torch.nn.Linear(64, 64)
-
-            def forward(self, x):
-                batch_size, seq_len, _ = x.shape
-
-                # Process input first - this creates fake tensors in export's fake mode
-                processed = self.lin(x)
-
-                # Create some computation that depends on processed tensor
-                intermediate = processed.sum(dim=-1).detach()  # Shape: (batch, seq_len)
-
-                def dynamic_mask_function(batch_idx, head_idx, q_idx, kv_idx):
-                    threshold = intermediate[
-                        batch_idx, q_idx % seq_len
-                    ]  # Access the captured tensor
-                    return (kv_idx <= q_idx) & (threshold > 0)
-
-                block_mask = create_block_mask(
-                    mask_mod=dynamic_mask_function,
-                    B=batch_size,
-                    H=None,
-                    Q_LEN=seq_len,
-                    KV_LEN=seq_len,
-                    device=x.device,
-                    _compile=False,
-                )
-                q = processed.view(batch_size, 1, seq_len, self.dim)
-                k = processed.view(batch_size, 1, seq_len, self.dim)
-                v = processed.view(batch_size, 1, seq_len, self.dim)
-
-                out = torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
-                out = flex_attention(q, k, v, block_mask=block_mask)
-
-                return out
-
-        backend_counter = CompileCounterWithBackend(backend)
-        model = MixedFakeModeModel()
-        compiled = torch.compile(model, backend=backend_counter, fullgraph=True)
-
-        if backend == "inductor":
-            # A known InductorError Issue https://github.com/pytorch/pytorch/issues/157612
-            with self.assertRaises(RuntimeError):
-                compiled(torch.randn(2, 128, 64))
-        else:
-            compiled(torch.randn(2, 128, 64))
-
-        # One graph, so no graph breaks
-        self.assertEqual(backend_counter.frame_count, 1)
-        self.assertEqual(len(backend_counter.graphs), 1)
-
-    # https://github.com/pytorch/pytorch/issues/164990
-    def test_guard_same_frame_fail_message(self):
-        import torch._dynamo.guards as g
-
-        # deterministically fail check on the same frame to verify error message correctness
-        # the other example of fail might be datetime.now() until patched - see issue #164990
-        compile_check_fn = g.CheckFunctionManager.compile_check_fn
-
-        def wrapper(self, builder, sorted_guards, guard_fail_fn):
-            compile_check_fn(self, builder, sorted_guards, guard_fail_fn)
-
-            def check(x):
-                return False
-
-            self.guard_manager.check = check
-
-        with mock.patch.object(g.CheckFunctionManager, "compile_check_fn", new=wrapper):
-
-            class Model(nn.Module):
-                def forward(self, x):
-                    return x + 1
-
-            model = Model()
-            x = torch.randn(5)
-
-            with self.assertRaises(AssertionError) as e:
-                torch.compile(model)(x)
-
-        msg = str(e.exception)
-        self.assertIn(
-            "Guard failed on the same frame it was created. This is a bug - please create an issue."
-            "Guard fail reason: ",
-            msg,
-        )
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):

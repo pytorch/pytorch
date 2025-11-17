@@ -1449,7 +1449,7 @@ def rollaxis(a: ArrayLike, axis, start=0):
         # numpy returns a view, here we try returning the tensor itself
         # return tensor[...]
         return a
-    axes = list(range(n))
+    axes = list(range(0, n))
     axes.remove(axis)
     axes.insert(start, axis)
     return a.view(axes)
@@ -1867,7 +1867,7 @@ def common_type(*tensors: ArrayLike):
         if not (t.is_floating_point or t.is_complex):
             p = 2  # array_precision[_nx.double]
         else:
-            p = array_precision.get(t)
+            p = array_precision.get(t, None)
             if p is None:
                 raise TypeError("can't get common type for non-numeric array")
         precision = builtins.max(precision, p)

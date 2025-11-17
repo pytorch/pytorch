@@ -36,14 +36,12 @@ class _remote_device:
         elif isinstance(remote_device, str):
             fields = remote_device.split("/")
             if len(fields) == 2:
-                # pyrefly: ignore [bad-assignment]
                 self._worker_name, self._device = fields
             elif len(fields) == 1:
                 # Check if this is a valid device.
                 if _remote_device._is_valid_local_device(fields[0]):
                     self._device = fields[0]
                 else:
-                    # pyrefly: ignore [bad-assignment]
                     self._worker_name = fields[0]
                     self._device = "cpu"
             else:
@@ -65,7 +63,6 @@ class _remote_device:
                 # rank:<rank>/device format, extract rank
                 if fields[0] == "rank" and fields[1].isdigit():
                     self._rank = int(fields[1])  # type: ignore[assignment]
-                    # pyrefly: ignore [bad-assignment]
                     self._worker_name = None
                 else:
                     raise ValueError(PARSE_ERROR)

@@ -64,7 +64,6 @@ class BroadcastingTorchSaveReader(StorageReader):
         self.checkpoint_id = checkpoint_id
         self.coordinator_rank = coordinator_rank
 
-    # pyrefly: ignore [bad-override]
     def read_metadata(self) -> Metadata:
         """Extends the default StorageReader to support building the metadata file"""
         # Metadata is built in planner.set_up_planner, since we are not actually reading metadata from
@@ -84,8 +83,7 @@ class BroadcastingTorchSaveReader(StorageReader):
         # the entire checkpoint on each rank, hopefully preventing OOM issues
         # TODO: read on each host, instead of only the coordinator
         if self.is_coordinator:
-            if self.checkpoint_id is None:
-                raise AssertionError("checkpoint_id must be set before reading data")
+            assert self.checkpoint_id is not None
             torch_state_dict = torch.load(
                 self.checkpoint_id, map_location="cpu", weights_only=False
             )
@@ -104,7 +102,6 @@ class BroadcastingTorchSaveReader(StorageReader):
             #  Broadcast the tensor from the coordinator rank
             if self.is_coordinator:
                 pg_device = dist.distributed_c10d._get_pg_default_device()
-                # pyrefly: ignore [unsupported-operation]
                 tensor = torch_state_dict[req.storage_index.fqn].to(pg_device)
             else:
                 tensor = torch.empty_like(planner.state_dict[req.storage_index.fqn])
@@ -113,11 +110,10 @@ class BroadcastingTorchSaveReader(StorageReader):
 
             tensor = narrow_tensor_by_index(tensor, req.storage_offsets, req.lengths)
             target_tensor = planner.resolve_tensor(req).detach()
-            if not target_tensor.size() == tensor.size():
-                raise AssertionError(
-                    f"req {req.storage_index} mismatch sizes, "
-                    f"{target_tensor.size()} vs {tensor.size()}"
-                )
+            assert target_tensor.size() == tensor.size(), (
+                f"req {req.storage_index} mismatch sizes, "
+                f"{target_tensor.size()} vs {tensor.size()}"
+            )
             target_tensor.copy_(tensor)
             planner.commit_tensor(req, target_tensor)
 
@@ -125,21 +121,13 @@ class BroadcastingTorchSaveReader(StorageReader):
         fut.set_result(None)
         return fut
 
-    # pyrefly: ignore [bad-override]
     def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
         """Implementation of the StorageReader method"""
         self.is_coordinator = is_coordinator
         if self.is_coordinator:
-            if not dist.get_rank() == self.coordinator_rank:
-                raise AssertionError(
-                    f"Coordinator rank mismatch: expected {self.coordinator_rank}, "
-                    f"got {dist.get_rank()}"
-                )
+            assert dist.get_rank() == self.coordinator_rank
 
-        if self.checkpoint_id is None:
-            raise AssertionError(
-                "checkpoint_id must be set before setting up storage reader"
-            )
+        assert self.checkpoint_id is not None
 
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
         """Implementation of the StorageReader method"""

@@ -40,8 +40,8 @@ class C10_API SymBool {
     return *c;
   }
 
-  SymBool sym_and(const SymBool& /*sci*/) const;
-  SymBool sym_or(const SymBool& /*sci*/) const;
+  SymBool sym_and(const SymBool&) const;
+  SymBool sym_or(const SymBool&) const;
   SymBool sym_not() const;
 
   SymBool operator&(const SymBool& other) const {

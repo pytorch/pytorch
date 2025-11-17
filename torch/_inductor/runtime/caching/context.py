@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from base64 import b64encode
 from functools import cache
 from hashlib import sha256
-from typing import Any, Sequence
+from typing import Any, Optional, Sequence
 from typing_extensions import override, TypedDict
 
 import torch
@@ -152,7 +152,7 @@ class _CompileContext(_Context):
 
     @cache
     @staticmethod
-    def triton_version_hash() -> str | None:
+    def triton_version_hash() -> Optional[str]:
         """Get Triton version key if Triton is available.
 
         Returns:
@@ -164,7 +164,7 @@ class _CompileContext(_Context):
 
     @cache
     @staticmethod
-    def runtime() -> str | None:
+    def runtime() -> Optional[str]:
         """Determine the runtime type based on available backends.
 
         Returns:
@@ -174,7 +174,7 @@ class _CompileContext(_Context):
 
     @cache
     @staticmethod
-    def runtime_version() -> str | None:
+    def runtime_version() -> Optional[str]:
         """Get the version string for the detected runtime.
 
         Returns:
@@ -188,7 +188,7 @@ class _CompileContext(_Context):
 
     @cache
     @staticmethod
-    def accelerator_properties() -> str | None:
+    def accelerator_properties() -> Optional[str]:
         """Get string representation of CUDA device properties.
 
         Returns:
@@ -197,7 +197,7 @@ class _CompileContext(_Context):
         """
         return (
             repr(torch.cuda.get_device_properties())
-            if _CompileContext.runtime() and torch.cuda.is_available()
+            if _CompileContext.runtime()
             else None
         )
 
@@ -254,7 +254,7 @@ def _isolation_context(
         ("runtime_context", _RuntimeContext),
         ("compile_context", _CompileContext),
     ):
-        selected_context: dict[str, Any] | None = None
+        selected_context: Optional[dict[str, Any]] = None
         if ischema[context_name] is True:  # type: ignore[literal-required]
             selected_context = {
                 form_of_context: getattr(context_cls, form_of_context)()

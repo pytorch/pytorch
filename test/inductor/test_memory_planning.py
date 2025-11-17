@@ -92,13 +92,13 @@ class TestMemoryPlanning(TestCase):
         )
 
         FileCheck().check(
-            "int64_t int_array_0[] = {24L + align(12L*s6), };"
+            "int64_t int_array_0[] = {24L + align(12L*s77), };"
         ).check_next("int64_t int_array_1[] = {1L, };").check_next(
             "AtenTensorHandle pool1_handle;"
         ).check_next(
             "aoti_torch_empty_strided(1, int_array_0, int_array_1,"
         ).check_next("RAIIAtenTensorHandle pool1(pool1_handle);").check_next(
-            "int64_t int_array_2[] = {s6, 3L};"
+            "int64_t int_array_2[] = {s77, 3L};"
         ).check_next("int64_t int_array_3[] = {3L, 1L};").check_next(
             "AtenTensorHandle tmp_tensor_handle_0;"
         ).check_next("aoti_torch__alloc_from_pool(pool1, 0").run(code)

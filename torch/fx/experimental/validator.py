@@ -4,9 +4,8 @@ import functools
 import logging
 import math
 import operator
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import sympy
 

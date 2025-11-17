@@ -89,7 +89,7 @@ struct type_caster<std::shared_ptr<torch::CapturedTraceback>> {
       std::shared_ptr<torch::CapturedTraceback>,
       _("torch._C._profiler.CapturedTraceback"));
 
-  bool load(handle src, bool /*unused*/) {
+  bool load(handle src, bool) {
     if (Py_TYPE(src.ptr()) == &THPCapturedTracebackType) {
       value = reinterpret_cast<THPCapturedTraceback*>(src.ptr())->data;
       return true;

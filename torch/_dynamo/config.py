@@ -3,7 +3,6 @@ Configuration module for TorchDynamo compiler and optimization settings.
 
 This module contains various configuration flags and settings that control TorchDynamo's
 behavior, including:
-
 - Runtime behavior flags (e.g., guard settings, specialization options)
 - Debugging and development options
 - Performance tuning parameters
@@ -188,22 +187,8 @@ disable = os.environ.get("TORCH_COMPILE_DISABLE", "0") == "1"
 # [@compile_ignored: runtime_behaviour] Get a cprofile trace of Dynamo
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
 
-# Legacy config, does nothing now!
+# legacy config, does nothing now!
 skipfiles_inline_module_allowlist: dict[Any, Any] = {}
-"""Allowlist of inline modules to skip during compilation.
-
-Legacy configuration that previously controlled which modules could be
-inlined during tracing. This configuration is deprecated and no longer used.
-
-:type: dict[Any, Any]
-:default: {}
-
-.. deprecated::
-   This configuration is deprecated and does nothing now.
-
-.. note::
-   DEPRECATED: This setting has no effect on current behavior.
-"""
 
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it
@@ -416,7 +401,7 @@ allow_rnn = False
 # exported FX graph. This flag should become the default eventually
 # and be removed, but currently provides a way to fall back to old
 # graph breaking behavior.
-capture_sparse_compute = not is_fbcode()
+capture_sparse_compute = False if is_fbcode() else True
 
 # If true, error if we try to compile a function that has
 # been seen before.
@@ -471,10 +456,6 @@ nested_graph_breaks = False
 # as graph attributes.  This is useful for export, as it
 # produces a consistent number of inputs to the graph.
 install_free_tensors = False
-
-# Temporary flag to control the turning of install_free_tensors to True for
-# export. We will remove this flag in a few weeks when stable.
-install_free_tensors_for_export = True
 
 # Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals) (deprecated: always True)
 enable_cpp_framelocals_guard_eval = True
@@ -633,35 +614,8 @@ compiled_autograd = False
 # See https://github.com/pytorch/pytorch/issues/157452 for more context
 graph_break_on_nn_param_ctor = True
 
-# Eager AC/SAC reapplies the mutations (like global dict mutations) in the
-# backward during the recomputation of forward. torch.compile has no easy way to
-# reapply python mutations in the backward. But many users might be ok to skip
-# reapplication of side effects in the backward. They can set this config flag
-# to accept this eager and compile divergence.
-skip_fwd_side_effects_in_bwd_under_checkpoint = False
-
-
 # Overrides torch.compile() kwargs for Compiled Autograd:
 compiled_autograd_kwargs_override: dict[str, Any] = {}
-"""Overrides torch.compile() kwargs for Compiled Autograd.
-
-This dictionary allows overriding specific torch.compile() keyword arguments
-when using Compiled Autograd. Only certain overrides are currently supported.
-
-:type: dict[str, Any]
-:default: {}
-
-Example::
-
-    torch._dynamo.config.compiled_autograd_kwargs_override = {
-        "fullgraph": True
-    }
-
-.. note::
-   Currently only the "fullgraph" kwarg override is supported. Other kwargs
-   may be added in future versions.
-"""
-
 
 # Enables use of collectives *during* compilation to synchronize behavior
 # across ranks.  Today, this is used solely to modify automatic_dynamic_shapes

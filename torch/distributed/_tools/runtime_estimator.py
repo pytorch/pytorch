@@ -519,7 +519,6 @@ class RuntimeEstimator(TorchDispatchMode):
         super().__enter__()
         return self
 
-    # pyrefly: ignore [bad-override]
     def __exit__(self, *args: Any) -> None:
         print(
             f"Estimated ({self._estimate_mode_type})"

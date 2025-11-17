@@ -253,7 +253,7 @@ TORCH_API at::Tensor to_lazy_tensor(
 template <size_t... Indices>
 auto TupleAtenFromLtcTensorsImpl(
     const std::vector<LazyTensorPtr>& tensors,
-    std::index_sequence<Indices...> /*unused*/) {
+    std::index_sequence<Indices...>) {
   return std::make_tuple(CreateAtenFromLtcTensor(tensors[Indices])...);
 }
 

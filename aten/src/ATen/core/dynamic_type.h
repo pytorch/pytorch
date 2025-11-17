@@ -138,8 +138,8 @@ class DynamicType : public SharedType {
 
   struct Arguments {
     Arguments() = default;
-    Arguments(c10::ArrayRef<TypePtr> /*args*/);
-    Arguments(const std::vector<std::string_view>& /*names*/, c10::ArrayRef<TypePtr> /*args*/);
+    Arguments(c10::ArrayRef<TypePtr>);
+    Arguments(const std::vector<std::string_view>&, c10::ArrayRef<TypePtr>);
     std::vector<LabeledDynamicType> elems;
   };
 
@@ -156,15 +156,15 @@ class DynamicType : public SharedType {
   static const TypeKind Kind = TypeKind::DynamicType;
   static TORCH_API DynamicTypePtr create(Type& ty);
 
-  explicit DynamicType(Tag /*tag*/, Arguments /*arguments*/);
-  explicit DynamicType(Tag /*tag*/, std::string_view /*name*/, Arguments /*arguments*/);
+  explicit DynamicType(Tag, Arguments);
+  explicit DynamicType(Tag, std::string_view, Arguments);
 
   DynamicType(DynamicType&& other) = delete;
   DynamicType(const DynamicType&) = delete;
   DynamicType& operator=(const DynamicType&) = delete;
   DynamicType& operator=(DynamicType&&) = delete;
 
-  TypePtr containedType(size_t /*i*/) const override;
+  TypePtr containedType(size_t) const override;
   size_t containedTypeSize() const override;
   Tag tag() const {
     return tag_;

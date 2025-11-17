@@ -49,7 +49,7 @@ class CustomDecompTable(dict[torch._ops.OperatorBase, Callable]):
         self.decomp_table = _core_aten_decompositions_post_autograd()
 
         for op in _collect_all_valid_cia_ops_for_aten_namespace():
-            if op not in PRESERVED_ATEN_CIA_OPS and op not in self.decomp_table:
+            if op not in PRESERVED_ATEN_CIA_OPS:
                 self.decomp_table[op] = _get_decomp_for_cia(op)
 
         # This is to track the *pending* deleted custom ops that haven't been materialized yet

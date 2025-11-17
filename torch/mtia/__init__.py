@@ -303,7 +303,7 @@ class StreamContext:
         self.idx = _get_device_index(None, True)
         if not torch.jit.is_scripting():
             if self.idx is None:
-                self.idx = -1  # pyrefly: ignore [bad-assignment]
+                self.idx = -1  # pyrefly: ignore  # bad-assignment
 
         self.src_prev_stream = (
             None if not torch.jit.is_scripting() else torch.mtia.default_stream(None)

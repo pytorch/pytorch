@@ -292,7 +292,6 @@ class OnDiskCache(AsyncCache[Key, Value]):
             raise CacheError(
                 f"Failed to get fpath for key {key!r}, key is not pickle-able."
             ) from err
-        # pyrefly: ignore [bad-argument-type]
         assert_never(key)
 
     def _flock_from_fpath(self: Self, fpath: Path) -> FileLock:
@@ -307,7 +306,6 @@ class OnDiskCache(AsyncCache[Key, Value]):
         # for fpath.name[:4]; this is more than enough unique locks to not
         # cause additional overhead from shared locks and it also saves our
         # cache dir from becoming 50 percent locks
-        # pyrefly: ignore [bad-return]
         return FileLock(str(fpath.parent / "locks" / fpath.name[:4]) + ".lock")
 
     @property

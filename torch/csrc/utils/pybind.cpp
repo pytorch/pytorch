@@ -4,7 +4,7 @@
 
 namespace pybind11::detail {
 
-bool type_caster<c10::SymInt>::load(py::handle src, bool /*unused*/) {
+bool type_caster<c10::SymInt>::load(py::handle src, bool) {
   if (torch::is_symint(src)) {
     auto node = src.attr("node");
     if (py::isinstance<c10::SymNodeImpl>(node)) {
@@ -62,7 +62,7 @@ py::handle type_caster<c10::SymInt>::cast(
   }
 }
 
-bool type_caster<c10::SymFloat>::load(py::handle src, bool /*unused*/) {
+bool type_caster<c10::SymFloat>::load(py::handle src, bool) {
   if (torch::is_symfloat(src)) {
     value = c10::SymFloat(static_cast<c10::SymNode>(
         c10::make_intrusive<torch::impl::PythonSymNodeImpl>(src.attr("node"))));
@@ -92,7 +92,7 @@ py::handle type_caster<c10::SymFloat>::cast(
   }
 }
 
-bool type_caster<c10::SymBool>::load(py::handle src, bool /*unused*/) {
+bool type_caster<c10::SymBool>::load(py::handle src, bool) {
   if (torch::is_symbool(src)) {
     value = c10::SymBool(static_cast<c10::SymNode>(
         c10::make_intrusive<torch::impl::PythonSymNodeImpl>(src.attr("node"))));
@@ -122,7 +122,7 @@ py::handle type_caster<c10::SymBool>::cast(
   }
 }
 
-bool type_caster<c10::Scalar>::load(py::handle src, bool /*unused*/) {
+bool type_caster<c10::Scalar>::load(py::handle src, bool) {
   TORCH_INTERNAL_ASSERT(
       0, "pybind11 loading for c10::Scalar NYI (file a bug if you need it)");
 }

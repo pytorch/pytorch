@@ -70,7 +70,7 @@ class WrapperSubclass(torch.Tensor):
     def __coerce_same_metadata_as_tangent__(
         self, expected_metadata: Any, expected_type: Optional[type] = None
     ):
-        if expected_type is type(self.a):
+        if expected_type == type(self.a):
             return self.a
         elif expected_type is TwoTensor:
             return TwoTensor(self.a, self.a.clone())

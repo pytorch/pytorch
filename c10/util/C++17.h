@@ -45,7 +45,14 @@ constexpr bool is_pod_v = is_pod<T>::value;
 
 namespace guts {
 
-#if defined(__HIP__)
+#if defined(__cpp_lib_apply) && !defined(__CUDA_ARCH__) && !defined(__HIP__)
+
+template <class F, class Tuple>
+C10_HOST_DEVICE inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
+  return std::apply(std::forward<F>(f), std::forward<Tuple>(t));
+}
+
+#else
 
 // Implementation from http://en.cppreference.com/w/cpp/utility/apply (but
 // modified)

@@ -30,7 +30,7 @@ namespace {
 // Workaround for gcc-14.2.0 ICE during RTL pass: expand when compiling for NEON
 __attribute__((optimize("no-tree-vectorize")))
 #endif
-void log_sigmoid_cpu_kernel(TensorBase &output, TensorBase &buffer, const TensorBase &input) {
+static void log_sigmoid_cpu_kernel(TensorBase &output, TensorBase &buffer, const TensorBase &input) {
   if (at::isReducedFloatingType(input.scalar_type())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(input.scalar_type(), "log_sigmoid_cpu", [&]() {
     using Vec = Vectorized<scalar_t>;
@@ -96,7 +96,7 @@ void log_sigmoid_cpu_kernel(TensorBase &output, TensorBase &buffer, const Tensor
   }
 }
 
-void log_sigmoid_backward_cpu_kernel(TensorIterator& iter) {
+static void log_sigmoid_backward_cpu_kernel(TensorIterator& iter) {
   if (at::isReducedFloatingType(iter.dtype())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "log_sigmoid_backward_cpu", [&]() {
       using Vec = Vectorized<scalar_t>;
@@ -150,7 +150,7 @@ void log_sigmoid_backward_cpu_kernel(TensorIterator& iter) {
   }
 }
 
-void threshold_kernel(
+static void threshold_kernel(
     TensorIteratorBase& iter,
     const Scalar& threshold_scalar,
     const Scalar& value_scalar) {
@@ -868,7 +868,7 @@ void hardswish_backward_kernel(TensorIterator& iter) {
   }
 }
 
-void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
+static void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
   if (at::isReducedFloatingType(iter.dtype())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "leaky_relu_cpu", [&]() {
     auto zero_vec = Vectorized<float>((float)(0));
@@ -907,7 +907,7 @@ void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
   }
 }
 
-void leaky_relu_backward_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
+static void leaky_relu_backward_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
   if (at::isReducedFloatingType(iter.dtype())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "leaky_relu_backward_cpu", [&]() {
     auto zero_vec = Vectorized<float>((float)(0));

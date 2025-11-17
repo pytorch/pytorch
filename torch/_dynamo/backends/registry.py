@@ -60,9 +60,9 @@ optimized_model = torch.compile(model, backend="my_compiler")
 
 import functools
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from importlib.metadata import EntryPoint
-from typing import Any, Optional, Protocol, Union
+from typing import Any, Callable, Optional, Protocol, Union
 
 import torch
 from torch import fx

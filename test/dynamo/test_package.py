@@ -326,8 +326,7 @@ def add(x, y):
 
             def guard_filter_fn(guards):
                 return [
-                    guard.guard_type
-                    not in ("CLOSURE_MATCH", "FUNCTION_MATCH", "MODULE_MATCH")
+                    guard.guard_type not in ("CLOSURE_MATCH", "FUNCTION_MATCH")
                     for guard in guards
                 ]
 

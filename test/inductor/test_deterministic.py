@@ -29,15 +29,6 @@ class DeterministicTest(TestCase):
         self._exit_stack.close()
         super().tearDown()
 
-    def test_use_deterministic_algorithsm(self):
-        old_val = torch.are_deterministic_algorithms_enabled()
-        try:
-            for new_val in [True, False, True]:
-                torch.use_deterministic_algorithms(new_val, warn_only=True)
-                self.assertEqual(inductor_config.deterministic, new_val)
-        finally:
-            torch.use_deterministic_algorithms(old_val, warn_only=True)
-
     @parametrize("deterministic", [False, True])
     def test_mm_padding(self, deterministic):
         with inductor_config.patch(deterministic=deterministic):

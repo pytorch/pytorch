@@ -118,7 +118,6 @@ def extract_filename(path: str, keep_ext: bool = True) -> Any:
 
 
 # https://gist.github.com/pypt/94d747fe5180851196eb
-# pyrefly: ignore [invalid-inheritance]
 class UniqueKeyLoader(Loader):
     def construct_mapping(self, node, deep=False):  # type: ignore[no-untyped-def]
         if not isinstance(node, MappingNode):
@@ -234,7 +233,6 @@ def preprocess(
         last_indent = input_indent
 
     while blank_lines != 0:
-        # pyrefly: ignore [unbound-name]
         python_lines.append(python_indent + "print(file=OUT_STREAM)")
         blank_lines -= 1
 
@@ -669,7 +667,6 @@ def generateShaderDispatchStr(shader_info: ShaderInfo, name: str) -> str:
             "    ",
         )
 
-    # pyrefly: ignore [unbound-name]
     return shader_dispatch_str
 
 
@@ -684,18 +681,15 @@ def genCppFiles(
         name = getName(spvPath).replace("_spv", "")
 
         sizeBytes, spv_bin_str = generateSpvBinStr(spvPath, name)
-        # pyrefly: ignore [bad-argument-type]
         spv_bin_strs.append(spv_bin_str)
 
         shader_info = getShaderInfo(srcPath)
 
         register_shader_info_strs.append(
-            # pyrefly: ignore [bad-argument-type]
             generateShaderInfoStr(shader_info, name, sizeBytes)
         )
 
         if shader_info.register_for is not None:
-            # pyrefly: ignore [bad-argument-type]
             shader_registry_strs.append(generateShaderDispatchStr(shader_info, name))
 
     spv_bin_arrays = "\n".join(spv_bin_strs)

@@ -79,7 +79,6 @@ def _flatten_tensor_size(size) -> torch.Size:
     Checks if tensor size is valid, then flatten/return a torch.Size object.
     """
     if len(size) == 1 and isinstance(size[0], collections.abc.Sequence):
-        # pyrefly: ignore [not-iterable]
         dims = list(*size)
     else:
         dims = list(size)
@@ -209,7 +208,6 @@ def build_global_metadata(
     global_sharded_tensor_metadata = None
     global_metadata_rank = 0
 
-    # pyrefly: ignore [bad-assignment]
     for rank, rank_metadata in enumerate(gathered_metadatas):
         if rank_metadata is None:
             continue

@@ -24,7 +24,7 @@ namespace at::native {
 namespace {
 
 template <typename scalar_t>
-void adaptive_avg_pool3d_out_frame(
+static void adaptive_avg_pool3d_out_frame(
     const scalar_t* input_p,
     scalar_t* output_p,
     int64_t sizeD,
@@ -176,7 +176,7 @@ void adaptive_avg_pool3d_out_cpu_template(
 }
 
 template <typename scalar_t>
-void adaptive_avg_pool3d_backward_out_frame(
+static void adaptive_avg_pool3d_backward_out_frame(
     scalar_t* gradInput_p,
     const scalar_t* gradOutput_p,
     int64_t sizeD,

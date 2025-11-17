@@ -135,8 +135,7 @@ class CheckpointProcess:
         )
 
         # wait for the timeout or a response from subprocess
-        if self._parent_end is None:
-            raise AssertionError("Parent end of pipe should be initialized")
+        assert self._parent_end is not None, "Parent end of pipe should be initialized"
         if not self._parent_end.poll(timeout=config.subprocess_init_timeout_secs):
             msg = f"Timed out after {config.subprocess_init_timeout_secs}s waiting for checkpoint subprocess to initialize"
             logger.error(msg)
@@ -162,8 +161,7 @@ class CheckpointProcess:
             os.getpid(),
         )
 
-        if sub_rank != 0:
-            raise AssertionError("We need only one checkpointer per parent training")
+        assert sub_rank == 0, "We need only one checkpointer per parent training"
         request = WorkerRequest(request_type=RequestType.PING, payload={})
 
         try:
@@ -224,12 +222,13 @@ class CheckpointProcess:
                 )
             )
             parent_pipe.close()
-            logger.exception("Subprocess terminated due to exception")
+            logger.error("Subprocess terminated due to exception: %s", e)
 
     def _send(self, request_type: RequestType, payload: dict[str, Any]) -> None:
         try:
-            if self._parent_end is None:
-                raise AssertionError("Parent end of pipe should be initialized")
+            assert self._parent_end is not None, (
+                "Parent end of pipe should be initialized"
+            )
             self._parent_end.send(
                 WorkerRequest(
                     request_type=request_type,
@@ -238,15 +237,16 @@ class CheckpointProcess:
             )
         except OSError as e:
             error_msg = "Child process terminated unexpectedly"
-            logger.exception(
-                "Communication failed during %s request", request_type.value
+            logger.error(
+                "Communication failed during %s request: %s", request_type.value, e
             )
             raise RuntimeError(error_msg) from e
 
     def _recv(self) -> Optional[dict[str, Any]]:
         try:
-            if self._parent_end is None:
-                raise AssertionError("Parent end of pipe should be initialized")
+            assert self._parent_end is not None, (
+                "Parent end of pipe should be initialized"
+            )
             response = self._parent_end.recv()
             if response.success is False:
                 error_msg = (
@@ -322,7 +322,6 @@ class CheckpointProcess:
             subprocess_pid = self.process.processes[0].pid
             # send graceful termination to sub process
             try:
-                # pyrefly: ignore [missing-attribute]
                 self._parent_end.send(
                     WorkerRequest(
                         request_type=RequestType.TERMINATE_PROCESS,
@@ -354,8 +353,10 @@ class CheckpointProcess:
                     )
                     self.process.processes[0].kill()
                     logger.info("Subprocess killed forcefully")
-            except ProcessExitedException:
-                logger.exception("ProcessExitedException during subprocess termination")
+            except ProcessExitedException as e:
+                logger.error(
+                    "ProcessExitedException during subprocess termination: %s", e
+                )
                 raise
 
         logger.debug("CheckpointProcess closed successfully")

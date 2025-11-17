@@ -155,7 +155,6 @@ class _PipelineStageBase(ABC):
         self.submod = submodule
         self.stage_index = stage_index
         self.num_stages = num_stages
-        # pyrefly: ignore [read-only]
         self.device = device
         self.group = group
 
@@ -651,6 +650,28 @@ class _PipelineStageBase(ABC):
             self.submod.set_reshard_after_backward(False)
             self.submod.set_requires_gradient_sync(False)
             result = perform_backward(backward_type)()
+            if last_backward:
+                # Manually call post backward for FSDP
+                def run_post_backward(fsdp_module: FSDPModule) -> None:
+                    fsdp_module.set_is_last_backward(True)
+                    fsdp_module.set_reshard_after_backward(True)
+                    fsdp_module.set_requires_gradient_sync(True)
+
+                    if isinstance(fsdp_module, ReplicateModule):
+                        distributed_state = replicate.state(fsdp_module)  # type: ignore[arg-type]
+                    else:
+                        distributed_state = fully_shard.state(fsdp_module)  # type: ignore[attr-defined]
+
+                    for state in distributed_state._state_ctx.all_states:
+                        if state._fsdp_param_group:
+                            state._fsdp_param_group.post_backward()
+
+                    # it would be much better if pipelining backward invoked .backward so autograd hooks
+                    # worked and modules like DDP/FSDP behaved as expected.  Working around this for the time being,
+                    # we need to call this too to ensure FSDP syncs its grad reduction ops back to the default stream.
+                    distributed_state._root_post_backward_final_callback()
+
+                run_post_backward(self.submod)
 
         else:
             # Non-DP submodule, regular backward
@@ -664,7 +685,6 @@ class _PipelineStageBase(ABC):
         fwd_chunk_id: int,
         args: tuple[Any, ...],
         kwargs: Optional[dict[str, Any]] = None,
-        save_forward_output: bool = True,
     ):
         """
         Perform forward pass on the stage with one microbatch.
@@ -704,8 +724,9 @@ class _PipelineStageBase(ABC):
 
         # Prepare for final output merge or reduction
         # Output chunks is only used for the last stage since we only merge the output of the last stage
-        if self.is_last and save_forward_output:
+        if self.is_last:
             self.output_chunks.append(output)
+
         # Save activations and inputs for backward
         flat_args = flatten_args(composite_args)
         flat_kwargs = flatten_args(composite_kwargs)
@@ -932,10 +953,8 @@ class _PipelineStageBase(ABC):
         next_stage_peer_rank = self.stage_index_to_group_rank.get(self.stage_index + 1)
         prev_stage_peer_rank = self.stage_index_to_group_rank.get(self.stage_index - 1)
 
-        recv_tensor = torch.zeros(1, device=self.device, dtype=torch.float32)
-        send_tensor = torch.tensor(
-            self.stage_index, device=self.device, dtype=torch.float32
-        )
+        recv_tensor = torch.zeros(1, device=self.device)
+        send_tensor = torch.tensor(self.stage_index, device=self.device)
         # forward
         if not self.is_first:
             ops.append(
@@ -977,31 +996,6 @@ class _PipelineStageBase(ABC):
             )
 
         return ops
-
-    def _post_backward(self, grad_scale_factor: int):
-        # Manually call post backward for FSDP
-        if isinstance(self.submod, FSDPModule):
-            fsdp_module = self.submod
-            fsdp_module.set_is_last_backward(True)
-            fsdp_module.set_reshard_after_backward(True)
-            fsdp_module.set_requires_gradient_sync(True)
-
-            if isinstance(fsdp_module, ReplicateModule):
-                distributed_state = replicate.state(fsdp_module)  # type: ignore[arg-type]
-            else:
-                distributed_state = fully_shard.state(fsdp_module)  # type: ignore[attr-defined]
-
-            for state in distributed_state._state_ctx.all_states:
-                if state._fsdp_param_group:
-                    state._fsdp_param_group.post_backward()
-
-            # it would be much better if pipelining backward invoked .backward so autograd hooks
-            # worked and modules like DDP/FSDP behaved as expected.  Working around this for the time being,
-            # we need to call this too to ensure FSDP syncs its grad reduction ops back to the default stream.
-            distributed_state._root_post_backward_final_callback()
-        # Call gradient scaling at the end of the backward pass
-        # NOTE: this must happen after FSDP post_backward is FSDP is enabled
-        self.scale_grads(grad_scale_factor)
 
 
 class _PipelineStage(_PipelineStageBase):

@@ -65,8 +65,5 @@ class Resize(Function):
     @staticmethod
     # pyrefly: ignore  # bad-override
     def backward(ctx, grad_output):
-        if grad_output.numel() != ctx.numel:
-            raise AssertionError(
-                f"Expected grad_output to have {ctx.numel} elements, but got {grad_output.numel()}"
-            )
+        assert grad_output.numel() == ctx.numel
         return grad_output.contiguous().view(ctx.input_sizes), None

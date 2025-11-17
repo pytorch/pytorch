@@ -100,7 +100,6 @@ class CMake:
             if ver is not None:
                 eprint(f"Found {cmd} ({command}) version: {ver}", end="")
                 cmake_versions.append(f"{cmd}=={ver}")
-                # pyrefly: ignore [unsupported-operation]
                 if ver >= CMAKE_MINIMUM_VERSION:
                     eprint(f" (>={CMAKE_MINIMUM_VERSION})")
                     valid_cmake_versions[cmd] = ver
@@ -327,7 +326,7 @@ class CMake:
 
         # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
         py_lib_path = sysconfig.get_path("purelib")
-        cmake_prefix_path = build_options.get("CMAKE_PREFIX_PATH")
+        cmake_prefix_path = build_options.get("CMAKE_PREFIX_PATH", None)
         if cmake_prefix_path:
             build_options["CMAKE_PREFIX_PATH"] = (
                 py_lib_path + ";" + cast(str, cmake_prefix_path)

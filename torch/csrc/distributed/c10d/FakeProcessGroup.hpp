@@ -33,8 +33,9 @@ class FakeProcessGroup : public Backend {
       int rank,
       int size,
       c10::intrusive_ptr<Options> options = c10::make_intrusive<Options>()) {
-    return c10::make_intrusive<FakeProcessGroup>(
-        rank, size, std::move(options));
+    return c10::intrusive_ptr<FakeProcessGroup>(
+        new FakeProcessGroup(rank, size, std::move(options)),
+        c10::raw::DontIncreaseRefcount{});
   }
 
   const std::string getBackendName() const override {
@@ -237,12 +238,12 @@ class FakeProcessGroup : public Backend {
     return c10::make_intrusive<FakeWork>();
   }
 
+ private:
   // Private constructor used by official APIs
   FakeProcessGroup(int rank, int size, c10::intrusive_ptr<Options> options)
       : Backend(rank, size), options_(std::move(options)) {}
   c10::intrusive_ptr<Options> options_;
 
- private:
   void checkCollectiveError() {
     TORCH_CHECK(
         !options_ || !options_->error_on_collective,

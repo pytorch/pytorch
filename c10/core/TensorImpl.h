@@ -359,7 +359,7 @@ struct C10_API VariableVersion {
   // https://cplusplus.github.io/LWG/issue2334.
   VariableVersion(uint32_t version)
       : version_counter_(c10::make_intrusive<VersionCounter>(version)) {}
-  VariableVersion(Disabled /*unused*/ = DISABLED) {}
+  VariableVersion(Disabled = DISABLED) {}
 
   bool enabled() const {
     return version_counter_;
@@ -522,21 +522,21 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   TensorImpl(
       Storage&& storage,
-      DispatchKeySet /*key_set*/,
+      DispatchKeySet,
       const caffe2::TypeMeta data_type);
 
   // See Note [Enum ImplType]
   TensorImpl(
-      ImplType /*unused*/,
+      ImplType,
       Storage&& storage,
-      DispatchKeySet /*key_set*/,
+      DispatchKeySet,
       const caffe2::TypeMeta data_type);
 
   /**
    * Construct a 1-dim 0 size tensor that doesn't have a storage.
    */
   TensorImpl(
-      DispatchKeySet /*key_set*/,
+      DispatchKeySet,
       const caffe2::TypeMeta data_type,
       std::optional<c10::Device> device_opt);
 
@@ -563,9 +563,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // from under us.
   TensorImpl(
       Storage&& storage,
-      DispatchKeySet /*key_set*/,
+      DispatchKeySet,
       const caffe2::TypeMeta data_type,
-      std::optional<c10::Device> /*device_opt*/);
+      std::optional<c10::Device>);
 
  public:
   TensorImpl(const TensorImpl&) = delete;

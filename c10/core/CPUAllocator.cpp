@@ -154,7 +154,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
   }
 };
 
-void NoDelete(void* /*unused*/) {}
+void NoDelete(void*) {}
 
 at::Allocator* GetCPUAllocator() {
   return GetAllocator(DeviceType::CPU);

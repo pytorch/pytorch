@@ -590,12 +590,10 @@ constexpr uint16_t num_runtime_entries = num_functionality_keys +
 constexpr uint16_t full_backend_mask =
     (static_cast<uint16_t>(1) << num_backends) - 1;
 
-C10_API const char* toString(DispatchKey /*t*/);
-C10_API const char* toString(BackendComponent /*t*/);
-C10_API std::ostream& operator<<(std::ostream& /*str*/, DispatchKey /*rhs*/);
-C10_API std::ostream& operator<<(
-    std::ostream& /*str*/,
-    BackendComponent /*rhs*/);
+C10_API const char* toString(DispatchKey);
+C10_API const char* toString(BackendComponent);
+C10_API std::ostream& operator<<(std::ostream&, DispatchKey);
+C10_API std::ostream& operator<<(std::ostream&, BackendComponent);
 
 C10_API DispatchKey getAutogradKeyFromBackend(BackendComponent k);
 

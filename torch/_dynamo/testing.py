@@ -23,8 +23,8 @@ import re
 import sys
 import types
 import unittest
-from collections.abc import Callable, Sequence
-from typing import Any, Optional, overload, TypeVar, Union
+from collections.abc import Sequence
+from typing import Any, Callable, Optional, overload, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -496,7 +496,7 @@ def make_test_cls_with_patches(
 def skipIfNotPy311(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 11):
         return fn
-    # pyrefly: ignore [bad-return, bad-argument-type]
+    # pyrefly: ignore  # bad-return, bad-argument-type
     return unittest.skip(fn)
 
 
@@ -504,12 +504,6 @@ def skipIfNotPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 12):
         return fn
     return unittest.skip("Requires Python 3.12+")(fn)
-
-
-def skipIfOnlyNotPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
-    if sys.version_info >= (3, 13) or sys.version_info < (3, 12):
-        return unittest.skip("Requires Python 3.12")(fn)
-    return fn
 
 
 def xfailIfPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:

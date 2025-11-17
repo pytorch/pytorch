@@ -40,17 +40,11 @@ from tools.flight_recorder.components.types import types
 
 def main(args: Optional[Sequence[str]] = None) -> None:
     config = JobConfig()
-    # pyrefly: ignore [bad-assignment]
     args = config.parse_args(args)
-    # pyrefly: ignore [missing-attribute]
     assert args.trace_dir, "Trace directory trace_dir is required"
-    # pyrefly: ignore [bad-argument-type]
     details, version = read_dir(args)
-    # pyrefly: ignore [bad-argument-type]
     db = build_db(details, args, version)
-    # pyrefly: ignore [missing-attribute]
     if args.output:
-        # pyrefly: ignore [no-matching-overload]
         with open(args.output, "wb") as f:
             pickle.dump((types, db), f)
 

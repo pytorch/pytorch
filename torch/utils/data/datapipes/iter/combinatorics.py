@@ -38,12 +38,11 @@ class SamplerIterDataPipe(IterDataPipe[_T_co]):
         sampler_args: Optional[tuple] = None,
         sampler_kwargs: Optional[dict] = None,
     ) -> None:
-        if not isinstance(datapipe, Sized):
-            raise AssertionError(
-                "Sampler class requires input datapipe implemented `__len__`"
-            )
+        assert isinstance(datapipe, Sized), (
+            "Sampler class requires input datapipe implemented `__len__`"
+        )
         super().__init__()
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         self.datapipe = datapipe
         self.sampler_args = () if sampler_args is None else sampler_args
         self.sampler_kwargs = {} if sampler_kwargs is None else sampler_kwargs
@@ -113,8 +112,7 @@ class ShufflerIterDataPipe(IterDataPipe[_T_co]):
         # TODO: Performance optimization
         #       buffer can be a fixed size and remove expensive `append()` and `len()` operations
         self._buffer: list[_T_co] = []
-        if buffer_size <= 0:
-            raise AssertionError("buffer_size should be larger than 0")
+        assert buffer_size > 0, "buffer_size should be larger than 0"
         if unbatch_level == 0:
             self.datapipe = datapipe
         else:

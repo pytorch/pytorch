@@ -103,6 +103,9 @@ def _reparametrize_module(
     strict: bool = False,
     stack_weights: bool = False,
 ):
+    parameters_and_buffers = parameters_and_buffers
+    stack_weights = stack_weights
+
     if tie_weights:
         untied_parameters_and_buffers = _untie_named_tensors_map(
             module, parameters_and_buffers

@@ -24,7 +24,7 @@ from .expanded_weights_utils import forward_helper
 @implements_per_sample_grads(F.conv3d)
 class ConvPerSampleGrad(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def forward(
         ctx: Any,
         kwarg_names: list[str],
@@ -57,7 +57,7 @@ class ConvPerSampleGrad(torch.autograd.Function):
                 f"unbatched input of dim {input.dim()}, expected input of dim {batched_dim_size}"
             )
 
-        # pyrefly: ignore [invalid-type-var]
+        # pyrefly: ignore  # invalid-type-var
         ctx.conv_fn = conv_fn
 
         ctx.batch_size = orig_input.shape[0]

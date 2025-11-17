@@ -177,7 +177,7 @@ if HAS_CUDA_AND_TRITON:
 
         def get_manager(self, device_index=None):
             return torch._inductor.cudagraph_trees.get_container(
-                device_index if device_index else self.device_idx
+                self.device_idx if not device_index else device_index
             ).tree_manager
 
         def get_roots(self):
@@ -973,125 +973,6 @@ if HAS_CUDA_AND_TRITON:
             _, code = run_and_get_code(f_compiled, x, False)
             num_partitions = get_num_partitions(code)
             self.assertEqual(num_partitions, 1)
-
-        @torch._inductor.config.patch("graph_partition", True)
-        @torch._inductor.config.patch("implicit_fallbacks", True)
-        def test_graph_partition_with_memory_plan_reuse(self):
-            BATCH_SIZE = 16
-            MLP_SIZE = 128
-            HIDDEN_SIZE = 128
-            RANDOM_SEED = 0
-
-            @torch.library.custom_op(
-                "silly::attention",
-                mutates_args=["out"],
-                tags=(torch._C.Tag.cudagraph_unsafe,),
-            )
-            def attention(
-                q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor
-            ) -> None:
-                out.copy_(q + k + v)
-
-            @attention.register_fake
-            def _(q, k, v, out):
-                return None
-
-            class ParentModel(torch.nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-
-                def forward(self, x: torch.Tensor) -> torch.Tensor:
-                    return x
-
-            class Attention(torch.nn.Module):
-                def __init__(self, mlp_size: int, hidden_size: int) -> None:
-                    super().__init__()
-                    self.pre_attn = torch.nn.Linear(mlp_size, hidden_size, bias=False)
-                    self.post_attn = torch.nn.Linear(hidden_size, mlp_size, bias=False)
-                    self.rms_norm_weight = torch.nn.Parameter(torch.ones(hidden_size))
-
-                def rms_norm_ref(self, x: torch.Tensor) -> torch.Tensor:
-                    x_f32 = x.float()
-                    return (
-                        x_f32
-                        * torch.rsqrt(
-                            torch.mean(x_f32.square(), dim=-1, keepdim=True) + 1e-6
-                        )
-                        * self.rms_norm_weight
-                    ).to(x.dtype)
-
-                def forward(self, x: torch.Tensor) -> torch.Tensor:
-                    x = self.pre_attn(x)
-                    x = self.rms_norm_ref(x)
-                    attn_output = torch.empty_like(x)
-                    torch.ops.silly.attention(x, x, x, attn_output)
-                    x = attn_output
-                    x = self.rms_norm_ref(x)
-                    x = self.post_attn(x)
-                    return x
-
-            class CompiledAttention(torch.nn.Module):
-                def __init__(
-                    self,
-                    *,
-                    mlp_size: int,
-                    hidden_size: int,
-                ) -> None:
-                    super().__init__()
-                    self.attn = Attention(mlp_size, hidden_size)
-
-                def forward(self, x: torch.Tensor) -> torch.Tensor:
-                    return self.attn(x)
-
-            class CompiledAttentionTwo(CompiledAttention):
-                def forward(self, x: torch.Tensor) -> torch.Tensor:
-                    return self.attn(x) + x
-
-            class SimpleModelWithTwoGraphs(ParentModel):
-                def __init__(
-                    self,
-                    *,
-                    mlp_size: int,
-                    hidden_size: int,
-                ) -> None:
-                    super().__init__()
-                    self.attn_one = CompiledAttention(
-                        mlp_size=mlp_size,
-                        hidden_size=hidden_size,
-                    )
-                    self.attn_two = CompiledAttentionTwo(
-                        mlp_size=mlp_size,
-                        hidden_size=hidden_size,
-                    )
-
-                    self.hidden_states = torch.zeros((BATCH_SIZE, MLP_SIZE)).cuda()
-
-                def forward(self, x: torch.Tensor) -> torch.Tensor:
-                    bsz = x.shape[0]
-                    # CUDAGraph expects same tensor addresses for each run
-                    self.hidden_states[:bsz].copy_(x)
-                    x = self.attn_one(self.hidden_states[:bsz])
-                    self.hidden_states[:bsz].copy_(x)
-                    x = self.attn_two(self.hidden_states[:bsz])
-                    return x
-
-            eager_model = (
-                SimpleModelWithTwoGraphs(
-                    mlp_size=MLP_SIZE,
-                    hidden_size=HIDDEN_SIZE,
-                )
-                .eval()
-                .cuda()
-            )
-
-            compiled_model = torch.compile(eager_model, mode="reduce-overhead")
-
-            inputs = torch.randn(BATCH_SIZE, MLP_SIZE).cuda()
-
-            for _ in range(3):
-                eager_out = eager_model(inputs)
-                compiled_out = compiled_model(inputs)
-                self.assertEqual(eager_out, compiled_out)
 
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("triton.cudagraph_trees", False)
@@ -2904,22 +2785,6 @@ if HAS_CUDA_AND_TRITON:
 
             # 2 graph partitions lead to 2 cudagraph
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
-
-        def test_graph_partition_view_fallback(self):
-            def f(x):
-                y = x + 1
-                z = torch.ops.aten.view.dtype(y, torch.float8_e4m3fn)
-                z_cpu = z.cpu()
-                u_cuda = z_cpu.cuda()
-                return u_cuda
-
-            compiled_f = torch.compile(f, mode="reduce-overhead")
-
-            for _ in range(3):
-                x = torch.ones(2, dtype=torch.int32, device="cuda")
-                eager_out = f(x)
-                compiled_out = compiled_f(x)
-                self.assertEqual(eager_out, compiled_out)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_log_message(self):

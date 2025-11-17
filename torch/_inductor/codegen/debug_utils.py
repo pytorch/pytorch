@@ -274,7 +274,7 @@ class DebugPrinterManager:
                         f'printf("[  {launch_prefix} - {kernel_name} - {arg}: %ld  ]", {arg}); printf("\\\\n");'
                     )
                 else:
-                    if arg_signatures is None and self.kernel_type in ("cpp", "extern"):
+                    if arg_signatures is None and self.kernel_type == "cpp" or "extern":
                         V.graph.wrapper_code.writeline(
                             f'aoti_torch_print_tensor_handle({arg}, "{launch_prefix} - {kernel_name} - {arg}");'
                         )

@@ -1,6 +1,5 @@
 import re
-from collections.abc import Callable
-from typing import Any, Union
+from typing import Any, Callable, Union
 
 import torch
 from torch.utils._pytree import tree_flatten_with_path, tree_map

@@ -6,7 +6,6 @@ from typing import cast, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
-from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._collective_utils import (
     fill_empty_tensor_to_shards,
@@ -103,7 +102,7 @@ class Shard(Placement):
         pad_sizes: list[int] = []
         for shard in tensor_list:
             if with_padding:
-                pad_size = Shard._get_shard_pad_size(full_chunk_size, shard, self.dim)
+                pad_size = full_chunk_size - shard.size(self.dim)
                 shard = pad_tensor(shard, self.dim, pad_size)
                 pad_sizes.append(pad_size)
             if contiguous:
@@ -112,7 +111,6 @@ class Shard(Placement):
         return shard_list, pad_sizes
 
     @staticmethod
-    @maybe_run_for_local_tensor
     def local_shard_size_and_offset(
         curr_local_size: int,
         num_chunks: int,
@@ -155,20 +153,6 @@ class Shard(Placement):
     ) -> tuple[int, Optional[int]]:
         return Shard.local_shard_size_and_offset(curr_local_size, num_chunks, rank)
 
-    @staticmethod
-    @maybe_run_for_local_tensor
-    def _maybe_unpad_tensor_with_sizes(
-        dim, local_tensor, pad_sizes, mesh_dim_local_rank, make_contiguous
-    ) -> torch.Tensor:
-        # Only unpad if the local_tensor was padded on the dimension.
-        if pad_sizes[mesh_dim_local_rank] > 0:
-            local_tensor = unpad_tensor(
-                local_tensor, dim, pad_sizes[mesh_dim_local_rank]
-            )
-            if make_contiguous:
-                local_tensor = local_tensor.contiguous()
-        return local_tensor
-
     def _shard_tensor(
         self,
         tensor: torch.Tensor,
@@ -196,40 +180,24 @@ class Shard(Placement):
                 tensor, num_chunks, with_padding=False, contiguous=True
             )
 
-            return self._select_shard(scatter_list, mesh_dim_local_rank)
+            return scatter_list[mesh_dim_local_rank]
 
         scatter_list, pad_sizes = self._split_tensor(
             tensor, num_chunks, with_padding=True, contiguous=True
         )
-
-        it = iter(scatter_list)
-        first = next(it)
-        # Tensors in the scatter list are expected to have the same shape because
-        # split is requested with padding.
-        assert all(first.shape == v.shape for v in it)
-
-        output = torch.empty_like(first)
+        output = torch.empty_like(scatter_list[mesh_dim_local_rank])
 
         # perform scatter from the src_data_rank as data source when it is not None
         mesh_scatter(
             output, scatter_list, mesh, mesh_dim=mesh_dim, group_src=src_data_rank
         )
 
-        return Shard._maybe_unpad_tensor_with_sizes(
-            self.dim, output, pad_sizes, mesh_dim_local_rank, True
-        )
-
-    @classmethod
-    def _make_shard_tensor(
-        cls,
-        dim: int,
-        tensor: torch.Tensor,
-        mesh: DeviceMesh,
-        mesh_dim: int,
-        src_data_rank: Optional[int] = 0,
-    ) -> torch.Tensor:
-        shard_placement = cls(dim)
-        return shard_placement._shard_tensor(tensor, mesh, mesh_dim, src_data_rank)
+        # Only unpad if the local_tensor was padded on the dimension.
+        if pad_sizes[mesh_dim_local_rank] > 0:
+            output = unpad_tensor(output, self.dim, pad_sizes[mesh_dim_local_rank])
+            # Unpad might return a view, hence we need to remake it contiguous
+            output = output.contiguous()
+        return output
 
     def _reduce_shard_tensor(
         self,
@@ -250,7 +218,6 @@ class Shard(Placement):
             return tensor
 
         is_padded = tensor.size(self.dim) % num_chunks != 0
-        pad_sizes = None
         if is_padded:
             scattered_list, pad_sizes = self._split_tensor(
                 tensor, num_chunks, with_padding=True, contiguous=True
@@ -264,46 +231,8 @@ class Shard(Placement):
         )
 
         if is_padded:
-            assert pad_sizes is not None
-            output = Shard._maybe_unpad_tensor_with_sizes(
-                self.dim, output, pad_sizes, my_coordinate[mesh_dim], False
-            )
+            output = unpad_tensor(output, self.dim, pad_sizes[my_coordinate[mesh_dim]])  # type: ignore[possibly-undefined]
         return output
-
-    @maybe_run_for_local_tensor
-    def _maybe_pad_tensor(
-        self,
-        local_tensor: torch.Tensor,
-        logical_dim_size: int,
-        num_chunks: int,
-    ) -> torch.Tensor:
-        is_padded = logical_dim_size % num_chunks != 0
-
-        if is_padded:
-            full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
-            pad_size = full_chunk_size - local_tensor.size(self.dim)
-            local_tensor = pad_tensor(local_tensor, self.dim, pad_size)
-
-        if not local_tensor.is_contiguous():
-            local_tensor = local_tensor.contiguous()
-
-        return local_tensor
-
-    @maybe_run_for_local_tensor
-    def _maybe_unpad_tensor(
-        self,
-        local_tensor: torch.Tensor,
-        logical_dim_size: int,
-        num_chunks: int,
-    ) -> torch.Tensor:
-        is_padded = logical_dim_size % num_chunks != 0
-
-        if is_padded:
-            full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
-            unpad_size = full_chunk_size * num_chunks - logical_dim_size  # type: ignore[possibly-undefined]
-            local_tensor = unpad_tensor(local_tensor, self.dim, unpad_size)
-
-        return local_tensor
 
     def _to_replicate_tensor(
         self,
@@ -317,26 +246,27 @@ class Shard(Placement):
         is replicated on the previously sharded mesh dimension
         """
         num_chunks = mesh.size(mesh_dim=mesh_dim)
-        logical_dim_size = current_logical_shape[self.dim]
 
-        local_tensor = self._maybe_pad_tensor(
-            local_tensor, logical_dim_size, num_chunks
-        )
+        logical_dim_size = current_logical_shape[self.dim]
+        is_padded = logical_dim_size % num_chunks != 0
+
+        if is_padded:
+            full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
+            pad_size = full_chunk_size - local_tensor.size(self.dim)
+            local_tensor = pad_tensor(local_tensor, self.dim, pad_size)
+
+        if not local_tensor.is_contiguous():
+            local_tensor = local_tensor.contiguous()
 
         result = funcol.all_gather_tensor(
             local_tensor,
             gather_dim=self.dim,
             group=(mesh, mesh_dim),
         )
-
-        result = self._maybe_unpad_tensor(result, logical_dim_size, num_chunks)
-
+        if is_padded:
+            unpad_size = full_chunk_size * num_chunks - logical_dim_size  # type: ignore[possibly-undefined]
+            result = unpad_tensor(result, self.dim, unpad_size)
         return result
-
-    @staticmethod
-    @maybe_run_for_local_tensor
-    def _select_shard(shards: list[torch.Tensor], shard_index) -> torch.Tensor:
-        return shards[shard_index].clone()
 
     def _replicate_to_shard(
         self,
@@ -356,106 +286,7 @@ class Shard(Placement):
             with_padding=False,
             contiguous=False,
         )
-
-        return Shard._select_shard(shards, shard_index)
-
-    @staticmethod
-    @maybe_run_for_local_tensor
-    def _get_shard_pad_size(
-        full_size: int, local_tensor: torch.Tensor, dim: int
-    ) -> int:
-        """
-        Get the padding size of the local tensor on the shard dimension.
-        """
-        return full_size - local_tensor.size(dim)
-
-    @staticmethod
-    def _compute_padding_info(
-        current_logical_shape: list[int],
-        num_chunks: int,
-        old_shard_dim: int,
-        new_shard_dim: int,
-    ) -> tuple[bool, int, int, bool, int, int]:
-        results = []
-        for shard_dim in [old_shard_dim, new_shard_dim]:
-            dim_logical_size = current_logical_shape[shard_dim]
-            dim_padding = dim_logical_size % num_chunks != 0
-            dim_full_chunk_size = (dim_logical_size + num_chunks - 1) // num_chunks
-            results.append((dim_padding, dim_logical_size, dim_full_chunk_size))
-
-        return results[0] + results[1]
-
-    @staticmethod
-    @maybe_run_for_local_tensor
-    def _pad_for_new_shard_dim(
-        current_logical_shape: list[int],
-        local_tensor: torch.Tensor,
-        num_chunks: int,
-        old_shard_dim: int,
-        new_shard_dim: int,
-    ) -> torch.Tensor:
-        (
-            old_dim_padding,
-            _,
-            old_dim_full_chunk_size,
-            new_dim_padding,
-            _,
-            new_dim_full_chunk_size,
-        ) = Shard._compute_padding_info(
-            current_logical_shape, num_chunks, old_shard_dim, new_shard_dim
-        )
-
-        if old_dim_padding:
-            old_dim_pad_size = Shard._get_shard_pad_size(
-                old_dim_full_chunk_size, local_tensor, old_shard_dim
-            )
-            local_tensor = pad_tensor(local_tensor, old_shard_dim, old_dim_pad_size)
-        if new_dim_padding:
-            new_dim_pad_size = Shard._get_shard_pad_size(
-                new_dim_full_chunk_size * num_chunks, local_tensor, new_shard_dim
-            )
-            local_tensor = pad_tensor(local_tensor, new_shard_dim, new_dim_pad_size)
-
-        if not local_tensor.is_contiguous():
-            local_tensor = local_tensor.contiguous()
-        return local_tensor
-
-    @staticmethod
-    @maybe_run_for_local_tensor
-    def _unpad_for_new_shard_dim(
-        current_logical_shape: list[int],
-        local_tensor: torch.Tensor,
-        num_chunks: int,
-        old_shard_dim: int,
-        new_shard_dim: int,
-        local_rank: int,
-    ) -> torch.Tensor:
-        (
-            old_dim_padding,
-            _,
-            old_dim_full_chunk_size,
-            new_dim_padding,
-            new_dim_logical_size,
-            new_dim_full_chunk_size,
-        ) = Shard._compute_padding_info(
-            current_logical_shape, num_chunks, old_shard_dim, new_shard_dim
-        )
-
-        if old_dim_padding:
-            old_dim_unpad_size = (
-                old_dim_full_chunk_size * num_chunks
-                - current_logical_shape[old_shard_dim]  # type: ignore[possibly-undefined]
-            )
-            local_tensor = unpad_tensor(local_tensor, old_shard_dim, old_dim_unpad_size)  # type: ignore[possibly-undefined]
-
-        if new_dim_padding:
-            local_shard_size_on_new_dim = Shard.local_shard_size_and_offset(
-                new_dim_logical_size, num_chunks, local_rank
-            )[0]
-            new_dim_unpad_size = new_dim_full_chunk_size - local_shard_size_on_new_dim  # type: ignore[possibly-undefined]
-            local_tensor = unpad_tensor(local_tensor, new_shard_dim, new_dim_unpad_size)  # type: ignore[possibly-undefined]
-
-        return local_tensor
+        return shards[shard_index].clone()
 
     def _to_new_shard_dim(
         self,
@@ -477,22 +308,44 @@ class Shard(Placement):
 
         num_chunks = mesh.size(mesh_dim=mesh_dim)
 
-        local_tensor = Shard._pad_for_new_shard_dim(
-            current_logical_shape, local_tensor, num_chunks, self.dim, new_shard_dim
-        )
+        old_dim_logical_size = current_logical_shape[self.dim]
+        new_dim_logical_size = current_logical_shape[new_shard_dim]
+        old_dim_padding = old_dim_logical_size % num_chunks != 0
+        new_dim_padding = new_dim_logical_size % num_chunks != 0
+        if old_dim_padding:
+            old_dim_full_chunk_size = (
+                old_dim_logical_size + num_chunks - 1
+            ) // num_chunks
+            old_dim_pad_size = old_dim_full_chunk_size - local_tensor.size(self.dim)
+            local_tensor = pad_tensor(local_tensor, self.dim, old_dim_pad_size)
+        if new_dim_padding:
+            new_dim_full_chunk_size = (
+                new_dim_logical_size + num_chunks - 1
+            ) // num_chunks
+            new_dim_pad_size = new_dim_full_chunk_size * num_chunks - local_tensor.size(
+                new_shard_dim
+            )
+            local_tensor = pad_tensor(local_tensor, new_shard_dim, new_dim_pad_size)
+
+        if not local_tensor.is_contiguous():
+            local_tensor = local_tensor.contiguous()
 
         new_tensor = shard_dim_alltoall(
             local_tensor, self.dim, new_shard_dim, mesh, mesh_dim
         )
 
-        new_tensor = Shard._unpad_for_new_shard_dim(
-            current_logical_shape,
-            new_tensor,
-            num_chunks,
-            self.dim,
-            new_shard_dim,
-            my_coordinate[mesh_dim],
-        )
+        if old_dim_padding:
+            old_dim_unpad_size = (
+                old_dim_full_chunk_size * num_chunks - current_logical_shape[self.dim]  # type: ignore[possibly-undefined]
+            )
+            new_tensor = unpad_tensor(new_tensor, self.dim, old_dim_unpad_size)  # type: ignore[possibly-undefined]
+
+        if new_dim_padding:
+            local_shard_size_on_new_dim = self._local_shard_size_and_offset(
+                new_dim_logical_size, num_chunks, my_coordinate[mesh_dim]
+            )[0]
+            new_dim_unpad_size = new_dim_full_chunk_size - local_shard_size_on_new_dim  # type: ignore[possibly-undefined]
+            new_tensor = unpad_tensor(new_tensor, new_shard_dim, new_dim_unpad_size)  # type: ignore[possibly-undefined]
 
         return new_tensor
 
@@ -599,21 +452,6 @@ class _StridedShard(Shard):
         """human readable representation of the _StridedShard placement"""
         return f"_S({self.dim}, {self.split_factor})"
 
-    @classmethod
-    def _make_shard_tensor(
-        cls,
-        dim: int,
-        tensor: torch.Tensor,
-        mesh: DeviceMesh,
-        mesh_dim: int,
-        src_data_rank: Optional[int] = 0,
-        split_factor: int = 1,
-    ) -> torch.Tensor:
-        strided_shard_placement = cls(dim=dim, split_factor=split_factor)
-        return strided_shard_placement._shard_tensor(
-            tensor, mesh, mesh_dim, src_data_rank
-        )
-
     def _split_tensor(
         self,
         tensor: torch.Tensor,
@@ -719,11 +557,6 @@ class _StridedShard(Shard):
 
         return replicate_tensor.contiguous()
 
-    @staticmethod
-    @maybe_run_for_local_tensor
-    def _local_shard_size(sharded_indices: list[torch.Tensor], rank: int) -> int:
-        return len(sharded_indices[rank])
-
     def _local_shard_size_and_offset(
         self,
         curr_local_size: int,
@@ -746,7 +579,7 @@ class _StridedShard(Shard):
         # squeeze back to 1D indices tensor
         sharded_indices = [shard.view(-1) for shard in sharded_indices]
 
-        local_shard_size = _StridedShard._local_shard_size(sharded_indices, rank)
+        local_shard_size = len(sharded_indices[rank])
 
         # offsets from _StridedShard is never used
         return local_shard_size, None
@@ -780,9 +613,8 @@ class Replicate(Placement):
         """
         return "R"
 
-    @classmethod
-    def _make_replicate_tensor(
-        cls,
+    def _replicate_tensor(
+        self,
         tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
@@ -803,15 +635,6 @@ class Replicate(Placement):
             # perform broadcast from the src_data_rank as data source when it is not None
             mesh_broadcast(tensor, mesh, mesh_dim=mesh_dim, group_src=src_data_rank)
         return tensor
-
-    def _replicate_tensor(
-        self,
-        tensor: torch.Tensor,
-        mesh: DeviceMesh,
-        mesh_dim: int,
-        src_data_rank: Optional[int] = 0,
-    ) -> torch.Tensor:
-        return Replicate._make_replicate_tensor(tensor, mesh, mesh_dim, src_data_rank)
 
     def is_replicate(self) -> bool:
         return True

@@ -846,7 +846,7 @@ TORCH_IMPL_FUNC(clamp_Tensor_out)
 (const Tensor& self,
  const OptionalTensorRef min,
  const OptionalTensorRef max,
- const Tensor& /*unused*/) {
+ const Tensor&) {
   if (min && max) {
     clamp_stub(device_type(), *this);
   } else if (min) {

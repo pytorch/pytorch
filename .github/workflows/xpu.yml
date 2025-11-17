@@ -35,7 +35,7 @@ jobs:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-jammy-xpu-n-1-py3.10
       docker-image-name: ci-image:pytorch-linux-jammy-xpu-n-1-py3
-      runner: linux.c7i.12xlarge
+      runner: linux.12xlarge
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 6, runner: "linux.idc.xpu" },
@@ -56,7 +56,7 @@ jobs:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-jammy-xpu-n-py3.10
       docker-image-name: ci-image:pytorch-linux-jammy-xpu-n-py3
-      runner: linux.c7i.12xlarge
+      runner: linux.12xlarge
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 8, runner: "linux.idc.xpu" },

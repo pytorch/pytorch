@@ -7,9 +7,8 @@ import os
 import sys
 import traceback
 import warnings
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -194,7 +193,7 @@ def _deserialize_graph_module(
     graph = KeepModules().trace(com, **tracer_extras)
 
     # Recover node.meta["stack_trace"] after re-tracing
-    node_meta_stack_trace = body.get("_graphmodule_graph_node_meta_stack_trace")
+    node_meta_stack_trace = body.get("_graphmodule_graph_node_meta_stack_trace", None)
     if node_meta_stack_trace is not None:
         del body["_graphmodule_graph_node_meta_stack_trace"]
         for node in graph.nodes:
@@ -841,25 +840,12 @@ class {module_name}(torch.nn.Module):
         if "_wrapped_call" not in vars(cls):
             cls._wrapped_call = _WrappedCall(cls, cls_call)  # type: ignore[attr-defined]
 
-        self._recompile_submodules()
-
         def call_wrapped(self, *args, **kwargs):
             return self._wrapped_call(self, *args, **kwargs)
 
         cls.__call__ = call_wrapped  # type: ignore[method-assign]
 
         return python_code
-
-    def _recompile_submodules(self) -> list[tuple[str, PythonCode]]:
-        """
-        Recompile all submodules of this graph module, returning their respective PythonCodes
-        in a similar format to named_children()
-        """
-        results: list[tuple[str, PythonCode]] = []
-        for name, mod in self.named_children():
-            if isinstance(mod, GraphModule):
-                results.append((name, mod.recompile()))
-        return results
 
     # Passing Tracer as argument allows subclasses extending fx.GraphModule
     # define their own Tracer (extending fx.Tracer).

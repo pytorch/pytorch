@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import copy
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, Callable, TYPE_CHECKING, Union
 
 import torch
 from torch.ao.quantization import QConfigMapping
@@ -10,8 +10,6 @@ from torch.ao.quantization.qconfig_mapping import _QCONFIG_STYLE_ORDER
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from torch.ao.quantization.qconfig import QConfigAny
 
 __all__ = ["QConfigMultiMapping"]

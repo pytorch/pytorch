@@ -1,6 +1,6 @@
 import copy
 import operator
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional
 
 import torch
 from torch.ao.quantization import (
@@ -13,10 +13,6 @@ from torch.ao.quantization import (
 from torch.ao.quantization.backend_config import BackendConfig
 from torch.ao.quantization.observer import _PartialWrapper
 from torch.ao.quantization.quantize_fx import convert_to_reference_fx, prepare_fx
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 
 # TODO: move all LSTM util functions from fx/utils.py to this file

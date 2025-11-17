@@ -298,7 +298,7 @@ class MaxPool3d(_MaxPoolNd):
 
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
-    """
+    """  # noqa: E501
 
     kernel_size: _size_3_t
     stride: _size_3_t

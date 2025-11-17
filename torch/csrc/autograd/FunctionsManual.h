@@ -279,7 +279,7 @@ std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
     const at::Tensor& self,
     const at::Tensor& min,
     const at::Tensor& max,
-    const std::array<bool, 2>& /*grad_input_mask*/);
+    const std::array<bool, 2>&);
 at::Tensor clamp_jvp(
     const Tensor& self_p,
     const Tensor& self_t,

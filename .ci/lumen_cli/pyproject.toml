@@ -6,7 +6,7 @@ dependencies = [
     "GitPython==3.1.45",
     "docker==7.1.0",
     "pytest==7.3.2",
-    "uv==0.9.5"
+    "uv==0.8.6"
 ]
 
 [tool.setuptools]

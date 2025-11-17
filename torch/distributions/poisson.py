@@ -32,7 +32,7 @@ class Poisson(ExponentialFamily):
         rate (Number, Tensor): the rate parameter
     """
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     arg_constraints = {"rate": constraints.nonnegative}
     support = constraints.nonnegative_integer
 
@@ -83,6 +83,6 @@ class Poisson(ExponentialFamily):
     def _natural_params(self) -> tuple[Tensor]:
         return (torch.log(self.rate),)
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def _log_normalizer(self, x):
         return torch.exp(x)

@@ -225,7 +225,6 @@ def decompose_bmm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
 
     if should_decompose_bmm(mat1, mat2):
         counters["inductor"]["decompose_bmm"] += 1
-        # pyrefly: ignore [bad-argument-type]
         match.replace_by_example(repl, [mat1, mat2])
         print_decompose_pattern(match, [mat1, mat2])
         realize_inputs([mat1, mat2])
@@ -249,7 +248,6 @@ def decompose_addmm(
 
     if should_decompose_mm(mat2, mat3):
         counters["inductor"]["decompose_addmm"] += 1
-        # pyrefly: ignore [bad-argument-type]
         match.replace_by_example(repl, [mat1, mat2, mat3])
         print_decompose_pattern(match, [mat1, mat2, mat3])
         realize_inputs([mat1, mat2, mat3])
@@ -270,7 +268,6 @@ def decompose_mm(
 
     if should_decompose_mm(mat1, mat2):
         counters["inductor"]["decompose_mm"] += 1
-        # pyrefly: ignore [bad-argument-type]
         match.replace_by_example(repl, [mat1, mat2])
         print_decompose_pattern(match, [mat1, mat2])
         realize_inputs([mat1, mat2])

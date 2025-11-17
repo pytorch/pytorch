@@ -2770,7 +2770,11 @@ class WorkHookTest(MultiProcessTestCase):
         # from rank0 to other ranks. However, this is DDP's internal implementation,
         # which is subject to change in future versions.
         self.assertTrue(num_hook_fired[OpType.BROADCAST] > 0)
-        ctor_allreduce = num_hook_fired.get(OpType.ALLREDUCE, 0)
+        ctor_allreduce = (
+            num_hook_fired[OpType.ALLREDUCE]
+            if OpType.ALLREDUCE in num_hook_fired
+            else 0
+        )
 
         x = torch.zeros(2, 1000).cuda(self.rank)
         ddp(x).sum().backward()
@@ -3818,6 +3822,27 @@ class NcclProcessGroupWithDispatchedCollectivesTests(
         self.assertEqual(output_tensor, tensor)
 
     @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_allgather_noncontig(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        device = "cuda"
+        tensor = (
+            torch.arange(0, 16, device=torch.device(device))
+            .view(2, 2, 2, 2)
+            .to(memory_format=torch.channels_last)
+        )
+        tensor_list = [torch.empty_like(tensor) for _ in range(self.world_size)]
+        dist.all_gather(tensor_list, tensor)
+        for o in tensor_list:
+            self.assertEqual(o, tensor)
+
+    @requires_nccl()
     @skip_if_lt_x_gpu(1)
     @parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
     def test_allgather_float8(self, float8_dtype):
@@ -4575,34 +4600,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
             timing_enabled=timing_enabled,
             is_json=True,
         )
-        dist.destroy_process_group()
-
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("timing_enabled", [True, False])
-    def test_fr_record_reset(self, timing_enabled):
-        if self.rank == self.MAIN_PROCESS_RANK:
-            return
-        pg = self._create_process_group_nccl()
-        if timing_enabled:
-            pg._enable_collectives_timing()
-        device = self.local_device
-        self.set_thread_name("fr_test_thread")
-        a = torch.full((3, 4), float(self.rank), device=device)
-        for _ in range(5):
-            f = pg.allreduce(a)
-        f.wait()
-        torch.cuda.synchronize(device=device)
-        # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
-        time.sleep(1)
-        torch._C._distributed_c10d._reset_fr_recording_nccl()
-        for _ in range(4):
-            f = pg.allreduce(a)
-        f.wait()
-        torch.cuda.synchronize(device=device)
-        time.sleep(1)
-        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
-        self.assertEqual(len(t["entries"]), 4)
         dist.destroy_process_group()
 
     @requires_nccl()

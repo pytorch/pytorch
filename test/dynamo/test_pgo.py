@@ -62,13 +62,6 @@ class PgoTest(torch._dynamo.test_case.TestCase):
         force_nn_module_property_static_shapes=False,
     )
     def test_whitelist_suggestion(self):
-        from torch._dynamo.pgo import (
-            _collect_dynamic_sources,
-            _collect_missing_sources,
-            get_code_state,
-            render_code_state,
-        )
-
         cnts = CompileCounter()
 
         @torch.compile(backend=cnts, fullgraph=True)
@@ -90,18 +83,14 @@ class PgoTest(torch._dynamo.test_case.TestCase):
         ]
 
         def check_whitelist(sources_):
-            state = render_code_state(get_code_state())
+            state = torch._dynamo.pgo.render_code_state(
+                torch._dynamo.pgo.get_code_state()
+            )
             whitelist = re.search(r'TORCH_COMPILE_DYNAMIC_SOURCES="(.*)"', state).group(
                 1
             )
             for src in sources_:
                 self.assertTrue(src in whitelist)
-
-        def check_num_missing_whitelist(expected):
-            frame_state = next(iter(get_code_state().values()))
-            all_dynamic_sources = _collect_dynamic_sources(frame_state)
-            missing_whitelist = _collect_missing_sources(all_dynamic_sources)
-            self.assertEqual(len(missing_whitelist), expected)
 
         # check growing whitelist
         f = Foo()
@@ -118,13 +107,11 @@ class PgoTest(torch._dynamo.test_case.TestCase):
         f.attr = torch.randn(8)
         f(torch.randn(8, 8), torch.randn(8))
         check_whitelist(sources)
-        check_num_missing_whitelist(5)
 
         # now use suggested whitelist
         self.reset()
         cnts.clear()
-        code_state = get_code_state()
-        state = render_code_state(code_state)
+        state = torch._dynamo.pgo.render_code_state(torch._dynamo.pgo.get_code_state())
         whitelist = re.search(r'TORCH_COMPILE_DYNAMIC_SOURCES="(.*)"', state).group(1)
         with torch.compiler.config.patch(dynamic_sources=whitelist):
             f = Foo()
@@ -134,7 +121,6 @@ class PgoTest(torch._dynamo.test_case.TestCase):
             f.attr = torch.randn(8)
             f(torch.randn(8, 8), torch.randn(8))
             self.assertEqual(cnts.frame_count, 1)
-            check_num_missing_whitelist(0)
 
     def test_no_empty_graph_allowlist(self):
         @torch._dynamo.disable

@@ -154,7 +154,7 @@ def make_crossref_functionalize(
                 maybe_detach, (f_args, f_kwargs)
             )
             with fake_mode:
-                f_r = op(*f_args, **f_kwargs)  # pyrefly: ignore [invalid-param-spec]
+                f_r = op(*f_args, **f_kwargs)  # pyrefly: ignore  # invalid-param-spec
         r = op._op_dk(final_key, *args, **kwargs)
 
         def desc():

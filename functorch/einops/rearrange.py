@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import functools
-from typing import TYPE_CHECKING, Union
+from typing import Callable, TYPE_CHECKING, Union
 
 import torch
 from functorch.dim import dims  # noqa: F401
@@ -16,7 +16,7 @@ from ._parsing import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
 
 __all__ = ["rearrange"]
 

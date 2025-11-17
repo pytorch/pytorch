@@ -188,16 +188,14 @@ class cuBLASModule:
                 value, "allow_fp16_reduced_precision_reduction"
             )
             return torch._C._set_cublas_allow_fp16_reduced_precision_reduction(
-                allow_reduced_precision,
-                allow_splitk,
+                allow_reduced_precision, allow_splitk
             )
         elif name == "allow_bf16_reduced_precision_reduction":
             allow_reduced_precision, allow_splitk = self._parse_reduction_setting(
                 value, "allow_bf16_reduced_precision_reduction"
             )
             return torch._C._set_cublas_allow_bf16_reduced_precision_reduction(
-                allow_reduced_precision,
-                allow_splitk,
+                allow_reduced_precision, allow_splitk
             )
         elif name == "allow_fp16_accumulation":
             return torch._C._set_cublas_allow_fp16_accumulation(value)

@@ -182,8 +182,7 @@ def save(
     no_dist = no_dist or (not dist.is_available()) or (not dist.is_initialized())
     if no_dist:
         warnings.warn(
-            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to save in a single process.",
-            stacklevel=2,
+            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to save in a single process."
         )
 
     with _profile():
@@ -293,10 +292,11 @@ def async_save(
 
     if dist.is_available() and dist.is_initialized():
         pg = process_group or _get_default_group()
-        if torch.device("cpu") not in pg._device_types:
-            raise AssertionError(
-                "A CPU backend must be enabled for async save; try initializing process group with 'cpu:gloo,cuda:nccl'"
-            )
+        assert (
+            torch.device("cpu") in pg._device_types  # type: ignore[attr-defined]
+        ), (
+            "A CPU backend must be enabled for async save; try initializing process group with 'cpu:gloo,cuda:nccl'"
+        )
 
     if async_stager is None:
         if storage_writer is not None and isinstance(storage_writer, AsyncStager):
@@ -329,7 +329,6 @@ def async_save(
     upload_future: Future = upload_executor.execute_save(
         staging_future_or_state_dict,
         checkpoint_id=checkpoint_id,
-        # pyrefly: ignore [bad-argument-type]
         storage_writer=storage_writer,
         planner=planner,
         process_group=process_group,
@@ -396,8 +395,7 @@ def _save_state_dict(
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
     if planner is None:
         planner = DefaultSavePlanner()
-    if planner is None:
-        raise AssertionError("planner is None")
+    assert planner is not None
 
     global_metadata = None
 
@@ -408,15 +406,13 @@ def _save_state_dict(
 
     @_dcp_method_logger(**ckpt_kwargs)
     def local_step():
-        if planner is None:
-            raise AssertionError("planner is None")
+        assert planner is not None
         storage_meta = storage_writer.storage_meta()
         if "storage_meta" not in inspect.signature(planner.set_up_planner).parameters:
             warnings.warn(
                 "The function definition for SavePlanner.set_up_planner has been updated"
                 " to include the storage_meta argument. Please update your implementation"
-                " to include this parameter.",
-                stacklevel=2,
+                " to include this parameter."
             )
             planner.set_up_planner(state_dict, distW.is_coordinator)  # type: ignore[call-arg, arg-type]
         else:
@@ -446,8 +442,7 @@ def _save_state_dict(
     def global_step(all_local_plans):
         nonlocal global_metadata
 
-        if planner is None:
-            raise AssertionError("planner is None")
+        assert planner is not None
         all_local_plans, global_metadata = planner.create_global_plan(all_local_plans)
         all_local_plans = storage_writer.prepare_global_plan(all_local_plans)
         return all_local_plans
@@ -462,10 +457,8 @@ def _save_state_dict(
 
     @_dcp_method_logger(**ckpt_kwargs)
     def write_data():
-        if planner is None:
-            raise AssertionError("planner is None")
-        if central_plan is None:
-            raise AssertionError("central_plan is None")
+        assert planner is not None
+        assert central_plan is not None
         final_local_plan = planner.finish_plan(central_plan)
         all_writes = storage_writer.write_data(final_local_plan, planner)
 
@@ -474,8 +467,7 @@ def _save_state_dict(
 
     @_dcp_method_logger(**ckpt_kwargs)
     def finish_checkpoint(all_results):
-        if global_metadata is None:
-            raise AssertionError("global_metadata is None")
+        assert global_metadata is not None
         storage_writer.finish(metadata=global_metadata, results=all_results)
         return global_metadata
 

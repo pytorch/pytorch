@@ -6,32 +6,21 @@ import pickle
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError, wait
 from contextlib import contextmanager
 from itertools import combinations
+from pathlib import Path
 from random import Random
-from shutil import rmtree
 from threading import Lock
-from typing import Any, Generator, Sequence, TYPE_CHECKING, Union
-from typing_extensions import TypeVar
+from typing import Generator, Sequence, Union
+from typing_extensions import Self, TypeVar
 from unittest.mock import patch
 
 from filelock import FileLock
 
-from torch._inductor.runtime.caching import (
-    config,
-    context,
-    exceptions,
-    implementations as impls,
-    locks,
-    utils,
-)
+from torch._inductor.runtime.caching import config, context, exceptions, locks, utils
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 class TestMixin:
@@ -356,235 +345,24 @@ class ExceptionsTest(TestCase):
 
 
 @instantiate_parametrized_tests
-class ImplementationsTest(TestMixin, TestCase):
-    impl_typenames: list[str] = [
-        "_InMemoryCacheImpl",
-        "_OnDiskCacheImpl",
-    ]
-    cls_id: int = Random().randint(0, 2**32)
-
-    @classmethod
-    def sub_dir(cls) -> str:
-        return f"testing-impls-instance-{cls.cls_id}"
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        rmtree(
-            impls._OnDiskCacheImpl(sub_dir=cls.sub_dir())._cache_dir, ignore_errors=True
-        )
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        rmtree(
-            impls._OnDiskCacheImpl(sub_dir=cls.sub_dir())._cache_dir, ignore_errors=True
-        )
-
-    def impl_from_typename(self, impl_typename: str) -> impls._CacheImpl:
-        if impl_typename == "_OnDiskCacheImpl":
-            return impls._OnDiskCacheImpl(
-                sub_dir=f"{self.sub_dir()}/rng-{self.random_string[4:]}",
-            )
-        else:
-            return getattr(impls, impl_typename)()
-
-    def assert_key_in(self, key: Any, impl: impls._CacheImpl) -> None:
-        self.assertTrue(impl.get(key) is not None)
-
-    def assert_key_not_in(self, key: Any, impl: impls._CacheImpl) -> None:
-        self.assertTrue(impl.get(key) is None)
-
-    def assert_key_value_inserted_in(
-        self, key: Any, value: Any, impl: impls._CacheImpl
-    ) -> None:
-        self.assertTrue(impl.insert(key, value))
-
-    def assert_key_value_not_inserted_in(
-        self, key: Any, value: Any, impl: impls._CacheImpl
-    ) -> None:
-        self.assertFalse(impl.insert(key, value))
-
-    def assert_key_has_value_in(
-        self, key: Any, value: Any, impl: impls._CacheImpl
-    ) -> None:
-        self.assertTrue(((get := impl.get(key)) is not None) and (get.value == value))
-
-    @parametrize("impl_typename", impl_typenames)
-    def test_get(self, impl_typename: str) -> None:
-        """Test cache get operation returns cache miss for non-existent keys.
-
-        Verifies that both in-memory and on-disk cache implementations correctly
-        handle get operations for keys that do not exist in the cache. This test
-        ensures that the cache properly returns a cache miss (hit=False) when
-        attempting to retrieve a non-existent key.
-
-        Args:
-            impl_typename: The cache implementation type to test ("_InMemoryCacheImpl" or "_OnDiskCacheImpl")
-        """
-        impl: impls._CacheImpl = self.impl_from_typename(impl_typename)
-        with impl.lock():
-            self.assert_key_not_in(self.random_string, impl)
-
-    @parametrize("impl_typename", impl_typenames)
-    def test_insert(self, impl_typename: str) -> None:
-        """Test cache insert operation successfully stores and retrieves key-value pairs.
-
-        Verifies that both in-memory and on-disk cache implementations correctly
-        handle insert operations for new key-value pairs. This test ensures that:
-        1. Keys initially don't exist in the cache (cache miss)
-        2. Insert operations succeed for new keys
-        3. The stored value can be retrieved correctly after insertion
-
-        Args:
-            impl_typename: The cache implementation type to test ("_InMemoryCacheImpl" or "_OnDiskCacheImpl")
-        """
-        impl: impls._CacheImpl = self.impl_from_typename(impl_typename)
-        with impl.lock():
-            key: str = self.random_string
-            self.assert_key_not_in(key, impl)
-            value: str = self.random_string
-            self.assert_key_value_inserted_in(key, value, impl)
-            self.assert_key_has_value_in(key, value, impl)
-
-    @parametrize("impl_typename", impl_typenames)
-    def test_insert_will_not_overwrite(self, impl_typename: str) -> None:
-        """Test cache insert operation does not overwrite existing keys.
-
-        Verifies that both in-memory and on-disk cache implementations correctly
-        handle insert operations for keys that already exist in the cache. This test
-        ensures that:
-        1. Keys initially don't exist in the cache (cache miss)
-        2. First insert operation succeeds for new keys
-        3. Subsequent insert operations with the same key fail (inserted=False)
-        4. The original value is preserved and not overwritten
-
-        Args:
-            impl_typename: The cache implementation type to test ("_InMemoryCacheImpl" or "_OnDiskCacheImpl")
-        """
-        impl: impls._CacheImpl = self.impl_from_typename(impl_typename)
-        with impl.lock():
-            key: str = self.random_string
-            self.assert_key_not_in(key, impl)
-            value: str = self.random_string
-            self.assert_key_value_inserted_in(key, value, impl)
-            self.assert_key_value_not_inserted_in(key, self.random_string, impl)
-            self.assert_key_has_value_in(key, value, impl)
-
-    @parametrize("impl_typename", impl_typenames)
-    def test_key_encoding(self, impl_typename: str) -> None:
-        """Test that cache implementations properly handle non-serializable keys.
-
-        Verifies that both in-memory and on-disk cache implementations correctly
-        raise KeyPicklingError when attempting to insert keys that cannot be
-        pickled (such as lambda functions). This ensures proper error handling
-        for invalid key types that would break the caching system.
-
-        Args:
-            impl_typename: The cache implementation type to test ("_InMemoryCacheImpl" or "_OnDiskCacheImpl")
-        """
-        impl: impls._CacheImpl = self.impl_from_typename(impl_typename)
-        with impl.lock():
-            with self.assertRaises(exceptions.KeyPicklingError):
-                impl.insert(lambda: None, None)
-
-    @parametrize("impl_typename", impl_typenames)
-    def test_value_encoding(self, impl_typename: str) -> None:
-        """Test that on-disk cache implementations properly handle non-serializable values.
-
-        Verifies that on-disk cache implementations correctly raise ValuePicklingError
-        when attempting to insert values that cannot be pickled (such as lambda functions).
-        This test only applies to on-disk implementations since in-memory caches don't
-        require serialization. Ensures proper error handling for invalid value types.
-
-        Args:
-            impl_typename: The cache implementation type to test ("_InMemoryCacheImpl" or "_OnDiskCacheImpl")
-        """
-        impl: impls._CacheImpl = self.impl_from_typename(impl_typename)
-        with impl.lock():
-            if isinstance(impl, impls._OnDiskCacheImpl):
-                with self.assertRaises(exceptions.ValuePicklingError):
-                    impl.insert(None, lambda: None)
-
-    @parametrize("impl_typename", impl_typenames)
-    def test_value_decoding(self, impl_typename: str) -> None:
-        """Test that on-disk cache implementations properly handle corrupted cached values.
-
-        Verifies that on-disk cache implementations correctly raise ValueUnPicklingError
-        when attempting to retrieve values from cache files that contain corrupted or
-        invalid pickled data. This test ensures proper error handling when cached data
-        becomes corrupted on disk. Only applies to on-disk implementations since
-        in-memory caches don't involve serialization/deserialization.
-
-        Args:
-            impl_typename: The cache implementation type to test ("_InMemoryCacheImpl" or "_OnDiskCacheImpl")
-        """
-        impl: impls._CacheImpl = self.impl_from_typename(impl_typename)
-        with impl.lock():
-            if isinstance(impl, impls._OnDiskCacheImpl):
-                key: str = self.random_string
-                self.assert_key_not_in(key, impl)
-                fpath: Path = impl._fpath_from_key(key)
-                with open(fpath, "xb") as fp:
-                    impl._write_version_header(fp)
-                    fp.write(b"foo")
-                with self.assertRaises(exceptions.ValueUnPicklingError):
-                    impl.get(key)
-
-    @parametrize("impl_typename", impl_typenames)
-    def test_version_mismatch(self, impl_typename: str) -> None:
-        """Test that on-disk cache implementations properly handle version mismatches.
-
-        Verifies that on-disk cache implementations correctly handle cached data when
-        the cache version changes. This test ensures that:
-        1. Data can be stored and retrieved with the current version
-        2. When version changes, previously cached data becomes inaccessible (cache miss)
-        3. New data can be stored with the new version
-        4. After version change, old cached data remains inaccessible
-
-        This version checking mechanism prevents corruption and compatibility issues
-        when cache formats change between software versions. Only applies to on-disk
-        implementations since in-memory caches don't persist across version changes.
-
-        Args:
-            impl_typename: The cache implementation type to test ("_InMemoryCacheImpl" or "_OnDiskCacheImpl")
-        """
-        impl: impls._CacheImpl = self.impl_from_typename(impl_typename)
-        with impl.lock():
-            if isinstance(impl, impls._OnDiskCacheImpl):
-                key: str = self.random_string
-                self.assert_key_not_in(key, impl)
-                value: str = self.random_string
-                self.assert_key_value_inserted_in(key, value, impl)
-                self.assert_key_has_value_in(key, value, impl)
-                with patch.object(
-                    impls._OnDiskCacheImpl, "_version", impl._version + 1
-                ):
-                    self.assert_key_not_in(key, impl)
-                    self.assert_key_value_inserted_in(key, value, impl)
-                    self.assert_key_has_value_in(key, value, impl)
-                self.assert_key_not_in(key, impl)
-                self.assert_key_value_inserted_in(key, value, impl)
-                self.assert_key_has_value_in(key, value, impl)
-
-
-@instantiate_parametrized_tests
 class LocksTest(TestMixin, TestCase):
     T = TypeVar("T")
 
     @contextmanager
-    def executor(self) -> Generator[ThreadPoolExecutor, None, None]:
+    def executor(self: Self) -> Generator[ThreadPoolExecutor, None, None]:
         executor: ThreadPoolExecutor = ThreadPoolExecutor()
         try:
             yield executor
         finally:
             executor.shutdown()
 
-    def is_lock(self, lock_or_flock: Union[Lock, FileLock]) -> bool:
+    def is_lock(self: Self, lock_or_flock: Union[Lock, FileLock]) -> bool:
         return hasattr(lock_or_flock, "locked")
 
-    def is_flock(self, lock_or_flock: Union[Lock, FileLock]) -> bool:
+    def is_flock(self: Self, lock_or_flock: Union[Lock, FileLock]) -> bool:
         return hasattr(lock_or_flock, "is_locked")
 
-    def lock_or_flock_locked(self, lock_or_flock: Union[Lock, FileLock]) -> bool:
+    def lock_or_flock_locked(self: Self, lock_or_flock: Union[Lock, FileLock]) -> bool:
         if self.is_lock(lock_or_flock):
             return lock_or_flock.locked()
         elif self.is_flock(lock_or_flock):
@@ -592,13 +370,13 @@ class LocksTest(TestMixin, TestCase):
         else:
             raise NotImplementedError
 
-    def test_BLOCKING(self) -> None:
+    def test_BLOCKING(self: Self) -> None:
         self.assertEqual(locks._BLOCKING, -1.0)
 
-    def test_NON_BLOCKING(self) -> None:
+    def test_NON_BLOCKING(self: Self) -> None:
         self.assertEqual(locks._NON_BLOCKING, 0.0)
 
-    def test_BLOCKING_WITH_TIMEOUT(self) -> None:
+    def test_BLOCKING_WITH_TIMEOUT(self: Self) -> None:
         self.assertGreater(locks._BLOCKING_WITH_TIMEOUT, 0.0)
 
     @patch.object(locks, "_BLOCKING_WITH_TIMEOUT", 1.0)
@@ -608,7 +386,7 @@ class LocksTest(TestMixin, TestCase):
     @parametrize("acquisition_mode", ["safe", "unsafe"])
     @parametrize("release", ["unlocked", "never", "before_timeout", "after_timeout"])
     def test_acquire_with_timeout(
-        self,
+        self: Self,
         lock_typename: str,
         lock_timeout: str,
         acquisition_mode: str,
@@ -662,10 +440,7 @@ class LocksTest(TestMixin, TestCase):
             self.assertFalse(self.lock_or_flock_locked(lock_or_flock))
 
         assert lock_typename in ["Lock", "FileLock"]
-        flock_fpath: Path = (
-            impls._OnDiskCacheImpl()._cache_dir
-            / f"testing-locks-instance-{self.random_string}.lock"
-        )
+        flock_fpath: Path = Path("/tmp/LocksTest") / self.random_string
         lock_or_flock: Union[Lock, FileLock] = (
             Lock() if lock_typename == "Lock" else FileLock(str(flock_fpath))
         )

@@ -114,7 +114,7 @@ def get_param_groups(
             "intermediates": intersected,
         }
         for input_node in intersected:
-            existing = param_groups.get(input_node)
+            existing = param_groups.get(input_node, None)
             if existing is not None:
                 existing["params"] = existing["params"].union(param_group["params"])
                 existing["intermediates"] = existing["intermediates"].union(
@@ -245,7 +245,6 @@ def stage_backward_weight(
             if non_none_grads:
                 summed_grad = sum(non_none_grads)
                 valid_edges.append(GradientEdge(intermediate, 0))
-                # pyrefly: ignore [bad-argument-type]
                 valid_grad_outputs.append(summed_grad)
 
         # Break a reference cycle caused inside stage_backward_input->get_hook->hook

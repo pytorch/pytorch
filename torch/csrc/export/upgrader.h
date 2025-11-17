@@ -108,12 +108,11 @@ void throwUpgraderError(
 /// e.g. adding a new field with default value, it's automatically handled by
 /// the default constructor in generated_serialization_types.h.
 ///
-/// @param artifact The JSON artifact to upgrade(passed by value: function
-/// operates on a local copy, original remains unmodified)
+/// @param artifact The JSON artifact to upgrade
 /// @param target_version The target schema version to upgrade to
 /// @return The upgraded JSON artifact with updated schema version
 /// @throws std::runtime_error if artifact is missing schema_version field
 /// @throws std::runtime_error if final version doesn't match target version
-nlohmann::json upgrade(nlohmann::json artifact, int target_version);
+nlohmann::json upgrade(const nlohmann::json& artifact, int target_version);
 
 } // namespace torch::_export

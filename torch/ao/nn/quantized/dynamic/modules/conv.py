@@ -68,13 +68,12 @@ class Conv1d(nnq.Conv1d):
         reduce_range=True,
     ):
         warnings.warn(
-            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended",  # noqa: B950
-            stacklevel=2,
+            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended"  # noqa: B950
         )
         factory_kwargs = {"device": device, "dtype": dtype}
         kernel_size = _single(kernel_size)
         stride = _single(stride)
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         padding = padding if isinstance(padding, str) else _single(padding)
         dilation = _single(dilation)
 
@@ -156,8 +155,7 @@ class Conv2d(nnq.Conv2d):
     ):
         warnings.warn(
             f"The current implementation of the {self._get_name()} module "
-            "has poor numerical accuracy and its use is not recommended",
-            stacklevel=2,
+            "has poor numerical accuracy and its use is not recommended"
         )
         factory_kwargs = {"device": device, "dtype": dtype}
         kernel_size = _pair(kernel_size)
@@ -241,8 +239,7 @@ class Conv3d(nnq.Conv3d):
         dtype=None,
     ):
         warnings.warn(
-            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended",  # noqa: B950
-            stacklevel=2,
+            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended"  # noqa: B950
         )
         assert padding_mode != "reflect", "Conv3d does not support reflection padding"
         factory_kwargs = {"device": device, "dtype": dtype}
@@ -333,8 +330,7 @@ class ConvTranspose1d(nnq.ConvTranspose1d):
         dtype=None,
     ):
         warnings.warn(
-            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended",  # noqa: B950
-            stacklevel=2,
+            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended"  # noqa: B950
         )
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(
@@ -416,8 +412,7 @@ class ConvTranspose2d(nnq.ConvTranspose2d):
         dtype=None,
     ):
         warnings.warn(
-            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended",  # noqa: B950
-            stacklevel=2,
+            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended"  # noqa: B950
         )
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(
@@ -499,8 +494,7 @@ class ConvTranspose3d(nnq.ConvTranspose3d):
         dtype=None,
     ):
         warnings.warn(
-            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended",  # noqa: B950
-            stacklevel=2,
+            f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended"  # noqa: B950
         )
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(

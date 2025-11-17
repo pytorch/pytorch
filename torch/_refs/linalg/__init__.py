@@ -110,7 +110,7 @@ def _check_vector_norm_args(
             x.numel() != 0,
             not isinstance(dim, IntLike) and dim is not None and len(dim) != 0,
         ),
-        lambda: f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
+        f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
         "because the operation does not have an identity",
     )
 
@@ -119,7 +119,7 @@ def _check_vector_norm_args(
         for d in dim:
             torch._check(
                 sym_or(x.numel() != 0, d < len(shape) and d >= 0 and shape[d] != 0),
-                lambda: f"linalg.vector_norm cannot compute the {ord} norm on the "
+                f"linalg.vector_norm cannot compute the {ord} norm on the "
                 f"dimension {d} because this dimension is empty and the "
                 "operation does not have an identity",
             )
@@ -216,7 +216,7 @@ def matrix_norm(
     # shape
     check_is_matrix(A, "linalg.matrix_norm")
     # dim
-
+    # pyrefly: ignore  # no-matching-overload
     dim = utils.canonicalize_dims(A.ndim, dim)
     if isinstance(dim, Dim):
         dim = (dim,)  # type: ignore[assignment]

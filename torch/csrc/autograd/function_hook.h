@@ -60,8 +60,8 @@ struct TORCH_API PostAccumulateGradHook {
   }
 
   virtual void apply_with_saved(
-      Variable& /*unused*/,
-      torch::dynamo::autograd::SwapSavedVariables& /*unused*/) {
+      Variable&,
+      torch::dynamo::autograd::SwapSavedVariables&) {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
         std::string("compiled_args nyi, see [Note: Compiled Autograd] ") +

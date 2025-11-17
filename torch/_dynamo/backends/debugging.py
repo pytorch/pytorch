@@ -26,9 +26,9 @@ These backends are primarily used for:
 import dataclasses
 import functools
 import logging
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from importlib import import_module
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from functorch.compile import min_cut_rematerialization_partition

@@ -273,7 +273,7 @@ Tensor sparse_coo_tensor(IntArrayRef size,
 
 // helper
 namespace {
-inline Tensor expand_values_if_needed(const Tensor& values) {
+static inline Tensor expand_values_if_needed(const Tensor& values) {
   // expand
   if (values.dim() == 0) {
     // Mimic Numpy behavior here and treat it as a 1D tensor

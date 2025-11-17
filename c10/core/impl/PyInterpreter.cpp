@@ -35,7 +35,7 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
 
   void python_op_registration_trampoline(
       const c10::OperatorHandle& op,
-      c10::DispatchKey /*unused*/,
+      c10::DispatchKey,
       c10::DispatchKeySet keyset,
       torch::jit::Stack* stack,
       bool with_keyset,
@@ -52,21 +52,19 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
 
   void python_dispatcher(
       const c10::OperatorHandle& op,
-      c10::DispatchKeySet /*unused*/,
+      c10::DispatchKeySet,
       torch::jit::Stack* stack) const override {
     PANIC(python_dispatcher);
   }
 
-  bool is_contiguous(const TensorImpl* self, at::MemoryFormat /*unused*/)
-      const override {
+  bool is_contiguous(const TensorImpl* self, at::MemoryFormat) const override {
     PANIC(is_contiguous);
   }
-  c10::SymBool sym_is_contiguous(
-      const TensorImpl* self,
-      at::MemoryFormat /*unused*/) const override {
+  c10::SymBool sym_is_contiguous(const TensorImpl* self, at::MemoryFormat)
+      const override {
     PANIC(sym_is_contiguous);
   }
-  bool is_strides_like(const TensorImpl* self, at::MemoryFormat /*unused*/)
+  bool is_strides_like(const TensorImpl* self, at::MemoryFormat)
       const override {
     PANIC(is_strides_like);
   }

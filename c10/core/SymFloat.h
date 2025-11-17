@@ -43,17 +43,17 @@ class C10_API SymFloat {
     return data_;
   }
 
-  SymFloat operator+(const SymFloat& /*sci*/) const;
-  SymFloat operator-(const SymFloat& /*sci*/) const;
-  SymFloat operator*(const SymFloat& /*sci*/) const;
-  SymFloat operator/(const SymFloat& /*sci*/) const;
+  SymFloat operator+(const SymFloat&) const;
+  SymFloat operator-(const SymFloat&) const;
+  SymFloat operator*(const SymFloat&) const;
+  SymFloat operator/(const SymFloat&) const;
 
-  SymBool sym_eq(const SymFloat& /*sci*/) const;
-  SymBool sym_ne(const SymFloat& /*sci*/) const;
-  SymBool sym_lt(const SymFloat& /*sci*/) const;
-  SymBool sym_le(const SymFloat& /*sci*/) const;
-  SymBool sym_gt(const SymFloat& /*sci*/) const;
-  SymBool sym_ge(const SymFloat& /*sci*/) const;
+  SymBool sym_eq(const SymFloat&) const;
+  SymBool sym_ne(const SymFloat&) const;
+  SymBool sym_lt(const SymFloat&) const;
+  SymBool sym_le(const SymFloat&) const;
+  SymBool sym_gt(const SymFloat&) const;
+  SymBool sym_ge(const SymFloat&) const;
 
   bool operator==(const SymFloat& o) const {
     return sym_eq(o).guard_bool(__FILE__, __LINE__);

@@ -10,6 +10,11 @@ BAD_SSL = "https://self-signed.badssl.com"
 
 print("Testing SSL certificate checking for Python:", sys.version)
 
+if sys.version_info[:2] < (2, 7) or sys.version_info[:2] < (3, 4):
+    print("This version never checks SSL certs; skipping tests")
+    sys.exit(0)
+
+
 EXC = OSError
 
 print(f"Connecting to {GOOD_SSL} should work")

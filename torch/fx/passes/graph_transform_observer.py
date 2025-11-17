@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import os
-from collections.abc import Callable
-from typing import Optional, TypeVar
+from typing import Callable, Optional, TypeVar
 
 from torch.fx import Graph, Node
 from torch.fx._compatibility import compatibility

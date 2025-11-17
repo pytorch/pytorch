@@ -365,9 +365,7 @@ std::vector<std::pair<std::string, TensorMetadata>> ValueCache::unpackTensorMap(
 }
 
 template <>
-void ValueCache::store<CallType::PyCall>(
-    const PyCallKey& key,
-    no_ephemeral_t /*unused*/) {
+void ValueCache::store<CallType::PyCall>(const PyCallKey& key, no_ephemeral_t) {
   auto& locations = std::get<CallType::PyCall>(state_);
   if (C10_UNLIKELY(locations.find(key) == locations.end())) {
     locations[key] = {
@@ -1434,7 +1432,7 @@ struct PythonIDVisitor {
   }
 
   template <typename T>
-  void operator()(T& /*unused*/) {}
+  void operator()(T&) {}
 
   size_t current_python_id_{0};
   ska::flat_hash_map<PyModuleCls, ska::flat_hash_map<PyModuleSelf, size_t>>

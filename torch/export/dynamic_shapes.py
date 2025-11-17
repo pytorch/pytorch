@@ -872,7 +872,7 @@ class AdditionalInputs:
         ]
 
         def _mark_dynamism(v, *other_vs):
-            if not all(type(v) is type(other) for other in other_vs):
+            if not all(type(v) == type(other) for other in other_vs):
                 raise ValueError(
                     "The following inputs were found to have differing types, "
                     f"so they cannot be marked as dynamic: {(v,) + other_vs}."

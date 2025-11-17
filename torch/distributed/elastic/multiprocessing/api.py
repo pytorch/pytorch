@@ -193,8 +193,6 @@ class LogsDest:
     tee_stdouts: dict[int, str] = field(default_factory=dict)
     tee_stderrs: dict[int, str] = field(default_factory=dict)
     error_files: dict[int, str] = field(default_factory=dict)
-    filtered_stdout: str = field(default_factory=str)
-    filtered_stderr: str = field(default_factory=str)
 
 
 class LogsSpecs(ABC):
@@ -292,8 +290,6 @@ class DefaultLogsSpecs(LogsSpecs):
         - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/<rank>/stdout.log`
         - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/<rank>/stderr.log`
         - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/<rank>/error.json`
-        - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/filtered_stdout.log`
-        - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/filtered_stderr.log`
         """
         nprocs = len(envs)
         global_env = {}  # use only to query properties that are not dependent on a rank
@@ -390,15 +386,7 @@ class DefaultLogsSpecs(LogsSpecs):
                 )
                 envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = error_file
 
-        return LogsDest(
-            stdouts,
-            stderrs,
-            tee_stdouts,
-            tee_stderrs,
-            error_files,
-            os.path.join(attempt_log_dir, "filtered_stdout.log"),
-            os.path.join(attempt_log_dir, "filtered_stderr.log"),
-        )
+        return LogsDest(stdouts, stderrs, tee_stdouts, tee_stderrs, error_files)
 
     def __repr__(self) -> str:
         return (
@@ -450,16 +438,6 @@ class PContext(abc.ABC):
     .. warning:: stdouts and stderrs should ALWAYS be a superset of
                  tee_stdouts and tee_stderrs (respectively) this is b/c
                  tee is implemented as a redirect + tail -f <stdout/stderr.log>
-
-    Args:
-        duplicate_stdout_filters:
-            If non-empty, duplicates stdouts specified in ``logs_specs``'s ``tee``
-            to a file containing only lines that match _any_ of the filter strings.
-            The log file is aggregated across all ranks selected by ``tee``.
-        duplicate_stderr_filters:
-            If non-empty, duplicates stderrs specified in ``logs_specs``'s ``tee``
-            to a file containing only lines that match _any_ of the filter strings.
-            The log file is aggregated across all ranks selected by ``tee``.
     """
 
     def __init__(
@@ -470,8 +448,6 @@ class PContext(abc.ABC):
         envs: dict[int, dict[str, str]],
         logs_specs: LogsSpecs,
         log_line_prefixes: Optional[dict[int, str]] = None,
-        duplicate_stdout_filters: Optional[list[str]] = None,
-        duplicate_stderr_filters: Optional[list[str]] = None,
     ):
         self.name = name
         # validate that all mappings have the same number of keys and
@@ -491,39 +467,13 @@ class PContext(abc.ABC):
         self.stderrs = logs_dest.stderrs
         self.error_files = logs_dest.error_files
         self.nprocs = nprocs
-        self.filtered_stdout = logs_dest.filtered_stdout
-        self.filtered_stderr = logs_dest.filtered_stderr
 
-        self._tail_logs = [
-            TailLog(name, logs_dest.tee_stdouts, sys.stdout, log_line_prefixes),
-            TailLog(name, logs_dest.tee_stderrs, sys.stderr, log_line_prefixes),
-        ]
-
-        if duplicate_stdout_filters:
-            self._tail_logs.append(
-                TailLog(
-                    name,
-                    logs_dest.tee_stdouts,
-                    self.filtered_stdout,
-                    log_line_prefixes,
-                    log_line_filter=lambda line: any(
-                        needle in line for needle in duplicate_stdout_filters
-                    ),
-                )
-            )
-
-        if duplicate_stderr_filters:
-            self._tail_logs.append(
-                TailLog(
-                    name,
-                    logs_dest.tee_stderrs,
-                    self.filtered_stderr,
-                    log_line_prefixes,
-                    log_line_filter=lambda line: any(
-                        needle in line for needle in duplicate_stderr_filters
-                    ),
-                )
-            )
+        self._stdout_tail = TailLog(
+            name, logs_dest.tee_stdouts, sys.stdout, log_line_prefixes
+        )
+        self._stderr_tail = TailLog(
+            name, logs_dest.tee_stderrs, sys.stderr, log_line_prefixes
+        )
 
     def start(self) -> None:
         """Start processes using parameters defined in the constructor."""
@@ -539,13 +489,11 @@ class PContext(abc.ABC):
                     sig = getattr(signal, sig_name.strip())
                     signal.signal(sig, _terminate_process_handler)
                     logger.info("Registered signal handler for %s", sig_name)
-                except (AttributeError, ValueError):
+                except (AttributeError, ValueError) as e:
                     logger.warning(
-                        "Failed to register signal handler for %s",
-                        sig_name,
-                        exc_info=True,
+                        "Failed to register signal handler for %s: %s", sig_name, e
                     )
-                except RuntimeError:
+                except RuntimeError as e:
                     if IS_WINDOWS and sig_name.strip() in [
                         "SIGHUP",
                         "SIGQUIT",
@@ -557,9 +505,7 @@ class PContext(abc.ABC):
                         )
                     else:
                         logger.warning(
-                            "Failed to register signal handler for %s",
-                            sig_name,
-                            exc_info=True,
+                            "Failed to register signal handler for %s: %s", sig_name, e
                         )
         else:
             logger.warning(
@@ -567,8 +513,8 @@ class PContext(abc.ABC):
                 "This could lead to orphaned worker processes if the torchrun is terminated."
             )
         self._start()
-        for tail_log in self._tail_logs:
-            tail_log.start()
+        self._stdout_tail.start()
+        self._stderr_tail.start()
 
     @abc.abstractmethod
     def _start(self) -> None:
@@ -655,8 +601,10 @@ class PContext(abc.ABC):
         if not death_sig:
             death_sig = _get_default_signal()
         self._close(death_sig=death_sig, timeout=timeout)
-        for tail_log in self._tail_logs:
-            tail_log.stop()
+        if self._stdout_tail:
+            self._stdout_tail.stop()
+        if self._stderr_tail:
+            self._stderr_tail.stop()
 
 
 def get_std_cm(std_rd: str, redirect_fn):
@@ -709,8 +657,6 @@ class MultiprocessContext(PContext):
         logs_specs: LogsSpecs,
         log_line_prefixes: Optional[dict[int, str]] = None,
         numa_options: Optional[NumaOptions] = None,
-        duplicate_stdout_filters: Optional[list[str]] = None,
-        duplicate_stderr_filters: Optional[list[str]] = None,
     ):
         super().__init__(
             name,
@@ -719,8 +665,6 @@ class MultiprocessContext(PContext):
             envs,
             logs_specs,
             log_line_prefixes,
-            duplicate_stdout_filters,
-            duplicate_stderr_filters,
         )
 
         self.start_method = start_method
@@ -783,7 +727,7 @@ class MultiprocessContext(PContext):
             # pipe. Hence to prevent deadlocks on large return values,
             # we opportunistically try queue.get on each join call
             # See: https://docs.python.org/2/library/multiprocessing.html#all-platforms
-            for local_rank in range(self.nprocs):
+            for local_rank in range(0, self.nprocs):
                 return_queue = self._ret_vals[local_rank]
                 if not return_queue.empty():
                     # save the return values temporarily into a member var
@@ -898,8 +842,6 @@ class SubprocessContext(PContext):
         logs_specs: LogsSpecs,
         log_line_prefixes: Optional[dict[int, str]] = None,
         numa_options: Optional[NumaOptions] = None,
-        duplicate_stdout_filters: Optional[list[str]] = None,
-        duplicate_stderr_filters: Optional[list[str]] = None,
     ):
         super().__init__(
             name,
@@ -908,8 +850,6 @@ class SubprocessContext(PContext):
             envs,
             logs_specs,
             log_line_prefixes,
-            duplicate_stdout_filters,
-            duplicate_stderr_filters,
         )
 
         # state vector; _vdone[local_rank] -> is local_rank finished or not

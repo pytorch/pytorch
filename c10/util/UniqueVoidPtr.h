@@ -13,7 +13,7 @@ using DeleterFnPtr = void (*)(void*);
 namespace detail {
 
 // Does not delete anything
-C10_API void deleteNothing(void* /*unused*/);
+C10_API void deleteNothing(void*);
 
 // A detail::UniqueVoidPtr is an owning smart pointer like unique_ptr, but
 // with three major differences:

@@ -524,10 +524,7 @@ def check_module_version_greater_or_equal(
         if error_if_malformed:
             raise RuntimeError(message) from e
         else:
-            warnings.warn(
-                message + ", but continuing assuming that requirement is met",
-                stacklevel=2,
-            )
+            warnings.warn(message + ", but continuing assuming that requirement is met")
             requirement_is_met = True
 
     return requirement_is_met
@@ -777,7 +774,10 @@ def _open_file_like(name_or_buffer: FileLike, mode: str) -> _opener[IO[bytes]]:
 
 class _open_zipfile_reader(_opener[torch._C.PyTorchFileReader]):
     def __init__(self, name_or_buffer: Union[str, IO[bytes]]) -> None:
-        super().__init__(torch._C.PyTorchFileReader(name_or_buffer))
+        super().__init__(
+            # pyrefly: ignore  # no-matching-overload
+            torch._C.PyTorchFileReader(name_or_buffer)
+        )
 
 
 class _open_zipfile_writer_file(_opener[torch._C.PyTorchFileWriter]):
@@ -970,7 +970,7 @@ def save(
     _check_save_filelike(f)
 
     if isinstance(f, (str, os.PathLike)):
-        f = os.fspath(f)
+        f = os.fspath(f)  # pyrefly: ignore  # no-matching-overload
 
     if _use_new_zipfile_serialization:
         with _open_zipfile_writer(f) as opened_zipfile:
@@ -1024,8 +1024,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
                 warnings.warn(
                     "Couldn't retrieve source code for container of "
                     "type " + obj.__name__ + ". It won't be checked "
-                    "for correctness upon loading.",
-                    stacklevel=2,
+                    "for correctness upon loading."
                 )
             return ("module", obj, source_file, source)
 
@@ -1136,13 +1135,10 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
 
     class PyTorchLegacyPickler(pickle_module.Pickler):
         def persistent_id(self, obj):
-            return persistent_id(obj)  # noqa: F821
+            return persistent_id(obj)
 
     pickler = PyTorchLegacyPickler(f, protocol=pickle_protocol)
     pickler.dump(obj)
-
-    # The class def keeps the persistent_id closure alive, leaking memory.
-    del persistent_id
 
     serialized_storage_keys = sorted(serialized_storages.keys())
     pickle_module.dump(serialized_storage_keys, f, protocol=pickle_protocol)
@@ -1221,14 +1217,10 @@ def _save(
 
     class PyTorchPickler(pickle_module.Pickler):  # type: ignore[name-defined]
         def persistent_id(self, obj):
-            return persistent_id(obj)  # noqa: F821
+            return persistent_id(obj)
 
     pickler = PyTorchPickler(data_buf, protocol=pickle_protocol)
     pickler.dump(obj)
-
-    # The class def keeps the persistent_id closure alive, leaking memory.
-    del persistent_id
-
     data_value = data_buf.getvalue()
     zip_file.write_record("data.pkl", data_value, len(data_value))
     # .format_version is used to track
@@ -1513,7 +1505,6 @@ def load(
                         " dispatching to 'torch.jit.load' (call 'torch.jit.load' directly to"
                         " silence this warning)",
                         UserWarning,
-                        stacklevel=2,
                     )
                     if weights_only:
                         raise RuntimeError(
@@ -1533,6 +1524,7 @@ def load(
                     else:
                         shared = False
                     overall_storage = torch.UntypedStorage.from_file(
+                        # pyrefly: ignore  # no-matching-overload
                         os.fspath(f),
                         shared,
                         size,
@@ -1615,8 +1607,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             warnings.warn(
                 "Couldn't retrieve source code for container of "
                 "type " + container_type.__name__ + ". It won't be checked "
-                "for correctness upon loading.",
-                stacklevel=2,
+                "for correctness upon loading."
             )
             return
         if original_source != current_source:
@@ -1658,7 +1649,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                     "patch tool to revert the changes."
                 )
             msg = f"source code of class '{torch.typename(container_type)}' has changed. {msg}"
-            warnings.warn(msg, SourceChangeWarning, stacklevel=2)
+            warnings.warn(msg, SourceChangeWarning)
 
     def legacy_load(f):
         deserialized_objects: dict[int, Any] = {}
@@ -1962,7 +1953,6 @@ def _load(
             "torch.serialization.set_default_load_endianness to set "
             "the desired default load endianness",
             UserWarning,
-            stacklevel=2,
         )
 
     from torch.utils.serialization import config

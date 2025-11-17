@@ -15,7 +15,7 @@ import warnings
 from collections.abc import Callable
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, Optional, TypeVar, Union
+from typing import Any, cast, Optional, TypeVar, Union
 from unittest.mock import patch
 
 import torch
@@ -160,7 +160,6 @@ def fn_prepped_for_autograd(
     fn: TraceFn,
     args_descs: list[AOTInput],
     meta: ViewAndMutationMeta,
-    aot_config: AOTConfig,
 ) -> PreppedForAutogradTraceFn:
     @simple_wraps(fn)
     def inner_fn(*args):
@@ -241,11 +240,10 @@ def fn_prepped_for_autograd(
         # This is annoying: our joint function needs to be aware of functionalization
         # (syncing mutated inputs before calling autograd.grad())
         # In theory, we could make the autograd engine do this automatically, although that probably isn't any cleaner.
-        if not aot_config.disable_functionalization:
-            for arg in args_maybe_cloned:
-                if not isinstance(arg, Tensor):
-                    continue
-                sync_functional_tensor(arg)
+        for arg in args_maybe_cloned:
+            if not isinstance(arg, Tensor):
+                continue
+            sync_functional_tensor(arg)
 
         return (fw_outs_to_return, out_grad_mask), (
             fw_outs_to_return_descs,
@@ -432,12 +430,9 @@ def create_joint(
             with torch.autograd.detect_anomaly(check_nan=False):
                 return inner_fn(primals, tangents)
 
-    def joint_helper(primals, tangents):
-        return inner_fn_with_anomaly(primals, tangents)
+    inner_fn_with_anomaly.handle = joint_fn_handle  # type: ignore[attr-defined]
 
-    joint_helper.handle = joint_fn_handle  # type: ignore[attr-defined]
-
-    return joint_helper
+    return cast(JointTraceFn, inner_fn_with_anomaly)  # deal with 'handle' property
 
 
 def create_functionalized_rng_ops_wrapper(
@@ -1347,15 +1342,6 @@ def create_functional_call(
             maybe_disable_thunkify(),
         ):
             if isinstance(mod, torch.fx.GraphModule):
-                if kwargs:
-                    # Handle **kwargs. FX only natively supports positional
-                    # arguments (through placeholders).
-                    arg_list = list(args[params_len:])
-                    arg_list.extend(list(kwargs.values()))
-                    args = tuple(arg_list)
-                else:
-                    args = args[params_len:]
-
                 with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
                     warnings.filterwarnings(
                         "ignore", "Anomaly Detection has been enabled."
@@ -1364,7 +1350,9 @@ def create_functional_call(
                         fake_mode = detect_fake_mode()
                         assert fake_mode is not None
                         fake_mode.epoch += 1
-                        out = PropagateUnbackedSymInts(mod).run(*args)
+                        out = PropagateUnbackedSymInts(mod).run(
+                            *args[params_len:], **kwargs
+                        )
             else:
                 out = mod(*args[params_len:], **kwargs)
 

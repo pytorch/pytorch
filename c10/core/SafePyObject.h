@@ -60,7 +60,7 @@ struct C10_API SafePyObject {
   c10::impl::PyInterpreter& pyinterpreter() const {
     return *pyinterpreter_;
   }
-  PyObject* ptr(const c10::impl::PyInterpreter* /*interpreter*/) const;
+  PyObject* ptr(const c10::impl::PyInterpreter*) const;
 
   // stop tracking the current object, and return it
   PyObject* release() {
@@ -103,7 +103,7 @@ struct C10_API SafePyHandle {
   c10::impl::PyInterpreter& pyinterpreter() const {
     return *pyinterpreter_;
   }
-  PyObject* ptr(const c10::impl::PyInterpreter* /*interpreter*/) const;
+  PyObject* ptr(const c10::impl::PyInterpreter*) const;
   void reset() {
     data_ = nullptr;
     pyinterpreter_ = nullptr;

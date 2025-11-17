@@ -4,7 +4,7 @@
 #include <torch/headeronly/util/bit_cast.h>
 #include <cstdint>
 
-HIDDEN_NAMESPACE_BEGIN(torch, headeronly, detail)
+namespace torch::headeronly::detail {
 
 C10_HOST_DEVICE inline float fp32_from_bits(uint32_t w) {
 #if defined(__OPENCL_VERSION__)
@@ -30,7 +30,7 @@ C10_HOST_DEVICE inline uint32_t fp32_to_bits(float f) {
 #endif
 }
 
-HIDDEN_NAMESPACE_END(torch, headeronly, detail)
+} // namespace torch::headeronly::detail
 
 namespace c10::detail {
 using torch::headeronly::detail::fp32_from_bits;

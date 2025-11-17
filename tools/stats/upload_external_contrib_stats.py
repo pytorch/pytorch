@@ -6,15 +6,11 @@ import json
 import os
 import time
 import urllib.parse
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, Callable, cast
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from tools.stats.upload_stats_lib import upload_to_s3
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 
 FILTER_OUT_USERS = {

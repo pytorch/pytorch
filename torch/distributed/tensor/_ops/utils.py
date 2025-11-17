@@ -336,7 +336,6 @@ def expand_to_full_mesh_op_strategy(
         for specs in zip(*strategy_comb):
             if specs[0] is not None:
                 # TODO: we should fill in tensor_meta here.  If nothing else, it helps the filter strategy callback
-                # pyrefly: ignore [bad-argument-type]
                 spec_list.append(DTensorSpec(mesh, specs))
             else:
                 spec_list.append(None)

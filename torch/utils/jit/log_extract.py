@@ -32,14 +32,10 @@ def make_tensor_from_type(inp_type: torch._C.TensorType):
     stride = inp_type.strides()
     device = inp_type.device()
     dtype = inp_type.dtype()
-    if size is None:
-        raise AssertionError("make_tensor_from_type: 'size' is None (inp_type.sizes() returned None)")
-    if stride is None:
-        raise AssertionError("make_tensor_from_type: 'stride' is None (inp_type.strides() returned None)")
-    if device is None:
-        raise AssertionError("make_tensor_from_type: 'device' is None (inp_type.device() returned None)")
-    if dtype is None:
-        raise AssertionError("make_tensor_from_type: 'dtype' is None (inp_type.dtype() returned None)")
+    assert size is not None
+    assert stride is not None
+    assert device is not None
+    assert dtype is not None
     return torch.empty_strided(size=size, stride=stride, device=device, dtype=dtype)
 
 def load_graph_and_inputs(ir: str) -> tuple[Any, list[Any]]:
@@ -85,8 +81,7 @@ def run_test(ir, inputs, *, warmup_runs=10, test_runs=20) -> float:
         if isinstance(input, torch.Tensor):
             is_cpu = input.device.type == "cpu"
             break
-    if is_cpu is None:
-        raise AssertionError("No tensor found in inputs")
+    assert is_cpu is not None
 
     out = time_cpu(graph, inputs, test_runs) if is_cpu else time_cuda(graph, inputs, test_runs)
     return out

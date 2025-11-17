@@ -5,7 +5,7 @@ import json
 import sys
 from functools import cached_property
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 
 _FILE = Path(__file__).absolute()
@@ -18,7 +18,7 @@ else:
     import _linter
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
+    from collections.abc import Iterator, Sequence
 
 
 GRANDFATHER_LIST = _FILE.parent / "docstring_linter-grandfather.json"

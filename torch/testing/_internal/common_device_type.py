@@ -34,7 +34,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     is_privateuse1_backend_available,
     IS_REMOTE_GPU,
-    IS_S390X,
     IS_SANDCASTLE,
     IS_WINDOWS,
     NATIVE_DEVICES,
@@ -391,8 +390,8 @@ class DeviceTypeTestBase(TestCase):
         return test.tolerance_overrides.get(dtype, tol(self.precision, self.rel_tol))
 
     def _apply_precision_override_for_test(self, test, param_kwargs):
-        dtype = param_kwargs.get("dtype")
-        dtype = param_kwargs.get("dtypes", dtype)
+        dtype = param_kwargs["dtype"] if "dtype" in param_kwargs else None
+        dtype = param_kwargs["dtypes"] if "dtypes" in param_kwargs else dtype
         if dtype:
             self.precision = self._get_precision_override(test, dtype)
             self.precision, self.rel_tol = self._get_tolerance_override(test, dtype)
@@ -1337,10 +1336,6 @@ def _has_sufficient_memory(device, size):
         effective_size = size * 10
     else:
         effective_size = size
-
-    # don't try using all RAM on s390x, leave some for service processes
-    if IS_S390X:
-        effective_size = effective_size * 2
 
     if psutil.virtual_memory().available < effective_size:
         gc.collect()

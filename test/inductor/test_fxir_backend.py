@@ -1034,22 +1034,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         x = torch.randn(7, device=self.device)
         self.check(M(), (x,), dynamic_shapes=({0: Dim.DYNAMIC},))
 
-    @parametrize("dynamic", (False, True))
-    @parametrize("input_", (1.5, 2, False))
-    def test_item(self, input_, dynamic: bool):
-        """
-        Test calling Tensor.item.
-        """
-
-        class M(torch.nn.Module):
-            def forward(self, x):
-                return x[1].item()
-
-        x = torch.tensor((input_,) * 10)
-        d = Dim("s0", min=1)
-        dynamic_shapes = ({0: 2 * d},) if dynamic else None
-        self.check(M(), (x,), dynamic_shapes=dynamic_shapes)
-
     @parametrize("pred", (False, True))
     def test_mismatched_branch_dynamic(self, pred: bool):
         """

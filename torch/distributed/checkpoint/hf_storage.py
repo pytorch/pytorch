@@ -226,10 +226,9 @@ class HuggingFaceStorageReader(FileSystemReader):
         tensor = f.get_slice(req.storage_index.fqn)[slices]
         target_tensor = planner.resolve_tensor(req).detach()
 
-        if target_tensor.size() != tensor.size():
-            raise AssertionError(
-                f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
-            )
+        assert target_tensor.size() == tensor.size(), (
+            f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
+        )
 
         target_tensor.copy_(tensor)
         planner.commit_tensor(req, target_tensor)
@@ -300,16 +299,14 @@ class HuggingFaceStorageReader(FileSystemReader):
             except queue.Empty:
                 pass
 
-            if processed_count != len(per_file):
-                raise AssertionError(
-                    f"Not all files were processed: {processed_count} out of {len(per_file)}"
-                )
+            assert processed_count == len(per_file), (
+                f"Not all files were processed: {processed_count} out of {len(per_file)}"
+            )
 
         fut: Future = Future()
         fut.set_result(None)
         return fut
 
-    # pyrefly: ignore [bad-override]
     def read_metadata(self) -> Metadata:
         from safetensors import safe_open  # type: ignore[import]
         from safetensors.torch import _getdtype  # type: ignore[import]

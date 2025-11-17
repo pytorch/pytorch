@@ -21,7 +21,7 @@ using namespace torch;
 PyObject* THPGeneratorClass = nullptr;
 
 PyObject* THPGenerator_initDefaultGenerator(const at::Generator& cdata) {
-  auto type = reinterpret_cast<PyTypeObject*>(THPGeneratorClass);
+  auto type = (PyTypeObject*)THPGeneratorClass;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self)
     throw python_error();
@@ -49,8 +49,7 @@ static PyObject* THPGenerator_pynew(
   auto r = parser.parse(args, kwargs, parsed_args);
   auto device = r.deviceWithDefault(0, at::Device(at::kCPU));
 
-  THPGeneratorPtr self(
-      reinterpret_cast<THPGenerator*>(type->tp_alloc(type, 0)));
+  THPGeneratorPtr self((THPGenerator*)type->tp_alloc(type, 0));
 
   c10::DeviceType device_type = device.type();
   if (device_type == at::kCPU) {
@@ -61,14 +60,14 @@ static PyObject* THPGenerator_pynew(
                       .getNewGenerator(device.index());
   }
 
-  return reinterpret_cast<PyObject*>(self.release());
+  return (PyObject*)self.release();
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPGenerator_getState(PyObject* _self, PyObject* noargs) {
   using namespace torch::autograd;
   HANDLE_TH_ERRORS
-  auto& gen = (reinterpret_cast<THPGenerator*>(_self))->cdata;
+  auto& gen = ((THPGenerator*)_self)->cdata;
 
   // See Note [Acquire lock when using random generators]
   std::scoped_lock<std::mutex> lock(gen.mutex());
@@ -89,7 +88,7 @@ static PyObject* THPGenerator_setState(PyObject* _self, PyObject* _new_state) {
             "expected a torch.ByteTensor, but got {}",
             Py_TYPE(_new_state)->tp_name));
   }
-  auto self = reinterpret_cast<THPGenerator*>(_self);
+  auto self = (THPGenerator*)_self;
   auto& gen = self->cdata;
   const auto& new_state_tensor = THPVariable_Unpack(_new_state);
 
@@ -98,7 +97,7 @@ static PyObject* THPGenerator_setState(PyObject* _self, PyObject* _new_state) {
   gen.set_state(new_state_tensor);
 
   Py_INCREF(self);
-  return reinterpret_cast<PyObject*>(self);
+  return (PyObject*)self;
   END_HANDLE_TH_ERRORS
 }
 
@@ -126,7 +125,7 @@ static PyObject* THPGenerator_graphSafeGetState(
     PyObject* _self,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto& gen = (reinterpret_cast<THPGenerator*>(_self))->cdata;
+  auto& gen = ((THPGenerator*)_self)->cdata;
 
   // See Note [Acquire lock when using random generators]
   std::scoped_lock<std::mutex> lock(gen.mutex());
@@ -139,7 +138,7 @@ static PyObject* THPGenerator_graphSafeSetState(
     PyObject* _self,
     PyObject* _state) {
   HANDLE_TH_ERRORS
-  auto self = reinterpret_cast<THPGenerator*>(_self);
+  auto self = (THPGenerator*)_self;
   auto& gen = self->cdata;
 
   // See Note [Acquire lock when using random generators]
@@ -147,13 +146,13 @@ static PyObject* THPGenerator_graphSafeSetState(
   gen.graphsafe_set_state(THPGenerator_Unwrap(_state));
 
   Py_INCREF(self);
-  return reinterpret_cast<PyObject*>(self);
+  return (PyObject*)self;
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPGenerator_cloneState(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto& gen = (reinterpret_cast<THPGenerator*>(_self))->cdata;
+  auto& gen = ((THPGenerator*)_self)->cdata;
 
   // See Note [Acquire lock when using random generators]
   std::scoped_lock<std::mutex> lock(gen.mutex());
@@ -164,7 +163,7 @@ static PyObject* THPGenerator_cloneState(PyObject* _self, PyObject* noargs) {
 
 static PyObject* THPGenerator_manualSeed(PyObject* _self, PyObject* seed) {
   HANDLE_TH_ERRORS
-  auto self = reinterpret_cast<THPGenerator*>(_self);
+  auto self = (THPGenerator*)_self;
   auto generator = self->cdata;
   TORCH_CHECK(
       THPUtils_checkLong(seed),
@@ -176,13 +175,13 @@ static PyObject* THPGenerator_manualSeed(PyObject* _self, PyObject* seed) {
   std::scoped_lock<std::mutex> lock(generator.mutex());
   generator.set_current_seed(unsigned_seed);
   Py_INCREF(self);
-  return reinterpret_cast<PyObject*>(self);
+  return (PyObject*)self;
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPGenerator_setOffset(PyObject* _self, PyObject* offset) {
   HANDLE_TH_ERRORS
-  auto self = reinterpret_cast<THPGenerator*>(_self);
+  auto self = (THPGenerator*)_self;
   auto generator = self->cdata;
   TORCH_CHECK(
       THPUtils_checkLong(offset),
@@ -194,14 +193,14 @@ static PyObject* THPGenerator_setOffset(PyObject* _self, PyObject* offset) {
   std::scoped_lock<std::mutex> lock(generator.mutex());
   generator.set_offset(unsigned_offset);
   Py_INCREF(self);
-  return reinterpret_cast<PyObject*>(self);
+  return (PyObject*)self;
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPGenerator_seed(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   // See Note [Acquire lock when using random generators]
-  auto self = reinterpret_cast<THPGenerator*>(_self);
+  auto self = (THPGenerator*)_self;
   std::scoped_lock<std::mutex> lock(self->cdata.mutex());
   uint64_t seed_val = self->cdata.seed();
   return THPUtils_packUInt64(seed_val);
@@ -210,14 +209,14 @@ static PyObject* THPGenerator_seed(PyObject* _self, PyObject* noargs) {
 
 static PyObject* THPGenerator_initialSeed(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = reinterpret_cast<THPGenerator*>(_self);
+  auto self = (THPGenerator*)_self;
   return THPUtils_packUInt64(self->cdata.current_seed());
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPGenerator_getOffset(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = reinterpret_cast<THPGenerator*>(_self);
+  auto self = (THPGenerator*)_self;
   return THPUtils_packUInt64(self->cdata.get_offset());
   END_HANDLE_TH_ERRORS
 }
@@ -230,7 +229,7 @@ static PyObject* THPGenerator_get_device(THPGenerator* self, void* unused) {
 
 static PyObject* THPGenerator_reduce(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = reinterpret_cast<THPGenerator*>(_self);
+  auto self = (THPGenerator*)_self;
   auto& gen = self->cdata;
 
   auto ret = THPObjectPtr{PyTuple_New(3)};
@@ -280,11 +279,7 @@ static PyObject* THPGenerator_pickleSetState(PyObject* _self, PyObject* state) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPGenerator_properties[] = {
-    {"device",
-     reinterpret_cast<getter>(THPGenerator_get_device),
-     nullptr,
-     nullptr,
-     nullptr},
+    {"device", (getter)THPGenerator_get_device, nullptr, nullptr, nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
@@ -354,12 +349,11 @@ static PyTypeObject THPGeneratorType = {
 };
 
 bool THPGenerator_init(PyObject* module) {
-  THPGeneratorClass = reinterpret_cast<PyObject*>(&THPGeneratorType);
+  THPGeneratorClass = (PyObject*)&THPGeneratorType;
   if (PyType_Ready(&THPGeneratorType) < 0)
     return false;
   Py_INCREF(&THPGeneratorType);
-  PyModule_AddObject(
-      module, "Generator", reinterpret_cast<PyObject*>(&THPGeneratorType));
+  PyModule_AddObject(module, "Generator", (PyObject*)&THPGeneratorType);
   return true;
 }
 
@@ -383,8 +377,7 @@ PyObject* THPGenerator_Wrap(const Generator& gen) {
     return obj;
   }
 
-  return THPGenerator_NewWithVar(
-      reinterpret_cast<PyTypeObject*>(THPGeneratorClass), gen);
+  return THPGenerator_NewWithVar((PyTypeObject*)THPGeneratorClass, gen);
 }
 
 at::Generator THPGenerator_Unwrap(PyObject* state) {
@@ -402,7 +395,7 @@ at::Generator THPGenerator_Unwrap(PyObject* state) {
 PyObject* THPGenerator_NewWithVar(PyTypeObject* type, Generator gen) {
   PyObject* obj = type->tp_alloc(type, 0);
   if (obj) {
-    auto g = reinterpret_cast<THPGenerator*>(obj);
+    auto g = (THPGenerator*)obj;
     new (&g->cdata) Generator(std::move(gen));
     set_pyobj(g->cdata, obj);
   }

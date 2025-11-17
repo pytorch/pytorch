@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import warnings
-from collections.abc import Callable
-from typing import Any, Union
+from typing import Any, Callable, Union
 
 from torch.ao.quantization.backend_config import (
     BackendConfig,

@@ -3,9 +3,8 @@ import json
 import logging
 from abc import abstractmethod
 from collections import defaultdict
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Generic, Optional, TypeVar
+from typing import Any, Callable, Generic, Optional, TypeVar
 
 import torch
 from torch._dynamo.package import (
@@ -204,7 +203,7 @@ class PrecompileContext:
                 if result is not None:
                     precompile_cache_entries[key] = result
             except Exception as e:
-                logger.warning("Failed to create cache entry %s", key, exc_info=True)
+                logger.warning("Failed to create cache entry %s: %s", key, str(e))
 
                 error = e
                 data = json.dumps(

@@ -90,7 +90,7 @@ class class_ : public ::torch::detail::class_base {
   /// constructor taking an `int` and a `std::string` as argument.
   template <typename... Types>
   class_& def(
-      torch::detail::types<void, Types...> /*unused*/,
+      torch::detail::types<void, Types...>,
       std::string doc_string = "",
       std::initializer_list<arg> default_args =
           {}) { // Used in combination with
@@ -457,8 +457,8 @@ inline class_<CurClass> selective_class_(
 
 template <class CurClass>
 inline detail::ClassNotSelected selective_class_(
-    const std::string& /*unused*/,
-    detail::SelectiveStr<false> /*unused*/) {
+    const std::string&,
+    detail::SelectiveStr<false>) {
   return detail::ClassNotSelected();
 }
 
@@ -512,7 +512,7 @@ inline class_<CurClass> Library::class_(detail::SelectiveStr<true> className) {
 }
 
 template <class CurClass>
-inline detail::ClassNotSelected Library::class_(detail::SelectiveStr<false> /*unused*/) {
+inline detail::ClassNotSelected Library::class_(detail::SelectiveStr<false>) {
   return detail::ClassNotSelected();
 }
 

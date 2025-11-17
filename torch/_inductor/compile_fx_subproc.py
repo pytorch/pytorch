@@ -20,7 +20,7 @@ from .compile_fx_ext import (
     _WireProtocolPickledInput,
     _WireProtocolPickledOutput,
 )
-from .output_code import complex_memory_overlap  # noqa: F401
+from .output_code import complex_memory_overlap as complex_memory_overlap  # noqa: F401
 
 
 if TYPE_CHECKING:

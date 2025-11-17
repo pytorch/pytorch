@@ -84,8 +84,7 @@ across models. Example usage::
 """
 
 import collections
-from collections.abc import Callable
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 import torch.ao.quantization.quantize_fx as quantize_fx
@@ -264,8 +263,7 @@ class OutputComparisonLogger(OutputLogger):
         # fmt: on
         if not self.enabled:
             return x
-        if not isinstance(x, torch.Tensor):
-            raise AssertionError("non-tensor inputs not yet supported")
+        assert isinstance(x, torch.Tensor), "non-tensor inputs not yet supported"
         if self.save_activations:
             # save the activation, for debugging
             self.stats.append(x.detach())
@@ -596,8 +594,9 @@ def _extract_logger_info_one_model(
             key = mod.ref_name
             if key not in results:
                 results[key] = {}
-            if mod.model_name in results[key]:
-                raise AssertionError(f"{mod.model_name} is already present in results")
+            assert mod.model_name not in results[key], (
+                f"{mod.model_name} is already present in results"
+            )
             if mod.results_type not in results[key]:
                 results[key][mod.results_type] = {}
             if mod.model_name not in results[key][mod.results_type]:
@@ -809,10 +808,12 @@ def extend_logger_results_with_comparison(
     """
     for results_type_to_results in results.values():
         for model_name_to_results in results_type_to_results.values():
-            if model_name_1 not in model_name_to_results:
-                raise AssertionError(f"{model_name_1} not found in results")
-            if model_name_2 not in model_name_to_results:
-                raise AssertionError(f"{model_name_2} not found in results")
+            assert model_name_1 in model_name_to_results, (
+                f"{model_name_1} not found in results"
+            )
+            assert model_name_2 in model_name_to_results, (
+                f"{model_name_2} not found in results"
+            )
 
             results_1 = model_name_to_results[model_name_1]
             results_2 = model_name_to_results[model_name_2]
@@ -830,8 +831,7 @@ def extend_logger_results_with_comparison(
                     ):
                         result_1 = cur_result_1
                         break
-                if result_1 is None:
-                    raise AssertionError("Expected result_1 to be not None")
+                assert result_1 is not None
 
                 values_1 = result_1["values"]
                 values_2 = result_2["values"]

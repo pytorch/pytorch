@@ -112,10 +112,10 @@ TORCH_API std::ostream& operator<<(std::ostream& stream, const Slice& slice);
 // `torch.tensor([1, 2])`) | `torch::tensor({1, 2})`
 struct TORCH_API TensorIndex final {
   // Case 1: `at::indexing::None`
-  TensorIndex(std::nullopt_t /*unused*/) : type_(TensorIndexType::None) {}
+  TensorIndex(std::nullopt_t) : type_(TensorIndexType::None) {}
 
   // Case 2: "..." / `at::indexing::Ellipsis`
-  TensorIndex(at::indexing::EllipsisIndexType /*unused*/)
+  TensorIndex(at::indexing::EllipsisIndexType)
       : type_(TensorIndexType::Ellipsis) {}
   TensorIndex(const char* str) : TensorIndex(at::indexing::Ellipsis) {
     TORCH_CHECK_VALUE(

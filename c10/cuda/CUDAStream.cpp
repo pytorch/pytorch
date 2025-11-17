@@ -15,14 +15,14 @@ namespace c10::cuda {
 namespace {
 
 // Global stream state and constants
-c10::once_flag init_flag;
-DeviceIndex num_gpus = -1;
-constexpr int kStreamsPerPoolBits = 5;
-constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
-constexpr unsigned int kDefaultFlags = cudaStreamNonBlocking;
-constexpr int kStreamTypeBits = 4;
+static c10::once_flag init_flag;
+static DeviceIndex num_gpus = -1;
+static constexpr int kStreamsPerPoolBits = 5;
+static constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
+static constexpr unsigned int kDefaultFlags = cudaStreamNonBlocking;
+static constexpr int kStreamTypeBits = 4;
 
-int max_stream_priorities;
+static int max_stream_priorities;
 
 // Non-default streams
 // Note: the number of CUDA devices is determined at run time,
@@ -39,14 +39,14 @@ int max_stream_priorities;
 // the destruction.
 #if !defined(USE_ROCM)
 // CUDA-only: used to initializes the stream pools (once)
-std::array<c10::once_flag, C10_COMPILE_TIME_MAX_GPUS> device_flags;
+static std::array<c10::once_flag, C10_COMPILE_TIME_MAX_GPUS> device_flags;
 #endif
-std::array<
+static std::array<
     std::array<std::atomic<uint32_t>, C10_COMPILE_TIME_MAX_GPUS>,
     c10::cuda::max_compile_time_stream_priorities>
     priority_counters;
 
-std::array<
+static std::array<
     std::array<
         std::array<cudaStream_t, kStreamsPerPool>,
         C10_COMPILE_TIME_MAX_GPUS>,
@@ -128,7 +128,7 @@ std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
   } else if (s.isExt()) {
     stream << "EXT";
   } else {
-    stream << "PRIORITY " << static_cast<int>(s.getStreamType());
+    stream << "PRIORITY " << int(s.getStreamType());
   }
   return stream;
 }
@@ -137,7 +137,7 @@ std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
 // We rely on streamIdIndex and streamIdType being non-negative;
 // see Note [Hazard when concatenating signed integers]
 
-inline StreamIdType streamIdType(StreamId s) {
+static inline StreamIdType streamIdType(StreamId s) {
   // Externally allocated streams have their id being the cudaStream_ptr
   // so the last bit will be 0
   if ((!(s & 1)) && s) {
@@ -151,7 +151,7 @@ inline StreamIdType streamIdType(StreamId s) {
   return StreamIdType(val);
 }
 
-inline size_t streamIdIndex(StreamId s) {
+static inline size_t streamIdIndex(StreamId s) {
   return static_cast<size_t>(
       (s >> (kStreamTypeBits + 1)) & ((1 << kStreamsPerPoolBits) - 1));
 }
@@ -166,11 +166,11 @@ StreamId makeStreamId(StreamIdType st, size_t si) {
 
 // Thread-local current streams
 // NOLINTNEXTLINE(*-arrays)
-thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
+static thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
 
 // Populates global values.
 // Warning: this function must only be called once!
-void initGlobalStreamState() {
+static void initGlobalStreamState() {
   num_gpus = device_count();
   // Check if the number of GPUs matches the expected compile-time max number
   // of GPUs.
@@ -199,7 +199,7 @@ void initGlobalStreamState() {
 
 // Init a single CUDA or HIP stream
 // See Note [HIP Lazy Streams]
-void initSingleStream(int p, DeviceIndex device_index, int i) {
+static void initSingleStream(int p, DeviceIndex device_index, int i) {
   CUDAGuard device_guard(device_index);
   auto& stream = streams[p][device_index][i];
   auto pri = -p; // lower number is higher priority
@@ -215,7 +215,7 @@ void initSingleStream(int p, DeviceIndex device_index, int i) {
 
 // Creates the low and high priority stream pools for the specified device
 // Warning: only call once per device!
-void initDeviceStreamState(DeviceIndex device_index) {
+static void initDeviceStreamState(DeviceIndex device_index) {
   for (const auto i : c10::irange(kStreamsPerPool)) {
     for (const auto p : c10::irange(max_stream_priorities)) {
       initSingleStream(p, device_index, i);
@@ -224,7 +224,7 @@ void initDeviceStreamState(DeviceIndex device_index) {
 }
 
 // Init front-end to ensure initialization only occurs once
-void initCUDAStreamsOnce() {
+static void initCUDAStreamsOnce() {
   // Inits default streams (once, globally)
   c10::call_once(init_flag, initGlobalStreamState);
 
@@ -241,7 +241,7 @@ void initCUDAStreamsOnce() {
 }
 
 // Helper to verify the GPU index is valid
-inline void check_gpu(DeviceIndex device_index) {
+static inline void check_gpu(DeviceIndex device_index) {
   TORCH_CHECK(
       device_index >= 0 && device_index < num_gpus,
       "Device index value ",
@@ -253,7 +253,7 @@ inline void check_gpu(DeviceIndex device_index) {
 
 // Helper to determine the index of the stream to return
 // Note: Streams are returned round-robin (see note in CUDAStream.h)
-uint32_t get_idx(std::atomic<uint32_t>& counter) {
+static uint32_t get_idx(std::atomic<uint32_t>& counter) {
   auto raw_idx = counter++;
   return raw_idx % kStreamsPerPool;
 }

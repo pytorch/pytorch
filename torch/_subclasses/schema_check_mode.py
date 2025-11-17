@@ -86,7 +86,7 @@ class SchemaCheckMode(TorchDispatchMode):
                 return torch.allclose(lhs, rhs, equal_nan=True)
 
         def has_mutated(before, after, md):
-            are_tensors = type(before) is torch.Tensor and type(after) is torch.Tensor
+            are_tensors = type(before) == torch.Tensor and type(after) == torch.Tensor
             if (
                 are_tensors
                 and before.layout != torch.sparse_csr
@@ -113,7 +113,7 @@ class SchemaCheckMode(TorchDispatchMode):
             return name if name != "self" else "input"
 
         def unwrap(e):
-            if isinstance(e, torch.Tensor) and type(e) is not torch.Tensor:
+            if isinstance(e, torch.Tensor) and type(e) != torch.Tensor:
                 try:
                     return e.elem
                 except AttributeError:
@@ -122,7 +122,7 @@ class SchemaCheckMode(TorchDispatchMode):
 
         def parse_metadata(e):
             if isinstance(e, torch.Tensor):
-                if type(e) is not torch.Tensor:
+                if type(e) != torch.Tensor:
                     try:
                         current = e.elem
                         return (

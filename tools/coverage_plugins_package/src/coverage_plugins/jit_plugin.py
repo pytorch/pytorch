@@ -30,7 +30,7 @@ cov_data = CoverageData(basename=f".coverage.jit.{time()}")
 
 
 def is_not_builtin_class(obj: Any) -> bool:
-    return isclass(obj) and type(obj).__module__ != "builtins"
+    return isclass(obj) and not type(obj).__module__ == "builtins"
 
 
 class JitPlugin(CoveragePlugin):  # type: ignore[misc, no-any-unimported]

@@ -24,7 +24,7 @@
 
 namespace at {
 namespace {
-inline void slow_conv_transpose2d_shape_check(
+static inline void slow_conv_transpose2d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
     const Tensor& weight,
@@ -386,7 +386,7 @@ void slow_conv_transpose2d_out_cpu_template(
   }
 }
 
-void slow_conv_transpose2d_backward_out_cpu_template(
+static void slow_conv_transpose2d_backward_out_cpu_template(
     const Tensor& input_,
     const Tensor& grad_output_,
     Tensor& grad_input,

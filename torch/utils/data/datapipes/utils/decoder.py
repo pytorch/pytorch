@@ -61,7 +61,7 @@ def basichandlers(extension: str, data):
     if extension in "txt text transcript":
         return data.decode("utf-8")
 
-    if extension in ["cls", "cls2", "class", "count", "index", "inx", "id"]:
+    if extension in "cls cls2 class count index inx id".split():
         try:
             return int(data)
         except ValueError:
@@ -70,10 +70,10 @@ def basichandlers(extension: str, data):
     if extension in "json jsn":
         return json.loads(data)
 
-    if extension in ["pyd", "pickle"]:
+    if extension in "pyd pickle".split():
         return pickle.loads(data)
 
-    if extension in ["pt"]:
+    if extension in "pt".split():
         stream = io.BytesIO(data)
         return torch.load(stream)
 
@@ -169,12 +169,13 @@ class ImageHandler:
     """
 
     def __init__(self, imagespec):
-        if imagespec not in list(imagespecs.keys()):
-            raise AssertionError(f"unknown image specification: {imagespec}")
+        assert imagespec in list(imagespecs.keys()), (
+            f"unknown image specification: {imagespec}"
+        )
         self.imagespec = imagespec.lower()
 
     def __call__(self, extension, data):
-        if extension.lower() not in ["jpg", "jpeg", "png", "ppm", "pgm", "pbm", "pnm"]:
+        if extension.lower() not in "jpg jpeg png ppm pgm pbm pnm".split():
             return None
 
         try:
@@ -204,20 +205,18 @@ class ImageHandler:
                 return img
             elif atype == "numpy":
                 result = np.asarray(img)
-                if result.dtype != np.uint8:
-                    raise AssertionError(
-                        f"numpy image array should be type uint8, but got {result.dtype}"
-                    )
+                assert result.dtype == np.uint8, (
+                    f"numpy image array should be type uint8, but got {result.dtype}"
+                )
                 if etype == "uint8":
                     return result
                 else:
                     return result.astype("f") / 255.0
             elif atype == "torch":
                 result = np.asarray(img)
-                if result.dtype != np.uint8:
-                    raise AssertionError(
-                        f"numpy image array should be type uint8, but got {result.dtype}"
-                    )
+                assert result.dtype == np.uint8, (
+                    f"numpy image array should be type uint8, but got {result.dtype}"
+                )
 
                 if etype == "uint8":
                     result = np.array(result.transpose(2, 0, 1))
@@ -236,17 +235,7 @@ def imagehandler(imagespec):
 # torch video
 ################################################################
 def videohandler(extension, data):
-    if extension not in [
-        "mp4",
-        "ogv",
-        "mjpeg",
-        "avi",
-        "mov",
-        "h264",
-        "mpg",
-        "webm",
-        "wmv",
-    ]:
+    if extension not in "mp4 ogv mjpeg avi mov h264 mpg webm wmv".split():
         return None
 
     try:

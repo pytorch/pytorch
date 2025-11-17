@@ -43,7 +43,7 @@ def broadcast(tensor, devices=None, *, out=None):
         devices = [_get_device_index(d) for d in devices]
         return torch._C._broadcast(tensor, devices)
     else:
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         return torch._C._broadcast_out(tensor, out)
 
 
@@ -201,7 +201,7 @@ def scatter(tensor, devices=None, chunk_sizes=None, dim=0, streams=None, *, out=
     """
     tensor = _handle_complex(tensor)
     if out is None:
-        # pyrefly: ignore [not-iterable]
+        # pyrefly: ignore  # not-iterable
         devices = [_get_device_index(d) for d in devices]
         return tuple(torch._C._scatter(tensor, devices, chunk_sizes, dim, streams))
     else:

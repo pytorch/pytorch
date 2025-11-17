@@ -25,7 +25,7 @@ struct TORCH_API HPUHooksInterface : AcceleratorHooksInterface {
         false, "Cannot get device of pointer on HPU without HPU backend");
   }
 
-  bool isPinnedPtr(const void* /*data*/) const override {
+  bool isPinnedPtr(const void*) const override {
     return false;
   }
 

@@ -60,7 +60,7 @@ def _toposort(edges):
             incoming_edges[m].remove(n)
             if not incoming_edges[m]:
                 S.add(m)
-    if any(incoming_edges.get(v) for v in edges):
+    if any(incoming_edges.get(v, None) for v in edges):
         raise ValueError("Input has cycles")
     return L
 

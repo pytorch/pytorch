@@ -1,15 +1,11 @@
 #include <torch/csrc/fx/node.h>
 
-#include <c10/util/Exception.h>
-#include <c10/util/SmallVector.h>
 #include <structmember.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
-#include <algorithm>
 
 namespace {
 
-using NodeSortKey = c10::SmallVector<int64_t, 4>;
 struct NodeBase;
 
 // Thrown to exit out of a C++ function and return an error to Python.
@@ -167,41 +163,7 @@ struct NodeBase {
   PyObject* users;
   PyObject* _repr_fn;
   PyObject* meta;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  alignas(NodeSortKey) char sort_key_buf[sizeof(NodeSortKey)];
-
-  inline NodeSortKey& sort_key() {
-    return *reinterpret_cast<NodeSortKey*>(sort_key_buf);
-  }
-
-  inline void set_prev(NodeBase* value) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(value);
-    Py_INCREF(reinterpret_cast<PyObject*>(value));
-    NodeBase* old = _prev;
-    _prev = value;
-    Py_DECREF(reinterpret_cast<PyObject*>(old));
-  }
-
-  inline void set_next(NodeBase* value) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(value);
-    Py_INCREF(reinterpret_cast<PyObject*>(value));
-    NodeBase* old = _next;
-    _next = value;
-    Py_DECREF(reinterpret_cast<PyObject*>(old));
-  }
-
-  // Equivalent to:
-  //   p, n = self._prev, self._next
-  //   p._next, n._prev = n, p
-  inline void remove_from_list() {
-    if (this->_prev == this && this->_next == this) {
-      return;
-    }
-    NodeBase* p = this->_prev;
-    NodeBase* n = this->_next;
-    p->set_next(n);
-    n->set_prev(p);
-  }
+  PyObject* _sort_key;
 };
 
 static PyObject* NodeBase_new(
@@ -211,8 +173,6 @@ static PyObject* NodeBase_new(
   PyObject* self = type->tp_alloc(type, 0);
   if (!self)
     return nullptr;
-  new (reinterpret_cast<NodeBase*>(self)->sort_key_buf)
-      NodeSortKey(); // placement new does not allocate
   return self;
 }
 
@@ -241,6 +201,7 @@ static int NodeBase_init_fn(NodeBase* self, PyObject* args, PyObject* kwds) {
   self->users = PyDict_New();
   self->_repr_fn = Py_NewRef(Py_None);
   self->meta = PyDict_New();
+  self->_sort_key = PyTuple_New(0);
   return 0;
 }
 
@@ -260,6 +221,7 @@ static struct PyMemberDef NodeBase_members[] = {
     {"users", T_OBJECT_EX, offsetof(NodeBase, users), 0, nullptr},
     {"_repr_fn", T_OBJECT_EX, offsetof(NodeBase, _repr_fn), 0, nullptr},
     {"meta", T_OBJECT_EX, offsetof(NodeBase, meta), 0, nullptr},
+    {"_sort_key", T_OBJECT_EX, offsetof(NodeBase, _sort_key), 0, nullptr},
     {nullptr} /* Sentinel */
 };
 
@@ -277,6 +239,7 @@ static int NodeBase_traverse(NodeBase* self, visitproc visit, void* arg) {
   Py_VISIT(self->users);
   Py_VISIT(self->_repr_fn);
   Py_VISIT(self->meta);
+  Py_VISIT(self->_sort_key);
   return 0;
 }
 
@@ -294,12 +257,12 @@ static int NodeBase_clear(NodeBase* self) {
   Py_CLEAR(self->users);
   Py_CLEAR(self->_repr_fn);
   Py_CLEAR(self->meta);
+  Py_CLEAR(self->_sort_key);
   return 0;
 }
 
 static void NodeBase_dealloc(PyObject* self) {
   PyObject_GC_UnTrack(self);
-  reinterpret_cast<NodeBase*>(self)->sort_key().~NodeSortKey();
   (void)NodeBase_clear((NodeBase*)self);
   Py_TYPE(self)->tp_free(self);
 }
@@ -358,234 +321,13 @@ static PyObject* NodeBase__update_args_kwargs(
   }
 }
 
-static PyObject* NodeBase__remove_from_list(
-    PyObject* self,
-    PyObject* _ignored) {
-  reinterpret_cast<NodeBase*>(self)->remove_from_list();
-  Py_RETURN_NONE;
-}
-
-static PyObject* NodeBase__replace_input_with(
-    PyObject* self,
-    PyObject* const* args,
-    Py_ssize_t nargs) {
-  if (nargs != 2) {
-    PyErr_SetString(
-        PyExc_TypeError,
-        "_replace_input_with() requires exactly 2 arguments (old_input, new_input)");
-    return nullptr;
-  }
-  PyObject* old_input = args[0];
-  PyObject* new_input = args[1];
-  auto replace_fn = [old_input, new_input](PyObject* maybe_node) {
-    if (maybe_node == old_input) {
-      return Py_NewRef(new_input);
-    }
-    return Py_NewRef(maybe_node);
-  };
-
-  auto node = reinterpret_cast<NodeBase*>(self);
-  try {
-    THPObjectPtr new_args(map_aggregate(node->_args, replace_fn));
-    if (!new_args) {
-      return nullptr;
-    }
-    THPObjectPtr new_kwargs(map_aggregate(node->_kwargs, replace_fn));
-    if (!new_kwargs) {
-      return nullptr;
-    }
-
-    PyObject* update_args[2] = {new_args.get(), new_kwargs.get()};
-    return NodeBase__update_args_kwargs(self, update_args, 2);
-  } catch (const PythonError& e) {
-    return nullptr;
-  }
-}
-
-static PyObject* NodeBase__prepend(PyObject* self_, PyObject* arg) {
-  if (self_ == arg) {
-    Py_RETURN_NONE;
-  }
-  if (!is_node(arg)) {
-    PyErr_SetString(PyExc_TypeError, "_prepend() argument must be a Node");
-    return nullptr;
-  }
-  NodeBase* self = reinterpret_cast<NodeBase*>(self_);
-  NodeBase* x = reinterpret_cast<NodeBase*>(arg);
-  if (self->graph != x->graph) {
-    PyErr_SetString(
-        PyExc_AssertionError,
-        "Attempting to move a Node into a different Graph");
-    return nullptr;
-  }
-
-  x->remove_from_list();
-  NodeBase* p = self->_prev;
-  p->set_next(x);
-  x->set_prev(p);
-  x->set_next(self);
-  self->set_prev(x);
-
-  // Now compute x.sort_key()
-  const NodeSortKey& psk = x->_prev->sort_key();
-  const NodeSortKey& nsk = x->_next->sort_key();
-  if (psk.size() > nsk.size()) {
-    // prefix = psk[: len(nsk)+1]
-    size_t slice_len = nsk.size() + 1;
-    NodeSortKey prefix(psk.begin(), psk.begin() + slice_len);
-    // last element is idx => increment by 1
-    prefix.back()++;
-    x->sort_key() = std::move(prefix);
-  } else if (psk.size() < nsk.size()) {
-    // prefix = nsk[: len(psk)+1]
-    size_t slice_len = psk.size() + 1;
-    NodeSortKey prefix(nsk.begin(), nsk.begin() + slice_len);
-    // last element is idx => decrement by 1
-    prefix.back()--;
-    x->sort_key() = std::move(prefix);
-  } else {
-    // same length => add a 0
-    x->sort_key() = psk;
-    x->sort_key().emplace_back(0);
-  }
-  Py_RETURN_NONE;
-}
-
-// __lt__(self, other): Return self.sort_key < other.sort_key
-static PyObject* NodeBase___lt__(PyObject* self, PyObject* other) {
-  // METH_O => one argument: 'other'
-  if (!is_node(other)) {
-    Py_RETURN_NOTIMPLEMENTED;
-  }
-  const NodeSortKey& lhs = reinterpret_cast<NodeBase*>(self)->sort_key();
-  const NodeSortKey& rhs = reinterpret_cast<NodeBase*>(other)->sort_key();
-  bool less = std::lexicographical_compare(
-      lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
-  if (less)
-    Py_RETURN_TRUE;
-  Py_RETURN_FALSE;
-}
-
-// __gt__(self, other): Return self.sort_key() > other.sort_key
-static PyObject* NodeBase___gt__(PyObject* self, PyObject* other) {
-  if (!is_node(other)) {
-    Py_RETURN_NOTIMPLEMENTED;
-  }
-  const NodeSortKey& lhs = reinterpret_cast<NodeBase*>(self)->sort_key();
-  const NodeSortKey& rhs = reinterpret_cast<NodeBase*>(other)->sort_key();
-  // "a > b" is equivalent to "b < a"
-  bool greater = std::lexicographical_compare(
-      rhs.begin(), rhs.end(), lhs.begin(), lhs.end());
-  if (greater)
-    Py_RETURN_TRUE;
-  Py_RETURN_FALSE;
-}
-
-static PyObject* NodeBase___ge__(PyObject* self, PyObject* other) {
-  if (self == other) {
-    Py_RETURN_TRUE;
-  }
-  return NodeBase___gt__(self, other);
-}
-
-// __le__(self, other): Return not (self > other)
-static PyObject* NodeBase___le__(PyObject* self, PyObject* other) {
-  if (self == other) {
-    Py_RETURN_TRUE;
-  }
-  return NodeBase___lt__(self, other);
-}
-
-// Convert the NodeBase::sort_key vector<long> into a Python tuple of ints
-// Only used by pickle/__getstate__
-static PyObject* NodeBase_get_sort_key(PyObject* self, void* /*closure*/) {
-  NodeBase* node = reinterpret_cast<NodeBase*>(self);
-  const NodeSortKey& vec = node->sort_key();
-  Py_ssize_t n = static_cast<Py_ssize_t>(vec.size());
-  THPObjectPtr tuple(PyTuple_New(n));
-  if (!tuple) {
-    return nullptr; // Out of memory
-  }
-  for (Py_ssize_t i = 0; i < n; i++) {
-    PyObject* value = PyLong_FromSsize_t(vec[i]);
-    if (!value) {
-      return nullptr;
-    }
-    PyTuple_SET_ITEM(tuple.get(), i, value);
-  }
-  return tuple.release();
-}
-
-// Setter for NodeBase::sort_key: expects a Python tuple of ints, e.g.
-// node._sort_key = (1,2,3) Only used by pickle/__setstate__
-static int NodeBase_set_sort_key(
-    PyObject* self,
-    PyObject* value,
-    void* /*closure*/) {
-  NodeBase* node = reinterpret_cast<NodeBase*>(self);
-  if (!PyTuple_Check(value)) {
-    PyErr_SetString(PyExc_TypeError, "_sort_key must be an tuple of ints");
-    return -1;
-  }
-  Py_ssize_t size = PyTuple_GET_SIZE(value);
-  NodeSortKey new_vec;
-  new_vec.reserve(size);
-  for (Py_ssize_t i = 0; i < size; i++) {
-    int64_t val = PyLong_AsSsize_t(PyTuple_GET_ITEM(value, i));
-    if (val == -1 && PyErr_Occurred()) {
-      return -1;
-    }
-    new_vec.emplace_back(val);
-  }
-  node->sort_key() = std::move(new_vec);
-  return 0;
-}
-
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static PyMethodDef NodeBase_methods[] = {
     {"_update_args_kwargs",
      (PyCFunction)(void*)(NodeBase__update_args_kwargs),
      METH_FASTCALL,
      "Internal method: do not call directly."},
-    {"_remove_from_list",
-     (PyCFunction)(void*)(NodeBase__remove_from_list),
-     METH_NOARGS,
-     "Internal method: do not call directly."},
-    {"_replace_input_with",
-     (PyCFunction)(void*)(NodeBase__replace_input_with),
-     METH_FASTCALL,
-     "Internal method: replace occurrences of one input Node with another."},
-    {"_prepend",
-     (PyCFunction)(void*)(NodeBase__prepend),
-     METH_O,
-     "Internal method: do not call directly."},
-    {"__lt__",
-     (PyCFunction)(void*)NodeBase___lt__,
-     METH_O,
-     "Return True if self.sort_key < other.sort_key"},
-    {"__gt__",
-     (PyCFunction)(void*)NodeBase___gt__,
-     METH_O,
-     "Return True if self.sort_key > other.sort_key"},
-    {"__ge__",
-     (PyCFunction)(void*)NodeBase___ge__,
-     METH_O,
-     "Return True if self.sort_key >= other.sort_key"},
-    {"__le__",
-     (PyCFunction)(void*)NodeBase___le__,
-     METH_O,
-     "Return True if self.sort_key <= other.sort_key"},
     {nullptr, nullptr, 0, nullptr} // Sentinel
-};
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-static PyGetSetDef NodeBase_getset[] = {
-    {"_sort_key", // attribute name in Python
-     (getter)NodeBase_get_sort_key, // C getter function
-     (setter)NodeBase_set_sort_key, // C setter function
-     (char*)"The sort key as a tuple of ints", // docstring
-     nullptr},
-    {nullptr, nullptr, nullptr, nullptr, nullptr} // Sentinel
 };
 
 PyTypeObject NodeBaseType = {
@@ -619,7 +361,7 @@ PyTypeObject NodeBaseType = {
     nullptr, /* tp_iternext */
     NodeBase_methods, /* tp_methods */
     NodeBase_members, /* tp_members */
-    NodeBase_getset, /* tp_getset */
+    nullptr, /* tp_getset */
     nullptr, /* tp_base */
     nullptr, /* tp_dict */
     nullptr, /* tp_descr_get */

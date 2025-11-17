@@ -23,8 +23,7 @@ try:
     from torch.compiler import is_dynamo_compiling as is_torchdynamo_compiling
 except Exception:
     warnings.warn(
-        "Unable to import torchdynamo util `is_torchdynamo_compiling`, so won't support torchdynamo correctly",
-        stacklevel=2,
+        "Unable to import torchdynamo util `is_torchdynamo_compiling`, so won't support torchdynamo correctly"
     )
 
     def is_torchdynamo_compiling():  # type: ignore[misc]
@@ -634,7 +633,6 @@ class AsyncCollectiveTensor(torch.Tensor):
         if func == torch.ops.aten.view.default:
             # Fast handle aten.view as a lot of view related op goes to aten.view
             # eventually, this avoids pytree slowdown
-            # pyrefly: ignore [index-error]
             res = func(args[0].elem, args[1])
             wrapper_res = AsyncCollectiveTensor(res)
             return wrapper_res
@@ -788,7 +786,6 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
                 FutureWarning,
                 stacklevel=3,
             )
-        # pyrefly: ignore [redundant-cast]
         return c10d._resolve_group_name_by_ranks_and_tag(cast(list[int], group), tag)
     else:
         raise ValueError(f"Unsupported group type: {type(group)}, {group}")
@@ -1010,8 +1007,8 @@ lib_impl.impl("broadcast", _broadcast_meta, "Meta")
 lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
 
 # mark these ops has side effect so that they won't be removed by DCE
-torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)  # type: ignore[has-type]
-torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)
 
 # Register legacy ops for backward compatibility
 # TODO(yifu): remove these in functional collective beta release
@@ -1167,17 +1164,15 @@ def all_gather_inplace(
     for t in tensor_list:
         is_scalar = t.dim() == 0
         t_offset = 1 if is_scalar else t.size(0)
-        # pyrefly: ignore [unsupported-operation]
         out = output[offset] if is_scalar else output[offset : offset + t_offset]
         output_splits.append(out)
-        # pyrefly: ignore [unsupported-operation]
         offset += t_offset
     for dst, src in zip(tensor_list, output_splits):
         dst.copy_(src)
     return tensor_list
 
 
-from torch.distributed.distributed_c10d import (  # pyrefly: ignore  # deprecated
+from torch.distributed.distributed_c10d import (
     _all_gather_base as legacy_all_gather_base,
     _reduce_scatter_base as legacy_reduce_scatter_base,
     all_gather as legacy_all_gather,
@@ -1191,11 +1186,11 @@ from torch.distributed.distributed_c10d import (  # pyrefly: ignore  # deprecate
 # This dict should contain sets of functions that dynamo is allowed to remap.
 # Functions in this set should accept the same args/kwargs 1:1 as their mapping.
 traceable_collective_remaps = {
-    legacy_allgather: all_gather_tensor_inplace,  # type: ignore[has-type]
-    legacy_reducescatter: reduce_scatter_tensor_inplace,  # type: ignore[has-type]
-    legacy_allreduce: all_reduce_inplace,  # type: ignore[has-type]
-    legacy_all_to_all_single: all_to_all_inplace,  # type: ignore[has-type]
-    legacy_all_gather: all_gather_inplace,  # type: ignore[has-type]
-    legacy_reduce_scatter_base: reduce_scatter_tensor_inplace,  # type: ignore[has-type]
-    legacy_all_gather_base: all_gather_tensor_inplace,  # type: ignore[has-type]
+    legacy_allgather: all_gather_tensor_inplace,
+    legacy_reducescatter: reduce_scatter_tensor_inplace,
+    legacy_allreduce: all_reduce_inplace,
+    legacy_all_to_all_single: all_to_all_inplace,
+    legacy_all_gather: all_gather_inplace,
+    legacy_reduce_scatter_base: reduce_scatter_tensor_inplace,
+    legacy_all_gather_base: all_gather_tensor_inplace,
 }

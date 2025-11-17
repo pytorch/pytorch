@@ -136,9 +136,9 @@ Reducer::Reducer(
   {
     std::set<int> unique_devices;
     for (const auto& v : params_) {
-      auto device_idx = static_cast<int>(v.device().index());
-      auto [_, inserted] = unique_devices.emplace(device_idx);
-      if (inserted) {
+      auto device_idx = int(v.device().index());
+      if (unique_devices.find(device_idx) == unique_devices.end()) {
+        unique_devices.insert(device_idx);
         if (unique_devices.size() > 1) {
           is_multi_device_module_ = true;
           break;
@@ -168,7 +168,7 @@ Reducer::Reducer(
   }
 
   // All variables are expected to have their `grad_fn` set to the gradient
-  // accumulation function (since they are leaves in the autograd graph).
+  // accumulation function (since they are leafs in the autograd graph).
   // We store pointers to these functions such that we can check if they are
   // used in an autograd pass. If they are not, we know their grad tensors
   // can be marked as ready for reduction.

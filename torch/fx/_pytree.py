@@ -1,6 +1,5 @@
 from collections import namedtuple
-from collections.abc import Callable
-from typing import Any, Optional, TypeVar
+from typing import Any, Callable, Optional, TypeVar
 from typing_extensions import NamedTuple
 
 import torch.return_types

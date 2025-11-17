@@ -233,9 +233,7 @@ if [[ "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
   export BUILD_STATIC_RUNTIME_BENCHMARK=ON
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-full-debug* ]]; then
-  export CMAKE_BUILD_TYPE=Debug
-elif [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
   export CMAKE_BUILD_TYPE=RelWithAssert
 fi
 
@@ -301,11 +299,6 @@ else
       python -m build --wheel --no-isolation
     fi
     pip_install_whl "$(echo dist/*.whl)"
-    if [[ "$BUILD_ENVIRONMENT" == *full-debug* ]]; then
-      # Regression test for https://github.com/pytorch/pytorch/issues/164297
-      # Torch should be importable and that's about it
-      pushd /; python -c "import torch;print(torch.__config__.show(), torch.randn(5) + 1.7)"; popd
-    fi
 
     if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *vision* ]]; then
       install_torchvision

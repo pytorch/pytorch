@@ -98,7 +98,7 @@ class EvalEnv:
     def __init__(self, rcb):
         self.rcb = rcb
         if torch.distributed.rpc.is_available():
-            # pyrefly: ignore [unsupported-operation]
+            # pyrefly: ignore  # unsupported-operation
             self.env["RRef"] = RRef
 
     def __getitem__(self, name):
@@ -389,8 +389,7 @@ def is_tensor(ann):
         warnings.warn(
             "TorchScript will treat type annotations of Tensor "
             "dtype-specific subtypes as if they are normal Tensors. "
-            "dtype constraints are not enforced in compilation either.",
-            stacklevel=2,
+            "dtype constraints are not enforced in compilation either."
         )
         return True
 

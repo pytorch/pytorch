@@ -1,9 +1,8 @@
 # mypy: allow-untyped-defs
 import itertools
 import operator
-from collections.abc import Callable
 from functools import reduce
-from typing import TypeVar
+from typing import Callable, TypeVar
 from typing_extensions import ParamSpec
 
 import sympy
@@ -181,12 +180,12 @@ def add_inference_rule(n: Node):
     t2 = n.args[1].type
 
     # handle scalar addition
-    if t1 is int and isinstance(t2, TensorType):
+    if t1 == int and isinstance(t2, TensorType):
         n.type = t2
         return n.type
 
     # handle scalar addition
-    elif t2 is int and isinstance(t1, TensorType):
+    elif t2 == int and isinstance(t1, TensorType):
         n.type = t1
         return n.type
 

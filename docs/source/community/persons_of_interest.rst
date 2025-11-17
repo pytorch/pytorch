@@ -224,12 +224,6 @@ AMD/ROCm/HIP
 -  Jithun Nair (`jithunnair-amd <https://github.com/jithunnair-amd>`__)
 -  (emeritus) Junjie Bai (`bddppq <https://github.com/bddppq>`__)
 
-XPU/Intel GPU
-~~~~~~~~~~~~~
-
-- Eikan Wang (`EikanWang <https://github.com/EikanWang>`__)
-- Guangye Yu (`guangyey <https://github.com/guangyey>`__)
-
 Build + CI
 ~~~~~~~~~~
 
@@ -332,11 +326,6 @@ AArch64 CPU
 ~~~~~~~~~~~~
 
 -  Sunita Nadampalli (`snadampal <https://github.com/snadampal>`__)
-
-Out-of-tree Backend Integration (PrivateUse1)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
--  Jiawei Li (`fffrog <https://github.com/fffrog>`__)
 
 Docs / Tutorials
 ~~~~~~~~~~~~~~~~

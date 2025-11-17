@@ -64,7 +64,7 @@ class ShufflerIterDataPipe(IterDataPipe[_T_co]):
     ) -> None:
         super().__init__()
         self.datapipe = datapipe
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         self.indices = list(range(len(datapipe))) if indices is None else indices
         self._enabled = True
         self._seed = None
@@ -96,7 +96,7 @@ class ShufflerIterDataPipe(IterDataPipe[_T_co]):
         self._shuffled_indices = self._rng.sample(self.indices, len(self.indices))
 
     def __len__(self) -> int:
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         return len(self.datapipe)
 
     def __getstate__(self):

@@ -176,8 +176,8 @@ THIRD_PARTY_LIBS = {
     "omp": ["//xplat/third-party/linker_lib:omp", "//third_party:no-op"],
     "pocketfft": ["//third-party/pocket_fft:pocketfft", "//third_party:pocketfft_header"],
     "psimd": ["//xplat/third-party/psimd:psimd", "//third_party:psimd"],
-    "pthreadpool": ["fbsource//xplat/third-party/pthreadpool:pthreadpool", "//third_party:pthreadpool"],
-    "pthreadpool_header": ["fbsource//xplat/third-party/pthreadpool:pthreadpool_header", "//third_party:pthreadpool_header"],
+    "pthreadpool": ["//xplat/third-party/pthreadpool:pthreadpool", "//third_party:pthreadpool"],
+    "pthreadpool_header": ["//xplat/third-party/pthreadpool:pthreadpool_header", "//third_party:pthreadpool_header"],
     "moodycamel": ["//third-party/moodycamel:moodycamel", "//third_party:moodycamel"],
     "pyyaml": ["//third-party/pypi/pyyaml:pyyaml", "//third_party:pyyaml"],
     "rt": ["//xplat/third-party/linker_lib:rt", "//third_party:rt"],
@@ -1729,10 +1729,8 @@ def define_buck_targets(
             "torch/csrc/jit/backends/backend_debug_info.cpp",
             "torch/csrc/jit/backends/backend_interface.cpp",
         ],
-        compiler_flags = get_pt_compiler_flags() + select({
-            "DEFAULT": [],
-            "ovr_config//os:android": c2_fbandroid_xplat_compiler_flags
-        }),
+        compiler_flags = get_pt_compiler_flags(),
+        fbandroid_compiler_flags = c2_fbandroid_xplat_compiler_flags,
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
         linker_flags = get_no_as_needed_linker_flag(),
@@ -2025,9 +2023,6 @@ def define_buck_targets(
                 "ovr_config//os:android-x86_64": [
                     "-mssse3",
                 ],
-            }) + select({
-                "DEFAULT": [],
-                "ovr_config//os:android": c2_fbandroid_xplat_compiler_flags,
             }),
             exported_preprocessor_flags = get_aten_preprocessor_flags(),
             exported_deps = [

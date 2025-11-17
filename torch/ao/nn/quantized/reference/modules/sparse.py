@@ -42,7 +42,7 @@ class Embedding(nn.Embedding, ReferenceQuantizedModule):
             scale_grad_by_freq,
             sparse,
             _weight,
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             device,
             dtype,
         )

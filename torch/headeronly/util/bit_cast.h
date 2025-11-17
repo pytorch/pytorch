@@ -13,7 +13,7 @@
 #endif // __has_include(<bit>) && (__cplusplus >= 202002L ||
        // (defined(__cpp_lib_bit_cast) && __cpp_lib_bit_cast >= 201806L))
 
-HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
+namespace torch::headeronly {
 
 #if C10_HAVE_STD_BIT_CAST
 using std::bit_cast;
@@ -43,7 +43,7 @@ bit_cast(const From& src) noexcept {
 #endif // C10_HAVE_STD_BIT_CAST
 #undef C10_HAVE_STD_BIT_CAST
 
-HIDDEN_NAMESPACE_END(torch, headeronly)
+} // namespace torch::headeronly
 
 namespace c10 {
 using torch::headeronly::bit_cast;

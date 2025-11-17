@@ -26,8 +26,9 @@ name: !{{ build_environment }}
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
+          # TODO: Removeme once 3.14 is out
           # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
-          python-version: "!{{ py_ver.strip('t') + ('.4' if '3.14' not in py_ver else '.0') }}"
+          python-version: "!{{ (py_ver.strip('t') + '.4') if '3.14' not in py_ver else '3.14.0-rc.2' }}"
           freethreaded: !{{ "true" if py_ver.endswith('t') else "false" }}
 {%- endmacro %}
 

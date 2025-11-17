@@ -8,11 +8,11 @@ namespace torch::nn::functional {
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 
-inline std::string padding_unwrap(enumtype::kValid /*unused*/) {
+inline std::string padding_unwrap(enumtype::kValid) {
   return "valid";
 }
 
-inline std::string padding_unwrap(enumtype::kSame /*unused*/) {
+inline std::string padding_unwrap(enumtype::kSame) {
   return "same";
 }
 

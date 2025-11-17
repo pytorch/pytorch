@@ -8,7 +8,6 @@
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/env.h>
-#include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <array>
@@ -827,7 +826,9 @@ TupleType::TupleType(
     : NamedType(TypeKind::TupleType, std::move(name)),
       elements_(std::move(elements)),
       has_free_variables_(std::any_of(elements_.begin(), elements_.end(), [](const TypePtr& v) {
-        TORCH_CHECK(v, "Can not create tuple with None type");
+        if (!v) {
+          throw std::runtime_error("Can not create tuple with None type");
+        }
         return v->hasFreeVariables();
       })), schema_(std::move(schema)) {
 

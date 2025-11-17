@@ -31,24 +31,23 @@ import sys
 import threading
 import traceback
 from collections import Counter, defaultdict
-from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
+from collections.abc import Generator, Iterator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import (
     Any,
+    Callable,
     cast,
     Generic,
     NamedTuple,
     NoReturn,
     Optional,
     TYPE_CHECKING,
-    TypeAlias,
-    TypeGuard,
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, ParamSpec
+from typing_extensions import deprecated, ParamSpec, TypeAlias, TypeGuard
 
 import torch
 import torch.fx
@@ -621,12 +620,13 @@ def rebind_unbacked(
             ):
                 # This is what the pattern match above is testing
                 repacked = _sympy_cast_symbool_to_symint_guardless(
+                    # pyrefly: ignore  # unbound-name
                     sympy.Eq(new_raw_u1, 1)
                 )
                 assert repacked == raw_u1, f"{repacked} != {raw_u1}"
                 # Cancel the to_int(to_bool(x)). This is sound because x in
                 # [0, 1]
-
+                # pyrefly: ignore  # unbound-name
                 raw_u1 = new_raw_u1
 
             if not isinstance(raw_u1, sympy.Symbol):
@@ -882,16 +882,11 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
     Raises:
         AssertionError: If the value is of an unsupported type.
     """
-    # This is almost close enough to implement in terms of _iterate_nodes()
-    # except that it needs to handle `list[sympy.Basic]` which _iterate_nodes()
-    # can't handle.
     if isinstance(val, SymTypes):
         # This allow applies to the jagged layout NestedTensor case as
         # nested ints are not symbolic
         if is_symbolic(val):
             yield val.node.expr
-    elif isinstance(val, SymNode):
-        yield val.expr
     elif isinstance(val, sympy.Basic):
         yield val
     elif isinstance(val, (int, float, bool)):
@@ -912,28 +907,6 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
         pass
     else:
         raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
-
-
-def _iterate_nodes(val: Any) -> Iterator[SymNode]:
-    """
-    Recursively iterate through a value and yield all SymNodes contained
-    within it.
-    """
-    if isinstance(val, SymNode):
-        yield val
-    elif isinstance(val, py_sym_types):
-        # This allow applies to the jagged layout NestedTensor case as
-        # nested ints are not symbolic
-        if is_symbolic(val):
-            yield val.node
-    elif isinstance(val, (tuple, list, torch.Size)):
-        for s in val:
-            yield from _iterate_nodes(s)
-    elif isinstance(val, torch.Tensor):
-        yield from _iterate_nodes(val.size())
-        if not is_sparse_any(val):
-            yield from _iterate_nodes(val.stride())
-            yield from _iterate_nodes(val.storage_offset())
 
 
 def free_symbols(val: IterateExprs) -> OrderedSet[sympy.Symbol]:
@@ -1054,6 +1027,7 @@ def find_symbol_binding_fx_nodes(
     # NB: Prefer first occurrence of symbol
     for node in graph.nodes:
         if (s := is_symbol_binding_fx_node(node)) is not None and s not in r:
+            # pyrefly: ignore  # unbound-name
             r[s] = node
     return r
 
@@ -1224,12 +1198,13 @@ def _free_unbacked_symbols_with_path(
         and isinstance(s := expr(a), sympy.Symbol)
         and s in pending
     ):
+        # pyrefly: ignore  # unbound-name
         r[s] = path
         if shape_env and real is not None:
             assert isinstance(real, (int, float))
-
+            # pyrefly: ignore  # unbound-name
             shape_env.set_unbacked_var_to_val(s, real)
-
+        # pyrefly: ignore  # unbound-name
         pending.remove(s)
     # When an unbacked SymInt is perfectly divisible by an integer
     # constant, we replace it with the integer constant to improve
@@ -1259,10 +1234,14 @@ def _free_unbacked_symbols_with_path(
                 source=shape_env.var_to_sources.get(s, [None])[0],  # type: ignore[union-attr]
             )
 
+        # pyrefly: ignore  # unbound-name
         unbacked = lhs if lhs in pending else rhs
         divisor: IntLikeType = (
+            # pyrefly: ignore  # unbound-name
             int(coeff)
+            # pyrefly: ignore  # unbound-name
             if shape_env and isinstance(coeff, sympy.Integer)
+            # pyrefly: ignore  # unbound-name
             else _symint_wrap(coeff)
         )
         # TODO: DivideByKey needs to test divisibility at runtime!
@@ -1271,8 +1250,11 @@ def _free_unbacked_symbols_with_path(
         if real is not None:
             assert isinstance(real, int)
             val = (
+                # pyrefly: ignore  # unbound-name
                 real // int(coeff)
+                # pyrefly: ignore  # unbound-name
                 if isinstance(coeff, sympy.Integer)
+                # pyrefly: ignore  # unbound-name
                 else CleanDiv(real, coeff)
             )
             if shape_env:
@@ -1289,12 +1271,14 @@ def _free_unbacked_symbols_with_path(
         and s.rhs == 1
         and s.lhs in pending
     ):
+        # pyrefly: ignore  # unsupported-operation
         r[s.lhs] = path + (ConvertIntKey(),)
         if real is not None:
             assert type(real) is bool
             if shape_env:
+                # pyrefly: ignore  # unbound-name
                 shape_env.set_unbacked_var_to_val(s, int(real))
-
+        # pyrefly: ignore  # unbound-name
         pending.remove(s.lhs)
 
     return r
@@ -1370,6 +1354,7 @@ def compute_unbacked_bindings(
             ):
                 if (
                     isinstance(old_sym, SymTypes)
+                    # pyrefly: ignore  # unbound-name
                     and (old_s := old_sym.node.expr) != new_s
                 ):
                     # If old_s is not an unbacked_symbol,
@@ -1379,12 +1364,15 @@ def compute_unbacked_bindings(
                     # and the original symbol gets replaced by the backed symbol.
                     # When this happens we just replace new_s by the old_s
                     # because we know the value is the same.
-
+                    # pyrefly: ignore  # unbound-name
                     if isinstance(old_s, sympy.Symbol) and free_unbacked_symbols(old_s):
+                        # pyrefly: ignore  # unbound-name
                         shape_env._rename_unbacked_to(new_s, old_s)
                     else:
+                        # pyrefly: ignore  # unbound-name
                         shape_env._eliminate_unbacked(new_s, old_s)
                 elif not isinstance(old_sym, SymTypes):
+                    # pyrefly: ignore  # unbound-name
                     shape_env._eliminate_unbacked(new_s, sympy.sympify(old_sym))
 
     return symbol_to_path
@@ -3193,8 +3181,8 @@ class DimConstraints:
                         self._dynamic_results.add(self._dcp.doprint(arg))
                 else:
                     self._dynamic_results.add(self._dcp.doprint(solution))
-            except (NotImplementedError, AssertionError):
-                log.warning("Failed to reduce inequalities", exc_info=True)
+            except (NotImplementedError, AssertionError) as e:
+                log.warning("Failed to reduce inequalities: %s", e)
                 for expr2 in exprs:
                     self._dynamic_results.add(self._dcp.doprint(expr2))
 
@@ -3349,7 +3337,7 @@ class DimConstraints:
                     and str(symbol := next(iter(c["eq"].free_symbols))) == old_root
                 ):  # derived dim with root = old_root
                     new_root_expr = results[str(old_root)]["eq"]  # dx=3*_dx+1
-
+                    # pyrefly: ignore  # unbound-name
                     new_expr = c["eq"].subs({symbol: new_root_expr})  # dy=(3*_dx+1)+1
                     c["eq"] = new_expr
 
@@ -4426,7 +4414,7 @@ class ShapeEnv:
         size = []
         for i, val in enumerate(tensor_size):
             sym = self.create_symbol(
-                hint_overrides.get(i, val),
+                val if i not in hint_overrides else hint_overrides[i],
                 TensorPropertySource(source, TensorProperty.SIZE, i),
                 dynamic_dims[i],
                 constraint_dims[i],
@@ -4627,7 +4615,7 @@ class ShapeEnv:
         sym_sizes = [
             self.create_symintnode(
                 sym,
-                hint=hint_overrides.get(i, hint),
+                hint=hint if i not in hint_overrides else hint_overrides[i],
                 source=TensorPropertySource(source, TensorProperty.SIZE, i),
             )
             for i, (sym, hint) in enumerate(zip(size, ex_size))
@@ -7614,9 +7602,10 @@ class ShapeEnv:
                         log.info(
                             "oblivious_size %s -> %s (passed counterfactual)",
                             orig_expr,
+                            # pyrefly: ignore  # unbound-name
                             correct_hint,
                         )
-
+                        # pyrefly: ignore  # unbound-name
                         concrete_val = correct_hint
                         # NB: do NOT transmute into runtime assert
                         ok = True
@@ -7633,9 +7622,10 @@ class ShapeEnv:
                             ).xreplace(self.var_to_val)
                         ).free_symbols
                     ):
+                        # pyrefly: ignore  # unbound-name
                         self._log_real_tensor_propagation(orig_expr, unsound_result)
                         transmute_into_runtime_assert = True
-
+                        # pyrefly: ignore  # unbound-name
                         concrete_val = unsound_result
                         ok = True
 

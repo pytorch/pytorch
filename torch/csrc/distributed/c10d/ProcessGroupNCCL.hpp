@@ -126,11 +126,6 @@ static std::vector<std::string> TORCH_NCCL_COORD_CHECK_MILSEC = {
 static std::vector<std::string> TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN = {
     "TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN"};
 
-// Whether to include only active collectives in the Flight Recorder trace
-// (default false)
-static std::vector<std::string> TORCH_NCCL_EXTRA_DUMP_ON_EXEC = {
-    "TORCH_NCCL_EXTRA_DUMP_ON_EXEC"};
-
 // Control whether to use CudaEventCache for the collective in watchdog thread.
 // We noticed in the past when cuda global lock is held, destroying CudaEvent
 // can cause a hang.
@@ -1084,11 +1079,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // In the timeout case and we will dump debug info such as the NCCL flight
   // recorder to storage. Down the road, if we have more complicated or blocking
   // operations, we might need to use a side thread to do it.
-  bool dumpDebuggingInfo(
-      bool includeStackTrace = true,
-      bool onlyActive = false);
-
-  void dumpExtraDebuggingInfo();
+  bool dumpDebuggingInfo(bool includeStackTrace = true);
 
   // Abort all communicators on this rank.
   bool abortComms(const std::optional<std::string>& abortReason = std::nullopt);
@@ -1471,9 +1462,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Communication-optimized memory pool associated with this PG
   std::unique_ptr<c10::cuda::MemPool> memPool_ = nullptr;
 };
-
-// Reset the flighrecorder recordings for the current rank.
-TORCH_API void reset_nccl_trace();
 
 // Dumps the NCCL comm traces and additional information about the Process
 // Group.

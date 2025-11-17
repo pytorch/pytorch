@@ -149,13 +149,13 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               py::call_guard<py::gil_scoped_release>())
           .def(
               "get_worker_info",
-              static_cast<const WorkerInfo& (RpcAgent::*)(void) const>(
-                  &RpcAgent::getWorkerInfo),
+              (const WorkerInfo& (RpcAgent::*)(void) const) &
+                  RpcAgent::getWorkerInfo,
               py::call_guard<py::gil_scoped_release>())
           .def(
               "get_worker_info",
-              static_cast<const WorkerInfo& (RpcAgent::*)(const std::string&)
-                              const>(&RpcAgent::getWorkerInfo),
+              (const WorkerInfo& (RpcAgent::*)(const std::string&) const) &
+                  RpcAgent::getWorkerInfo,
               py::call_guard<py::gil_scoped_release>())
           .def(
               "get_worker_infos",
@@ -611,28 +611,28 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          static_cast<const WorkerInfo& (TensorPipeAgent::*)(void) const>(
-              &RpcAgent::getWorkerInfo),
+          (const WorkerInfo& (TensorPipeAgent::*)(void) const) &
+              RpcAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          static_cast<const WorkerInfo& (TensorPipeAgent::*)(const std::string&)
-                          const>(&TensorPipeAgent::getWorkerInfo),
+          (const WorkerInfo& (TensorPipeAgent::*)(const std::string&) const) &
+              TensorPipeAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          static_cast<const WorkerInfo& (TensorPipeAgent::*)(worker_id_t id)
-                          const>(&TensorPipeAgent::getWorkerInfo),
+          (const WorkerInfo& (TensorPipeAgent::*)(worker_id_t id) const) &
+              TensorPipeAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_infos",
-          static_cast<std::vector<WorkerInfo> (TensorPipeAgent::*)() const>(
-              &TensorPipeAgent::getWorkerInfos),
+          (std::vector<WorkerInfo>(TensorPipeAgent::*)() const) &
+              TensorPipeAgent::getWorkerInfos,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_get_device_map",
-          static_cast<DeviceMap (TensorPipeAgent::*)(const WorkerInfo& dst)
-                          const>(&TensorPipeAgent::getDeviceMap),
+          (DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dst)
+               const)&TensorPipeAgent::getDeviceMap,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_get_backend_options",

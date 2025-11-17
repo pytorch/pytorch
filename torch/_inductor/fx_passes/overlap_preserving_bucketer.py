@@ -1,15 +1,27 @@
 from collections import defaultdict
+from typing import Optional
 
+import torch
 import torch.fx as fx
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
 from torch._inductor.fx_passes.bucketing import (
-    bucket_key,
+    _ag_group_key,
+    _rs_group_key,
     is_all_gather_into_tensor as is_all_gather,
     is_reduce_scatter_tensor as is_reduce_scatter,
     is_wait_tensor,
 )
 from torch._inductor.fx_passes.overlap_scheduling import CollBucket, CollectiveInfo
 from torch.utils._ordered_set import OrderedSet
+
+
+def bucket_key(node: torch.fx.Node) -> Optional[object]:
+    if is_all_gather(node):
+        return _ag_group_key(node)
+    elif is_reduce_scatter(node):
+        return _rs_group_key(node)
+    else:
+        return None
 
 
 class OverlapPreservingBucketer:
@@ -26,7 +38,6 @@ class OverlapPreservingBucketer:
         scheduled: OrderedSet[fx.Node],
         max_bucket_memory_gb: float = 1.0,
         max_coll_distance: int = 1000,
-        insert_overlap_deps: bool = False,
     ):
         self.graph = graph
         self.collective_info = collective_info
@@ -36,7 +47,6 @@ class OverlapPreservingBucketer:
         self.node_idx = {n: i for i, n in enumerate(scheduled)}
         self.aug_graph = AugmentedGraphHelper(self.graph, self.node_ancestors)
         self.max_coll_distance = max_coll_distance
-        self.insert_overlap_deps = insert_overlap_deps
 
     def bucket_collectives(self) -> None:
         """Main entry point for bucketing collectives."""
@@ -79,8 +89,7 @@ class OverlapPreservingBucketer:
         _stable_topological_sort(self.graph, additional_deps)
 
         # After topological sort, preserve dependencies using effect tokens
-        if self.insert_overlap_deps:
-            self._preserve_dependencies_with_tokens(additional_deps)
+        self._preserve_dependencies_with_tokens(additional_deps)
 
         self.graph.lint()
 
@@ -268,4 +277,5 @@ class OverlapPreservingBucketer:
             preserve_node_ordering,
         )
 
-        preserve_node_ordering(self.graph, additional_deps)
+        if torch._inductor.config.test_configs.aten_fx_overlap_insert_overlap_deps:
+            preserve_node_ordering(self.graph, additional_deps)

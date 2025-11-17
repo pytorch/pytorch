@@ -30,7 +30,6 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    create_local_tensor_test_class,
     DTensorTestBase,
     with_comms,
 )
@@ -648,7 +647,7 @@ class TestViewOps(DTensorTestBase):
     @with_comms
     def test_squeeze_(self):
         mesh_2d = init_device_mesh(self.device_type, (3, 2), mesh_dim_names=("a", "b"))
-        self.init_manual_seed_for_rank()
+        torch.manual_seed(self.rank)
         x = torch.randn((1, 4), device=self.device_type)
         dist_x = DTensor.from_local(x, mesh_2d, [Partial(), Shard(1)])
         self._test_op_on_dtensor(
@@ -664,14 +663,6 @@ class TestViewOps(DTensorTestBase):
         )
         self.assertEqual(dist_x.placements, [Partial(), Shard(0)])
 
-
-TestViewOpsWithLocalTensor = create_local_tensor_test_class(
-    TestViewOps,
-    skipped_tests=[
-        # Comparing data pointers is not supported for local tensor
-        "test_dtensor_view_op_uneven",
-    ],
-)
 
 if __name__ == "__main__":
     run_tests()

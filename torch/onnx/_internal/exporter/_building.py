@@ -267,7 +267,7 @@ def _get_or_create_constant(
     # float representation of complex numbers
     if isinstance(arg, complex):
         # Convert the complex number to a float
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         arg = (arg.real, arg.imag)
 
     if isinstance(arg, list):
@@ -646,6 +646,45 @@ class OpRecorder(evaluator.Evaluator):
         kwargs: Mapping[str, AllowedArgType],
     ) -> _tensors.SymbolicTensor | Sequence[_tensors.SymbolicTensor] | bool | int:
         try:
+            # TODO(justinchuby): Remove this once IsScalar and Rank are removed
+            # Special cases for handling IsScalar and Rank
+            if function.name == "IsScalar":
+                if len(args) != 1:
+                    raise TypeError(
+                        f"Expected 1 positional argument for function '{function}', got {len(args)}."
+                    )
+                if isinstance(args[0], _tensors.SymbolicTensor):
+                    if args[0].rank is not None:
+                        return args[0].rank == 0
+                    else:
+                        # Fall to call add_function_call
+                        pass
+                elif isinstance(args[0], Sequence):
+                    return False
+                else:
+                    # Python constants are scalars
+                    return True
+            if function.name == "Rank":
+                if len(args) != 1:
+                    raise TypeError(
+                        f"Expected 1 positional argument for function '{function}', got {len(args)}."
+                    )
+                if isinstance(args[0], _tensors.SymbolicTensor):
+                    if args[0].rank is not None:
+                        return args[0].rank
+                    else:
+                        # Fall to call add_function_call
+                        pass
+                elif isinstance(args[0], Sequence):
+                    if all(isinstance(arg, (int, float)) for arg in args[0]):
+                        return 1
+                    else:
+                        # Fall to call add_function_call
+                        pass
+                else:
+                    # Python constants are scalars
+                    return 0
+
             # NOTE: signature should be written to function in the registration process
             if hasattr(function, "_pt_onnx_signature"):
                 op_signature = function._pt_onnx_signature  # type: ignore[attr-defined]

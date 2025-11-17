@@ -46,7 +46,7 @@ class BatchUpdateParameterServer:
     @rpc.functions.async_execution
     def update_and_fetch_model(ps_rref, grads):
         self = ps_rref.local_value()
-        for p, g in zip(self.model.parameters(), grads, strict=True):
+        for p, g in zip(self.model.parameters(), grads):
             if p.grad is None:
                 p.grad = g
             else:

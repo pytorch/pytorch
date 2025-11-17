@@ -750,9 +750,9 @@ class CKTileGemmTemplate(CKTileTemplate):
         """
         The primary entry point for the code rendering process used in this template.
         """
-        epilogue_nodes = kwargs.get("epilogue_nodes")
+        epilogue_nodes = kwargs.get("epilogue_nodes", None)
         assert epilogue_nodes is None or 0 == len(epilogue_nodes)
-        template_buffer_node = kwargs.get("template_buffer_node")
+        template_buffer_node = kwargs.get("template_buffer_node", None)
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
         assert 2 == len(self.input_nodes)

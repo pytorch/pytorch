@@ -2,8 +2,7 @@
 # mypy: allow-untyped-defs
 import enum
 import operator
-from collections.abc import Callable
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 import torch
 import torch.ao.nn.intrinsic.quantized as nniq
@@ -61,8 +60,7 @@ def get_node_first_input_and_output_type(
             return (NodeInputOrOutputType.INT8, NodeInputOrOutputType.INT8)
         elif node.target in FUNS_IO_TYPE_FP32_OR_INT8:
             first_arg = get_normalized_nth_input(node, gm, 0)
-            if not isinstance(first_arg, Node):
-                raise AssertionError(f"Expected Node, got {type(first_arg)}")
+            assert isinstance(first_arg, Node)
             (
                 _prev_node_input_type,
                 prev_node_output_type,
@@ -74,11 +72,8 @@ def get_node_first_input_and_output_type(
             return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
 
     elif node.op == "call_module":
-        if node.op != "call_module":
-            raise AssertionError(f"Expected call_module, got '{node.op}'")
-        if not isinstance(node.target, str):
-            raise AssertionError(f"Expected str, but got {type(node.target)}")
-
+        assert node.op == "call_module"
+        assert isinstance(node.target, str)
         mod = getattr_from_fqn(gm, node.target)
         is_known_fp32_or_int8_input_module = any(
             isinstance(mod, target_type)  # type: ignore[arg-type]
@@ -91,8 +86,7 @@ def get_node_first_input_and_output_type(
             # A logger or observer's input and output type is the output
             # type of the preceding node.
             first_arg = get_normalized_nth_input(node, gm, 0)
-            if not isinstance(first_arg, Node):
-                raise AssertionError(f"Expected Node, got {type(first_arg)}")
+            assert isinstance(first_arg, Node)
             (
                 _prev_node_input_type,
                 prev_node_output_type,
@@ -121,8 +115,7 @@ def get_node_first_input_and_output_type(
             # So, we look up the output type of the previous node and return that
             # as the input type of this node instance.
             prev_node = get_normalized_nth_input(node, gm, 0)
-            if not isinstance(prev_node, Node):
-                raise AssertionError(f"Expected Node, got {type(prev_node)}")
+            assert isinstance(prev_node, Node)
             (
                 _prev_node_input_type,
                 prev_node_output_type,
@@ -137,8 +130,7 @@ def get_node_first_input_and_output_type(
             # as the input type of this node instance. We also look up the target
             # of to and return the correct output type.
             prev_node = get_normalized_nth_input(node, gm, 0)
-            if not isinstance(prev_node, Node):
-                raise AssertionError(f"Expected Node, got {type(prev_node)}")
+            assert isinstance(prev_node, Node)
             (
                 _prev_node_input_type,
                 prev_node_output_type,
@@ -147,17 +139,15 @@ def get_node_first_input_and_output_type(
             )
 
             cur_node_dtype_target = get_normalized_nth_input(node, gm, 1)
-            if cur_node_dtype_target is not torch.float16:
-                raise AssertionError(
-                    f"{cur_node_dtype_target} handling needs to be added"
-                )
+            assert cur_node_dtype_target is torch.float16, (
+                f"{cur_node_dtype_target} handling needs to be added"
+            )
 
             return (prev_node_output_type, NodeInputOrOutputType.FP16)
 
         elif node.target in METHS_IO_TYPE_FP32_OR_INT8:
             first_arg = get_normalized_nth_input(node, gm, 0)
-            if not isinstance(first_arg, Node):
-                raise AssertionError(f"Expected Node, got {type(first_arg)}")
+            assert isinstance(first_arg, Node)
             (
                 _prev_node_input_type,
                 prev_node_output_type,
@@ -190,14 +180,8 @@ def get_node_input_qparams(
     def _get_scale_zp_from_function_args(node, gm, scale_arg_idx, zp_arg_idx):
         scale_node = get_normalized_nth_input(node, gm, scale_arg_idx)
         zp_node = get_normalized_nth_input(node, gm, zp_arg_idx)
-        if not isinstance(scale_node, Node):
-            raise AssertionError(f"Expected Node, got {type(scale_node)}")
-        if not isinstance(scale_node.target, str):
-            raise AssertionError(f"Expected str, got {type(scale_node.target)}")
-        if not isinstance(zp_node, Node):
-            raise AssertionError(f"Expected Node, got {type(zp_node)}")
-        if not isinstance(zp_node.target, str):
-            raise AssertionError(f"Expected str, got {type(zp_node.target)}")
+        assert isinstance(scale_node, Node) and isinstance(scale_node.target, str)
+        assert isinstance(zp_node, Node) and isinstance(zp_node.target, str)
         scale_obj = getattr_from_fqn(gm, scale_node.target)
         zp_obj = getattr_from_fqn(gm, zp_node.target)
         return (scale_obj, zp_obj)
@@ -215,8 +199,7 @@ def get_node_input_qparams(
 
     elif prev_node.op == "call_module":
         # get type of the module
-        if not isinstance(prev_node.target, str):
-            raise AssertionError(f"Expected str, got {type(prev_node.target)}")
+        assert isinstance(prev_node.target, str)
         module_obj = getattr_from_fqn(gm, prev_node.target)
         if isinstance(
             module_obj,
@@ -275,24 +258,15 @@ def return_first_non_observer_node(
     if node.op == "call_module":
         node_obj = getattr_from_fqn(gm, node.target)  # type: ignore[arg-type]
         if _is_activation_post_process(node_obj):
-            if len(node.args) != 1:
-                raise AssertionError(
-                    f"Expected node.args to have length 1, got {len(node.args)}"
-                )
-            if not isinstance(node.args[0], Node):
-                raise AssertionError(f"Expected Node, got {type(node.args[0])}")
+            assert len(node.args) == 1
+            assert isinstance(node.args[0], Node)
             node = node.args[0]
             # code duplication intended, not worth refactoring
-            if not isinstance(node.target, str):
-                raise AssertionError(f"Expected str, got {type(node.target)}")
+            assert isinstance(node.target, str)
             node_obj = getattr_from_fqn(gm, node.target)
             if _is_activation_post_process(node_obj):
-                if len(node.args) != 1:
-                    raise AssertionError(
-                        f"Expected node.args to have length 1, got {len(node.args)}"
-                    )
-                if not isinstance(node.args[0], Node):
-                    raise AssertionError(f"Expected Node, got {type(node.args[0])}")
+                assert len(node.args) == 1
+                assert isinstance(node.args[0], Node)
                 node = node.args[0]
     return node
 
@@ -342,7 +316,7 @@ def get_arg_indices_of_inputs_to_log(node: Node) -> list[int]:
         node.target in (torch.add, torch.ops.quantized.add, operator.add)
         or node.target in (torch.mul, torch.ops.quantized.mul, operator.mul)
     ):
-        result = [i for i in range(2) if type(node.args[i]) is Node]
+        result = [i for i in range(2) if type(node.args[i]) == Node]
         return result
     return [0]
 
@@ -356,8 +330,7 @@ def get_target_type_str(node: Node, gm: GraphModule) -> str:
     if node.op in ("call_function", "call_method"):
         target_type = torch.typename(node.target)
     elif node.op == "call_module":
-        if not isinstance(node.target, str):
-            raise AssertionError(f"Expected str, got {type(node.target)}")
+        assert isinstance(node.target, str)
         target_mod = getattr_from_fqn(gm, node.target)
         target_type = torch.typename(target_mod)
     return target_type
@@ -391,8 +364,7 @@ def rekey_logger_info_on_node_name_of_model(
         for model_name_to_results in result_type_to_results.values():
             for cur_model_name, list_of_results in model_name_to_results.items():
                 if cur_model_name == model_name:
-                    if len(list_of_results) == 0:
-                        raise AssertionError("Expected list_of_results to be not empty")
+                    assert len(list_of_results)
                     new_layer_name = list_of_results[0]["ref_node_name"]
                 else:
                     continue
@@ -496,7 +468,7 @@ def compute_normalized_l2_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tenso
     Return:
         float or tuple of floats
     """
-    # pyrefly: ignore [unsupported-operation]
+    # pyrefly: ignore  # unsupported-operation
     return torch.sqrt(((x - y) ** 2).sum() / (x**2).sum())
 
 
@@ -546,20 +518,14 @@ def get_normalized_nth_input(node: Node, gm: GraphModule, idx: int) -> Node:
         )
         if norm_args_and_kwargs is not None:
             norm_args, norm_kwargs = norm_args_and_kwargs
-            if len(norm_args) + len(norm_kwargs) <= idx:
-                raise AssertionError(
-                    f"Index {idx} out of range: total = {len(norm_args) + len(norm_kwargs)}"
-                )
+            assert len(norm_args) + len(norm_kwargs) > idx
             if idx < len(norm_args):
                 return norm_args[idx]
             else:
                 # note: in Python 3.7+ dicts are ordered
                 return list(norm_kwargs.values())[idx]
         else:
-            if len(node.args) + len(node.kwargs) <= idx:
-                raise AssertionError(
-                    f"Index {idx} out of range: total = {len(node.args) + len(node.kwargs)}"
-                )
+            assert len(node.args) + len(node.kwargs) > idx
             if idx < len(node.args):
                 return node.args[idx]  # type: ignore[return-value]
             else:
@@ -569,10 +535,7 @@ def get_normalized_nth_input(node: Node, gm: GraphModule, idx: int) -> Node:
         # this RuntimeError happens when node argument normalization
         # requires typehints to proceed, such as for torch.add where
         # either the first, second or both arguments could be tensors
-        if len(node.args) + len(node.kwargs) <= idx:
-            raise AssertionError(
-                f"Index {idx} out of range: total = {len(node.args) + len(node.kwargs)}"
-            ) from None
+        assert len(node.args) + len(node.kwargs) > idx
         if idx < len(node.args):
             return node.args[idx]  # type: ignore[return-value]
         else:

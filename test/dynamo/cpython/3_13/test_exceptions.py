@@ -399,13 +399,12 @@ class ExceptionTests(__TestCase):
         # test that setting an exception at the C level works even if the
         # exception object can't be constructed.
 
-        with torch._dynamo.error_on_graph_break(False):
-            class BadException(Exception):
-                def __init__(self_):
-                    raise RuntimeError("can't instantiate BadException")
+        class BadException(Exception):
+            def __init__(self_):
+                raise RuntimeError("can't instantiate BadException")
 
-            class InvalidException:
-                pass
+        class InvalidException:
+            pass
 
         @unittest.skipIf(_testcapi is None, "requires _testcapi")
         def test_capi1():
@@ -693,9 +692,8 @@ class ExceptionTests(__TestCase):
         self.assertIsInstance(e, IndexError)
         self.assertEqual(e.__traceback__, tb)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class MyException(Exception):
-                pass
+        class MyException(Exception):
+            pass
 
         e = MyException().with_traceback(tb)
         self.assertIsInstance(e, MyException)
@@ -754,9 +752,8 @@ class ExceptionTests(__TestCase):
         self.assertIsNone(e.__context__)
         self.assertIsNone(e.__cause__)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class MyException(OSError):
-                pass
+        class MyException(OSError):
+            pass
 
         e = MyException()
         self.assertIsNone(e.__context__)
@@ -785,11 +782,10 @@ class ExceptionTests(__TestCase):
         # but user-defined subclasses can if they want
         self.assertRaises(TypeError, BaseException, a=1)
 
-        with torch._dynamo.error_on_graph_break(False):
-            class DerivedException(BaseException):
-                def __init__(self, fancy_arg):
-                    BaseException.__init__(self)
-                    self.fancy_arg = fancy_arg
+        class DerivedException(BaseException):
+            def __init__(self, fancy_arg):
+                BaseException.__init__(self)
+                self.fancy_arg = fancy_arg
 
         x = DerivedException(fancy_arg=42)
         self.assertEqual(x.fancy_arg, 42)
@@ -839,12 +835,11 @@ class ExceptionTests(__TestCase):
         # Make sure exception state is cleaned up as soon as the except
         # block is left. See #2507
 
-        with torch._dynamo.error_on_graph_break(False):
-            class MyException(Exception):
-                def __init__(self, obj):
-                    self.obj = obj
-            class MyObj:
-                pass
+        class MyException(Exception):
+            def __init__(self, obj):
+                self.obj = obj
+        class MyObj:
+            pass
 
         def inner_raising_func():
             # Create some references in exception value and traceback
@@ -942,12 +937,11 @@ class ExceptionTests(__TestCase):
         self.assertIsNone(obj)
 
         # Inside an exception-silencing "with" block
-        with torch._dynamo.error_on_graph_break(False):
-            class Context:
-                def __enter__(self):
-                    return self
-                def __exit__ (self, exc_type, exc_value, exc_tb):
-                    return True
+        class Context:
+            def __enter__(self):
+                return self
+            def __exit__ (self, exc_type, exc_value, exc_tb):
+                return True
         obj = MyObj()
         wr = weakref.ref(obj)
         with Context():
@@ -1089,12 +1083,11 @@ class ExceptionTests(__TestCase):
     def _check_generator_cleanup_exc_state(self, testfunc):
         # Issue #12791: exception state is cleaned up as soon as a generator
         # is closed (reference cycles are broken).
-        with torch._dynamo.error_on_graph_break(False):
-            class MyException(Exception):
-                def __init__(self, obj):
-                    self.obj = obj
-            class MyObj:
-                pass
+        class MyException(Exception):
+            def __init__(self, obj):
+                self.obj = obj
+        class MyObj:
+            pass
 
         def raising_gen():
             try:
@@ -1153,11 +1146,10 @@ class ExceptionTests(__TestCase):
     def test_3114(self):
         # Bug #3114: in its destructor, MyObject retrieves a pointer to
         # obsolete and/or deallocated objects.
-        with torch._dynamo.error_on_graph_break(False):
-            class MyObject:
-                def __del__(self):
-                    nonlocal e
-                    e = sys.exception()
+        class MyObject:
+            def __del__(self):
+                nonlocal e
+                e = sys.exception()
         e = ()
         try:
             raise Exception(MyObject())
@@ -1167,13 +1159,12 @@ class ExceptionTests(__TestCase):
         self.assertIsNone(e)
 
     def test_raise_does_not_create_context_chain_cycle(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A(Exception):
-                pass
-            class B(Exception):
-                pass
-            class C(Exception):
-                pass
+        class A(Exception):
+            pass
+        class B(Exception):
+            pass
+        class C(Exception):
+            pass
 
         # Create a context chain:
         # C -> B -> A
@@ -1229,13 +1220,12 @@ class ExceptionTests(__TestCase):
     def test_no_hang_on_context_chain_cycle2(self):
         # See issue 25782. Cycle at head of context chain.
 
-        with torch._dynamo.error_on_graph_break(False):
-            class A(Exception):
-                pass
-            class B(Exception):
-                pass
-            class C(Exception):
-                pass
+        class A(Exception):
+            pass
+        class B(Exception):
+            pass
+        class C(Exception):
+            pass
 
         # Context cycle:
         # +-----------+
@@ -1266,17 +1256,16 @@ class ExceptionTests(__TestCase):
     def test_no_hang_on_context_chain_cycle3(self):
         # See issue 25782. Longer context chain with cycle.
 
-        with torch._dynamo.error_on_graph_break(False):
-            class A(Exception):
-                pass
-            class B(Exception):
-                pass
-            class C(Exception):
-                pass
-            class D(Exception):
-                pass
-            class E(Exception):
-                pass
+        class A(Exception):
+            pass
+        class B(Exception):
+            pass
+        class C(Exception):
+            pass
+        class D(Exception):
+            pass
+        class E(Exception):
+            pass
 
         # Context cycle:
         #             +-----------+
@@ -1431,12 +1420,11 @@ class ExceptionTests(__TestCase):
     def test_badisinstance(self):
         # Bug #2542: if issubclass(e, MyException) raises an exception,
         # it should be ignored
-        with torch._dynamo.error_on_graph_break(False):
-            class Meta(type):
-                def __subclasscheck__(cls, subclass):
-                    raise ValueError()
-            class MyException(Exception, metaclass=Meta):
-                pass
+        class Meta(type):
+            def __subclasscheck__(cls, subclass):
+                raise ValueError()
+        class MyException(Exception, metaclass=Meta):
+            pass
 
         with captured_stderr() as stderr:
             try:
@@ -1670,9 +1658,8 @@ class ExceptionTests(__TestCase):
         self.assertTrue(issubclass(error3, error2))
 
         # test with explicit base tuple
-        with torch._dynamo.error_on_graph_break(False):
-            class C(object):
-                pass
+        class C(object):
+            pass
         error4 = _testcapi.make_exception_with_doc("_testcapi.error4", doc4,
                                                    (error3, C))
         self.assertTrue(issubclass(error4, error3))
@@ -1692,9 +1679,8 @@ class ExceptionTests(__TestCase):
         # Issue #5437: preallocated MemoryError instances should not keep
         # traceback objects alive.
         from _testcapi import raise_memoryerror
-        with torch._dynamo.error_on_graph_break(False):
-            class C:
-                pass
+        class C:
+            pass
         wr = None
         def inner():
             nonlocal wr
@@ -1714,9 +1700,8 @@ class ExceptionTests(__TestCase):
     @no_tracing
     def test_recursion_error_cleanup(self):
         # Same test as above, but with "recursion exceeded" errors
-        with torch._dynamo.error_on_graph_break(False):
-            class C:
-                pass
+        class C:
+            pass
         wr = None
         def inner():
             nonlocal wr
@@ -1741,12 +1726,11 @@ class ExceptionTests(__TestCase):
 
     def test_unraisable(self):
         # Issue #22836: PyErr_WriteUnraisable() should give sensible reports
-        with torch._dynamo.error_on_graph_break(False):
-            class BrokenDel:
-                def __del__(self):
-                    exc = ValueError("del is broken")
-                    # The following line is included in the traceback report:
-                    raise exc
+        class BrokenDel:
+            def __del__(self):
+                exc = ValueError("del is broken")
+                # The following line is included in the traceback report:
+                raise exc
 
         obj = BrokenDel()
         with support.catch_unraisable_exception() as cm:
@@ -1800,12 +1784,11 @@ class ExceptionTests(__TestCase):
 
     def test_yield_in_nested_try_excepts(self):
         #Issue #25612
-        with torch._dynamo.error_on_graph_break(False):
-            class MainError(Exception):
-                pass
+        class MainError(Exception):
+            pass
 
-            class SubError(Exception):
-                pass
+        class SubError(Exception):
+            pass
 
         def main():
             try:
@@ -1880,9 +1863,8 @@ class ExceptionTests(__TestCase):
         # subclass object. Finally, it checks that creating a new MemoryError
         # succeeds, proving that the freelist is not corrupted.
 
-        with torch._dynamo.error_on_graph_break(False):
-            class TestException(MemoryError):
-                pass
+        class TestException(MemoryError):
+            pass
 
         try:
             raise MemoryError
@@ -1960,9 +1942,8 @@ class NameErrorTests(__TestCase):
 
     def test_gh_111654(self):
         def f():
-            with torch._dynamo.error_on_graph_break(False):
-                class TestClass:
-                    TestClass
+            class TestClass:
+                TestClass
 
         self.assertRaises(NameError, f)
 
@@ -1982,9 +1963,8 @@ class AttributeErrorTests(__TestCase):
         self.assertIs(exc.obj, sentinel)
 
     def test_getattr_has_name_and_obj(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                blech = None
+        class A:
+            blech = None
 
         obj = A()
         try:
@@ -1999,10 +1979,9 @@ class AttributeErrorTests(__TestCase):
             self.assertEqual(obj, exc.obj)
 
     def test_getattr_has_name_and_obj_for_method(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class A:
-                def blech(self):
-                    return
+        class A:
+            def blech(self):
+                return
 
         obj = A()
         try:
@@ -2331,9 +2310,8 @@ class SyntaxErrorTests(__TestCase):
                     the_exception = exc
 
     def test_subclass(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class MySyntaxError(SyntaxError):
-                pass
+        class MySyntaxError(SyntaxError):
+            pass
 
         try:
             raise MySyntaxError("bad bad", ("bad.py", 1, 2, "abcdefg", 1, 7))
@@ -2578,12 +2556,11 @@ class PEP626Tests(__TestCase):
         self.lineno_after_raise(in_finally_except, 4)
 
     def test_lineno_after_with(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class Noop:
-                def __enter__(self):
-                    return self
-                def __exit__(self, *args):
-                    pass
+        class Noop:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
         def after_with():
             with Noop():
                 1/0
@@ -2598,12 +2575,11 @@ class PEP626Tests(__TestCase):
         self.lineno_after_raise(f, None)
 
     def test_lineno_after_raise_in_with_exit(self):
-        with torch._dynamo.error_on_graph_break(False):
-            class ExitFails:
-                def __enter__(self):
-                    return self
-                def __exit__(self, *args):
-                    raise ValueError
+        class ExitFails:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                raise ValueError
 
         def after_with():
             with ExitFails():

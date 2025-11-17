@@ -1517,50 +1517,6 @@ class ShapePropagator : public PropertyPropBase {
           return {};
         }};
 
-    static const auto get_cast_scalar_type = [](Node* node) -> at::ScalarType {
-      switch (node->kind()) {
-        case aten::_cast_Byte:
-          return at::kByte;
-        case aten::_cast_Char:
-          return at::kChar;
-        case aten::_cast_Double:
-          return at::kDouble;
-        case aten::_cast_Float:
-          return at::kFloat;
-        case aten::_cast_Half:
-          return at::kHalf;
-        case aten::_cast_Int:
-          return at::kInt;
-        case aten::_cast_Long:
-          return at::kLong;
-        case aten::_cast_Short:
-          return at::kShort;
-        default:
-          TORCH_INTERNAL_ASSERT(
-              false,
-              "unknown node kind in get_cast_scalar_type: ",
-              node->kind().toQualString());
-      }
-    };
-    static const register_formula_for cast_ops{
-        {
-            "aten::_cast_Byte(Tensor self, bool non_blocking) -> Tensor",
-            "aten::_cast_Char(Tensor self, bool non_blocking) -> Tensor",
-            "aten::_cast_Double(Tensor self, bool non_blocking) -> Tensor",
-            "aten::_cast_Float(Tensor self, bool non_blocking) -> Tensor",
-            "aten::_cast_Half(Tensor self, bool non_blocking) -> Tensor",
-            "aten::_cast_Int(Tensor self, bool non_blocking) -> Tensor",
-            "aten::_cast_Long(Tensor self, bool non_blocking) -> Tensor",
-            "aten::_cast_Short(Tensor self, bool non_blocking) -> Tensor",
-        },
-        [](Node* node) -> type_vec_t {
-          if (auto type =
-                  node->namedInput(attr::self)->type()->cast<TensorType>()) {
-            return {type->withScalarType(get_cast_scalar_type(node))};
-          }
-          return {};
-        }};
-
     // First, try to match one of the registered formulas to their operator
     // sets.
     for (auto& entry : shape_formulas) {

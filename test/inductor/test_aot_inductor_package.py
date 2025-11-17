@@ -950,7 +950,7 @@ class TestAOTInductorPackage(TestCase):
             "aot_inductor.package_cpp_only": self.package_cpp_only,
             "always_keep_tensor_constants": True,
             "aot_inductor.package_constants_in_so": False,
-            "aot_inductor.package_constants_on_disk_format": "pickle_weights",
+            "aot_inductor.package_constants_on_disk": True,
         }
 
         class Bar(torch.nn.Module):
@@ -1034,7 +1034,7 @@ class TestAOTInductorPackage(TestCase):
             "aot_inductor.package_cpp_only": self.package_cpp_only,
             "always_keep_tensor_constants": True,
             "aot_inductor.package_constants_in_so": False,
-            "aot_inductor.package_constants_on_disk_format": "pickle_weights",
+            "aot_inductor.package_constants_on_disk": True,
         }
 
         # linear.weight's node name is linear_weight.

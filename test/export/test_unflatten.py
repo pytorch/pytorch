@@ -1060,27 +1060,6 @@ def forward(self, x):
         inp = (torch.randn(3), None)
         self.assertTrue(torch.allclose(unf(*inp), M1()(*inp)))
 
-    def test_unflatten_root_module_type(self) -> None:
-        class M(torch.nn.Module):
-            def forward(self, x: torch.Tensor) -> torch.Tensor:
-                return x + x
-
-        class M1(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.m = M()
-
-            def forward(self, x: torch.Tensor) -> torch.Tensor:
-                return self.m(x)
-
-        inp = (torch.randn(3),)
-        ep = torch.export.export(M1(), inp)
-        unf = torch.export.unflatten(ep)
-        self.assertIsNotNone(unf.type_name())
-        self.assertEqual(unf.type_name().split(".")[-1], "M1")
-        self.assertEqual(unf.m.type_name().split(".")[-1], "M")
-        self.assertTrue(torch.allclose(unf(*inp), M1()(*inp)))
-
 
 if __name__ == "__main__":
     run_tests()

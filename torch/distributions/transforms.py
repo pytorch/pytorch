@@ -226,13 +226,13 @@ class _InverseTransform(Transform):
         self._inv: Transform = transform  # type: ignore[assignment]
 
     @constraints.dependent_property(is_discrete=False)
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def domain(self):
         assert self._inv is not None
         return self._inv.codomain
 
     @constraints.dependent_property(is_discrete=False)
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def codomain(self):
         assert self._inv is not None
         return self._inv.domain
@@ -302,7 +302,7 @@ class ComposeTransform(Transform):
         return self.parts == other.parts
 
     @constraints.dependent_property(is_discrete=False)
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def domain(self):
         if not self.parts:
             return constraints.real
@@ -318,7 +318,7 @@ class ComposeTransform(Transform):
         return domain
 
     @constraints.dependent_property(is_discrete=False)
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def codomain(self):
         if not self.parts:
             return constraints.real
@@ -438,14 +438,14 @@ class IndependentTransform(Transform):
         )
 
     @constraints.dependent_property(is_discrete=False)
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def domain(self):
         return constraints.independent(
             self.base_transform.domain, self.reinterpreted_batch_ndims
         )
 
     @constraints.dependent_property(is_discrete=False)
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def codomain(self):
         return constraints.independent(
             self.base_transform.codomain, self.reinterpreted_batch_ndims
@@ -513,12 +513,12 @@ class ReshapeTransform(Transform):
         super().__init__(cache_size=cache_size)
 
     @constraints.dependent_property
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def domain(self):
         return constraints.independent(constraints.real, len(self.in_shape))
 
     @constraints.dependent_property
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def codomain(self):
         return constraints.independent(constraints.real, len(self.out_shape))
 
@@ -772,14 +772,14 @@ class AffineTransform(Transform):
         return self._event_dim
 
     @constraints.dependent_property(is_discrete=False)
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def domain(self):
         if self.event_dim == 0:
             return constraints.real
         return constraints.independent(constraints.real, self.event_dim)
 
     @constraints.dependent_property(is_discrete=False)
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def codomain(self):
         if self.event_dim == 0:
             return constraints.real
@@ -877,7 +877,7 @@ class CorrCholeskyTransform(Transform):
         # apply stick-breaking on the squared values
         # Note that y = sign(r) * sqrt(z * z1m_cumprod)
         #             = (sign(r) * sqrt(z)) * sqrt(z1m_cumprod) = r * sqrt(z1m_cumprod)
-        # pyrefly: ignore [unsupported-operation]
+        # pyrefly: ignore  # unsupported-operation
         z = r**2
         z1m_cumprod_sqrt = (1 - z).sqrt().cumprod(-1)
         # Diagonal elements must be 1.
@@ -1166,14 +1166,14 @@ class CatTransform(Transform):
         return all(t.bijective for t in self.transforms)
 
     @constraints.dependent_property
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def domain(self):
         return constraints.cat(
             [t.domain for t in self.transforms], self.dim, self.lengths
         )
 
     @constraints.dependent_property
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def codomain(self):
         return constraints.cat(
             [t.codomain for t in self.transforms], self.dim, self.lengths
@@ -1246,12 +1246,12 @@ class StackTransform(Transform):
         return all(t.bijective for t in self.transforms)
 
     @constraints.dependent_property
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def domain(self):
         return constraints.stack([t.domain for t in self.transforms], self.dim)
 
     @constraints.dependent_property
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def codomain(self):
         return constraints.stack([t.codomain for t in self.transforms], self.dim)
 

@@ -34,7 +34,6 @@ class TensorRepr(gdb.Command):  # type: ignore[misc, no-any-unimported]
     on it.
     """
 
-    # pyrefly: ignore [bad-argument-type]
     __doc__ = textwrap.dedent(__doc__).strip()
 
     def __init__(self) -> None:

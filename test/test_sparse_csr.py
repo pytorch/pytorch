@@ -35,7 +35,7 @@ if TEST_NUMPY:
     import numpy as np
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests  # noqa: PLW0127
+load_tests = load_tests
 
 no_mkl_sparse = IS_WINDOWS or not TEST_MKL
 
@@ -135,7 +135,7 @@ class TestSparseCSRSampler(TestCase):
         index_dtype = torch.int32
         for n_rows in range(1, 10):
             for n_cols in range(1, 10):
-                for nnz in range(n_rows * n_cols + 1):
+                for nnz in range(0, n_rows * n_cols + 1):
                     crow_indices = self._make_crow_indices(
                         n_rows, n_cols, nnz,
                         device=device, dtype=index_dtype)
@@ -4099,7 +4099,7 @@ class TestSparseCompressedTritonKernels(TestCase):
             left_alpha = make_tensor(M, dtype=dtype, device=device, low=0.5, high=high) if has_left_alpha else None
             right_alpha = make_tensor(N, dtype=dtype, device=device, low=0.5, high=high) if has_right_alpha else None
 
-            if 0 and op == "bsr_dense_addmm":  # noqa: SIM223
+            if 0 and op == "bsr_dense_addmm":
                 # Find optimal kernel parameters, the speed-up is
                 # about 10x for running this test.
                 #

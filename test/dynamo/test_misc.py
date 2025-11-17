@@ -110,7 +110,6 @@ if python_pytree._cxx_pytree_dynamo_traceable:
     import torch.utils._cxx_pytree as cxx_pytree
 
     pytree_modules["cxx"] = cxx_pytree
-    pytree_modules["native_optree"] = cxx_pytree.optree
 else:
     cxx_pytree = None
 
@@ -242,57 +241,6 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertTrue(same(val3, correct3))
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
-
-    def test_dynamo_inside_custom_op(self):
-        cnt = torch._dynamo.testing.InductorAndRecordGraphs()
-        cnt1 = torch._dynamo.testing.InductorAndRecordGraphs()
-
-        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
-            m.define("foo(Tensor x) -> Tensor")
-
-            def inner(x):
-                return x.sin().cos()
-
-            def foo_impl(x):
-                return torch.compile(inner, fullgraph=True, dynamic=True, backend=cnt)(
-                    x
-                )
-
-            m.impl("foo", foo_impl, "CompositeExplicitAutograd")
-
-            @torch.compile(fullgraph=True, dynamic=True, backend=cnt1)
-            def f(x):
-                return torch.ops.mylib.foo.default(x)
-
-            x = torch.randn(3)
-            res = f(x)
-            res1 = f(x)
-            res2 = f(x)
-            expected = x.sin().cos()
-            self.assertEqual(res, expected)
-            self.assertEqual(res1, expected)
-            self.assertEqual(res2, expected)
-            self.assertTrue(len(cnt.inductor_graphs), 1)
-            self.assertTrue(len(cnt1.inductor_graphs), 1)
-            self.assertExpectedInline(
-                str(cnt.inductor_graphs[0].graph).strip(),
-                """\
-graph():
-    %arg0_1 : [num_users=0] = placeholder[target=arg0_1]
-    %arg1_1 : [num_users=1] = placeholder[target=arg1_1]
-    %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%arg1_1,), kwargs = {})
-    %cos : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%sin,), kwargs = {})
-    return (cos,)""",
-            )
-            self.assertExpectedInline(
-                str(cnt1.inductor_graphs[0].graph).strip(),
-                """\
-graph():
-    %arg0_1 : [num_users=0] = placeholder[target=arg0_1]
-    %arg1_1 : [num_users=1] = placeholder[target=arg1_1]
-    %foo : [num_users=1] = call_function[target=torch.ops.mylib.foo.default](args = (%arg1_1,), kwargs = {})
-    return (foo,)""",
-            )
 
     @torch._dynamo.config.patch(accumulated_recompile_limit=1)
     def test_dynamo_disabled_in_custom_op_kernels(self):
@@ -657,31 +605,6 @@ graph():
 
         fn = torch.compile(f, backend="eager", dynamic=True, fullgraph=True)
         fn(torch.tensor([5]), 5)
-
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    def test_cond_runtime_assert_generation(self):
-        def fn(x):
-            y = x.nonzero()  # unbacked binding u0
-            torch._check(y.shape[0] % 4 == 0)
-
-            return torch.randn(y.shape[0])
-
-        @torch.compile(dynamic=True, backend="aot_eager")
-        def foo(x):
-            b = torch.cond(
-                pred=(x.shape[0] % 4 == 0),
-                true_fn=lambda: fn(x),
-                false_fn=lambda: fn(x),
-            )
-
-            return b
-
-        foo(torch.randn(4, 4))
-        with self.assertRaisesRegex(
-            RuntimeError, "Runtime assertion failed for expression Eq(Mod(u1, 4), 0)*"
-        ):
-            foo(torch.randn(5, 5))
 
     def test_tensor_setattr_getset_descriptor(self):
         # Tensor attribute `real` has special getter/setter for complex dtype.
@@ -3447,9 +3370,9 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         # Test on non autocast state and autocast cache states.
         self.assertIn("autocast_state", json_guards)
         for key, value in json_guards.items():
-            if type(value) is int:
+            if type(value) == int:
                 variant = value + 1
-            elif type(value) is bool:
+            elif type(value) == bool:
                 variant = not value
             elif isinstance(value, dict) and key == "autocast_state":
                 variant = value.copy()
@@ -7779,19 +7702,6 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(opt_fn(torch.ones(1)), torch.tensor([3.0]))
 
-    def test_sparse_output_inductor_should_break(self) -> None:
-        # See https://github.com/pytorch/pytorch/issues/164823
-        # We want consistent semantics here
-        def forward(x: torch.Tensor) -> torch.Tensor:
-            x_sparse = x.to_sparse()
-            return x_sparse * 2
-
-        test_tensor = torch.randn(10, 10)
-        pt = forward(test_tensor)
-        aot_eager = torch.compile(forward, backend="aot_eager")(test_tensor)
-        self.assertEqual(pt, aot_eager)
-        inductor = torch.compile(forward, backend="inductor")(test_tensor)
-
     def test_nested_sequential_try_with(self):
         def fn(x):
             with torch.set_grad_enabled(True):
@@ -9281,47 +9191,6 @@ def ___make_guard_fn():
         self.assertEqual(comp_out, real_out)
         self.assertEqual(counter.frame_count, 2)
         self.assertEqual(counter.op_count, 2)
-
-    def test_jacfwd_one_hot_dynamic_compile(self):
-        import torch.nn.functional as F
-
-        MAX, BATCH = 3, 37
-
-        def func(x, idxs):
-            return x.square() * F.one_hot(idxs, MAX)
-
-        def jacfunc(x, idxs):
-            return torch.func.jacfwd(func, argnums=(0,))(x, idxs)
-
-        idxs = torch.randint(MAX, (BATCH,), dtype=torch.int64)
-        x = torch.rand((BATCH, MAX), dtype=torch.float64)
-        eager = jacfunc(x, idxs)
-
-        compiled = torch.compile(jacfunc, backend="eager", dynamic=True)
-        out_comp = compiled(x, idxs)
-        self.assertEqual(eager[0], out_comp[0])
-
-    def test_tracing_nested_py_tree_mixed_all(self):
-        def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
-            res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
-
-        xs = [torch.tensor(i) for i in range(3)]
-        xsa = (xs, xs)
-        xsb = {"aa": xsa, "ab": xs}
-        xsl = {
-            "a": xs,
-            "b": xsa,
-            "c": xsb,
-        }
-
-        counter = CompileCounter()
-        comp_out = torch.compile(fn, backend=counter, fullgraph=True)(xsl)
-        real_out = fn(xsl)
-        self.assertEqual(comp_out, real_out)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 18)
 
     def test_any_all_symnode(self):
         cnt = CompileCounter()
@@ -11468,12 +11337,12 @@ fn
             fn(x, y)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_infer_unbacked_size_gt_zero(self):
+    def test_guard_size_oblivious(self):
         # This code, in fact, does NOT work in eager
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
             y = torch.zeros(x.item())
-            if y.size(0) < 0:
+            if guard_size_oblivious(y.size(0) == 0):
                 assert False
             return y
 
@@ -12888,9 +12757,6 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            if pytree.__name__ == "optree":
-                # The treespec argument comes first in OpTree / JAX PyTree
-                return pytree.tree_unflatten(spec, res)
             return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
@@ -12905,9 +12771,6 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            if pytree.__name__ == "optree":
-                # The treespec argument comes first in OpTree / JAX PyTree
-                return pytree.tree_unflatten(spec, res)
             return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
@@ -12925,9 +12788,6 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            if pytree.__name__ == "optree":
-                # The treespec argument comes first in OpTree / JAX PyTree
-                return pytree.tree_unflatten(spec, res)
             return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
@@ -12945,9 +12805,6 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            if pytree.__name__ == "optree":
-                # The treespec argument comes first in OpTree / JAX PyTree
-                return pytree.tree_unflatten(spec, res)
             return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
@@ -12969,9 +12826,6 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            if pytree.__name__ == "optree":
-                # The treespec argument comes first in OpTree / JAX PyTree
-                return pytree.tree_unflatten(spec, res)
             return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
@@ -13073,13 +12927,7 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
                 torch.ones(3, 2),
                 1,
             ]
-            if pytree.__name__ == "optree":
-                # `None` is a internal node rather than leaf in default OpTree / JAX PyTree
-                new_leaves.pop()
-                # The treespec argument comes first in OpTree / JAX PyTree
-                new_tree = pytree.tree_unflatten(treespec, new_leaves)
-            else:
-                new_tree = pytree.tree_unflatten(new_leaves, treespec)
+            new_tree = pytree.tree_unflatten(new_leaves, treespec)
             return leaves, new_tree
 
         x = torch.randn(3, 2)
@@ -13134,10 +12982,6 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
 
     @parametrize_pytree_module
     def test_pytree_tree_map_only(self, pytree):
-        if not callable(getattr(pytree, "tree_map_only", None)):
-            # OpTree and JAX PyTree do not have `tree_map_only`
-            return
-
         def fn(xs):
             def mapper(x):
                 return x.clone()
@@ -13435,7 +13279,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             counter = CompileCounter()
             opt_fn = torch.compile(fn, backend=counter)
             res = opt_fn()
-            self.assertTrue(res.device.type in device)
+            self.assertEqual(res.device.type, device)
             self.assertEqual(res.device.index, 0)
             self.assertEqual(counter.frame_count, 2)
 

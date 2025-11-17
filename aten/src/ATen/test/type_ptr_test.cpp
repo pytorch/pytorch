@@ -37,10 +37,6 @@ TEST(SingletonOrSharedTypePtr, Comparison) {
 
   EXPECT_NE(empty, p);
   EXPECT_NE(p, p2);
-
-  EXPECT_EQ(empty, empty);
-  EXPECT_EQ(p, p);
-  EXPECT_EQ(p2, p2);
 }
 
 TEST(SingletonOrSharedTypePtr, SingletonComparison) {
@@ -51,8 +47,6 @@ TEST(SingletonOrSharedTypePtr, SingletonComparison) {
   c10::TypePtr type = c10::NoneType::get();
   EXPECT_NE(type, c10::StringType::get());
   EXPECT_NE(type, c10::DeviceObjType::get());
-  EXPECT_EQ(type, type);
-  EXPECT_EQ(type, c10::NoneType::get());
 }
 
 

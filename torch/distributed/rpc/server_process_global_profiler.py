@@ -4,8 +4,6 @@
 import itertools
 
 import torch
-
-# pyrefly: ignore [deprecated]
 from torch.autograd.profiler_legacy import profile
 
 from . import (
@@ -176,13 +174,11 @@ class _server_process_global_profile(profile):
         flattened_function_events = list(
             itertools.chain.from_iterable(process_global_function_events)
         )
-        # pyrefly: ignore [bad-assignment]
         self.function_events = torch.autograd.profiler_util.EventList(
             flattened_function_events,
             use_device="cuda" if self.use_cuda else None,
             profile_memory=self.profile_memory,
         )
-        # pyrefly: ignore [missing-attribute]
         self.function_events._build_tree()
 
         self.process_global_function_events = process_global_function_events

@@ -24,7 +24,7 @@ struct type_caster<torch::monitor::data_value_t> {
   PYBIND11_TYPE_CASTER(torch::monitor::data_value_t, _("data_value_t"));
 
   // Python -> C++
-  bool load(handle src, bool /*unused*/) {
+  bool load(handle src, bool) {
     PyObject* source = src.ptr();
     if (THPUtils_checkLong(source)) {
       this->value = THPUtils_unpackLong(source);

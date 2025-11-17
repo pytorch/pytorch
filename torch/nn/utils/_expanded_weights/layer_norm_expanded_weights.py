@@ -17,7 +17,7 @@ from .expanded_weights_utils import (
 @implements_per_sample_grads(F.layer_norm)
 class LayerNormPerSampleGrad(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def forward(ctx, kwarg_names, _, *expanded_args_and_kwargs):
         expanded_args, expanded_kwargs = standard_kwargs(
             kwarg_names, expanded_args_and_kwargs
@@ -43,7 +43,7 @@ class LayerNormPerSampleGrad(torch.autograd.Function):
         return output
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def backward(ctx, grad_output):
         def weight_per_sample_grad(weight):
             return sum_over_all_but_batch_and_last_n(

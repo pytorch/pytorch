@@ -58,12 +58,8 @@ class APoTObserver(ObserverBase):
         alpha = torch.max(-self.min_val, self.max_val)
 
         # check for valid inputs of b, k
-        if not self.k or self.k == 0:
-            raise AssertionError(f"k must be a non-zero integer, got k={self.k}")
-        if self.b % self.k != 0:
-            raise AssertionError(
-                f"b must be divisible by k, got b={self.b}, k={self.k}"
-            )
+        assert self.k and self.k != 0
+        assert self.b % self.k == 0
 
         # compute n and store as member variable
         self.n = self.b // self.k
@@ -72,10 +68,10 @@ class APoTObserver(ObserverBase):
         p_all = []
 
         # create levels
-        for i in range(self.n):
+        for i in range(0, self.n):
             p_curr = torch.tensor([0])
 
-            for j in range((2**self.k - 2) + 1):
+            for j in range(0, (2**self.k - 2) + 1):
                 curr_ele = 2 ** (-(i + j * self.n))
                 p_append = torch.tensor([curr_ele])
                 p_curr = torch.cat((p_curr, p_append))

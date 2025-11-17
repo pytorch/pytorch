@@ -202,7 +202,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,fail_accuracy,37
+vision_maskrcnn,fail_accuracy,39
 
 
 

@@ -26,35 +26,35 @@ class TORCH_API CppPrinter : public IRPrinter {
   using IRPrinter::visit;
 
   // Binary expressions.
-  void visit(const ModPtr& /*v*/) override;
-  void visit(const MaxPtr& /*v*/) override;
-  void visit(const MinPtr& /*v*/) override;
+  void visit(const ModPtr&) override;
+  void visit(const MaxPtr&) override;
+  void visit(const MinPtr&) override;
 
   // Conditional expressions.
-  void visit(const CompareSelectPtr& /*v*/) override;
-  void visit(const IfThenElsePtr& /*v*/) override;
+  void visit(const CompareSelectPtr&) override;
+  void visit(const IfThenElsePtr&) override;
 
   // Tensor operations.
-  void visit(const AllocatePtr& /*v*/) override;
-  void visit(const FreePtr& /*v*/) override;
-  void visit(const LoadPtr& /*v*/) override;
-  void visit(const StorePtr& /*v*/) override;
+  void visit(const AllocatePtr&) override;
+  void visit(const FreePtr&) override;
+  void visit(const LoadPtr&) override;
+  void visit(const StorePtr&) override;
 
   // Casts.
-  void visit(const CastPtr& /*v*/) override;
-  void visit(const BitCastPtr& /*v*/) override;
+  void visit(const CastPtr&) override;
+  void visit(const BitCastPtr&) override;
 
   // Calls.
-  void visit(const IntrinsicsPtr& /*v*/) override;
-  void visit(const ExternalCallPtr& /*v*/) override;
+  void visit(const IntrinsicsPtr&) override;
+  void visit(const ExternalCallPtr&) override;
 
   // Vars.
-  void visit(const LetPtr& /*v*/) override;
-  void visit(const VarPtr& /*v*/) override;
+  void visit(const LetPtr&) override;
+  void visit(const VarPtr&) override;
 
   // Vector data types.
-  void visit(const RampPtr& /*v*/) override;
-  void visit(const BroadcastPtr& /*v*/) override;
+  void visit(const RampPtr&) override;
+  void visit(const BroadcastPtr&) override;
 
  private:
   int lane_;

@@ -83,7 +83,6 @@ class TrackedProcessPoolExecutor(ProcessPoolExecutor):
     def submit(
         self, fn: Callable[_P, _R], /, *args: _P.args, **kwargs: _P.kwargs
     ) -> Future[_R]:
-        # pyrefly: ignore [bad-argument-type]
         f = super().submit(fn, *args, **kwargs)
         self._record_enqueue(f)
         return f

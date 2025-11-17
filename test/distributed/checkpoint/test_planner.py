@@ -66,7 +66,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 def create_sharded_tensor(rank, world_size, shards_per_rank, shard_size=8):
     shards_metadata = []
     local_shards = []
-    for idx in range(world_size * shards_per_rank):
+    for idx in range(0, world_size * shards_per_rank):
         shard_rank = idx // shards_per_rank
         shard_md = ShardMetadata(
             shard_offsets=[idx * shard_size],

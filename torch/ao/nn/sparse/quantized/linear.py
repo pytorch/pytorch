@@ -224,7 +224,7 @@ class Linear(torch.nn.Module):
 
         TODO(zaf): Need to add the sparse params to the qconfig
         """
-        assert type(mod) is cls._FLOAT_MODULE, (
+        assert type(mod) == cls._FLOAT_MODULE, (
             cls._get_name() + ".from_float only works for " + cls._FLOAT_MODULE.__name__
         )
         assert hasattr(mod, "sparse_params"), (

@@ -45,7 +45,6 @@ def _get_logging_handler(
     return (log_handler, log_handler_name)
 
 
-# pyrefly: ignore [unknown-name]
 global _c10d_logger
 _c10d_logger = _get_or_create_logger()
 

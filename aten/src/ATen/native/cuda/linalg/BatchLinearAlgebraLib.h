@@ -86,7 +86,7 @@ namespace cuda { namespace detail {
 struct LinalgDispatch {
    Tensor (*cholesky_solve_helper)(const Tensor& self, const Tensor& A, bool upper);
 };
-C10_EXPORT void registerLinalgDispatch(const LinalgDispatch& /*disp_*/);
+C10_EXPORT void registerLinalgDispatch(const LinalgDispatch&);
 }} // namespace cuda::detail
 #endif
 

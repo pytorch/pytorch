@@ -44,7 +44,7 @@ class Geometric(Distribution):
         logits (Number, Tensor): the log-odds of sampling `1`.
     """
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
     support = constraints.nonnegative_integer
 
@@ -59,11 +59,11 @@ class Geometric(Distribution):
                 "Either `probs` or `logits` must be specified, but not both."
             )
         if probs is not None:
-            # pyrefly: ignore [read-only]
+            # pyrefly: ignore  # read-only
             (self.probs,) = broadcast_all(probs)
         else:
             assert logits is not None  # helps mypy
-            # pyrefly: ignore [read-only]
+            # pyrefly: ignore  # read-only
             (self.logits,) = broadcast_all(logits)
         probs_or_logits = probs if probs is not None else logits
         if isinstance(probs_or_logits, _Number):

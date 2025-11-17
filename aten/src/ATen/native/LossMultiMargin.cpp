@@ -57,7 +57,7 @@ inline int64_t target_index_checked(
 }
 
 template <typename scalar_t>
-inline void multi_margin_loss_cpu_kernel(
+static inline void multi_margin_loss_cpu_kernel(
     Tensor& output,
     const scalar_t* input_data,
     const int64_t* target_data,
@@ -148,7 +148,7 @@ void multi_margin_loss_out_cpu_template(
 }
 
 template <typename scalar_t>
-void multi_margin_loss_backward_cpu_kernel(
+static void multi_margin_loss_backward_cpu_kernel(
     scalar_t* grad_input_data,
     const Tensor& grad_output,
     const scalar_t* input_data,

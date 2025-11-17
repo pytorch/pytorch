@@ -54,20 +54,6 @@ def is_tuple(x: object) -> TypeIs[tuple]:
     return isinstance(x, tuple)
 
 
-def as_tuple(x: IntTuple) -> tuple[IntTuple, ...]:
-    if is_int(x):
-        return (x,)
-    return x
-
-
-def match_structure(a: IntTuple, b: IntTuple) -> bool:
-    if is_int(a) and is_int(b):
-        return True
-    if is_tuple(a) and is_tuple(b):
-        return len(a) == len(b) and all(match_structure(x, y) for x, y in zip(a, b))
-    return False
-
-
 def flatten(t: IntTuple) -> tuple[int, ...]:
     if is_tuple(t):
         if len(t) == 0:
@@ -212,9 +198,7 @@ def crd2idx(
             for i in range(len(shape) - 1, 0, -1):
                 result += crd2idx(crd % product(shape[i]), shape[i], stride[i])
                 crd = crd // product(shape[i])
-            if len(shape) > 0:
-                result += crd2idx(crd, shape[0], stride[0])
-            return result
+            return result + crd2idx(crd, shape[0], stride[0])
         else:  # "int" "int" "int"
             assert not is_tuple(shape) and not is_tuple(stride)
             return crd * stride  # all are ints after type checks

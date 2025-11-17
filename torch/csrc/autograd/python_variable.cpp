@@ -213,7 +213,7 @@ static PyObject* THPVariable_NewWithVar(
     std::optional<bool> has_torch_dispatch_if_known = std::nullopt);
 
 // clang-tidy gets confused by static const
-static constexpr const char* VOLATILE_WARNING =
+static const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
     "`with torch.no_grad():` instead.";
 
@@ -686,7 +686,7 @@ static Tensor make_tensor_for_subclass_helper(
 }
 
 static PyObject* THPVariable_make_wrapper_subclass(
-    PyObject* /*unused*/,
+    PyObject*,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
@@ -895,7 +895,7 @@ static c10::SymDimVector tuple_to_symintlist(PyObject* obj) {
 // DTensor-specific variant of make_wrapper_subclass to minimize DTensor
 // overhead.
 static PyObject* THPVariable_dtensor_new(
-    PyObject* /*unused*/,
+    PyObject*,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS

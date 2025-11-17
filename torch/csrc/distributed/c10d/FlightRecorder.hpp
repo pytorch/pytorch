@@ -231,8 +231,6 @@ struct FlightRecorder {
       std::optional<size_t> id,
       bool compute_duration = true);
 
-  TORCH_API void reset_all();
-
   const c10::List<c10::IValue> getCollectiveTrace(
       bool includeStacktraces,
       bool onlyActive);
@@ -264,15 +262,6 @@ struct FlightRecorder {
       bool includeStackTraces,
       bool onlyActive);
 };
-
-// Whether to include stack trace in the Flight Recorder trace (default true)
-static std::vector<std::string> TORCH_INCLUDE_STACK_TRACE = {
-    "TORCH_INCLUDE_STACK_TRACE"};
-
-// Whether to include only active collectives in the Flight Recorder trace
-// (default false)
-static std::vector<std::string> TORCH_INCLUDE_ONLY_ACTIVE = {
-    "TORCH_INCLUDE_ONLY_ACTIVE"};
 
 // Dumps the fr traces and additional information about the Process
 // Group.

@@ -28,7 +28,6 @@
     is_available
     is_bf16_supported
     is_initialized
-    is_tf32_supported
     set_device
     set_stream
     stream

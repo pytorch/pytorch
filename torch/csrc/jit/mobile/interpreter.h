@@ -12,7 +12,7 @@ struct InterpreterState {
   TORCH_API bool run(Stack& stack);
 
  private:
-  void enterFrame(const Code& /*code*/);
+  void enterFrame(const Code&);
   void leaveFrame();
   void saveExceptionDebugHandles();
   void callFunction(torch::jit::Function& f, Stack& stack);

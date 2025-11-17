@@ -1045,13 +1045,9 @@ def _max_pool_with_indices(
     if not stride:
         stride = kernel_size
 
-    # pyrefly: ignore [bad-assignment]
     kernel_size = pad_listlike(kernel_size, dim)
-    # pyrefly: ignore [bad-assignment]
     dilation = pad_listlike(dilation, dim)
-    # pyrefly: ignore [bad-assignment]
     padding = pad_listlike(padding, dim)
-    # pyrefly: ignore [bad-assignment]
     stride = pad_listlike(stride, dim)
 
     window_size = functools.reduce(operator.mul, kernel_size)
@@ -1186,10 +1182,9 @@ def repeat_interleave_Tensor(
     assert repeat.ndim == 1
     cumsum = repeat.cumsum(0)
     pos = torch.arange(output_size, device=repeat.device)
-    indices = torch.searchsorted(
+    return torch.searchsorted(
         cumsum, pos, out_int32=(repeat.dtype == torch.int32), right=True
     )
-    return torch.clamp(indices, max=repeat.size(0) - 1)
 
 
 # intentionally not regiestered
@@ -1210,11 +1205,8 @@ def conv1d_to_conv2d(
         "Expect (N,C_in,L) and (C_out,C_in//groups,K)"
     )
 
-    # pyrefly: ignore [bad-assignment]
     stride = stride[0]
-    # pyrefly: ignore [bad-assignment]
     padding = padding[0]
-    # pyrefly: ignore [bad-assignment]
     dilation = dilation[0]
 
     # Unsqueeze to make input 2D: (N,C,L) -> (N,C,L,1)

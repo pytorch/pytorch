@@ -100,7 +100,7 @@ class TestBuiltin(TestCase):
         # dtypes results in False/True when compared to valid dtypes.
         # Here 7 cannot be converted to dtype. No exceptions should be raised
 
-        assert np.dtype(np.int32) != 7, "dtype richcompare failed for =="
+        assert not np.dtype(np.int32) == 7, "dtype richcompare failed for =="
         assert np.dtype(np.int32) != 7, "dtype richcompare failed for !="
 
     @parametrize("operation", [operator.le, operator.lt, operator.ge, operator.gt])

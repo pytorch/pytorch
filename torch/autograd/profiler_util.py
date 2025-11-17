@@ -30,7 +30,6 @@ class EventList(list):
         use_device = kwargs.pop("use_device", None)
         profile_memory = kwargs.pop("profile_memory", False)
         with_flops = kwargs.pop("with_flops", False)
-        # pyrefly: ignore [not-iterable]
         super().__init__(*args, **kwargs)
         self._use_device = use_device
         self._profile_memory = profile_memory
@@ -131,10 +130,9 @@ class EventList(list):
                         current_events.pop()
                     else:
                         parent.append_cpu_child(event)
-                        if event.cpu_parent is not None:
-                            raise AssertionError(
-                                f"There is already a CPU parent event for {event.key}"
-                            )
+                        assert event.cpu_parent is None, (
+                            f"There is already a CPU parent event for {event.key}"
+                        )
                         event.set_cpu_parent(parent)
                         break
 
@@ -159,12 +157,12 @@ class EventList(list):
         for evt in self:
             p = bw_parent(evt)
             if p is not None:
-                if p.fwd_thread is None:
-                    raise AssertionError(
-                        "Expected fwd_thread to be set for backward parent"
-                    )
+                assert p.fwd_thread is not None
                 t = (p.sequence_nr, p.fwd_thread)
-                evt.stack = fwd_stacks.get(t, [])
+                if t in fwd_stacks:
+                    evt.stack = fwd_stacks[t]
+                else:
+                    evt.stack = []
 
     @property
     def self_cpu_time_total(self):
@@ -327,10 +325,7 @@ class EventList(list):
         Returns:
             An EventList containing FunctionEventAvg objects.
         """
-        if not self._tree_built:
-            raise AssertionError(
-                "Expected tree to be built before calling key_averages"
-            )
+        assert self._tree_built
         stats: dict[tuple[str, ...], FunctionEventAvg] = defaultdict(FunctionEventAvg)
 
         def get_key(
@@ -400,8 +395,7 @@ def _format_time(time_us):
 def _format_time_share(time_us, total_time_us):
     """Define how to format time in FunctionEvent."""
     if total_time_us == 0:
-        if time_us != 0:
-            raise AssertionError(f"Expected time_us == 0 but got {time_us}")
+        assert time_us == 0, f"Expected time_us == 0 but got {time_us}"
         return "NaN"
     return f"{time_us * 100.0 / total_time_us:.2f}%"
 
@@ -506,9 +500,9 @@ class FunctionEvent(FormattedTimesMixin):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         self.overload_name: str = overload_name
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         self.trace_name: str = trace_name
         self.time_range: Interval = Interval(start_us, end_us)
         self.thread: int = thread
@@ -517,13 +511,13 @@ class FunctionEvent(FormattedTimesMixin):
         self.count: int = 1
         self.cpu_children: list[FunctionEvent] = []
         self.cpu_parent: Optional[FunctionEvent] = None
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         self.input_shapes: tuple[int, ...] = input_shapes
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         self.concrete_inputs: list[Any] = concrete_inputs
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         self.kwinputs: dict[str, Any] = kwinputs
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         self.stack: list = stack
         self.scope: int = scope
         self.use_device: Optional[str] = use_device
@@ -546,8 +540,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.metadata_json = metadata_json
 
     def append_kernel(self, name, device, duration):
-        if self.device_type != DeviceType.CPU:
-            raise AssertionError("Expected device_type to be CPU")
+        assert self.device_type == DeviceType.CPU
         self.kernels.append(Kernel(name, device, duration))
 
     def append_cpu_child(self, child):
@@ -556,12 +549,9 @@ class FunctionEvent(FormattedTimesMixin):
         One is supposed to append only direct children to the event to have
         correct self cpu time being reported.
         """
-        if self.device_type != DeviceType.CPU:
-            raise AssertionError("Expected device_type to be CPU")
-        if not isinstance(child, FunctionEvent):
-            raise AssertionError("Expected child to be a FunctionEvent")
-        if child.device_type != DeviceType.CPU:
-            raise AssertionError("Expected child device_type to be CPU")
+        assert self.device_type == DeviceType.CPU
+        assert isinstance(child, FunctionEvent)
+        assert child.device_type == DeviceType.CPU
         self.cpu_children.append(child)
 
     def set_cpu_parent(self, parent):
@@ -571,12 +561,9 @@ class FunctionEvent(FormattedTimesMixin):
         the child's range interval is completely inside the parent's. We use
         this connection to determine the event is from top-level op or not.
         """
-        if self.device_type != DeviceType.CPU:
-            raise AssertionError("Expected device_type to be CPU")
-        if not isinstance(parent, FunctionEvent):
-            raise AssertionError("Expected parent to be a FunctionEvent")
-        if parent.device_type != DeviceType.CPU:
-            raise AssertionError("Expected parent device_type to be CPU")
+        assert self.device_type == DeviceType.CPU
+        assert isinstance(parent, FunctionEvent)
+        assert parent.device_type == DeviceType.CPU
         self.cpu_parent = parent
 
     # Note: async events don't have children, are not used when computing 'self'
@@ -634,15 +621,12 @@ class FunctionEvent(FormattedTimesMixin):
                 # each legacy cpu events has a single (fake) kernel
                 return sum(kinfo.duration for kinfo in self.kernels)
         else:
-            if self.device_type not in [
+            assert self.device_type in [
                 DeviceType.CUDA,
                 DeviceType.PrivateUse1,
                 DeviceType.MTIA,
                 DeviceType.HPU,
-            ]:
-                raise AssertionError(
-                    f"Expected device_type to be CUDA, PrivateUse1, MTIA, or HPU, but got {self.device_type}"
-                )
+            ]
             return self.time_range.elapsed_us()
 
     @property
@@ -662,15 +646,12 @@ class FunctionEvent(FormattedTimesMixin):
                 child.device_time_total for child in self.cpu_children
             )
         else:
-            if self.device_type not in [
+            assert self.device_type in [
                 DeviceType.CUDA,
                 DeviceType.PrivateUse1,
                 DeviceType.MTIA,
                 DeviceType.HPU,
-            ]:
-                raise AssertionError(
-                    f"Expected device_type to be CUDA, PrivateUse1, MTIA, or HPU, but got {self.device_type}"
-                )
+            ]
             return self.device_time_total
 
     @property
@@ -748,14 +729,8 @@ class FunctionEventAvg(FormattedTimesMixin):
             self.use_device = other.use_device
             self.is_user_annotation = other.is_user_annotation
 
-        if not isinstance(other, (FunctionEvent, FunctionEventAvg)):
-            raise AssertionError(
-                "Expected other to be a FunctionEvent or FunctionEventAvg"
-            )
-        if other.key != self.key:
-            raise AssertionError(
-                f"Expected keys to match, but got {other.key} vs {self.key}"
-            )
+        assert isinstance(other, (FunctionEvent, FunctionEventAvg))
+        assert other.key == self.key
 
         self.cpu_time_total += other.cpu_time_total
         self.device_time_total += other.device_time_total
@@ -767,7 +742,7 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.self_device_memory_usage += other.self_device_memory_usage
         self.count += other.count
         if self.flops is None:
-            # pyrefly: ignore [bad-assignment]
+            # pyrefly: ignore  # bad-assignment
             self.flops = other.flops
         elif other.flops is not None:
             self.flops += other.flops
@@ -1002,14 +977,10 @@ def _build_table(
             "TFLOPs",
             "PFLOPs",
         ]
-        if flops <= 0:
-            raise AssertionError(f"Expected flops to be positive, but got {flops}")
-        # pyrefly: ignore [no-matching-overload]
+        assert flops > 0
+        # pyrefly: ignore  # no-matching-overload
         log_flops = max(0, min(math.log10(flops) / 3, float(len(flop_headers) - 1)))
-        if not (log_flops >= 0 and log_flops < len(flop_headers)):
-            raise AssertionError(
-                f"Expected log_flops to be in range [0, {len(flop_headers)}), but got {log_flops}"
-            )
+        assert log_flops >= 0 and log_flops < len(flop_headers)
         return (pow(10, (math.floor(log_flops) * -3.0)), flop_headers[int(log_flops)])
 
     add_column(name_column_width)

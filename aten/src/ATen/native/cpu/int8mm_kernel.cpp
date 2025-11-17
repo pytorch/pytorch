@@ -100,7 +100,7 @@ inline void tinygemm_kernel(
 
 #elif defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
-inline float _mm256_reduce_add_ps(__m256& v) {
+static inline float _mm256_reduce_add_ps(__m256& v) {
   __m256 v1 = _mm256_permute2f128_ps(v, v, 0x1);
   v = _mm256_add_ps(v, v1);
   v1 = _mm256_shuffle_ps(v, v, 0x4E);

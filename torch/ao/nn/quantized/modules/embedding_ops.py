@@ -196,7 +196,7 @@ class Embedding(torch.nn.Module):
                           utilities or provided by user
         """
         if hasattr(mod, "weight_fake_quant"):
-            assert type(mod) is torch.ao.nn.qat.Embedding, (
+            assert type(mod) == torch.ao.nn.qat.Embedding, (
                 "nnq."
                 + cls.__name__
                 + ".from_float "
@@ -205,7 +205,7 @@ class Embedding(torch.nn.Module):
             )
             weight_observer = mod.weight_fake_quant
         else:
-            assert type(mod) is nn.Embedding, (
+            assert type(mod) == nn.Embedding, (
                 "nnq."
                 + cls.__name__
                 + ".from_float only works for "
@@ -349,7 +349,7 @@ class EmbeddingBag(Embedding):
         if hasattr(mod, "weight_fake_quant"):
             weight_observer = mod.weight_fake_quant
         else:
-            assert type(mod) is nn.EmbeddingBag, (
+            assert type(mod) == nn.EmbeddingBag, (
                 "nnq."
                 + cls.__name__
                 + ".from_float only works for "

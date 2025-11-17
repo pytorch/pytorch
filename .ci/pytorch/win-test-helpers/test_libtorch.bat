@@ -15,35 +15,37 @@ if errorlevel 1 exit /b 1
 if not errorlevel 0 exit /b 1
 
 cd %TMP_DIR_WIN%\build\torch\test
-
-:: Enable delayed variable expansion to make the list
-setlocal enabledelayedexpansion
-set EXE_LIST=
 for /r "." %%a in (*.exe) do (
-  if "%%~na" == "c10_intrusive_ptr_benchmark" (
-    @REM NB: This is not a gtest executable file, thus couldn't be handled by
-    @REM pytest-cpp and is excluded from test discovery by run_test
-    call "%%~fa"
+    call :libtorch_check "%%~na" "%%~fa"
     if errorlevel 1 goto fail
-    if not errorlevel 0 goto fail
-  ) else (
-    if "%%~na" == "verify_api_visibility" (
-      @REM Skip verify_api_visibility as it is a compile-level test
-    ) else (
-      set EXE_LIST=!EXE_LIST! cpp/%%~na
-    )
-  )
 )
+
+goto :eof
+
+:libtorch_check
 
 cd %CWD%
 set CPP_TESTS_DIR=%TMP_DIR_WIN%\build\torch\test
 
-:: Run python test\run_test.py on the list
-set NO_TD=True && python test\run_test.py --cpp --verbose -i !EXE_LIST!
-if errorlevel 1 goto fail
-if not errorlevel 0 goto fail
+:: Skip verify_api_visibility as it a compile level test
+if "%~1" == "verify_api_visibility" goto :eof
 
-goto :eof
+echo Running "%~2"
+if "%~1" == "c10_intrusive_ptr_benchmark" (
+  :: NB: This is not a gtest executable file, thus couldn't be handled by pytest-cpp
+  call "%~2"
+  goto :eof
+)
+
+python test\run_test.py --cpp --verbose -i "cpp/%~1"
+if errorlevel 1 (
+  echo %1 failed with exit code %errorlevel%
+  goto fail
+)
+if not errorlevel 0 (
+  echo %1 failed with exit code %errorlevel%
+  goto fail
+)
 
 :eof
 exit /b 0

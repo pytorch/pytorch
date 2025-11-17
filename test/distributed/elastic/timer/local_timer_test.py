@@ -127,7 +127,7 @@ if not INVALID_PLATFORMS:
         interval seconds. Releases the given semaphore once before going to work.
         """
         sem.release()
-        for i in range(n):
+        for i in range(0, n):
             mp_queue.put(TimerRequest(i, "test_scope", 0))
             time.sleep(interval)
 

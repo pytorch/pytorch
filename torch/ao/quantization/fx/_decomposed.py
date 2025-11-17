@@ -1149,7 +1149,7 @@ quantized_decomposed_lib.define(
 
 class FakeQuantPerChannel(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def forward(ctx, input, scales, zero_points, axis, quant_min, quant_max):
         if scales.dtype != torch.float32:
             scales = scales.to(torch.float32)
@@ -1159,7 +1159,7 @@ class FakeQuantPerChannel(torch.autograd.Function):
             f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
         )
         assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
-        broadcast_dims = list(range(axis)) + list(range(axis + 1, input.ndim))
+        broadcast_dims = list(range(0, axis)) + list(range(axis + 1, input.ndim))
         unsqueeze_scales = _unsqueeze_multiple(scales, broadcast_dims)
         unsqueeze_zero_points = _unsqueeze_multiple(zero_points, broadcast_dims)
         temp = torch.round(input * (1.0 / unsqueeze_scales)) + unsqueeze_zero_points
@@ -1172,7 +1172,7 @@ class FakeQuantPerChannel(torch.autograd.Function):
         return out
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def backward(ctx, gy):
         (mask,) = ctx.saved_tensors
         return gy * mask, None, None, None, None, None

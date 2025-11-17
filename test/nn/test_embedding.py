@@ -551,7 +551,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 # Pull out the bag's indices from indices_1D, and fill any
                 # remaining space with padding indices
                 indices_in_bag = []
-                for item_pos in range(max_indices_per_bag):
+                for item_pos in range(0, max_indices_per_bag):
                     if (start + item_pos) < end:
                         indices_in_bag.append(indices_1D[start + item_pos])
                     else:
@@ -631,76 +631,6 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 self.assertEqual(
                     weights.grad, weights_check.grad, msg=msg, atol=atol, rtol=rtol
                 )
-
-    @onlyCUDA
-    @dtypes(
-        torch.bfloat16,
-    )
-    @largeTensorTest("80GB", device="cuda")
-    def test_embedding_backward_large_batch_overflow(self, device, dtype):
-        """
-        Test that embedding_dense_backward handles large batches that exceed INT32_MAX thread IDs.
-
-        This reproduces the bug where gid = blockIdx.x * blockDim.x + threadIdx.x overflows
-        when declared as int32, causing negative indices and illegal memory access.
-        """
-        # Parameters chosen to GUARANTEE int32 overflow
-        num_indices = 8_214_880
-        embedding_dim = 4096
-        num_weights = 1280
-        padding_idx = -1
-        scale_grad_by_freq = False
-
-        # Verify parameters guarantee overflow
-        NROWS_PER_THREAD = 10
-        max_segments = min(num_indices, num_weights)
-        min_partial_for_overflow = (2**31) // 4096
-        required_indices = (min_partial_for_overflow - max_segments) * NROWS_PER_THREAD
-
-        assert num_indices > required_indices, (
-            f"Test bug: num_indices={num_indices:,} too small! Need >{required_indices:,}"
-        )
-
-        # Generate indices that create many partial segments
-        # Strategy: ~950 unique indices, each appearing many times
-        num_unique = 954
-        unique_indices = torch.randint(
-            2, 1276, (num_unique,), dtype=torch.int64, device=device
-        )
-        counts = torch.randint(
-            5000, 12000, (num_unique,), dtype=torch.int64, device=device
-        )
-
-        # Normalize to exactly num_indices
-        counts = (counts.float() / counts.float().sum() * num_indices).long()
-        counts[-1] = num_indices - counts[:-1].sum()
-
-        indices = torch.repeat_interleave(unique_indices, counts)
-        assert indices.numel() == num_indices
-
-        # Verify we'll trigger overflow
-        approx_partial_segments = num_indices // NROWS_PER_THREAD + max_segments
-        stride_warped = ((embedding_dim + 31) // 32) * 32
-        total_threads = approx_partial_segments * stride_warped
-
-        assert total_threads > 2**31 - 1, (
-            f"Test bug: threads={total_threads:,} <= INT32_MAX, won't trigger overflow!"
-        )
-
-        # Create gradient output
-        grad_output = torch.randn(
-            num_indices, embedding_dim, dtype=dtype, device=device
-        )
-
-        # This should complete without error (after fix)
-        # Before fix: RuntimeError with "illegal memory access"
-        grad_weight = torch.ops.aten.embedding_dense_backward(
-            grad_output, indices, num_weights, padding_idx, scale_grad_by_freq
-        )
-
-        # Verify output shape
-        assert grad_weight.shape == (num_weights, embedding_dim)
-        assert grad_weight.dtype == torch.bfloat16
 
     # Check correctness of torch.nn.functional.embedding_bag forward and
     # backward functions with padding_idx, given a 2D indices input. Compare

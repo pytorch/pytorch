@@ -1,9 +1,8 @@
 # mypy: allow-untyped-defs
 import logging
-from collections.abc import Callable
 from functools import wraps
 from inspect import unwrap
-from typing import Optional
+from typing import Callable, Optional
 
 
 logger = logging.getLogger(__name__)

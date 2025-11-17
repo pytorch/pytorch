@@ -53,7 +53,7 @@ class ConcatDataFramesPipe(DFIterDataPipe):
             if len(buffer) == self.n_batch:
                 yield df_wrapper.concat(buffer)
                 buffer = []
-        if buffer:
+        if len(buffer):
             yield df_wrapper.concat(buffer)
 
 
@@ -78,7 +78,7 @@ class ShuffleDataFramesPipe(DFIterDataPipe):
             if len(buffer) == size:
                 yield df_wrapper.concat(buffer)
                 buffer = []
-        if buffer:
+        if len(buffer):
             yield df_wrapper.concat(buffer)
 
 
@@ -92,7 +92,7 @@ class FilterDataFramesPipe(DFIterDataPipe):
         size = None
         all_buffer = []
         filter_res = []
-        # pyrefly: ignore [bad-assignment]
+        # pyrefly: ignore  # bad-assignment
         for df in self.source_datapipe:
             if size is None:
                 size = len(df.index)
@@ -107,7 +107,7 @@ class FilterDataFramesPipe(DFIterDataPipe):
                 if len(buffer) == size:
                     yield df_wrapper.concat(buffer)
                     buffer = []
-        if buffer:
+        if len(buffer):
             yield df_wrapper.concat(buffer)
 
 

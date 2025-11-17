@@ -26,7 +26,6 @@ from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codegen.debug_utils import DebugPrinterManager
 from torch._inductor.codegen.multi_kernel import MultiKernelState
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch._logging import trace_structured
 from torch.fx.experimental.symbolic_shapes import (
     CallMethodKey,
     ConvertIntKey,
@@ -413,19 +412,6 @@ class CommentLine(WrapperLine):
     @staticmethod
     def codegen_fx(converter: FxConverter) -> FxConversionFunc:
         return converter._generate_comment
-
-
-@dataclasses.dataclass
-class DynamicScalarLine(WrapperLine):
-    wrapper: PythonWrapperCodegen
-    node: ir.DynamicScalar
-
-    def codegen(self, code: IndentedBuffer) -> None:
-        self.wrapper._codegen_dynamic_scalar(self.node)
-
-    @staticmethod
-    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
-        return converter._generate_dynamic_scalar
 
 
 @dataclasses.dataclass
@@ -1128,7 +1114,6 @@ class PythonWrapperCodegen(CodeGen):
         return PythonWrapperCodegen()
 
     def set_launcher_fn_name(self) -> None:
-        # pyrefly: ignore [bad-assignment]
         self.launcher_fn_name = "call"
 
     def write_constant(self, name: str, hashed: str) -> None:
@@ -1265,17 +1250,14 @@ class PythonWrapperCodegen(CodeGen):
         self.write_get_raw_stream_header()
 
     def add_meta_once(self, meta: TritonMetaParams) -> str:
-        # pyrefly: ignore [bad-assignment]
         meta = repr(meta)
         if meta not in self._metas:
             var = f"meta{len(self._metas)}"
-            # pyrefly: ignore [unsupported-operation]
             self._metas[meta] = var
             self.header.writeline(f"{var} = {meta}")
             if config.triton.autotune_at_compile_time:
                 self.kernel_autotune_calls.writeline(f"{var} = {meta}")
                 self._meta_vars.add(var)
-        # pyrefly: ignore [index-error]
         return self._metas[meta]
 
     @cache_on_self
@@ -1711,7 +1693,6 @@ class PythonWrapperCodegen(CodeGen):
             with self.set_writeline(self.wrapper_call.writeline):
                 for line in self.lines:
                     if isinstance(line, WrapperLine):
-                        # pyrefly: ignore [missing-attribute]
                         line.codegen(self.wrapper_call)
                     else:
                         self.wrapper_call.writeline(line)
@@ -1806,14 +1787,6 @@ class PythonWrapperCodegen(CodeGen):
                 "Auto-tuning code written to %s",
                 file_path,
             )
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "inductor_autotune_at_compile_time_code",
-                "encoding": "string",
-            },
-            payload_fn=lambda: tuning_code,
-        )
         # Execute the code to autotune kernels
         try:
             exec(tuning_code, scope)
@@ -1826,8 +1799,7 @@ class PythonWrapperCodegen(CodeGen):
         self.lines = MemoryPlanner(self).plan(self.lines)
 
     def memory_plan_reuse(self):
-        outputs = self.get_graph_outputs()
-        out_names = V.graph._get_output_names(outputs)
+        out_names = V.graph.get_output_names()
 
         while (
             self.lines
@@ -2073,9 +2045,6 @@ class PythonWrapperCodegen(CodeGen):
         self.unbacked_symbol_decls.add(str(node.unbacked_size_symbol))
 
     def codegen_dynamic_scalar(self, node):
-        self.writeline(DynamicScalarLine(self, node))
-
-    def _codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
         if len(node.keypath) == 0:
             self.writeline(f"{node.sym} = {data}.item()")
@@ -2332,10 +2301,8 @@ class PythonWrapperCodegen(CodeGen):
                 else:
                     add_to_signature(idx, arg)
 
-        arg_names = [p.name for p in kernel.params]
-        constexprs = [p.num for p in kernel.params if p.is_constexpr]
-        for idx, key in enumerate(arg_names):
-            if idx in constexprs:
+        for idx, key in enumerate(kernel.arg_names):
+            if idx in kernel.constexprs:
                 add_arg(idx, ConstexprArg(name=key), is_constexpr=True)
                 continue
 
@@ -2649,6 +2616,7 @@ class PythonWrapperCodegen(CodeGen):
                         if len(kernel.launchers) == 0:
                             kernel.precompile()
                         kernel.save_gpu_kernel(
+                            grid=(0, 0, 0),   # use dummy grid
                             stream="stream",  # use dummy stream
                             launcher=kernel.launchers[0],
                         )
@@ -2796,18 +2764,13 @@ class PythonWrapperCodegen(CodeGen):
                 self,
                 kernel_name=kernel_name,
                 call_args=call_args,
-                # pyrefly: ignore [bad-argument-type]
                 raw_keys=raw_keys,
-                # pyrefly: ignore [bad-argument-type]
                 raw_args=raw_args,
-                # pyrefly: ignore [bad-argument-type]
                 arg_types=arg_types,
                 triton=triton,
-                # pyrefly: ignore [bad-argument-type]
                 triton_meta=triton_meta,
                 device=device,
                 graph_name=V.graph.name,
-                # pyrefly: ignore [bad-argument-type]
                 original_fxnode_name=original_fxnode_name,
             )
         )
@@ -2928,7 +2891,6 @@ class PythonWrapperCodegen(CodeGen):
 
             reused_args = {}
             for i, (arg, arg_type, raw_key, raw_arg) in enumerate(
-                # pyrefly: ignore [no-matching-overload]
                 zip(call_args, arg_types, raw_keys, raw_args)
             ):
                 key = None
@@ -3716,7 +3678,6 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of
         # the subgraph.
-        # pyrefly: ignore [bad-assignment]
         self.launcher_fn_name = self.subgraph_name
 
     def write_header(self) -> None:

@@ -243,7 +243,6 @@ class CompilerBisector:
         lines = cls.read_lines_from_file(file_path)
         low = None
         high = None
-        # pyrefly: ignore [bad-assignment]
         for line in reversed(lines):
             if line.startswith("low="):
                 low = int(line.strip().split("=")[1])
@@ -551,7 +550,7 @@ class CompilerBisector:
                         curr_backend,
                         curr_subsystem.name,
                         low,
-                        call_counter_debug_info.get(low),
+                        call_counter_debug_info.get(low, None),
                     )
 
                 next_subsystem = cls.advance_subsystem(curr_backend, curr_subsystem)

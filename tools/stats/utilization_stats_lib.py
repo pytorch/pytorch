@@ -2,8 +2,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
-#  pyrefly: ignore [missing-import]
-from dataclasses_json import DataClassJsonMixin  # type: ignore[import-not-found]
+from dataclasses_json import DataClassJsonMixin
 
 
 _DATA_MODEL_VERSION = 1.5
@@ -18,7 +17,7 @@ class UtilizationStats:
 
 
 @dataclass
-class UtilizationMetadata(DataClassJsonMixin):  # type: ignore[misc, no-any-unimported]
+class UtilizationMetadata(DataClassJsonMixin):
     level: str
     workflow_id: str
     job_id: str
@@ -34,7 +33,7 @@ class UtilizationMetadata(DataClassJsonMixin):  # type: ignore[misc, no-any-unim
 
 
 @dataclass
-class GpuUsage(DataClassJsonMixin):  # type: ignore[misc, no-any-unimported]
+class GpuUsage(DataClassJsonMixin):
     uuid: Optional[str] = None
     util_percent: Optional[UtilizationStats] = None
     mem_util_percent: Optional[UtilizationStats] = None
@@ -44,14 +43,14 @@ class GpuUsage(DataClassJsonMixin):  # type: ignore[misc, no-any-unimported]
 
 
 @dataclass
-class RecordData(DataClassJsonMixin):  # type: ignore[misc, no-any-unimported]
+class RecordData(DataClassJsonMixin):
     cpu: Optional[UtilizationStats] = None
     memory: Optional[UtilizationStats] = None
     gpu_usage: Optional[list[GpuUsage]] = None
 
 
 @dataclass
-class UtilizationRecord(DataClassJsonMixin):  # type: ignore[misc, no-any-unimported]
+class UtilizationRecord(DataClassJsonMixin):
     level: str
     timestamp: int
     data: Optional[RecordData] = None
@@ -64,7 +63,7 @@ class UtilizationRecord(DataClassJsonMixin):  # type: ignore[misc, no-any-unimpo
 # the db schema related to this is:
 # https://github.com/pytorch/test-infra/blob/main/clickhouse_db_schema/oss_ci_utilization/oss_ci_utilization_metadata_schema.sql
 @dataclass
-class OssCiSegmentV1(DataClassJsonMixin):  # type: ignore[misc, no-any-unimported]
+class OssCiSegmentV1(DataClassJsonMixin):
     level: str
     name: str
     start_at: int

@@ -4,7 +4,7 @@
 import io
 import os
 import sys
-from itertools import product
+from itertools import product as product
 from typing import Union
 
 import hypothesis.strategies as st

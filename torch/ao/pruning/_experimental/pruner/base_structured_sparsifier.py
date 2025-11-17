@@ -260,7 +260,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
                     module.register_parameter(
                         "_bias", nn.Parameter(module.bias.detach())
                     )
-                    # pyrefly: ignore [bad-assignment]
+                    # pyrefly: ignore  # bad-assignment
                     module.bias = None
                     module.prune_bias = prune_bias
 

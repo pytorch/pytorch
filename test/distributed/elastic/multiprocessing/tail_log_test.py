@@ -84,53 +84,6 @@ class TailLogTest(unittest.TestCase):
         )
         self.assertTrue(tail.stopped())
 
-    def test_tail_write_to_dst_file(self):
-        """
-        writer() writes 0 - max (on number on each line) to a log file.
-        Run nprocs such writers and tail the log files into a temp file
-        and validate that all lines are accounted for.
-        """
-        nprocs = 32
-        max = 1000
-        interval_sec = 0.0001
-
-        log_files = {
-            local_rank: os.path.join(self.test_dir, f"{local_rank}_stdout.log")
-            for local_rank in range(nprocs)
-        }
-
-        dst = os.path.join(self.test_dir, "tailed_stdout.log")
-        tail = TailLog(
-            name="writer", log_files=log_files, dst=dst, interval_sec=interval_sec
-        ).start()
-        # sleep here is intentional to ensure that the log tail
-        # can gracefully handle and wait for non-existent log files
-        time.sleep(interval_sec * 10)
-
-        futs = []
-        for local_rank, file in log_files.items():
-            f = self.threadpool.submit(
-                write, max=max, sleep=interval_sec * local_rank, file=file
-            )
-            futs.append(f)
-
-        wait(futs, return_when=ALL_COMPLETED)
-        self.assertFalse(tail.stopped())
-        tail.stop()
-
-        actual: dict[int, set[int]] = {}
-        with open(dst) as dst_file:
-            for line in dst_file:
-                header, num = line.split(":")
-                nums = actual.setdefault(header, set())
-                nums.add(int(num))
-
-        self.assertEqual(nprocs, len(actual))
-        self.assertEqual(
-            {f"[writer{i}]": set(range(max)) for i in range(nprocs)}, actual
-        )
-        self.assertTrue(tail.stopped())
-
     def test_tail_with_custom_prefix(self):
         """
         writer() writes 0 - max (on number on each line) to a log file.
@@ -176,52 +129,6 @@ class TailLogTest(unittest.TestCase):
         self.assertEqual(nprocs, len(headers))
         for i in range(nprocs):
             self.assertIn(f"[worker{i}][{i}]", headers)
-        self.assertTrue(tail.stopped())
-
-    def test_tail_with_custom_filter(self):
-        """
-        writer() writes 0 - max (on number on each line) to a log file.
-        Run nprocs such writers and tail the log files into an IOString
-        and validate that all lines are accounted for.
-        """
-        nprocs = 3
-        max = 20
-        interval_sec = 0.0001
-
-        log_files = {
-            local_rank: os.path.join(self.test_dir, f"{local_rank}_stdout.log")
-            for local_rank in range(nprocs)
-        }
-
-        dst = io.StringIO()
-        tail = TailLog(
-            "writer",
-            log_files,
-            dst,
-            interval_sec=interval_sec,
-            log_line_filter=lambda line: "2" in line,  # only print lines containing '2'
-        ).start()
-        # sleep here is intentional to ensure that the log tail
-        # can gracefully handle and wait for non-existent log files
-        time.sleep(interval_sec * 10)
-        futs = []
-        for local_rank, file in log_files.items():
-            f = self.threadpool.submit(
-                write, max=max, sleep=interval_sec * local_rank, file=file
-            )
-            futs.append(f)
-        wait(futs, return_when=ALL_COMPLETED)
-        self.assertFalse(tail.stopped())
-        tail.stop()
-        dst.seek(0)
-
-        actual: dict[int, set[int]] = {}
-        for line in dst.readlines():
-            header, num = line.split(":")
-            nums = actual.setdefault(header, set())
-            nums.add(int(num))
-        self.assertEqual(nprocs, len(actual))
-        self.assertEqual({f"[writer{i}]": {2, 12} for i in range(nprocs)}, actual)
         self.assertTrue(tail.stopped())
 
     def test_tail_no_files(self):

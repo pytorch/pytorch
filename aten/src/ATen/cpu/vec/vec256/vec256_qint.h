@@ -5,6 +5,13 @@
 
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
+
+#ifdef __aarch64__
+#if defined(CPU_CAPABILITY_SVE128) || !defined(CPU_CAPABILITY_SVE)
+#include <ATen/cpu/vec/vec128/vec128_float_neon.h>
+#endif
+#endif
+
 #include <ATen/native/quantized/AffineQuantizerBase.h>
 
 #include <c10/util/irange.h>
@@ -915,7 +922,7 @@ Vectorized<c10::quint8> inline maximum(
   return a.maximum(b);
 }
 
-#elif !defined(CPU_CAPABILITY_SVE256)
+#else
 
 // NOTE: These are low-performance implementations that we fall back on
 // if we are not building with AVX2. This may not be an issue, because
@@ -1372,12 +1379,18 @@ Vectorized<c10::quint8> inline maximum(
   return a.maximum(b);
 }
 
-#endif // if defined(CPU_CAPABILITY_AVX2)
-
-#if (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256))
+#if defined(__aarch64__) && \
+    (defined(CPU_CAPABILITY_SVE128) || !defined(CPU_CAPABILITY_SVE))
 std::pair<Vectorized<float>, Vectorized<float>> inline convert_int8_to_float(
     at::vec::Vectorized<int8_t> src) {
-  auto s8x8 = vget_low_s8(src);
+
+#ifdef CPU_CAPABILITY_SVE
+  svint8_t x = src;
+  auto s8x8 = vget_low_s8(svget_neonq(x));
+#else
+  auto s8x8 = vld1_s8(src.operator const int8_t*());
+#endif
+
   auto s16x8 = vmovl_s8(s8x8);
 
   auto s32x4_hi = vmovl_s16(vget_high_s16(s16x8));
@@ -1390,7 +1403,7 @@ std::pair<Vectorized<float>, Vectorized<float>> inline convert_int8_to_float(
 
 std::pair<Vectorized<float>, Vectorized<float>> inline convert_int8_to_float(
     at::vec::Vectorized<uint8_t> src) {
-  auto u8x8 = vget_low_u8(src);
+  auto u8x8 = vld1_u8(src.operator const uint8_t*());
   auto u16x8 = vmovl_u8(u8x8);
   auto u32x4_hi = vmovl_u16(vget_high_u16(u16x8));
   auto u32x4_lo = vmovl_u16(vget_low_u16(u16x8));
@@ -1402,7 +1415,14 @@ std::pair<Vectorized<float>, Vectorized<float>> inline convert_int8_to_float(
 
 Vectorized<float> inline convert_int8_half_register_to_float(
     at::vec::Vectorized<int8_t> src) {
-  auto s8x8 = vget_low_s8(src);
+
+#ifdef CPU_CAPABILITY_SVE
+  svint8_t x = src;
+  auto s8x8 = vget_low_s8(svget_neonq(x));
+#else
+  auto s8x8 = vld1_s8(src.operator const int8_t*());
+#endif
+
   auto s16x8 = vmovl_s8(s8x8);
 
   auto s32x4_lo = vmovl_s16(vget_low_s16(s16x8));
@@ -1412,7 +1432,7 @@ Vectorized<float> inline convert_int8_half_register_to_float(
 
 Vectorized<float> inline convert_int8_half_register_to_float(
     at::vec::Vectorized<uint8_t> src) {
-  auto u8x8 = vget_low_u8(src);
+  auto u8x8 = vld1_u8(src.operator const uint8_t*());
   auto u16x8 = vmovl_u8(u8x8);
   auto u32x4_lo = vmovl_u16(vget_low_u16(u16x8));
 
@@ -1420,5 +1440,8 @@ Vectorized<float> inline convert_int8_half_register_to_float(
 }
 
 #endif
+
+#endif // if defined(CPU_CAPABILITY_AVX2)
+
 } // namespace CPU_CAPABILITY
 } // namespace at::vec

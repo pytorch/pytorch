@@ -5,8 +5,7 @@ import numbers
 import types
 import typing
 import warnings
-from collections.abc import Callable
-from typing import Any, cast, NamedTuple, Optional, TYPE_CHECKING
+from typing import Any, Callable, cast, NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 from torch._jit_internal import boolean_dispatched

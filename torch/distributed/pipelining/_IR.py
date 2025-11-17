@@ -189,7 +189,7 @@ def _insert_stage_symbolic_backward(
                 output_grads: Union[tuple[Optional[fx.Node], ...], Optional[fx.Node]]
                 if node in tuples:
                     stage_output = tuples[node]
-                    output_grads = tuple(val_to_grad.get(n) for n in tuples[node])
+                    output_grads = tuple(val_to_grad.get(n, None) for n in tuples[node])
                     outputs_with_grads_idxs = [
                         i for i, n in enumerate(tuples[node]) if n in live_nodes
                     ]
@@ -282,7 +282,6 @@ class LossWrapper(torch.nn.Module):
 
 
 class TrivialLossWrapper(LossWrapper):
-    # pyrefly: ignore [bad-override]
     def forward(self, x, targets):
         model_out = self.module(x)
         return self.loss_fn(model_out, targets)
@@ -391,7 +390,7 @@ class DetachExecutor(fx.Interpreter):
 
         """
         def dont_traverse_size(a):
-            return type(a) is not torch.Size
+            return type(a) != torch.Size
         """
 
         args = map_aggregate(

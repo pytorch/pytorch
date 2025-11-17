@@ -332,7 +332,7 @@ class TestHelperModules:
         ) -> None:
             super().__init__()
             self.linear = nn.Linear(4, 4, bias=use_bias)
-            if postop is nn.GELU:
+            if postop == nn.GELU:
                 self.postop = postop(approximate=post_op_algo)
             else:
                 self.postop = postop(inplace=inplace_postop)

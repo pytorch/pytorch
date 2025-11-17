@@ -16,7 +16,7 @@ from .expanded_weights_utils import (
 @implements_per_sample_grads(F.linear)
 class LinearPerSampleGrad(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def forward(ctx, _, __, *expanded_args_and_kwargs):
         if len(expanded_args_and_kwargs[0].shape) <= 1:
             raise RuntimeError(
@@ -36,7 +36,7 @@ class LinearPerSampleGrad(torch.autograd.Function):
         return output
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def backward(ctx, grad_output):
         input, weight = ctx.args
         bias = ctx.kwargs["bias"]

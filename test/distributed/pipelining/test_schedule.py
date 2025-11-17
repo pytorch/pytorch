@@ -8,7 +8,6 @@ import os
 from model_registry import MultiMLP
 
 import torch
-from torch._dynamo import OptimizedModule
 from torch.distributed.pipelining import (
     Schedule1F1B,
     ScheduleDualPipeV,
@@ -66,7 +65,7 @@ class MockPipelineStage(_PipelineStageBase):
         self.num_stages = kwargs.get("num_stages", 1)
         self.group_size = kwargs.get("group_size", 1)
         self.group_rank = kwargs.get("group_rank", 0)
-        self.group = kwargs.get("group")
+        self.group = kwargs.get("group", None)
 
     def _create_grad_recv_info(self, *args, **kwargs):
         return None
@@ -259,15 +258,7 @@ class ScheduleTest(TestCase):
         finally:
             torch.distributed.destroy_process_group()
 
-    @parametrize(
-        "ScheduleClass",
-        [
-            ScheduleInterleavedZeroBubble,
-            ScheduleZBVZeroBubble,
-            ScheduleDualPipeV,
-        ],
-    )
-    def test_zero_bubble_schedule_errors_with_compile(self, ScheduleClass):
+    def test_zero_bubble_schedule_errors_with_compile(self):
         """
         Test that zero bubble schedules raise an error when used with torch.compile.
         """
@@ -280,18 +271,16 @@ class ScheduleTest(TestCase):
         model = MultiMLP(8, n_layers=n_stages)
         # full_mod
         compiled_model = torch.compile(model)
-        self.assertTrue(isinstance(compiled_model, OptimizedModule))
         stage = PipelineStage(
             compiled_model,
             0,
             n_stages,
             device,
         )
-        try:
-            with self.assertRaises(RuntimeError):
-                ScheduleClass([stage], 2)
-        finally:
-            torch.distributed.destroy_process_group()
+        with self.assertRaises(RuntimeError):
+            ScheduleInterleavedZeroBubble([stage], 2)
+
+        torch.distributed.destroy_process_group()
 
 
 instantiate_parametrized_tests(ScheduleTest)
@@ -535,23 +524,6 @@ class TestScheduleLowering(TestCase):
             {
                 "compute": ["0F0", "0F1", "   ", "0B0", "0B1"],
                 "comms": ["0UNSHARD", "0F0", "0F1", "0B0", "0B1", "0RESHARD"],
-            },
-            {
-                "compute": ["0F0", "0F1", "1F0", "1F1", "1B0", "1B1", "0B0", "0B1"],
-                "comms": [
-                    "0UNSHARD",
-                    "1UNSHARD",
-                    "0F0",
-                    "0F1",
-                    "1F0",
-                    "1F1",
-                    "1B0",
-                    "1B1",
-                    "1RESHARD",
-                    "0B0",
-                    "0B1",
-                    "0RESHARD",
-                ],
             },
         ],
     )

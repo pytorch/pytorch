@@ -55,7 +55,6 @@ def warn_deprecated():
         "torch._custom_op is deprecated and will be removed in PyTorch 2.6, please "
         "use the equivalent torch.library API instead.",
         DeprecationWarning,
-        stacklevel=2,
     )
 
 
@@ -102,7 +101,7 @@ def custom_op(
             lib, ns, function_schema, name, ophandle, _private_access=True
         )
 
-        result.__name__ = func.__name__  # pyrefly: ignore [bad-assignment]
+        result.__name__ = func.__name__  # pyrefly: ignore  # bad-assignment
         result.__module__ = func.__module__
         result.__doc__ = func.__doc__
 

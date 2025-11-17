@@ -201,8 +201,7 @@ class _OverlappingCpuLoader(_TensorLoader):
                 self.in_flight_data += tensor.numel() * tensor.element_size()
 
     def _finish(self) -> Iterable[tuple[torch.Tensor, object]]:
-        if not self._done:
-            raise AssertionError("_finish called before all items were processed")
+        assert self._done
         if len(self.current_items) > 0:
             self.stream.synchronize()
         return self.current_items
@@ -282,8 +281,7 @@ class _StorageWriterTransforms:
 
 def _item_size(item: WriteItem) -> int:
     size = 1
-    if item.tensor_data is None:
-        raise AssertionError("WriteItem tensor_data must not be None")
+    assert item.tensor_data is not None
     # can't use math.prod as PT needs to support older python
     for s in item.tensor_data.size:
         size *= s
@@ -331,16 +329,11 @@ def _write_item(
     )
 
     if write_item.type == WriteItemType.BYTE_IO:
-        if not isinstance(data, io.BytesIO):
-            raise AssertionError("Data must be io.BytesIO for BYTE_IO write items")
+        assert isinstance(data, io.BytesIO)
         transform_to.write(data.getbuffer())
     else:
-        if not isinstance(data, torch.Tensor):
-            raise AssertionError(
-                "Data must be torch.Tensor for non-BYTE_IO write items"
-            )
-        if data.device != torch.device("cpu"):
-            raise AssertionError("Tensor must be on CPU device")
+        assert isinstance(data, torch.Tensor)
+        assert data.device == torch.device("cpu")
         if serialization_format == SerializationFormat.TORCH_SAVE:
             torch.save(data, transform_to)
 
@@ -435,8 +428,7 @@ def _write_files_from_queue(
                 tensor_dict = {}
                 metadata_dict = {}
                 for tensor, write_item in loader.values():
-                    if not tensor.is_cpu:
-                        raise AssertionError("Tensor must be on CPU")
+                    assert tensor.is_cpu
                     write_results.append(
                         _write_item(
                             transforms,
@@ -639,7 +631,7 @@ class _FileSystemWriter(StorageWriter):
     def set_up_storage_writer(
         self, is_coordinator: bool, *args: Any, **kwargs: Any
     ) -> None:
-        self.rank = kwargs.get("rank")
+        self.rank = kwargs.get("rank", None)
         self.use_collectives = kwargs.get("use_collectives", True)
 
     def _metadata_exists(self) -> bool:
@@ -660,8 +652,7 @@ class _FileSystemWriter(StorageWriter):
                 warnings.warn(
                     f"Detected an existing checkpoint in {self.path}, overwriting since {self.overwrite=}."
                     " Past version 2.5 of PyTorch, `overwrite` will default to False. Set this variable to True to"
-                    " maintain this functionality or False to raise when an existing checkpoint is found.",
-                    stacklevel=2,
+                    " maintain this functionality or False to raise when an existing checkpoint is found."
                 )
             else:
                 raise RuntimeError(f"Checkpoint already exists and {self.overwrite=}.")
@@ -912,10 +903,9 @@ class FileSystemReader(StorageReader):
                         )
                         target_tensor = planner.resolve_tensor(req).detach()
 
-                        if target_tensor.size() != tensor.size():
-                            raise AssertionError(
-                                f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
-                            )
+                        assert target_tensor.size() == tensor.size(), (
+                            f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
+                        )
                         target_tensor.copy_(tensor)
                         planner.commit_tensor(req, target_tensor)
 
@@ -929,7 +919,7 @@ class FileSystemReader(StorageReader):
 
     # Implementing the abstract function in StorageReader
     def read_metadata(self, *args: Any, **kwargs: Any) -> Metadata:
-        rank = kwargs.get("rank")
+        rank = kwargs.get("rank", None)
         path = self._get_metadata_path(rank)
         with self.fs.create_stream(path, "rb") as metadata_file:
             metadata = pickle.load(metadata_file)
@@ -944,10 +934,9 @@ class FileSystemReader(StorageReader):
         self, metadata: Metadata, is_coordinator: bool, *args: Any, **kwargs: Any
     ) -> None:
         self.storage_data = metadata.storage_data
-        self.rank = kwargs.get("rank")
+        self.rank = kwargs.get("rank", None)
         self.use_collectives = kwargs.get("use_collectives", True)
-        if self.storage_data is None:
-            raise AssertionError("storage_data must not be None in metadata")
+        assert self.storage_data is not None
 
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
         return plan

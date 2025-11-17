@@ -79,9 +79,9 @@ jobs:
     runs-on: "windows-11-arm64-preview"
     {%- else %}
     {%- if branches == "nightly" %}
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     {%- else %}
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge.nonephemeral"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     {%- endif %}
     {%- endif %}
     timeout-minutes: !{{ common.timeout_minutes_windows_binary }}

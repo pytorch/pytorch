@@ -1,6 +1,7 @@
 #include <c10/util/ApproximateClock.h>
-#include <c10/util/Exception.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/irange.h>
+#include <fmt/format.h>
 
 namespace c10 {
 
@@ -46,8 +47,7 @@ std::function<time_t(approx_time_t)> ApproximateClockToUnixTimeConverter::
   for (const auto i : c10::irange(replicates)) {
     auto delta_ns = end_times[i].t_ - start_times_[i].t_;
     auto delta_approx = end_times[i].approx_t_ - start_times_[i].approx_t_;
-    scale_factors[i] =
-        static_cast<double>(delta_ns) / static_cast<double>(delta_approx);
+    scale_factors[i] = (double)delta_ns / (double)delta_approx;
   }
   std::sort(scale_factors.begin(), scale_factors.end());
   long double scale_factor = scale_factors[replicates / 2 + 1];
@@ -65,8 +65,7 @@ std::function<time_t(approx_time_t)> ApproximateClockToUnixTimeConverter::
   for (const auto i : c10::irange(replicates)) {
     auto dt = start_times_[i].t_ - t0;
     auto dt_approx =
-        static_cast<double>(start_times_[i].approx_t_ - t0_approx) *
-        scale_factor;
+        (double)(start_times_[i].approx_t_ - t0_approx) * scale_factor;
     t0_correction[i] = dt - (time_t)dt_approx; // NOLINT
   }
   t0 += t0_correction[t0_correction.size() / 2 + 1]; // NOLINT
@@ -74,9 +73,7 @@ std::function<time_t(approx_time_t)> ApproximateClockToUnixTimeConverter::
   return [=](approx_time_t t_approx) {
     // See above for why this is more stable than `A * t_approx + B`.
     return t_approx > t0_approx
-        ? static_cast<time_t>(
-              static_cast<double>(t_approx - t0_approx) * scale_factor) +
-            t0
+        ? (time_t)((double)(t_approx - t0_approx) * scale_factor) + t0
         : 0;
   };
 }

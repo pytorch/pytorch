@@ -1,3 +1,4 @@
+# flake8: noqa: F401
 r"""Intrinsic QAT Modules.
 
 This file is in the process of migration to `torch/ao/nn/intrinsic/qat`, and

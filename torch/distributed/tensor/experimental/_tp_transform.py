@@ -237,11 +237,8 @@ def _mark_sharding(
                         op_schema,
                     )
                 placement_strategies[node] = OpSpec(
-                    # pyrefly: ignore [bad-argument-type]
                     output_specs=_get_output_spec_from_output_sharding(output_sharding),
-                    # pyrefly: ignore [missing-attribute]
                     input_specs=output_sharding.redistribute_schema.args_spec
-                    # pyrefly: ignore [missing-attribute]
                     if output_sharding.redistribute_schema is not None
                     else _get_input_node_specs(node, placement_strategies),
                 )

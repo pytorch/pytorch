@@ -7,12 +7,8 @@ import json
 import os
 import shutil
 from pathlib import Path
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, Callable, cast
 from urllib.request import urlopen
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

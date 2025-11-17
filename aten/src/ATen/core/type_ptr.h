@@ -16,7 +16,7 @@ class SingletonTypePtr {
   /* implicit */ SingletonTypePtr(T* p) : repr_(p) {}
 
   // We need this to satisfy Pybind11, but it shouldn't be hit.
-  explicit SingletonTypePtr(std::shared_ptr<T> /*unused*/) { TORCH_CHECK(false); }
+  explicit SingletonTypePtr(std::shared_ptr<T>) { TORCH_CHECK(false); }
 
   using element_type = typename std::shared_ptr<T>::element_type;
 

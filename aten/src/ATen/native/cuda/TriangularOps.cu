@@ -44,7 +44,7 @@ __global__ void triu_tril_kernel(
     const int64_t k,
     const int64_t N_padded,
     const IndexType last_dim_padded) {
-  int64_t linear_idx = (((int64_t)blockIdx.x) * blockDim.x + threadIdx.x) * elements_per_thread;
+  int64_t linear_idx = (blockIdx.x * blockDim.x + threadIdx.x) * elements_per_thread;
   if (linear_idx >= N_padded) {
     return;
   }

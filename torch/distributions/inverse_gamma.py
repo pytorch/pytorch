@@ -38,10 +38,10 @@ class InverseGamma(TransformedDistribution):
         "concentration": constraints.positive,
         "rate": constraints.positive,
     }
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     support = constraints.positive
     has_rsample = True
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     base_dist: Gamma
 
     def __init__(

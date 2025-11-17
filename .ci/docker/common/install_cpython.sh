@@ -83,6 +83,10 @@ function build_cpython {
         py_suffix=${py_ver::-1}
         py_folder=$py_suffix
     fi
+    # Update to rc2 due to https://github.com/python/cpython/commit/c72699086fe4
+    if [ "$py_suffix" == "3.14.0" ]; then
+        py_suffix="3.14.0rc2"
+    fi
     wget -q $PYTHON_DOWNLOAD_URL/$py_folder/Python-$py_suffix.tgz -O Python-$py_ver.tgz
     do_cpython_build $py_ver Python-$py_suffix
 

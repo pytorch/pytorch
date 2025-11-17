@@ -116,7 +116,7 @@ def _interpolate(name, dim, interpolate_mode):
                 if i < 2
                 else float(output_size[-(dim - i)])
                 / float(input.type().sizes()[-(dim - i)])
-                for i in range(dim)
+                for i in range(0, dim)
             ]
         return g.op("Upsample", input, mode_s=interpolate_mode, scales_f=scales)
 
@@ -183,8 +183,7 @@ def _try_cast_integer_to_float(g: jit_utils.GraphContext, *args):
         warnings.warn(
             "Only floating datatype is supported for these operators: "
             "{Greater, Less, MatMul, PRelu, Gemm, Flatten}. This might cause "
-            "the onnx model to be incorrect, if inputs have integer datatypes.",
-            stacklevel=2,
+            "the onnx model to be incorrect, if inputs have integer datatypes."
         )
     return (old_type,) + args
 
@@ -192,7 +191,7 @@ def _try_cast_integer_to_float(g: jit_utils.GraphContext, *args):
 def _cast_to_type(g: jit_utils.GraphContext, input, to_type):
     if to_type is None:
         return input
-    return getattr(opset9, f"_cast_{to_type}")(g, input, False)
+    return g.op("Cast", input, to_i=symbolic_helper.cast_pytorch_to_onnx[to_type])
 
 
 def _comparison_operator(g: jit_utils.GraphContext, input, other, op_name):

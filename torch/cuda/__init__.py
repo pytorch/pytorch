@@ -35,7 +35,6 @@ from .graphs import (
     is_current_stream_capturing,
     make_graphed_callables,
 )
-from .green_contexts import GreenContext
 from .streams import Event, ExternalStream, Stream
 
 
@@ -293,8 +292,7 @@ def _check_capability():
                         min_arch % 10,
                         max_arch // 10,
                         max_arch % 10,
-                    ),
-                    stacklevel=2,
+                    )
                 )
                 matched_arches = ""
                 for arch, arch_info in CUDA_ARCHES_SUPPORTED.items():
@@ -304,9 +302,7 @@ def _check_capability():
                     ):
                         matched_arches += f" {arch}"
                 if matched_arches != "":
-                    warnings.warn(
-                        matched_cuda_warn.format(matched_arches), stacklevel=2
-                    )
+                    warnings.warn(matched_cuda_warn.format(matched_arches))
 
 
 def _check_cubins():
@@ -331,8 +327,7 @@ If you want to use the {} GPU with PyTorch, please check the instructions at htt
             warnings.warn(
                 incompatible_device_warn.format(
                     device_name, capability, " ".join(arch_list), device_name
-                ),
-                stacklevel=2,
+                )
             )
 
 
@@ -822,9 +817,7 @@ def _raw_device_count_amdsmi() -> int:
     try:
         amdsmi.amdsmi_init()
     except amdsmi.AmdSmiException as e:
-        warnings.warn(
-            f"Can't initialize amdsmi - Error code: {e.err_code}", stacklevel=2
-        )
+        warnings.warn(f"Can't initialize amdsmi - Error code: {e.err_code}")
         return -1
     socket_handles = amdsmi.amdsmi_get_processor_handles()
     return len(socket_handles)
@@ -837,12 +830,12 @@ def _raw_device_count_nvml() -> int:
     nvml_h = CDLL("libnvidia-ml.so.1")
     rc = nvml_h.nvmlInit()
     if rc != 0:
-        warnings.warn("Can't initialize NVML", stacklevel=2)
+        warnings.warn("Can't initialize NVML")
         return -1
     dev_count = c_int(-1)
     rc = nvml_h.nvmlDeviceGetCount_v2(byref(dev_count))
     if rc != 0:
-        warnings.warn("Can't get nvml device count", stacklevel=2)
+        warnings.warn("Can't get nvml device count")
         return -1
     del nvml_h
     return dev_count.value
@@ -856,27 +849,27 @@ def _raw_device_uuid_amdsmi() -> Optional[list[str]]:
     try:
         amdsmi.amdsmi_init()
     except amdsmi.AmdSmiException:
-        warnings.warn("Can't initialize amdsmi", stacklevel=2)
+        warnings.warn("Can't initialize amdsmi")
         return None
     try:
         socket_handles = amdsmi.amdsmi_get_processor_handles()
         dev_count = len(socket_handles)
     except amdsmi.AmdSmiException:
-        warnings.warn("Can't get amdsmi device count", stacklevel=2)
+        warnings.warn("Can't get amdsmi device count")
         return None
     uuids: list[str] = []
     for idx in range(dev_count):
         try:
             handler = amdsmi.amdsmi_get_processor_handles()[idx]
         except amdsmi.AmdSmiException:
-            warnings.warn("Cannot get amd device handler", stacklevel=2)
+            warnings.warn("Cannot get amd device handler")
             return None
         try:
             uuid = amdsmi.amdsmi_get_gpu_asic_info(handler)["asic_serial"][
                 2:
             ]  # Removes 0x prefix from serial
         except amdsmi.AmdSmiException:
-            warnings.warn("Cannot get uuid for amd device", stacklevel=2)
+            warnings.warn("Cannot get uuid for amd device")
             return None
         uuids.append(
             str(uuid).lower()
@@ -891,25 +884,25 @@ def _raw_device_uuid_nvml() -> Optional[list[str]]:
     nvml_h = CDLL("libnvidia-ml.so.1")
     rc = nvml_h.nvmlInit()
     if rc != 0:
-        warnings.warn("Can't initialize NVML", stacklevel=2)
+        warnings.warn("Can't initialize NVML")
         return None
     dev_count = c_int(-1)
     rc = nvml_h.nvmlDeviceGetCount_v2(byref(dev_count))
     if rc != 0:
-        warnings.warn("Can't get nvml device count", stacklevel=2)
+        warnings.warn("Can't get nvml device count")
         return None
     uuids: list[str] = []
     for idx in range(dev_count.value):
         dev_id = c_void_p()
         rc = nvml_h.nvmlDeviceGetHandleByIndex_v2(idx, byref(dev_id))
         if rc != 0:
-            warnings.warn("Can't get device handle", stacklevel=2)
+            warnings.warn("Can't get device handle")
             return None
         buf_len = 96
         buf = create_string_buffer(buf_len)
         rc = nvml_h.nvmlDeviceGetUUID(dev_id, buf, buf_len)
         if rc != 0:
-            warnings.warn("Can't get device UUID", stacklevel=2)
+            warnings.warn("Can't get device UUID")
             return None
         uuids.append(buf.raw.decode("ascii").strip("\0"))
     del nvml_h
@@ -1851,7 +1844,6 @@ __all__ = [
     "ExternalStream",
     "Stream",
     "StreamContext",
-    "GreenContext",
     "amp",
     "caching_allocator_alloc",
     "caching_allocator_delete",

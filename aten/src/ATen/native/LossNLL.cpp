@@ -159,7 +159,7 @@ inline scalar_t* optional_data(const Tensor& source) {
 }
 
 template <typename scalar_t, typename target_t>
-void nll_loss_out_frame(
+static void nll_loss_out_frame(
     const Tensor& output,
     const Tensor& total_weight,
     const Tensor& input,
@@ -338,7 +338,7 @@ void nll_loss_forward_out_cpu_template(
 }
 
 template <typename scalar_t, typename target_t>
-void nll_loss_backward_out_frame(
+static void nll_loss_backward_out_frame(
     const Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& input,

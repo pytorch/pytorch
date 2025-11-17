@@ -120,23 +120,17 @@ inline void initGlobalDevicePoolState() {
   TORCH_CHECK(
       gDevicePool.devices.size() <= std::numeric_limits<DeviceIndex>::max(),
       "Too many XPU devices, DeviceIndex overflowed!");
-  // Check each device's architecture and issue a warning if it is older than
-  // the officially supported range (Intel GPUs starting from Arc (Alchemist)
-  // series).
-  namespace syclex = sycl::ext::oneapi::experimental;
-  for (const auto& device : gDevicePool.devices) {
-    auto architecture = device->get_info<syclex::info::device::architecture>();
-    if (architecture < syclex::architecture::intel_gpu_acm_g10) {
-      TORCH_WARN(
-          "The detected GPU (",
-          device->get_info<sycl::info::device::name>(),
-          ") is not officially supported by PyTorch XPU. Running workloads on this device may result in unexpected behavior.\n",
-          "For stable and fully supported execution, please use GPUs based on Intel Arc (Alchemist) series or newer.\n",
-          "Refer to the hardware prerequisites for more information: ",
-          "https://github.com/pytorch/pytorch/blob/main/docs/source/notes/get_start_xpu.rst#hardware-prerequisite");
-    }
-  }
 
+#if defined(_WIN32) && SYCL_COMPILER_VERSION < 20250000
+  // The default context feature is disabled by default on Windows for SYCL
+  // compiler versions earlier than 2025.0.0.
+  std::vector<sycl::device> deviceList;
+  for (auto it = gDevicePool.devices.begin(); it != gDevicePool.devices.end();
+       ++it) {
+    deviceList.push_back(*(*it));
+  }
+  gDevicePool.context = std::make_unique<sycl::context>(deviceList);
+#else
   // The default context is utilized for each Intel GPU device, allowing the
   // retrieval of the context from any GPU device.
   const auto& platform = gDevicePool.devices[0]->get_platform();
@@ -145,6 +139,7 @@ inline void initGlobalDevicePoolState() {
       platform.khr_get_default_context());
 #else
       platform.ext_oneapi_get_default_context());
+#endif
 #endif
 }
 
@@ -170,9 +165,9 @@ void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
 #define ASSIGN_DEVICE_ASPECT(member) \
   device_prop->has_##member = raw_device.has(sycl::aspect::member);
 
-#define ASSIGN_EXP_CL_ASPECT(member) \
-  device_prop->has_##member =        \
-      raw_device.ext_oneapi_supports_cl_extension("cl_intel_" #member);
+#define ASSIGN_EXP_CL_ASPECT(member)                                       \
+  device_prop->has_##member = raw_device.ext_oneapi_supports_cl_extension( \
+      "cl_intel_" #member, &cl_version);
 
 #define ASSIGN_EXP_DEVICE_PROP(property) \
   device_prop->property =                \
@@ -187,6 +182,8 @@ void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
 
   AT_FORALL_XPU_DEVICE_ASPECT(ASSIGN_DEVICE_ASPECT);
 
+  // TODO: Remove cl_version since it is unnecessary.
+  sycl::ext::oneapi::experimental::cl_version cl_version;
   AT_FORALL_XPU_EXP_CL_ASPECT(ASSIGN_EXP_CL_ASPECT);
 
 #if SYCL_COMPILER_VERSION >= 20250000

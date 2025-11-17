@@ -86,23 +86,4 @@ inline SymIntArrayRef fromIntArrayRefSlow(IntArrayRef array_ref) {
       reinterpret_cast<const SymInt*>(array_ref.data()), array_ref.size());
 }
 
-inline c10::SymBool sym_equals(SymIntArrayRef LHS, SymIntArrayRef RHS) {
-  if (LHS.size() != RHS.size()) {
-    return c10::SymBool(false);
-  }
-
-  c10::SymBool result = sym_eq(LHS.size(), RHS.size());
-  for (size_t i = 0; i < RHS.size(); ++i) {
-    c10::SymBool equals = sym_eq(LHS[i], RHS[i]);
-    std::optional<bool> equals_bool = equals.maybe_as_bool();
-
-    if (equals_bool.has_value() && !*equals_bool) {
-      // Early return if element comparison is known to be false
-      return equals;
-    }
-    result = result.sym_and(equals);
-  }
-  return result;
-}
-
 } // namespace c10

@@ -8,7 +8,6 @@ from typing import Any, Callable, Optional
 import sympy
 
 import torch
-from torch._inductor import config
 from torch._inductor.codegen.common import (
     CSE,
     CSEVariable,
@@ -21,7 +20,6 @@ from torch._inductor.ops_handler import StoreMode
 from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
 
-from ...utils import sympy_index_symbol
 from .cutedsl_op_overrides import CuteDSLOpOverrides
 
 
@@ -113,15 +111,6 @@ class CuteDSLTemplateKernel(Kernel):
 
         self.cse = CSE(name_prefix="tmp")
 
-        # Track all tensor buffers added during modification processing
-        self.collected_tensor_buffers: list[str] = []
-
-    def kexpr(self, expr: sympy.Expr) -> str:
-        """Convert sympy expression to CuteDSL string representation."""
-        # For CuteDSL, we use standard Python string conversion
-        # since CuteDSL uses Python syntax for expressions
-        return str(expr)
-
     def gen_imports(self) -> str:
         """Generate common imports for CuteDSL templates."""
         imports = IndentedBuffer()
@@ -154,8 +143,6 @@ class CuteDSLTemplateKernel(Kernel):
             "def_kernel": self.def_kernel,
             "gen_defines": lambda: self.gen_defines(**kwargs),
             "get_output": self.get_output,
-            "get_tensor_buffers": self.get_tensor_buffers,
-            "unpack_buffers": self.unpack_buffers,
             "modification": self.modification,
         }
 
@@ -271,33 +258,6 @@ class CuteDSLTemplateKernel(Kernel):
             raise ValueError(f"Output buffer '{buf_name}' not found in args")
         return output
 
-    def get_tensor_buffers(self):
-        """Get list of tensor buffer names that were collected during modifications."""
-        return self.collected_tensor_buffers
-
-    def unpack_buffers(self, buffer_list_name: str, *, indent_width: int = 4):
-        """Generate buffer unpacking code via render hook."""
-
-        def hook():
-            tensor_buffers = self.get_tensor_buffers()
-            if not tensor_buffers:
-                return ""
-
-            # Generate unpacking assignments: in_ptr4 = buffers[0], etc.
-            unpacking_lines = []
-            for i, buffer_name in enumerate(tensor_buffers):
-                # pyrefly: ignore [bad-argument-type]
-                unpacking_lines.append(f"{buffer_name} = {buffer_list_name}[{i}]")
-
-            indent = " " * indent_width
-            return "\n" + indent + ("\n" + indent).join(unpacking_lines)
-
-        # Register the hook and return placeholder
-        placeholder = "<UNPACK_BUFFERS>"
-        assert placeholder not in self.render_hooks
-        self.render_hooks[placeholder] = hook
-        return placeholder
-
     def call_kernel(self, name: str, node=None):
         """Call the kernel function. Simplified version of TritonTemplateKernel.call_kernel."""
         wrapper = V.graph.wrapper_code
@@ -363,9 +323,6 @@ class CuteDSLTemplateKernel(Kernel):
                     "Side-effect only modifications not yet supported for CuteDSL"
                 )
 
-            # Add Buffers that were added during modification
-            self.collected_tensor_buffers.extend(modification_handler.tensor_buffers)
-
             return self.body.getvalue()
 
 
@@ -393,8 +350,6 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         self.kernel = kernel
         self.fixed_inputs = fixed_inputs
         self.mask = mask
-        # Track tensor buffers that get added during modification processing
-        self.tensor_buffers: list[str] = []
 
     def _get_input_dtype(self, name: str) -> torch.dtype:
         """Get the dtype for an input from the kernel's named_input_nodes."""
@@ -406,83 +361,9 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
     def load(self, name: str, index: sympy.Expr):
         """Handle loading from tensor or fixed(template args) input for CuteDSL."""
         if name not in self.fixed_inputs:
-            index_str = self._process_indexing(index)
-            var = self._add_kernel_input(name)
-            buffer = V.graph.get_buffer(name)
-            var_dtype = buffer.dtype
-
-            # Get the CuteDSL dtype mapping
-            cute_dtype = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
-                var_dtype, "cutlass.Float32"
+            raise NotImplementedError(
+                "Tensor loading not yet supported for CuteDSL - only fixed input substitution"
             )
-
-            # NB
-            # This assumes single-value loads which is not generally the case but is a workaround
-            # since we don't have gather support yet. We do loads in non-SSA form then convert
-            # back to SSA form for any remaining operations over the loaded values.
-            #
-            # Pattern:
-            #   index_frag = cute.make_fragment(1, cutlass.Int32)
-            #   index_frag.store(index)
-            #   val_frag = cute.make_fragment(1, dtype)
-            #   index = index_frag[0]
-            #   val_frag[0] = tensor[index]
-            #   result = val_frag.load()
-
-            index_frag = self.kernel.cse.generate(
-                self.kernel.body,
-                "cute.make_fragment(1, cutlass.Int32)",
-                dtype=torch.int32,
-                bounds=ValueRanges.unknown(),
-            )
-
-            self.kernel.cse.generate(
-                self.kernel.body,
-                f"{index_frag}.store({index_str})",
-                dtype=torch.int32,
-                bounds=ValueRanges.unknown(),
-            )
-
-            val_frag = self.kernel.cse.generate(
-                self.kernel.body,
-                f"cute.make_fragment(1, {cute_dtype})",
-                dtype=var_dtype,
-                bounds=ValueRanges.unknown(),
-            )
-
-            index_var = self.kernel.cse.generate(
-                self.kernel.body,
-                f"{index_frag}[0]",
-                dtype=torch.int32,
-                bounds=ValueRanges.unknown(),
-            )
-
-            self.kernel.cse.generate(
-                self.kernel.body,
-                f"{val_frag}[0] = ({var}[{index_var}])",
-                dtype=var_dtype,
-                bounds=ValueRanges.unknown(),
-            )
-
-            final_expr = f"{val_frag}.load()"
-
-            # Handle upcast to fp32 if needed
-            if (
-                var_dtype in (torch.float16, torch.bfloat16)
-                and config.triton.codegen_upcast_to_fp32
-            ):
-                # Apply dtype conversion after fragment load
-                final_expr = f"({final_expr}).to(cutlass.Float32)"
-                var_dtype = torch.float32
-
-            out = self.kernel.cse.generate(
-                self.kernel.body,
-                final_expr,
-                dtype=var_dtype,
-                bounds=ValueRanges.unknown(),
-            )
-            return out
-
         value = self.fixed_inputs[name]
         dtype = self._get_input_dtype(name)
 
@@ -493,9 +374,8 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""
-        return sympy_index_symbol(str(index_var))
+        raise NotImplementedError("Indirect indexing not supported")
 
-    # pyrefly: ignore [bad-override]
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> str:
@@ -505,17 +385,12 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
 
     def _add_kernel_input(self, name: str):
         """Add name as input to kernel and return input ref."""
-        # Get the remapped name that will be used in the kernel
-        remapped_name = self.kernel.args.input(name)
-        # Track the remapped name for later collection
-        if remapped_name not in self.tensor_buffers:
-            self.tensor_buffers.append(remapped_name)
-        return remapped_name
+        return self.kernel.args.input(name)
 
     def _process_indexing(self, index):
         """Process and rename indexing, adding symbols as kernel inputs."""
-        renamed = self.kernel.rename_indexing(index)
-        return self.kernel.kexpr(renamed)
+        # Convert sympy expression to string representation for CuteDSL
+        return str(index)  # Simplified for now
 
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         try:

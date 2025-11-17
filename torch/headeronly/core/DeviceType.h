@@ -4,7 +4,6 @@
 // If you modify me, keep me synchronized with that file.
 
 #include <torch/headeronly/macros/Export.h>
-#include <torch/headeronly/macros/Macros.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -103,7 +102,7 @@ struct hash<c10::DeviceType> {
 };
 } // namespace std
 
-HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
+namespace torch::headeronly {
 using c10::COMPILE_TIME_MAX_DEVICE_TYPES;
 using c10::DeviceType;
 using c10::kCPU;
@@ -123,4 +122,4 @@ using c10::kVE;
 using c10::kVulkan;
 using c10::kXLA;
 using c10::kXPU;
-HIDDEN_NAMESPACE_END(torch, headeronly)
+} // namespace torch::headeronly

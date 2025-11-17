@@ -554,30 +554,26 @@ class Op:
                     MatchState.SIZE_OR_SYNTAX_MISMATCH,
                     f"Expected input sizes: '{self.input_sizes}' does not match found output sizes: '{other.output_sizes}'",
                 )
-            if (
-                self.type
-                in [
-                    "all_gather",
-                    "all_gather_base",
-                    "all_gather_into_tensor_coalesced",
-                ]
-                and math.prod(other.output_sizes[0])
-                != math.prod(self.input_sizes[0]) * self.pg_size
+            if self.type in [
+                "all_gather",
+                "all_gather_base",
+                "all_gather_into_tensor_coalesced",
+            ] and not (
+                math.prod(other.output_sizes[0])
+                == math.prod(self.input_sizes[0]) * self.pg_size
             ):
                 return MatchInfo(
                     MatchState.SIZE_OR_SYNTAX_MISMATCH,
                     f"Found input numel '{math.prod(other.input_sizes[0])} * pg size {self.pg_size}' "
                     f"does not match output numel '{math.prod(other.output_sizes[0])}'",
                 )
-            if (
-                self.type
-                in [
-                    "reduce_scatter",
-                    "_reduce_scatter_base",
-                    "reduce_scatter_tensor_coalesced",
-                ]
-                and math.prod(other.input_sizes[0])
-                != math.prod(self.output_sizes[0]) * self.pg_size
+            if self.type in [
+                "reduce_scatter",
+                "_reduce_scatter_base",
+                "reduce_scatter_tensor_coalesced",
+            ] and not (
+                math.prod(other.input_sizes[0])
+                == math.prod(self.output_sizes[0]) * self.pg_size
             ):
                 return MatchInfo(
                     MatchState.SIZE_OR_SYNTAX_MISMATCH,

@@ -15,11 +15,7 @@ namespace at::native {
 
 Scalar item(const Tensor& self) {
   auto numel = self.sym_numel();
-  TORCH_SYM_CHECK(
-      numel.sym_eq(1),
-      "a Tensor with ",
-      numel,
-      " elements cannot be converted to Scalar");
+  TORCH_CHECK(numel == 1, "a Tensor with ", numel, " elements cannot be converted to Scalar");
   if (self.is_sparse()) {
     if (self._nnz() == 0) return Scalar(0);
     if (self.is_coalesced()) return at::_local_scalar_dense(self._values());

@@ -32,10 +32,10 @@ class LogNormal(TransformedDistribution):
     """
 
     arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     support = constraints.positive
     has_rsample = True
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     base_dist: Normal
 
     def __init__(

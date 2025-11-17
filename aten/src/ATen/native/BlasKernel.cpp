@@ -286,7 +286,7 @@ template void scal_fast_path<scalar_t>(int *n, scalar_t *a, scalar_t *x, int *in
 #if AT_BUILD_WITH_BLAS()
 template <>
 bool scal_use_fast_path<double>(int64_t n, int64_t incx) {
-  auto constexpr intmax = std::numeric_limits<int>::max();
+  auto intmax = std::numeric_limits<int>::max();
   return n <= intmax && incx <= intmax;
 }
 
@@ -315,7 +315,7 @@ bool gemv_use_fast_path<float>(
     int64_t incx,
     [[maybe_unused]] float beta,
     int64_t incy) {
-  auto constexpr intmax = std::numeric_limits<int>::max();
+  auto intmax = std::numeric_limits<int>::max();
   return (m <= intmax) && (n <= intmax) && (lda <= intmax) &&
          (incx > 0) && (incx <= intmax) && (incy > 0) && (incy <= intmax);
 }

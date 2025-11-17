@@ -182,25 +182,9 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       r.s = parseStringLiteral(token.range, token.text());
       L.next();
       return r;
-    case TK_TRUE:
-      r.k = AttributeKind::i;
-      r.i = 1;
-      L.next();
-      return r;
-    case TK_FALSE:
-      r.k = AttributeKind::i;
-      r.i = 0;
-      L.next();
-      return r;
     case '-':
       str = "-";
       L.next();
-      if (L.cur().kind == TK_IDENT && L.cur().text() == "inf") {
-        r.k = AttributeKind::f;
-        r.f = -std::numeric_limits<double>::infinity();
-        L.next();
-        return r;
-      }
       if (L.cur().kind != TK_NUMBER) {
         throw(
             ErrorReport(token.range)
@@ -254,13 +238,6 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       L.next();
       return r;
     case TK_IDENT:
-      if (L.cur().text() == "inf") {
-        r.k = AttributeKind::f;
-        r.f = std::numeric_limits<double>::infinity();
-        L.next();
-        return r;
-      }
-
       // Type literal
       r.k = AttributeKind::ty;
       type_alias = type_parser.parseType();

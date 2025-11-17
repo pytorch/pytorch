@@ -8,7 +8,6 @@
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/custom_class.h>
 #include <string>
-#include <unordered_set>
 
 using c10::AliasInfo;
 using c10::AwaitType;
@@ -42,25 +41,6 @@ using c10::UnionType;
 using c10::VarType;
 
 namespace torch::jit {
-
-static std::unordered_set<std::string>& getOpaqueTypes() {
-  static std::unordered_set<std::string> global_opaque_types;
-  return global_opaque_types;
-}
-
-void registerOpaqueType(const std::string& type_name) {
-  auto& global_opaque_types = getOpaqueTypes();
-  auto [_, inserted] = global_opaque_types.insert(type_name);
-  if (!inserted) {
-    throw std::runtime_error(
-        "Type '" + type_name + "' is already registered as an opaque type");
-  }
-}
-
-bool isRegisteredOpaqueType(const std::string& type_name) {
-  auto& global_opaque_types = getOpaqueTypes();
-  return global_opaque_types.find(type_name) != global_opaque_types.end();
-}
 
 TypePtr SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
@@ -100,11 +80,6 @@ TypePtr SchemaTypeParser::parseBaseType() {
     L.expect(TK_IDENT);
   }
   std::string text = tok.text();
-
-  // Check if this type is registered as an opaque type first
-  if (isRegisteredOpaqueType(text)) {
-    return c10::PyObjectType::get();
-  }
 
   auto it = type_map.find(text);
   if (it == type_map.end()) {

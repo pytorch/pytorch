@@ -218,14 +218,3 @@ DataParallel functions (multi-GPU, distributed)
     :nosignatures:
 
     torch.nn.parallel.data_parallel
-
-Low-Precision functions
------------------------
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    ScalingType
-    SwizzleType
-    scaled_mm
-    scaled_grouped_mm

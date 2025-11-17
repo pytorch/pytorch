@@ -348,7 +348,7 @@ inline static bool array_has_torch_function(
   return false;
 }
 
-PyObject* THPModule_has_torch_function(PyObject* /*unused*/, PyObject* arg) {
+PyObject* THPModule_has_torch_function(PyObject*, PyObject* arg) {
   bool result = false;
   if (PyTuple_CheckExact(arg) || PyList_CheckExact(arg)) {
     // Fast path:
@@ -372,9 +372,7 @@ PyObject* THPModule_has_torch_function(PyObject* /*unused*/, PyObject* arg) {
   Py_RETURN_FALSE;
 }
 
-PyObject* THPModule_has_torch_function_unary(
-    PyObject* /*unused*/,
-    PyObject* obj) {
+PyObject* THPModule_has_torch_function_unary(PyObject*, PyObject* obj) {
   // Special case `THPModule_has_torch_function` for the single arg case.
   if (torch::check_has_torch_function(obj)) {
     Py_RETURN_TRUE;
@@ -383,7 +381,7 @@ PyObject* THPModule_has_torch_function_unary(
 }
 
 PyObject* THPModule_has_torch_function_variadic(
-    PyObject* /*unused*/,
+    PyObject*,
     PyObject* const* args,
     Py_ssize_t nargs) {
   if (array_has_torch_function(args, nargs)) {

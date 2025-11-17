@@ -128,7 +128,7 @@ def run_with_nativert(ep):
         flat_results = pytree.tree_leaves(results)
         assert len(flat_results) == len(flat_expected)
         for result, expected in zip(flat_results, flat_expected):
-            assert type(result) is type(expected)
+            assert type(result) == type(expected)
             if isinstance(result, torch.Tensor) and isinstance(expected, torch.Tensor):
                 assert result.shape == expected.shape
                 assert result.dtype == expected.dtype
@@ -323,7 +323,7 @@ class TestNativeRT(TestCase):
             flat_results = pytree.tree_leaves(results)
             assert len(flat_results) == len(flat_expected)
             for result, expected in zip(flat_results, flat_expected):
-                assert type(result) is type(expected)
+                assert type(result) == type(expected)
                 if isinstance(result, torch.Tensor) and isinstance(
                     expected, torch.Tensor
                 ):

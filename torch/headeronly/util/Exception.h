@@ -38,7 +38,7 @@ namespace c10 {
 #define STD_TORCH_CHECK_MSG(cond, type, ...) \
   (#cond #type " CHECK FAILED at " C10_STRINGIZE(__FILE__))
 #else // so STRIP_ERROR_MESSAGES is not defined
-HIDDEN_NAMESPACE_BEGIN(torch, headeronly, detail)
+namespace torch::headeronly::detail {
 template <typename... Args>
 std::string stdTorchCheckMsgImpl(const char* /*msg*/, const Args&... args) {
   // This is similar to the one in c10/util/Exception.h, but does
@@ -57,7 +57,7 @@ inline const char* stdTorchCheckMsgImpl(const char* msg) {
 inline const char* stdTorchCheckMsgImpl(const char* /*msg*/, const char* args) {
   return args;
 }
-HIDDEN_NAMESPACE_END(torch, headeronly, detail)
+} // namespace torch::headeronly::detail
 
 #define STD_TORCH_CHECK_MSG(cond, type, ...)               \
   (torch::headeronly::detail::stdTorchCheckMsgImpl(        \

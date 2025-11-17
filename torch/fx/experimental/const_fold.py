@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import re
-from collections.abc import Callable
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 import torch.fx
 from torch.fx.node import map_arg

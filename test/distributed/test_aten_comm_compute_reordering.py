@@ -44,22 +44,9 @@ device_type = str(get_devtype())
 
 def apply_reordering_and_get_graph(graph, out_li) -> None:
     gm = graph.owning_module
-    from torch._inductor.config import aten_distributed_optimizations as dist_opts
     from torch._inductor.fx_passes.overlap_scheduling import schedule_overlap_bucketing
 
-    # Read config values, only pass non-None values to use function defaults
-    kwargs: dict[str, object] = {}
-    config_keys = (
-        "collective_bucketing",
-        "max_compute_pre_fetch",
-        "custom_runtime_estimation",
-        "insert_overlap_deps",
-    )
-    for key in config_keys:
-        if (val := getattr(dist_opts, key)) is not None:
-            kwargs[key] = val
-
-    schedule_overlap_bucketing(gm, **kwargs)
+    schedule_overlap_bucketing(gm)
     gm.graph.lint()
     out_li.append(str(gm.graph))
 
@@ -75,16 +62,13 @@ def run_and_get_aten_graph(fn, *inputs):
 
 def get_patches():
     return {
-        "aten_distributed_optimizations.custom_runtime_estimation": estimate_aten_runtime,
+        "test_configs.estimate_aten_runtime": estimate_aten_runtime,
         "reorder_for_locality": False,
-        "triton.native_matmul": False,
         "reorder_for_compute_comm_overlap_passes": [],
         "compile_threads": 1,
         "force_disable_caches": True,
         # Messes up existing test strings
-        "aten_distributed_optimizations.insert_overlap_deps": False,
-        # interferes with testing, / custom estimation
-        "test_configs.assume_bucketing_reduces_latency": False,
+        "test_configs.aten_fx_overlap_insert_overlap_deps": False,
     }
 
 
@@ -364,58 +348,20 @@ graph():
             # these have no overlap opportunities
             self.assertEqual(counters["inductor"]["overlap_scheduling_bad_exposed"], 0)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    def test_overlap_scheduling_via_config(self):
-        """Test overlap scheduling enabled via config in post_grad pass."""
-
-        def func(a):
-            ar = _functional_collectives.all_reduce(a, "sum", "0")
-            b = torch.matmul(a, a)
-            return torch.matmul(ar, b)
-
-        patches = {
-            **get_patches(),
-            "aten_distributed_optimizations.enable_overlap_scheduling": True,
-        }
-
-        with _dynamo_dist_per_rank_init(
-            self.rank,
-            self.world_size,
-            self.backend(device_type),
-            fake_pg=not at_least_x_gpu(2),
-        ):
-            inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
-
-            with torch._inductor.config.patch(patches):
-                compiled_func = torch.compile(func)
-                out, code = run_and_get_code(compiled_func, inputs)
-
-                # Verify that wait_tensor is sinked below matmul
-                FileCheck().check("all_reduce").check("mm").check("wait_tensor").check(
-                    "mm"
-                ).run(code[0])
-
-                correct = func(inputs)
-                self.assertTrue(same(out, correct))
-                self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
-
 
 def get_bucket_patches(compute_multiplier=1.0):
     estimate_aten_runtime_part = functools.partial(
         estimate_aten_runtime, compute_multiplier=compute_multiplier
     )
     return {
-        "aten_distributed_optimizations.custom_runtime_estimation": estimate_aten_runtime_part,
-        "aten_distributed_optimizations.collective_bucketing": True,
+        "test_configs.estimate_aten_runtime": estimate_aten_runtime_part,
+        "test_configs.aten_fx_overlap_preserving_bucketing": True,
         "reorder_for_locality": False,
-        "triton.native_matmul": False,
         "reorder_for_compute_comm_overlap_passes": [],
         "compile_threads": 1,
         "force_disable_caches": True,
         # messes up test strings
-        "aten_distributed_optimizations.insert_overlap_deps": False,
-        # interferes with testing, / custom estimation
-        "test_configs.assume_bucketing_reduces_latency": False,
+        "test_configs.aten_fx_overlap_insert_overlap_deps": False,
     }
 
 
@@ -631,7 +577,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_bucket_patches(2.0))
-    def test_bucketing_split_for_overlap_blocking_no_deps(self):
+    def test_bucketing_split_for_overlap_blocking(self):
         """Test that 4 independent all-gathers split into 2+2 buckets for better overlap with compute."""
 
         def func(a, b, c, d, *, ranks):
@@ -854,7 +800,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
                 fake_pg=not at_least_x_gpu(2),
             ),
             torch._inductor.config.patch(
-                "aten_distributed_optimizations.insert_overlap_deps", True
+                "test_configs.aten_fx_overlap_insert_overlap_deps", True
             ),
             torch._inductor.config.patch(post_grad_custom_post_pass=apply),
         ):

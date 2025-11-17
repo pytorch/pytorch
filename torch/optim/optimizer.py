@@ -398,6 +398,7 @@ class Optimizer:
         self.state: defaultdict[torch.Tensor, Any] = defaultdict(dict)
         self.param_groups: list[dict[str, Any]] = []
 
+        # pyrefly: ignore  # no-matching-overload
         param_groups = list(params)
         if len(param_groups) == 0:
             raise ValueError("optimizer got an empty parameter list")
@@ -483,8 +484,7 @@ class Optimizer:
                 warnings.warn(
                     "This instance was constructed with capturable=True or some of all the param_groups came with capturable=True, "
                     "but step() is running without CUDA graph capture. If you never intend to graph-capture this "
-                    "instance, capturable=True can impair performance, and you should set capturable=False.",
-                    stacklevel=2,
+                    "instance, capturable=True can impair performance, and you should set capturable=False."
                 )
                 self._warned_capturable_if_run_uncaptured = True
 
@@ -780,12 +780,11 @@ class Optimizer:
         # UNLESS fused or capturable, see note [special device hosting for step]
         fused = False
         capturable = False
-        if param_groups is None:
-            raise AssertionError("Expected param_groups to be set")
+        assert param_groups is not None
         for pg in param_groups:
             if param_id in pg["params"]:
-                fused = pg.get("fused", False)
-                capturable = pg.get("capturable", False)
+                fused = pg["fused"] if "fused" in pg else False
+                capturable = pg["capturable"] if "capturable" in pg else False
                 break
         if key == "step":
             if capturable or fused:
@@ -1058,18 +1057,12 @@ class Optimizer:
                             if not foreach or p.grad.is_sparse:
                                 p.grad.zero_()
                             else:
-                                if per_device_and_dtype_grads is None:
-                                    raise AssertionError(
-                                        "Expected per_device_and_dtype_grads to be set"
-                                    )
+                                assert per_device_and_dtype_grads is not None
                                 per_device_and_dtype_grads[p.grad.device][
                                     p.grad.dtype
                                 ].append(p.grad)
             if foreach:
-                if per_device_and_dtype_grads is None:
-                    raise AssertionError(
-                        "Expected per_device_and_dtype_grads to be set"
-                    )
+                assert per_device_and_dtype_grads is not None
                 for per_dtype_grads in per_device_and_dtype_grads.values():
                     for grads in per_dtype_grads.values():
                         torch._foreach_zero_(grads)

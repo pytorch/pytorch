@@ -96,15 +96,15 @@ struct TORCH_API Function {
   // Overload for server interpreter, a bailout size is needed for graph
   // executor.
   virtual bool call(
-      Stack& /*unused*/,
-      std::optional<size_t> /*unused*/,
-      c10::function_ref<void(const Code&)> /*unused*/) {
+      Stack&,
+      std::optional<size_t>,
+      c10::function_ref<void(const Code&)>) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
     return false;
   }
 
   // Overload for mobile interpreter.
-  virtual bool call(Stack& /*unused*/, c10::function_ref<void(const mobile::Code&)> /*unused*/) {
+  virtual bool call(Stack&, c10::function_ref<void(const mobile::Code&)>) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
     return false;
   }

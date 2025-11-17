@@ -11,7 +11,6 @@
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 #include <limits>
 
-#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
 namespace torch::jit {
@@ -113,17 +112,20 @@ void listRemove<at::Tensor>(Stack& stack) {
 }
 
 void checkImplicitTensorToNum(const at::Tensor& t, bool toInt) {
-  TORCH_CHECK(
-      !t.requires_grad(),
-      "Cannot input a tensor that requires grad as a scalar argument");
-  TORCH_CHECK(
-      t.sizes().empty(),
-      "Cannot input a tensor of dimension other than 0 as a scalar argument");
-  TORCH_CHECK(
-      !toInt || isIntegralType(t.scalar_type(), /*includeBool=*/false),
-      "Cannot input a tensor of type ",
-      t.scalar_type(),
-      " as an integral argument");
+  if (t.requires_grad()) {
+    throw std::runtime_error(
+        "Cannot input a tensor that requires grad as a scalar argument");
+  }
+  if (!t.sizes().empty()) {
+    throw std::runtime_error(
+        "Cannot input a tensor of dimension other than 0 as a scalar argument");
+  }
+  if (toInt && !isIntegralType(t.scalar_type(), /*includeBool=*/false)) {
+    std::stringstream ss;
+    ss << "Cannot input a tensor of type " << t.scalar_type()
+       << " as an integral argument";
+    throw std::runtime_error(ss.str());
+  }
 }
 
 void checkDoubleInRange(double a) {

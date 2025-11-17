@@ -1,9 +1,7 @@
 import os
-import sys
 from collections import defaultdict
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import matplotlib.pyplot as plt
 
@@ -44,11 +42,10 @@ class Performance:
 
 
 class BenchmarkKernel:
-    def __init__(self, script_args):
-        self.script_args = script_args
+    def __init__(self, compile_mode: str = "max-autotune-no-cudagraphs"):
         self.name = self.__class__.__name__
         self.available_backends: list[str] = []
-        self.compile_mode: str = script_args.compile_mode
+        self.compile_mode: str = compile_mode
 
         # mapping from backend to list of performance results
         self.profiling_results: defaultdict[str, list[Performance]] = defaultdict(list)
@@ -108,21 +105,14 @@ class BenchmarkKernel:
             args_ref, kwargs_ref = self.clone_inputs(args, kwargs)
             res[backend] = getattr(self, backend)(args_ref, kwargs_ref)()
         gold = res["eager"]
-
-        tol = {}
-        if self.script_args.tolerance:
-            tol = {
-                "atol": self.script_args.tolerance,
-                "rtol": self.script_args.tolerance,
-            }
         for backend in self.available_backends:
             if backend == "eager":
                 continue
             try:
-                torch.testing.assert_close(res[backend], gold, **tol)
+                torch.testing.assert_close(res[backend], gold)
                 for t, gold_t in zip(res[backend], gold):
                     if t.requires_grad:
-                        torch.testing.assert_close(t.grad, gold_t.grad, **tol)
+                        torch.testing.assert_close(t.grad, gold_t.grad)
                 print(
                     f"Accuracy check \033[92m✓ succeed\033[0m for {backend} backend on {self.name} kernel"
                 )
@@ -130,9 +120,6 @@ class BenchmarkKernel:
                 print(
                     f"Accuracy check \033[91m✗ failed\033[0m for {backend} backend on {self.name} kernel. Error {e}"
                 )
-                if self.script_args.exit_on_accuracy_failure:
-                    print("Exit right away since --exit-on-accuracy-failure is set")
-                    sys.exit(1)
 
     def benchmark_single_shape(
         self, args, kwargs=None, should_check_accuracy=True, setting: str = ""

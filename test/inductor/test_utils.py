@@ -198,7 +198,7 @@ class TestUtils(TestCase):
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     def test_get_device_tflops(self, dtype):
         ret = get_device_tflops(dtype)
-        self.assertTrue(type(ret) is float)
+        self.assertTrue(type(ret) == float)
 
 
 instantiate_device_type_tests(TestUtils, globals())

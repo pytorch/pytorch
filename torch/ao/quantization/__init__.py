@@ -25,7 +25,7 @@ from .pt2e.export_utils import (
     _move_exported_model_to_train as move_exported_model_to_train,
 )
 
-# pyrefly: ignore [deprecated]
+# pyrefly: ignore  # deprecated
 from .qconfig import *  # noqa: F403
 from .qconfig_mapping import *  # noqa: F403
 from .quant_type import *  # noqa: F403

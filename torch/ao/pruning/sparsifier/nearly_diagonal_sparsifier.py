@@ -53,7 +53,7 @@ class NearlyDiagonalSparsifier(base_sparsifier.BaseSparsifier):
                 "nearliness cannot be larger than the dimensions of tensor."
             )
 
-        for row in range(height):
+        for row in range(0, height):
             # Bounds of entries that needs to be set to 1
             low = max(0, row - dist_to_diagonal)
             high = min(width, row + dist_to_diagonal + 1)

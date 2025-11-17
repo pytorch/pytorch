@@ -102,14 +102,6 @@ class MicrobatchTests(TestCase):
             KV_LEN=SEQ_LEN,
             device=device,
         )
-        block_mask2 = block_mask_fn(
-            create_block_causal_mask(batch, DOC_LEN - 1),
-            B=B,
-            H=H,
-            Q_LEN=SEQ_LEN,
-            KV_LEN=SEQ_LEN,
-            device=device,
-        )
         if device == "cuda":
             flex_fn = torch.compile(flex_attention)
         else:
@@ -120,18 +112,12 @@ class MicrobatchTests(TestCase):
 
         q_clone, k_clone, v_clone = (target.clone().detach() for target in (q, k, v))
         arg_split, _ = split_args_kwargs_into_chunks(
-            (
-                q_clone,
-                k_clone,
-                v_clone,
-                {"unused_block_mask": block_mask2, "block_mask": block_mask},
-            ),
+            (q_clone, k_clone, v_clone, {"block_mask": block_mask}),
             {},
-            chunks=4,
+            chunks=B,
             args_chunk_spec=None,
             kwargs_chunk_spec=None,
         )
-        assert len(arg_split) == 4
 
         q_total_chunks = []
         dq_total_chunks = []
@@ -191,83 +177,6 @@ class MicrobatchTests(TestCase):
         self.assertEqual(concat_kv_full_num_blocks, block_mask.full_kv_num_blocks)
         self.assertEqual(concat_kv_full_indices, block_mask.full_kv_indices)
         self.assertEqual(concat_out, out)
-
-    def test_split_block_mask_batch_size_one(self, device):
-        B = 6
-        H = 1
-        SEQ_LEN = 512
-        DIM = 32
-
-        def create_causal_mask():
-            def causal_mask(
-                b: torch.Tensor,
-                h: torch.Tensor,
-                q_idx: torch.Tensor,
-                kv_idx: torch.Tensor,
-            ):
-                return q_idx >= kv_idx
-
-            return causal_mask
-
-        q, k, v = (torch.randn(B, H, SEQ_LEN, DIM, device=device) for i in range(3))
-        block_mask_fn = torch.compile(create_block_mask, fullgraph=True)
-        block_mask = block_mask_fn(
-            create_causal_mask(),
-            B=1,
-            H=H,
-            Q_LEN=SEQ_LEN,
-            KV_LEN=SEQ_LEN,
-            device=device,
-        )
-        if device == "cuda":
-            flex_fn = torch.compile(flex_attention)
-        else:
-            # It's unclear why CPU + torch.compile + flex_attention can cause an issue.
-            flex_fn = flex_attention
-        out = flex_fn(q, k, v, block_mask=block_mask)
-
-        q_clone, k_clone, v_clone = (target.clone().detach() for target in (q, k, v))
-        arg_split, _ = split_args_kwargs_into_chunks(
-            (q_clone, k_clone, v_clone, {"block_mask": block_mask}),
-            {},
-            chunks=4,
-            args_chunk_spec=None,
-            kwargs_chunk_spec=None,
-        )
-
-        assert len(arg_split) == 4
-
-        out_total_chunks = []
-        for i in range(len(arg_split)):
-            q_chunk, k_chunk, v_chunk, block_mask_chunk = arg_split[i]
-            out_chunk = flex_fn(
-                q_chunk, k_chunk, v_chunk, block_mask=block_mask_chunk["block_mask"]
-            )
-            out_total_chunks.append(out_chunk)
-
-        concat_out = torch.cat(out_total_chunks, dim=0)
-        self.assertEqual(concat_out, out)
-
-    def test_split_block_mask_none(self, device):
-        B = 6
-        H = 1
-        SEQ_LEN = 512
-        DIM = 32
-
-        q, k, v = (torch.randn(B, H, SEQ_LEN, DIM, device=device) for i in range(3))
-        arg_split, kwarg_split = split_args_kwargs_into_chunks(
-            (q, k, v, None),
-            {"attention_mask": None},
-            chunks=4,
-            args_chunk_spec=None,
-            kwargs_chunk_spec=None,
-        )
-
-        assert len(arg_split) == 4
-
-        for i in range(len(arg_split)):
-            self.assertIsNone(arg_split[i][3])
-            self.assertIsNone(kwarg_split[i]["attention_mask"])
 
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_chunk_spec(self, device):

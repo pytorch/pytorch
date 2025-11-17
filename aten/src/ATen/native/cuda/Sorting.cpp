@@ -43,12 +43,6 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cuda(
   TORCH_CHECK(k >= 1 && k <= slicesize,
               "kthvalue(): selected number k out of range for dimension ", dim);
 
-  TORCH_CHECK(
-      slicesize <= std::numeric_limits<int32_t>::max(),
-      "kthvalue(): dimension ", dim, " is too large (", slicesize,
-      "). The current CUDA implementation supports dimension sizes up to ",
-      std::numeric_limits<int32_t>::max());
-
   at::assert_no_overlap(self, values);
 
   _reduction_with_indices_allocate_or_resize_output(
@@ -169,6 +163,10 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
     bool keepdim,
     Tensor& values,
     Tensor& indices) {
+  // See note [Writing Nondeterministic Operations]
+  // If there are duplicate elements of the kth value, the procedure for choosing which
+  // of the duplicates to use for the indices output is nondeterministic.
+  at::globalContext().alertNotDeterministic("kthvalue CUDA");
   auto result = [&]() {
     NoNamesGuard guard;
     // `kthvalue_out_impl_cuda` expects contiguous in input `self`.

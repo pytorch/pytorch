@@ -190,7 +190,7 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
   // Return callstack as a vector of [Function, SourceRange] pairs.
   std::vector<InlinedCallStackEntry> vec();
 
-  void setCallee(std::optional<InlinedCallStackPtr> /*callee*/);
+  void setCallee(std::optional<InlinedCallStackPtr>);
 
   bool operator==(const InlinedCallStack& rhs) const {
     // No need to compare fn_, since source_range equivalence check

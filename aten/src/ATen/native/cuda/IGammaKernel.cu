@@ -82,7 +82,7 @@ __host__ __device__ scalar_t lanczos_sum_expg_scaled(scalar_t x) {
   // lanczos approximation
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
 
-  constexpr accscalar_t lanczos_sum_expg_scaled_num[13] = {
+  static const accscalar_t lanczos_sum_expg_scaled_num[13] = {
     0.006061842346248906525783753964555936883222,
     0.5098416655656676188125178644804694509993,
     19.51992788247617482847860966235652136208,
@@ -97,7 +97,7 @@ __host__ __device__ scalar_t lanczos_sum_expg_scaled(scalar_t x) {
     103794043.1163445451906271053616070238554,
     56906521.91347156388090791033559122686859
   };
-  constexpr accscalar_t lanczos_sum_expg_scaled_denom[13] = {
+  static const accscalar_t lanczos_sum_expg_scaled_denom[13] = {
     1.,
     66.,
     1925.,
@@ -126,10 +126,10 @@ __host__ __device__ scalar_t _igam_helper_fac(scalar_t a, scalar_t x) {
 
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
   accscalar_t ax, fac, res, num, numfac;
-  constexpr accscalar_t MAXLOG = std::is_same_v<accscalar_t,double> ?
+  static const accscalar_t MAXLOG = std::is_same_v<accscalar_t,double> ?
     7.09782712893383996843E2 : 88.72283905206835;
-  constexpr accscalar_t EXP1 = 2.718281828459045;
-  constexpr accscalar_t lanczos_g = 6.024680040776729583740234375;
+  static const accscalar_t EXP1 = 2.718281828459045;
+  static const accscalar_t lanczos_g = 6.024680040776729583740234375;
 
   if (::fabs(a - x) > 0.4 * ::fabs(a)) {
     ax = a * ::log(x) - x - ::lgamma(a);
@@ -158,9 +158,9 @@ __host__ __device__ scalar_t _igam_helper_series(scalar_t a, scalar_t x) {
   // Compute igam using DLMF 8.11.4. [igam1]
 
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
-  constexpr accscalar_t MACHEP = std::is_same_v<accscalar_t, double> ?
+  static const accscalar_t MACHEP = std::is_same_v<accscalar_t, double> ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
-  constexpr int MAXITER = 2000;
+  static const int MAXITER = 2000;
 
   int i;
   accscalar_t ans, ax, c, r;
@@ -196,8 +196,8 @@ __host__ __device__ scalar_t _igamc_helper_series(scalar_t a, scalar_t x) {
   accscalar_t fac = 1;
   accscalar_t sum = 0;
   accscalar_t term, logx;
-  constexpr int MAXITER = 2000;
-  constexpr accscalar_t MACHEP = std::is_same_v<accscalar_t, double> ?
+  static const int MAXITER = 2000;
+  static const accscalar_t MACHEP = std::is_same_v<accscalar_t, double> ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
 
   for (n = 1; n < MAXITER; n++) {
@@ -219,7 +219,7 @@ __host__ __device__ scalar_t _igam_helper_asymptotic_series(scalar_t a, scalar_t
   // Compute igam/igamc using DLMF 8.12.3/8.12.4 [igam1]
 
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
-  constexpr accscalar_t d[25][25] =
+  static const accscalar_t d[25][25] =
     {{-3.3333333333333333e-1, 8.3333333333333333e-2, -1.4814814814814815e-2, 1.1574074074074074e-3, 3.527336860670194e-4, -1.7875514403292181e-4, 3.9192631785224378e-5, -2.1854485106799922e-6, -1.85406221071516e-6, 8.296711340953086e-7, -1.7665952736826079e-7, 6.7078535434014986e-9, 1.0261809784240308e-8, -4.3820360184533532e-9, 9.1476995822367902e-10, -2.551419399494625e-11, -5.8307721325504251e-11, 2.4361948020667416e-11, -5.0276692801141756e-12, 1.1004392031956135e-13, 3.3717632624009854e-13, -1.3923887224181621e-13, 2.8534893807047443e-14, -5.1391118342425726e-16, -1.9752288294349443e-15},
     {-1.8518518518518519e-3, -3.4722222222222222e-3, 2.6455026455026455e-3, -9.9022633744855967e-4, 2.0576131687242798e-4, -4.0187757201646091e-7, -1.8098550334489978e-5, 7.6491609160811101e-6, -1.6120900894563446e-6, 4.6471278028074343e-9, 1.378633446915721e-7, -5.752545603517705e-8, 1.1951628599778147e-8, -1.7543241719747648e-11, -1.0091543710600413e-9, 4.1627929918425826e-10, -8.5639070264929806e-11, 6.0672151016047586e-14, 7.1624989648114854e-12, -2.9331866437714371e-12, 5.9966963656836887e-13, -2.1671786527323314e-16, -4.9783399723692616e-14, 2.0291628823713425e-14, -4.13125571381061e-15},
     {4.1335978835978836e-3, -2.6813271604938272e-3, 7.7160493827160494e-4, 2.0093878600823045e-6, -1.0736653226365161e-4, 5.2923448829120125e-5, -1.2760635188618728e-5, 3.4235787340961381e-8, 1.3721957309062933e-6, -6.298992138380055e-7, 1.4280614206064242e-7, -2.0477098421990866e-10, -1.4092529910867521e-8, 6.228974084922022e-9, -1.3670488396617113e-9, 9.4283561590146782e-13, 1.2872252400089318e-10, -5.5645956134363321e-11, 1.1975935546366981e-11, -4.1689782251838635e-15, -1.0940640427884594e-12, 4.6622399463901357e-13, -9.905105763906906e-14, 1.8931876768373515e-17, 8.8592218725911273e-15},
@@ -248,7 +248,7 @@ __host__ __device__ scalar_t _igam_helper_asymptotic_series(scalar_t a, scalar_t
 
   int k, n, sgn;
   int maxpow = 0;
-  constexpr accscalar_t MACHEP = std::is_same_v<accscalar_t, double> ?
+  static const accscalar_t MACHEP = std::is_same_v<accscalar_t, double> ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
   accscalar_t lambda = x / a;
   accscalar_t sigma = (x - a) / a;
@@ -314,12 +314,12 @@ __host__ __device__ scalar_t _igamc_helper_continued_fraction(scalar_t a, scalar
   int i;
   accscalar_t ans, ax, c, yc, r, t, y, z;
   accscalar_t pk, pkm1, pkm2, qk, qkm1, qkm2;
-  constexpr int MAXITER = 2000;
-  constexpr accscalar_t MACHEP = std::is_same_v<accscalar_t, double> ?
+  static const int MAXITER = 2000;
+  static const accscalar_t MACHEP = std::is_same_v<accscalar_t, double> ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
-  constexpr accscalar_t BIG = std::is_same_v<accscalar_t,double> ?
+  static const accscalar_t BIG = std::is_same_v<accscalar_t,double> ?
     4.503599627370496e15 : 16777216.;
-  constexpr accscalar_t BIGINV = std::is_same_v<accscalar_t,double> ?
+  static const accscalar_t BIGINV = std::is_same_v<accscalar_t,double> ?
     2.22044604925031308085e-16 : 5.9604644775390625E-8;
 
   ax = _igam_helper_fac(a, x);
@@ -385,10 +385,10 @@ __noinline__ __host__ __device__ scalar_t calc_igammac(scalar_t a, scalar_t x) {
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
   accscalar_t absxma_a;
 
-  constexpr accscalar_t SMALL = 20.0;
-  constexpr accscalar_t LARGE = 200.0;
-  constexpr accscalar_t SMALLRATIO = 0.3;
-  constexpr accscalar_t LARGERATIO = 4.5;
+  static const accscalar_t SMALL = 20.0;
+  static const accscalar_t LARGE = 200.0;
+  static const accscalar_t SMALLRATIO = 0.3;
+  static const accscalar_t LARGERATIO = 4.5;
 
   if ((x < 0) || (a < 0)) {
     // out of defined-region of the function
@@ -467,10 +467,10 @@ __noinline__ __host__ __device__ scalar_t calc_igamma(scalar_t a, scalar_t x) {
 
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
   accscalar_t absxma_a;
-  constexpr accscalar_t SMALL = 20.0;
-  constexpr accscalar_t LARGE = 200.0;
-  constexpr accscalar_t SMALLRATIO = 0.3;
-  constexpr accscalar_t LARGERATIO = 4.5;
+  static const accscalar_t SMALL = 20.0;
+  static const accscalar_t LARGE = 200.0;
+  static const accscalar_t SMALLRATIO = 0.3;
+  static const accscalar_t LARGERATIO = 4.5;
 
   // boundary values following SciPy
   if ((x < 0) || (a < 0)) {

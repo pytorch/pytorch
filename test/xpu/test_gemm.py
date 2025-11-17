@@ -238,7 +238,7 @@ class TestBasicGEMM(TestCase):
                 )
 
     @precisionOverride({torch.float: 1e-4, torch.double: 1e-6, torch.half: 1e-1})
-    @dtypes(torch.float32, torch.half, torch.double, torch.complex64)
+    @dtypes(torch.float32, torch.half, torch.double)
     @tf32_on_and_off(0.05)
     def test_addmm(self, device, dtype):
         self._test_addmm_impl(torch.addmm, None, device, dtype)
@@ -313,7 +313,6 @@ class TestBasicGEMM(TestCase):
         torch.half,
         torch.float32,
         torch.float64,
-        torch.complex64,
     )
     @tf32_on_and_off(0.05)
     def test_mm(self, device, dtype):
@@ -417,7 +416,7 @@ class TestBasicGEMM(TestCase):
             _test_mm(n, m, p, dtype, genf)
 
     @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
-    @dtypes(torch.float32, torch.bfloat16, torch.half, torch.float64, torch.complex64)
+    @dtypes(torch.float32, torch.bfloat16, torch.half, torch.float64)
     @tf32_on_and_off(0.05)
     def test_bmm(self, device, dtype):
         batch_sizes = [1, 10]
@@ -534,7 +533,7 @@ class TestBasicGEMM(TestCase):
         self.assertEqual(res7, ref)
 
     @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
-    @dtypes(torch.float64, torch.float32, torch.bfloat16, torch.half, torch.complex64)
+    @dtypes(torch.float64, torch.float32, torch.bfloat16, torch.half)
     @tf32_on_and_off(0.005)
     def test_addbmm(self, device, dtype):
         num_batches = 2
@@ -638,7 +637,7 @@ class TestBasicGEMM(TestCase):
             self._test_addbmm_baddbmm("addbmm", b1, b2, ref, out_tensor)
 
     @precisionOverride({torch.half: 0.1, torch.bfloat16: 0.5, torch.float64: 1e-6})
-    @dtypes(torch.float64, torch.float32, torch.bfloat16, torch.half, torch.complex64)
+    @dtypes(torch.float64, torch.float32, torch.bfloat16, torch.half)
     @tf32_on_and_off(0.01)
     def test_baddbmm(self, device, dtype):
         num_batches = 10

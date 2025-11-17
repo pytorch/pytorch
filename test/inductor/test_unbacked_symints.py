@@ -236,6 +236,7 @@ class TestUnbackedSymints(InductorTestCase):
 
         def fn(x, w, repeats, is_bmm):
             u0 = repeats.item()
+            torch._check_is_size(u0)
 
             x_unbacked = x.expand(u0, 32)
             w_unbacked = w.expand(32, u0)
@@ -267,6 +268,7 @@ class TestUnbackedSymints(InductorTestCase):
     def test_unbacked_range_tree_divisor(self, device):
         def fn(x, num):
             u0 = num.item()
+            torch._check_is_size(u0)
             zeros = torch.zeros(u0, device=device, dtype=torch.int)
             return (torch.ops.aten.index(x, [None, zeros]),)
 
@@ -300,6 +302,8 @@ class TestUnbackedSymints(InductorTestCase):
     def test_unbacked_repeat(self, device):
         def fn(x, a, b):
             u0, u1 = a.item(), b.item()
+            torch._check_is_size(u0)
+            torch._check_is_size(u1)
 
             return x.repeat(u0, 2).repeat(2, u1)
 
@@ -592,6 +596,7 @@ class TestUnbackedSymints(InductorTestCase):
     def test_to_int_with_unbacked_size(self, device):
         def fn(x):
             unbacked = x.item()
+            torch._check_is_size(unbacked)
 
             # Transpose to avoid contig short-circuit.
             unbacked_size = torch.ones(
@@ -649,28 +654,6 @@ class TestUnbackedSymints(InductorTestCase):
 
         example_inputs = (torch.randn(32, device=device, dtype=torch.float16),)
         torch._dynamo.mark_dynamic(example_inputs[0], 0)
-        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
-        expected = fn(*example_inputs)
-        torch.testing.assert_close(actual, expected)
-
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
-    @inductor_config.patch({"max_autotune": True})
-    @dynamo_config.patch({"capture_scalar_outputs": True})
-    def test_autotune_with_unbacked_stride(self, device):
-        def fn(x, y, a):
-            u0 = a.item()
-            torch._check(u0 != 1)
-            unbacked = x.expand(8, u0, *x.shape).clone()
-            unbacked = torch.permute(unbacked, [0, 2, 1])
-            y = y.expand(8, *y.shape)
-            bmm = torch.ops.aten.bmm(unbacked, y)
-            return bmm
-
-        example_inputs = (
-            torch.randn((32,), dtype=torch.bfloat16, device=device),
-            torch.randn((128, 64), dtype=torch.bfloat16, device=device),
-            torch.tensor(128, device=device),
-        )
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)

@@ -111,7 +111,6 @@ class ConstantOperator(Operator):
                 ]:
                     # Clamp integer values to [0, 3] to avoid index overflow in multiplication
                     # Even with multiplication, indices should stay in reasonable range
-                    # pyrefly: ignore [bad-argument-type]
                     fill_value = max(0, min(3, abs(fill_value)))
 
                 tensor_creation = (

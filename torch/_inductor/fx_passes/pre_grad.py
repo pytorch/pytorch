@@ -5,6 +5,7 @@ import itertools
 import logging
 import types
 from collections.abc import Sequence
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -190,8 +191,8 @@ def _get_pass_name_func(p):
 def _run_pre_dispatch_passes(
     gm: torch.fx.GraphModule,
     example_inputs: Sequence[object] = (),
-    add_passes: str | None = None,
-    remove_passes: str | None = None,
+    add_passes: Optional[str] = None,
+    remove_passes: Optional[str] = None,
 ) -> None:
     # order matters
     default_pass_list = [
@@ -277,8 +278,8 @@ def _run_pre_dispatch_passes(
 def pre_grad_passes(
     gm: torch.fx.GraphModule,
     example_inputs: Sequence[object] = (),
-    add_passes: str | None = None,
-    remove_passes: str | None = None,
+    add_passes: Optional[str] = None,
+    remove_passes: Optional[str] = None,
 ) -> torch.fx.GraphModule:
     """
     Apply passes on the input FX graph using Torch IR.
@@ -508,7 +509,6 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                 conv = conv_bn_fusion.conv_module
                 bn = conv_bn_fusion.bn_module
 
-                # pyrefly: ignore [bad-argument-type]
                 fused_conv = fuse_conv_bn_eval(conv, bn)
                 for bn_node in bn_nodes:
                     replace_node_module(bn_node.args[0], modules, fused_conv)
@@ -596,11 +596,8 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                 fused_conv.weight, fused_conv.bias = fuse_conv_bn_weights(
                     fused_conv.weight,
                     fused_conv.bias,
-                    # pyrefly: ignore [bad-argument-type]
                     bn_running_mean,
-                    # pyrefly: ignore [bad-argument-type]
                     bn_running_var,
-                    # pyrefly: ignore [bad-argument-type]
                     bn_eps,
                     bn_weight,
                     bn_bias,
@@ -637,7 +634,7 @@ class NormalizedLinearNode:
         if len(self.node.args) > 2:
             return self.node.args[2]  # type: ignore[return-value]
         else:
-            return self.node.kwargs.get("bias", None)  # type: ignore[return-value]
+            return self.node.kwargs["bias"] if "bias" in self.node.kwargs else None  # type: ignore[return-value]
 
 
 class NormalizedMatmulNode:
@@ -762,7 +759,7 @@ def linear_permute_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
 # ---->
 # Y2 = (W * X^T + bias.unsqueeze(-1))^T
 def linear_transpose(
-    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None
+    input: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor]
 ) -> torch.Tensor:
     if bias is None:
         return torch.matmul(weight, input.transpose(-1, -2))
@@ -859,7 +856,7 @@ def permute_matmul_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
 # ---->
 # Y2 = X1.transpose(-1, -2) * W1^T + bias1
 def transpose_linear(
-    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None
+    input: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor]
 ) -> torch.Tensor:
     if bias is None:
         return torch.matmul(input.transpose(-1, -2), weight.t())

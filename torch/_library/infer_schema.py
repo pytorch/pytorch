@@ -9,7 +9,7 @@ import torch
 from torch import device, dtype, Tensor, types
 from torch.utils._exposed_in import exposed_in
 
-from .opaque_object import _OPAQUE_TYPES, is_opaque_type, OpaqueType, OpaqueTypeStr
+from .opaque_object import OpaqueType, OpaqueTypeStr
 
 
 # This is used as a negative test for
@@ -125,20 +125,14 @@ def infer_schema(
         # we convert it to the actual type.
         annotation_type, _ = unstringify_type(param.annotation)
 
-        schema_type = None
         if annotation_type not in SUPPORTED_PARAM_TYPES:
-            if is_opaque_type(annotation_type):
-                schema_type = _OPAQUE_TYPES[annotation_type]
-            elif annotation_type == torch._C.ScriptObject:
+            if annotation_type == torch._C.ScriptObject:
                 error_fn(
                     f"Parameter {name}'s type cannot be inferred from the schema "
                     "as it is a ScriptObject. Please manually specify the schema "
                     "using the `schema=` kwarg with the actual type of the ScriptObject."
                 )
-            elif (
-                hasattr(annotation_type, "__origin__")
-                and annotation_type.__origin__ is tuple
-            ):
+            elif annotation_type.__origin__ is tuple:
                 list_type = tuple_to_list(annotation_type)
                 example_type_str = "\n\n"
                 # Only suggest the list type if this type is supported.
@@ -155,12 +149,9 @@ def infer_schema(
                     f"Parameter {name} has unsupported type {param.annotation}. "
                     f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
                 )
-        else:
-            schema_type = SUPPORTED_PARAM_TYPES[annotation_type]
 
-        assert schema_type is not None
-
-        if type(mutates_args) is str:
+        schema_type = SUPPORTED_PARAM_TYPES[annotation_type]
+        if type(mutates_args) == str:
             if mutates_args != UNKNOWN_MUTATES:
                 raise ValueError(
                     "mutates_args must either be a sequence of the names of "
@@ -252,7 +243,6 @@ def derived_types(
 
 
 def get_supported_param_types():
-    # pyrefly: ignore  # bad-assignment
     data: list[tuple[Union[type, typing._SpecialForm], str, bool, bool, bool]] = [
         # (python type, schema type, type[] variant, type?[] variant, type[]? variant
         (Tensor, "Tensor", True, True, False),

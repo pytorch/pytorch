@@ -92,7 +92,7 @@ def _log_modified_bessel_fn(x, order=0):
 @torch.jit.script_if_tracing
 def _rejection_sample(loc, concentration, proposal_r, x):
     done = torch.zeros(x.shape, dtype=torch.bool, device=loc.device)
-    # pyrefly: ignore [bad-assignment]
+    # pyrefly: ignore  # bad-assignment
     while not done.all():
         u = torch.rand((3,) + x.shape, dtype=loc.dtype, device=loc.device)
         u1, u2, u3 = u.unbind()
@@ -101,7 +101,7 @@ def _rejection_sample(loc, concentration, proposal_r, x):
         c = concentration * (proposal_r - f)
         accept = ((c * (2 - c) - u2) > 0) | ((c / u2).log() + 1 - c >= 0)
         if accept.any():
-            # pyrefly: ignore [no-matching-overload]
+            # pyrefly: ignore  # no-matching-overload
             x = torch.where(accept, (u3 - 0.5).sign() * f.acos(), x)
             done = done | accept
     return (x + math.pi + loc) % (2 * math.pi) - math.pi
@@ -125,7 +125,7 @@ class VonMises(Distribution):
     :param torch.Tensor concentration: concentration parameter
     """
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     arg_constraints = {"loc": constraints.real, "concentration": constraints.positive}
     support = constraints.real
     has_rsample = False
@@ -163,10 +163,10 @@ class VonMises(Distribution):
     @lazy_property
     def _proposal_r(self) -> Tensor:
         kappa = self._concentration
-        # pyrefly: ignore [unsupported-operation]
+        # pyrefly: ignore  # unsupported-operation
         tau = 1 + (1 + 4 * kappa**2).sqrt()
         rho = (tau - (2 * tau).sqrt()) / (2 * kappa)
-        # pyrefly: ignore [unsupported-operation]
+        # pyrefly: ignore  # unsupported-operation
         _proposal_r = (1 + rho**2) / (2 * rho)
         # second order Taylor expansion around 0 for small kappa
         _proposal_r_taylor = 1 / kappa + kappa

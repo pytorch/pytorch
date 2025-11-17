@@ -250,7 +250,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   using PtrVector = SmallVector<char*, 4>;
   using StrideVector = SmallVector<int64_t, 6>;
 
-  void build(TensorIteratorConfig& /*config*/);
+  void build(TensorIteratorConfig&);
 
   // The inner-loop function operates on the fastest moving dimension. It
   // implements element-wise operations in terms of 1-d strided tensors.
@@ -618,20 +618,20 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
 #undef TORCH_DISALLOW_TEMPORARIES
  protected:
   // Mutable reference as it moves tensors out of TensorIteratorConfig
-  void populate_operands(TensorIteratorConfig& /*config*/);
+  void populate_operands(TensorIteratorConfig&);
   void mark_outputs();
-  void mark_resize_outputs(const TensorIteratorConfig& /*config*/);
-  void compute_mem_overlaps(const TensorIteratorConfig& /*config*/);
-  void compute_shape(const TensorIteratorConfig& /*config*/);
-  void compute_strides(const TensorIteratorConfig& /*config*/);
+  void mark_resize_outputs(const TensorIteratorConfig&);
+  void compute_mem_overlaps(const TensorIteratorConfig&);
+  void compute_shape(const TensorIteratorConfig&);
+  void compute_strides(const TensorIteratorConfig&);
   void reorder_dimensions();
   void permute_dimensions(IntArrayRef perm);
-  void compute_types(const TensorIteratorConfig& /*config*/);
+  void compute_types(const TensorIteratorConfig&);
   ScalarType compute_common_dtype();
   void allocate_or_resize_outputs();
-  bool fast_set_up(const TensorIteratorConfig& /*config*/);
-  FastSetupType compute_fast_setup_type(const TensorIteratorConfig& /*config*/);
-  void compute_names(const TensorIteratorConfig& /*config*/);
+  bool fast_set_up(const TensorIteratorConfig&);
+  FastSetupType compute_fast_setup_type(const TensorIteratorConfig&);
+  void compute_names(const TensorIteratorConfig&);
   void propagate_names_to_outputs();
   void coalesce_dimensions();
 

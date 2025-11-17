@@ -22,7 +22,7 @@ def _Dirichlet_backward(x, concentration, grad_output):
 
 class _Dirichlet(Function):
     @staticmethod
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def forward(ctx, concentration):
         x = torch._sample_dirichlet(concentration)
         ctx.save_for_backward(x, concentration)
@@ -30,7 +30,7 @@ class _Dirichlet(Function):
 
     @staticmethod
     @once_differentiable
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def backward(ctx, grad_output):
         x, concentration = ctx.saved_tensors
         return _Dirichlet_backward(x, concentration, grad_output)
@@ -52,7 +52,7 @@ class Dirichlet(ExponentialFamily):
             (often referred to as alpha)
     """
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     arg_constraints = {
         "concentration": constraints.independent(constraints.positive, 1)
     }
@@ -133,6 +133,6 @@ class Dirichlet(ExponentialFamily):
     def _natural_params(self) -> tuple[Tensor]:
         return (self.concentration,)
 
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     def _log_normalizer(self, x):
         return x.lgamma().sum(-1) - torch.lgamma(x.sum(-1))

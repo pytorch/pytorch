@@ -1179,7 +1179,7 @@ def add(
     if alpha is not None:
         dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
         python_type = utils.dtype_to_type(dtype)
-        if python_type is not bool and not utils.is_weakly_lesser_type(
+        if python_type != bool and not utils.is_weakly_lesser_type(
             type(alpha), python_type
         ):
             msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
@@ -1336,9 +1336,9 @@ def float_power(
 
     # Float power has the following contiguous cast behavior to be
     # consistent with its C++ impl
-
+    # pyrefly: ignore  # no-matching-overload
     a = _maybe_convert_to_dtype(a, dtype)
-
+    # pyrefly: ignore  # no-matching-overload
     b = _maybe_convert_to_dtype(b, dtype)
 
     a, b = _maybe_broadcast(a, b)
@@ -2348,6 +2348,7 @@ def all(
     dim: Optional[DimsType] = None,
     keepdim: bool = False,
 ) -> TensorLikeType:
+    # pyrefly: ignore  # no-matching-overload
     result = torch.logical_not(torch.any(torch.logical_not(a), dim, keepdim=keepdim))
 
     if a.dtype == torch.uint8:
@@ -3244,7 +3245,7 @@ def _normalize(
         mean (Tensor): mean of the tensor along norm_dims.
         rstd (Tensor): 1/std of the tensor along norm_dims.
     """
-
+    # pyrefly: ignore  # no-matching-overload
     norm_dims = utils.canonicalize_dims(a.ndim, norm_dims)
     computation_dtype = utils.get_computation_dtype(a.dtype)
     a_acc = _maybe_convert_to_dtype(a, computation_dtype)
@@ -3493,7 +3494,7 @@ def stft(
     )
     torch._check(
         not center or align_to_window is None,
-        lambda: "stft only supports align_to_window for center = False.",
+        "stft only supports align_to_window for center = False.",
     )
 
     hop_length_ = hop_length if hop_length is not None else n_fft // 4
@@ -3505,7 +3506,7 @@ def stft(
         )
         torch._check(
             return_complex_,
-            lambda: (
+            (
                 "stft requires the return_complex parameter be given for real inputs, "
                 + "and will further require that return_complex=True in a future PyTorch release."
             ),
@@ -3729,8 +3730,7 @@ def istft(
     if end > expected_output_signal_len:
         warnings.warn(
             "The length of signal is shorter than the length parameter. Result is being "
-            + "padded with zeros in the tail. Please check your center and hop_length settings",
-            stacklevel=2,
+            + "padded with zeros in the tail. Please check your center and hop_length settings"
         )
         y = aten.constant_pad_nd(y, (0, end - expected_output_signal_len), 0)
     return y
@@ -3951,7 +3951,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     shape_numel = reduce(operator.mul, shape, 1)
     torch._check(
         a.numel() == shape_numel,
-        lambda: f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
+        f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
     )
 
     # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
@@ -3975,7 +3975,7 @@ def reshape_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
 @out_wrapper()
 def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLikeType:
     """Reference implementation of :func:`torch.roll`."""
-
+    # pyrefly: ignore  # no-matching-overload
     dims = utils.canonicalize_dims(a.ndim, dims)
     # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
     if not isinstance(shifts, Iterable):
@@ -4286,7 +4286,7 @@ def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType
         return prims.squeeze(a, dims) if dims else prims.view_of(a)
 
     ndim = a.ndim
-
+    # pyrefly: ignore  # no-matching-overload
     dim = utils.canonicalize_dims(ndim, dim)
     dims = (dim,) if isinstance(dim, Dim) else dim
     # Short-circuits if the tensor has no dimensions
@@ -4315,8 +4315,8 @@ def split_with_sizes(
     # NB: Perform the check_is_size tests first so that the
     # sum test does not try to do a replacement
     for i in range(len(split_sizes)):
-        torch._check(
-            split_sizes[i] >= 0,
+        torch._check_is_size(
+            split_sizes[i],
             lambda: "split_with_sizes expects split_sizes have only non-negative entries",
         )
     torch._check_with(
@@ -4738,7 +4738,7 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     if a.ndim <= 1 or dim0 == dim1:
         return aten.alias.default(a)
 
-    _permutation = list(range(a.ndim))
+    _permutation = list(range(0, a.ndim))
     _permutation[_dim0] = _dim1
     _permutation[_dim1] = _dim0
     return torch.permute(a, _permutation)

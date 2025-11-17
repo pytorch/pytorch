@@ -21,7 +21,7 @@ def intern_string(s: Optional[str]) -> int:
     if s is None:
         return -1
 
-    r = INTERN_TABLE.get(s)
+    r = INTERN_TABLE.get(s, None)
     if r is None:
         r = len(INTERN_TABLE)
         INTERN_TABLE[s] = r

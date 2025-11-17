@@ -99,7 +99,7 @@ inline void check_gradout_shape_nll_loss2d(
 
 
 template <typename scalar_t>
-void nll_loss2d_forward_out_frame(
+static void nll_loss2d_forward_out_frame(
     Tensor& output,
     Tensor& total_weight,
     const Tensor& input,
@@ -280,7 +280,7 @@ void nll_loss2d_forward_out_cpu_template(
 }
 
 template <typename scalar_t>
-void nll_loss2d_backward_out_frame(
+static void nll_loss2d_backward_out_frame(
     Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& input,

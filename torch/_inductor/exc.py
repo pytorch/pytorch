@@ -132,7 +132,6 @@ class TritonMissing(ShortenTraceback):
 class GPUTooOldForTriton(ShortenTraceback):
     def __init__(
         self,
-        # pyrefly: ignore [not-a-type]
         device_props: _CudaDeviceProperties,
         first_useful_frame: Optional[types.FrameType],
     ) -> None:

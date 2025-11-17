@@ -36,14 +36,15 @@ class APoTFakeQuantize(FakeQuantizeBase):
             self.level_indices = result[3]
 
         if self.fake_quant_enabled[0] == 1:
-            if (
-                self.alpha is None
-                or self.gamma is None
-                or self.quantization_levels is None
-                or self.level_indices is None
-            ):
-                raise AssertionError("Must set qparams for fake quant")
+            assert (
+                self.alpha is not None
+                and self.gamma is not None
+                and self.quantization_levels is not None
+                and self.level_indices is not None
+            ), "Must set qparams for fake quant"
+
             X = fake_quantize_function.apply(
                 X, self.alpha, self.gamma, self.quantization_levels, self.level_indices
             )
+
         return X

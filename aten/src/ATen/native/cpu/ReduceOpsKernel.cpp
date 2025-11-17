@@ -28,7 +28,7 @@ namespace at::native { namespace {
 using namespace vec;
 
 template <typename scalar_t, typename func_t>
-inline void cpu_cum_base_kernel(const Tensor& result,
+static inline void cpu_cum_base_kernel(const Tensor& result,
     const Tensor& self,
     int64_t dim,
     const func_t& f,
@@ -76,7 +76,7 @@ inline void cpu_cum_base_kernel(const Tensor& result,
   iter.for_each(loop, grain_size);
 }
 
-void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
+static void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
@@ -95,7 +95,7 @@ void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   });
 }
 
-void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
+static void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
@@ -114,7 +114,7 @@ void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   });
 }
 
-void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
+static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
@@ -135,7 +135,7 @@ void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
   });
 }
 
-void std_var_kernel_impl(TensorIterator& iter, double correction, bool take_sqrt) {
+static void std_var_kernel_impl(TensorIterator& iter, double correction, bool take_sqrt) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "std_cpu", [&] {
     binary_kernel_reduce(
         iter,
@@ -148,7 +148,7 @@ void std_var_kernel_impl(TensorIterator& iter, double correction, bool take_sqrt
   });
 }
 
-void prod_kernel_impl(TensorIterator& iter) {
+static void prod_kernel_impl(TensorIterator& iter) {
   // Workaround for the error: '*' in boolean context, suggest '&&' instead
   if (iter.dtype() == ScalarType::Bool) {
     using scalar_t = bool;
@@ -203,7 +203,7 @@ void norm_kernel_cpu_impl(TensorIterator& iter, const double& val) {
   }
 }
 
-void norm_kernel_tensor_iterator_impl(
+static void norm_kernel_tensor_iterator_impl(
     TensorIterator& iter,
     const Scalar& p) {
   double val = 0;
@@ -274,7 +274,7 @@ void norm_kernel_tensor_iterator_impl(
   }
 }
 
-void and_kernel_impl(TensorIterator& iter) {
+static void and_kernel_impl(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Byte) {
     // Refer [all, any : uint8 compatibility]
     binary_kernel_reduce_vec(
@@ -312,7 +312,7 @@ void and_kernel_impl(TensorIterator& iter) {
   }
 }
 
-void or_kernel_impl(TensorIterator& iter) {
+static void or_kernel_impl(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Byte) {
     // Refer [all, any : uint8 compatibility]
     binary_kernel_reduce_vec(
@@ -346,7 +346,7 @@ struct MinValuesOps: public at::native::MinOps<scalar_t> {
   }
 };
 
-void min_values_kernel_impl(TensorIterator& iter) {
+static void min_values_kernel_impl(TensorIterator& iter) {
   if (iter.dtype() == kLong) {
     // This case is special because of Vectorized<int64_t> does not
     // handle upper_bound<int64_t>().
@@ -367,7 +367,7 @@ void min_values_kernel_impl(TensorIterator& iter) {
   });
 }
 
-void max_values_kernel_impl(TensorIterator& iter) {
+static void max_values_kernel_impl(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(), "max_values_cpu", [&iter] {
     binary_kernel_reduce_vec(
       iter,
@@ -377,7 +377,7 @@ void max_values_kernel_impl(TensorIterator& iter) {
   });
 }
 
-void argmax_kernel_impl(TensorIterator &iter) {
+static void argmax_kernel_impl(TensorIterator &iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(1), "argmax_cpu", [&] {
     if (is_reduce_lastdim(iter)) {
       using arg_t = std::pair<scalar_t, int64_t>;
@@ -401,7 +401,7 @@ void argmax_kernel_impl(TensorIterator &iter) {
   });
 }
 
-void argmin_kernel_impl(TensorIterator &iter) {
+static void argmin_kernel_impl(TensorIterator &iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(1), "argmin_cpu", [&] {
     if (is_reduce_lastdim(iter)) {
       using arg_t = std::pair<scalar_t, int64_t>;
@@ -459,7 +459,7 @@ struct XorSumOps {
   }
 };
 
-void xor_sum_kernel_impl(TensorIterator& iter) {
+static void xor_sum_kernel_impl(TensorIterator& iter) {
   // Use iter.dtype(1) to dispatch based on the type of the input tensor
   AT_DISPATCH_ALL_TYPES_AND3(
       kBFloat16, kHalf, kBool, iter.dtype(1), "xor_sum_cpu", [&] {

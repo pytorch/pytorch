@@ -1710,7 +1710,7 @@ class TestReductions(TestCase):
                                             with_extremal=False, atol=None, rtol=None,
                                             exact_dtype=True, with_keepdim=False):
         # Test 0-d to 3-d tensors.
-        for ndims in range(4):
+        for ndims in range(0, 4):
             shape = _rand_shape(ndims, min_size=5, max_size=10)
             for n in range(ndims + 1):
                 for c in combinations(list(range(ndims)), n):
@@ -1899,7 +1899,7 @@ class TestReductions(TestCase):
         # Note [all, any uint8 compatibility]: However for compatibility reason,
         # for `uint8`, they return Tensor of same dtype `uint8`.
         # Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
-        exact_dtype = dtype != torch.uint8
+        exact_dtype = True if dtype != torch.uint8 else False
 
         def _test_all_any(x):
             self.compare_with_numpy(torch.all, np.all, x)
@@ -2623,7 +2623,7 @@ class TestReductions(TestCase):
         # Generate some random test cases
         ops = ['quantile', 'nanquantile']
         inputs = [tuple(np.random.randint(2, 10, size=i)) for i in range(1, 4)]
-        quantiles = [tuple(np.random.rand(i)) for i in range(5)]
+        quantiles = [tuple(np.random.rand(i)) for i in range(0, 5)]
         keepdims = [True, False]
 
         # Add corner cases
@@ -3327,7 +3327,7 @@ class TestReductions(TestCase):
     """
     def _test_histogramdd_numpy(self, t, bins, bin_range, weights, density):
         def to_np(t):
-            if type(t) is list:
+            if type(t) == list:
                 return list(map(to_np, t))
             if not torch.is_tensor(t):
                 return t

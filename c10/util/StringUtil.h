@@ -87,7 +87,7 @@ C10_API std::ostream& _str(std::ostream& ss, const std::wstring& wString);
 template <>
 inline std::ostream& _str<CompileTimeEmptyString>(
     std::ostream& ss,
-    const CompileTimeEmptyString& /*unused*/) {
+    const CompileTimeEmptyString&) {
   return ss;
 }
 

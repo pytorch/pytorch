@@ -1,9 +1,8 @@
 #pragma once
 
 #include <torch/headeronly/cpu/vec/intrinsics.h>
-#include <torch/headeronly/macros/Macros.h>
 
-HIDDEN_NAMESPACE_BEGIN(torch, headeronly, vec)
+namespace torch::headeronly::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -48,7 +47,7 @@ static inline float half2float_scalar(uint16_t val) {
 #endif
 
 } // namespace CPU_CAPABILITY
-HIDDEN_NAMESPACE_END(torch, headeronly, vec)
+} // namespace torch::headeronly::vec
 
 namespace at::vec {
 #if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && \

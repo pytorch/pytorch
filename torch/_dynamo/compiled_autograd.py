@@ -20,8 +20,8 @@ import itertools
 import operator
 import time
 from collections import Counter, defaultdict
-from collections.abc import Callable, Generator, Sequence
-from typing import Any, Optional, TYPE_CHECKING, Union
+from collections.abc import Generator, Sequence
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree

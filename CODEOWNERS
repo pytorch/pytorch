@@ -201,17 +201,3 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 /torch/csrc/stable/ @janeyx99 @mikaylagawarecki
 /torch/headeronly/ @janeyx99
 /torch/header_only_apis.txt @janeyx99
-
-# FlexAttention
-/torch/nn/attention/flex_attention.py @drisspg
-/torch/_higher_order_ops/flex_attention.py @drisspg
-/torch/_inductor/kernel/flex/ @drisspg
-/torch/_inductor/codegen/cpp_flex_attention_template.py @drisspg
-/test/inductor/test_flex_attention.py @drisspg
-/test/inductor/test_flex_decoding.py @drisspg
-
-# Low Precision GEMMs
-/aten/src/ATen/native/cuda/Blas.cpp @drisspg @slayton58
-/aten/src/ATen/cuda/CUDABlas.cpp @drisspg @slayton58
-/aten/src/ATen/cuda/CUDABlas.h @drisspg @slayton58
-/test/test_scaled_matmul_cuda.py @drisspg @slayton58

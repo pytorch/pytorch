@@ -13,7 +13,6 @@
 #include <c10/core/ScalarType.h>
 
 #include <ATen/cuda/tunable/TunableOp.h>
-#include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/Exceptions.h>
 #include <c10/util/StringUtil.h>
@@ -30,7 +29,7 @@
 
 namespace at::cuda::tunable {
 
-using at::blas::ScalingType;
+using at::cuda::blas::ScalingType;
 
 enum class BlasOp {
   N = 0,
@@ -151,7 +150,6 @@ inline std::string ScalarTypeToBLASType(c10::ScalarType scalar_type) {
       BLASType = "unknown";
   }
   return BLASType;
-
 }
 
 // Similar to Compute Type in GemmRocblas.h
@@ -246,25 +244,33 @@ inline std::string to_string_epilogue(const at::cuda::blas::GEMMAndBiasActivatio
 
 namespace detail {
 
-static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t size, const NumericalCheckConfig& config) {
-
-  if (!config.enabled) {
-    return true; // skip when disabled
-  }
-
+static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t size) {
   auto options = at::TensorOptions().dtype(dtype).device(at::kCUDA);
+  // comparison done as 1D tensor
   at::Tensor ref = at::from_blob(c,       {size}, options);
   at::Tensor oth = at::from_blob(other_c, {size}, options);
   at::Tensor ref_float = ref.to(at::kFloat);
   at::Tensor oth_float = oth.to(at::kFloat);
-
-  const bool ok = at::allclose(ref_float, oth_float, config.rtol, config.atol);
-  if (ok) {
-    TUNABLE_LOG3("├──verify numerics: PASSED with atol=", config.atol, ", rtol=", config.rtol);
-  } else {
-    TUNABLE_LOG3("├──verify numerics: FAILED with atol=", config.atol, ", rtol=", config.rtol);
+  std::vector<double> atols{1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
+  std::vector<double> rtols{1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
+  double last_succeed_atol = 1;
+  double last_succeed_rtol = 1;
+  for (auto& atol : atols) {
+    for (auto& rtol : rtols) {
+      if (at::allclose(ref_float, oth_float, rtol, atol)) {
+        last_succeed_atol = atol;
+        last_succeed_rtol = rtol;
+      }
+    }
   }
-  return ok;
+  if (last_succeed_atol == 1) {
+    return false;
+  }
+  else {
+    TUNABLE_LOG3("├──verify numerics: atol=", last_succeed_atol, ", rtol=", last_succeed_rtol);
+  }
+
+  return true;
 }
 
 }
@@ -349,10 +355,8 @@ struct GemmParams : OpParams {
   }
 
   TuningStatus NumericalCheck(GemmParams<T> *other) {
-    auto* ctx = getTuningContext();
-    auto cfg = ctx->GetNumericalCheckConfig();
     auto c_dtype = c10::CppTypeToScalarType<T>::value;
-    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T), cfg) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
   }
 
   char transa{};
@@ -445,10 +449,8 @@ struct GemmAndBiasParams : OpParams {
   }
 
   TuningStatus NumericalCheck(GemmAndBiasParams<T> *other) {
-    auto* ctx = getTuningContext();
-    auto cfg = ctx->GetNumericalCheckConfig();
     auto c_dtype = c10::CppTypeToScalarType<T>::value;
-    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T), cfg) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
   }
 
   char transa{};
@@ -544,10 +546,8 @@ struct GemmStridedBatchedParams : OpParams {
   }
 
   TuningStatus NumericalCheck(GemmStridedBatchedParams<T> *other) {
-    auto* ctx = getTuningContext();
-    auto cfg = ctx->GetNumericalCheckConfig();
     auto c_dtype = c10::CppTypeToScalarType<C_Dtype>::value;
-    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T), cfg) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
   }
 
   char transa{};
@@ -663,9 +663,7 @@ struct ScaledGemmParams : OpParams {
   }
 
   TuningStatus NumericalCheck(ScaledGemmParams<T> *other) {
-    auto* ctx = getTuningContext();
-    auto cfg = ctx->GetNumericalCheckConfig();
-    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T), cfg) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
   }
 
   char transa{};

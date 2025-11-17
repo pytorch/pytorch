@@ -137,7 +137,6 @@ def register_woq_mm_ops() -> None:
             )
             and mat2.get_layout().is_contiguous()
         ):
-            # pyrefly: ignore [bad-specialization, missing-attribute, not-a-type]
             CppWoqInt4GemmTemplate[qGroupSize].add_choices(
                 choices,
                 aten_layout,

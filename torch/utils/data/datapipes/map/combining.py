@@ -49,16 +49,16 @@ class ConcaterMapDataPipe(MapDataPipe):
     def __getitem__(self, index) -> _T_co:  # type: ignore[type-var]
         offset = 0
         for dp in self.datapipes:
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             if index - offset < len(dp):
                 return dp[index - offset]
             else:
-                # pyrefly: ignore [bad-argument-type]
+                # pyrefly: ignore  # bad-argument-type
                 offset += len(dp)
         raise IndexError(f"Index {index} is out of range.")
 
     def __len__(self) -> int:
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         return sum(len(dp) for dp in self.datapipes)
 
 
@@ -105,5 +105,5 @@ class ZipperMapDataPipe(MapDataPipe[tuple[_T_co, ...]]):
         return tuple(res)
 
     def __len__(self) -> int:
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore  # bad-argument-type
         return min(len(dp) for dp in self.datapipes)

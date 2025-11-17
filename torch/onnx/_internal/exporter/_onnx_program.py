@@ -157,7 +157,7 @@ def _to_ort_value(input: torch.Tensor | int | float | str | bool) -> ort.OrtValu
             int: np.int64,
             float: np.float32,
         }
-        # pyrefly: ignore [no-matching-overload]
+        # pyrefly: ignore  # no-matching-overload
         dtype = dtype_mapping.get(type(input), None)
         return ort.OrtValue.ortvalue_from_numpy(np.array(input, dtype=dtype))
 
@@ -253,7 +253,7 @@ ONNXProgram(
         run_options = ort.RunOptions()
         run_options.log_severity_level = 3  # 3: Error
         logger.debug("Running the inference session with %s arguments.", len(ort_input))
-        # pyrefly: ignore [missing-attribute]
+        # pyrefly: ignore  # missing-attribute
         outputs = self._inference_session.run_with_ort_values(
             None, ort_input, run_options=run_options
         )

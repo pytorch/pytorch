@@ -13,7 +13,7 @@ RegisterWorkerInfoOnce::RegisterWorkerInfoOnce() {
 }
 
 WorkerInfo::WorkerInfo(std::string name, int64_t id)
-    : WorkerInfo(std::move(name), static_cast<worker_id_t>(id)) {
+    : WorkerInfo(std::move(name), (worker_id_t)id) {
   TORCH_CHECK(
       id <= std::numeric_limits<worker_id_t>::max(),
       "RPC worker id ",

@@ -185,9 +185,9 @@ class FakeQuantize(FakeQuantizeBase):
                 dtype = getattr(getattr(observer, "p", {}), "keywords", {}).get(
                     "dtype", dtype
                 )
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             assert torch.iinfo(dtype).min <= quant_min, "quant_min out of bound"
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore  # bad-argument-type
             assert quant_max <= torch.iinfo(dtype).max, "quant_max out of bound"
             observer_kwargs.update({"quant_min": quant_min, "quant_max": quant_max})
         observer_kwargs["is_dynamic"] = is_dynamic
@@ -329,7 +329,7 @@ class FixedQParamsFakeQuantize(FakeQuantize):
     # TODO: rename observer to observer_ctr
     def __init__(self, observer):
         super().__init__(observer=observer)
-        assert type(self.activation_post_process) is FixedQParamsObserver, (
+        assert type(self.activation_post_process) == FixedQParamsObserver, (
             f"{self.__class__.__name__}'s observer must be a {FixedQParamsObserver.__name__}"
         )
         self._observer_ctr = observer

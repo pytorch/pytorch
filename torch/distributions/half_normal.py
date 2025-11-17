@@ -32,10 +32,10 @@ class HalfNormal(TransformedDistribution):
     """
 
     arg_constraints = {"scale": constraints.positive}
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     support = constraints.nonnegative
     has_rsample = True
-    # pyrefly: ignore [bad-override]
+    # pyrefly: ignore  # bad-override
     base_dist: Normal
 
     def __init__(

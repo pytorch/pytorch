@@ -19,8 +19,8 @@ optimization of both forward and backward passes.
 import contextlib
 import functools
 import logging
-from collections.abc import Callable, Iterable
-from typing import Any
+from collections.abc import Iterable
+from typing import Any, Callable
 from typing_extensions import ParamSpec, TypeVar
 from unittest.mock import patch
 

@@ -439,6 +439,10 @@ function(torch_compile_options libname)
         $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=hidden>)
   endif()
 
+  # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
+  target_compile_options(${libname} PRIVATE
+      $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-O2>)
+
 endfunction()
 
 ##############################################################################

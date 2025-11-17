@@ -8,9 +8,6 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/native/mps/kernels/LinearAlgebra.h>
-
-#include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -31,7 +28,6 @@
 #include <ATen/ops/linalg_solve_triangular_native.h>
 #include <ATen/ops/lu_unpack_native.h>
 #include <ATen/ops/mm_native.h>
-#include <ATen/ops/orgqr_native.h>
 #include <ATen/ops/slice.h>
 #include <ATen/ops/stack.h>
 #include <ATen/ops/triangular_solve_native.h>
@@ -200,28 +196,6 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
        other.size(0) > max_stride_size || other.size(1) > max_stride_size);
 }
 
-void map_mps_decomposition_error_code_to_blas(const Tensor& status) {
-  const auto& status_flat = status.view(-1);
-
-  for (const auto i : c10::irange(status_flat.size(0))) {
-    int code = status_flat[i].item<int>();
-    switch (code) {
-      case MPSMatrixDecompositionStatusSuccess:
-        status_flat[i] = 0;
-        break;
-      case MPSMatrixDecompositionStatusNonPositiveDefinite:
-      case MPSMatrixDecompositionStatusSingular:
-        status_flat[i] = 2;
-        break;
-      case MPSMatrixDecompositionStatusFailure:
-        status_flat[i] = -1;
-        break;
-      default:
-        TORCH_INTERNAL_ASSERT(false, "Unknown MPSMatrixDecompositionStatus enum value: ", code);
-    }
-  }
-}
-
 } // anonymous namespace
 
 static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
@@ -342,8 +316,6 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
           ". See https://developer.apple.com/documentation/metalperformanceshaders/mpsmatrixdecompositionstatus for details.");
     }
   }
-
-  map_mps_decomposition_error_code_to_blas(info);
 }
 
 static void linalg_solve_out_mps_impl(const Tensor& A,
@@ -515,9 +487,6 @@ static void linalg_solve_out_mps_impl(const Tensor& A,
                   "mpsmatrixdecompositionstatus for details.");
     }
   }
-
-  map_mps_decomposition_error_code_to_blas(info);
-
   if (!left) {
     // If this was a right solve, transpose the result back
     result.copy_(result_t.transpose(-2, -1).contiguous());
@@ -1239,69 +1208,6 @@ static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper
   }
 }
 
-static Tensor& orgqr_stub_impl(Tensor& self, const Tensor& tau) {
-  if (self.numel() == 0) {
-    return self;
-  }
-
-  auto m = self.size(-2);
-  auto n = self.size(-1);
-  auto k = tau.size(-1);
-
-  if (tau.numel() == 0) {
-    auto I = eye(m, self.scalar_type(), std::nullopt, self.device());
-    return self.copy_(I.slice(-1, 0, n));
-  }
-
-  auto num_batch_dims = self.dim() - 2;
-  auto batch_sizes = self.sizes().slice(0, num_batch_dims);
-
-  std::vector<int64_t> H_sizes(num_batch_dims + 2);
-  for (auto dim : c10::irange(num_batch_dims)) {
-    H_sizes[dim] = self.size(dim);
-  }
-  H_sizes[num_batch_dims] = m;
-  H_sizes[num_batch_dims + 1] = m;
-
-  auto H = at::empty(H_sizes, self.options().memory_format(MemoryFormat::Contiguous));
-  auto H_prod = at::empty_like(H);
-
-  OrgqrParams params;
-
-  params.num_batch_dims = num_batch_dims;
-  params.m = m;
-  params.n = n;
-  params.k = k;
-
-  for (const auto dim : c10::irange(self.dim())) {
-    params.A_strides[dim] = self.stride(dim);
-
-    if (dim < tau.dim()) {
-      params.tau_strides[dim] = tau.stride(dim);
-    }
-
-    params.H_strides[dim] = H.stride(dim);
-    params.H_sizes[dim] = H.size(dim);
-  }
-
-  auto num_threads = H.numel();
-  MPSStream* stream = getCurrentMPSStream();
-
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
-      auto pipeline_state = lib.getPipelineStateForFunc(fmt::format("orgqr_{}", scalarToMetalTypeString(self)));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "orgqr", {self, tau});
-      [compute_encoder setComputePipelineState:pipeline_state];
-      mtl_setArgs(compute_encoder, self, tau, H, H_prod, params);
-      mtl_dispatch1DJob(compute_encoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state);
-    }
-  });
-
-  return self;
-}
-
 } // namespace mps
 
 Tensor addr_mps(const Tensor& self, const Tensor& vec1, const Tensor& vec2, const Scalar& beta, const Scalar& alpha) {
@@ -1517,6 +1423,20 @@ TORCH_IMPL_FUNC(_linalg_solve_ex_out_mps)
   mps::linalg_solve_out_mps_impl(A, B, left, check_errors, result, LU, pivots, info);
 }
 
+std::tuple<Tensor&, Tensor&> linalg_lu_factor_out_mps(const Tensor& A, bool pivot, Tensor& LU, Tensor& pivots) {
+  Tensor info = at::empty({}, A.options().dtype(kInt));
+  mps::linalg_lu_factor_ex_out_mps_impl(A, pivot, LU, pivots, info, false);
+  return std::tie(LU, pivots);
+}
+
+std::tuple<Tensor, Tensor> linalg_lu_factor_mps(const Tensor& A, bool pivot) {
+  Tensor LU = at::empty({0}, A.options());
+  Tensor pivots = at::empty({0}, A.options().dtype(kInt));
+  Tensor info = at::empty({}, A.options().dtype(kInt));
+  mps::linalg_lu_factor_ex_out_mps_impl(A, pivot, LU, pivots, info, false);
+  return std::make_tuple(std::move(LU), std::move(pivots));
+}
+
 TORCH_IMPL_FUNC(lu_unpack_out_mps)
 (const Tensor& LU_data,
  const Tensor& LU_pivots,
@@ -1538,6 +1458,4 @@ TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const
 }
 
 REGISTER_DISPATCH(cholesky_stub, mps::cholesky_stub_impl)
-REGISTER_DISPATCH(orgqr_stub, mps::orgqr_stub_impl);
-
 } // namespace at::native

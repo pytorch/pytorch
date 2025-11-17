@@ -50,7 +50,6 @@ def compile(*args, **kwargs):
     """
     See :func:`torch.compile` for details on the arguments for this function.
     """
-    # pyrefly: ignore [not-iterable]
     return torch.compile(*args, **kwargs)
 
 
@@ -502,12 +501,7 @@ def save_cache_artifacts() -> Optional[tuple[bytes, "CacheInfo"]]:
     - Execute torch.compile
     - Call torch.compiler.save_cache_artifacts()
     """
-    from ._cache import CacheArtifactManager
-
-    if torch._dynamo.config.caching_precompile:
-        from torch._dynamo.precompile_context import PrecompileContext
-
-        PrecompileContext.save_to_dynamo_cache()
+    from ._cache import CacheArtifactManager, CacheInfo
 
     return CacheArtifactManager.serialize()
 

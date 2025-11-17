@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import inspect
-from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any, Callable, TypeVar
 from typing_extensions import TypeVarTuple, Unpack
 
 from .dispatcher import Dispatcher, MethodDispatcher

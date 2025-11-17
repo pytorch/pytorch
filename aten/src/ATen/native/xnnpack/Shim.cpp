@@ -29,63 +29,63 @@ bool available() {
 }
 
 bool use_convolution2d(
-    const Tensor& /*unused*/,
-    const Tensor& /*unused*/,
-    const at::OptionalIntArrayRef /*unused*/,
-    const IntArrayRef /*unused*/,
-    const IntArrayRef /*unused*/,
-    const IntArrayRef /*unused*/,
-    const int64_t /*unused*/,
-    bool /*unused*/) {
+    const Tensor&,
+    const Tensor&,
+    const at::OptionalIntArrayRef,
+    const IntArrayRef,
+    const IntArrayRef,
+    const IntArrayRef,
+    const int64_t,
+    bool) {
   return false;
 }
 
 Tensor convolution2d(
-    const Tensor& /*unused*/,
-    const Tensor& /*unused*/,
-    const Tensor& /*unused*/,
-    const IntArrayRef /*unused*/,
-    const IntArrayRef /*unused*/,
-    const IntArrayRef /*unused*/,
-    const int64_t /*unused*/) {
+    const Tensor&,
+    const Tensor&,
+    const Tensor&,
+    const IntArrayRef,
+    const IntArrayRef,
+    const IntArrayRef,
+    const int64_t) {
   TORCH_CHECK(false, internal::kError);
 }
 
 bool use_linear(
-    const Tensor& /*unused*/,
-    const Tensor& /*unused*/,
-    const Tensor& /*unused*/) {
+    const Tensor&,
+    const Tensor&,
+    const Tensor&) {
   return false;
 }
 
 Tensor linear(
-    const Tensor& /*unused*/,
-    const Tensor& /*unused*/,
-    const Tensor& /*unused*/) {
+    const Tensor&,
+    const Tensor&,
+    const Tensor&) {
   TORCH_CHECK(false, internal::kError);
 }
 
 bool use_max_pool2d(
-    const Tensor& /*unused*/,
-    const IntArrayRef /*unused*/,
-    const IntArrayRef /*unused*/,
-    IntArrayRef /*unused*/,
-    const IntArrayRef /*unused*/,
-    const bool /*unused*/,
-    const float /*unused*/,
-    const float /*unused*/) {
+    const Tensor&,
+    const IntArrayRef,
+    const IntArrayRef,
+    IntArrayRef,
+    const IntArrayRef,
+    const bool,
+    const float,
+    const float) {
   return false;
 }
 
 Tensor max_pool2d(
-    const Tensor& /*unused*/,
-    const IntArrayRef /*unused*/,
-    const IntArrayRef /*unused*/,
-    IntArrayRef /*unused*/,
-    const IntArrayRef /*unused*/,
-    const bool /*unused*/,
-    const float /*unused*/,
-    const float /*unused*/) {
+    const Tensor&,
+    const IntArrayRef,
+    const IntArrayRef,
+    IntArrayRef,
+    const IntArrayRef,
+    const bool,
+    const float,
+    const float) {
   TORCH_CHECK(false, internal::kError);
 }
 
