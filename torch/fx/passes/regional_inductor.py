@@ -120,6 +120,7 @@ def _needs_inductor_compile(node: torch.fx.Node):
         and "compile_with_inductor" in node.meta["custom"]
     )
 
+
 def _needs_inductor_fallback(node: torch.fx.Node):
     return (
         node.op not in ("placeholder", "output")
