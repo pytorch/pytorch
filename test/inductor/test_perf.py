@@ -28,16 +28,14 @@ from torch._inductor.utils import run_and_get_code
 # performance for that setting.
 #
 # Defines all the kernels for tests
-from torch.testing._internal.triton_utils import (
-    HAS_CUDA_AND_TRITON,
-    requires_cuda_and_triton,
-)
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
 
 # set so that metrics appear
 torch._logging.set_logs(inductor_metrics=True)
 
-if HAS_CUDA_AND_TRITON:
+if HAS_GPU_AND_TRITON:
     import triton  # @manual
     import triton.language as tl  # @manual
 
@@ -80,7 +78,7 @@ def count_numel_train(f, *args):
     return str(metrics.num_bytes_accessed // 4)
 
 
-DEVICE = "cuda"
+DEVICE = GPU_TYPE
 
 
 def T(*size, dtype=torch.float32, device=DEVICE, grad=False):
@@ -488,7 +486,7 @@ class FusionTests(TestCase):
 
     def test_reduction_pointwise_multi_level_reduction(self):
         hidden_size = 4096
-        layer_norm = torch.nn.LayerNorm(hidden_size).cuda().float()
+        layer_norm = torch.nn.LayerNorm(hidden_size).to(GPU_TYPE).float()
 
         @torch.inference_mode()
         def f(x, scale, amax_keep_dim):
@@ -841,7 +839,7 @@ class NoopTests(TestCase):
 
     def test_noop_device_conversion(self):
         def f(a):
-            b = torch.ops.prims.device_put(a, "cuda")
+            b = torch.ops.prims.device_put(a, DEVICE)
             c = unfusible(b)
             return c
 
@@ -923,7 +921,7 @@ class InplacingTests(TestCase):
         inp = (T(10, 10), TI(2, mx=5))
         self.assertExpectedInline(count_numel(f, *inp), """42""")
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_inplace_triton_kernel_training(self):
         @triton.jit
         def sin_kernel(
@@ -967,7 +965,7 @@ class InplacingTests(TestCase):
         x = T(3, grad=True)
         self.assertExpectedInline(count_numel_train(f, x), """9""")
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_triton_kernel_not_fusable_with_users(self):
         @triton.jit
         def _sin_kernel(
@@ -1020,7 +1018,7 @@ class InplacingTests(TestCase):
         # (it will cost an extra kernel)
         self.assertExpectedInline(count_numel_train(f, x), """27""")
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_inplace_custom_op_training_two_mutated_inputs(self):
         @torch.library.custom_op(
             "_reinplacing::sin_cos", mutates_args={"out_sin", "out_cos"}
@@ -1040,7 +1038,7 @@ class InplacingTests(TestCase):
         x = T(3, grad=True)
         self.assertExpectedInline(count_numel(f, x), """21""")
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_inplace_custom_op_training(self):
         @torch.library.custom_op("_reinplacing::sin", mutates_args={"result"})
         def sin(x: torch.Tensor, result: torch.Tensor) -> None:
@@ -1069,7 +1067,7 @@ class InplacingTests(TestCase):
         x = T(3, grad=True)
         self.assertExpectedInline(count_numel_train(f, x), """9""")
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_inplace_custom_op(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
             m.define("foo(Tensor x, Tensor(a!) out) -> ()")
@@ -1099,7 +1097,7 @@ class InplacingTests(TestCase):
 
             self.assertExpectedInline(count_numel(f, x, out), """21""")
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_inplace_custom_op_intermediate(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
             m.define("foo(Tensor x, Tensor(a!) out) -> ()")
@@ -1130,7 +1128,7 @@ class InplacingTests(TestCase):
 
             self.assertExpectedInline(count_numel(f, x, out), """21""")
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_inplace_custom_op_two_mutated_inputs(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
             m.define("foo(Tensor q, Tensor(a!) k_cache, Tensor(b!) v_cache) -> Tensor")
@@ -1164,7 +1162,7 @@ class InplacingTests(TestCase):
 
             self.assertExpectedInline(count_numel(f), """45""")
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_inplace_triton_kernel_v1(self):
         def f(x: torch.Tensor, y: torch.Tensor):
             output = torch.zeros_like(x)
@@ -1176,7 +1174,7 @@ class InplacingTests(TestCase):
         inp = (T(10), T(10))
         self.assertExpectedInline(count_numel(f, *inp), """50""")
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_inplace_triton_kernel_v2(self):
         def f(x: torch.Tensor, y: torch.Tensor):
             output = torch.zeros_like(x)
@@ -1189,7 +1187,7 @@ class InplacingTests(TestCase):
         inp = (T(10), T(10))
         self.assertExpectedInline(count_numel(f, *inp), """70""")
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_inplace_triton_kernel_v3(self):
         def f(x: torch.Tensor, y: torch.Tensor):
             output = torch.zeros_like(x)
@@ -1202,7 +1200,7 @@ class InplacingTests(TestCase):
         inp = (T(10), T(10))
         self.assertExpectedInline(count_numel(f, *inp), """80""")
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_inplace_triton_kernel_v4(self):
         def f(x: torch.Tensor, y: torch.Tensor):
             x_view = x.view(-1)
@@ -1216,7 +1214,7 @@ class InplacingTests(TestCase):
         inp = (T(10), T(10))
         self.assertExpectedInline(count_numel(f, *inp), """70""")
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_inplace_triton_kernel_v5(self):
         def f(x: torch.Tensor, y: torch.Tensor):
             x_view = x.view(-1)
@@ -1230,7 +1228,7 @@ class InplacingTests(TestCase):
         inp = (T(10), T(10))
         self.assertExpectedInline(count_numel(f, *inp), """80""")
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_inplace_triton_kernel_v6(self):
         def f(x: torch.Tensor, y: torch.Tensor):
             output = torch.zeros_like(x)
@@ -1297,5 +1295,5 @@ class WouldBeNiceIfItWorked:
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CUDA_AND_TRITON:
+    if HAS_GPU_AND_TRITON:
         run_tests(needs="filelock")

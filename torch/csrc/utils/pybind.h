@@ -29,28 +29,6 @@ PYBIND11_DECLARE_HOLDER_TYPE(T, c10::intrusive_ptr<T>, true)
 PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonOrSharedTypePtr<T>)
 PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonTypePtr<T>, true)
 
-// pybind11 3.x's type_caster_enum_type handles both py::native_enum
-// and py::enum_. py::native_enum is preferred, so it gets checked
-// first. We still use lots of py::enum_ because we don't (yet?)
-// require pybind11 3.x, and possibly because the difference is
-// user-visible. Putting TORCH_MAKE_PYBIND_ENUM_FASTER(T) at global
-// scope before using py::enum_<T> will cause pybind function calls
-// that pass arguments of type T to go faster (16% at time of writing,
-// but they are quite slow currently and the savings is a fixed cost,
-// so the percentage may be higher after other optimizations for
-// py::enum_ happen).
-#ifdef PYBIND11_HAS_NATIVE_ENUM
-#define TORCH_MAKE_PYBIND_ENUM_FASTER(T)                                    \
-  namespace pybind11::detail {                                              \
-  template <>                                                               \
-  struct type_caster_enum_type_enabled<T, void> : std::false_type {};       \
-  template <>                                                               \
-  struct type_caster_enum_type_enabled<const T, void> : std::false_type {}; \
-  } // namespace pybind11::detail
-#else // PYBIND11_HAS_NATIVE_ENUM
-#define TORCH_MAKE_PYBIND_ENUM_FASTER(T)
-#endif // PYBIND11_HAS_NATIVE_ENUM
-
 namespace pybind11::detail {
 
 // torch.Tensor <-> at::Tensor conversions (without unwrapping)
@@ -60,7 +38,7 @@ struct TORCH_PYTHON_API type_caster<at::Tensor> {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(at::Tensor, _("torch.Tensor"));
 
-  bool load(handle src, bool);
+  bool load(handle src, bool /*unused*/);
 
   static handle cast(
       const at::Tensor& src,
@@ -75,7 +53,7 @@ struct type_caster<at::Storage> {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(at::Storage, _("torch.StorageBase"));
 
-  bool load(handle src, bool) {
+  bool load(handle src, bool /*unused*/) {
     PyObject* obj = src.ptr();
     if (torch::isStorage(obj)) {
       value = torch::createStorage(obj);
@@ -98,7 +76,7 @@ struct type_caster<at::Generator> {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(at::Generator, _("torch.Generator"));
 
-  bool load(handle src, bool) {
+  bool load(handle src, bool /*unused*/) {
     PyObject* obj = src.ptr();
     if (THPGenerator_Check(obj)) {
       value = reinterpret_cast<THPGenerator*>(obj)->cdata;
@@ -121,7 +99,7 @@ struct TORCH_PYTHON_API type_caster<at::IntArrayRef> {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(at::IntArrayRef, _("Tuple[int, ...]"));
 
-  bool load(handle src, bool);
+  bool load(handle src, bool /*unused*/);
   static handle cast(
       at::IntArrayRef src,
       return_value_policy /* policy */,
@@ -137,7 +115,7 @@ struct TORCH_PYTHON_API type_caster<at::SymIntArrayRef> {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(at::SymIntArrayRef, _("List[int]"));
 
-  bool load(handle src, bool);
+  bool load(handle src, bool /*unused*/);
   static handle cast(
       at::SymIntArrayRef src,
       return_value_policy /* policy */,
@@ -153,7 +131,7 @@ struct TORCH_PYTHON_API type_caster<at::ArrayRef<c10::SymNode>> {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(at::ArrayRef<c10::SymNode>, _("List[SymNode]"));
 
-  bool load(handle src, bool);
+  bool load(handle src, bool /*unused*/);
   static handle cast(
       at::ArrayRef<c10::SymNode> src,
       return_value_policy /* policy */,
@@ -169,7 +147,7 @@ struct type_caster<at::MemoryFormat> {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(at::MemoryFormat, _("torch.memory_format"));
 
-  bool load(handle src, bool) {
+  bool load(handle src, bool /*unused*/) {
     PyObject* obj = src.ptr();
     if (THPMemoryFormat_Check(obj)) {
       value = reinterpret_cast<THPMemoryFormat*>(obj)->memory_format;
@@ -197,7 +175,7 @@ struct type_caster<at::Device> {
   // after a successful call to load.
   type_caster() : value(c10::kCPU) {}
 
-  bool load(handle src, bool) {
+  bool load(handle src, bool /*unused*/) {
     PyObject* obj = src.ptr();
     if (THPDevice_Check(obj)) {
       value = reinterpret_cast<THPDevice*>(obj)->device;
@@ -226,7 +204,7 @@ struct type_caster<at::ScalarType> {
   // after a successful call to load.
   type_caster() : value(at::kFloat) {}
 
-  bool load(handle src, bool) {
+  bool load(handle src, bool /*unused*/) {
     PyObject* obj = src.ptr();
     if (THPDtype_Check(obj)) {
       value = reinterpret_cast<THPDtype*>(obj)->scalar_type;
@@ -255,7 +233,7 @@ struct type_caster<c10::Stream> {
   // after a successful call to load.
   type_caster() : value(c10::Stream::DEFAULT, c10::Device(c10::kCPU, 0)) {}
 
-  bool load(handle src, bool) {
+  bool load(handle src, bool /*unused*/) {
     PyObject* obj = src.ptr();
     if (THPStream_Check(obj)) {
       value = c10::Stream::unpack3(
@@ -308,7 +286,7 @@ struct TORCH_PYTHON_API type_caster<c10::Scalar> {
   PYBIND11_TYPE_CASTER(
       c10::Scalar,
       _("Union[Number, torch.SymInt, torch.SymFloat, torch.SymBool]"));
-  bool load(py::handle src, bool);
+  bool load(py::handle src, bool /*unused*/);
 
   static py::handle cast(
       const c10::Scalar& si,
@@ -320,7 +298,7 @@ template <>
 struct TORCH_PYTHON_API type_caster<c10::SymInt> {
  public:
   PYBIND11_TYPE_CASTER(c10::SymInt, _("Union[int, torch.SymInt]"));
-  bool load(py::handle src, bool);
+  bool load(py::handle src, bool /*unused*/);
 
   static py::handle cast(
       const c10::SymInt& si,
@@ -332,7 +310,7 @@ template <>
 struct TORCH_PYTHON_API type_caster<c10::SymFloat> {
  public:
   PYBIND11_TYPE_CASTER(c10::SymFloat, _("float"));
-  bool load(py::handle src, bool);
+  bool load(py::handle src, bool /*unused*/);
 
   static py::handle cast(
       const c10::SymFloat& si,
@@ -344,7 +322,7 @@ template <>
 struct TORCH_PYTHON_API type_caster<c10::SymBool> {
  public:
   PYBIND11_TYPE_CASTER(c10::SymBool, _("Union[bool, torch.SymBool]"));
-  bool load(py::handle src, bool);
+  bool load(py::handle src, bool /*unused*/);
 
   static py::handle cast(
       const c10::SymBool& si,
@@ -358,7 +336,7 @@ struct type_caster<c10::complex<T>> {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(c10::complex<T>, _("complex"));
 
-  bool load(handle src, bool) {
+  bool load(handle src, bool /*unused*/) {
     PyObject* obj = src.ptr();
 
     // Referred from `THPUtils_unpackComplexDouble`

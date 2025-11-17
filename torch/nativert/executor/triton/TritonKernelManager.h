@@ -17,6 +17,10 @@ struct GridDims {
 };
 
 struct LaunchParams {
+  // CPU params
+  int num_cpu_threads = 0; // 0 means use all available threads
+  // GPU params
+  // TODO: Add more GPU autotuning parameters
   int num_warps = 4;
   int shared_memory_bytes = 0;
   GridDims grid_dims;
