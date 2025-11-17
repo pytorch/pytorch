@@ -468,7 +468,7 @@ class AOTInductorModelBase {
       auto code = cudaEventDestroy(*run_finished_);
       if (code != cudaSuccess) {
         std::cerr << "Failed to destroy CUDA event in AOTInductor model: "
-                  << cudaGetErrorString(code) << "\n";
+                  << cudaGetErrorString(code) << '\n';
       }
     }
 #endif // USE_CUDA

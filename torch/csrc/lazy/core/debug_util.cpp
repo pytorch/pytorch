@@ -77,7 +77,7 @@ std::string GetFirstUserFrameInPython() {
     auto& loc = frames[i - 1];
     if (loc.file.find("site-packages") == std::string::npos) {
       std::stringstream ss;
-      ss << loc.file << " " << loc.function << " " << loc.line;
+      ss << loc.file << ' ' << loc.function << ' ' << loc.line;
       return ss.str();
     }
   }
@@ -120,7 +120,7 @@ std::string DebugUtil::GetTensorsGraphInfo(
   std::vector<SourceLocation> frames = GetPythonFramesFunction()();
   ss << "Python Stacktrace:\n";
   for (auto& location : frames) {
-    ss << "  " << location.function << " (" << location.file << ":"
+    ss << "  " << location.function << " (" << location.file << ':'
        << location.line << ")\n";
   }
   ss << "\nHashes: (";
@@ -160,7 +160,7 @@ void DebugUtil::SaveTensorsGraphInfo(
     std::string info = GetTensorsGraphInfo(tensors, indices, format);
     std::lock_guard<std::mutex> guard(lock);
     std::ofstream graph_file(save_file, std::ios_base::app);
-    graph_file << "[" << name << "]\n" << info << "\n";
+    graph_file << '[' << name << "]\n" << info << '\n';
   }
 }
 
