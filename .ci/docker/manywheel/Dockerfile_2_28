@@ -14,7 +14,7 @@ ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/op
 
 # cmake-3.18.4 from pip
 RUN yum install -y python3-pip && \
-    python3 -mpip install cmake==3.18.4 && \
+    python3 -m pip install cmake==3.18.4 && \
     ln -s /usr/local/bin/cmake /usr/bin/cmake3
 
 FROM base as openssl
@@ -135,7 +135,7 @@ RUN bash ./patch_libstdc.sh && rm patch_libstdc.sh
 
 # cmake-3.18.4 from pip; force in case cmake3 already exists
 RUN yum install -y python3-pip && \
-    python3 -mpip install cmake==3.18.4 && \
+    python3 -m pip install cmake==3.18.4 && \
     ln -sf /usr/local/bin/cmake /usr/bin/cmake3
 
 FROM cpu_final as cuda_final
@@ -157,7 +157,7 @@ ENV ROCM_PATH /opt/rocm
 # cmake-3.28.4 from pip to get enable_language(HIP)
 # and avoid 3.21.0 cmake+ninja issues with ninja inserting "-Wl,--no-as-needed" in LINK_FLAGS for static linker
 RUN python3 -m pip install --upgrade pip && \
-    python3 -mpip install cmake==3.28.4
+    python3 -m pip install cmake==3.28.4
 # replace the libdrm in /opt/amdgpu with custom amdgpu.ids lookup path
 ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
 RUN bash ./install_rocm_drm.sh && rm install_rocm_drm.sh
@@ -174,7 +174,7 @@ FROM cpu_final as xpu_final
 ENV XPU_DRIVER_TYPE ROLLING
 # cmake-3.28.4 from pip
 RUN python3 -m pip install --upgrade pip && \
-    python3 -mpip install cmake==3.28.4
+    python3 -m pip install cmake==3.28.4
 ADD ./common/install_xpu.sh install_xpu.sh
 ENV XPU_VERSION 2025.2
 RUN bash ./install_xpu.sh && rm install_xpu.sh
