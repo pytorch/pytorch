@@ -115,7 +115,7 @@ class TestInductorConfig(TestCase):
         for kwargs in checks:
             torch._dynamo.reset()
             opt_fn = torch.compile(dummy_fn, **kwargs)
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(
                 opt_fn(x), y, msg=f"torch.compile(..., **{kwargs!r}) failed"
             )
 
