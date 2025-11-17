@@ -260,8 +260,9 @@ struct TORCH_API Operator {
 
 TORCH_API std::string canonicalSchemaString(const FunctionSchema& schema);
 
-TORCH_API const std::vector<std::shared_ptr<Operator>> getAllOperators();
-TORCH_API const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(
+TORCH_API std::vector<std::shared_ptr<Operator>> getAllOperators();
+// This function returns a copy for thread safety.
+TORCH_API std::vector<std::shared_ptr<Operator>> getAllOperatorsFor(
     Symbol name);
 // Returns operators in the order which OpOverloadPacket resolves them.
 TORCH_API std::vector<std::shared_ptr<Operator>> getAllSortedOperatorsFor(
