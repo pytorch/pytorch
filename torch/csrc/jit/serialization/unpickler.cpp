@@ -351,7 +351,6 @@ PickleOpCode Unpickler::readInstruction() {
       TORCH_CHECK(!marks_.empty(), "Parsing error: marks_ is empty");
       size_t start = marks_.back();
       marks_.pop_back();
-      std::vector<IValue> elements;
       TORCH_CHECK(
           stack_.size() >= start,
           "Parsing error: wrong start index ",
@@ -379,11 +378,10 @@ PickleOpCode Unpickler::readInstruction() {
           stack_.emplace_back(c10::ivalue::Tuple::create(pop(stack_)));
           break;
         default: {
-          elements.reserve(stack_.size() - start);
           auto start_it = stack_.begin() + static_cast<std::ptrdiff_t>(start);
-          for (auto it = start_it; it != stack_.end(); ++it) {
-            elements.emplace_back(std::move(*it));
-          }
+          std::vector<IValue> elements{
+              std::make_move_iterator(start_it),
+              std::make_move_iterator(stack_.end())};
           stack_.erase(start_it, stack_.end());
           stack_.emplace_back(c10::ivalue::Tuple::create(std::move(elements)));
           break;
@@ -1063,10 +1061,10 @@ void Unpickler::rebuildRRef() {
     // const reference will extend the lifetime of the temporary variable
     const auto& rrefId = distributed::rpc::RRefId(
         static_cast<int16_t>(args.at(distributed::rpc::RREFID_ON_IDX).toInt()),
-        static_cast<int64_t>(args.at(distributed::rpc::RREFID_ID_IDX).toInt()));
+        args.at(distributed::rpc::RREFID_ID_IDX).toInt());
     const auto& forkId = distributed::rpc::RRefId(
         static_cast<int16_t>(args.at(distributed::rpc::FORKID_ON_IDX).toInt()),
-        static_cast<int64_t>(args.at(distributed::rpc::FORKID_ID_IDX).toInt()));
+        args.at(distributed::rpc::FORKID_ID_IDX).toInt());
     auto parent =
         static_cast<int16_t>(args.at(distributed::rpc::PARENT_IDX).toInt());
     const auto& typeStr = static_cast<std::string>(

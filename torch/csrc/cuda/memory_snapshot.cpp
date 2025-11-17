@@ -1,6 +1,7 @@
 #include <ATen/Context.h>
 #include <ATen/record_function.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/serialization/pickler.h>
@@ -310,6 +311,7 @@ std::string _memory_snapshot_pickled() {
   IValue is_expandable_s = "is_expandable";
   IValue time_us_s = "time_us";
   IValue compile_contexts_s = "compile_context";
+  IValue user_metadata_s = "user_metadata";
 
   auto empty_frames = new_list();
 
@@ -413,7 +415,7 @@ std::string _memory_snapshot_pickled() {
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
     }
-    throw std::runtime_error("unreachable");
+    TORCH_CHECK(false, "unreachable");
   };
 
   for (const auto& traceInfo : snapshot.device_traces) {
@@ -427,6 +429,7 @@ std::string _memory_snapshot_pickled() {
       trace_entry.insert(size_s, (int64_t)te.size_);
       trace_entry.insert(stream_s, int64_t(te.stream_));
       trace_entry.insert(compile_contexts_s, te.compile_context_);
+      trace_entry.insert(user_metadata_s, te.user_metadata_);
       if (te.context_) {
         auto sc = getFromContext(te.context_);
         frame_tracebacks.push_back(sc);
