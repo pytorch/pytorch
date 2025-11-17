@@ -260,6 +260,13 @@ __device__ inline void cmtdStore(void* address, T value) {
 // We identify all the threads within a warp that will perform an atomicAdd on the same destination
 // address and perform the addition on the CU. Each warp elects a leader thread which does the
 // atomicAdd to the destination address.
+//
+// Warp local "reduce-by-key":
+// - Each lane provides (index, value); -1 marks out-of-bounds, so no-op.
+// - The standard "warp-aggregated atomics" technique: the ballot (activemask) / shuffle / leader pattern
+//   - Group lanes that target the same (flat) index.
+//   - Lanes in the same group (with the same index) are detected with ballot (activemask) and their values are summed via shuffles.
+//   - A single elected leader lane issues a single global atomic for the group.
 template <class scalar_t, class index_t>
 __device__ __forceinline__ void opportunistic_fastAtomicAdd(
     scalar_t* self_ptr,

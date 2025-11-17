@@ -410,10 +410,23 @@ namespace {
         // 4 atomics (rather than the original 4xC) for this current channel only
         if (input_requires_grad) {
           const index_t NC_offset = n * gInp_sN + c * gInp_sC;
+#if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__))
+          // Warp-aggregated atomics via opportunistic_fastAtomicAdd:
+          // Build flat indices in the (n, c) plane; -1 marks OOB.
+          const index_t idx_nw = within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W) ? (NC_offset + iy_nw * gInp_sH + ix_nw * gInp_sW) : static_cast<index_t>(-1);
+          const index_t idx_ne = within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W) ? (NC_offset + iy_ne * gInp_sH + ix_ne * gInp_sW) : static_cast<index_t>(-1);
+          const index_t idx_sw = within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W) ? (NC_offset + iy_sw * gInp_sH + ix_sw * gInp_sW) : static_cast<index_t>(-1);
+          const index_t idx_se = within_bounds_2d(iy_se, ix_se, inp_H, inp_W) ? (NC_offset + iy_se * gInp_sH + ix_se * gInp_sW) : static_cast<index_t>(-1);
+          if (idx_nw >= 0) opportunistic_fastAtomicAdd<scalar_t, index_t>(grad_input.data, idx_nw, grad_input_memory_span, nw * gOut);
+          if (idx_ne >= 0) opportunistic_fastAtomicAdd<scalar_t, index_t>(grad_input.data, idx_ne, grad_input_memory_span, ne * gOut);
+          if (idx_sw >= 0) opportunistic_fastAtomicAdd<scalar_t, index_t>(grad_input.data, idx_sw, grad_input_memory_span, sw * gOut);
+          if (idx_se >= 0) opportunistic_fastAtomicAdd<scalar_t, index_t>(grad_input.data, idx_se, grad_input_memory_span, se * gOut);
+#else
           safe_add_2d(grad_input.data, iy_nw, ix_nw, gInp_sH, gInp_sW, inp_H, inp_W, nw * gOut, NC_offset, grad_input_memory_span);
           safe_add_2d(grad_input.data, iy_ne, ix_ne, gInp_sH, gInp_sW, inp_H, inp_W, ne * gOut, NC_offset, grad_input_memory_span);
           safe_add_2d(grad_input.data, iy_sw, ix_sw, gInp_sH, gInp_sW, inp_H, inp_W, sw * gOut, NC_offset, grad_input_memory_span);
           safe_add_2d(grad_input.data, iy_se, ix_se, gInp_sH, gInp_sW, inp_H, inp_W, se * gOut, NC_offset, grad_input_memory_span);
+#endif
         }
 
         // Only one thread per (n, h, w) with channel 0 does the grid reduction,
@@ -461,7 +474,12 @@ namespace {
           const index_t ix_nearest = static_cast<index_t>(std::nearbyint(ix));
           const index_t iy_nearest = static_cast<index_t>(std::nearbyint(iy));
           const index_t NC_offset = n * gInp_sN + c * gInp_sC;
+#if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__))
+          const index_t idx = within_bounds_2d(iy_nearest, ix_nearest, inp_H, inp_W) ? (NC_offset + iy_nearest * gInp_sH + ix_nearest * gInp_sW) : static_cast<index_t>(-1);
+          if (idx >= 0) opportunistic_fastAtomicAdd<scalar_t, index_t>(grad_input.data, idx, grad_input_memory_span, gOut);
+#else
           safe_add_2d(grad_input.data, iy_nearest, ix_nearest, gInp_sH, gInp_sW, inp_H, inp_W, gOut, NC_offset, grad_input_memory_span);
+#endif
         }
         if (c == 0) {
           //scalar_t* gGrid_ptr = grad_grid.data + (n * out_H * out_W + h * out_W + w) * gGrid_sW;
