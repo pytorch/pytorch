@@ -795,7 +795,7 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
     std::move(I + 1, this->end(), I);
     // Drop the last elt.
     this->pop_back();
-    return (N);
+    return N;
   }
 
   iterator erase(iterator S, iterator E) {
@@ -807,7 +807,7 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
     // Drop the last elts.
     this->destroy_range(I, this->end());
     this->set_size(I - this->begin());
-    return (N);
+    return N;
   }
 
  private:
@@ -1412,13 +1412,13 @@ inline size_t capacity_in_bytes(const SmallVector<T, N>& X) {
 template <typename T, unsigned N>
 std::ostream& operator<<(std::ostream& out, const SmallVector<T, N>& list) {
   int i = 0;
-  out << "[";
+  out << '[';
   for (auto e : list) {
     if (i++ > 0)
       out << ", ";
     out << e;
   }
-  out << "]";
+  out << ']';
   return out;
 }
 

@@ -245,8 +245,7 @@ due to:
 Traceback (most recent call last):
   File "test_logging.py", line N, in throw
     raise AssertionError
-torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:
-LoweringException: AssertionError:
+torch._inductor.exc.InductorError: LoweringException: AssertionError:
   target: aten.round.default
   args[0]: TensorBox(StorageBox(
     InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
@@ -862,7 +861,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
     def test_logs_out(self):
         import tempfile
 
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(delete=True) as tmp:
             file_path = _as_posix_path(tmp.name)
             """
             NamedTemporaryFile will include a file open operation.
@@ -889,14 +888,16 @@ fn(torch.randn(5))
                 file_path, encoding="utf-8"
             ) as fd:  # encoding file to UTF-8 for Windows.
                 lines = fd.read()
-                fd.close()
-                os.remove(
-                    file_path
-                )  # Delete temp file manually, due to setup NamedTemporaryFile as delete=False.
-                self.assertEqual(  # process wrap difference: /r/n on Windows, /n on posix.
-                    empty_line_normalizer(lines),
-                    empty_line_normalizer(stderr.decode("utf-8")),
-                )
+                orig_maxDiff = unittest.TestCase.maxDiff
+                unittest.TestCase.maxDiff = None
+                try:
+                    self.assertEqual(  # process wrap difference: /r/n on Windows, /n on posix.
+                        empty_line_normalizer(lines),
+                        empty_line_normalizer(stderr.decode("utf-8")),
+                    )
+                except Exception:
+                    unittest.TestCase.maxDiff = orig_maxDiff
+                    raise
 
     @make_settings_test("torch._dynamo.eval_frame")
     def test_log_traced_frames(self, records):
@@ -983,6 +984,7 @@ exclusions = {
     "hierarchical_compile",
     "compute_dependencies",
     "annotation",
+    "node_runtime_estimation",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

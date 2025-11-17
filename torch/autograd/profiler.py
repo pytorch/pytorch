@@ -52,26 +52,7 @@ __all__ = [
     "MemRecordsAcc",
 ]
 
-try:
-    # Available in Python >= 3.2
-    from contextlib import ContextDecorator as _ContextDecorator
-except ImportError:
-    import functools
-
-    class _ContextDecorator:  # type: ignore[no-redef]
-        def __enter__(self):
-            raise NotImplementedError
-
-        def __exit__(self, exc_type, exc_val, exc_tb):
-            raise NotImplementedError
-
-        def __call__(self, func):
-            @functools.wraps(func)
-            def wrapped(*args, **kwargs):
-                with self:
-                    return func(*args, **kwargs)
-
-            return wrapped
+from contextlib import ContextDecorator
 
 
 # global python state - whether profiler is currently enabled
@@ -228,12 +209,12 @@ class profile:
                 FutureWarning,
                 stacklevel=2,
             )
-            self.use_device: Optional[str] = "cuda"
+            self.use_device: str | None = "cuda"
         else:
             self.use_device = use_device
         # TODO Consider changing _function_events into data structure with size cap
-        self._function_events: Optional[EventList] = None
-        self._old_function_events: Optional[EventList] = None
+        self._function_events: EventList | None = None
+        self._old_function_events: EventList | None = None
         # Function event processing is done lazily
         self._needs_processing = False
         self.entered = False
@@ -248,7 +229,7 @@ class profile:
         if experimental_config is None:
             experimental_config = _ExperimentalConfig()
         self.experimental_config = experimental_config
-        self.kineto_results: Optional[_ProfilerResult] = None
+        self.kineto_results: _ProfilerResult | None = None
         self.profiling_start_time_ns = 0
         self.profiling_end_time_ns = 0
         self._stats = _ProfilerStats()
@@ -265,22 +246,24 @@ class profile:
             if _get_privateuse1_backend_name() != "privateuseone":
                 VALID_DEVICE_OPTIONS.append(_get_privateuse1_backend_name())
             if self.use_device not in VALID_DEVICE_OPTIONS:
-                warn(f"The {self.use_device} is not a valid device option.")
+                warn(
+                    f"The {self.use_device} is not a valid device option.", stacklevel=2
+                )
                 self.use_device = None
 
             if self.use_device == "cuda" and not torch.cuda.is_available():
-                warn("CUDA is not available, disabling CUDA profiling")
+                warn("CUDA is not available, disabling CUDA profiling", stacklevel=2)
                 self.use_cuda = False
                 self.use_device = None
 
             if self.use_device == "xpu" and not torch.xpu.is_available():
-                warn("XPU is not available, disabling XPU profiling")
+                warn("XPU is not available, disabling XPU profiling", stacklevel=2)
                 self.use_device = None
 
             if self.use_device == "hpu" and not (
                 hasattr(torch, "hpu") and torch.hpu.is_available()
             ):
-                warn("HPU is not available, disabling HPU profiling")
+                warn("HPU is not available, disabling HPU profiling", stacklevel=2)
                 self.use_device = None
 
         self.kineto_activities = set()
@@ -742,8 +725,7 @@ class profile:
         return all_function_events
 
 
-# pyrefly: ignore  # invalid-inheritance
-class record_function(_ContextDecorator):
+class record_function(ContextDecorator):
     """Context manager/function decorator that adds a label to a code block/function when running autograd profiler.
     Label will only appear if CPU activity tracing is enabled.
 
@@ -782,16 +764,13 @@ class record_function(_ContextDecorator):
 
     """
 
-    def __init__(self, name: str, args: Optional[str] = None):
+    def __init__(self, name: str, args: str | None = None):
         self.name: str = name
-        self.args: Optional[str] = args
+        self.args: str | None = args
         # Whether or not we should run record function's end callbacks when exiting.
         self.run_callbacks_on_exit: bool = True
-        # TODO: TorchScript ignores standard type annotation here
-        # self.record: Optional["torch.classes.profiler._RecordFunction"] = None
         self.record = torch.jit.annotate(
-            # pyrefly: ignore  # not-a-type
-            Optional["torch.classes.profiler._RecordFunction"],
+            Optional[torch.classes.profiler._RecordFunction],
             None,
         )
 
@@ -1224,7 +1203,8 @@ class KinetoStepTracker:
             if delta > 1:
                 warn(
                     "Profiler step count has increased more than 1 - "
-                    f"current_step = {cls._current_step} step dict =  {cls._step_dict}"
+                    f"current_step = {cls._current_step} step dict =  {cls._step_dict}",
+                    stacklevel=2,
                 )
             for _ in range(delta):
                 _kineto_step()

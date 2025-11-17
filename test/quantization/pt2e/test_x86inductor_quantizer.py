@@ -1548,7 +1548,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             return annot._annotated, annot._is_output_of_quantized_pattern
 
         for node in gm.graph.nodes:
-            if node.target in expected_stat_dict.keys():
+            if node.target in expected_stat_dict:
                 annotated, is_quant_out = _check_annotation(node)
                 expected_stat_dict[node.target]["annotated"] -= annotated
                 expected_stat_dict[node.target]["is_quant_out"] -= is_quant_out
@@ -2016,7 +2016,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         }
 
         with override_quantized_engine("x86"):
-            for unary_op in unary_map.keys():
+            for unary_op in unary_map:
                 m = TestHelperModules.Conv2dUnaryModule(
                     unary_map[unary_op][0], with_bn=True
                 )
@@ -2464,11 +2464,11 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
         }
         node_list = [
-            # Q/DQ for first lienar
+            # Q/DQ for first linear
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.linear.default,
-            # Q/DQ for second lienar
+            # Q/DQ for second linear
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.linear.default,

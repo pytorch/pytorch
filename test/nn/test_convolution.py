@@ -12,6 +12,16 @@ import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import make_tensor
+
+
+def _get_cudnn_version():
+    """Safely get cuDNN version, returning None if unavailable."""
+    try:
+        return torch.backends.cudnn.version()
+    except RuntimeError:
+        return None
+
+
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, tf32_on_and_off
 from torch.testing._internal.common_device_type import (
     disablecuDNN,
@@ -47,9 +57,12 @@ from torch.testing._internal.common_utils import (
     gradgradcheck,
     instantiate_parametrized_tests,
     MACOS_VERSION,
+    MI300_ARCH,
     parametrize as parametrize_test,
     run_tests,
+    serialTest,
     set_default_dtype,
+    skipIfRocmArch,
     subtest,
     TEST_SCIPY,
     TEST_WITH_ROCM,
@@ -92,6 +105,47 @@ class TestConvolutionNN(NNTestCase):
             m = torch.load(path, encoding="utf-8", weights_only=False)
         input = torch.randn((1, 1, 1, 1), dtype=torch.float)
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
+
+    def test_huge_padding(self):
+        class Conv1dModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv1d(
+                    in_channels=16,
+                    out_channels=32,
+                    kernel_size=3,
+                    stride=1,
+                    padding=9223372036854775803,
+                )
+                self.add_module(name="conv1", module=self.conv1)
+
+        input_data = torch.randn(1, 16, 100)
+        model = Conv1dModule()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Given padding=9223372036854775803 at dimension 0 , expected padding to be at most",
+        ):
+            model.conv1(input_data)
+
+        class ConvTransposed1dModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_transposed1d = nn.ConvTranspose1d(
+                    in_channels=16,
+                    out_channels=32,
+                    kernel_size=3,
+                    stride=2,
+                    padding=9223372036854775803,
+                )
+                self.add_module(name="conv_transposed1d", module=self.conv_transposed1d)
+
+        input_data = torch.randn(1, 16, 100)
+        model = ConvTransposed1dModule()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Given padding=9223372036854775803 at dimension 0 , expected padding to be at most",
+        ):
+            model.conv_transposed1d(input_data)
 
     def test_invalid_conv1d(self):
         for dtype in [
@@ -1009,7 +1063,7 @@ class TestConvolutionNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_conv_cudnn_memory_layout_dominance(self):
         # desired behavior here is to have the memory_layout of conv.weight to
-        # dominante the layout of output.
+        # dominant the layout of output.
         # which is not the same as current behavior, we'll fix this in
         # following up PRs and remove the `expectedFailure` tag
         input = torch.randint(
@@ -3183,6 +3237,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @largeTensorTest("12GB")
+    @serialTest()
     def test_conv_large_nosplit(self, device):
         # Here we just test the convolution correctly route to the fallback implementation
         # that is, it does not crash. The correctness of fallback implementation should be
@@ -3243,6 +3298,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @largeTensorTest("12GB")
+    @serialTest()
     def test_conv_transposed_large(self, device):
         dtype = torch.half if self.device_type == "cuda" else torch.float
         conv = nn.ConvTranspose2d(1, 1, 1, 1, bias=False).to(device).to(dtype)
@@ -3287,6 +3343,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @largeTensorTest("12GB")
+    @serialTest()
     def test_conv_large(self, device):
         dtype = torch.half if self.device_type == "cuda" else torch.float
         conv = nn.Conv2d(2, 2, 8, 8, bias=False).to(device).to(dtype)
@@ -3320,6 +3377,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @largeTensorTest("20GB", "cpu")
     @largeTensorTest("60GB", "cuda")
+    @serialTest()
     def test_conv_large_batch_1(self, device):
         in_channels = 514
         dim = 2048
@@ -3352,8 +3410,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
         F.conv_transpose2d(x, torch.randn(16, 1, 1, 1, device=device))
         F.conv2d(x, torch.randn(1, 16, 1, 1, device=device))
 
+    @skipIfRocmArch(MI300_ARCH)
     @onlyCUDA
-    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @tf32_on_and_off(0.005)
     def test_Conv2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
         conv_cpu = torch.nn.Conv2d(3, 3, kernel_size=1)
@@ -3384,8 +3443,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
             exact_device=False,
         )
 
+    @skipIfRocmArch(MI300_ARCH)
     @onlyCUDA
-    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @tf32_on_and_off(0.005)
     def test_ConvTranspose2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
         conv_cpu = torch.nn.ConvTranspose2d(3, 3, kernel_size=1)
@@ -3599,7 +3659,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     input_format=input_format,
                     weight_format=weight_format,
                 )
-                # test when input chanels is 1 and not converted to channels last
+                # test when input channel is 1 and not converted to channels last
                 helper(
                     nn.Conv2d,
                     2,
@@ -4131,6 +4191,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @largeTensorTest("40GB")
     @largeTensorTest("24GB", "cpu")
+    @serialTest()
     @tf32_on_and_off(0.005)
     def test_conv3d_64bit_indexing(self, device):
         x = torch.rand(1, 32, 512, 512, 256)
@@ -4141,7 +4202,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @skipCUDAIfRocm
     @onlyCUDA
-    @largeTensorTest("40GB", "cuda")
+    @largeTensorTest("48GB", "cuda")
+    @serialTest()
     def test_conv3d_cudnn_broken(self, device):
         for dtype in (torch.half, torch.bfloat16):
             x = torch.rand(1, 16, 124, 1282, 722, dtype=dtype, device=device)
@@ -4164,11 +4226,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @largeTensorTest("20GB")
     @largeTensorTest("64GB", "cpu")
+    @serialTest()
     # TODO(eqy): Remove this once it is fixed in cuDNN and we can dispatch to it again
-    @xfailIf(
-        torch.backends.cudnn.version() is not None
-        and torch.backends.cudnn.version() > 91000
-    )
+    @xfailIf(_get_cudnn_version() is not None and _get_cudnn_version() > 91000)
     def test_depthwise_conv_64bit_indexing(self, device):
         x = torch.randn(1, 2, 32800, 32800, dtype=torch.half).to(
             memory_format=torch.channels_last
