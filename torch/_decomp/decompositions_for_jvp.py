@@ -1,7 +1,8 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import inspect
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import torch
 import torch._decomp
@@ -83,7 +84,7 @@ def _register_jit_decomposition_for_jvp(decomp, use_python=False):
         # Thanks copilot!
         def get_function_def(sig):
             param_def = [f"{param_str}" for param_str in sig.parameters.values()]
-            param_use = [f"{param_str}" for param_str in sig.parameters.keys()]
+            param_use = [f"{param_str}" for param_str in sig.parameters]
 
             return f"def wrapped_decomp({', '.join(param_def)}):\n  return decomp_fn({', '.join(param_use)})\n"
 
@@ -146,7 +147,7 @@ def native_layer_norm_backward(
     inner_dims = input_shape[axis:]
     outer_dims = input_shape[:axis]
     inner_dim_indices = list(range(axis, input_ndim))
-    outer_dim_indices = list(range(0, axis))
+    outer_dim_indices = list(range(axis))
 
     N = 1
     for i in inner_dims:
