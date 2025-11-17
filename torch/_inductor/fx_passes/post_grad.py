@@ -1556,13 +1556,19 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
     match.replace_by_example(repl, [inp, mat1, mat2, alpha, beta])
 
 
-def is_valid_addmm_activation_fusion(match: Match) -> bool:
+def is_valid_addmm_activation_fusion(match: Match, activation: str = "relu") -> bool:
     if not is_gpu(match.kwargs["inp"].meta["val"].device.type):
         return False
 
     # Only beta == 1 so far implies activation epilogue in addmm
     if match.kwargs["beta"] not in (1, 1.0, 1 + 0j, 1 - 0j):
         return False
+
+    if activation == "gelu":
+        approximate = match.kwargs.setdefault("approximate", "none")
+        # Activation fusion only for "tanh" approximation
+        if approximate != "tanh":
+            return False
 
     return not has_uses_tagged_as(
         match.output_node(),
@@ -1592,6 +1598,31 @@ def relu_addmm_fusion(match: Match, mat1, mat2, *, inp, beta, alpha):
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(replacement, [inp, mat1, mat2, beta, alpha])
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.gelu,
+        CallFunction(
+            aten.addmm,
+            KeywordArg("inp"),
+            Arg(),
+            Arg(),
+            beta=KeywordArg("beta"),
+            alpha=KeywordArg("alpha"),
+        ),
+        approximate=KeywordArg("approximate"),
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[1],
+    extra_check=lambda *args, **kwargs: is_valid_addmm_activation_fusion(*args, activation="gelu", **kwargs),
+)
+def gelu_addmm_fusion(match: Match, mat1, mat2, *, inp, beta, alpha, approximate):
+    def replacement(inp, mat1, mat2, beta, alpha, approximate):
+        return aten._addmm_activation(inp, mat1, mat2, beta=beta, alpha=alpha, use_gelu=True)
+
+    # pyrefly: ignore [bad-argument-type]
+    match.replace_by_example(replacement, [inp, mat1, mat2, beta, alpha, approximate])
 
 
 @register_graph_pattern(

@@ -1227,12 +1227,14 @@ class TestPatternMatcher(TestCase):
         m2 = torch.rand(2, 4, device=GPU_TYPE)
         alphas = ({"alpha": 0.8}, {})  # **{} -> alpha=1
         betas = ({"beta": 1}, {})  # **{} -> beta=1
-        activations = (
-            lambda *args, **kwargs: torch.nn.functional.relu(*args, **kwargs),
-        )
 
-        for activation in activations:
-            # Cases Activation(Addmm) -> _addmm_activation
+        # Cases Activation(Addmm) -> _addmm_activation
+        fusable_activations = (
+            lambda *args, **kwargs: torch.nn.functional.relu(*args, **kwargs),
+            # NOTE: only approximate="tanh" is fusable
+            lambda *args, **kwargs: torch.nn.functional.gelu(*args, approximate="tanh", **kwargs),
+        )
+        for activation in fusable_activations:
             for beta, alpha in itertools.product(betas, alphas):
 
                 def f(b, m1, m2, beta, alpha):
@@ -1251,6 +1253,22 @@ class TestPatternMatcher(TestCase):
             # abs(beta) != 1 implies no _addmm_activation
             _, (code) = run_and_get_code(fc, b, m1, m2, {"beta": 0.5}, alpha)
             self.assertNotIn("_addmm_activation", code[0])
+
+        # Cases Activation(Addmm) -> Activation(Addmm)
+        non_fusable_activations = (
+            torch.nn.functional.gelu,  # implies approximate="none"
+            lambda *args, **kwargs: torch.nn.functional.gelu(*args, approximate="none", **kwargs),
+        )
+        for activation in non_fusable_activations:
+            for beta, alpha in itertools.product(betas, alphas):
+
+                def f(b, m1, m2, beta, alpha):
+                    return activation(torch.addmm(b, m1, m2, **beta, **alpha))
+
+                fc = torch.compile(f)
+
+                _, (code) = run_and_get_code(fc, b, m1, m2, beta, alpha)
+                self.assertNotIn("_addmm_activation", code[0])
 
     def test_addmm_alpha_beta_with_pointwise(self):
         # Test that addmm with alpha/beta != 1 is unfused correctly with pointwise ops
