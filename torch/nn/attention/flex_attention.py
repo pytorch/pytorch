@@ -229,6 +229,7 @@ class FlexKernelOptions(TypedDict, total=False):
         - "DECODE": Triton flex_decoding kernel, only available for short sequence lengths with specific configurations
         - "FLASH": Experimental: Flash Attention kernel (cute-dsl), user needs to have flash installed
 
+    This option cannot be combined with legacy knobs such as ``FORCE_USE_FLEX_ATTENTION``.
     Raises an error if the requested implementation cannot be used. Default: "DEFAULT"
     """
 
@@ -1246,6 +1247,16 @@ def _apply_kernel_options(
     return_aux: AuxRequest | None = None,
 ):
     kernel_options = {} if kernel_options is None else dict(kernel_options)
+
+    if "FORCE_IMPL" in kernel_options and kernel_options.get(
+        "FORCE_USE_FLEX_ATTENTION", False
+    ):
+        # TODO: remove FORCE_USE_FLEX_ATTENTION once FORCE_IMPL is fully adopted.
+        raise RuntimeError(
+            "FORCE_IMPL cannot be combined with legacy FORCE_USE_FLEX_ATTENTION. "
+            "FORCE_IMPL supersedes the legacy knob; please drop FORCE_USE_FLEX_ATTENTION "
+            "and only specify the desired FORCE_IMPL."
+        )
 
     kernel_options.setdefault("FORCE_IMPL", "DEFAULT")
     kernel_options.setdefault("PRESCALE_QK", False)
