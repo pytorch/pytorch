@@ -2,6 +2,7 @@
 // This file should only be compiled if this condition holds, so it should be
 // safe.
 #if defined(USE_CUDNN) || defined(USE_ROCM)
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <tuple>
@@ -12,8 +13,6 @@ using version_tuple = std::tuple<size_t, size_t, size_t>;
 
 #ifdef USE_CUDNN
 #include <cudnn.h>
-
-TORCH_MAKE_PYBIND_ENUM_FASTER(cudnnRNNMode_t)
 
 namespace {
 
@@ -34,11 +33,7 @@ version_tuple getRuntimeVersion() {
 }
 
 size_t getVersionInt() {
-#ifndef USE_STATIC_CUDNN
-  return cudnnGetVersion();
-#else
-  return CUDNN_VERSION;
-#endif
+  return at::detail::getCUDAHooks().versionRuntimeCuDNN();
 }
 
 } // namespace

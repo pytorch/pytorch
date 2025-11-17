@@ -13,6 +13,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
+from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
@@ -269,7 +270,7 @@ class TestFlopCounter(TestCase):
         model = torch.nn.ConvTranspose2d(4, 8, (2, 2), stride=2)
 
         with FlopCounterMode() as mode:
-            for i in range(50):
+            for _ in range(50):
                 out = model(x)
                 out.sum().backward()
         self.assertExpectedInline(str(mode.get_total_flops()), """1536000""")
@@ -853,7 +854,7 @@ class TestFlopCounter(TestCase):
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
     def test_scaled_mm(self):
-        dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
+        dtype = e4m3_type
         with FlopCounterMode() as mode:
             torch._scaled_mm(
                 torch.randn((3 * 16, 5 * 16), device="cuda").to(dtype),

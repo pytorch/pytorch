@@ -215,7 +215,7 @@ partition create_sdpa_graph_partition(
   // For optional additive mask
   std::optional<op> mask_add;
 
-  // For optional implicite causal mask
+  // For optional implicit causal mask
   std::optional<op> mask_gen_idx_row;
   std::optional<logical_tensor> mask_row_idx;
   std::optional<op> mask_gen_idx_col;
@@ -556,7 +556,7 @@ partition create_sdpa_backward_graph_partition(
   // For optional additive mask
   std::optional<op> mask_add;
 
-  // For optional implicite causal mask
+  // For optional implicit causal mask
   std::optional<op> mask_gen_idx_row;
   std::optional<logical_tensor> mask_row_idx;
   std::optional<op> mask_gen_idx_col;
