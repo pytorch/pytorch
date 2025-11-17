@@ -5,6 +5,7 @@ import unittest
 
 import torch
 import torch.distributed as dist
+from torch._dynamo.testing import CompileCounterWithBackend
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -30,6 +31,8 @@ from torch.utils._debug_mode import (
     _RedistributeCall,
     _TritonKernelCall,
     DebugMode,
+    hash_tensor_fn,
+    norm_hash_fn,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._triton import has_triton_package
@@ -113,6 +116,28 @@ class TestDTensorDebugMode(TestCase):
         self.assertTrue(
             "aten::sum(t: f32[1, 32])  # {'hash': " in debug_mode.debug_string()
         )
+
+        # check tuple hash functions
+        with (
+            DebugMode() as debug_mode,
+            DebugMode.log_tensor_hashes(hash_fn=["norm", "hash_tensor"]),
+        ):
+            mm(x_dtensor, y_dtensor)
+
+        output_hash = debug_mode.operators[-1].log["hash"]
+        norm_ = lambda x: norm_hash_fn(x, use_scalar=True)  # noqa: E731
+        hash_ = lambda x: hash_tensor_fn(x, use_scalar=True)  # noqa: E731
+
+        self.assertEqual(output_hash[0], norm_(eager_out))
+        self.assertEqual(output_hash[1], hash_(eager_out))
+
+        # some edge cases
+        self.assertEqual(norm_(torch.tensor(torch.nan)), torch.nan)
+        self.assertEqual(norm_(torch.tensor(torch.inf)), torch.inf)
+        self.assertEqual(norm_(torch.complex(torch.ones(4), torch.zeros(4))), 4)
+        self.assertEqual(hash_(torch.ones(4, dtype=torch.float8_e5m2)), 0)
+        self.assertEqual(hash_(torch.ones(4, dtype=torch.int8)), 0)
+        self.assertEqual(hash_(torch.ones(5, dtype=torch.int8)), 1)
 
     def test_debug_string_inside_context(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
@@ -384,14 +409,22 @@ class TestDTensorDebugMode(TestCase):
         self.assertIn("torch.ops.higher_order.cond", debug_mode.debug_string())
 
     def test_compile(self):
-        @torch.compile
+        cnt = CompileCounterWithBackend("inductor")
+
+        @torch.compile(backend=cnt)
         def f(x):
             return x.sin().cos()
 
         x = torch.randn(8)
+        f(x)
         with DebugMode() as debug_mode:
             f(x)
-        self.assertEqual(len(debug_mode.debug_string()), 0)
+            self.assertEqual(len(debug_mode.debug_string()), 0)
+            f(x)
+        f(x)
+        self.assertEqual(
+            cnt.frame_count, 1
+        )  # check DebugMode doesn't trigger additional recompilations
 
     def test_nn_module(self):
         class Foo(torch.nn.Module):
@@ -441,6 +474,9 @@ class TestDTensorDebugMode(TestCase):
             op for op in debug_mode.operators if str(op.op) == "aten.sum.dim_IntList"
         ][-1]
         self.assertTrue("self.l2(self.l1(x))" in sum_op.fwd_stack_trace)
+        self.assertTrue(
+            "self.l2(self.l1(x))" in debug_mode.debug_string(show_stack_trace=True)
+        )
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @unittest.skipIf(not has_triton_package(), "requires triton")
