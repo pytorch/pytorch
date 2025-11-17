@@ -497,7 +497,7 @@ static bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
     if (item.a.isPtrType()) {
       // uncomment to debug type matching errors
       // std::cout << "MATCHING " << /*item.a <<*/ "(" << *item.a.type() << ") "
-      //          << item.a.internalToPointer() << " " << /*item.b <<*/ " ("
+      //          << item.a.internalToPointer() << ' ' << /*item.b <<*/ " ("
       //          << *item.b.type() << ") " << item.b.internalToPointer() <<
       //          "\n";
 
@@ -902,7 +902,7 @@ void initJitScriptBindings(PyObject* module) {
                     std::stringstream err;
                     err << "Tried to deepcopy object ";
                     if (auto qualname = class_type->name()) {
-                      err << qualname->qualifiedName() << " ";
+                      err << qualname->qualifiedName() << ' ';
                     }
                     err << "which does not have a __setstate__ method defined!";
                     throw std::runtime_error(err.str());
@@ -912,7 +912,7 @@ void initJitScriptBindings(PyObject* module) {
                 std::stringstream err;
                 err << "Tried to deepcopy object ";
                 if (auto qualname = self.type()->name()) {
-                  err << qualname->qualifiedName() << " ";
+                  err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __getstate__ method defined!";
                 throw std::runtime_error(err.str());
@@ -929,7 +929,7 @@ void initJitScriptBindings(PyObject* module) {
                 std::stringstream err;
                 err << "Tried to serialize object ";
                 if (auto qualname = self.type()->name()) {
-                  err << qualname->qualifiedName() << " ";
+                  err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __getstate__ method defined!";
                 throw std::runtime_error(err.str());
@@ -966,7 +966,7 @@ void initJitScriptBindings(PyObject* module) {
                 std::stringstream err;
                 err << "Tried to deserialize object ";
                 if (auto qualname = class_type->name()) {
-                  err << qualname->qualifiedName() << " ";
+                  err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __setstate__ method defined!";
                 throw std::runtime_error(err.str());

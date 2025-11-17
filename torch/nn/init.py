@@ -2,7 +2,8 @@
 
 import math
 import warnings
-from typing import Callable, Literal, Optional as _Optional, TypeVar, Union
+from collections.abc import Callable
+from typing import Literal, Optional as _Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -137,7 +138,7 @@ def _no_grad_zero_(tensor: Tensor) -> Tensor:
 
 
 def calculate_gain(
-    nonlinearity: _NonlinearityType, param: _Optional[Union[int, float]] = None
+    nonlinearity: _NonlinearityType, param: _Optional[int | float] = None
 ) -> float:
     r"""Return the recommended gain value for the given nonlinearity function.
 
@@ -499,6 +500,7 @@ def xavier_normal_(
 
 
 def _calculate_correct_fan(tensor: Tensor, mode: _FanMode) -> int:
+    # pyrefly: ignore [bad-assignment]
     mode = mode.lower()
     valid_modes = ["fan_in", "fan_out"]
     if mode not in valid_modes:
@@ -563,7 +565,7 @@ def kaiming_uniform_(
         )
 
     if 0 in tensor.shape:
-        warnings.warn("Initializing zero-element tensors is a no-op")
+        warnings.warn("Initializing zero-element tensors is a no-op", stacklevel=2)
         return tensor
     fan = _calculate_correct_fan(tensor, mode)
     gain = calculate_gain(nonlinearity, a)
@@ -617,7 +619,7 @@ def kaiming_normal_(
         pass in a transposed weight matrix, i.e. ``nn.init.kaiming_normal_(w.T, ...)``.
     """
     if 0 in tensor.shape:
-        warnings.warn("Initializing zero-element tensors is a no-op")
+        warnings.warn("Initializing zero-element tensors is a no-op", stacklevel=2)
         return tensor
     fan = _calculate_correct_fan(tensor, mode)
     gain = calculate_gain(nonlinearity, a)
@@ -704,7 +706,7 @@ def sparse_(
         raise ValueError("Only tensors with 2 dimensions are supported")
 
     rows, cols = tensor.shape
-    num_zeros = int(math.ceil(sparsity * rows))
+    num_zeros = math.ceil(sparsity * rows)
 
     with torch.no_grad():
         tensor.normal_(0, std, generator=generator)

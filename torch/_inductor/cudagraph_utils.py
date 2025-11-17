@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
-from torch._dynamo.exc import Unsupported
 from torch._dynamo.utils import counters, get_metrics_context
 from torch._inductor.utils import GraphPartitionMap, InputType
 from torch.utils._ordered_set import OrderedSet
@@ -74,7 +74,7 @@ def get_mutating_use_stack_trace_from_node(
         return next(iter(placeholder_node.users)).meta.get("stack_trace", None)
 
     for use in placeholder_node.users:
-        if use.target == torch.ops.aten.copy_.default:
+        if use.target is torch.ops.aten.copy_.default:
             if stack_trace := use.meta.get("stack_trace", None):
                 return stack_trace
 
@@ -192,7 +192,7 @@ def check_multiple_devices_or_any_cpu_nodes(
     ):
         return None
 
-    keys_repr = (repr(key) for key in device_node_mapping.keys())
+    keys_repr = (repr(key) for key in device_node_mapping)
     return format_default_skip_message(f"multiple devices: {', '.join(keys_repr)}")
 
 
@@ -207,7 +207,7 @@ def log_cudagraph_skip_and_bump_counter(msg: str) -> None:
     counters["inductor"]["cudagraph_skips"] += 1
 
     if torch._inductor.config.triton.cudagraph_or_error:
-        raise Unsupported(msg)
+        raise RuntimeError(msg)
 
     metrics_context = get_metrics_context()
     if metrics_context.in_progress():

@@ -93,7 +93,7 @@ class TestUserObjects(__TestCase):
         self._copy_test(obj)
 
     def test_dict_missing(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class A(UserDict):
                 def __missing__(self, key):
                     return 456
@@ -193,7 +193,7 @@ class TestChainMap(__TestCase):
         self.assertTrue(ChainMap({}, {1:2}))
 
     def test_missing(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class DefaultChainMap(ChainMap):
                 def __missing__(self, key):
                     return 999
@@ -228,7 +228,7 @@ class TestChainMap(__TestCase):
              ('i', 9999), ('j', 0)])
 
     def test_iter_not_calling_getitem_on_maps(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class DictWithGetItem(UserDict):
                 def __init__(self, *args, **kwds):
                     self.called = False
@@ -260,7 +260,7 @@ class TestChainMap(__TestCase):
         self.assertIs(m, d.maps[0])
 
         # Use a different map than a dict
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class lowerdict(dict):
                 def __getitem__(self, key):
                     if isinstance(key, str):
@@ -690,7 +690,7 @@ class TestNamedTuple(__TestCase):
             NT = namedtuple('NT', ['abc', 'def'], False, True)
 
     def test_namedtuple_subclass_issue_24931(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class Point(namedtuple('_Point', ['x', 'y'])):
                 pass
 
@@ -753,7 +753,7 @@ class ABCTestCase(__TestCase):
         methodstubs = dict.fromkeys(names, lambda s, *args: 0)
 
         # everything should work will all required methods are present
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             C = type('C', (abc,), methodstubs)
         C()
 
@@ -1011,7 +1011,7 @@ class TestOneTrickPonyABCs(ABCTestCase):
         for x in samples:
             self.assertIsInstance(x, Iterable)
             self.assertTrue(issubclass(type(x), Iterable), repr(type(x)))
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             # Check direct subclassing
             class I(Iterable):
                 def __iter__(self):
@@ -1020,7 +1020,7 @@ class TestOneTrickPonyABCs(ABCTestCase):
         self.assertFalse(issubclass(str, I))
         self.validate_abstract_methods(Iterable, '__iter__')
         self.validate_isinstance(Iterable, '__iter__')
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             # Check None blocking
             class It:
                 def __iter__(self): return iter([])
@@ -1055,7 +1055,7 @@ class TestOneTrickPonyABCs(ABCTestCase):
         self.assertTrue(issubclass(Sequence, Reversible), repr(Sequence))
         self.assertFalse(issubclass(Mapping, Reversible), repr(Mapping))
         self.assertFalse(issubclass(MutableMapping, Reversible), repr(MutableMapping))
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             # Check direct subclassing
             class R(Reversible):
                 def __iter__(self):
@@ -1065,7 +1065,7 @@ class TestOneTrickPonyABCs(ABCTestCase):
         self.assertEqual(list(reversed(R())), [])
         self.assertFalse(issubclass(float, R))
         self.validate_abstract_methods(Reversible, '__reversed__', '__iter__')
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             # Check reversible non-iterable (which is not Reversible)
             class RevNoIter:
                 def __reversed__(self): return reversed([])
@@ -1075,7 +1075,7 @@ class TestOneTrickPonyABCs(ABCTestCase):
         self.assertFalse(isinstance(RevNoIter(), Reversible))
         self.assertTrue(issubclass(RevPlusIter, Reversible))
         self.assertTrue(isinstance(RevPlusIter(), Reversible))
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             # Check None blocking
             class Rev:
                 def __iter__(self): return iter([])
@@ -1117,7 +1117,7 @@ class TestOneTrickPonyABCs(ABCTestCase):
         self.assertTrue(issubclass(Set, Collection), repr(Set))
         self.assertTrue(issubclass(MutableSet, Collection), repr(MutableSet))
         self.assertTrue(issubclass(Sequence, Collection), repr(MutableSet))
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             # Check direct subclassing
             class Col(Collection):
                 def __iter__(self):
@@ -1138,7 +1138,7 @@ class TestOneTrickPonyABCs(ABCTestCase):
         self.validate_abstract_methods(Collection, '__len__', '__iter__',
                                                    '__contains__')
         # Check sized container non-iterable (which is not Collection) etc.
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class ColNoIter:
                 def __len__(self): return 0
                 def __contains__(self, item): return False
@@ -1155,7 +1155,7 @@ class TestOneTrickPonyABCs(ABCTestCase):
         self.assertFalse(issubclass(ColNoCont, Collection))
         self.assertFalse(isinstance(ColNoCont(), Collection))
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             # Check None blocking
             class SizeBlock:
                 def __iter__(self): return iter([])
@@ -1169,7 +1169,7 @@ class TestOneTrickPonyABCs(ABCTestCase):
         self.assertFalse(isinstance(SizeBlock(), Collection))
         self.assertFalse(issubclass(IterBlock, Collection))
         self.assertFalse(isinstance(IterBlock(), Collection))
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             # Check None blocking in subclass
             class ColImpl:
                 def __iter__(self):
@@ -1202,7 +1202,7 @@ class TestOneTrickPonyABCs(ABCTestCase):
             self.assertTrue(issubclass(type(x), Iterator), repr(type(x)))
         self.validate_abstract_methods(Iterator, '__next__', '__iter__')
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             # Issue 10565
             class NextOnly:
                 def __next__(self):
@@ -1211,7 +1211,7 @@ class TestOneTrickPonyABCs(ABCTestCase):
         self.assertNotIsInstance(NextOnly(), Iterator)
 
     def test_Generator(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class NonGen1:
                 def __iter__(self): return self
                 def __next__(self): return None
@@ -1236,7 +1236,7 @@ class TestOneTrickPonyABCs(ABCTestCase):
             self.assertNotIsInstance(x, Generator)
             self.assertFalse(issubclass(type(x), Generator), repr(type(x)))
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class Gen:
                 def __iter__(self): return self
                 def __next__(self): return None
@@ -1271,14 +1271,14 @@ class TestOneTrickPonyABCs(ABCTestCase):
                                mgen.throw, ValueError, ValueError("huhu"))
         self.assertRaises(StopIteration, mgen.throw, StopIteration())
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class FailOnClose(Generator):
                 def send(self, value): return value
                 def throw(self, *args): raise ValueError
 
         self.assertRaises(ValueError, FailOnClose().close)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class IgnoreGeneratorExit(Generator):
                 def send(self, value): return value
                 def throw(self, *args): pass
@@ -1424,7 +1424,7 @@ class TestOneTrickPonyABCs(ABCTestCase):
 
     def test_direct_subclassing(self):
         for B in Hashable, Iterable, Iterator, Reversible, Sized, Container, Callable:
-            with torch._dynamo.set_fullgraph(fullgraph=False):
+            with torch._dynamo.error_on_graph_break(False):
                 class C(B):
                     pass
             self.assertTrue(issubclass(C, B))
@@ -1432,7 +1432,7 @@ class TestOneTrickPonyABCs(ABCTestCase):
 
     def test_registration(self):
         for B in Hashable, Iterable, Iterator, Reversible, Sized, Container, Callable:
-            with torch._dynamo.set_fullgraph(fullgraph=False):
+            with torch._dynamo.error_on_graph_break(False):
                 class C:
                     __hash__ = None  # Make sure it isn't hashable by default
             self.assertFalse(issubclass(C, B), B.__name__)
@@ -1470,7 +1470,7 @@ class TestCollectionABCs(ABCTestCase):
             self.assertIsInstance(sample(), Set)
             self.assertTrue(issubclass(sample, Set))
         self.validate_abstract_methods(Set, '__contains__', '__iter__', '__len__')
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class MySet(Set):
                 def __contains__(self, x):
                     return False
@@ -1496,7 +1496,7 @@ class TestCollectionABCs(ABCTestCase):
         self.assertTrue(hash(a) == hash(b))
 
     def test_isdisjoint_Set(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class MySet(Set):
                 def __init__(self, itr):
                     self.contents = itr
@@ -1513,7 +1513,7 @@ class TestCollectionABCs(ABCTestCase):
         self.assertFalse(s1.isdisjoint(s3))
 
     def test_equality_Set(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class MySet(Set):
                 def __init__(self, itr):
                     self.contents = itr
@@ -1536,7 +1536,7 @@ class TestCollectionABCs(ABCTestCase):
         self.assertNotEqual(s2, s3)
 
     def test_arithmetic_Set(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class MySet(Set):
                 def __init__(self, itr):
                     self.contents = itr
@@ -1567,7 +1567,7 @@ class TestCollectionABCs(ABCTestCase):
 
     def test_issue_4920(self):
         # MutableSet.pop() method did not work
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class MySet(MutableSet):
                 __slots__=['__s']
                 def __init__(self,items=None):
@@ -1615,7 +1615,7 @@ class TestCollectionABCs(ABCTestCase):
     def test_issue16373(self):
         # Recursion error comparing comparable and noncomparable
         # Set instances
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class MyComparableSet(Set):
                 def __contains__(self, x):
                     return False
@@ -1644,7 +1644,7 @@ class TestCollectionABCs(ABCTestCase):
 
     def test_issue26915(self):
         # Container membership test should check identity first
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class CustomSequence(Sequence):
                 def __init__(self, seq):
                     self._seq = seq
@@ -1676,7 +1676,7 @@ class TestCollectionABCs(ABCTestCase):
 
     def test_Set_from_iterable(self):
         """Verify _from_iterable overridden to an instance method works."""
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class SetUsingInstanceFromIterable(MutableSet):
                 def __init__(self, values, created_by):
                     if not created_by:
@@ -1733,7 +1733,7 @@ class TestCollectionABCs(ABCTestCase):
 
     def test_Set_interoperability_with_real_sets(self):
         # Issue: 8743
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class ListSet(Set):
                 def __init__(self, elements=()):
                     self.data = []
@@ -1902,7 +1902,7 @@ class TestCollectionABCs(ABCTestCase):
             self.assertTrue(issubclass(sample, Mapping))
         self.validate_abstract_methods(Mapping, '__contains__', '__iter__', '__len__',
             '__getitem__')
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class MyMapping(Mapping):
                 def __len__(self):
                     return 0
@@ -1960,7 +1960,7 @@ class TestCollectionABCs(ABCTestCase):
             '__getitem__')
 
     def test_Sequence_mixins(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class SequenceSubclass(Sequence):
                 def __init__(self, seq=()):
                     self.seq = seq
@@ -2041,7 +2041,7 @@ class TestCollectionABCs(ABCTestCase):
     def test_MutableSequence_mixins(self):
         # Test the mixins of MutableSequence by creating a minimal concrete
         # class inherited from it.
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class MutableSequenceSubclass(MutableSequence):
                 def __init__(self):
                     self.lst = []
@@ -2284,7 +2284,7 @@ class TestCounter(__TestCase):
         check(Counter(words))
 
     def test_copy_subclass(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class MyCounter(Counter):
                 pass
         c = MyCounter('slartibartfast')

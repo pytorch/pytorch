@@ -89,6 +89,12 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
   virtual int* get_rank_to_global_rank_dev() {
     TORCH_CHECK(false, "NYI");
   }
+
+  // Returns true if *all* peers within the group are accessible via direct
+  // memory load and store.
+  virtual bool world_within_direct_access() {
+    TORCH_CHECK(false, "NYI");
+  }
 };
 
 class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {
