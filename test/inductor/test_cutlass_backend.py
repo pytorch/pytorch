@@ -234,7 +234,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
-                "cuda.cutlass_backend_min_gemm_size": 100000,
+                "cuda.cutlass_backend_min_gemm_size": 100001,
                 "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
