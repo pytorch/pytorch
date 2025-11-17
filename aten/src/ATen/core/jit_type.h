@@ -41,7 +41,7 @@ void standardizeVectorForUnion(std::vector<TypePtr>* to_flatten);
 inline bool is_contiguous_strides(
     const IntArrayRef sizes,
     const IntArrayRef strides) {
-  int n_dim = static_cast<int>(sizes.size());
+  size_t n_dim = sizes.size();
   if (n_dim == 0) {
     return true;
   }
@@ -50,7 +50,7 @@ inline bool is_contiguous_strides(
     return false;
   }
 
-  for (int i = n_dim - 2; i >= 0; i--) {
+  for (int i = static_cast<int>(n_dim) - 2; i >= 0; i--) {
     if (strides[i] != strides[i + 1] * sizes[i + 1]) {
       return false;
     }
@@ -211,7 +211,7 @@ struct TORCH_API OptionalType : public UnionType {
 
   std::string str() const override {
     std::stringstream ss;
-    ss << getElementType()->str() << "?";
+    ss << getElementType()->str() << '?';
     return ss.str();
   }
 
@@ -240,7 +240,7 @@ struct TORCH_API OptionalType : public UnionType {
 
   std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     std::stringstream ss;
-    ss << "Optional[" << getElementType()->annotation_str(printer) << "]";
+    ss << "Optional[" << getElementType()->annotation_str(printer) << ']';
     return ss.str();
   }
 };
@@ -906,7 +906,7 @@ struct TORCH_API ListType
 
   std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     std::stringstream ss;
-    ss << "List[" << getElementType()->annotation_str(printer) << "]";
+    ss << "List[" << getElementType()->annotation_str(printer) << ']';
     return ss.str();
   }
 };
@@ -922,6 +922,7 @@ struct TORCH_API DictType : public SharedType {
     if (auto dyn = key->castRaw<DynamicType>()) {
       kind = dyn->dynamicKind();
     }
+    C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
     switch (kind) {
       case TypeKind::AnyType:
       case TypeKind::IntType:
@@ -938,13 +939,14 @@ struct TORCH_API DictType : public SharedType {
             key->str(),
             "', only int, float, complex, Tensor, device and string keys are supported");
     }
+    C10_DIAGNOSTIC_POP()
   }
 
   // aligned with the format in FunctionSchema
   std::string str() const override {
     std::stringstream ss;
     ss << "Dict(" << getKeyType()->str() << ", " << getValueType()->str()
-       << ")";
+       << ')';
     return ss.str();
   }
 
@@ -1016,7 +1018,7 @@ struct TORCH_API FutureType
 
   std::string str() const override {
     std::stringstream ss;
-    ss << "Future(" << getElementType()->str() << ")";
+    ss << "Future(" << getElementType()->str() << ')';
     return ss.str();
   }
   TypePtr createWithContained(
@@ -1039,7 +1041,7 @@ struct TORCH_API FutureType
 
   std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     std::stringstream ss;
-    ss << "Future[" << getElementType()->annotation_str(printer) << "]";
+    ss << "Future[" << getElementType()->annotation_str(printer) << ']';
     return ss.str();
   }
 };
@@ -1058,7 +1060,7 @@ struct TORCH_API AwaitType
 
   std::string str() const override {
     std::stringstream ss;
-    ss << "Await(" << getElementType()->str() << ")";
+    ss << "Await(" << getElementType()->str() << ')';
     return ss.str();
   }
   TypePtr createWithContained(
@@ -1081,7 +1083,7 @@ struct TORCH_API AwaitType
 
   std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     std::stringstream ss;
-    ss << "Await[" << getElementType()->annotation_str(printer) << "]";
+    ss << "Await[" << getElementType()->annotation_str(printer) << ']';
     return ss.str();
   }
 };
@@ -1100,7 +1102,7 @@ struct TORCH_API RRefType
 
   std::string str() const override {
     std::stringstream ss;
-    ss << "RRef(" << getElementType()->str() << ")";
+    ss << "RRef(" << getElementType()->str() << ')';
     return ss.str();
   }
   TypePtr createWithContained(
@@ -1113,7 +1115,7 @@ struct TORCH_API RRefType
 
   std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     std::stringstream ss;
-    ss << "RRef[" << getElementType()->annotation_str(printer) << "]";
+    ss << "RRef[" << getElementType()->annotation_str(printer) << ']';
     return ss.str();
   }
 };

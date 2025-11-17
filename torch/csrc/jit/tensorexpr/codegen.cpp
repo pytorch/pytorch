@@ -41,7 +41,7 @@ RegisterCodeGenList::StmtFactoryMethod RegisterCodeGenList::
       oss << entry.first;
       index++;
     }
-    oss << "]";
+    oss << ']';
     throw std::runtime_error(oss.str());
   }
   return iter->second;
