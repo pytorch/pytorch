@@ -5,7 +5,7 @@ import copy
 
 import torch
 import torch.nn as nn
-from torch.distributed import DeviceMesh, init_device_mesh
+from torch.distributed import DeviceMesh
 from torch.distributed.tensor import (
     distribute_module,
     distribute_tensor,
@@ -16,6 +16,7 @@ from torch.distributed.tensor import (
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     skip_if_lt_x_gpu,
     with_comms,
@@ -48,7 +49,7 @@ class DistConvolutionOpsTest(DTensorTestBase):
 
     @with_comms
     def test_downsampling_convolution(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(3)]
 
         input_list = torch.rand(ITER_TIME, 7, 3, 512, 1024)
@@ -118,7 +119,7 @@ class DistConvolutionOpsTest(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_depthwise_convolution(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(3)]
 
         input_list = torch.rand(ITER_TIME, 7, 256, 128, 256)
@@ -186,9 +187,7 @@ class DistConvolutionOpsTest(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_conv_backward_none_grad_inp(self):
-        device_mesh = init_device_mesh(
-            device_type=self.device_type, mesh_shape=(self.world_size,)
-        )
+        device_mesh = self.build_device_mesh()
         conv = nn.Conv2d(64, 64, 3, padding=1).train()
         x = torch.randn(1, 64, 32, 32)
         x_dt = DTensor.from_local(x, device_mesh, [Replicate()])
@@ -205,6 +204,42 @@ class DistConvolutionOpsTest(DTensorTestBase):
         self.assertTrue(b_dt.grad is not None)
         self.assertTrue(x_dt.grad is None)
 
+    def _run_single_arg_fwd(
+        self, model, arg, placements=None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Given model and arg, runs fwd model local and distbuted given device_mesh"""
+        device_mesh = self.build_device_mesh()
+        model_copy = copy.deepcopy(model).to(device=self.device_type)
+        dist_model = distribute_module(model, device_mesh, _conv_fn)
+        arg_dt = DTensor.from_local(arg, device_mesh, placements)
+        out_dt = dist_model(arg_dt.to(device=self.device_type))
+        out = model_copy(arg_dt.full_tensor())
+        return (out_dt.full_tensor(), out)
+
+    @with_comms
+    def test_conv1d(self):
+        model = nn.Conv1d(64, 64, 3, padding=1)
+        x = torch.randn(1, 64, 8, device=self.device_type)
+        out_dt, out = self._run_single_arg_fwd(model, x)
+        self.assertEqual(out_dt, out)
+
+    @with_comms
+    def test_conv3d(self):
+        model = nn.Conv3d(64, 64, 3, padding=1)
+        x = torch.randn(1, 64, 8, 8, 8, device=self.device_type)
+        out_dt, out = self._run_single_arg_fwd(model, x, [Shard(0)])
+        self.assertEqual(out_dt, out)
+
+
+DistConvolutionOpsTestWithLocalTensor = create_local_tensor_test_class(
+    DistConvolutionOpsTest,
+    # Send / recv ops are not supported
+    skipped_tests=[
+        "test_conv_backward_none_grad_inp",
+        "test_depthwise_convolution",
+        "test_downsampling_convolution",
+    ],
+)
 
 if __name__ == "__main__":
     run_tests()

@@ -241,6 +241,8 @@ void bf16bf16_grouped_gemm_impl_sm90_sm100(
   Strides tensor_StrideA = make_strides(mat_a.strides());
   Strides tensor_StrideB = make_strides(mat_b.strides());
   Strides tensor_StrideOutput = make_strides(out.strides());
+  Strides tensor_ShapeA = make_strides(mat_a.sizes());
+  Strides tensor_ShapeB = make_strides(mat_b.sizes());
 
   at::cuda::detail::prepare_grouped_gemm_data<<<1, group_count, 0, stream>>>(
       reinterpret_cast<DtypeA*>(mat_a.data_ptr()),
@@ -264,6 +266,8 @@ void bf16bf16_grouped_gemm_impl_sm90_sm100(
       tensor_StrideA,
       tensor_StrideB,
       tensor_StrideOutput,
+      tensor_ShapeA,
+      tensor_ShapeB,
       0,
       0,
       a_row_major,

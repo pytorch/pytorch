@@ -238,9 +238,6 @@ struct Vectorized {
     Vectorized vector;
     int_same_size_t<T> buffer[size()];
     mask.store(buffer);
-#if defined(__clang__) && __ARM_FEATURE_SVE
-#pragma clang loop vectorize(disable)
-#endif
     for (const auto i : c10::irange(size())) {
       if (buffer[i] & 0x01) {
         vector[i] = b[i];
@@ -547,6 +544,9 @@ struct Vectorized {
   Vectorized<T> exp_u20() const {
     return map(std::exp);
   }
+  Vectorized<T> fexp_u20() const {
+    return map(std::exp);
+  }
   Vectorized<T> frac() const {
     return *this - this->trunc();
   }
@@ -634,7 +634,7 @@ struct Vectorized {
   }
   Vectorized<T> neg() const {
     // NB: the trailing return type is needed because we need to coerce the
-    // return value back to T in the case of unary operator- incuring a
+    // return value back to T in the case of unary operator- incurring a
     // promotion
     return map([](T x) -> T { return -x; });
   }
@@ -672,7 +672,7 @@ struct Vectorized {
     return map(std::sqrt);
   }
   Vectorized<T> reciprocal() const {
-    return map([](T x) { return (T)(1) / x; });
+    return map([](T x) { return (T)1 / x; });
   }
   Vectorized<T> rsqrt() const {
     return map([](T x) { return (T)1 / std::sqrt(x); });
@@ -1248,6 +1248,16 @@ inline Vectorized<T> fmadd(
 VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fmadd)
 
 template <typename T>
+inline Vectorized<T> fnmadd(
+    const Vectorized<T>& a,
+    const Vectorized<T>& b,
+    const Vectorized<T>& c) {
+  return -(a * b) + c;
+}
+
+VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fnmadd)
+
+template <typename T>
 inline Vectorized<T> fmsub(
     const Vectorized<T>& a,
     const Vectorized<T>& b,
@@ -1256,6 +1266,16 @@ inline Vectorized<T> fmsub(
 }
 
 VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fmsub)
+
+template <typename T>
+inline Vectorized<T> fnmsub(
+    const Vectorized<T>& a,
+    const Vectorized<T>& b,
+    const Vectorized<T>& c) {
+  return -(a * b) - c;
+}
+
+VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fnmsub)
 
 template <typename T>
 Vectorized<T> inline operator&&(

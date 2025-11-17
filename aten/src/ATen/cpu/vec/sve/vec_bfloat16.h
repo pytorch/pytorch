@@ -5,6 +5,7 @@
 #include <ATen/cpu/vec/sve/vec_common_sve.h>
 #include <ATen/cpu/vec/sve/vec_float.h>
 #include <ATen/cpu/vec/vec_base.h>
+#include <c10/util/bit_cast.h>
 #include <cmath>
 namespace at {
 namespace vec {
@@ -36,7 +37,7 @@ class Vectorized<BFloat16> {
     return VECTOR_WIDTH / sizeof(BFloat16);
   }
 
-  Vectorized() {}
+  Vectorized();
   Vectorized(svbfloat16_t v) : values(v) {}
   Vectorized(int val);
   Vectorized(BFloat16 val);
@@ -163,6 +164,9 @@ class Vectorized<BFloat16> {
   Vectorized<BFloat16> exp_u20() const {
     return exp();
   }
+  Vectorized<BFloat16> fexp_u20() const {
+    return exp();
+  }
   Vectorized<BFloat16> fmod(const Vectorized<BFloat16>& q) const;
   Vectorized<BFloat16> hypot(const Vectorized<BFloat16>& b) const;
   Vectorized<BFloat16> i0() const;
@@ -187,7 +191,7 @@ class Vectorized<BFloat16> {
     auto vals = svreinterpret_u16_bf16(values);
     vals = sveor_u16_x(ptrue, vals, mask);
     return svreinterpret_bf16_u16(vals);
-  };
+  }
   Vectorized<BFloat16> round() const;
   Vectorized<BFloat16> tan() const;
   Vectorized<BFloat16> tanh() const;
@@ -220,8 +224,12 @@ class Vectorized<BFloat16> {
   Vectorized<BFloat16> le(const Vectorized<BFloat16>& other) const;
 };
 
-inline std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(
-    const Vectorized<c10::BFloat16>& a) {
+#if defined(__GNUC__) && __GNUC__ == 14
+// Workaround for gcc-14.2.0 ICE during RTL pass: vregs when compiling for SVE
+__attribute__((optimize("no-tree-vectorize")))
+#endif
+inline std::tuple<Vectorized<float>, Vectorized<float>>
+convert_bfloat16_float(const Vectorized<c10::BFloat16>& a) {
   static_assert(
       Vectorized<c10::BFloat16>::size() == 2 * Vectorized<float>::size());
   auto zero = svreinterpret_bf16_f32(svdup_n_f32(0.0f));
@@ -299,6 +307,11 @@ Vectorized<c10::BFloat16> inline operator/(
   return binary_operator_via_float(std::divides<Vectorized<float>>(), a, b);
 }
 
+inline Vectorized<BFloat16>::Vectorized() {
+  auto vals_f = svdup_n_f32(0);
+  values = convert_float_bfloat16(vals_f, vals_f);
+}
+
 inline Vectorized<BFloat16>::Vectorized(int val) {
   auto vals_f = svdup_n_f32(val);
   values = convert_float_bfloat16(vals_f, vals_f);
@@ -336,47 +349,47 @@ Vectorized<BFloat16> inline Vectorized<BFloat16>::frac() const {
     return convert_float_bfloat16(v1, v2);                     \
   }
 
-DEFINE_BF16_FUNC_VIA_FLOAT(isnan);
-DEFINE_BF16_FUNC_VIA_FLOAT(angle);
-DEFINE_BF16_FUNC_VIA_FLOAT(acos);
-DEFINE_BF16_FUNC_VIA_FLOAT(acosh);
-DEFINE_BF16_FUNC_VIA_FLOAT(asin);
-DEFINE_BF16_FUNC_VIA_FLOAT(atan);
-DEFINE_BF16_FUNC_VIA_FLOAT(atanh);
-DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(atan2);
-DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(copysign);
-DEFINE_BF16_FUNC_VIA_FLOAT(erf);
-DEFINE_BF16_FUNC_VIA_FLOAT(erfc);
-DEFINE_BF16_FUNC_VIA_FLOAT(exp);
-DEFINE_BF16_FUNC_VIA_FLOAT(exp2);
-DEFINE_BF16_FUNC_VIA_FLOAT(expm1);
-DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(fmod);
-DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(hypot);
-DEFINE_BF16_FUNC_VIA_FLOAT(i0);
-DEFINE_BF16_FUNC_VIA_FLOAT(i0e);
-DEFINE_BF16_FUNC_VIA_FLOAT(digamma);
-DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(igamma);
-DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(igammac);
-DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(nextafter);
-DEFINE_BF16_FUNC_VIA_FLOAT(log);
-DEFINE_BF16_FUNC_VIA_FLOAT(log2);
-DEFINE_BF16_FUNC_VIA_FLOAT(log10);
-DEFINE_BF16_FUNC_VIA_FLOAT(log1p);
-DEFINE_BF16_FUNC_VIA_FLOAT(sin);
-DEFINE_BF16_FUNC_VIA_FLOAT(sinh);
-DEFINE_BF16_FUNC_VIA_FLOAT(cos);
-DEFINE_BF16_FUNC_VIA_FLOAT(cosh);
-DEFINE_BF16_FUNC_VIA_FLOAT(ceil);
-DEFINE_BF16_FUNC_VIA_FLOAT(floor);
-DEFINE_BF16_FUNC_VIA_FLOAT(round);
-DEFINE_BF16_FUNC_VIA_FLOAT(tan);
-DEFINE_BF16_FUNC_VIA_FLOAT(tanh);
-DEFINE_BF16_FUNC_VIA_FLOAT(trunc);
-DEFINE_BF16_FUNC_VIA_FLOAT(lgamma);
-DEFINE_BF16_FUNC_VIA_FLOAT(sqrt);
-DEFINE_BF16_FUNC_VIA_FLOAT(reciprocal);
-DEFINE_BF16_FUNC_VIA_FLOAT(rsqrt);
-DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(pow);
+DEFINE_BF16_FUNC_VIA_FLOAT(isnan)
+DEFINE_BF16_FUNC_VIA_FLOAT(angle)
+DEFINE_BF16_FUNC_VIA_FLOAT(acos)
+DEFINE_BF16_FUNC_VIA_FLOAT(acosh)
+DEFINE_BF16_FUNC_VIA_FLOAT(asin)
+DEFINE_BF16_FUNC_VIA_FLOAT(atan)
+DEFINE_BF16_FUNC_VIA_FLOAT(atanh)
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(atan2)
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(copysign)
+DEFINE_BF16_FUNC_VIA_FLOAT(erf)
+DEFINE_BF16_FUNC_VIA_FLOAT(erfc)
+DEFINE_BF16_FUNC_VIA_FLOAT(exp)
+DEFINE_BF16_FUNC_VIA_FLOAT(exp2)
+DEFINE_BF16_FUNC_VIA_FLOAT(expm1)
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(fmod)
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(hypot)
+DEFINE_BF16_FUNC_VIA_FLOAT(i0)
+DEFINE_BF16_FUNC_VIA_FLOAT(i0e)
+DEFINE_BF16_FUNC_VIA_FLOAT(digamma)
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(igamma)
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(igammac)
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(nextafter)
+DEFINE_BF16_FUNC_VIA_FLOAT(log)
+DEFINE_BF16_FUNC_VIA_FLOAT(log2)
+DEFINE_BF16_FUNC_VIA_FLOAT(log10)
+DEFINE_BF16_FUNC_VIA_FLOAT(log1p)
+DEFINE_BF16_FUNC_VIA_FLOAT(sin)
+DEFINE_BF16_FUNC_VIA_FLOAT(sinh)
+DEFINE_BF16_FUNC_VIA_FLOAT(cos)
+DEFINE_BF16_FUNC_VIA_FLOAT(cosh)
+DEFINE_BF16_FUNC_VIA_FLOAT(ceil)
+DEFINE_BF16_FUNC_VIA_FLOAT(floor)
+DEFINE_BF16_FUNC_VIA_FLOAT(round)
+DEFINE_BF16_FUNC_VIA_FLOAT(tan)
+DEFINE_BF16_FUNC_VIA_FLOAT(tanh)
+DEFINE_BF16_FUNC_VIA_FLOAT(trunc)
+DEFINE_BF16_FUNC_VIA_FLOAT(lgamma)
+DEFINE_BF16_FUNC_VIA_FLOAT(sqrt)
+DEFINE_BF16_FUNC_VIA_FLOAT(reciprocal)
+DEFINE_BF16_FUNC_VIA_FLOAT(rsqrt)
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(pow)
 
 Vectorized<BFloat16> inline Vectorized<BFloat16>::operator==(
     const Vectorized<BFloat16>& other) const {

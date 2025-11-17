@@ -292,7 +292,7 @@ def _conv1d_op_with_squeeze(
 
 
 def _transform_conv_with_packedparam(gm: torch.fx.GraphModule, node: torch.fx.Node):
-    """Conv specfic transformation function."""
+    """Conv specific transformation function."""
     assert isinstance(node.target, torch._ops.OpOverload)
     opname = node.target._opname
     scale_node, zero_point_node = node.args[2], node.args[3]
@@ -347,7 +347,7 @@ def _transform_conv_with_packedparam(gm: torch.fx.GraphModule, node: torch.fx.No
 
 
 def _transform_linear_with_packedparam(gm: torch.fx.GraphModule, node: torch.fx.Node):
-    """Linear specfic transformation function."""
+    """Linear specific transformation function."""
     scale_node, zero_point_node = node.args[2], node.args[3]
 
     inp_node, param_node = node.args[0], node.args[1]
@@ -567,6 +567,7 @@ def replace_quantized_ops_with_standard_ops(gm: torch.fx.GraphModule):
     quantized = False
 
     last_quantized_node = None
+    # pyrefly: ignore [bad-assignment]
     for node in gm.graph.nodes:
         if isinstance(node.target, OpOverload):
             with gm.graph.inserting_before(node):
@@ -629,6 +630,7 @@ def replace_quantized_ops_with_standard_ops(gm: torch.fx.GraphModule):
                     attr_names_to_clean.add(k)
                 if k == "_buffers":
                     buffer_name_to_clean = set()
+                    # pyrefly: ignore [missing-attribute]
                     for b_name, b_value in v.items():
                         if isinstance(b_value, torch.Tensor) and b_value.dtype in [
                             torch.qint8,
@@ -636,6 +638,7 @@ def replace_quantized_ops_with_standard_ops(gm: torch.fx.GraphModule):
                         ]:
                             buffer_name_to_clean.add(b_name)
                     for b_name in buffer_name_to_clean:
+                        # pyrefly: ignore [missing-attribute]
                         v.pop(b_name, None)
             for attr_name in attr_names_to_clean:
                 delattr(submod, attr_name)

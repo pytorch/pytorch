@@ -34,7 +34,9 @@ class Vectorized<c10::complex<double>> {
   static constexpr size_type size() {
     return 4;
   }
-  Vectorized() {}
+  Vectorized() {
+    values = _mm512_setzero_pd();
+  }
   Vectorized(__m512d v) : values(v) {}
   Vectorized(c10::complex<double> val) {
     double real_value = val.real();

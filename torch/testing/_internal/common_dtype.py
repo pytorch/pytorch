@@ -121,6 +121,19 @@ def all_types_and_half():
     return _all_types_and_half
 
 
+_all_mps_types = (
+    _dispatch_dtypes({torch.float, torch.half, torch.bfloat16}) + _integral_types
+)
+
+
+def all_mps_types():
+    return _all_mps_types
+
+
+def all_mps_types_and(*dtypes):
+    return _all_mps_types + _validate_dtypes(*dtypes)
+
+
 _float8_types = _dispatch_dtypes(
     (
         torch.float8_e4m3fn,

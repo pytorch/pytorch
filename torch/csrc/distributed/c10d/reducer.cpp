@@ -136,9 +136,9 @@ Reducer::Reducer(
   {
     std::set<int> unique_devices;
     for (const auto& v : params_) {
-      auto device_idx = int(v.device().index());
-      if (unique_devices.find(device_idx) == unique_devices.end()) {
-        unique_devices.insert(device_idx);
+      auto device_idx = static_cast<int>(v.device().index());
+      auto [_, inserted] = unique_devices.emplace(device_idx);
+      if (inserted) {
         if (unique_devices.size() > 1) {
           is_multi_device_module_ = true;
           break;
@@ -168,7 +168,7 @@ Reducer::Reducer(
   }
 
   // All variables are expected to have their `grad_fn` set to the gradient
-  // accumulation function (since they are leafs in the autograd graph).
+  // accumulation function (since they are leaves in the autograd graph).
   // We store pointers to these functions such that we can check if they are
   // used in an autograd pass. If they are not, we know their grad tensors
   // can be marked as ready for reduction.
@@ -375,8 +375,7 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
       // previous iterations, no copy is needed.
       if (!grad.is_alias_of(bucket_view)) {
         if (comm_hook_ == nullptr) {
-          auto wrapped =
-              at::native::wrapped_scalar_tensor(double(1.) / div_factor_);
+          auto wrapped = at::native::wrapped_scalar_tensor(1. / div_factor_);
           if (!grad.requires_grad()) {
             // Divides while copying into the bucket view to save one scan over
             // all the input parameters.
@@ -964,24 +963,6 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
   // do any extra synchronization here.
   const auto& tensor = bucket.gradients;
 
-  // TODO(@egienvalue): remove special case after view ops are fully
-  // supported on MTIA.
-  // If the bucket.gradients is on MTIA, bucket.bucket_views_in might not
-  // point to the same storage as bucket.gradients due to the special
-  // memory layout. It has to explicitly copy the data back to 1-D gradients.
-  if (tensor.is_mtia()) {
-    for (const auto i : c10::irange(bucket.variables.size())) {
-      const auto offset = bucket.offsets[i];
-      const auto length = bucket.lengths[i];
-      if (!bucket.bucket_views_in[i].is_alias_of(tensor)) {
-        tensor
-            .narrow(
-                0, static_cast<int64_t>(offset), static_cast<int64_t>(length))
-            .copy_(bucket.bucket_views_in[i].flatten());
-      }
-    }
-  }
-
   GradBucket grad_bucket(
       next_bucket_,
       buckets_.size(),
@@ -1285,12 +1266,8 @@ void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
     auto& v = bucket.variables[i];
     const auto offset = bucket.offsets[i];
     const auto length = bucket.lengths[i];
-    // TODO(@egienvalue): remove special case after view ops are fully
-    // supported on MTIA.
-    // In general, on MTIA, due to the special memory layout, it doesn't
-    // support as_strided which creates a view tensor and aten::view will
-    // create a new tensor on MTIA for now.
-    if (v.is_non_overlapping_and_dense() && !v.is_mtia()) {
+
+    if (v.is_non_overlapping_and_dense()) {
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
@@ -1344,12 +1321,8 @@ void Reducer::populate_bucket_views_out(
     const auto& v = bucket.variables[i];
     const auto offset = bucket.offsets[i];
     const auto length = bucket.lengths[i];
-    // TODO(@egienvalue): remove special case after view ops are fully
-    // supported on MTIA.
-    // In general, on MTIA, due to the special memory layout, it doesn't
-    // support as_strided which creates a view tensor and aten::view will
-    // create a new tensor on MTIA for now.
-    if (v.is_non_overlapping_and_dense() && !v.is_mtia()) {
+
+    if (v.is_non_overlapping_and_dense()) {
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.

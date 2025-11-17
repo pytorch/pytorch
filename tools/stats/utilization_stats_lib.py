@@ -2,10 +2,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
-from dataclasses_json import DataClassJsonMixin
+#  pyrefly: ignore [missing-import]
+from dataclasses_json import DataClassJsonMixin  # type: ignore[import-not-found]
 
 
-_DATA_MODEL_VERSION = 1.0
+_DATA_MODEL_VERSION = 1.5
 
 
 # data model for test log usage
@@ -13,10 +14,11 @@ _DATA_MODEL_VERSION = 1.0
 class UtilizationStats:
     avg: Optional[float] = None
     max: Optional[float] = None
+    raw: Optional[list[float]] = None
 
 
 @dataclass
-class UtilizationMetadata(DataClassJsonMixin):
+class UtilizationMetadata(DataClassJsonMixin):  # type: ignore[misc, no-any-unimported]
     level: str
     workflow_id: str
     job_id: str
@@ -32,21 +34,24 @@ class UtilizationMetadata(DataClassJsonMixin):
 
 
 @dataclass
-class GpuUsage(DataClassJsonMixin):
+class GpuUsage(DataClassJsonMixin):  # type: ignore[misc, no-any-unimported]
     uuid: Optional[str] = None
     util_percent: Optional[UtilizationStats] = None
     mem_util_percent: Optional[UtilizationStats] = None
+    allocated_mem_percent: Optional[UtilizationStats] = None
+    allocated_mem_value: Optional[UtilizationStats] = None
+    total_mem_value: Optional[float] = None
 
 
 @dataclass
-class RecordData(DataClassJsonMixin):
+class RecordData(DataClassJsonMixin):  # type: ignore[misc, no-any-unimported]
     cpu: Optional[UtilizationStats] = None
     memory: Optional[UtilizationStats] = None
     gpu_usage: Optional[list[GpuUsage]] = None
 
 
 @dataclass
-class UtilizationRecord(DataClassJsonMixin):
+class UtilizationRecord(DataClassJsonMixin):  # type: ignore[misc, no-any-unimported]
     level: str
     timestamp: int
     data: Optional[RecordData] = None
@@ -59,7 +64,7 @@ class UtilizationRecord(DataClassJsonMixin):
 # the db schema related to this is:
 # https://github.com/pytorch/test-infra/blob/main/clickhouse_db_schema/oss_ci_utilization/oss_ci_utilization_metadata_schema.sql
 @dataclass
-class OssCiSegmentV1(DataClassJsonMixin):
+class OssCiSegmentV1(DataClassJsonMixin):  # type: ignore[misc, no-any-unimported]
     level: str
     name: str
     start_at: int

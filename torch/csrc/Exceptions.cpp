@@ -65,7 +65,8 @@ could not be completed because the input matrix is singular.",
           "Exception raised when device is out of memory",
           PyExc_RuntimeError,
           nullptr));
-  PyTypeObject* type = (PyTypeObject*)THPException_OutOfMemoryError;
+  PyTypeObject* type =
+      reinterpret_cast<PyTypeObject*>(THPException_OutOfMemoryError);
   type->tp_name = "torch.OutOfMemoryError";
   ASSERT_TRUE(
       PyModule_AddObject(
@@ -133,7 +134,7 @@ could not be completed because the input matrix is singular.",
           "Exception raised while executing on device",
           PyExc_RuntimeError,
           nullptr));
-  type = (PyTypeObject*)THPException_AcceleratorError;
+  type = reinterpret_cast<PyTypeObject*>(THPException_AcceleratorError);
   ASSERT_TRUE(
       PyModule_AddObject(
           module, "AcceleratorError", THPException_AcceleratorError) == 0);
@@ -228,17 +229,6 @@ std::string processErrorMsg(std::string str) {
   return str;
 }
 
-static std::string formatMessage(const char* format, va_list fmt_args) {
-  constexpr size_t ERROR_BUF_SIZE = 1024;
-  std::string error_buf(ERROR_BUF_SIZE, '\0');
-  auto res = vsnprintf(error_buf.data(), ERROR_BUF_SIZE, format, fmt_args);
-  if (res < 0) {
-    res = 0;
-  }
-  error_buf.resize(res);
-  return error_buf;
-}
-
 void translate_exception_to_python(const std::exception_ptr& e_ptr) {
   try {
     TORCH_INTERNAL_ASSERT(
@@ -248,13 +238,6 @@ void translate_exception_to_python(const std::exception_ptr& e_ptr) {
     std::rethrow_exception(e_ptr);
   }
   CATCH_ALL_ERRORS(return)
-}
-
-TypeError::TypeError(const char* format, ...) {
-  va_list fmt_args{};
-  va_start(fmt_args, format);
-  msg = formatMessage(format, fmt_args);
-  va_end(fmt_args);
 }
 
 void PyWarningHandler::InternalHandler::process(const c10::Warning& warning) {
@@ -270,10 +253,10 @@ PyWarningHandler::PyWarningHandler() noexcept(true)
 // Get the Python warning type for a warning
 static PyObject* map_warning_to_python_type(const c10::Warning& warning) {
   struct Visitor {
-    PyObject* operator()(const c10::UserWarning&) const {
+    PyObject* operator()(const c10::UserWarning& /*unused*/) const {
       return PyExc_UserWarning;
     }
-    PyObject* operator()(const c10::DeprecationWarning&) const {
+    PyObject* operator()(const c10::DeprecationWarning& /*unused*/) const {
       return PyExc_DeprecationWarning;
     }
   };
@@ -354,7 +337,7 @@ PyObject* _new_accelerator_error_object(const c10::AcceleratorError& e) {
 
   auto py_msg = PyUnicode_FromString(msg);
   auto rc = PyObject_CallOneArg(THPException_AcceleratorError, py_msg);
-  auto error_code = PyInt_FromLong(e.get_error_code());
+  auto error_code = THPUtils_packUInt32(e.get_error_code());
   PyObject_SetAttrString(rc, "error_code", error_code);
   Py_XDECREF(py_msg);
   Py_XDECREF(error_code);

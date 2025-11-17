@@ -13,6 +13,7 @@
 #include <c10/core/ScalarType.h>
 
 #include <ATen/cuda/tunable/TunableOp.h>
+#include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/Exceptions.h>
 #include <c10/util/StringUtil.h>
@@ -28,6 +29,8 @@
 #include <fmt/printf.h>
 
 namespace at::cuda::tunable {
+
+using at::blas::ScalingType;
 
 enum class BlasOp {
   N = 0,
@@ -148,6 +151,7 @@ inline std::string ScalarTypeToBLASType(c10::ScalarType scalar_type) {
       BLASType = "unknown";
   }
   return BLASType;
+
 }
 
 // Similar to Compute Type in GemmRocblas.h
@@ -160,7 +164,7 @@ inline std::string ComputeTypeFor() {
 // ROCBLAS and hipBLASLt.
 template <>
 inline std::string ComputeTypeFor<float>() {
-  if (at::globalContext().float32Precision("cuda", "matmul") != "tf32") {
+  if (at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) != at::Float32Precision::TF32) {
     return "f32_r";
   } else {
     return "xf32_r";
@@ -242,33 +246,25 @@ inline std::string to_string_epilogue(const at::cuda::blas::GEMMAndBiasActivatio
 
 namespace detail {
 
-static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t size) {
+static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t size, const NumericalCheckConfig& config) {
+
+  if (!config.enabled) {
+    return true; // skip when disabled
+  }
+
   auto options = at::TensorOptions().dtype(dtype).device(at::kCUDA);
-  // comparison done as 1D tensor
   at::Tensor ref = at::from_blob(c,       {size}, options);
   at::Tensor oth = at::from_blob(other_c, {size}, options);
   at::Tensor ref_float = ref.to(at::kFloat);
   at::Tensor oth_float = oth.to(at::kFloat);
-  std::vector<double> atols{1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
-  std::vector<double> rtols{1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
-  double last_succeed_atol = 1;
-  double last_succeed_rtol = 1;
-  for (auto& atol : atols) {
-    for (auto& rtol : rtols) {
-      if (at::allclose(ref_float, oth_float, rtol, atol)) {
-        last_succeed_atol = atol;
-        last_succeed_rtol = rtol;
-      }
-    }
-  }
-  if (last_succeed_atol == 1) {
-    return false;
-  }
-  else {
-    TUNABLE_LOG3("├──verify numerics: atol=", last_succeed_atol, ", rtol=", last_succeed_rtol);
-  }
 
-  return true;
+  const bool ok = at::allclose(ref_float, oth_float, config.rtol, config.atol);
+  if (ok) {
+    TUNABLE_LOG3("├──verify numerics: PASSED with atol=", config.atol, ", rtol=", config.rtol);
+  } else {
+    TUNABLE_LOG3("├──verify numerics: FAILED with atol=", config.atol, ", rtol=", config.rtol);
+  }
+  return ok;
 }
 
 }
@@ -353,8 +349,10 @@ struct GemmParams : OpParams {
   }
 
   TuningStatus NumericalCheck(GemmParams<T> *other) {
+    auto* ctx = getTuningContext();
+    auto cfg = ctx->GetNumericalCheckConfig();
     auto c_dtype = c10::CppTypeToScalarType<T>::value;
-    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T), cfg) ? OK : FAIL;
   }
 
   char transa{};
@@ -447,8 +445,10 @@ struct GemmAndBiasParams : OpParams {
   }
 
   TuningStatus NumericalCheck(GemmAndBiasParams<T> *other) {
+    auto* ctx = getTuningContext();
+    auto cfg = ctx->GetNumericalCheckConfig();
     auto c_dtype = c10::CppTypeToScalarType<T>::value;
-    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T), cfg) ? OK : FAIL;
   }
 
   char transa{};
@@ -544,8 +544,10 @@ struct GemmStridedBatchedParams : OpParams {
   }
 
   TuningStatus NumericalCheck(GemmStridedBatchedParams<T> *other) {
+    auto* ctx = getTuningContext();
+    auto cfg = ctx->GetNumericalCheckConfig();
     auto c_dtype = c10::CppTypeToScalarType<C_Dtype>::value;
-    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T), cfg) ? OK : FAIL;
   }
 
   char transa{};
@@ -598,7 +600,8 @@ struct ScaledGemmParams : OpParams {
     //
     // In TunableOp, we must distinguish in param signature these two cases: with and without a bias vector.
     return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld_rw_%d_bias_%s",
-      transa, transb, m, n, k, lda, ldb, ldc, use_rowwise,
+      transa, transb, m, n, k, lda, ldb, ldc,
+      a_scaling_type == ScalingType::RowWise && b_scaling_type == ScalingType::RowWise,
       bias_ptr == nullptr ? "None" : at::toString(bias_dtype));
   }
 
@@ -660,7 +663,9 @@ struct ScaledGemmParams : OpParams {
   }
 
   TuningStatus NumericalCheck(ScaledGemmParams<T> *other) {
-    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
+    auto* ctx = getTuningContext();
+    auto cfg = ctx->GetNumericalCheckConfig();
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T), cfg) ? OK : FAIL;
   }
 
   char transa{};
@@ -673,11 +678,13 @@ struct ScaledGemmParams : OpParams {
   int64_t lda{};
   ScalarType a_dtype{};
   ScalarType a_scale_dtype{};
+  ScalingType a_scaling_type{};
   const void* b{};
   const void* b_scale_ptr{};
   int64_t ldb{};
   ScalarType b_dtype{};
   ScalarType b_scale_dtype{};
+  ScalingType b_scaling_type{};
   const void* bias_ptr{};
   ScalarType bias_dtype{};
   void* c{};
@@ -686,7 +693,6 @@ struct ScaledGemmParams : OpParams {
   ScalarType c_dtype{};
   void* amax_ptr{};
   bool use_fast_accum{};
-  bool use_rowwise{};
 private:
   bool duplicate_inputs_{false};
 };

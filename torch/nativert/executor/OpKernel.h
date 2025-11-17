@@ -98,9 +98,8 @@ class OpKernel {
  public:
   explicit OpKernel(
       const Node* node,
-      std::optional<c10::Device> device = std::nullopt,
       OpKernelKind kind = OpKernelKind::kInterpreterFallbackKernel)
-      : node_(node), device_(device), kind_(kind) {
+      : node_(node), kind_(kind) {
     VLOG(1) << "Initializing kernel for node: " << *node_;
   }
 
@@ -150,7 +149,6 @@ class OpKernel {
   virtual void computeInternal(ExecutionFrame& executionFrame) const = 0;
 
   const Node* node_;
-  std::optional<c10::Device> device_;
   const static bool blockingEnabled_;
   // this should be set in the ctor!
   const OpKernelKind kind_;

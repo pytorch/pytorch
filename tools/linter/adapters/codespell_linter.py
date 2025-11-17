@@ -20,6 +20,8 @@ FORBIDDEN_WORDS = {
     "multipy",  # project pytorch/multipy is dead  # codespell:ignore multipy
 }
 
+MAX_FILE_SIZE: int = 1024 * 1024 * 1024  # 1GB in bytes
+
 
 class LintSeverity(str, Enum):
     ERROR = "error"
@@ -49,8 +51,8 @@ def format_error_message(
     if message is None and error is not None:
         message = (
             f"Failed due to {error.__class__.__name__}:\n{error}\n"
-            "Please either fix the error or "
-            "add the word(s) to the dictionary file (lowercase is preferred)."
+            "Please either fix the error or add the word(s) to the dictionary file.\n"
+            "HINT: all-lowercase words in the dictionary can cover all case variations."
         )
     return LintMessage(
         path=filename,
@@ -86,6 +88,39 @@ def run_codespell(path: Path) -> str:
 
 def check_file(filename: str) -> list[LintMessage]:
     path = Path(filename).absolute()
+
+    # Check if file is too large
+    try:
+        file_size = os.path.getsize(path)
+        if file_size > MAX_FILE_SIZE:
+            return [
+                LintMessage(
+                    path=filename,
+                    line=None,
+                    char=None,
+                    code="CODESPELL",
+                    severity=LintSeverity.WARNING,
+                    name="file-too-large",
+                    original=None,
+                    replacement=None,
+                    description=f"File size ({file_size} bytes) exceeds {MAX_FILE_SIZE} bytes limit, skipping",
+                )
+            ]
+    except OSError as err:
+        return [
+            LintMessage(
+                path=filename,
+                line=None,
+                char=None,
+                code="CODESPELL",
+                severity=LintSeverity.ERROR,
+                name="file-access-error",
+                original=None,
+                replacement=None,
+                description=f"Failed to get file size: {err}",
+            )
+        ]
+
     try:
         run_codespell(path)
     except Exception as err:
@@ -101,6 +136,7 @@ def check_dictionary(filename: str) -> list[LintMessage]:
         words_set = set(words)
         if len(words) != len(words_set):
             raise ValueError("The dictionary file contains duplicate entries.")
+        # pyrefly: ignore [no-matching-overload]
         uncased_words = list(map(str.lower, words))
         if uncased_words != sorted(uncased_words):
             raise ValueError(

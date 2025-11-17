@@ -353,6 +353,17 @@ def test_linalg(device="cpu") -> None:
             torch.linalg.svd(A)
 
 
+def test_sdpa(device="cpu", dtype=torch.float16) -> None:
+    """Regression test for https://github.com/pytorch/pytorch/issues/167602
+    Without nvrtc_builtins on CuDNN-9.13 on CUDA-13 fails with ` No valid execution plans built.`
+    """
+    print(f"Testing SDPA on {device} using type {dtype}")
+    k, q, v = torch.rand(3, 1, 16, 77, 64, dtype=dtype, device=device).unbind(0)
+    attn = torch.rand(1, 1, 77, 77, dtype=dtype, device=device)
+    rc = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn)
+    assert rc.isnan().any().item() is False
+
+
 def smoke_test_compile(device: str = "cpu") -> None:
     supported_dtypes = [torch.float16, torch.float32, torch.float64]
 
@@ -383,6 +394,31 @@ def smoke_test_compile(device: str = "cpu") -> None:
     x = torch.rand(64, 1, 28, 28, device=device).type(torch.float32)
     model = Net().to(device=device)
     x_pt2 = torch.compile(model, mode="max-autotune")(x)
+
+
+def smoke_test_nvshmem() -> None:
+    if not torch.cuda.is_available() or target_os == "windows":
+        print("Windows platform or CUDA is not available, skipping NVSHMEM test")
+        return
+
+    # Check if NVSHMEM is compiled in current build
+    try:
+        from torch._C._distributed_c10d import _is_nvshmem_available
+    except ImportError:
+        # Not built with NVSHMEM support.
+        # torch is not compiled with NVSHMEM prior to 2.9
+        from torch.torch_version import TorchVersion
+
+        if TorchVersion(torch.__version__) < (2, 9):
+            return
+        else:
+            # After 2.9: NVSHMEM is expected to be compiled in current build
+            raise RuntimeError("torch not compiled with NVSHMEM") from None
+
+    print("torch compiled with NVSHMEM")
+
+    # Check if NVSHMEM is available on current system.
+    print(f"NVSHMEM available at run time: {_is_nvshmem_available()}")
 
 
 def smoke_test_modules():
@@ -464,10 +500,12 @@ def main() -> None:
     smoke_test_conv2d()
     test_linalg()
     test_numpy()
+    test_sdpa()
 
     if is_cuda_system:
         test_linalg("cuda")
         test_cuda_gds_errors_captured()
+        test_sdpa("cuda")
 
     if options.package == "all":
         smoke_test_modules()
@@ -478,6 +516,8 @@ def main() -> None:
         options.torch_compile_check,
         options.pypi_pkg_check,
     )
+
+    smoke_test_nvshmem()
 
 
 if __name__ == "__main__":

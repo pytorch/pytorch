@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import ParamSpec, TypeAlias
+from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING, TypeAlias, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 from torch import sym_float, Tensor
@@ -43,7 +44,8 @@ def _apply_docstring_templates(func: Callable[_P, _T]) -> Callable[_P, _T]:
         warnings.warn(
             f"No documentation string available for {func.__name__}."
             " PyTorch team should run `python tools/update_masked_docs.py`"
-            " to generate the missing docstrings."
+            " to generate the missing docstrings.",
+            stacklevel=2,
         )
     else:
         func.__doc__ = doc_string
@@ -166,123 +168,123 @@ Example::
 """,
     )
 
-    args_and_kwargs = dict(
+    args_and_kwargs = {
         # argument name sufficies separated by double underscore will
         # be removed in the final documentation string.
-        sum=(("dim",), ("keepdim=False", "dtype=None", "mask=None")),
-        prod=(("dim",), ("keepdim=False", "dtype=None", "mask=None")),
-        cumsum=(("dim__as_int",), ("dtype=None", "mask=None")),
-        cumprod=(("dim__as_int",), ("dtype=None", "mask=None")),
-        amin=(("dim",), ("keepdim=False", "dtype=None", "mask=None")),
-        amax=(("dim",), ("keepdim=False", "dtype=None", "mask=None")),
-        argmin=(("dim__as_int",), ("keepdim=False", "dtype=None", "mask=None")),
-        argmax=(("dim__as_int",), ("keepdim=False", "dtype=None", "mask=None")),
-        mean=(("dim",), ("keepdim=False", "dtype=None", "mask=None")),
-        median=(("dim__as_int",), ("keepdim=False", "dtype=None", "mask=None")),
-        norm=(
+        "sum": (("dim",), ("keepdim=False", "dtype=None", "mask=None")),
+        "prod": (("dim",), ("keepdim=False", "dtype=None", "mask=None")),
+        "cumsum": (("dim__as_int",), ("dtype=None", "mask=None")),
+        "cumprod": (("dim__as_int",), ("dtype=None", "mask=None")),
+        "amin": (("dim",), ("keepdim=False", "dtype=None", "mask=None")),
+        "amax": (("dim",), ("keepdim=False", "dtype=None", "mask=None")),
+        "argmin": (("dim__as_int",), ("keepdim=False", "dtype=None", "mask=None")),
+        "argmax": (("dim__as_int",), ("keepdim=False", "dtype=None", "mask=None")),
+        "mean": (("dim",), ("keepdim=False", "dtype=None", "mask=None")),
+        "median": (("dim__as_int",), ("keepdim=False", "dtype=None", "mask=None")),
+        "norm": (
             (
                 "ord",
                 "dim",
             ),
             ("keepdim=False", "dtype=None", "mask=None"),
         ),
-        var=(("dim", "unbiased"), ("keepdim=False", "dtype=None", "mask=None")),
-        std=(("dim", "unbiased"), ("keepdim=False", "dtype=None", "mask=None")),
-        logsumexp=(("dim",), ("keepdim=False", "dtype=None", "mask=None")),
-        softmax=(("dim__as_int",), ("dtype=None", "mask=None")),
-        log_softmax=(("dim__as_int",), ("dtype=None", "mask=None")),
-        softmin=(("dim__as_int",), ("dtype=None", "mask=None")),
-        normalize=(
+        "var": (("dim", "unbiased"), ("keepdim=False", "dtype=None", "mask=None")),
+        "std": (("dim", "unbiased"), ("keepdim=False", "dtype=None", "mask=None")),
+        "logsumexp": (("dim",), ("keepdim=False", "dtype=None", "mask=None")),
+        "softmax": (("dim__as_int",), ("dtype=None", "mask=None")),
+        "log_softmax": (("dim__as_int",), ("dtype=None", "mask=None")),
+        "softmin": (("dim__as_int",), ("dtype=None", "mask=None")),
+        "normalize": (
             (
                 "ord__required",
                 "dim__as_int",
             ),
             ("eps=1e-12", "dtype=None", "mask=None"),
         ),
-    )
+    }
 
-    argument_declarations = dict(
-        dim="""\
-dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
-  Default: None that is equivalent to ``tuple(range(input.ndim))``.""",
-        dim__as_int="""\
-dim (int): the dimension along which {operation name} is computed.""",
-        ord="""\
-ord (int, float, optional): the order of vector norm. Default: 2.
-  See :func:`torch.linalg.vector_norm` for a list of supported norms.""",
-        ord__required="""\
-ord (int, float): the order of vector norm. Default: 2.
-  See :func:`torch.linalg.vector_norm` for a list of supported norms.""",
-        unbiased="""\
-unbiased (bool): when True, use Bessel's correction, otherwise, compute
-  the uncorrected sample variance.""",
-        eps="""\
-eps (float, optional): small value to avoid division by zero. Default: {default}.""",
-        keepdim="""\
-keepdim (bool, optional): whether the output tensor has
-  :attr:`dim` retained or not. Default: {default}.""",
-        dtype="""\
-dtype (:class:`torch.dtype`, optional): the desired data type
-  of returned tensor.  If specified, the input tensor is
-  casted to :attr:`dtype` before the operation is
-  performed. Default: {default}.""",
-        mask="""\
-mask (:class:`torch.Tensor`, optional): the boolean tensor
-  containing the binary mask of validity of input tensor
-  elements.
-  Default: None that is equivalent to ``torch.ones(input.shape, dtype=torch.bool)``.""",
-    )
+    argument_declarations = {
+        "dim": """\
+    dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
+    Default: None that is equivalent to ``tuple(range(input.ndim))``.""",
+        "dim__as_int": """\
+    dim (int): the dimension along which {operation name} is computed.""",
+        "ord": """\
+    ord (int, float, optional): the order of vector norm. Default: 2.
+    See :func:`torch.linalg.vector_norm` for a list of supported norms.""",
+        "ord__required": """\
+    ord (int, float): the order of vector norm. Default: 2.
+    See :func:`torch.linalg.vector_norm` for a list of supported norms.""",
+        "unbiased": """\
+    unbiased (bool): when True, use Bessel's correction, otherwise, compute
+    the uncorrected sample variance.""",
+        "eps": """\
+    eps (float, optional): small value to avoid division by zero. Default: {default}.""",
+        "keepdim": """\
+    keepdim (bool, optional): whether the output tensor has
+    :attr:`dim` retained or not. Default: {default}.""",
+        "dtype": """\
+    dtype (:class:`torch.dtype`, optional): the desired data type
+    of returned tensor.  If specified, the input tensor is
+    casted to :attr:`dtype` before the operation is
+    performed. Default: {default}.""",
+        "mask": """\
+    mask (:class:`torch.Tensor`, optional): the boolean tensor
+    containing the binary mask of validity of input tensor
+    elements.
+    Default: None that is equivalent to ``torch.ones(input.shape, dtype=torch.bool)``.""",
+    }
 
-    definitions = dict(
-        softmax="""\
-Let ``x`` be a sequence of unmasked elements of one-dimensional slice
-of the :attr:`input` tensor. Softmax of i-th element in ``x`` is
-defined as ``exp(x[i])/sum(exp(x))``.""",
-        log_softmax="""\
-Let ``x`` be a sequence of unmasked elements of one-dimensional slice
-of the :attr:`input` tensor. LogSoftmax of i-th element in ``x`` is
-defined as ``log(exp(x[i])/sum(exp(x)))``.""",
-        softmin="""\
-Let ``x`` be a sequence of unmasked elements of one-dimensional slice
-of the :attr:`input` tensor. Softmin of i-th element in ``x`` is
-defined as ``exp(-x[i])/sum(exp(-x))``.""",
-        normalize="""\
-Let ``x`` be a sequence of unmasked elements of one-dimensional slice
-of the :attr:`input` tensor. Normalize of i-th element in ``x`` is
-defined as ``x[i]/max(norm(x, p), eps)``.""",
-        cumsum="""\
-Let ``x`` be a sequence of unmasked elements of one-dimensional slice
-of the :attr:`input` tensor. Cumsum of i-th element in ``x`` is
-defined as ``sum(x[:i])``.""",
-        cumprod="""\
-Let ``x`` be a sequence of unmasked elements of one-dimensional slice
-of the :attr:`input` tensor. Cumsum of i-th element in ``x`` is
-defined as ``prod(x[:i])``.""",
-    )
+    definitions = {
+        "softmax": """\
+    Let ``x`` be a sequence of unmasked elements of one-dimensional slice
+    of the :attr:`input` tensor. Softmax of i-th element in ``x`` is
+    defined as ``exp(x[i])/sum(exp(x))``.""",
+        "log_softmax": """\
+    Let ``x`` be a sequence of unmasked elements of one-dimensional slice
+    of the :attr:`input` tensor. LogSoftmax of i-th element in ``x`` is
+    defined as ``log(exp(x[i])/sum(exp(x)))``.""",
+        "softmin": """\
+    Let ``x`` be a sequence of unmasked elements of one-dimensional slice
+    of the :attr:`input` tensor. Softmin of i-th element in ``x`` is
+    defined as ``exp(-x[i])/sum(exp(-x))``.""",
+        "normalize": """\
+    Let ``x`` be a sequence of unmasked elements of one-dimensional slice
+    of the :attr:`input` tensor. Normalize of i-th element in ``x`` is
+    defined as ``x[i]/max(norm(x, p), eps)``.""",
+        "cumsum": """\
+    Let ``x`` be a sequence of unmasked elements of one-dimensional slice
+    of the :attr:`input` tensor. Cumsum of i-th element in ``x`` is
+    defined as ``sum(x[:i])``.""",
+        "cumprod": """\
+    Let ``x`` be a sequence of unmasked elements of one-dimensional slice
+    of the :attr:`input` tensor. Cumsum of i-th element in ``x`` is
+    defined as ``prod(x[:i])``.""",
+    }
 
-    reduction_names = dict(
-        sum="sum",
-        prod="product",
-        amax="maximum",
-        amin="minimum",
-        argmax="argmax",
-        argmin="argmin",
-        mean="mean",
-        median="median",
-        norm="norm",
-        var="variance",
-        std="standard_deviation",
-        logsumexp="logsumexp",
-    )
+    reduction_names = {
+        "sum": "sum",
+        "prod": "product",
+        "amax": "maximum",
+        "amin": "minimum",
+        "argmax": "argmax",
+        "argmin": "argmin",
+        "mean": "mean",
+        "median": "median",
+        "norm": "norm",
+        "var": "variance",
+        "std": "standard_deviation",
+        "logsumexp": "logsumexp",
+    }
 
-    normalization_names = dict(
-        softmax="softmax",
-        log_softmax="log_softmax",
-        softmin="softmin",
-        normalize="normalize",
-        cumsum="cumulative_sum",
-        cumprod="cumulative_prod",
-    )
+    normalization_names = {
+        "softmax": "softmax",
+        "log_softmax": "log_softmax",
+        "softmin": "softmin",
+        "normalize": "normalize",
+        "cumsum": "cumulative_sum",
+        "cumprod": "cumulative_prod",
+    }
 
     operation_names = {}
     operation_names.update(reduction_names)
@@ -427,7 +429,7 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
             return torch.tensor(-torch.inf, dtype=dtype, device=device)
         elif torch.is_signed(input) or dtype == torch.uint8:
             return torch.tensor(torch.iinfo(dtype).min, dtype=dtype, device=device)
-    elif op_name in {"logsumexp"}:
+    elif op_name == "logsumexp":
         if torch.is_floating_point(input):
             return torch.tensor(-torch.inf, dtype=dtype, device=device)
         elif torch.is_complex(input):
@@ -482,6 +484,7 @@ def _canonical_dim(dim: DimOrDims, ndim: int) -> tuple[int, ...]:
             raise IndexError(
                 f"Dimension out of range (expected to be in range of [{-ndim}, {ndim - 1}], but got {d})"
             )
+        # pyrefly: ignore [bad-argument-type]
         dims.append(d % ndim)
     return tuple(sorted(dims))
 
@@ -1014,6 +1017,7 @@ def _combine_input_and_mask(
 
     class Combine(torch.autograd.Function):
         @staticmethod
+        # pyrefly: ignore [bad-override]
         def forward(ctx, input, mask):
             """Return input with masked-out elements eliminated for the given operations."""
             ctx.save_for_backward(mask)
@@ -1024,6 +1028,7 @@ def _combine_input_and_mask(
             return helper(input, mask)
 
         @staticmethod
+        # pyrefly: ignore [bad-override]
         def backward(ctx, grad_output):
             (mask,) = ctx.saved_tensors
             grad_data = (
@@ -1398,15 +1403,18 @@ elements, have ``nan`` values.
     if input.layout == torch.strided:
         if mask is None:
             # TODO: compute count analytically
+            # pyrefly: ignore [no-matching-overload]
             count = sum(
                 torch.ones(input.shape, dtype=torch.int64, device=input.device),
                 dim,
                 keepdim=keepdim,
             )
+            # pyrefly: ignore [no-matching-overload]
             total = sum(input, dim, keepdim=keepdim, dtype=dtype)
         else:
             inmask = _input_mask(input, mask=mask)
             count = inmask.sum(dim=dim, keepdim=bool(keepdim))
+            # pyrefly: ignore [no-matching-overload]
             total = sum(input, dim, keepdim=keepdim, dtype=dtype, mask=inmask)
         return total / count
     elif input.layout == torch.sparse_csr:
@@ -1617,15 +1625,18 @@ def _std_var(
     if input.layout == torch.strided:
         if mask is None:
             # TODO: compute count analytically
+            # pyrefly: ignore [no-matching-overload]
             count = sum(
                 torch.ones(input.shape, dtype=torch.int64, device=input.device),
                 dim,
                 keepdim=True,
             )
+            # pyrefly: ignore [no-matching-overload]
             sample_total = sum(input, dim, keepdim=True, dtype=dtype)
         else:
             inmask = _input_mask(input, mask=mask)
             count = inmask.sum(dim=dim, keepdim=True)
+            # pyrefly: ignore [no-matching-overload]
             sample_total = sum(input, dim, keepdim=True, dtype=dtype, mask=inmask)
         # TODO: replace torch.subtract/divide/square/maximum with
         # masked subtract/divide/square/maximum when these will be
@@ -1633,6 +1644,7 @@ def _std_var(
         sample_mean = torch.divide(sample_total, count)
         x = torch.subtract(input, sample_mean)
         if mask is None:
+            # pyrefly: ignore [no-matching-overload]
             total = sum(x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype)
         else:
             total = sum(

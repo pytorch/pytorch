@@ -416,21 +416,6 @@ with PackageExporter(f2, importer=(importer, sys_importer)) as exporter:
     exporter.save_pickle("model", "model.pkl", obj)
 ```
 
-### Package a TorchScript module?
-To package a TorchScript model, use the same `save_pickle` and `load_pickle` APIs as you would with any other object.
-Saving TorchScript objects that are attributes or submodules is supported as well with no extra work.
-
-```python
-# save TorchScript just like any other object
-with PackageExporter(file_name) as e:
-    e.save_pickle("res", "script_model.pkl", scripted_model)
-    e.save_pickle("res", "mixed_model.pkl", python_model_with_scripted_submodule)
-# load as normal
-importer = PackageImporter(file_name)
-loaded_script = importer.load_pickle("res", "script_model.pkl")
-loaded_mixed = importer.load_pickle("res", "mixed_model.pkl"
-```
-
 ## Explanation
 
 ### `torch.package` Format Overview

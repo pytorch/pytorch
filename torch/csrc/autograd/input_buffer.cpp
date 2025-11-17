@@ -1,3 +1,4 @@
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/input_buffer.h>
 
 #include <ATen/CachedTensorUtils.h>
@@ -11,6 +12,7 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
 #include <c10/core/StreamGuard.h>
+#include <c10/util/Logging.h>
 #include <optional>
 
 #include <cstddef>
@@ -84,8 +86,8 @@ bool can_accumulate_inplace(const Variable& v) {
       v.is_non_overlapping_and_dense() &&
 
       // and we hold the last reference
-      at::caching::adjusted_use_count(v) == 1 && v.has_storage() &&
-      v.storage().use_count() == 1);
+      impl::is_tensor_stealable(v, 1 + at::caching::is_cached_tensor(v)) &&
+      v.has_storage() && v.storage().use_count() == 1);
 }
 } // anonymous namespace
 
@@ -170,7 +172,7 @@ static void accumulate(
 //            multi-deviced-ness]
 // 2) Because we are the first producer, there's no accumulation necessary.
 //    Just move var into the buffer.
-// 3) Update the ready_events and streams for the current position.
+// 3) Update the ready_events and streams for the current position.**
 //    ready_events are events you need to wait for to ensure the corresponding
 //    buffers are ready. The events are updated as we accumulate into the
 //    buffer.
@@ -182,13 +184,17 @@ static void accumulate(
 //   (i) wait stream and (ii) record stream to make sure both are ready to be
 //   used on the accumulation stream.
 // 2) Accumulate on the accumulation stream
-// 3) Update the ready event and stream for the current position.
+// 3) Update the ready event and stream for the current position.**
+//
+// **As an optimization, we avoid creating and recording an event if we
+// know that we won't need to wait on it, saving on the order of microseconds.
 //
 void InputBuffer::add(
     size_t pos,
     Variable&& var,
     const std::optional<c10::Stream>& opt_producer_stream_,
-    const std::optional<c10::Stream>& opt_consumer_stream_) {
+    const std::optional<c10::Stream>& opt_consumer_stream_,
+    Node* fn) {
   TORCH_INTERNAL_ASSERT(pos < buffer.size());
 
   if (!var.defined()) {
@@ -228,6 +234,21 @@ void InputBuffer::add(
 
   TORCH_INTERNAL_ASSERT(opt_consumer_stream && opt_producer_stream);
 
+  if (*opt_consumer_stream != *opt_producer_stream &&
+      dynamic_cast<AccumulateGrad*>(fn) &&
+      at::globalContext().warnOnAccumulateGradStreamMismatch()) {
+    TORCH_WARN_ONCE(
+        "The AccumulateGrad node's stream does not match the stream of the node that produced "
+        "the incoming gradient. This may incur unnecessary synchronization and break CUDA graph "
+        "capture if the AccumulateGrad node's stream is the default stream. This mismatch is "
+        "caused by an AccumulateGrad node created prior to the current iteration being kept alive. "
+        "This can happen if the autograd graph is still being kept alive by tensors such as the "
+        "loss, or if you are using DDP, which will stash a reference to the node. To resolve the "
+        "mismatch, delete all references to the autograd graph or ensure that DDP initialization is "
+        "performed under the same stream as subsequent forwards. If the mismatch is intentional, "
+        "you can use torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(False) to suppress this "
+        "warning.");
+  }
   // See Note: [Autograd Producer-Consumer Stream Syncs]
   if (!opt_accum_streams[pos].has_value()) {
     // [ First producer ]
@@ -253,16 +274,23 @@ void InputBuffer::add(
     // 2)
     buffer[pos] = std::move(var);
     // 3)
-    auto event = c10::Event{device_type};
-    event.record(*opt_producer_stream);
-    ready_events[pos] = std::move(event);
+    auto& opt_accum_stream = opt_accum_streams[pos];
+    TORCH_INTERNAL_ASSERT(opt_accum_stream.has_value());
+    if (*opt_consumer_stream != *opt_producer_stream ||
+        *opt_accum_stream != *opt_producer_stream) {
+      // Either the consumer or accum stream waits for the producer
+      // stream depending on whether accumulation is needed.
+      auto event = c10::Event{device_type};
+      event.record(*opt_producer_stream);
+      ready_events[pos] = std::move(event);
+    }
     ready_streams[pos] = opt_producer_stream;
   } else {
     // [ Nth producer ]
     auto accum_stream = opt_accum_streams[pos];
     auto& ready_event = ready_events[pos];
     auto& ready_stream = ready_streams[pos];
-    TORCH_INTERNAL_ASSERT(accum_stream && ready_event && ready_stream);
+    TORCH_INTERNAL_ASSERT(accum_stream && ready_stream);
     // 1)
     if (*accum_stream != *opt_producer_stream) {
       auto event = c10::Event{device_type};
@@ -271,6 +299,7 @@ void InputBuffer::add(
       record_stream_any_impl(var, *accum_stream);
     }
     if (*accum_stream != *ready_stream) {
+      TORCH_INTERNAL_ASSERT(ready_event);
       accum_stream->wait(*ready_event);
       // This is redundant for case A, but needed for case C
       record_stream_any_impl(buffer[pos], *accum_stream);
@@ -279,9 +308,12 @@ void InputBuffer::add(
     c10::OptionalStreamGuard stream_guard{accum_stream};
     accumulate(buffer, pos, std::move(var));
     // 3)
-    auto event = c10::Event{device_type};
-    event.record(*accum_stream);
-    ready_events[pos] = std::move(event);
+    if (*opt_consumer_stream != *accum_stream) {
+      // Only the consumer stream needs to wait for this event
+      auto event = c10::Event{device_type};
+      event.record(*accum_stream);
+      ready_events[pos] = std::move(event);
+    }
     ready_streams[pos] = accum_stream;
   }
 }

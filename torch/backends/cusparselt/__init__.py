@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import Optional
 
 import torch
@@ -20,10 +19,11 @@ __MAX_ALG_ID: Optional[int] = None
 
 if _cusparselt is not None:
 
-    def _init():
+    def _init() -> bool:
         global __cusparselt_version
         global __MAX_ALG_ID
         if __cusparselt_version is None:
+            # pyrefly: ignore [missing-attribute]
             __cusparselt_version = _cusparselt.getVersionInt()
             if __cusparselt_version == 400:
                 __MAX_ALG_ID = 4
@@ -35,7 +35,7 @@ if _cusparselt is not None:
 
 else:
 
-    def _init():
+    def _init() -> bool:
         return False
 
 

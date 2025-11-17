@@ -124,7 +124,8 @@ class RNNBase(Module):
                 "dropout option adds dropout after all but last "
                 "recurrent layer, so non-zero dropout expects "
                 f"num_layers greater than 1, but got dropout={dropout} and "
-                f"num_layers={num_layers}"
+                f"num_layers={num_layers}",
+                stacklevel=2,
             )
 
         if not isinstance(hidden_size, int):
@@ -195,7 +196,7 @@ class RNNBase(Module):
                     param_names += ["weight_hr_l{}{}"]
                 param_names = [x.format(layer, suffix) for x in param_names]
 
-                for name, param in zip(param_names, layer_params):
+                for name, param in zip(param_names, layer_params, strict=True):
                     setattr(self, name, param)
                 self._flat_weights_names.extend(param_names)
                 self._all_weights.append(param_names)
@@ -204,7 +205,7 @@ class RNNBase(Module):
 
         self.reset_parameters()
 
-    def _init_flat_weights(self):
+    def _init_flat_weights(self) -> None:
         self._flat_weights = [
             getattr(self, wn) if hasattr(self, wn) else None
             for wn in self._flat_weights_names
@@ -214,7 +215,7 @@ class RNNBase(Module):
         ]
         self.flatten_parameters()
 
-    def __setattr__(self, attr, value):
+    def __setattr__(self, attr, value) -> None:
         if hasattr(self, "_flat_weights_names") and attr in self._flat_weights_names:
             # keep self._flat_weights up to date if you do self.weight = ...
             idx = self._flat_weights_names.index(attr)
@@ -242,7 +243,7 @@ class RNNBase(Module):
         for fw in self._flat_weights:
             if (
                 not isinstance(fw, Tensor)
-                or not (fw.dtype == dtype)
+                or fw.dtype != dtype
                 or not fw.is_cuda
                 or not torch.backends.cudnn.is_acceptable(fw)
             ):
@@ -351,7 +352,9 @@ class RNNBase(Module):
         # Returns True if the weight tensors have changed since the last forward pass.
         # This is the case when used with torch.func.functional_call(), for example.
         weights_changed = False
-        for ref, name in zip(self._flat_weight_refs, self._flat_weights_names):
+        for ref, name in zip(
+            self._flat_weight_refs, self._flat_weights_names, strict=True
+        ):
             weight = getattr(self, name) if hasattr(self, name) else None
             if weight is not None and ref is not None and ref() is not weight:
                 weights_changed = True
@@ -360,7 +363,7 @@ class RNNBase(Module):
 
     def check_forward_args(
         self, input: Tensor, hidden: Tensor, batch_sizes: Optional[Tensor]
-    ):
+    ) -> None:
         self.check_input(input, batch_sizes)
         expected_hidden_size = self.get_expected_hidden_size(input, batch_sizes)
 
@@ -387,7 +390,7 @@ class RNNBase(Module):
             s += ", bidirectional={bidirectional}"
         return s.format(**self.__dict__)
 
-    def _update_flat_weights(self):
+    def _update_flat_weights(self) -> None:
         if not torch.jit.is_scripting():
             if self._weights_have_changed():
                 self._init_flat_weights()
@@ -615,7 +618,7 @@ class RNN(RNNBase):
     ) -> None: ...
 
     @overload
-    def __init__(self, *args, **kwargs): ...
+    def __init__(self, *args, **kwargs) -> None: ...
 
     def __init__(self, *args, **kwargs):
         if "proj_size" in kwargs:
@@ -640,18 +643,25 @@ class RNN(RNNBase):
     @overload
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(
-        self, input: Tensor, hx: Optional[Tensor] = None
+        self,
+        input: Tensor,
+        hx: Optional[Tensor] = None,
     ) -> tuple[Tensor, Tensor]:
         pass
 
     @overload
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(
-        self, input: PackedSequence, hx: Optional[Tensor] = None
+        self,
+        input: PackedSequence,
+        hx: Optional[Tensor] = None,
     ) -> tuple[PackedSequence, Tensor]:
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
+        """
+        Runs the forward pass.
+        """
         self._update_flat_weights()
 
         num_directions = 2 if self.bidirectional else 1
@@ -769,7 +779,10 @@ class RNN(RNNBase):
 
         if isinstance(orig_input, PackedSequence):
             output_packed = PackedSequence(
-                output, batch_sizes, sorted_indices, unsorted_indices
+                output,
+                batch_sizes,
+                sorted_indices,
+                unsorted_indices,
             )
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
 
@@ -971,7 +984,7 @@ class LSTM(RNNBase):
     ) -> None: ...
 
     @overload
-    def __init__(self, *args, **kwargs): ...
+    def __init__(self, *args, **kwargs) -> None: ...
 
     def __init__(self, *args, **kwargs):
         super().__init__("LSTM", *args, **kwargs)
@@ -998,7 +1011,7 @@ class LSTM(RNNBase):
         input: Tensor,
         hidden: tuple[Tensor, Tensor],  # type: ignore[override]
         batch_sizes: Optional[Tensor],
-    ):
+    ) -> None:
         self.check_input(input, batch_sizes)
         self.check_hidden_size(
             hidden[0],
@@ -1027,7 +1040,9 @@ class LSTM(RNNBase):
     @overload  # type: ignore[override]
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(
-        self, input: Tensor, hx: Optional[tuple[Tensor, Tensor]] = None
+        self,
+        input: Tensor,
+        hx: Optional[tuple[Tensor, Tensor]] = None,
     ) -> tuple[Tensor, tuple[Tensor, Tensor]]:  # noqa: F811
         pass
 
@@ -1035,7 +1050,9 @@ class LSTM(RNNBase):
     @overload
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(
-        self, input: PackedSequence, hx: Optional[tuple[Tensor, Tensor]] = None
+        self,
+        input: PackedSequence,
+        hx: Optional[tuple[Tensor, Tensor]] = None,
     ) -> tuple[PackedSequence, tuple[Tensor, Tensor]]:  # noqa: F811
         pass
 
@@ -1149,7 +1166,10 @@ class LSTM(RNNBase):
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
         if isinstance(orig_input, PackedSequence):
             output_packed = PackedSequence(
-                output, batch_sizes, sorted_indices, unsorted_indices
+                output,
+                batch_sizes,
+                sorted_indices,
+                unsorted_indices,
             )
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
         else:
@@ -1304,7 +1324,7 @@ class GRU(RNNBase):
     ) -> None: ...
 
     @overload
-    def __init__(self, *args, **kwargs): ...
+    def __init__(self, *args, **kwargs) -> None: ...
 
     def __init__(self, *args, **kwargs):
         if "proj_size" in kwargs:
@@ -1316,14 +1336,18 @@ class GRU(RNNBase):
     @overload  # type: ignore[override]
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(
-        self, input: Tensor, hx: Optional[Tensor] = None
+        self,
+        input: Tensor,
+        hx: Optional[Tensor] = None,
     ) -> tuple[Tensor, Tensor]:  # noqa: F811
         pass
 
     @overload
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(
-        self, input: PackedSequence, hx: Optional[Tensor] = None
+        self,
+        input: PackedSequence,
+        hx: Optional[Tensor] = None,
     ) -> tuple[PackedSequence, Tensor]:  # noqa: F811
         pass
 
@@ -1417,7 +1441,10 @@ class GRU(RNNBase):
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
         if isinstance(orig_input, PackedSequence):
             output_packed = PackedSequence(
-                output, batch_sizes, sorted_indices, unsorted_indices
+                output,
+                batch_sizes,
+                sorted_indices,
+                unsorted_indices,
             )
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
         else:

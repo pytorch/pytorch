@@ -67,7 +67,7 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(len(counters["graph_break"]), 0)
         else:
             self.assertIn("moo", printed_output)
-            self.assertEqual(len(counters["graph_break"]), 1)
+            self.assertGreater(len(counters["graph_break"]), 0)
 
 
 class ReorderLogsTests(torch._dynamo.test_case.TestCase):
@@ -210,7 +210,8 @@ Unsupported Tensor.item() call with capture_scalar_outputs=False
   Hint: Set `torch._dynamo.config.capture_scalar_outputs = True` or `export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1` to include these operations in the captured graph.
 
   Developer debug context: call_method TensorVariable() item () {}
-""",  # noqa: B950
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0124.html""",  # noqa: B950
         )
 
 

@@ -50,7 +50,13 @@ class ChannelShuffle(Module):
         self.groups = groups
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.channel_shuffle(input, self.groups)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"groups={self.groups}"

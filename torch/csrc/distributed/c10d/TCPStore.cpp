@@ -207,7 +207,7 @@ class SendBuffer {
   SendBuffer(detail::TCPClient& client, detail::QueryType cmd)
       : client(client) {
     buffer.reserve(32); // enough for most commands
-    buffer.push_back((uint8_t)cmd);
+    buffer.push_back(static_cast<uint8_t>(cmd));
   }
 
   void appendString(const std::string& str) {
@@ -224,7 +224,7 @@ class SendBuffer {
 
   template <typename T>
   void appendValue(T value) {
-    uint8_t* begin = (uint8_t*)&value;
+    uint8_t* begin = reinterpret_cast<uint8_t*>(&value);
     buffer.insert(buffer.end(), begin, begin + sizeof(T));
     maybeFlush();
   }
@@ -423,8 +423,14 @@ void TCPStore::ping() {
   buffer.flush();
 
   uint32_t returnedNonce = client_->receiveValue<std::uint32_t>();
-  TORCH_INTERNAL_ASSERT(
-      nonce == returnedNonce, "Ping failed, invalid nonce returned");
+  if (nonce != returnedNonce) {
+    C10_THROW_ERROR(
+        DistNetworkError,
+        fmt::format(
+            "Ping failed, invalid value returned from server. Expected: {}, Got: {}",
+            nonce,
+            returnedNonce));
+  }
 }
 
 void TCPStore::_splitSet(

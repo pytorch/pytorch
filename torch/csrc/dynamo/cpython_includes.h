@@ -10,7 +10,6 @@
 #endif
 
 // see https://bugs.python.org/issue35886
-#if PY_VERSION_HEX >= 0x03080000
 #define Py_BUILD_CORE
 
 #ifndef __cplusplus
@@ -21,14 +20,32 @@
 
 #if IS_PYTHON_3_11_PLUS
 #include <internal/pycore_frame.h>
+
+#include <torch/csrc/dynamo/stackref_bridge.h>
+#if IS_PYTHON_3_14_PLUS && !defined(_WIN32)
+#include <internal/pycore_code.h>
+#include <internal/pycore_genobject.h>
+#include <internal/pycore_interpframe.h>
+#include <internal/pycore_stackref.h>
+#elif IS_PYTHON_3_14_PLUS && defined(_WIN32)
+#include <internal/pycore_interpframe_structs.h> // _PyInterpreterFrame
+#endif
+
 #endif
 
 #undef Py_BUILD_CORE
-#endif // PY_VERSION_HEX >= 0x03080000
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#if IS_PYTHON_3_14_PLUS
+
+#define F_CODE(x) \
+  ((PyCodeObject*)THP_PyStackRef_AsPyObjectBorrow(&(x)->f_executable))
+#define PREV_INSTR(x) (x)->instr_ptr
+
+#else
 
 #if IS_PYTHON_3_13_PLUS
 #define F_CODE(x) ((PyCodeObject*)(x)->f_executable)
@@ -36,12 +53,17 @@ extern "C" {
 #else
 #define F_CODE(x) ((PyCodeObject*)(x)->f_code)
 #define PREV_INSTR(x) (x)->prev_instr
-#endif
+#endif // IS_PYTHON_3_13_PLUS
 
-#if IS_PYTHON_3_12_PLUS
-#define FUNC(x) ((x)->f_funcobj)
+#endif // IS_PYTHON_3_14_PLUS
+
+#if IS_PYTHON_3_14_PLUS
+#define FUNC(x) \
+  ((PyFunctionObject*)THP_PyStackRef_AsPyObjectBorrow(&(x)->f_funcobj))
+#elif IS_PYTHON_3_12_PLUS
+#define FUNC(x) ((PyFunctionObject*)(x)->f_funcobj)
 #else
-#define FUNC(x) ((x)->f_func)
+#define FUNC(x) ((PyFunctionObject*)(x)->f_func)
 #endif
 
 #ifdef __cplusplus

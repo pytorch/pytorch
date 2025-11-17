@@ -15,7 +15,12 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
 )
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_XPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_CUDA_AND_TRITON,
+    HAS_XPU_AND_TRITON,
+)
 
 
 def checkpoint_wrapper(fn):
@@ -992,20 +997,21 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             attn_weights = scores.float().softmax(dim=-1).type(value.dtype)
             return attn_weights.matmul(value)
 
-        tensor_shape = (4, 2, 16, 32)
-        attn_mask = torch.randn((1, 1, 1, 2), dtype=torch.float, device=self.device)
-        args = [
-            torch.randn(tensor_shape, device=self.device),
-            torch.randn(tensor_shape, device=self.device),
-            torch.randn(tensor_shape, device=self.device),
-            attn_mask,
-        ]
-        self._check_common(
-            dot_prod_attention,
-            args1=args,
-            has_dropout=False,
-            check_train=False,
-        )
+        tensor_shapes = [(4, 2, 16, 32), (1, 2, 16, 32)]
+        for tensor_shape in tensor_shapes:
+            attn_mask = torch.randn((1, 1, 1, 2), dtype=torch.float, device=self.device)
+            args = [
+                torch.randn(tensor_shape, device=self.device),
+                torch.randn(tensor_shape, device=self.device),
+                torch.randn(tensor_shape, device=self.device),
+                attn_mask,
+            ]
+            self._check_common(
+                dot_prod_attention,
+                args1=args,
+                has_dropout=False,
+                check_train=False,
+            )
 
     def _test_sdpa_rewriter_22(self):
         def dot_prod_attention(
@@ -1022,20 +1028,31 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             attn_weights = scores.float().softmax(dim=-1).type(value.dtype)
             return attn_weights.matmul(value), key, value
 
-        tensor_shape = (4, 2, 16, 32)
-        attn_mask = torch.randn((1, 1, 1, 2), dtype=torch.float, device=self.device)
-        args = [
-            torch.randn(tensor_shape, device=self.device),
-            torch.randn(tensor_shape, device=self.device),
-            torch.randn(tensor_shape, device=self.device),
-            attn_mask,
-        ]
-        self._check_common(
-            dot_prod_attention,
-            args1=args,
-            has_dropout=False,
-            check_train=False,
-        )
+        tensor_shapes = [(4, 2, 16, 32), (1, 2, 16, 32)]
+        for tensor_shape in tensor_shapes:
+            attn_mask = torch.randn((1, 1, 2, 2), dtype=torch.float, device=self.device)
+            args = [
+                torch.randn(tensor_shape, device=self.device),
+                torch.randn(tensor_shape, device=self.device),
+                torch.randn(tensor_shape, device=self.device),
+                attn_mask,
+            ]
+            self._check_common(
+                dot_prod_attention,
+                args1=args,
+                has_dropout=False,
+                check_train=False,
+            )
+            # test attn_mask with stride of last dim != 1
+            attn_mask_ = attn_mask.transpose(2, 3)
+            args[3] = attn_mask_
+            self._check_common(
+                dot_prod_attention,
+                args1=args,
+                has_dropout=False,
+                check_train=False,
+                contains=self.device == "cpu",
+            )
 
     def _test_sdpa_rewriter_23(self):
         def dot_prod_attention(
@@ -1052,11 +1069,50 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             attn_weights = scores.float().softmax(dim=-1).type(value.dtype)
             return attn_weights.matmul(value), key, value
 
+        tensor_shapes = [(4, 2, 16, 32), (1, 2, 16, 32)]
+        for tensor_shape in tensor_shapes:
+            args = [
+                torch.randn(tensor_shape, device=self.device),
+                torch.randn(tensor_shape, device=self.device),
+                torch.randn(tensor_shape, device=self.device),
+            ]
+            self._check_common(
+                dot_prod_attention,
+                args1=args,
+                has_dropout=False,
+                check_train=False,
+            )
+
+    def _test_sdpa_rewriter_24(self):
+        def dot_prod_attention(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            attn_mask: torch.Tensor,
+        ) -> torch.Tensor:
+            """Input tensors assumed to have shape (batch_size, n_head, seq_len, embed_dim)"""
+            bs = query.size(0)
+            n_head = query.size(1)
+            seq_len = query.size(2)
+            embed_dim = query.size(3)
+            q = query.view(bs * n_head, seq_len, embed_dim)
+            k = key.reshape(bs * n_head, seq_len, embed_dim)
+            v = value.reshape(bs * n_head, seq_len, embed_dim)
+            attn_weights = torch.bmm(q, k.transpose(1, 2))
+            attn_weights = attn_weights.view(bs, n_head, seq_len, seq_len) + attn_mask
+            attn_weights = attn_weights.view(bs * n_head, seq_len, seq_len)
+            attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+            attn_output = torch.bmm(attn_weights, v)
+            attn_output = attn_output.view(bs, n_head, seq_len, embed_dim)
+            return attn_output
+
         tensor_shape = (4, 2, 16, 32)
+        attn_mask = torch.randn((1, 1, 16, 16), dtype=torch.float, device=self.device)
         args = [
-            torch.randn(tensor_shape, device=self.device),
-            torch.randn(tensor_shape, device=self.device),
-            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device, dtype=torch.float),
+            torch.randn(tensor_shape, device=self.device, dtype=torch.float),
+            torch.randn(tensor_shape, device=self.device, dtype=torch.float),
+            attn_mask,
         ]
         self._check_common(
             dot_prod_attention,
@@ -1066,7 +1122,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         )
 
 
-if HAS_XPU or (HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION):
+if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENTION):
 
     class SDPAPatternRewriterGpuTests(TestSDPAPatternRewriterTemplate):
         device = GPU_TYPE
@@ -1133,6 +1189,9 @@ if HAS_XPU or (HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION):
         test_sdpa_rewriter_23_gpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_23
         )
+        test_sdpa_rewriter_24_gpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_24
+        )
 
     class SDPAPatternRewriterGpuDynamicTests(SDPAPatternRewriterGpuTests):
         use_static_shapes = False
@@ -1198,6 +1257,9 @@ if HAS_CPU:
         )
         test_sdpa_rewriter_23_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_23
+        )
+        test_sdpa_rewriter_24_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_24
         )
 
     class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):

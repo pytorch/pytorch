@@ -5,8 +5,7 @@ import enum
 import itertools as it
 import logging
 from collections.abc import Iterator
-from typing import Any, cast, Optional, Union
-from typing_extensions import Literal
+from typing import Any, cast, Literal, Optional, Union
 
 import torch
 from torch._C import FunctionSchema
@@ -231,6 +230,7 @@ class SchemaMatcher:
         for schema in cls.match_schemas(t):
             mutable = mutable or [False for _ in schema.arguments]
             for i, arg in enumerate(schema.arguments):
+                # pyrefly: ignore [unsupported-operation]
                 mutable[i] |= getattr(arg.alias_info, "is_write", False)
 
         return tuple(mutable or (None for _ in t.inputs))
@@ -239,10 +239,12 @@ class SchemaMatcher:
     def match_schemas(cls, t: _ExtraFields_TorchOp) -> tuple[FunctionSchema, ...]:
         signature = tuple(
             # Tensor
-            TensorKey.from_tensor(i) if isinstance(i, _TensorMetadata)
+            TensorKey.from_tensor(i)
+            if isinstance(i, _TensorMetadata)
             #
             # TensorList
-            else [TensorKey.from_tensor(j) for j in i] if isinstance(i, list)
+            else [TensorKey.from_tensor(j) for j in i]
+            if isinstance(i, list)
             #
             # Scalar and uncaptured inputs.
             else i
@@ -252,7 +254,9 @@ class SchemaMatcher:
         def matches(schema) -> bool:
             return len(schema.arguments) == len(signature) and all(
                 cls._types_match(observed, schema_arg.type)
-                for observed, schema_arg in zip(signature, schema.arguments)
+                for observed, schema_arg in zip(
+                    signature, schema.arguments, strict=True
+                )
             )
 
         return tuple(s for s in cls.lookup_schemas(t.name) or () if matches(s))
@@ -375,7 +379,9 @@ class SizeMap:
         key = TensorKey.from_tensor(t)
         if key is not None and t is not None and t.layout == torch.strided:
             # Scalars are represented as zero dim Tensors
-            n = max(i[0] * i[1] for i in zip(t.sizes or [1], t.strides or [1]))
+            n = max(
+                i[0] * i[1] for i in zip(t.sizes or [1], t.strides or [1], strict=True)
+            )
 
             num_bytes = n * _element_size(t.dtype)
             assert num_bytes >= 0, f"{num_bytes}"
@@ -428,7 +434,7 @@ class DataFlowNode:
         mutable_by_key: dict[Optional[TensorKey], set[Optional[bool]]] = {}
         for op in (i.typed[1] for i in subtree if i.typed[0] == _EventType.TorchOp):
             for op_input, mutable in zip(
-                op.inputs, SchemaMatcher.inputs_are_mutable(op)
+                op.inputs, SchemaMatcher.inputs_are_mutable(op), strict=True
             ):
                 # Tensor
                 if isinstance(op_input, _TensorMetadata):
@@ -514,7 +520,7 @@ class DataFlowGraph:
     def flow_nodes(self) -> tuple[DataFlowNode, ...]:
         return tuple(self._flow_nodes)
 
-    def validate(self):
+    def validate(self) -> None:
         # Check that each (Tensor, version) pair has a unique creation node
         outputs: set[tuple[TensorKey, int]] = set()
         for node in self.flow_nodes:
@@ -670,6 +676,7 @@ class MemoryProfile:
         output: list[tuple[int, Action, KeyAndID, int]] = []
         allocation_times: dict[tuple[TensorKey, bool], int] = {}
         live_unknown: dict[tuple[int, torch.device], Literal[True]] = {}
+
         for event in self._op_tree.dfs():
             if event.typed[0] == _EventType.Allocation:
                 alloc_fields = event.typed[1]
@@ -704,7 +711,7 @@ class MemoryProfile:
 
         events: list[tuple[int, Action, TensorAndID]] = [
             (-1, Action.PREEXISTING, (key, version))
-            for key, version in snapshot.keys()
+            for key, version in snapshot
             if (key, True) not in allocation_times and version == 0
         ]
 
@@ -776,6 +783,7 @@ class MemoryProfile:
 
                 if ids:
                     depends_on_gradient.update(ids)
+
                     depends_on_gradient.update(key.id for key in node.outputs)
 
             # We are guaranteed to exit because there is a finite set of
@@ -930,7 +938,7 @@ class MemoryProfile:
         parameter_keys = {key.id for key, _ in candidate_parameters}
         parameter_keys &= self._any_version_depends_on_gradient()
 
-        for key, _ in snapshot.keys():
+        for key, _ in snapshot:
             if key.id in parameter_keys:
                 self._categories.set_by_id(key, Category.PARAMETER)
 
@@ -964,7 +972,7 @@ class MemoryProfile:
                     if key is not None:
                         self._categories.set_by_id(key, Category.OPTIMIZER_STATE)
 
-    def _set_autograd_detail(self):
+    def _set_autograd_detail(self) -> None:
         prior = {None, Category.AUTOGRAD_DETAIL}
         for node in self._data_flow_graph.flow_nodes:
             if RecordScope.BACKWARD_FUNCTION in get_scopes(node._event):
@@ -976,7 +984,7 @@ class MemoryProfile:
 
 
 class MemoryProfileTimeline:
-    def __init__(self, memory_profile):
+    def __init__(self, memory_profile) -> None:
         """The minimum representation of the memory profile timeline
         includes the memory timeline and categories. The timeline
         consists of [timestamp, action, (TensorKey, version), numbytes]
@@ -999,7 +1007,7 @@ class MemoryProfileTimeline:
         times: list[int] = []
         sizes: list[list[int]] = []
 
-        def update(key, version, delta):
+        def update(key, version, delta) -> None:
             category = (
                 self.categories.get(key, version)
                 if isinstance(key, TensorKey)
@@ -1080,6 +1088,7 @@ class MemoryProfileTimeline:
 
             if action in (Action.PREEXISTING, Action.CREATE):
                 raw_events.append(
+                    # pyrefly: ignore [bad-argument-type]
                     (
                         t,
                         _ACTION_TO_INDEX[action],
@@ -1090,6 +1099,7 @@ class MemoryProfileTimeline:
 
             elif action == Action.INCREMENT_VERSION:
                 raw_events.append(
+                    # pyrefly: ignore [bad-argument-type]
                     (
                         t,
                         _ACTION_TO_INDEX[action],
@@ -1098,6 +1108,7 @@ class MemoryProfileTimeline:
                     )
                 )
                 raw_events.append(
+                    # pyrefly: ignore [bad-argument-type]
                     (
                         t,
                         _ACTION_TO_INDEX[action],
@@ -1108,6 +1119,7 @@ class MemoryProfileTimeline:
 
             elif action == Action.DESTROY:
                 raw_events.append(
+                    # pyrefly: ignore [bad-argument-type]
                     (
                         t,
                         _ACTION_TO_INDEX[action],

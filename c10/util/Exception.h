@@ -217,7 +217,7 @@ class C10_API WarningHandlerGuard {
 /// The TORCH_WARN_ONCE macro is difficult to test for. Use
 /// setWarnAlways(true) to turn it into TORCH_WARN, which can be
 /// tested for more easily.
-C10_API void set_warnAlways(bool) noexcept(true);
+C10_API void set_warnAlways(bool /*setting*/) noexcept(true);
 C10_API bool get_warnAlways() noexcept(true);
 
 // A RAII guard that sets warn_always (not thread-local) on
@@ -264,6 +264,13 @@ class C10_API TypeError : public Error {
 // Used in ATen for functionality that is not implemented.  These turn into
 // NotImplementedError when they cross to Python.
 class C10_API NotImplementedError : public Error {
+  using Error::Error;
+};
+
+// Used in ATen for buffer-related errors, e.g. trying to create a DLPack of
+// an unsupported device.  These turn into BufferError when they cross to
+// Python.
+class C10_API BufferError : public Error {
   using Error::Error;
 };
 
@@ -365,33 +372,18 @@ C10_API std::string GetExceptionString(const std::exception& e);
 // https://stackoverflow.com/questions/5134523/msvc-doesnt-expand-va-args-correctly
 #define C10_EXPAND_MSVC_WORKAROUND(x) x
 
-// On nvcc, C10_UNLIKELY thwarts missing return statement analysis.  In cases
-// where the unlikely expression may be a constant, use this macro to ensure
-// return statement analysis keeps working (at the cost of not getting the
-// likely/unlikely annotation on nvcc).
-// https://github.com/pytorch/pytorch/issues/21418
-//
-// Currently, this is only used in the error reporting macros below.  If you
-// want to use it more generally, move me to Macros.h
-//
-// TODO: Brian Vaughan observed that we might be able to get this to work on
-// nvcc by writing some sort of C++ overload that distinguishes constexpr inputs
-// from non-constexpr.  Since there isn't any evidence that losing C10_UNLIKELY
-// in nvcc is causing us perf problems, this is not yet implemented, but this
-// might be an interesting piece of C++ code for an intrepid bootcamper to
-// write.
-#if defined(__CUDACC__)
-#define C10_UNLIKELY_OR_CONST(e) e
-#else
-#define C10_UNLIKELY_OR_CONST(e) C10_UNLIKELY(e)
-#endif
+#include <torch/headeronly/util/Exception.h>
 
 // ----------------------------------------------------------------------------
 // Error reporting macros
 // ----------------------------------------------------------------------------
 
 #ifdef STRIP_ERROR_MESSAGES
-#define TORCH_RETHROW(e, ...) throw
+#define TORCH_RETHROW(e, ...)                       \
+  do {                                              \
+    (void)e; /* Suppress unused variable warning */ \
+    throw;                                          \
+  } while (false)
 #else
 #define TORCH_RETHROW(e, ...)               \
   do {                                      \
@@ -481,7 +473,7 @@ C10_API std::string GetExceptionString(const std::exception& e);
 
 namespace c10::detail {
 template <typename... Args>
-decltype(auto) torchCheckMsgImpl(const char* /*msg*/, const Args&... args) {
+auto torchCheckMsgImpl(const char* /*msg*/, const Args&... args) {
   return ::c10::str(args...);
 }
 inline C10_API const char* torchCheckMsgImpl(const char* msg) {
@@ -654,6 +646,10 @@ namespace c10::detail {
 #define TORCH_CHECK_NOT_IMPLEMENTED(cond, ...) \
   TORCH_CHECK_WITH_MSG(NotImplementedError, cond, "TYPE", __VA_ARGS__)
 
+// Like TORCH_CHECK, but raises BufferError instead of Errors.
+#define TORCH_CHECK_BUFFER(cond, ...) \
+  TORCH_CHECK_WITH_MSG(BufferError, cond, "TYPE", __VA_ARGS__)
+
 #define TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(cond, ...) \
   TORCH_CHECK_WITH_MSG(                                   \
       ErrorAlwaysShowCppStacktrace, cond, "TYPE", ##__VA_ARGS__)
@@ -709,6 +705,98 @@ namespace c10::detail {
 // NOTE: using the argument name in TORCH_CHECK's message is preferred
 #define TORCH_CHECK_ARG(cond, argN, ...) \
   TORCH_CHECK(cond, "invalid argument ", argN, ": ", __VA_ARGS__)
+
+#ifndef FATAL_IF
+#ifdef C10_USE_GLOG
+#define FATAL_IF(condition)                                              \
+  condition ? (void)0                                                    \
+            : ::c10::LoggerVoidify() &                                   \
+          ::c10::MessageLogger(__FILE__, __LINE__, ::google::GLOG_FATAL) \
+              .stream()
+#else
+#define FATAL_IF(condition)            \
+  condition ? (void)0                  \
+            : ::c10::LoggerVoidify() & \
+          ::c10::MessageLogger(__FILE__, __LINE__, ::c10::GLOG_FATAL).stream()
+#endif
+#endif
+
+#ifndef NON_FATAL_IF
+#ifdef C10_USE_GLOG
+#define NON_FATAL_IF(condition)                                \
+  condition ? (void)0                                          \
+            : ::c10::LoggerVoidify() &                         \
+          ::c10::MessageLogger(                                \
+              __FILE__, __LINE__, ::google::GLOG_FATAL, false) \
+              .stream()
+#else
+#define NON_FATAL_IF(condition)                                              \
+  condition ? (void)0                                                        \
+            : ::c10::LoggerVoidify() &                                       \
+          ::c10::MessageLogger(__FILE__, __LINE__, ::c10::GLOG_FATAL, false) \
+              .stream()
+#endif
+#endif
+
+// Binary comparison check macros
+#define TORCH_CHECK_OP(val1, val2, op)                                      \
+  NON_FATAL_IF(((val1)op(val2)))                                            \
+      << "Check failed: " #val1 " " #op " " #val2 " (" << (val1) << " vs. " \
+      << (val2) << "). "
+
+#define TORCH_DCHECK_OP(val1, val2, op)                                       \
+  FATAL_IF(((val1)op(val2))) << "Check failed: " #val1 " " #op " " #val2 " (" \
+                             << (val1) << " vs. " << (val2) << "). "
+
+#define TORCH_CHECK_EQ(val1, val2) TORCH_CHECK_OP(val1, val2, ==)
+#define TORCH_CHECK_NE(val1, val2) TORCH_CHECK_OP(val1, val2, !=)
+#define TORCH_CHECK_LE(val1, val2) TORCH_CHECK_OP(val1, val2, <=)
+#define TORCH_CHECK_LT(val1, val2) TORCH_CHECK_OP(val1, val2, <)
+#define TORCH_CHECK_GE(val1, val2) TORCH_CHECK_OP(val1, val2, >=)
+#define TORCH_CHECK_GT(val1, val2) TORCH_CHECK_OP(val1, val2, >)
+
+// Debug versions of TORCH_CHECK_OP macros
+#ifndef NDEBUG
+#define TORCH_DCHECK_EQ(val1, val2) TORCH_DCHECK_OP(val1, val2, ==)
+#define TORCH_DCHECK_NE(val1, val2) TORCH_DCHECK_OP(val1, val2, !=)
+#define TORCH_DCHECK_LE(val1, val2) TORCH_DCHECK_OP(val1, val2, <=)
+#define TORCH_DCHECK_LT(val1, val2) TORCH_DCHECK_OP(val1, val2, <)
+#define TORCH_DCHECK_GE(val1, val2) TORCH_DCHECK_OP(val1, val2, >=)
+#define TORCH_DCHECK_GT(val1, val2) TORCH_DCHECK_OP(val1, val2, >)
+#else // !NDEBUG
+// Optimized versions - generate no code
+#define TORCH_DCHECK_EQ(val1, val2) \
+  while (false)                     \
+  TORCH_DCHECK_OP(val1, val2, ==)
+#define TORCH_DCHECK_NE(val1, val2) \
+  while (false)                     \
+  TORCH_DCHECK_OP(val1, val2, !=)
+#define TORCH_DCHECK_LE(val1, val2) \
+  while (false)                     \
+  TORCH_DCHECK_OP(val1, val2, <=)
+#define TORCH_DCHECK_LT(val1, val2) \
+  while (false)                     \
+  TORCH_DCHECK_OP(val1, val2, <)
+#define TORCH_DCHECK_GE(val1, val2) \
+  while (false)                     \
+  TORCH_DCHECK_OP(val1, val2, >=)
+#define TORCH_DCHECK_GT(val1, val2) \
+  while (false)                     \
+  TORCH_DCHECK_OP(val1, val2, >)
+#endif // NDEBUG
+
+// Null pointer check macro
+#define TORCH_CHECK_NOTNULL(val) \
+  ::c10::CheckNotNull(__FILE__, __LINE__, #val, (val), false)
+
+#ifndef NDEBUG
+#define TORCH_DCHECK_NOTNULL(val) \
+  ::c10::CheckNotNull(__FILE__, __LINE__, #val, (val), true)
+#else // !NDEBUG
+#define TORCH_DCHECK_NOTNULL(val) \
+  while (false)                   \
+  TORCH_CHECK_NOTNULL(val)
+#endif // NDEBUG
 
 // ----------------------------------------------------------------------------
 // Deprecated macros

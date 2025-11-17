@@ -23,8 +23,8 @@ import re
 import sys
 import types
 import unittest
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, overload, TypeVar, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, overload, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -42,7 +42,7 @@ from .bytecode_transformation import (
 )
 from .guards import CheckFunctionManager, CompileId, GuardedCode
 from .types import ConvertFrameReturn, DynamoFrameType, wrap_guarded_code
-from .utils import same
+from .utils import CompileCounterInt, same
 
 
 np: Optional[types.ModuleType] = None
@@ -85,6 +85,12 @@ def extract_graph_and_tracker(fn, *args, **kwargs):  # type: ignore[no-untyped-d
 
     torch.compile(backend=extract_graph_backend, fullgraph=True)(fn)(*args, **kwargs)
     return gm.graph, region_tracker  # type: ignore[union-attr]
+
+
+def extract_graph(fn, *args, **kwargs):  # type: ignore[no-untyped-def]
+    backend = AotEagerAndRecordGraphs()
+    result = torch.compile(backend=backend)(fn)(*args, **kwargs)
+    return result, backend.graphs, backend.fw_graphs, backend.bw_graphs
 
 
 def collect_results(
@@ -200,13 +206,13 @@ def debug_insert_nops(
             return ConvertFrameReturn()
 
         debug_checks(frame.f_code)
-        code = transform_code_object(frame.f_code, insert_nops)
+        code, _ = transform_code_object(frame.f_code, insert_nops)
         graph = OutputGraph(
             code_options={},
             compiler_fn=None,
-            root_tx=None,
+            root_tx=None,  # type: ignore[arg-type]
             export=False,
-            export_constraints=None,
+            export_constraints=[],
             frame_state={"_id": 0},
             # TODO: shouldn't this be f_locals/f_globals from frame?
             local_scope=locals(),
@@ -227,8 +233,8 @@ def debug_insert_nops(
 
 class CompileCounter:
     def __init__(self) -> None:
-        self.frame_count = 0
-        self.op_count = 0
+        self.frame_count: Union[int, CompileCounterInt] = 0
+        self.clear()
 
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
@@ -240,16 +246,19 @@ class CompileCounter:
         return gm.forward
 
     def clear(self) -> None:
-        self.frame_count = 0
+        if config.debug_disable_compile_counter:
+            self.frame_count = CompileCounterInt(0)
+        else:
+            self.frame_count = 0
         self.op_count = 0
 
 
 class CompileCounterWithBackend:
     def __init__(self, backend: str) -> None:
-        self.frame_count = 0
-        self.op_count = 0
+        self.frame_count: Union[int, CompileCounterInt] = 0
         self.backend = backend
         self.graphs: list[torch.fx.GraphModule] = []
+        self.clear()
 
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
@@ -264,7 +273,10 @@ class CompileCounterWithBackend:
         return lookup_backend(self.backend)(gm, example_inputs)
 
     def clear(self) -> None:
-        self.frame_count = 0
+        if config.debug_disable_compile_counter:
+            self.frame_count = CompileCounterInt(0)
+        else:
+            self.frame_count = 0
         self.op_count = 0
         self.graphs = []
 
@@ -414,11 +426,12 @@ def rand_strided(
     device: Union[str, torch.device] = "cpu",
     extra_size: int = 0,
 ) -> torch.Tensor:
-    needed_size = (
-        sum((shape - 1) * stride for shape, stride in zip(size, stride))
-        + 1
-        + extra_size
-    )
+    needed_size = extra_size
+    if all(s > 0 for s in size):
+        # only need to allocate if all sizes are non-zero
+        needed_size += (
+            sum((shape - 1) * stride for shape, stride in zip(size, stride)) + 1
+        )
     if dtype.is_floating_point:
         if dtype.itemsize == 1:
             """
@@ -489,6 +502,7 @@ def make_test_cls_with_patches(
 def skipIfNotPy311(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 11):
         return fn
+    # pyrefly: ignore [bad-return, bad-argument-type]
     return unittest.skip(fn)
 
 
@@ -496,6 +510,12 @@ def skipIfNotPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 12):
         return fn
     return unittest.skip("Requires Python 3.12+")(fn)
+
+
+def skipIfOnlyNotPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
+    if sys.version_info >= (3, 13) or sys.version_info < (3, 12):
+        return unittest.skip("Requires Python 3.12")(fn)
+    return fn
 
 
 def xfailIfPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
@@ -508,13 +528,6 @@ def skipIfPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 12):
         return unittest.skip("Not supported in Python 3.12+")(fn)
     return fn
-
-
-def requiresPy310(fn: Callable[_P, _T]) -> Callable[_P, _T]:
-    if sys.version_info >= (3, 10):
-        return fn
-    else:
-        return unittest.skip("Requires Python 3.10+")(fn)
 
 
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py

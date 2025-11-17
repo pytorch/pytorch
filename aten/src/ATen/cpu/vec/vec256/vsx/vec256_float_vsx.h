@@ -142,7 +142,7 @@ class Vectorized<float> {
       const Vectorized<float>& a,
       const Vectorized<float>& b,
       const Vectorized<float>& mask) {
-    // the mask used here returned by comparision of vec256
+    // the mask used here returned by comparison of vec256
     // assuming this we can use the same mask directly with vec_sel
     return {
         vec_sel(a._vec0, b._vec0, mask._vecb0),
@@ -350,6 +350,9 @@ class Vectorized<float> {
     return {Sleef_expm1f4_u10(_vec0), Sleef_expm1f4_u10(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE exp_u20() const {
+    return exp();
+  }
+  Vectorized<float> C10_ALWAYS_INLINE fexp_u20() const {
     return exp();
   }
 

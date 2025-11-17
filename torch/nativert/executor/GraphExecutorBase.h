@@ -14,12 +14,15 @@ struct ProfileMetrics {
   size_t staticDispatchNodesCount{0};
   size_t totalNodesCount{0};
   std::vector<float> timePerNode;
+  std::vector<std::string> nodeTypes;
   std::unordered_map<std::string, float> timePerNodeType;
   std::unordered_map<std::string, float> percentPerNodeType;
+  std::vector<float> percentPerNode;
   std::unordered_map<std::string, int> instancesPerNodeType;
   std::unordered_set<std::string> staticDispatchNodes;
   std::unordered_set<std::string> primNodes;
   float totalTime{0};
+  std::string name;
 };
 
 /**
@@ -51,7 +54,7 @@ class GraphExecutorBase {
 
   ProfileMetrics benchmarkIndividualNodes(
       ExecutionFrame& executionFrame,
-      std::vector<std::vector<c10::IValue>> inputs,
+      const std::vector<std::vector<c10::IValue>>& inputs,
       const uint32_t warmup_runs,
       const uint32_t main_runs);
 

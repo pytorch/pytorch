@@ -4,6 +4,7 @@
 #include <fmt/format.h>
 
 #include <c10/util/Enumerate.h>
+#include <torch/custom_class.h>
 #include <torch/nativert/detail/ITree.h>
 
 namespace torch::nativert::detail {
@@ -259,7 +260,7 @@ TEST(ITreeTest, NoContext) {
       c10::IValue(8),
       c10::IValue(9),
   };
-  ASSERT_DEATH({ itreeUnflatten(flats, spec); }, "Check failed");
+  EXPECT_THROW({ itreeUnflatten(flats, spec); }, c10::Error);
 }
 
 TEST(ITreeTest, TooManyContext) {
@@ -304,7 +305,7 @@ TEST(ITreeTest, TooManyContext) {
       c10::IValue(8),
       c10::IValue(9),
   };
-  ASSERT_DEATH({ itreeUnflatten(flats, spec); }, "Check failed");
+  EXPECT_THROW({ itreeUnflatten(flats, spec); }, c10::Error);
 }
 
 TEST(ITreeTest, DoubleRegister) {
@@ -375,7 +376,7 @@ TEST(ITreeTest, NotEnoughUnflatten) {
       c10::IValue(2),
       c10::IValue(7),
   };
-  ASSERT_DEATH({ itreeUnflatten(flats, spec); }, "Check failed");
+  EXPECT_THROW({ itreeUnflatten(flats, spec); }, c10::Error);
 }
 
 TEST(ITreeTest, TooManyUnflatten) {
@@ -449,7 +450,7 @@ TEST(ITreeTest, TooManyUnflatten) {
       c10::IValue(2),
       c10::IValue(7),
   };
-  ASSERT_DEATH({ itreeUnflatten(flats, spec); }, "Check failed");
+  EXPECT_THROW({ itreeUnflatten(flats, spec); }, c10::Error);
 }
 
 TEST(ITreeTest, Flatten) {
@@ -908,8 +909,8 @@ TEST(ITreeTest, UnmatchedDictFlatten) {
   list.push_back(std::move(tup));
   list.push_back(c10::IValue(2));
   list.push_back(std::move(dict));
-  ASSERT_DEATH(
-      { itreeFlatten(c10::IValue{std::move(list)}, spec); }, "Check failed");
+  EXPECT_THROW(
+      { itreeFlatten(c10::IValue{std::move(list)}, spec); }, c10::Error);
 }
 
 TEST(ITreeTest, DictFlattenTest) {
@@ -1025,8 +1026,8 @@ TEST(ITreeTest, UnmatchedTupleFlatten) {
   list.push_back(std::move(tup));
   list.push_back(c10::IValue(2));
   list.push_back(std::move(dict));
-  ASSERT_DEATH(
-      { itreeFlatten(c10::IValue{std::move(list)}, spec); }, "Check failed");
+  EXPECT_THROW(
+      { itreeFlatten(c10::IValue{std::move(list)}, spec); }, c10::Error);
 }
 
 TEST(ITreeTest, ToAtenType) {
@@ -1145,6 +1146,202 @@ TEST(ITreeTest, ToAtenType) {
   EXPECT_EQ(
       elementType->expectRef<c10::DictType>().getValueType()->kind(),
       c10::TypeKind::AnyType);
+}
+
+TEST(ITreeTest, KeyedJaggedTensorUnflatten) {
+  // Test KeyedJaggedTensor pytree node registration
+  // KeyedJaggedTensor has 6 tensor fields: _values, _weights, _lengths,
+  // _offsets, _stride_per_key_per_rank, _inverse_indices
+  auto jsonSpec = R"(
+[
+  1,
+  {
+    "type": "torchrec.sparse.jagged_tensor.KeyedJaggedTensor",
+    "context": "[\"key1\", \"key2\"]",
+    "children_spec": [
+      {
+        "type": null,
+        "context": null,
+        "children_spec": []
+      },
+      {
+        "type": null,
+        "context": null,
+        "children_spec": []
+      },
+      {
+        "type": null,
+        "context": null,
+        "children_spec": []
+      },
+      {
+        "type": null,
+        "context": null,
+        "children_spec": []
+      },
+      {
+        "type": null,
+        "context": null,
+        "children_spec": []
+      },
+      {
+        "type": null,
+        "context": null,
+        "children_spec": []
+      }
+    ]
+  }
+]
+  )";
+
+  auto [graph, valuePtrs] = makeValues(6);
+  const auto spec = itreeSpecLoads(jsonSpec, valuePtrs);
+
+  // Create mock tensor values for the 6 fields
+  std::vector<c10::IValue> flats = {
+      c10::IValue(1), // _values
+      c10::IValue(2), // _weights
+      c10::IValue(3), // _lengths
+      c10::IValue(4), // _offsets
+      c10::IValue(5), // _stride_per_key_per_rank
+      c10::IValue(6), // _inverse_indices tensor part
+  };
+
+  // Test unflatten - this will create a generic tuple since we don't have
+  // the actual KeyedJaggedTensor constructor available in tests
+  auto itree = itreeUnflatten(flats, spec);
+  EXPECT_TRUE(itree.isTuple());
+  EXPECT_EQ(itree.toTupleRef().elements().size(), 6);
+
+  // Verify the values match what we put in
+  for (size_t i = 0; i < 6; i++) {
+    EXPECT_EQ(itree.toTupleRef().elements()[i], flats[i]);
+  }
+
+  // Verify spec has correct number of children and structure
+  EXPECT_EQ(spec.children().size(), 6);
+  EXPECT_EQ(spec.numIValues(), 6);
+  EXPECT_FALSE(spec.isIValue());
+  EXPECT_EQ(
+      spec.uniformName(), "torchrec.sparse.jagged_tensor.KeyedJaggedTensor");
+}
+
+TEST(ITreeTest, KeyedJaggedTensorNodeRegistration) {
+  // Test that KeyedJaggedTensor pytree node is properly registered
+
+  // Verify the KeyedJaggedTensor node is in the registry by attempting
+  // to load a spec that references it
+  auto jsonSpec = R"(
+[
+  1,
+  {
+    "type": "torchrec.sparse.jagged_tensor.KeyedJaggedTensor",
+    "context": "[\"key1\", \"key2\"]",
+    "children_spec": [
+      {
+        "type": null,
+        "context": null,
+        "children_spec": []
+      },
+      {
+        "type": null,
+        "context": null,
+        "children_spec": []
+      },
+      {
+        "type": null,
+        "context": null,
+        "children_spec": []
+      },
+      {
+        "type": null,
+        "context": null,
+        "children_spec": []
+      },
+      {
+        "type": null,
+        "context": null,
+        "children_spec": []
+      },
+      {
+        "type": null,
+        "context": null,
+        "children_spec": []
+      }
+    ]
+  }
+]
+  )";
+
+  auto [graph, valuePtrs] = makeValues(6);
+
+  // This should not throw - if KeyedJaggedTensor wasn't registered,
+  // we'd get an exception about "Unknown pytree node type"
+  EXPECT_NO_THROW({
+    const auto spec = itreeSpecLoads(jsonSpec, valuePtrs);
+
+    // Verify the spec loaded correctly
+    EXPECT_FALSE(spec.isIValue());
+    EXPECT_EQ(
+        spec.uniformName(), "torchrec.sparse.jagged_tensor.KeyedJaggedTensor");
+    EXPECT_EQ(spec.children().size(), 6);
+    EXPECT_EQ(spec.numIValues(), 6);
+
+    // Verify context is parsed correctly
+    EXPECT_FALSE(spec.context().is_null());
+    EXPECT_TRUE(spec.context().is_array());
+    EXPECT_EQ(spec.context().size(), 2);
+  });
+}
+
+TEST(ITreeTest, JaggedTensorNodeRegistration) {
+  // Test that JaggedTensor pytree node is also properly registered
+
+  auto jsonSpec = R"(
+[
+  1,
+  {
+    "type": "torchrec.sparse.jagged_tensor.JaggedTensor",
+    "context": "null",
+    "children_spec": [
+      {
+        "type": null,
+        "context": null,
+        "children_spec": []
+      },
+      {
+        "type": null,
+        "context": null,
+        "children_spec": []
+      },
+      {
+        "type": null,
+        "context": null,
+        "children_spec": []
+      },
+      {
+        "type": null,
+        "context": null,
+        "children_spec": []
+      }
+    ]
+  }
+]
+  )";
+
+  auto [graph, valuePtrs] = makeValues(4);
+
+  // This should not throw - if JaggedTensor wasn't registered,
+  // we'd get an exception about "Unknown pytree node type"
+  EXPECT_NO_THROW({
+    const auto spec = itreeSpecLoads(jsonSpec, valuePtrs);
+
+    // Verify the spec loaded correctly
+    EXPECT_FALSE(spec.isIValue());
+    EXPECT_EQ(spec.uniformName(), "torchrec.sparse.jagged_tensor.JaggedTensor");
+    EXPECT_EQ(spec.children().size(), 4);
+    EXPECT_EQ(spec.numIValues(), 4);
+  });
 }
 
 } // namespace torch::nativert::detail

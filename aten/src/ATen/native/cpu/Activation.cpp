@@ -26,7 +26,11 @@ namespace at::native {
 
 namespace {
 
-static void log_sigmoid_cpu_kernel(TensorBase &output, TensorBase &buffer, const TensorBase &input) {
+#if defined(__GNUC__) && __GNUC__ == 14 && defined(__aarch64__) && !defined(__ARM_FEATURE_SVE)
+// Workaround for gcc-14.2.0 ICE during RTL pass: expand when compiling for NEON
+__attribute__((optimize("no-tree-vectorize")))
+#endif
+void log_sigmoid_cpu_kernel(TensorBase &output, TensorBase &buffer, const TensorBase &input) {
   if (at::isReducedFloatingType(input.scalar_type())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(input.scalar_type(), "log_sigmoid_cpu", [&]() {
     using Vec = Vectorized<scalar_t>;
@@ -92,7 +96,7 @@ static void log_sigmoid_cpu_kernel(TensorBase &output, TensorBase &buffer, const
   }
 }
 
-static void log_sigmoid_backward_cpu_kernel(TensorIterator& iter) {
+void log_sigmoid_backward_cpu_kernel(TensorIterator& iter) {
   if (at::isReducedFloatingType(iter.dtype())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "log_sigmoid_backward_cpu", [&]() {
       using Vec = Vectorized<scalar_t>;
@@ -146,7 +150,7 @@ static void log_sigmoid_backward_cpu_kernel(TensorIterator& iter) {
   }
 }
 
-static void threshold_kernel(
+void threshold_kernel(
     TensorIteratorBase& iter,
     const Scalar& threshold_scalar,
     const Scalar& value_scalar) {
@@ -864,7 +868,7 @@ void hardswish_backward_kernel(TensorIterator& iter) {
   }
 }
 
-static void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
+void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
   if (at::isReducedFloatingType(iter.dtype())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "leaky_relu_cpu", [&]() {
     auto zero_vec = Vectorized<float>((float)(0));
@@ -903,7 +907,7 @@ static void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
   }
 }
 
-static void leaky_relu_backward_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
+void leaky_relu_backward_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
   if (at::isReducedFloatingType(iter.dtype())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "leaky_relu_backward_cpu", [&]() {
     auto zero_vec = Vectorized<float>((float)(0));
@@ -994,7 +998,7 @@ void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta_, con
     auto threshold = threshold_.to<float>();
     const Vec beta_vec(beta);
     const Vec threshold_vec(threshold);
-    const Vec one_vec(static_cast<float>(1.0));
+    const Vec one_vec(1.0f);
     cpu_kernel_vec(
         iter,
         [beta, threshold](scalar_t a, scalar_t b) -> scalar_t {

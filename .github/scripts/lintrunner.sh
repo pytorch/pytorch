@@ -2,7 +2,7 @@
 set -ex
 
 # Use uv to speed up lintrunner init
-python3 -m pip install uv==0.1.45 setuptools
+python3 -m pip install -U uv==0.8.* setuptools
 
 CACHE_DIRECTORY="/tmp/.lintbin"
 # Try to recover the cached binaries
@@ -33,6 +33,9 @@ python3 torch/utils/data/datapipes/gen_pyi.py
 
 # Also check generated pyi files
 find torch -name '*.pyi' -exec git add --force -- "{}" +
+
+# Print current environment
+python3 -m pip freeze
 
 RC=0
 # Run lintrunner on all files

@@ -6,7 +6,7 @@ set(PYTORCH_FOUND_HIP FALSE)
 # In the latter case, if /opt/rocm does not exist emit status
 # message and return.
 if(DEFINED ENV{ROCM_PATH})
-  set(ROCM_PATH $ENV{ROCM_PATH})
+  file(TO_CMAKE_PATH "$ENV{ROCM_PATH}" ROCM_PATH)
   if(NOT EXISTS ${ROCM_PATH})
     message(FATAL_ERROR
       "ROCM_PATH environment variable is set to ${ROCM_PATH} but does not exist.\n"
@@ -31,7 +31,7 @@ if(NOT DEFINED ENV{MAGMA_HOME})
   set(MAGMA_HOME ${ROCM_PATH}/magma)
   set(ENV{MAGMA_HOME} ${ROCM_PATH}/magma)
 else()
-  set(MAGMA_HOME $ENV{MAGMA_HOME})
+  file(TO_CMAKE_PATH "$ENV{MAGMA_HOME}" MAGMA_HOME)
 endif()
 
 # MIOpen isn't a part of HIP-SDK for Windows and hence, may have a different
@@ -93,19 +93,16 @@ if(HIP_FOUND)
   # hip (lower-case) package. Both are probed above and will be in
   # ROCM_INCLUDE_DIRS if available.
   find_file(ROCM_VERSION_HEADER_PATH
-    NAMES rocm-core/rocm_version.h
+    NAMES rocm-core/rocm_version.h hip/hip_version.h
     NO_DEFAULT_PATH
     PATHS ${ROCM_INCLUDE_DIRS}
   )
-  set(ROCM_LIB_NAME "ROCM")
-  if(NOT ROCM_VERSION_HEADER_PATH)
-    find_file(ROCM_VERSION_HEADER_PATH
-      NAMES hip/hip_version.h
-      NO_DEFAULT_PATH
-      PATHS ${ROCM_INCLUDE_DIRS}
-    )
+  if(ROCM_VERSION_HEADER_PATH MATCHES "rocm-core/rocm_version.h$")
+    set(ROCM_LIB_NAME "ROCM")
+  else()
     set(ROCM_LIB_NAME "HIP")
   endif()
+
   if(NOT ROCM_VERSION_HEADER_PATH)
     message(FATAL_ERROR "Could not find hip/hip_version.h or rocm-core/rocm_version.h in ${ROCM_INCLUDE_DIRS}")
   endif()

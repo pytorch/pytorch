@@ -2,7 +2,7 @@
 
 
 import operator
-from typing import Callable
+from collections.abc import Callable
 
 import sympy
 
@@ -99,7 +99,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
             # so it's not worth CSEing.
             or get_aten_target(n) is aten.empty
             or n in nodes_that_alias_outputs
-            # This CSE pass currently doesn't handle re-propogation of unbacked
+            # This CSE pass currently doesn't handle re-propagation of unbacked
             # meta where it'll sometimes eliminate a _local_scalar_dense but not
             # replace the meta of downstream users. eg. one bug we've seen is:
             #
@@ -179,7 +179,7 @@ def raise_getitems(gm: fx.GraphModule) -> fx.GraphModule:
     )
 
     # loop through getitem nodes in the graph and raise them to the parent node
-    # in reverse order to perserve their original relative order
+    # in reverse order to preserve their original relative order
     for node in reversed(getitem_nodes):
         assert len(node.all_input_nodes) == 1
         parent = node.all_input_nodes[0]

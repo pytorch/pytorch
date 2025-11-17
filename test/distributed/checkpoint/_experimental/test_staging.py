@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import requires_cuda, run_tests, TestC
 
 class TestDefaultStager(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         # Create a test state dictionary with various data types
         self.state_dict = {
             "model": torch.nn.Linear(10, 5).state_dict(),
@@ -74,7 +75,7 @@ class TestDefaultStager(TestCase):
         if torch.cuda.is_available():
             self.skipTest("CUDA is available, cannot test CUDA unavailable scenario")
 
-        options = CheckpointStagerConfig(use_cuda_non_blocking_copy=True)
+        options = CheckpointStagerConfig(use_non_blocking_copy=True)
         with self.assertRaises(AssertionError):
             DefaultStager(options)
 
@@ -86,21 +87,21 @@ class TestDefaultStager(TestCase):
                 use_pinned_memory=False,
                 use_shared_memory=False,
                 use_async_staging=False,
-                use_cuda_non_blocking_copy=False,
+                use_non_blocking_copy=False,
             ),
             # Only pinned memory
             CheckpointStagerConfig(
                 use_pinned_memory=True,
                 use_shared_memory=False,
                 use_async_staging=False,
-                use_cuda_non_blocking_copy=False,
+                use_non_blocking_copy=False,
             ),
             # Only shared memory
             CheckpointStagerConfig(
                 use_pinned_memory=False,
                 use_shared_memory=True,
                 use_async_staging=False,
-                use_cuda_non_blocking_copy=False,
+                use_non_blocking_copy=False,
             ),
         ]
 
@@ -108,19 +109,19 @@ class TestDefaultStager(TestCase):
             # Only async staging
             test_cases.append(
                 CheckpointStagerConfig(
-                    use_pinned_memory=torch.cuda.is_available(),
+                    use_pinned_memory=torch.accelerator.is_available(),
                     use_shared_memory=False,
                     use_async_staging=True,
-                    use_cuda_non_blocking_copy=False,
+                    use_non_blocking_copy=False,
                 )
             )
             # Only CUDA non-blocking copy
             test_cases.append(
                 CheckpointStagerConfig(
-                    use_pinned_memory=torch.cuda.is_available(),
+                    use_pinned_memory=torch.accelerator.is_available(),
                     use_shared_memory=False,
                     use_async_staging=False,
-                    use_cuda_non_blocking_copy=torch.cuda.is_available(),
+                    use_non_blocking_copy=torch.accelerator.is_available(),
                 )
             )
 
@@ -129,7 +130,7 @@ class TestDefaultStager(TestCase):
                 stager = DefaultStager(options)
 
                 # Test staging works with these options
-                if options.use_async_staging and torch.cuda.is_available():
+                if options.use_async_staging and torch.accelerator.is_available():
                     result = stager.stage(self.state_dict)
                     self.assertIsInstance(result, Future)
                     staged_dict = result.result()
@@ -183,9 +184,9 @@ class TestDefaultStager(TestCase):
         """Test multiple staging operations with the same stager."""
         options = CheckpointStagerConfig(
             use_async_staging=False,
-            use_pinned_memory=torch.cuda.is_available(),
+            use_pinned_memory=torch.accelerator.is_available(),
             use_shared_memory=False,
-            use_cuda_non_blocking_copy=torch.cuda.is_available(),
+            use_non_blocking_copy=torch.accelerator.is_available(),
         )
         stager = DefaultStager(options)
 
@@ -206,7 +207,7 @@ class TestDefaultStager(TestCase):
         for i, result in enumerate(staged_results):
             self.assertIsInstance(result, dict)
             # Verify the result contains the expected keys
-            for key in state_dicts[i].keys():
+            for key in state_dicts[i]:
                 self.assertIn(key, result)
 
         stager.close()

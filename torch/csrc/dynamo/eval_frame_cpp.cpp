@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/cpp_shim.h>
 #include <torch/csrc/dynamo/cpython_includes.h>
@@ -23,10 +24,8 @@ static py::object dynamo_call_callback(
     CacheEntry* cache_entry,
     FrameState* frame_state) {
   THPPyInterpreterFrame* frame = THPPyInterpreterFrame_New(_frame);
-  if (frame == nullptr) {
-    throw std::runtime_error(
-        "Dynamo failed to initialize CPython interpreter frame wrapper");
-  }
+  TORCH_CHECK(
+      frame, "Dynamo failed to initialize CPython interpreter frame wrapper");
   frame->locals = (PyObject*)framelocals_mapping_to_dict(locals);
 
   py::object cache_entry_obj = py::none();
@@ -138,6 +137,15 @@ PyObject* dynamo__custom_eval_frame(
   };
 
   auto fail = [&]() { clear_old_frame_if_python_312_plus(tstate, frame); };
+
+#if IS_PYTHON_3_12_PLUS
+  // skip tracing the frame if CPython is in a tracing state (e.g.
+  // sys.monitoring call)
+  if (tstate->tracing > 0) {
+    eval_default();
+    return eval_result;
+  }
+#endif
 
   ExtraState* extra = get_extra_state(F_CODE(frame));
 
@@ -334,4 +342,15 @@ PyObject* set_code_exec_strategy(PyObject* dummy, PyObject* args) {
 
   extra_state_set_exec_strategy(extra, strategy);
   Py_RETURN_NONE;
+}
+
+void skip_code_recursive(PyCodeObject* code) {
+  ExtraState* extra = get_extra_state(code);
+  if (extra == nullptr) {
+    extra = init_and_set_extra_state(code);
+  }
+
+  FrameExecStrategy strategy =
+      FrameExecStrategy{FrameAction::SKIP, FrameAction::SKIP};
+  extra_state_set_exec_strategy(extra, strategy);
 }

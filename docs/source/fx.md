@@ -44,8 +44,7 @@ Your transform will take in a {class}`torch.nn.Module`, acquire a {class}`Graph`
 from it, do some modifications, and return a new
 {class}`torch.nn.Module`. You should think of the {class}`torch.nn.Module` that your FX
 transform returns as identical to a regular {class}`torch.nn.Module` -- you can pass it to another
-FX transform, you can pass it to TorchScript, or you can
-run it. Ensuring that the inputs and outputs of your FX transform are a
+FX transform, or you can run it. Ensuring that the inputs and outputs of your FX transform are a
 {class}`torch.nn.Module` will allow for composability.
 
 ```{note}
@@ -1094,6 +1093,9 @@ The set of leaf modules can be customized by overriding
 ```{eval-rst}
 .. autofunction:: torch.fx.replace_pattern
 ```
+```{eval-rst}
+.. autofunction:: torch.fx.traceback.annotate
+```
 
 <!-- The experimental and passes submodules are missing docs. -->
 <!-- Adding it here for coverage but this doesn't add anything to the -->
@@ -1132,7 +1134,6 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.experimental.refinement_types
 .. py:module:: torch.fx.experimental.rewriter
 .. py:module:: torch.fx.experimental.schema_type_annotation
-.. py:module:: torch.fx.experimental.sym_node
 .. py:module:: torch.fx.experimental.unification.core
 .. py:module:: torch.fx.experimental.unification.dispatch
 .. py:module:: torch.fx.experimental.unification.match
@@ -1142,7 +1143,6 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.experimental.unification.multipledispatch.dispatcher
 .. py:module:: torch.fx.experimental.unification.multipledispatch.utils
 .. py:module:: torch.fx.experimental.unification.multipledispatch.variadic
-.. py:module:: torch.fx.experimental.unification.unification_tools
 .. py:module:: torch.fx.experimental.unification.utils
 .. py:module:: torch.fx.experimental.unification.variable
 .. py:module:: torch.fx.experimental.unify_refinements
@@ -1167,6 +1167,7 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.passes.operator_support
 .. py:module:: torch.fx.passes.param_fetch
 .. py:module:: torch.fx.passes.pass_manager
+.. py:module:: torch.fx.passes.regional_inductor
 .. py:module:: torch.fx.passes.reinplace
 .. py:module:: torch.fx.passes.runtime_assert
 .. py:module:: torch.fx.passes.shape_prop

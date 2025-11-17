@@ -63,10 +63,9 @@ _META_FUNCTIONS = {
     "recv_any_source_": lambda *args: create_fakework(args, return_first_arg=False),
 }
 
-if not torch._running_with_deploy():
-    lib_impl = torch.library.Library("c10d", "IMPL")  # noqa: TOR901
-    for op, meta_func in _META_FUNCTIONS.items():
-        lib_impl.impl(op, meta_func, "Meta")
+lib_impl = torch.library.Library("c10d", "IMPL")  # noqa: TOR901
+for op, meta_func in _META_FUNCTIONS.items():
+    lib_impl.impl(op, meta_func, "Meta")
 
 # List of collective operation functions including functional collectives
 # Note: The following collectives might be deprecated soon hence not adding them
@@ -277,14 +276,14 @@ class CollectiveOp:
             return res.untyped_storage().nbytes()
         if func in CollectiveOp.COMM_TENSOR_SINGLE_UNTYPED_STORAGE:
             return args[0].untyped_storage().nbytes()
-        if func == c10d._reduce_scatter_base_.default:
+        if func is c10d._reduce_scatter_base_.default:
             return args[1].untyped_storage().nbytes()
-        if func == c10d.alltoall_.default:
+        if func is c10d.alltoall_.default:
             # TODO(@sanketpurandare) - Confirm size computation
             return max(
                 CollectiveOp.sum_tensors(args[0]), CollectiveOp.sum_tensors(args[1])
             )
-        if func == c10d.alltoall_base_.default:
+        if func is c10d.alltoall_base_.default:
             # TODO(@sanketpurandare) - Confirm size computation
             return max(
                 args[0].untyped_storage().nbytes(), args[1].untyped_storage().nbytes()

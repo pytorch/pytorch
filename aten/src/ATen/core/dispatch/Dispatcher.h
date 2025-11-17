@@ -96,7 +96,7 @@ class TORCH_API Dispatcher final {
   friend class TypedOperatorHandle;
 
   struct Guard final {
-    Guard() : alive(true), mutex() {}
+    Guard() : alive(true) {}
     std::atomic<bool> alive;
     std::mutex mutex;
   };
@@ -371,7 +371,10 @@ class TORCH_API Dispatcher final {
 
 #ifdef FBCODE_CAFFE2
   static bool profilingOperatorEvents();
-  static void fireOpStartUSDT(at::RecordFunction::schema_ref_t schema_ref);
+  static void fireOpStartUSDT(
+      at::RecordFunction::schema_ref_t schema_ref,
+      std::vector<void*>& argsAddresses,
+      std::vector<const char*>& argsTypes);
   static void fireOpEndUSDT(at::RecordFunction::schema_ref_t schema_ref);
 #endif // FBCODE_CAFFE2
 
@@ -484,12 +487,16 @@ class TORCH_API OperatorHandle {
     return operatorDef_->op.hasComputedKernelForDispatchKey(k);
   }
 
+  SafeKernelFunction getComputedKernelForDispatchKey(DispatchKey k) const {
+    return operatorDef_->op.getComputedKernelForDispatchKey(k);
+  }
+
   std::string dumpComputedTable() const {
     return operatorDef_->op.dumpComputedTable();
   }
 
   void checkInvariants() const {
-    return operatorDef_->op.checkInvariants();
+    operatorDef_->op.checkInvariants();
   }
 
   c10::ArrayRef<at::Tag> getTags() const {
@@ -578,7 +585,7 @@ class TORCH_API OperatorHandle {
 
   // We need to store this iterator in order to make
   // Dispatcher::cleanup() fast -- it runs a lot on program
-  // termination (and presuambly library unloading).
+  // termination (and presumably library unloading).
   std::list<Dispatcher::OperatorDef>::iterator operatorIterator_;
 };
 
@@ -626,7 +633,7 @@ class TypedOperatorHandle<Return(Args...)> final : public OperatorHandle {
 
 namespace detail {
 template <class... Args>
-inline void unused_arg_(const Args&...) {}
+inline void unused_arg_(const Args&... /*unused*/) {}
 
 // CaptureKernelCall is intended to capture return values from Dispatcher
 // unboxed kernel calls. A record function may request to get outputs from the
@@ -795,16 +802,21 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(
 
 #ifdef FBCODE_CAFFE2
   if (profilingOperatorEvents()) {
+    std::vector<void*> argsAddresses = {(void*)(&args)...};
+    std::vector<const char*> argsTypes = {(typeid(args).name())...};
     struct FireOpRAII {
-      FireOpRAII(at::RecordFunction::schema_ref_t schema_ref)
+      FireOpRAII(
+          at::RecordFunction::schema_ref_t schema_ref,
+          std::vector<void*>& argsAddresses,
+          std::vector<const char*>& argsTypes)
           : schema_ref_(schema_ref) {
-        fireOpStartUSDT(schema_ref);
+        fireOpStartUSDT(schema_ref, argsAddresses, argsTypes);
       }
       ~FireOpRAII() {
         fireOpEndUSDT(schema_ref_);
       }
       at::RecordFunction::schema_ref_t schema_ref_;
-    } event(op.schema());
+    } event(op.schema(), argsAddresses, argsTypes);
     return kernel.template call<Return, Args...>(
         op, dispatchKeySet, std::forward<Args>(args)...);
   } else {
@@ -920,7 +932,7 @@ inline void Dispatcher::redispatchBoxed(
   }
 #endif
   const auto& kernel = entry.lookup(dispatchKeySet);
-  return kernel.callBoxed(op, dispatchKeySet, stack);
+  kernel.callBoxed(op, dispatchKeySet, stack);
 }
 
 } // namespace c10

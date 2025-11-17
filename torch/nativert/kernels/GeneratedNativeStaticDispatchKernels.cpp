@@ -39,7 +39,7 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto& self = KernelInput(0).toTensor();
       KernelOutput(0) = at::native::view_as_real(self);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten.view_as_complex.default",
@@ -48,31 +48,31 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto& self = KernelInput(0).toTensor();
       KernelOutput(0) = at::native::view_as_complex(self);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL("torch.ops.aten.real.default", aten_real_default, {
   const auto& self = KernelInput(0).toTensor();
   KernelOutput(0) = at::native::real(self);
   return;
-});
+})
 
 REGISTER_NATIVE_CPU_KERNEL("torch.ops.aten.imag.default", aten_imag_default, {
   const auto& self = KernelInput(0).toTensor();
   KernelOutput(0) = at::native::imag(self);
   return;
-});
+})
 
 REGISTER_NATIVE_CPU_KERNEL("torch.ops.aten._conj.default", aten__conj_default, {
   const auto& self = KernelInput(0).toTensor();
   KernelOutput(0) = at::native::_conj(self);
   return;
-});
+})
 
 REGISTER_NATIVE_CPU_KERNEL("torch.ops.aten.conj.default", aten_conj_default, {
   const auto& self = KernelInput(0).toTensor();
   KernelOutput(0) = at::native::conj(self);
   return;
-});
+})
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten.resolve_conj.default",
@@ -81,7 +81,7 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto& self = KernelInput(0).toTensor();
       KernelOutput(0) = at::native::resolve_conj(self);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten.resolve_neg.default",
@@ -90,7 +90,7 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto& self = KernelInput(0).toTensor();
       KernelOutput(0) = at::native::resolve_neg(self);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten._neg_view.default",
@@ -99,7 +99,7 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto& self = KernelInput(0).toTensor();
       KernelOutput(0) = at::native::_neg_view(self);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten.diagonal.default",
@@ -111,7 +111,7 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto dim2 = KernelInput(3).toInt();
       KernelOutput(0) = at::native::diagonal(self, offset, dim1, dim2);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten.linalg_diagonal.default",
@@ -123,7 +123,7 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto dim2 = KernelInput(3).toInt();
       KernelOutput(0) = at::native::linalg_diagonal(A, offset, dim1, dim2);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten.expand_as.default",
@@ -133,7 +133,7 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto& other = KernelInput(1).toTensor();
       KernelOutput(0) = at::native::expand_as(self, other);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten.flatten.using_ints",
@@ -144,7 +144,7 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto end_dim = KernelInput(2).toInt();
       KernelOutput(0) = at::native::flatten(self, start_dim, end_dim);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL("torch.ops.aten.movedim.int", aten_movedim_int, {
   const auto& self = KernelInput(0).toTensor();
@@ -152,7 +152,7 @@ REGISTER_NATIVE_CPU_KERNEL("torch.ops.aten.movedim.int", aten_movedim_int, {
   const auto destination = KernelInput(2).toInt();
   KernelOutput(0) = at::native::movedim(self, source, destination);
   return;
-});
+})
 
 REGISTER_NATIVE_CPU_KERNEL("torch.ops.aten.moveaxis.int", aten_moveaxis_int, {
   const auto& self = KernelInput(0).toTensor();
@@ -160,7 +160,7 @@ REGISTER_NATIVE_CPU_KERNEL("torch.ops.aten.moveaxis.int", aten_moveaxis_int, {
   const auto destination = KernelInput(2).toInt();
   KernelOutput(0) = at::native::moveaxis(self, source, destination);
   return;
-});
+})
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten.numpy_T.default",
@@ -169,7 +169,7 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto& self = KernelInput(0).toTensor();
       KernelOutput(0) = at::native::numpy_T(self);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten.matrix_H.default",
@@ -178,19 +178,19 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto& self = KernelInput(0).toTensor();
       KernelOutput(0) = at::native::matrix_H(self);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL("torch.ops.aten.mT.default", aten_mT_default, {
   const auto& self = KernelInput(0).toTensor();
   KernelOutput(0) = at::native::mT(self);
   return;
-});
+})
 
 REGISTER_NATIVE_CPU_KERNEL("torch.ops.aten.mH.default", aten_mH_default, {
   const auto& self = KernelInput(0).toTensor();
   KernelOutput(0) = at::native::mH(self);
   return;
-});
+})
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten.adjoint.default",
@@ -199,13 +199,13 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto& self = KernelInput(0).toTensor();
       KernelOutput(0) = at::native::adjoint(self);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL("torch.ops.aten.ravel.default", aten_ravel_default, {
   const auto& self = KernelInput(0).toTensor();
   KernelOutput(0) = at::native::ravel(self);
   return;
-});
+})
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten.reshape_as.default",
@@ -215,7 +215,7 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto& other = KernelInput(1).toTensor();
       KernelOutput(0) = at::native::reshape_as(self, other);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten.detach.default",
@@ -224,7 +224,7 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto& self = KernelInput(0).toTensor();
       KernelOutput(0) = at::native::detach(self);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten.squeeze.default",
@@ -233,20 +233,20 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto& self = KernelInput(0).toTensor();
       KernelOutput(0) = at::native::squeeze(self);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL("torch.ops.aten.squeeze.dim", aten_squeeze_dim, {
   const auto& self = KernelInput(0).toTensor();
   const auto dim = KernelInput(1).toInt();
   KernelOutput(0) = at::native::squeeze(self, dim);
   return;
-});
+})
 
 REGISTER_NATIVE_CPU_KERNEL("torch.ops.aten.t.default", aten_t_default, {
   const auto& self = KernelInput(0).toTensor();
   KernelOutput(0) = at::native::t(self);
   return;
-});
+})
 
 REGISTER_NATIVE_CPU_KERNEL("torch.ops.aten.transpose.int", aten_transpose_int, {
   const auto& self = KernelInput(0).toTensor();
@@ -254,7 +254,7 @@ REGISTER_NATIVE_CPU_KERNEL("torch.ops.aten.transpose.int", aten_transpose_int, {
   const auto dim1 = KernelInput(2).toInt();
   KernelOutput(0) = at::native::transpose(self, dim0, dim1);
   return;
-});
+})
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten.unsqueeze.default",
@@ -264,7 +264,7 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto dim = KernelInput(1).toInt();
       KernelOutput(0) = at::native::unsqueeze(self, dim);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten.view_as.default",
@@ -274,7 +274,7 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto& other = KernelInput(1).toTensor();
       KernelOutput(0) = at::native::view_as(self, other);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten.positive.default",
@@ -283,7 +283,7 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto& self = KernelInput(0).toTensor();
       KernelOutput(0) = at::native::positive(self);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten._autocast_to_reduced_precision.default",
@@ -297,7 +297,7 @@ REGISTER_NATIVE_CPU_KERNEL(
       KernelOutput(0) = at::native::_autocast_to_reduced_precision(
           self, cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten._autocast_to_full_precision.default",
@@ -309,7 +309,7 @@ REGISTER_NATIVE_CPU_KERNEL(
       KernelOutput(0) = at::native::_autocast_to_full_precision(
           self, cuda_enabled, cpu_enabled);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten.swapaxes.default",
@@ -320,7 +320,7 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto axis1 = KernelInput(2).toInt();
       KernelOutput(0) = at::native::swapaxes(self, axis0, axis1);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten.swapdims.default",
@@ -331,7 +331,7 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto dim1 = KernelInput(2).toInt();
       KernelOutput(0) = at::native::swapdims(self, dim0, dim1);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL(
     "torch.ops.aten.unfold.default",
@@ -343,12 +343,12 @@ REGISTER_NATIVE_CPU_KERNEL(
       const auto step = KernelInput(3).toInt();
       KernelOutput(0) = at::native::unfold(self, dimension, size, step);
       return;
-    });
+    })
 
 REGISTER_NATIVE_CPU_KERNEL("torch.ops.aten.alias.default", aten_alias_default, {
   const auto& self = KernelInput(0).toTensor();
   KernelOutput(0) = at::native::alias(self);
   return;
-});
+})
 
 } // namespace torch::nativert

@@ -119,7 +119,7 @@ Multi-instance inference
 Memory allocator
 ----------------
 
-"--enable-tcmalloc" and "--enable-jemalloc" can be used to enable different memory allcator.
+"--enable-tcmalloc" and "--enable-jemalloc" can be used to enable different memory allocator.
 
 """
 
@@ -835,6 +835,7 @@ def create_args(parser=None):
 
     @retval ArgumentParser
     """
+    # pyrefly: ignore [missing-attribute]
     parser.add_argument(
         "--multi-instance",
         "--multi_instance",
@@ -843,6 +844,7 @@ def create_args(parser=None):
         help="Enable multi-instance, by default one instance per node",
     )
 
+    # pyrefly: ignore [missing-attribute]
     parser.add_argument(
         "-m",
         "--module",
@@ -853,6 +855,7 @@ def create_args(parser=None):
         '"python -m".',
     )
 
+    # pyrefly: ignore [missing-attribute]
     parser.add_argument(
         "--no-python",
         "--no_python",
@@ -867,6 +870,7 @@ def create_args(parser=None):
 
     _add_multi_instance_params(parser)
     # positional
+    # pyrefly: ignore [missing-attribute]
     parser.add_argument(
         "program",
         type=str,
@@ -875,6 +879,7 @@ def create_args(parser=None):
     )
 
     # rest from the training program
+    # pyrefly: ignore [missing-attribute]
     parser.add_argument("program_args", nargs=REMAINDER)
 
 

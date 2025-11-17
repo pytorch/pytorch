@@ -10,7 +10,9 @@ from torch import rand, randn, Tensor
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
+    DTensor,
     init_device_mesh,
+    Partial,
     Replicate,
     Shard,
 )
@@ -25,9 +27,10 @@ from torch.distributed.tensor._ops._view_ops import (
     view_groups,
 )
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.distributed.tensor.placement_types import Placement
+from torch.distributed.tensor.placement_types import _StridedShard, Placement
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     with_comms,
 )
@@ -168,8 +171,34 @@ class TestViewOps(DTensorTestBase):
             *(device_mesh.ndim * [sharding_choices])
         )
 
-        for in_shard in all_sharding_choices:
-            in_dt = distribute_tensor(args[0], device_mesh, in_shard)
+        outer_mesh = device_mesh["outer"]
+        inner_mesh = device_mesh["inner"]
+        inner_mesh_size = inner_mesh.size()
+        strided_sharding_choices = [
+            (_StridedShard(i, split_factor=inner_mesh_size), Shard(i))
+            for i, s in enumerate(in_shape)
+            if s > 1 and i not in no_shard_dims
+        ]
+
+        for in_shard in itertools.chain(all_sharding_choices, strided_sharding_choices):
+            if isinstance(in_shard[0], _StridedShard):
+                if op != Tensor.view:
+                    continue
+                # cannot produce DTensor using ``distribute_tensor()``
+                # with ``_StridedShard``. Need to distribute the input
+                # over inner mesh dim first, then distribute the
+                # _local_tensor over the outer mesh dim.
+                in_dt = distribute_tensor(args[0], inner_mesh, (in_shard[1],))
+                in_dt = distribute_tensor(
+                    in_dt._local_tensor, outer_mesh, (Shard(in_shard[0].dim),)
+                )
+                in_dt = DTensor.from_local(
+                    in_dt._local_tensor,
+                    device_mesh,
+                    in_shard,
+                )
+            else:
+                in_dt = distribute_tensor(args[0], device_mesh, in_shard)
 
             comm_mode = CommDebugMode()
             with comm_mode:
@@ -200,24 +229,29 @@ class TestViewOps(DTensorTestBase):
         shard.view(-1)
 
         shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=1)])
-        with self.assertRaisesRegex(
-            RuntimeError, "Attempted to flatten sharded dimension"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "Sharding propagation failed"):
             shard.view(-1)
 
         # 8 is the uneven case since mesh dim is 6
         tensor = torch.randn((8, 256))
         dtensor = distribute_tensor(tensor, device_mesh, [Replicate()])
         shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=0)])
-        with self.assertRaisesRegex(
-            RuntimeError, "Attempted to flatten unevenly sharded dimension"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "Sharding propagation failed"):
             shard.view(-1)
+
+        # assuming world size is 4+, tensor is shardable on dim 1 with size 256
+        # but not viewable when the resulting dim 1 has size 2
+        tensor = torch.randn((8, 256))
+        dtensor = distribute_tensor(tensor, device_mesh, [Replicate()])
+        shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=1)])
+        with self.assertRaisesRegex(RuntimeError, "Sharding propagation failed"):
+            shard.view(8, 2, -1)
 
     @with_comms
     def test_view_ops(self):
-        self.device_mesh = DeviceMesh(
-            self.device_type, torch.arange(dist.get_world_size()).view(-1, 2)
+        mesh_shape = (dist.get_world_size() // 2, 2)
+        self.device_mesh = init_device_mesh(
+            self.device_type, mesh_shape=mesh_shape, mesh_dim_names=("outer", "inner")
         )
         self.dimmap_test(torch.atleast_1d, (randn(()),), (Singleton(),))
         self.dimmap_test(torch.atleast_1d, (randn(24),), (InputDim(0),))
@@ -442,7 +476,6 @@ class TestViewOps(DTensorTestBase):
             (randn(42, 24, 36), 1),
             (InputDim(0), Singleton(), InputDim(1), InputDim(2)),
         )
-
         self.dimmap_test(
             Tensor.view,
             (randn(6, 12, 24), 72, 24),
@@ -609,11 +642,131 @@ class TestViewOps(DTensorTestBase):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
         dtensor_x = distribute_tensor(x, mesh, (Shard(0),))
 
-        with self.assertRaisesRegex(
-            RuntimeError, "Attempted to flatten unevenly sharded dimension"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "Sharding propagation failed"):
             dtensor_x.view(-1, 8)
 
+    @with_comms
+    def test_squeeze_(self):
+        mesh_2d = init_device_mesh(self.device_type, (3, 2), mesh_dim_names=("a", "b"))
+        self.init_manual_seed_for_rank()
+        x = torch.randn((1, 4), device=self.device_type)
+        dist_x = DTensor.from_local(x, mesh_2d, [Partial(), Shard(1)])
+        self._test_op_on_dtensor(
+            torch.ops.aten.squeeze_.dim,
+            dist_x,
+            0,
+        )
+        # check DTensor subclass metadata as well as placements
+        self.assertEqual(dist_x.shape, torch.Size([8]))
+        self.assertEqual(
+            dist_x.stride(),
+            (1,),
+        )
+        self.assertEqual(dist_x.placements, [Partial(), Shard(0)])
+
+    @with_comms
+    def test_storage_offset_slice(self):
+        """
+        Test that storage_offset is properly tracked on DTensor when slicing
+        a replicated tensor.
+        """
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        # Create a replicated DTensor
+        tensor = torch.randn(10, device=self.device_type)
+        dtensor = distribute_tensor(tensor, mesh, [Replicate()])
+
+        # Perform a slice operation [1:]
+        with CommDebugMode() as comm_mode:
+            sliced_dtensor = dtensor[1:]
+            # Slicing should not trigger any communication
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        # Verify that the DTensor's storage_offset matches the expected value
+        self.assertEqual(sliced_dtensor.storage_offset(), 1)
+
+        # Verify that the local tensor also has the correct storage_offset
+        self.assertEqual(sliced_dtensor.to_local().storage_offset(), 1)
+
+        # Verify the shape is correct
+        self.assertEqual(sliced_dtensor.shape, torch.Size([9]))
+
+        # Verify the values are correct
+        expected = tensor[1:]
+        self.assertEqual(sliced_dtensor.full_tensor(), expected)
+
+    @with_comms
+    def test_storage_offset_shard_dim0_slice_dim1(self):
+        """
+        Test that storage_offset is properly tracked when tensor is sharded on dim 0
+        and sliced on dim 1.
+        """
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        # Create a 2D tensor and shard on dim 0
+        tensor = torch.randn(12, 8, device=self.device_type)
+        dtensor = distribute_tensor(tensor, mesh, [Shard(0)])
+
+        # Perform a slice operation [:, 2:]
+        with CommDebugMode() as comm_mode:
+            sliced_dtensor = dtensor[:, 2:]
+            # Slicing should not trigger any communication
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        # The storage_offset should be 2 (skipping 2 elements in each row)
+        self.assertEqual(sliced_dtensor.storage_offset(), 2)
+
+        # Verify that the local tensor also has the correct storage_offset
+        self.assertEqual(sliced_dtensor.to_local().storage_offset(), 2)
+
+        # Verify the shape is correct
+        expected_shape = torch.Size([12, 6])
+        self.assertEqual(sliced_dtensor.shape, expected_shape)
+
+        # Verify the values are correct
+        expected = tensor[:, 2:]
+        self.assertEqual(sliced_dtensor.full_tensor(), expected)
+
+    @with_comms
+    def test_storage_offset_shard_dim1_slice_dim0(self):
+        """
+        Test that storage_offset is properly tracked when tensor is sharded on dim 1
+        and sliced on dim 0.
+        """
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        # Create a 2D tensor and shard on dim 1
+        tensor = torch.randn(10, 12, device=self.device_type)
+        dtensor = distribute_tensor(tensor, mesh, [Shard(1)])
+
+        # Perform a slice operation [2:, :]
+        with CommDebugMode() as comm_mode:
+            sliced_dtensor = dtensor[2:, :]
+            # Slicing should not trigger any communication
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        local_dim1_size = 12 // self.world_size
+        expected_offset = 2 * local_dim1_size
+        self.assertEqual(sliced_dtensor.storage_offset(), expected_offset)
+
+        self.assertEqual(sliced_dtensor.to_local().storage_offset(), expected_offset)
+
+        # Verify the shape is correct
+        expected_shape = torch.Size([8, 12])
+        self.assertEqual(sliced_dtensor.shape, expected_shape)
+
+        # Verify the values are correct
+        expected = tensor[2:, :]
+        self.assertEqual(sliced_dtensor.full_tensor(), expected)
+
+
+TestViewOpsWithLocalTensor = create_local_tensor_test_class(
+    TestViewOps,
+    skipped_tests=[
+        # Comparing data pointers is not supported for local tensor
+        "test_dtensor_view_op_uneven",
+    ],
+)
 
 if __name__ == "__main__":
     run_tests()

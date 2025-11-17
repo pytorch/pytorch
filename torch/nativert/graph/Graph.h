@@ -71,7 +71,7 @@ class Type {
 // These are all the constant types that are allowed as attributes on Nodes.
 struct None {};
 // None always equals itself
-inline bool operator==(const None&, const None&) {
+inline bool operator==(const None& /*unused*/, const None& /*unused*/) {
   return true;
 }
 
@@ -442,6 +442,11 @@ class Graph {
 
   void applyDevicePlacement(const Placement& placement);
 
+  // Override all weights in the graph if matching name is found in the map.
+  void overrideWeightsDevice(
+      const std::unordered_map<std::string, std::optional<c10::Device>>&
+          submodNameToDevice);
+
   std::string getUniqueValueName();
 
   ValueId getNextValueId() {
@@ -584,6 +589,8 @@ class Graph {
   void setWeightsMeta(
       const std::unordered_map<std::string, torch::_export::TensorMeta>&
           tensorsMeta) {
+    TORCH_CHECK(!placementApplied_);
+
     for (auto [name, tensorMeta] : tensorsMeta) {
       weightsMeta_.emplace(name, TensorMeta{tensorMeta});
     }
@@ -605,6 +612,8 @@ class Graph {
   void setTensorValuesMeta(
       const std::unordered_map<std::string, torch::_export::TensorMeta>&
           tensorsMeta) {
+    TORCH_CHECK(!placementApplied_);
+
     for (auto [name, tensorMeta] : tensorsMeta) {
       tensorValuesMeta_.emplace(name, TensorMeta{tensorMeta});
     }
@@ -629,6 +638,8 @@ class Graph {
   Graph();
   friend std::ostream& operator<<(std::ostream& out, const Graph& g);
   GraphSignature signature_;
+
+  bool placementApplied_ = false;
 
   // keys are parameters, buffers, tensor_constants' names
   std::unordered_map<std::string, TensorMeta> weightsMeta_;

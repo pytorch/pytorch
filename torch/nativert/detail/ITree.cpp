@@ -46,7 +46,7 @@ class PytreeNodeRegistry {
                const ITreeSpec& spec,
                std::vector<c10::IValue>& ivalues) {
               const auto& tuple = nested.toTupleRef().elements();
-              TORCH_CHECK_EQ(tuple.size(), spec.children().size());
+              TORCH_CHECK(tuple.size() == spec.children().size());
               for (size_t i = 0; i < tuple.size(); i++) {
                 itreeFlatten(tuple[i], spec.children(i), ivalues);
               }
@@ -60,7 +60,7 @@ class PytreeNodeRegistry {
                const c10::IValue& nested,
                const ITreeSpec& spec) {
               const auto& tuple = nested.toTupleRef().elements();
-              TORCH_CHECK_EQ(tuple.size(), spec.children().size());
+              TORCH_CHECK(tuple.size() == spec.children().size());
               for (size_t i = 0; i < tuple.size(); i++) {
                 ivalueApply(fn, tuple[i], spec.children(i));
               }
@@ -119,7 +119,7 @@ class PytreeNodeRegistry {
               const auto& contextKeys = spec.contextKeys();
               // allow the dict size less than the spec, missing key will be
               // filled with empty tensor
-              TORCH_CHECK_LE(dict.size(), contextKeys.size());
+              TORCH_CHECK(dict.size() <= contextKeys.size());
               size_t i = 0;
               for (const auto& key : contextKeys) {
                 auto it = dict.find(key);
@@ -143,7 +143,7 @@ class PytreeNodeRegistry {
               c10::Dict<c10::IValue, c10::IValue> dict(
                   c10::AnyType::get(), c10::AnyType::get());
               TORCH_CHECK(obj.is_array());
-              TORCH_CHECK_EQ(obj.size(), flats.size());
+              TORCH_CHECK(obj.size() == flats.size());
               dict.reserve(flats.size());
               for (size_t i = 0; i < flats.size(); i++) {
                 dict.insert(dynamicToIValue(obj[i]), std::move(flats[i]));
@@ -172,6 +172,148 @@ class PytreeNodeRegistry {
     registerNode(
         "torch.fx.immutable_collections.immutable_dict",
         getNodeDef("builtins.dict"));
+    // Register JaggedTensor pytree node
+    registerNode(
+        "torchrec.sparse.jagged_tensor.JaggedTensor",
+        NodeDef{
+            [](const c10::IValue& nested,
+               const ITreeSpec& spec,
+               std::vector<c10::IValue>& ivalues) {
+              // JaggedTensor has 4 fields: _values, _weights, _lengths,
+              // _offsets All fields are optional torch.Tensor except _values
+              TORCH_CHECK(nested.isObject(), "Expected JaggedTensor object");
+              const auto& obj = nested.toObjectRef();
+
+              // Extract the tensor fields in order: _values, _weights,
+              // _lengths, _offsets
+              TORCH_CHECK(
+                  spec.children().size() == 4,
+                  "JaggedTensor should have 4 children");
+
+              // Flatten each tensor field
+              itreeFlatten(obj.getAttr("_values"), spec.children(0), ivalues);
+              itreeFlatten(obj.getAttr("_weights"), spec.children(1), ivalues);
+              itreeFlatten(obj.getAttr("_lengths"), spec.children(2), ivalues);
+              itreeFlatten(obj.getAttr("_offsets"), spec.children(3), ivalues);
+            },
+            [](std::vector<c10::IValue> flats,
+               const nlohmann::json& obj) -> c10::IValue {
+              // Reconstruct JaggedTensor from flattened tensors
+              // This is a simplified reconstruction - in practice would need
+              // to call the actual JaggedTensor constructor
+              TORCH_INTERNAL_ASSERT_DEBUG_ONLY(obj.is_null());
+              TORCH_CHECK(
+                  flats.size() == 4, "JaggedTensor expects 4 tensor fields");
+
+              // Return a generic tuple for now - actual implementation would
+              // need to construct the JaggedTensor custom class
+              return c10::ivalue::Tuple::create(std::move(flats));
+            },
+            [](ITreeMapNoReturnFn fn,
+               const c10::IValue& nested,
+               const ITreeSpec& spec) {
+              TORCH_CHECK(nested.isObject(), "Expected JaggedTensor object");
+              const auto& obj = nested.toObjectRef();
+
+              TORCH_CHECK(
+                  spec.children().size() == 4,
+                  "JaggedTensor should have 4 children");
+
+              // Apply function to each tensor field
+              ivalueApply(fn, obj.getAttr("_values"), spec.children(0));
+              ivalueApply(fn, obj.getAttr("_weights"), spec.children(1));
+              ivalueApply(fn, obj.getAttr("_lengths"), spec.children(2));
+              ivalueApply(fn, obj.getAttr("_offsets"), spec.children(3));
+            }});
+
+    // Register KeyedJaggedTensor pytree node
+    registerNode(
+        "torchrec.sparse.jagged_tensor.KeyedJaggedTensor",
+        NodeDef{
+            [](const c10::IValue& nested,
+               const ITreeSpec& spec,
+               std::vector<c10::IValue>& ivalues) {
+              // KeyedJaggedTensor has 6 tensor fields plus keys context
+              // Fields: _values, _weights, _lengths, _offsets,
+              // _stride_per_key_per_rank, _inverse_indices tensor
+              TORCH_CHECK(
+                  nested.isObject(), "Expected KeyedJaggedTensor object");
+              const auto& obj = nested.toObjectRef();
+
+              // Extract the tensor fields in order
+              TORCH_CHECK(
+                  spec.children().size() == 6,
+                  "KeyedJaggedTensor should have 6 children");
+
+              // Flatten each tensor field
+              itreeFlatten(obj.getAttr("_values"), spec.children(0), ivalues);
+              itreeFlatten(obj.getAttr("_weights"), spec.children(1), ivalues);
+              itreeFlatten(obj.getAttr("_lengths"), spec.children(2), ivalues);
+              itreeFlatten(obj.getAttr("_offsets"), spec.children(3), ivalues);
+              itreeFlatten(
+                  obj.getAttr("_stride_per_key_per_rank"),
+                  spec.children(4),
+                  ivalues);
+              // For _inverse_indices, we need to extract the tensor part
+              // (second element of tuple)
+              auto inverse_indices = obj.getAttr("_inverse_indices");
+              if (!inverse_indices.isNone()) {
+                auto tuple = inverse_indices.toTuple();
+                itreeFlatten(tuple->elements()[1], spec.children(5), ivalues);
+              } else {
+                // Handle None case by adding a null tensor
+                itreeFlatten(c10::IValue(), spec.children(5), ivalues);
+              }
+            },
+            [](std::vector<c10::IValue> flats,
+               const nlohmann::json& obj) -> c10::IValue {
+              // Reconstruct KeyedJaggedTensor from flattened tensors and keys
+              // context
+              TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!obj.is_null());
+              TORCH_CHECK(
+                  flats.size() == 6,
+                  "KeyedJaggedTensor expects 6 tensor fields");
+
+              // The context should contain the keys list
+              // Return a generic tuple for now - actual implementation would
+              // need to construct the KeyedJaggedTensor custom class
+              return c10::ivalue::Tuple::create(std::move(flats));
+            },
+            [](ITreeMapNoReturnFn fn,
+               const c10::IValue& nested,
+               const ITreeSpec& spec) {
+              TORCH_CHECK(
+                  nested.isObject(), "Expected KeyedJaggedTensor object");
+              const auto& obj = nested.toObjectRef();
+
+              TORCH_CHECK(
+                  spec.children().size() == 6,
+                  "KeyedJaggedTensor should have 6 children");
+
+              // Apply function to each tensor field
+              ivalueApply(fn, obj.getAttr("_values"), spec.children(0));
+              ivalueApply(fn, obj.getAttr("_weights"), spec.children(1));
+              ivalueApply(fn, obj.getAttr("_lengths"), spec.children(2));
+              ivalueApply(fn, obj.getAttr("_offsets"), spec.children(3));
+              ivalueApply(
+                  fn,
+                  obj.getAttr("_stride_per_key_per_rank"),
+                  spec.children(4));
+              // For _inverse_indices, we need to apply to the tensor part
+              // (second element of tuple)
+              auto inverse_indices = obj.getAttr("_inverse_indices");
+              if (!inverse_indices.isNone()) {
+                auto tuple = inverse_indices.toTuple();
+                ivalueApply(fn, tuple->elements()[1], spec.children(5));
+              } else {
+                // Handle None case
+                ivalueApply(fn, c10::IValue(), spec.children(5));
+              }
+            },
+            [](std::string_view context) {
+              // Context contains the keys list as JSON
+              return nlohmann::json::parse(context);
+            }});
   }
   bool hasNodeDef(std::string_view typeName) const {
     return registry_.find(std::string{typeName}) != registry_.end();
@@ -200,7 +342,7 @@ ITreeSpec makeITreeSpec(
   TORCH_CHECK(obj.is_object());
   TORCH_CHECK(obj.find("type") != obj.end());
   if (obj["type"].is_null()) {
-    TORCH_CHECK_EQ(obj["children_spec"].size(), 0);
+    TORCH_CHECK(obj["children_spec"].empty());
     TORCH_CHECK(obj["context"].is_null());
 
     const Value* value = values[start];
@@ -244,11 +386,11 @@ ITreeSpec itreeSpecLoads(
     const std::vector<const Value*>& values) {
   const auto obj = nlohmann::json::parse(json);
   TORCH_CHECK(obj.is_array());
-  TORCH_CHECK_EQ(obj.size(), 2);
-  TORCH_CHECK_EQ(obj[0].get<int64_t>(), kDefaultTreeSpecSerializationProtocol);
+  TORCH_CHECK(obj.size() == 2);
+  TORCH_CHECK(obj[0].get<int64_t>() == kDefaultTreeSpecSerializationProtocol);
   auto result = makeITreeSpec(obj[1], values, 0);
 
-  TORCH_CHECK_EQ(result.numIValues(), values.size());
+  TORCH_CHECK(result.numIValues() == values.size());
   return result;
 }
 
@@ -256,7 +398,7 @@ c10::IValue itreeUnflatten(
     std::vector<c10::IValue> ivalues,
     const ITreeSpec& spec) {
   RECORD_USER_SCOPE("nativert::itreeUnflatten");
-  TORCH_CHECK_EQ(ivalues.size(), spec.numIValues());
+  TORCH_CHECK(ivalues.size() == spec.numIValues());
   if (spec.isIValue()) {
     return std::move(ivalues[0]);
   }
@@ -299,20 +441,20 @@ std::vector<c10::IValue> itreeFlattenFromArgs(
     const ITreeSpec& spec) {
   RECORD_USER_SCOPE("nativert::itreeFlattenFromArgs");
   TORCH_CHECK(!spec.isIValue());
-  TORCH_CHECK_EQ(spec.children().size(), 2);
+  TORCH_CHECK(spec.children().size() == 2);
 
   std::vector<c10::IValue> ivalues;
   ivalues.reserve(spec.numIValues());
   const auto& specArgs = spec.children(0);
   TORCH_CHECK(!specArgs.isIValue());
-  TORCH_CHECK_EQ(specArgs.children().size(), args.size());
+  TORCH_CHECK(specArgs.children().size() == args.size());
   for (size_t i = 0; i < args.size(); i++) {
     itreeFlatten(args[i], specArgs.children(i), ivalues);
   }
 
   const auto& specKwargs = spec.children(1);
   TORCH_CHECK(!specKwargs.isIValue());
-  TORCH_CHECK_EQ(specKwargs.context().size(), kwargs.size());
+  TORCH_CHECK(specKwargs.context().size() == kwargs.size());
   for (size_t i = 0; i < specKwargs.context().size(); i++) {
     itreeFlatten(
         kwargs.at(specKwargs.context()[i].get_ref<const std::string&>()),
@@ -329,11 +471,11 @@ void ivalueApplyFromArgs(
     const ITreeSpec& spec) {
   RECORD_USER_SCOPE("nativert::ivalueApplyFromArgs");
   TORCH_CHECK(!spec.isIValue());
-  TORCH_CHECK_EQ(spec.children().size(), 2);
+  TORCH_CHECK(spec.children().size() == 2);
 
   const auto& specArgs = spec.children(0);
   TORCH_CHECK(!specArgs.isIValue());
-  TORCH_CHECK_EQ(specArgs.children().size(), args.size());
+  TORCH_CHECK(specArgs.children().size() == args.size());
   for (size_t i = 0; i < args.size(); i++) {
     ivalueApply(fn, args[i], specArgs.children(i));
   }
@@ -342,7 +484,7 @@ void ivalueApplyFromArgs(
   TORCH_CHECK(!specKwargs.isIValue());
 
   const auto& ctx = specKwargs.context();
-  TORCH_CHECK_EQ(ctx.size(), kwargs.size());
+  TORCH_CHECK(ctx.size() == kwargs.size());
 
   for (size_t i = 0; i < ctx.size(); i++) {
     ivalueApply(

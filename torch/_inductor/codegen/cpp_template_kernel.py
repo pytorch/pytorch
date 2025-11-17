@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import itertools
-from collections.abc import Iterable
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Iterable
+from typing import Any, Optional, Union
+from unittest.mock import patch
 
 import sympy
 from sympy.parsing.sympy_parser import parse_expr
@@ -18,7 +19,7 @@ from ..select_algorithm import PartialRender
 from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
 from .common import REMOVED
-from .cpp import CppKernel, CppKernelProxy, KernelGroup
+from .cpp import CppKernel, CppKernelProxy, KernelGroup, ParallelDepth
 from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferContext
 
 
@@ -189,7 +190,11 @@ class CppTemplateKernel(CppKernel):
         if config.cpp.enable_kernel_profile:
             graph_id = V.graph.graph_id
             prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
-            return f'RECORD_FUNCTION("{prefix}{self.kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
+            handle_str = (
+                "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
+                f'record_{prefix}{self.kernel_name}_("{prefix}{self.kernel_name}", nullptr);'
+            )
+            return handle_str
         else:
             return ""
 
@@ -288,7 +293,15 @@ class CppTemplateKernel(CppKernel):
             var_sizes_list.append(var_sizes)
 
         cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
-        kernel_group.finalize_kernel(cpp_kernel_proxy, [])
+
+        def max_parallel_depth():
+            return ParallelDepth(parallel_depth=0, start_depth=0)
+
+        # This loop is not parallelized since it is not the outermost loop.
+        with patch.object(
+            cpp_kernel_proxy.loop_nest, "max_parallel_depth", max_parallel_depth
+        ):
+            kernel_group.finalize_kernel(cpp_kernel_proxy, [])
         return kernel_group.loops_code.getvalue()
 
     def store_grouped_gemm_pointwise_nodes(
@@ -342,7 +355,15 @@ class CppTemplateKernel(CppKernel):
             var_sizes_list.append(var_sizes)
 
         cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
-        kernel_group.finalize_kernel(cpp_kernel_proxy, [])
+
+        def max_parallel_depth():
+            return ParallelDepth(parallel_depth=0, start_depth=0)
+
+        # This loop is not parallelized since it is not the outermost loop.
+        with patch.object(
+            cpp_kernel_proxy.loop_nest, "max_parallel_depth", max_parallel_depth
+        ):
+            kernel_group.finalize_kernel(cpp_kernel_proxy, [])
         return kernel_group.loops_code.getvalue()
 
     def store_output(
@@ -390,6 +411,7 @@ class CppTemplateKernel(CppKernel):
                     )
                     epilogue_nodes = scope.localize_nodes(epilogue_nodes)
                 return self.store_pointwise_nodes(
+                    # pyrefly: ignore [bad-argument-type]
                     dst,
                     epilogue_nodes,  # type: ignore[arg-type]
                     offsets,
@@ -401,6 +423,7 @@ class CppTemplateKernel(CppKernel):
                 copy = L.copy(dst, src).data.data
                 with LocalBufferContext(self.args) as scope:
                     scope.add_local_buffer(src)
+                    # pyrefly: ignore [bad-argument-type]
                     return self.store_pointwise_nodes(dst, [copy])
             else:
                 assert dst.layout == src.layout, f"{dst=}, {src=}"
