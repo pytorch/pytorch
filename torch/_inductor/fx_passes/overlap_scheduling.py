@@ -44,8 +44,9 @@ def get_group_name(n: fx.Node) -> str:
 
 def get_custom_estimation(
     n: fx.Node,
-    custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
-    override_size=None,
+    custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
+    | None = None,
+    override_size: int | None = None,
 ) -> float | None:
     if custom_runtime_estimation is None:
         return None
@@ -56,7 +57,8 @@ def get_custom_estimation(
 def estimate_collective_time(
     n: fx.Node,
     override_size: int | None = None,
-    custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
+    custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
+    | None = None,
 ) -> float:
     """Estimate the runtime of a collective operation, optionally with an overridden size."""
     if (
@@ -81,11 +83,17 @@ def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
     )
 
     input_node = fx_node.args[0]
-    input_tensor = input_node.meta.get("val")
+    assert isinstance(input_node, fx.Node)
+    input_tensor = input_node.meta.get("val", None)
+    output_tensor = fx_node.meta.get("val", None)
+
+    if input_tensor is None or output_tensor is None:
+        return 0
+
     input_size = input_tensor.numel() * input_tensor.element_size()
 
     output_tensor = fx_node.meta.get("val")
-    output_size = output_tensor.numel() * output_tensor.element_size()
+    output_size = output_tensor.numel() * output_tensor.element_size()  # pyre-ignore
 
     # all_reduce can be in-place, so only needs one buffer
     if is_all_reduce(fx_node):
@@ -126,7 +134,8 @@ def get_collective_do_bench() -> Callable[[Callable[[], Any]], float]:
 
 def benchmark_node_with_cache_key(
     n: fx.Node,
-    custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
+    custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
+    | None = None,
 ) -> tuple[float, str | None]:
     """Benchmark a compute node and return (runtime, cache_key)."""
     assert is_compute_node(n)
@@ -169,7 +178,9 @@ def benchmark_node_with_cache_key(
         if unbacked_tensor:
             return 0, key
 
-        if (est := get_custom_estimation(n, custom_runtime_estimation)) is not None:
+        if (
+            est := get_custom_estimation(n, custom_runtime_estimation, None)
+        ) is not None:
             set_cached_node_time(key, est)
             return est, key
 
@@ -181,7 +192,8 @@ def benchmark_node_with_cache_key(
 
 def benchmark_node(
     n: fx.Node,
-    custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
+    custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
+    | None = None,
 ) -> float:
     return benchmark_node_with_cache_key(n, custom_runtime_estimation)[0]
 
@@ -263,7 +275,7 @@ class OverlapScheduler:
         insert_overlap_deps: bool,
         compute_overlap_multipler: float,
         max_coll_distance: int,
-        custom_runtime_estimation: Callable[[fx.Node], float | None] | None,
+        custom_runtime_estimation: Callable[[fx.Node, int | None], float | None] | None,
         collective_estimator: Literal["analytical", "benchmark"],
     ):
         self.gm = gm
@@ -458,7 +470,10 @@ class OverlapScheduler:
             # Benchmark CUDA events (non-deterministic, needs alignment)
             # Skip collectives with custom estimation
             for n in collective_nodes:
-                if get_custom_estimation(n, self.custom_runtime_estimation) is not None:
+                if (
+                    get_custom_estimation(n, self.custom_runtime_estimation, None)
+                    is not None
+                ):
                     continue
 
                 # Benchmark actual size
@@ -1027,7 +1042,8 @@ def schedule_overlap_bucketing(
     insert_overlap_deps: bool = False,
     compute_overlap_multipler: float = 1.0,
     max_coll_distance: int = 1000,
-    custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
+    custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
+    | None = None,
     collective_estimator: Literal["analytical", "benchmark"] = "analytical",
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
