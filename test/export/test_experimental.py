@@ -521,8 +521,8 @@ def forward(self, arg0_1, arg1_1):
         self.assertExpectedInline(
             ep.code.strip("\r\n "),
             """\
-def forward(self, args_0):
-    _tree_leaf_0, _tree_leaf_1, = pytree.tree_leaves((self, args_0,))
+def forward(self, x):
+    _tree_leaf_0, _tree_leaf_1, = pytree.tree_leaves((self, x,))
     L_x_ , L_outer_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1)
     l_x_ = L_x_
     l_outer_ = L_outer_
