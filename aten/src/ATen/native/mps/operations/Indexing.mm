@@ -179,8 +179,7 @@ static void dispatch_index_kernel(TensorIteratorBase& iter,
                    iter.strides(2),
                    index_size,
                    index_stride,
-                   ndim_nindiees,
-                   mpsStream->getErrorBuffer());
+                   ndim_nindiees);
     mtl_dispatch1DJob(computeEncoder, indexSelectPSO, serial ? 1 : iter.numel());
   });
 }
@@ -300,7 +299,7 @@ static Tensor& nonzero_out_native_mps(const Tensor& self, Tensor& out_) {
   MPSStream* stream = getCurrentMPSStream();
   using CachedGraph = MPSUnaryCachedGraph;
 
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
+  dispatch_sync(stream->queue(), ^() {
     stream->synchronize(SyncType::COMMIT_AND_WAIT);
   });
   int64_t total_nonzero = at::count_nonzero(self).item<int64_t>();
@@ -385,7 +384,7 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
   MPSStream* stream = getCurrentMPSStream();
   using CachedGraph = MPSUnaryCachedGraph;
 
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
+  dispatch_sync(stream->queue(), ^() {
     stream->synchronize(SyncType::COMMIT_AND_WAIT);
   });
   int64_t total_nonzero = at::count_nonzero(self).item<int64_t>();

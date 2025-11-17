@@ -27,10 +27,6 @@ class TestDevice(TestCase):
             self.assertEqual(torch.accelerator.current_device_index(), 1)
         self.assertEqual(torch.accelerator.current_device_index(), device)
 
-    def test_invalid_device_index(self):
-        with self.assertRaisesRegex(RuntimeError, "The device index is out of range"):
-            torch.accelerator.set_device_index(2)
-
 
 if __name__ == "__main__":
     run_tests()

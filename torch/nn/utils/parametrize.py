@@ -5,7 +5,7 @@ import copyreg
 from collections.abc import Sequence
 from contextlib import contextmanager
 from copy import deepcopy
-from typing import Union
+from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -26,7 +26,7 @@ __all__ = [
 ]
 
 _cache_enabled = 0
-_cache: dict[tuple[int, str], Tensor | None] = {}
+_cache: dict[tuple[int, str], Optional[Tensor]] = {}
 
 
 @contextmanager
@@ -72,7 +72,7 @@ def cached():
             _cache = {}
 
 
-def _register_parameter_or_buffer(module, name, X) -> None:
+def _register_parameter_or_buffer(module, name, X):
     if isinstance(X, Parameter):
         module.register_parameter(name, X)
     else:
@@ -644,7 +644,7 @@ def register_parametrization(
     return module
 
 
-def is_parametrized(module: Module, tensor_name: str | None = None) -> bool:
+def is_parametrized(module: Module, tensor_name: Optional[str] = None) -> bool:
     r"""Determine if a module has a parametrization.
 
     Args:
@@ -776,7 +776,7 @@ def type_before_parametrizations(module: Module) -> type:
 def transfer_parametrizations_and_params(
     from_module: Module,
     to_module: Module,
-    tensor_name: str | None = None,
+    tensor_name: Optional[str] = None,
 ) -> Module:
     r"""Transfer parametrizations and the parameters they parametrize from :attr:`from_module` to :attr:`to_module`.
 

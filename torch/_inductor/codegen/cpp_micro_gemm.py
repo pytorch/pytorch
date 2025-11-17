@@ -2,9 +2,8 @@
 import dataclasses
 import operator
 import sys
-from collections.abc import Callable
 from enum import Enum
-from typing import Optional
+from typing import Callable, Optional
 
 import torch
 

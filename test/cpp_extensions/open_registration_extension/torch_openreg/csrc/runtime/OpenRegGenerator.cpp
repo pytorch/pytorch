@@ -5,7 +5,6 @@ static std::vector<at::Generator> default_generators;
 
 namespace c10::openreg {
 
-// LITERALINCLUDE START: OPENREG GET DEFAULT GENERATOR IMPL
 const at::Generator& getDefaultOpenRegGenerator(c10::DeviceIndex device_index) {
   static bool flag [[maybe_unused]] = []() {
     auto deivce_nums = device_count();
@@ -25,6 +24,5 @@ const at::Generator& getDefaultOpenRegGenerator(c10::DeviceIndex device_index) {
   }
   return default_generators[idx];
 }
-// LITERALINCLUDE END: OPENREG GET DEFAULT GENERATOR IMPL
 
 } // namespace c10::openreg

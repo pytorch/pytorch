@@ -73,25 +73,15 @@ _like_tensor_constructors = ordered_set(
     aten.ones_like.default,
     aten.ones_like.out,
     aten.rand_like.default,
-    aten.rand_like.generator,
     aten.rand_like.out,
-    aten.rand_like.generator_out,
     aten.randn_like.default,
-    aten.randn_like.generator,
     aten.randn_like.out,
-    aten.randn_like.generator_out,
     aten.randint_like.default,
-    aten.randint_like.generator,
     aten.randint_like.Tensor,
-    aten.randint_like.Tensor_generator,
     aten.randint_like.Tensor_out,
-    aten.randint_like.Tensor_generator_out,
     aten.randint_like.out,
-    aten.randint_like.generator_out,
     aten.randint_like.low_dtype,
-    aten.randint_like.low_generator_dtype,
     aten.randint_like.low_dtype_out,
-    aten.randint_like.low_generator_dtype_out,
     aten.zeros_like.default,
     aten.zeros_like.out,
     aten.new_empty.default,
@@ -221,11 +211,6 @@ def non_kwarg_is_pinned(fake_mode, func, *args, **kwargs):
     with in_kernel_invocation_manager(fake_mode):
         r = func(inp)
     return r
-
-
-@register_op_impl(aten._async_error.default)
-def _async_error(fake_mode, func, msg: str):
-    pass
 
 
 @register_op_impl(aten.to.prim_Device)

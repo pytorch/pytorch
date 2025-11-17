@@ -630,37 +630,6 @@ def mirror_files_into_torchgen() -> None:
         raise RuntimeError("Check the file paths in `mirror_files_into_torchgen()`")
 
 
-def mirror_inductor_external_kernels() -> None:
-    """
-    Copy external kernels into Inductor so they are importable.
-    """
-    paths = [
-        (
-            CWD / "torch/_inductor/kernel/vendored_templates/cutedsl_grouped_gemm.py",
-            CWD
-            / "third_party/cutlass/examples/python/CuTeDSL/blackwell/grouped_gemm.py",
-        ),
-    ]
-    for new_path, orig_path in paths:
-        # Create the dirs involved in new_path if they don't exist
-        if not new_path.exists():
-            new_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Copy the files from the orig location to the new location
-        if orig_path.is_file():
-            shutil.copyfile(orig_path, new_path)
-            continue
-        if orig_path.is_dir():
-            if new_path.exists():
-                # copytree fails if the tree exists already, so remove it.
-                shutil.rmtree(new_path)
-            shutil.copytree(orig_path, new_path)
-            continue
-        raise RuntimeError(
-            "Check the file paths in `mirror_inductor_external_kernels()`"
-        )
-
-
 # ATTENTION: THIS IS AI SLOP
 def extract_variant_from_version(version: str) -> str:
     """Extract variant from version string, defaulting to 'cpu'."""
@@ -1358,45 +1327,6 @@ class concat_license_files:
 
 # Need to create the proper LICENSE.txt for the wheel
 class bdist_wheel(setuptools.command.bdist_wheel.bdist_wheel):
-    def _wrap_headers_with_macro(self, bdist_dir: Path) -> None:
-        """Wrap all header files with #if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION).
-
-        Excludes:
-        - torch/include/torch/headeronly/*
-        - torch/include/torch/csrc/stable/*
-        - torch/include/torch/csrc/inductor/aoti_torch/c/ (only shim headers)
-        - torch/include/torch/csrc/inductor/aoti_torch/generated/
-        """
-        header_extensions = (".h", ".hpp", ".cuh")
-        header_files = [
-            f for ext in header_extensions for f in bdist_dir.rglob(f"*{ext}")
-        ]
-
-        # Paths to exclude from wrapping
-        exclude_dir_patterns = [
-            "torch/include/torch/headeronly/",
-            "torch/include/torch/csrc/stable/",
-            "torch/include/torch/csrc/inductor/aoti_torch/c/",
-            "torch/include/torch/csrc/inductor/aoti_torch/generated/",
-        ]
-
-        for header_file in header_files:
-            rel_path = header_file.relative_to(bdist_dir).as_posix()
-
-            if any(rel_path.startswith(pattern) for pattern in exclude_dir_patterns):
-                report(f"Skipping header: {rel_path}")
-                continue
-
-            original_content = header_file.read_text(encoding="utf-8")
-            wrapped_content = (
-                "#if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
-                f"{original_content}"
-                "\n#endif  // !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
-            )
-
-            header_file.write_text(wrapped_content, encoding="utf-8")
-            report(f"Wrapped header: {rel_path}")
-
     def run(self) -> None:
         with concat_license_files(include_files=True):
             super().run()
@@ -1418,14 +1348,6 @@ class bdist_wheel(setuptools.command.bdist_wheel.bdist_wheel):
                 file.unlink()
             # need an __init__.py file otherwise we wouldn't have a package
             (bdist_dir / "torch" / "__init__.py").touch()
-
-        # Wrap all header files with TORCH_STABLE_ONLY macro
-        assert self.bdist_dir is not None, "bdist_dir should be set during wheel build"
-        bdist_dir = Path(self.bdist_dir)
-        report(
-            "-- Wrapping header files with if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)"
-        )
-        self._wrap_headers_with_macro(bdist_dir)
 
 
 class clean(Command):
@@ -1693,7 +1615,6 @@ def main() -> None:
     mirror_files_into_torchgen()
     if RUN_BUILD_DEPS:
         build_deps()
-        mirror_inductor_external_kernels()
 
     (
         ext_modules,
@@ -1728,7 +1649,6 @@ def main() -> None:
         "_inductor/codegen/aoti_runtime/*.cpp",
         "_inductor/script.ld",
         "_inductor/kernel/flex/templates/*.jinja",
-        "_inductor/kernel/templates/*.jinja",
         "_export/serde/*.yaml",
         "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",

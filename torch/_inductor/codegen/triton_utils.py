@@ -4,7 +4,6 @@ from typing import Any, Optional
 import sympy
 
 import torch
-from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config
 from ..runtime.hints import AttrsDescriptorWrapper
@@ -71,10 +70,6 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
             # it should be marked as "constexpr" in the signature.
             return "constexpr"
         elif isinstance(arg.expr, (float, sympy.Float)):
-            return "fp32"
-        elif isinstance(arg.expr, sympy.Symbol) and symbol_is_type(
-            arg.expr, (SymT.UNBACKED_FLOAT)
-        ):
             return "fp32"
         elif isinstance(arg.expr, bool):
             return "i1"

@@ -168,7 +168,7 @@ class ImageHandler:
     - pilrgba: pil None rgba
     """
 
-    def __init__(self, imagespec) -> None:
+    def __init__(self, imagespec):
         if imagespec not in list(imagespecs.keys()):
             raise AssertionError(f"unknown image specification: {imagespec}")
         self.imagespec = imagespec.lower()
@@ -335,13 +335,13 @@ class Decoder:
     handlers until some handler returns something other than None.
     """
 
-    def __init__(self, *handler, key_fn=extension_extract_fn) -> None:
+    def __init__(self, *handler, key_fn=extension_extract_fn):
         self.handlers = list(handler) if handler else []
         self.key_fn = key_fn
 
     # Insert new handler from the beginning of handlers list to make sure the new
     # handler having the highest priority
-    def add_handler(self, *handler) -> None:
+    def add_handler(self, *handler):
         if not handler:
             return
         self.handlers = list(handler) + self.handlers

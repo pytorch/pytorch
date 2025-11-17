@@ -2,7 +2,6 @@ import csv
 import os
 import re
 import sys
-from pathlib import Path
 
 
 # This script takes the logs produced by the benchmark scripts (e.g.,
@@ -16,7 +15,8 @@ from pathlib import Path
 # This script is not very well written, feel free to rewrite it as necessary
 
 assert len(sys.argv) == 2
-full_log = Path(sys.argv[1]).read_text()
+
+full_log = open(sys.argv[1]).read()
 
 # If the log contains a gist URL, extract it so we can include it in the CSV
 gist_url = ""

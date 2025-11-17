@@ -29,8 +29,6 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
-
 namespace torch {
 namespace jit {
 struct Function;
@@ -2569,5 +2567,3 @@ TypePtr IValue::type() const {
 }
 
 } // namespace c10
-
-C10_DIAGNOSTIC_POP()

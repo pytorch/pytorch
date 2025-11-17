@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import operator
 from functools import reduce
-from typing import Any
+from typing import Any, Optional
 
 import torch
 from torch.nn import functional as F
@@ -38,10 +38,10 @@ class DataNormSparsifier(BaseDataSparsifier):
 
     def __init__(
         self,
-        data_list: list[tuple[str, Any]] | None = None,
+        data_list: Optional[list[tuple[str, Any]]] = None,
         sparsity_level: float = 0.5,
         sparse_block_shape: tuple[int, int] = (1, 4),
-        zeros_per_block: int | None = None,
+        zeros_per_block: Optional[int] = None,
         norm: str = "L1",
     ):
         if zeros_per_block is None:

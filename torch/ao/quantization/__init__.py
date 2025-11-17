@@ -43,7 +43,7 @@ else:
     from typing import TypeAliasType
 
     ObserverOrFakeQuantize = TypeAliasType(
-        "ObserverOrFakeQuantize", ObserverBase | FakeQuantizeBase
+        "ObserverOrFakeQuantize", Union[ObserverBase, FakeQuantizeBase]
     )
 
 for _f in [
@@ -219,10 +219,10 @@ class _DerivedObserverOrFakeQuantize(ObserverBase):
         derive_qparams_fn: Callable[
             [list[ObserverOrFakeQuantize]], tuple[Tensor, Tensor]
         ],
-        quant_min: int | None = None,
-        quant_max: int | None = None,
-        qscheme: torch.qscheme | None = None,
-        ch_axis: int | None = None,
+        quant_min: Optional[int] = None,
+        quant_max: Optional[int] = None,
+        qscheme: Optional[torch.qscheme] = None,
+        ch_axis: Optional[int] = None,
     ):
         super().__init__(dtype)
         self.obs_or_fqs = obs_or_fqs
@@ -235,10 +235,9 @@ class _DerivedObserverOrFakeQuantize(ObserverBase):
         from .utils import is_per_channel
 
         if is_per_channel(self.qscheme):
-            if self.ch_axis is None:
-                raise AssertionError(
-                    "Must provide a valid ch_axis if qscheme is per channel"
-                )
+            assert self.ch_axis is not None, (
+                "Must provide a valid ch_axis if qscheme is per channel"
+            )
 
     def forward(self, x: Tensor) -> Tensor:
         return x

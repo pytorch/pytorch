@@ -9459,7 +9459,7 @@ dedent """
                 return self.mods(input)
 
         m = M()
-        self.assertTrue('mods.conv.weight' in m.state_dict())
+        self.assertTrue('mods.conv.weight' in m.state_dict().keys())
 
     def test_script_sequential_multi_output_fail(self):
         class Sub(torch.jit.ScriptModule):
@@ -11954,7 +11954,7 @@ dedent """
             # type: (Dict[str, int]) -> Tuple[str, int]
             key_str = ""
             sum = 0
-            for key in x:
+            for key in x.keys():
                 key_str += key
             for val in x.values():
                 sum += val
@@ -16271,10 +16271,8 @@ for test in criterion_tests:
     add_nn_module_test(**test)
 
 if __name__ == '__main__':
-    if sys.version_info < (3, 14):
-        TestCase._default_dtype_check_enabled = True
-        run_tests()
-        import jit.test_module_interface
-
-        suite = unittest.findTestCases(jit.test_module_interface)
-        unittest.TextTestRunner().run(suite)
+    TestCase._default_dtype_check_enabled = True
+    run_tests()
+    import jit.test_module_interface
+    suite = unittest.findTestCases(jit.test_module_interface)
+    unittest.TextTestRunner().run(suite)

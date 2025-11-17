@@ -7,6 +7,7 @@ into its building blocks to be able to observe.
 
 import numbers
 import warnings
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -100,7 +101,7 @@ class LSTMCell(torch.nn.Module):
         self.cell_state_dtype: torch.dtype = torch.quint8
 
     def forward(
-        self, x: Tensor, hidden: tuple[Tensor, Tensor] | None = None
+        self, x: Tensor, hidden: Optional[tuple[Tensor, Tensor]] = None
     ) -> tuple[Tensor, Tensor]:
         if hidden is None or hidden[0] is None or hidden[1] is None:
             hidden = self.initialize_hidden(x.shape[0], x.is_quantized)
@@ -246,7 +247,7 @@ class _LSTMSingleLayer(torch.nn.Module):
             input_dim, hidden_dim, bias=bias, split_gates=split_gates, **factory_kwargs
         )
 
-    def forward(self, x: Tensor, hidden: tuple[Tensor, Tensor] | None = None):
+    def forward(self, x: Tensor, hidden: Optional[tuple[Tensor, Tensor]] = None):
         result = []
         seq_len = x.shape[0]
         for i in range(seq_len):
@@ -296,14 +297,14 @@ class _LSTMLayer(torch.nn.Module):
                 **factory_kwargs,
             )
 
-    def forward(self, x: Tensor, hidden: tuple[Tensor, Tensor] | None = None):
+    def forward(self, x: Tensor, hidden: Optional[tuple[Tensor, Tensor]] = None):
         if self.batch_first:
             x = x.transpose(0, 1)
         if hidden is None:
             hx_fw, cx_fw = (None, None)
         else:
             hx_fw, cx_fw = hidden
-        hidden_bw: tuple[Tensor, Tensor] | None = None
+        hidden_bw: Optional[tuple[Tensor, Tensor]] = None
         if self.bidirectional:
             if hx_fw is None:
                 hx_bw = None
@@ -505,7 +506,7 @@ class LSTM(torch.nn.Module):
         )
         self.layers = torch.nn.ModuleList(layers)
 
-    def forward(self, x: Tensor, hidden: tuple[Tensor, Tensor] | None = None):
+    def forward(self, x: Tensor, hidden: Optional[tuple[Tensor, Tensor]] = None):
         if self.batch_first:
             x = x.transpose(0, 1)
 

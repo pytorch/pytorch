@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+from typing import Optional
 
 import torch
 from torch.ao.nn.quantized.modules.utils import (
@@ -32,9 +33,9 @@ class LinearPackedParams(torch.nn.Module):
     def set_weight_bias(
         self,
         weight: torch.Tensor,
-        bias: torch.Tensor | None,
-        row_block_size: int | None,
-        col_block_size: int | None,
+        bias: Optional[torch.Tensor],
+        row_block_size: Optional[int],
+        col_block_size: Optional[int],
     ) -> None:
         assert row_block_size is not None and col_block_size is not None
         self._packed_params = torch.ops.sparse.qlinear_prepack(
@@ -208,9 +209,9 @@ class Linear(torch.nn.Module):
     def set_weight_bias(
         self,
         w: torch.Tensor,
-        b: torch.Tensor | None,
-        row_block_size: int | None,
-        col_block_size: int | None,
+        b: Optional[torch.Tensor],
+        row_block_size: Optional[int],
+        col_block_size: Optional[int],
     ) -> None:
         assert row_block_size is not None and col_block_size is not None
         self._packed_params.set_weight_bias(w, b, row_block_size, col_block_size)

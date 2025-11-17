@@ -8,7 +8,6 @@ class TestGetSetItem(TestCase):
     """Comprehensive tests for first-class dimension indexing operations."""
 
     def setUp(self):
-        super().setUp()
         """Set up common test fixtures."""
         self.batch, self.height, self.width = dims(3)
 

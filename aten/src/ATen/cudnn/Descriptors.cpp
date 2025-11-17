@@ -3,7 +3,6 @@
 #include <ATen/ATen.h>
 #include <c10/util/irange.h>
 
-#include <array>
 #include <iostream>
 #include <sstream>
 
@@ -137,9 +136,9 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
     "Weight strides: ", t.strides(), "\n",
     "cuDNN suggested memory_format: ", memory_format);
 
-  std::array<int, CUDNN_DIM_MAX> size;
+  int size[CUDNN_DIM_MAX];
   for (const auto i : c10::irange(dim)) {
-    size[i] = static_cast<int>(t.size(i));
+    size[i] = (int) t.size(i);
   }
   for (const auto i : c10::irange(dim, pad)) {
     size[i] = 1;
@@ -157,7 +156,7 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
     default:
       TORCH_INTERNAL_ASSERT(false, "unsupported memory_format for cuDNN filters");
   }
-  set(getDataType(t), static_cast<int>(dim), size.data(), filter_format);
+  set(getDataType(t), static_cast<int>(dim), size, filter_format);
 }
 
 std::string cudnnMemoryFormatToString(cudnnTensorFormat_t tformat) {

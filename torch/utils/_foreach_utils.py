@@ -1,4 +1,4 @@
-from typing import TypeAlias
+from typing import Optional, TypeAlias
 
 import torch
 from torch import Tensor
@@ -23,7 +23,7 @@ def _get_fused_kernels_supported_devices() -> list[str]:
     ]
 
 
-TensorListList: TypeAlias = list[list[Tensor | None]]
+TensorListList: TypeAlias = list[list[Optional[Tensor]]]
 Indices: TypeAlias = list[int]
 _foreach_supported_types = [torch.Tensor]
 

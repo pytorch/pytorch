@@ -162,7 +162,7 @@ def _get_builtin_table():
         return _builtin_table
     _builtin_table = {}
 
-    def register_all(mod) -> None:
+    def register_all(mod):
         for name in dir(mod):
             v = getattr(mod, name)
             if (
@@ -196,7 +196,7 @@ def _get_builtin_table():
     return _builtin_table
 
 
-def _register_builtin(fn, op) -> None:
+def _register_builtin(fn, op):
     _get_builtin_table()[id(fn)] = op
 
 

@@ -24,7 +24,6 @@ set(C10_XPU_HEADERS
     XPUCachingAllocator.h
     XPUDeviceProp.h
     XPUException.h
-    XPUEvent.h
     XPUFunctions.h
     XPUMacros.h
     XPUStream.h

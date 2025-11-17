@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from collections.abc import Sequence
-from typing import Any, overload, TypeVar, Union
+from typing import Any, Optional, overload, TypeVar, Union
 from typing_extensions import deprecated
 
 import torch
@@ -58,10 +58,7 @@ def scatter(inputs, target_gpus, dim=0):
         if _is_namedtuple(obj):
             # pyrefly: ignore [no-matching-overload]
             return [
-                # pyrefly: ignore [no-matching-overload]
-                type(obj)(*args)
-                # pyrefly: ignore  # no-matching-overload
-                for args in zip(*map(scatter_map, obj), strict=False)
+                type(obj)(*args) for args in zip(*map(scatter_map, obj), strict=False)
             ]
         if isinstance(obj, tuple) and len(obj) > 0:
             # pyrefly: ignore [no-matching-overload]
@@ -72,10 +69,7 @@ def scatter(inputs, target_gpus, dim=0):
         if isinstance(obj, dict) and len(obj) > 0:
             # pyrefly: ignore [no-matching-overload]
             return [
-                # pyrefly: ignore [no-matching-overload]
-                type(obj)(i)
-                # pyrefly: ignore  # no-matching-overload
-                for i in zip(*map(scatter_map, obj.items()), strict=False)
+                type(obj)(i) for i in zip(*map(scatter_map, obj.items()), strict=False)
             ]
         return [obj for _ in target_gpus]
 
@@ -93,7 +87,7 @@ def scatter(inputs, target_gpus, dim=0):
 
 def scatter_kwargs(
     inputs: tuple[Any, ...],
-    kwargs: dict[str, Any] | None,
+    kwargs: Optional[dict[str, Any]],
     target_gpus: Sequence[Union[int, torch.device]],
     dim: int = 0,
 ) -> tuple[tuple[Any, ...], tuple[dict[str, Any], ...]]:

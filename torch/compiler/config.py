@@ -35,7 +35,6 @@ __all__ = [
     "enable_cpp_symbolic_shape_guards",
     "wrap_top_frame",
     "reorderable_logging_functions",
-    "force_disable_caches",
 ]
 
 

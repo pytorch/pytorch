@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from collections.abc import Callable, Iterable
 from math import sqrt
-from typing import TypeVar
+from typing import Optional, TypeVar
 
 import torch
 from torch import Tensor
@@ -133,12 +133,12 @@ Examples::
 def exponential(
     M: int,
     *,
-    center: float | None = None,
+    center: Optional[float] = None,
     tau: float = 1.0,
     sym: bool = True,
-    dtype: torch.dtype | None = None,
+    dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: torch.device | None = None,
+    device: Optional[torch.device] = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -220,9 +220,9 @@ def cosine(
     M: int,
     *,
     sym: bool = True,
-    dtype: torch.dtype | None = None,
+    dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: torch.device | None = None,
+    device: Optional[torch.device] = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -294,9 +294,9 @@ def gaussian(
     *,
     std: float = 1.0,
     sym: bool = True,
-    dtype: torch.dtype | None = None,
+    dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: torch.device | None = None,
+    device: Optional[torch.device] = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -373,9 +373,9 @@ def kaiser(
     *,
     beta: float = 12.0,
     sym: bool = True,
-    dtype: torch.dtype | None = None,
+    dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: torch.device | None = None,
+    device: Optional[torch.device] = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -465,9 +465,9 @@ def hamming(
     M: int,
     *,
     sym: bool = True,
-    dtype: torch.dtype | None = None,
+    dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: torch.device | None = None,
+    device: Optional[torch.device] = None,
     requires_grad: bool = False,
 ) -> Tensor:
     return general_hamming(
@@ -519,9 +519,9 @@ def hann(
     M: int,
     *,
     sym: bool = True,
-    dtype: torch.dtype | None = None,
+    dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: torch.device | None = None,
+    device: Optional[torch.device] = None,
     requires_grad: bool = False,
 ) -> Tensor:
     return general_hamming(
@@ -573,9 +573,9 @@ def blackman(
     M: int,
     *,
     sym: bool = True,
-    dtype: torch.dtype | None = None,
+    dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: torch.device | None = None,
+    device: Optional[torch.device] = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -634,9 +634,9 @@ def bartlett(
     M: int,
     *,
     sym: bool = True,
-    dtype: torch.dtype | None = None,
+    dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: torch.device | None = None,
+    device: Optional[torch.device] = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -710,9 +710,9 @@ def general_cosine(
     *,
     a: Iterable,
     sym: bool = True,
-    dtype: torch.dtype | None = None,
+    dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: torch.device | None = None,
+    device: Optional[torch.device] = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -803,9 +803,9 @@ def general_hamming(
     *,
     alpha: float = 0.54,
     sym: bool = True,
-    dtype: torch.dtype | None = None,
+    dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: torch.device | None = None,
+    device: Optional[torch.device] = None,
     requires_grad: bool = False,
 ) -> Tensor:
     return general_cosine(
@@ -867,9 +867,9 @@ def nuttall(
     M: int,
     *,
     sym: bool = True,
-    dtype: torch.dtype | None = None,
+    dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: torch.device | None = None,
+    device: Optional[torch.device] = None,
     requires_grad: bool = False,
 ) -> Tensor:
     return general_cosine(

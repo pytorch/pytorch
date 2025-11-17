@@ -3,6 +3,7 @@ import functools
 import math
 import operator
 from typing import *  # noqa: F403
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -142,7 +143,7 @@ def check_schema(schema_str: str, func, *args, **kwargs) -> None:
         name, arg_type = named_arg_type.split(": ")
         is_optional = arg_type.endswith("?")
         normalized_arg_type = arg_type[:-1] if is_optional else arg_type
-        if normalized_arg_type not in arg_type_check_fns:
+        if normalized_arg_type not in arg_type_check_fns.keys():
             raise AssertionError(f"Unknown arg type: {normalized_arg_type}")
 
         if i >= len(args):
@@ -248,7 +249,7 @@ def register_func(tables, aten_ops, schema_str):
 register_jagged_func = functools.partial(register_func, JAGGED_OPS_TABLE)
 
 
-def lookup_jagged(func, *args, **kwargs) -> Callable | None:
+def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
     dispatch_func = JAGGED_OPS_TABLE.get(func, None)
     if dispatch_func is not None:
         return dispatch_func
@@ -399,7 +400,7 @@ def jagged_torch_function(func, *args, **kwargs):
     # Handle flatten() here because it's CompositeImplicit.
     if func.__name__ == "flatten":
 
-        def _flatten_sig(input, start_dim=0, end_dim=-1) -> None:
+        def _flatten_sig(input, start_dim=0, end_dim=-1):
             pass
 
         _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -465,7 +466,7 @@ def jagged_torch_function(func, *args, **kwargs):
     # Handle nested-specific input validation for CompositeImplicit rms_norm
     if func.__name__ == "rms_norm":
 
-        def _rms_norm_sig(input, normalized_shape, weight=None, eps=None) -> None:
+        def _rms_norm_sig(input, normalized_shape, weight=None, eps=None):
             pass
 
         _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -531,7 +532,7 @@ def prim_layout_default(func, *args, **kwargs):
     [torch.ops.aten.size.default],
     "self: jt_all",
 )
-def tensor_attr_unsupported_getter(func, *args, **kwargs) -> None:
+def tensor_attr_unsupported_getter(func, *args, **kwargs):
     if func is torch.ops.aten.size.default:
         raise RuntimeError(
             "NestedTensor does not support directly calling torch.ops.aten.size; "
@@ -1137,7 +1138,7 @@ def unbind_int(func, *args, **kwargs):
     lengths = inp.lengths()
     ragged_idx = inp._ragged_idx
 
-    def _torch_check(_lengths: list[int], _offsets: list[int] | None = None) -> None:
+    def _torch_check(_lengths: list[int], _offsets: Optional[list[int]] = None):
         # This torch._check are needed for torch.compile
         # symbolic shapes processing.
         # offsets and lengths are symbolic variables during compilation,
@@ -2614,7 +2615,7 @@ def _nested_select_backward_default(func, *args, **kwargs):
 
 
 @register_jagged_func(torch.ops.aten.record_stream.default, "self: jt_all, s: any")
-def record_stream_default(func, *args, **kwargs) -> None:
+def record_stream_default(func, *args, **kwargs):
     inp = args[0]
     stream = args[1]
     # ensure all components live until stream computation completes

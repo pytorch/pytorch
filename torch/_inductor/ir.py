@@ -9,12 +9,13 @@ import operator
 import os
 import textwrap
 import traceback
-from collections.abc import Callable, Container, Generator, Iterable, Iterator, Sequence
+from collections.abc import Container, Generator, Iterable, Iterator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from enum import Enum
 from functools import partial
 from typing import (
     Any,
+    Callable,
     cast,
     ClassVar,
     Literal,
@@ -23,11 +24,18 @@ from typing import (
     SupportsFloat,
     SupportsInt,
     TYPE_CHECKING,
-    TypeAlias,
     TypeVar,
     Union,
 )
-from typing_extensions import assert_never, Never, override, ParamSpec, Self, TypeIs
+from typing_extensions import (
+    assert_never,
+    Never,
+    override,
+    ParamSpec,
+    Self,
+    TypeAlias,
+    TypeIs,
+)
 from unittest.mock import patch
 
 import sympy
@@ -64,7 +72,6 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.node import Node
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._python_dispatch import _disable_current_modes
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, Mod, ModularIndexing
 from torch.utils._sympy.symbol import SymT
 
@@ -1535,7 +1542,7 @@ class Reduction(Loops):
                 # "all" is desugared to `!any(!val)`
             }
 
-            assert reduction_type in rtypes_to_inits, (
+            assert reduction_type in rtypes_to_inits.keys(), (
                 f"{reduction_type} not supported for zero-dimension tensors!"
             )
 
@@ -5223,9 +5230,7 @@ class ChoiceCaller:
         }
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(lambda: algo(*args), **benchmark_configs)  # type: ignore[arg-type]
-        return benchmarker.benchmark(
-            algo, args, {"out": out}, device=None, **benchmark_configs
-        )
+        return benchmarker.benchmark(algo, args, {"out": out}, **benchmark_configs)
 
     def call_name(self) -> str:
         raise NotImplementedError
@@ -6136,12 +6141,9 @@ class ExternKernel(InputsKernel):
         if isinstance(x, (Expr, sympy.logic.boolalg.Boolean, int)):
             return ShapeAsConstantBuffer(expr=x)
         if isinstance(x, Constant):
-            # We need to unset fake mode, or else the torch.tensor() call will
-            # turn into a FakeTensor
-            with _disable_current_modes():
-                return V.graph.add_tensor_constant(
-                    torch.tensor(x.value, dtype=x.get_dtype(), device=x.get_device())
-                )
+            return V.graph.add_tensor_constant(
+                torch.tensor(x.value, dtype=x.get_dtype(), device=x.get_device())
+            )
         if isinstance(x, ConstantBuffer):
             return x
         if isinstance(x, TensorBox):
@@ -6981,7 +6983,6 @@ class UserDefinedTritonKernel(ExternKernel):
 
             configs = kernel.configs
             kernel = kernel.fn
-        # pyrefly: ignore  # bad-return
         return kernel, configs, restore_value_args, reset_to_zero_args
 
     @override
@@ -7137,10 +7138,7 @@ class UserDefinedTritonKernel(ExternKernel):
         self.mutable_args = [
             kernel_args[key]
             for key in identify_mutated_tensors(
-                # pyrefly: ignore  # bad-argument-type
-                kernel,
-                {**kernel_args, **autotuned_kwargs},
-                tma_descriptor_metadata,
+                kernel, {**kernel_args, **autotuned_kwargs}, tma_descriptor_metadata
             )
         ]
 
@@ -8849,9 +8847,7 @@ class Conditional(ExternKernel):
         outputs = [
             MultiOutput(
                 FixedLayout(
-                    device=output.get_device()
-                    if output.get_device() is not None
-                    else device,  # type: ignore[arg-type]
+                    device=device,
                     dtype=output.get_dtype(),
                     size=[Conditional._maybe_expr(sz) for sz in merged_output.size()],
                     stride=[
@@ -9242,9 +9238,12 @@ class EffectfulKernel(FallbackKernel):
             unbacked_bindings=unbacked_bindings,
         )
 
-        from torch._higher_order_ops.effects import _get_effect
+        from torch._higher_order_ops.effects import get_effect_key
 
-        effect_type = _get_effect(kernel)
+        uncovered_args = [
+            a.value if isinstance(a, TorchBindObject) else a for a in tensor_args
+        ]
+        effect_type = get_effect_key(kernel, (*nontensor_args, *uncovered_args), kwargs)
         assert effect_type is not None
         self.effect_type = effect_type
         self.prev_effect_buffer = V.graph.effectful_ops.get(effect_type, None)
@@ -9295,10 +9294,6 @@ class TorchBindObject(NonTensorObj):
     def get_buf_bytes(self) -> int:
         # Returns the sum of all tensors in the flattened object
         real_script_obj = self.get_real_obj()
-
-        if real_script_obj is None:
-            return 0
-
         assert hasattr(real_script_obj, "__obj_flatten__")
         flat_dict = dict(real_script_obj.__obj_flatten__())
         flat_elems = pytree.tree_flatten(flat_dict)[0]

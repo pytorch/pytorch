@@ -3,6 +3,7 @@
 import collections
 import enum
 import itertools as it
+from typing import Optional
 
 from torch.utils.benchmark.utils import common
 from torch import tensor as _tensor
@@ -28,12 +29,12 @@ class Colorize(enum.Enum):
 class _Column:
     def __init__(
         self,
-        grouped_results: list[tuple[common.Measurement | None, ...]],
+        grouped_results: list[tuple[Optional[common.Measurement], ...]],
         time_scale: float,
         time_unit: str,
         trim_significant_figures: bool,
         highlight_warnings: bool,
-    ) -> None:
+    ):
         self._grouped_results = grouped_results
         self._flat_results = [*it.chain.from_iterable(grouped_results)]
         self._time_scale = time_scale
@@ -59,7 +60,7 @@ class _Column:
     def get_results_for(self, group):
         return self._grouped_results[group]
 
-    def num_to_str(self, value: float | None, estimated_sigfigs: int, spread: float | None):
+    def num_to_str(self, value: Optional[float], estimated_sigfigs: int, spread: Optional[float]):
         if value is None:
             return " " * len(self.num_to_str(1, estimated_sigfigs, None))
 
@@ -78,7 +79,7 @@ def optional_min(seq):
 
 class _Row:
     def __init__(self, results, row_group, render_env, env_str_len,
-                 row_name_str_len, time_scale, colorize, num_threads=None) -> None:
+                 row_name_str_len, time_scale, colorize, num_threads=None):
         super().__init__()
         self._results = results
         self._row_group = row_group
@@ -90,7 +91,7 @@ class _Row:
         self._columns: tuple[_Column, ...] = ()
         self._num_threads = num_threads
 
-    def register_columns(self, columns: tuple[_Column, ...]) -> None:
+    def register_columns(self, columns: tuple[_Column, ...]):
         self._columns = columns
 
     def as_column_strings(self):
@@ -155,7 +156,7 @@ class Table:
             colorize: Colorize,
             trim_significant_figures: bool,
             highlight_warnings: bool
-    ) -> None:
+    ):
         if len({r.label for r in results}) != 1:
             raise AssertionError("All results must share the same label")
 
@@ -174,17 +175,17 @@ class Table:
         self.rows, self.columns = self.populate_rows_and_columns()
 
     @staticmethod
-    def row_fn(m: common.Measurement) -> tuple[int, str | None, str]:
+    def row_fn(m: common.Measurement) -> tuple[int, Optional[str], str]:
         return m.num_threads, m.env, m.as_row_name
 
     @staticmethod
-    def col_fn(m: common.Measurement) -> str | None:
+    def col_fn(m: common.Measurement) -> Optional[str]:
         return m.description
 
     def populate_rows_and_columns(self) -> tuple[tuple[_Row, ...], tuple[_Column, ...]]:
         rows: list[_Row] = []
         columns: list[_Column] = []
-        ordered_results: list[list[common.Measurement | None]] = [
+        ordered_results: list[list[Optional[common.Measurement]]] = [
             [None for _ in self.column_keys]
             for _ in self.row_keys
         ]
@@ -204,7 +205,7 @@ class Table:
         prior_num_threads = -1
         prior_env = ""
         row_group = -1
-        rows_by_group: list[list[list[common.Measurement | None]]] = []
+        rows_by_group: list[list[list[Optional[common.Measurement]]]] = []
         for (num_threads, env, _), row in zip(self.row_keys, ordered_results, strict=True):
             thread_transition = (num_threads != prior_num_threads)
             if thread_transition:
@@ -282,17 +283,17 @@ class Compare:
     Args:
         results: List of Measurement to display.
     """
-    def __init__(self, results: list[common.Measurement]) -> None:
+    def __init__(self, results: list[common.Measurement]):
         self._results: list[common.Measurement] = []
         self.extend_results(results)
         self._trim_significant_figures = False
         self._colorize = Colorize.NONE
         self._highlight_warnings = False
 
-    def __str__(self) -> str:
+    def __str__(self):
         return "\n".join(self._render())
 
-    def extend_results(self, results) -> None:
+    def extend_results(self, results):
         """Append results to already stored ones.
 
         All added results must be instances of ``Measurement``.
@@ -304,22 +305,22 @@ class Compare:
                 )
         self._results.extend(results)
 
-    def trim_significant_figures(self) -> None:
+    def trim_significant_figures(self):
         """Enables trimming of significant figures when building the formatted table."""
         self._trim_significant_figures = True
 
-    def colorize(self, rowwise=False) -> None:
+    def colorize(self, rowwise=False):
         """Colorize formatted table.
 
         Colorize columnwise by default.
         """
         self._colorize = Colorize.ROWWISE if rowwise else Colorize.COLUMNWISE
 
-    def highlight_warnings(self) -> None:
+    def highlight_warnings(self):
         """Enables warning highlighting when building formatted table."""
         self._highlight_warnings = True
 
-    def print(self) -> None:
+    def print(self):
         """Print formatted table"""
         print(str(self))
 

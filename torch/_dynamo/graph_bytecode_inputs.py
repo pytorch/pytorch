@@ -1,6 +1,5 @@
 import weakref
-from collections.abc import Callable
-from typing import Any
+from typing import Any, Callable
 
 from torch._dynamo.source import Source
 
@@ -59,9 +58,9 @@ def register_graph_created_object(
     try:
         index_to_external_object_weakref[index] = weakref.ref(example_value)
     except TypeError as e:
-        from .exc import unimplemented
+        from .exc import unimplemented_v2
 
-        unimplemented(
+        unimplemented_v2(
             gb_type="Failed to make weakref to graph-created external object",
             context=f"user_object: {example_value}",
             explanation="Object does not allow us to make a weakref to it",
@@ -79,9 +78,9 @@ def register_user_object(value: Any, source: Source) -> int:
     try:
         index_to_external_object_weakref[index] = weakref.ref(value)
     except TypeError as e:
-        from .exc import unimplemented
+        from .exc import unimplemented_v2
 
-        unimplemented(
+        unimplemented_v2(
             gb_type="Failed to make weakref to User Object",
             context=f"user_object: {value}",
             explanation="Object does not allow us to make a weakref to it",

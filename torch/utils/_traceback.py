@@ -5,6 +5,7 @@ import os.path
 import tempfile
 import traceback
 from types import TracebackType
+from typing import Optional
 
 
 # This file contains utilities for ensuring dynamically compile()'d
@@ -143,7 +144,7 @@ def shorten_filename(fn, *, base=None):
         return fn[len(prefix) + 1 :]
 
 
-def format_frame(frame, *, base=None, line=False) -> str:
+def format_frame(frame, *, base=None, line=False):
     """
     Format a FrameSummary in a short way, without printing full absolute path or code.
 
@@ -163,11 +164,11 @@ def format_traceback_short(tb):
 class CapturedTraceback:
     __slots__ = ["tb", "skip"]
 
-    def __init__(self, tb, skip=0) -> None:
+    def __init__(self, tb, skip=0):
         self.tb = tb
         self.skip = skip
 
-    def cleanup(self) -> None:
+    def cleanup(self):
         self.tb = None
 
     def summary(self):
@@ -233,7 +234,7 @@ class CapturedTraceback:
         import torch._C._profiler
 
         # Directly populate tracebacks that already have cached summaries
-        rs: list[list[str] | None] = []
+        rs: list[Optional[list[str]]] = []
         delayed_idxs = []
         for i, tb in enumerate(tbs):
             if tb.tb is None:

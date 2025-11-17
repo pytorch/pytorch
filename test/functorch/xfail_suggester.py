@@ -73,7 +73,7 @@ def parse_namespace(base):
         "sparse_": "sparse",
         "special_": "special",
     }
-    for heading in mappings:
+    for heading in mappings.keys():
         if base.startswith(heading):
             return mappings[heading], base[len(heading) :]
     return None, base

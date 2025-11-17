@@ -1,6 +1,6 @@
 """Miscellaneous utilities to aid with typing."""
 
-from typing import TypeVar
+from typing import Optional, TypeVar
 
 
 # Helper to turn Optional[T] into T when we know None either isn't
@@ -8,7 +8,7 @@ from typing import TypeVar
 T = TypeVar("T")
 
 
-def not_none(obj: T | None) -> T:
+def not_none(obj: Optional[T]) -> T:
     if obj is None:
         raise TypeError("Invariant encountered: value was None when it should not be")
     return obj

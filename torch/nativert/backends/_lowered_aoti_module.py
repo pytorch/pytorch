@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 from torch.export import ExportedProgram
 
@@ -8,7 +10,7 @@ class LoweredBackendModule(torch.nn.Module):
         original_exported_program: ExportedProgram,
         backend_id: str,
         *,
-        module_name: str | None = None,
+        module_name: Optional[str] = None,
     ) -> None:
         super().__init__()
         self._backend_id = backend_id
@@ -20,7 +22,7 @@ class LoweredBackendModule(torch.nn.Module):
         return self._backend_id
 
     @property
-    def module_name(self) -> str | None:
+    def module_name(self) -> Optional[str]:
         return self._module_name
 
     @property

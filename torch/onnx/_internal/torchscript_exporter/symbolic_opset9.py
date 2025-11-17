@@ -810,7 +810,7 @@ def _reduce_with_dtype(onnx_op: str, name: str, allow_multi_dim_support: bool = 
 
 @_onnx_symbolic("aten::cumsum")
 @symbolic_helper.parse_args("v", "i", "none")
-def cumsum(g: jit_utils.GraphContext, input, dim, dtype) -> None:
+def cumsum(g: jit_utils.GraphContext, input, dim, dtype):
     symbolic_helper._onnx_opset_unsupported("cumsum", 9, 11, input)
 
 
@@ -3332,9 +3332,7 @@ def _unique(g: jit_utils.GraphContext, input, sorted, return_inverse):
 
 @_onnx_symbolic("aten::_unique2")
 @symbolic_helper.parse_args("v", "i", "i", "i")
-def _unique2(
-    g: jit_utils.GraphContext, input, sorted, return_inverse, return_counts
-) -> None:
+def _unique2(g: jit_utils.GraphContext, input, sorted, return_inverse, return_counts):
     symbolic_helper._onnx_opset_unsupported("_unique2", 9, 11, input)
 
 
@@ -6291,7 +6289,7 @@ def broadcast_tensors(g: jit_utils.GraphContext, self):
 
 
 @_onnx_symbolic("aten::is_pinned")
-def is_pinned(g: jit_utils.GraphContext, self, device=None) -> None:
+def is_pinned(g: jit_utils.GraphContext, self, device=None):
     # Unused by ONNX.
     return None
 
@@ -6359,7 +6357,7 @@ def prim_layout(g: jit_utils.GraphContext, self):
 
 
 @_onnx_symbolic("prim::ListConstruct")
-def prim_list_construct(g: jit_utils.GraphContext, *inputs, **kwargs) -> None:
+def prim_list_construct(g: jit_utils.GraphContext, *inputs, **kwargs):
     return None
 
 
@@ -6376,12 +6374,12 @@ def prim_list_unpack(
 
 
 @_onnx_symbolic("prim::TupleConstruct")
-def prim_tuple_construct(g: jit_utils.GraphContext, *inputs, **kwargs) -> None:
+def prim_tuple_construct(g: jit_utils.GraphContext, *inputs, **kwargs):
     return None
 
 
 @_onnx_symbolic("prim::Uninitialized")
-def prim_uninitialized(g: jit_utils.GraphContext, *inputs, **kwargs) -> None:
+def prim_uninitialized(g: jit_utils.GraphContext, *inputs, **kwargs):
     return None
 
 

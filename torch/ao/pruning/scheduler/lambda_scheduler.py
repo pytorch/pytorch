@@ -1,5 +1,6 @@
 import warnings
 from collections.abc import Callable
+from typing import Union
 
 from torch.ao.pruning.sparsifier.base_sparsifier import BaseSparsifier
 
@@ -35,7 +36,7 @@ class LambdaSL(BaseScheduler):
     def __init__(
         self,
         sparsifier: BaseSparsifier,
-        sl_lambda: Callable[[int], float] | list[Callable[[int], float]],
+        sl_lambda: Union[Callable[[int], float], list[Callable[[int], float]]],
         last_epoch: int = -1,
         verbose: bool = False,
     ) -> None:

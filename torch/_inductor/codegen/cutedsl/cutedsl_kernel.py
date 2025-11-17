@@ -3,8 +3,7 @@ import contextlib
 import dataclasses
 import logging
 import textwrap
-from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import sympy
 

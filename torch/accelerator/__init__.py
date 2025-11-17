@@ -10,7 +10,6 @@ import torch
 from ._utils import _device_t, _get_device_index
 from .memory import (
     empty_cache,
-    get_memory_info,
     max_memory_allocated,
     max_memory_reserved,
     memory_allocated,
@@ -26,10 +25,9 @@ __all__ = [
     "current_device_idx",  # deprecated
     "current_device_index",
     "current_stream",
+    "empty_cache",
     "device_count",
     "device_index",
-    "empty_cache",
-    "get_memory_info",
     "is_available",
     "max_memory_allocated",
     "max_memory_reserved",
@@ -93,7 +91,7 @@ def is_available() -> bool:
     return mod.is_available()
 
 
-def current_accelerator(check_available: bool = False) -> torch.device | None:
+def current_accelerator(check_available: bool = False) -> Optional[torch.device]:
     r"""Return the device of the accelerator available at compilation time.
     If no accelerator were available at compilation time, returns None.
     See :ref:`accelerator<accelerators>` for details.
@@ -261,7 +259,7 @@ class device_index:
         ...     pass
     """
 
-    def __init__(self, device: int | None, /) -> None:
+    def __init__(self, device: Optional[int], /) -> None:
         self.idx = device
         self.prev_idx = -1
 

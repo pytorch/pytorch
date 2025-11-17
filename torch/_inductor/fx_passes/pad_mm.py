@@ -2,8 +2,8 @@ import functools
 import itertools
 import operator
 import typing
-from collections.abc import Callable, Sequence
-from typing import Any
+from collections.abc import Sequence
+from typing import Any, Callable
 
 import torch
 import torch._inductor.runtime.runtime_utils

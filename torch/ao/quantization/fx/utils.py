@@ -6,7 +6,7 @@ import warnings
 from collections import namedtuple
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -83,8 +83,8 @@ class ObservedGraphModuleAttrs:
     is_qat: bool
     observed_node_names: set[str]
     is_observed_standalone_module: bool = False
-    standalone_module_input_quantized_idxs: list[int] | None = None
-    standalone_module_output_quantized_idxs: list[int] | None = None
+    standalone_module_input_quantized_idxs: Optional[list[int]] = None
+    standalone_module_output_quantized_idxs: Optional[list[int]] = None
 
 
 def node_arg_is_weight(node: Node, arg: Any) -> bool:
@@ -192,15 +192,13 @@ def get_new_attr_name_with_prefix(prefix: str) -> Callable:
     return get_new_attr_name
 
 
-def collect_producer_nodes(node: Node) -> list[Node] | None:
+def collect_producer_nodes(node: Node) -> Optional[list[Node]]:
     r"""Starting from a target node, trace back until we hit input or
     getattr node. This is used to extract the chain of operators
-    starting from getattr to the target node, for example::
-
-        def forward(self, x):
-            observed = self.observer(self.weight)
-            return F.linear(x, observed)
-
+    starting from getattr to the target node, for example
+    def forward(self, x):
+      observed = self.observer(self.weight)
+      return F.linear(x, observed)
     collect_producer_nodes(observed) will either return a list of nodes that
     produces the observed node or None if we can't extract a self contained
     graph without free variables(inputs of the forward function).
@@ -265,7 +263,7 @@ def create_getattr_from_value(
     graph: Graph,
     prefix: str,
     value: Any,
-    device: torch.device | None = None,
+    device: Optional[torch.device] = None,
 ) -> Node:
     """
     Given a value of any type, creates a getattr node corresponding to the value and
@@ -396,7 +394,7 @@ NodeInfo = namedtuple("NodeInfo", "op target")
 # for them would cause errors
 
 NON_OBSERVABLE_ARG_DICT: dict[
-    NodeInfo, dict[type | torch.dtype, Callable[[Node], list[int]]]
+    NodeInfo, dict[Union[type, torch.dtype], Callable[[Node], list[int]]]
 ] = {
     NodeInfo("call_method", "masked_fill"): {
         torch.bool: return_arg_list([1]),
@@ -414,12 +412,12 @@ NON_OBSERVABLE_ARG_DICT: dict[
     NodeInfo("call_method", "view"): {int: all_node_args_except_first},
 }
 
-EMPTY_ARG_DICT: dict[type | torch.dtype, Callable[[Node], list[int]]] = {}
+EMPTY_ARG_DICT: dict[Union[type, torch.dtype], Callable[[Node], list[int]]] = {}
 
 
 def get_non_observable_arg_indexes_and_types(
     node: Node,
-) -> dict[type | torch.dtype, Callable[[Node], list[int]]]:
+) -> dict[Union[type, torch.dtype], Callable[[Node], list[int]]]:
     """
     Returns a dict with of non float tensor types as keys and values which correspond to a
     function to retrieve the list (which takes the node as an argument)
@@ -432,9 +430,9 @@ def get_non_observable_arg_indexes_and_types(
 def maybe_get_next_module(
     node: Node,
     modules: dict[str, nn.Module],
-    target_module_type: type[nn.Module] | None = None,
+    target_module_type: Optional[type[nn.Module]] = None,
     target_functional_type: Any = None,
-) -> Node | None:
+) -> Optional[Node]:
     """Gets the next module that matches what is needed in
     is_target_module_type if it exists
 
@@ -444,7 +442,7 @@ def maybe_get_next_module(
         target_functional_type: Functional type that we want to check
     """
 
-    for user in node.users:
+    for user in node.users.keys():
         if (
             user.op == "call_module"
             and target_module_type is not None
@@ -501,7 +499,7 @@ def _is_custom_module_lstm(
     named_modules: dict[str, torch.nn.Module],
     qconfig: QConfigAny = None,
     # QuantizeHandler, but we cannot include the type here due to circular imports
-    qhandler: Any | None = None,
+    qhandler: Optional[Any] = None,
 ) -> bool:
     """
     Return whether this refers to the custom module LSTM flow.
@@ -526,7 +524,7 @@ def _is_custom_module_mha(
     named_modules: dict[str, torch.nn.Module],
     qconfig: QConfigAny = None,
     # QuantizeHandler, but we cannot include the type here due to circular imports
-    qhandler: Any | None = None,
+    qhandler: Optional[Any] = None,
 ) -> bool:
     """
     Return whether this refers to the custom module MultiheadAttention flow.
@@ -548,7 +546,7 @@ def _is_custom_module_mha(
 
 def _get_module(
     node: Node, named_modules: dict[str, torch.nn.Module]
-) -> torch.nn.Module | None:
+) -> Optional[torch.nn.Module]:
     """
     If `node` refers to a call_module node, return the module, else None.
     """
@@ -676,7 +674,7 @@ def _insert_dequant_stubs_for_custom_module_lstm_output(
 def _maybe_get_custom_module_lstm_from_node_arg(
     arg: Node,
     named_modules: dict[str, torch.nn.Module],
-) -> Node | None:
+) -> Optional[Node]:
     """
     Given an argument of a node, if the argument refers to the path through which the node
     is a consumer of custom module LSTM, return the custom module LSTM node, or None otherwise.
@@ -713,7 +711,7 @@ def _maybe_get_custom_module_lstm_from_node_arg(
     def match_tuple(a):
         return a.op == "call_function" and a.target is tuple
 
-    def _match_pattern(match_pattern: list[Callable]) -> Node | None:
+    def _match_pattern(match_pattern: list[Callable]) -> Optional[Node]:
         """
         Traverse up the graph and match the args one by one.
         If there is a match, return the last matched node, or None otherwise.
@@ -851,7 +849,7 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
 
 
 def _get_observer_from_activation_post_process(
-    activation_post_process: ObserverBase | FakeQuantizeBase,
+    activation_post_process: Union[ObserverBase, FakeQuantizeBase],
 ) -> ObserverBase:
     """
     If `activation_post_process` is an observer, return the observer.
@@ -887,7 +885,7 @@ def _qconfig_satisfies_dtype_config_constraints(
 
     # TODO: log warnings only when the user enabled a debug flag
     def _activation_post_process_satisfies_dtype_config_constraints(
-        activation_post_process: ObserverBase | FakeQuantizeBase,
+        activation_post_process: Union[ObserverBase, FakeQuantizeBase],
         dtype_with_constraints: DTypeWithConstraints,
         debug_string: str,
     ) -> bool:

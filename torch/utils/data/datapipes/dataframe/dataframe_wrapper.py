@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
-from typing import Any
+from typing import Any, Optional
 
 
 _pandas: Any = None
-_WITH_PANDAS: bool | None = None
+_WITH_PANDAS: Optional[bool] = None
 
 
 def _try_import_pandas() -> bool:
@@ -83,7 +83,7 @@ def get_df_wrapper():
     return default_wrapper
 
 
-def set_df_wrapper(wrapper) -> None:
+def set_df_wrapper(wrapper):
     global default_wrapper
     default_wrapper = wrapper
 

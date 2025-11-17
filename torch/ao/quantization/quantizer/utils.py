@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import Optional
 
 from torch.ao.quantization.pt2e.utils import _is_sym_size_node
 from torch.ao.quantization.quantizer.quantizer import (
@@ -12,7 +13,7 @@ __all__: list[str] = []
 
 
 def _annotate_input_qspec_map(
-    node: Node, input_node: Node, qspec: QuantizationSpecBase | None
+    node: Node, input_node: Node, qspec: Optional[QuantizationSpecBase]
 ) -> None:
     quantization_annotation = node.meta.get(
         "quantization_annotation", QuantizationAnnotation()
@@ -23,7 +24,7 @@ def _annotate_input_qspec_map(
     node.meta["quantization_annotation"] = quantization_annotation
 
 
-def _annotate_output_qspec(node: Node, qspec: QuantizationSpecBase | None) -> None:
+def _annotate_output_qspec(node: Node, qspec: Optional[QuantizationSpecBase]) -> None:
     quantization_annotation = node.meta.get(
         "quantization_annotation", QuantizationAnnotation()
     )

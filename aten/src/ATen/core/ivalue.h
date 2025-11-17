@@ -18,8 +18,6 @@
 #include <unordered_set>
 #include <utility>
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
-
 namespace torch {
 class TORCH_API CustomClassHolder : public c10::intrusive_ptr_target {};
 namespace jit {
@@ -1631,7 +1629,5 @@ struct TORCH_API WeakOrStrongTypePtr {
 };
 
 } // namespace c10
-
-C10_DIAGNOSTIC_POP()
 
 #include <ATen/core/ivalue_inl.h> // IWYU pragma: keep

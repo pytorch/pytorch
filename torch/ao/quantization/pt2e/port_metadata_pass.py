@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
+from typing import Optional
 
 import torch
 from torch._export.error import InternalError
@@ -54,7 +55,7 @@ def _has_quant_annotation(node: torch.fx.Node) -> bool:
     return "quantization_annotation" in node.meta
 
 
-def _find_choose_qparams_node(node: torch.fx.Node) -> torch.fx.Node | None:
+def _find_choose_qparams_node(node: torch.fx.Node) -> Optional[torch.fx.Node]:
     # BFS to look for choose qparams
     from collections import deque
 
@@ -65,7 +66,7 @@ def _find_choose_qparams_node(node: torch.fx.Node) -> torch.fx.Node | None:
             continue
         if n.op == "call_function" and n.target in _CHOOSE_QPARAMS_OPS:
             return n
-        for k in n.users:
+        for k in n.users.keys():
             queue.append(k)
     return None
 
@@ -73,7 +74,7 @@ def _find_choose_qparams_node(node: torch.fx.Node) -> torch.fx.Node | None:
 def _port_metadata_for_input_quant_nodes(
     input_node: torch.fx.Node,
     node: torch.fx.Node,
-    qspec: QuantizationSpecBase | None,
+    qspec: Optional[QuantizationSpecBase],
 ):
     if qspec is None:
         return
@@ -131,7 +132,7 @@ def _port_metadata_for_input_quant_nodes(
 
 
 def _port_metadata_for_output_quant_nodes(
-    node: torch.fx.Node, qspec: QuantizationSpecBase | None
+    node: torch.fx.Node, qspec: Optional[QuantizationSpecBase]
 ):
     if qspec is None:
         return

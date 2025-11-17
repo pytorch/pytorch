@@ -11,8 +11,7 @@ import sys
 import time
 import urllib
 import urllib.parse
-from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from urllib.request import Request, urlopen
 
 

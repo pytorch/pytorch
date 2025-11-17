@@ -5,7 +5,6 @@ import contextlib
 import math
 import operator
 import os
-import sys
 import unittest
 import warnings
 
@@ -1683,8 +1682,11 @@ class TestTEFuser(JitTestCase):
         ]
         dtypes = ["int", "float", "bool"]
         values = {"int": [10, 3], "float": [12.34, 2.78], "bool": [True, False]}
-        for dtype_x, dtype_y, op in product(dtypes, dtypes, binary_ops):
-            code = ir_template.format(dtype_x=dtype_x, dtype_y=dtype_y, op=op)
+        devices = self.devices
+        for dtype_x, dtype_y, op, device in product(
+            dtypes, dtypes, binary_ops, devices
+        ):
+            code = ir_template.format(**locals())
 
             # Interpret the graph
             try:
@@ -1699,7 +1701,9 @@ class TestTEFuser(JitTestCase):
             try:
                 k = torch._C._te.TensorExprKernel(graph)
             except Exception as e:
-                raise RuntimeError(" ".join(["Compilation failed:", str(code)])) from e
+                raise RuntimeError(
+                    " ".join(["Compilation failed:", device, str(code)])
+                ) from e
 
             # Run the graph
             for x, y in product(values[dtype_x], values[dtype_y]):
@@ -1709,7 +1713,9 @@ class TestTEFuser(JitTestCase):
                     self.assertEqual(ref, res)
                 except Exception as e:
                     raise RuntimeError(
-                        " ".join(["Failed at runtime:", str(x), str(y), str(code)])
+                        " ".join(
+                            ["Failed at runtime:", device, str(x), str(y), str(code)]
+                        )
                     ) from e
 
     def test_matmul(self):
@@ -3048,5 +3054,4 @@ instantiate_device_type_tests(TestLoopnestRandomization, globals(), only_for=("c
 
 
 if __name__ == "__main__":
-    if sys.version_info < (3, 14):
-        run_tests()
+    run_tests()

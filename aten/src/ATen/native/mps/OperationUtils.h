@@ -40,6 +40,8 @@ using namespace at::mps;
 
 namespace at::native::mps {
 
+void dispatch_sync_with_rethrow(dispatch_queue_t queue, void (^block)());
+
 struct MPSScalar {
   id<MTLBuffer> getMTLBuffer() const {
     return __builtin_bit_cast(id<MTLBuffer>, buffer.get());

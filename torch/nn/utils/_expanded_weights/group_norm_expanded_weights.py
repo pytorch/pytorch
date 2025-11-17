@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import operator
 from functools import reduce
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -52,7 +53,7 @@ class GroupNormPerSampleGrad(torch.autograd.Function):
         weight, bias, eps = ctx.weight, ctx.bias, ctx.eps
         mean, rstd = ctx.mean, ctx.rstd
 
-        results: list[torch.Tensor | None] = []
+        results: list[Optional[torch.Tensor]] = []
         results.append(None)  # for kwarg names
         results.append(None)  # for op reference
 

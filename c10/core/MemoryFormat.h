@@ -55,7 +55,6 @@ inline std::ostream& operator<<(
       return stream << "ChannelsLast";
     case MemoryFormat::ChannelsLast3d:
       return stream << "ChannelsLast3d";
-    case MemoryFormat::NumOptions:
     default:
       TORCH_CHECK(false, "Unknown memory format ", memory_format);
   }

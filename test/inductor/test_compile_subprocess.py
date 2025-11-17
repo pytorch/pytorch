@@ -70,7 +70,7 @@ class TestSubprocess(TestCase):
         torch._dynamo.reset()
         FxCompile._reset_stats()
 
-        super().setUp()
+        TestCase.setUp(self)
 
         self._stack = contextlib.ExitStack()
         self._stack.enter_context(

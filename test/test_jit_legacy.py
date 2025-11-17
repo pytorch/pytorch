@@ -12,5 +12,4 @@ if __name__ == '__main__':
 from test_jit import *  # noqa: F403, F401
 
 if __name__ == '__main__':
-    if sys.version_info < (3, 14):
-        run_tests()
+    run_tests()

@@ -317,7 +317,6 @@ class HashStoreTest(TestCase, StoreTestBase):
 
 class PrefixStoreTest(TestCase):
     def setUp(self):
-        super().setUp()
         # delete is false as FileStore will automatically clean up the file
         self.file = tempfile.NamedTemporaryFile(delete=False)
 

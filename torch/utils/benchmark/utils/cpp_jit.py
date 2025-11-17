@@ -5,7 +5,7 @@ import re
 import shutil
 import textwrap
 import threading
-from typing import Any
+from typing import Any, Optional
 
 import torch
 from torch.utils.benchmark.utils._stubs import CallgrindModuleType, TimeitModuleType
@@ -29,7 +29,7 @@ SOURCE_ROOT = os.path.split(os.path.abspath(__file__))[0]
 #   ````
 # `setup` and `stmt` do not change, so we can reuse the executable from the
 # first pass through the loop.
-_BUILD_ROOT: str | None = None
+_BUILD_ROOT: Optional[str] = None
 
 def _get_build_root() -> str:
     global _BUILD_ROOT
@@ -64,7 +64,7 @@ def _get_build_root() -> str:
 #   analysis and the shims no longer justify their maintenance and code
 #   complexity costs) back testing paths will be removed.
 
-CXX_FLAGS: list[str] | None
+CXX_FLAGS: Optional[list[str]]
 if hasattr(torch.__config__, "_cxx_flags"):
     try:
         CXX_FLAGS = torch.__config__._cxx_flags().strip().split()
@@ -89,7 +89,7 @@ if CONDA_PREFIX is not None:
     EXTRA_INCLUDE_PATHS.append(os.path.join(CONDA_PREFIX, "include"))
 
 
-COMPAT_CALLGRIND_BINDINGS: CallgrindModuleType | None = None
+COMPAT_CALLGRIND_BINDINGS: Optional[CallgrindModuleType] = None
 def get_compat_bindings() -> CallgrindModuleType:
     with LOCK:
         global COMPAT_CALLGRIND_BINDINGS

@@ -408,9 +408,6 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertEqual(ref0, res0)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    @unittest.skip(
-        "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
-    )
     def test_cuda_event_reconstruct(self):
         def fn(x):
             e = torch.cuda.Event()
@@ -428,9 +425,6 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertEqual(cnts.op_count, 3)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    @unittest.skip(
-        "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
-    )
     def test_cuda_event_across_graph_break(self):
         def fn(x):
             e = torch.cuda.Event()
@@ -452,12 +446,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         res = opt_fn(x)
         self.assertEqual(ref[0], res[0])
         self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 10)
+        self.assertEqual(cnts.op_count, 9)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    @unittest.skip(
-        "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
-    )
     def test_cuda_event_created_outside_of_graph(self):
         user_stream = torch.cuda.Stream()
         event = torch.cuda.Event()
@@ -487,12 +478,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         res = run_iters(func, compile=True)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 4)
+        self.assertEqual(cnts.op_count, 3)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    @unittest.skip(
-        "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
-    )
     def test_cuda_event_method_create_stream_outside_of_compile(self):
         def fn(x, cur_stream, new_stream):
             x = torch.mul(x, 1)

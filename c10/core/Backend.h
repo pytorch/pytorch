@@ -3,12 +3,9 @@
 #include <c10/core/DeviceType.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
-#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
 #include <stdexcept>
-
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
 
 namespace c10 {
 
@@ -405,5 +402,3 @@ inline bool isSparseCsr(Backend b) {
 }
 
 } // namespace c10
-
-C10_DIAGNOSTIC_POP()

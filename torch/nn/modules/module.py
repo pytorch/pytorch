@@ -2438,7 +2438,6 @@ class Module:
                     not is_param_lazy
                     and len(param.shape) == 0
                     and len(input_param.shape) == 1
-                    and input_param.shape[0] == 1
                 ):
                     input_param = input_param[0]
 
@@ -2522,7 +2521,7 @@ class Module:
             unexpected_keys.append(extra_state_key)
 
         if strict:
-            for key in state_dict:
+            for key in state_dict.keys():
                 if key.startswith(prefix) and key != extra_state_key:
                     input_name = key[len(prefix) :].split(".", 1)
                     # Must be Module if it have attributes
@@ -3041,7 +3040,7 @@ class Module:
 
         return replica
 
-    def compile(self, *args, **kwargs) -> None:
+    def compile(self, *args, **kwargs):
         """
         Compile this Module's forward using :func:`torch.compile`.
 

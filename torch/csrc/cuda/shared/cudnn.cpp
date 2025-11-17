@@ -2,7 +2,6 @@
 // This file should only be compiled if this condition holds, so it should be
 // safe.
 #if defined(USE_CUDNN) || defined(USE_ROCM)
-#include <ATen/detail/CUDAHooksInterface.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <tuple>
@@ -33,7 +32,11 @@ version_tuple getRuntimeVersion() {
 }
 
 size_t getVersionInt() {
-  return at::detail::getCUDAHooks().versionRuntimeCuDNN();
+#ifndef USE_STATIC_CUDNN
+  return cudnnGetVersion();
+#else
+  return CUDNN_VERSION;
+#endif
 }
 
 } // namespace

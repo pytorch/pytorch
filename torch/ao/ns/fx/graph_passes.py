@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Optional, Union
 
 import torch
 from torch.ao.ns.fx.mappings import get_node_type_to_io_type_map
@@ -24,7 +24,7 @@ from .utils import (
 )
 
 
-def _maybe_get_fqn(node: Node, gm: GraphModule) -> str | None:
+def _maybe_get_fqn(node: Node, gm: GraphModule) -> Optional[str]:
     fqn = None
     if hasattr(gm, "_node_name_to_scope"):
         # fqn on observers is not present, because they do not
@@ -53,7 +53,7 @@ def _insert_logger_after_node(
     results_type: str,
     index_within_arg: int,
     index_of_arg: int,
-    fqn: str | None,
+    fqn: Optional[str],
 ) -> Node:
     """
     Given a starting graph of
@@ -203,8 +203,8 @@ def _insert_quantize_per_tensor_node(
     node_a: Node,
     gm_b: GraphModule,
     graph_c: Graph,
-    scale: torch.Tensor | float,
-    zero_point: torch.Tensor | int,
+    scale: Union[torch.Tensor, float],
+    zero_point: Union[torch.Tensor, int],
     dtype_cast_name: str,
 ) -> Node:
     # copy scale
@@ -234,14 +234,14 @@ def _insert_quantize_per_tensor_node(
 def _insert_dtype_cast_after_node(
     node_a: Node,
     node_c: Node,
-    prev_node_c: Node | list[Node],
+    prev_node_c: Union[Node, list[Node]],
     gm_a: GraphModule,
     gm_b: GraphModule,
     graph_c: Graph,
     node_name_prefix: str,
     logger_cls: Callable,
     node_type_to_io_type_map: dict[str, set[NSNodeTargetType]],
-) -> Node | list[Node]:
+) -> Union[Node, list[Node]]:
     """
     Given a starting graph C (derived from graph B) of
 
@@ -526,8 +526,8 @@ def _can_insert_copy_of_subgraph_a(
 
 
 def _insert_copy_of_subgraph_a_after_input_node_c(
-    input_node_c: Node | list[Node],
-    input_node_c_2: Node | list[Node] | None,
+    input_node_c: Union[Node, list[Node]],
+    input_node_c_2: Optional[Union[Node, list[Node]]],
     subgraph_a: NSSubgraph,
     gm_a: GraphModule,
     gm_b: GraphModule,
@@ -570,8 +570,8 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
 
 
 def _insert_copy_of_node_a_after_input_node_c(
-    input_node_c: Node | list[Node],
-    input_node_c_2: Node | list[Node] | None,
+    input_node_c: Union[Node, list[Node]],
+    input_node_c_2: Optional[Union[Node, list[Node]]],
     node_a: Node,
     gm_a: GraphModule,
     gm_b: GraphModule,
@@ -721,7 +721,7 @@ def create_a_shadows_b(
     matched_subgraph_pairs: dict[str, tuple[NSSubgraph, NSSubgraph]],
     logger_cls: Callable,
     should_log_inputs: bool,
-    node_type_to_io_type_map: dict[str, set[NSNodeTargetType]] | None = None,
+    node_type_to_io_type_map: Optional[dict[str, set[NSNodeTargetType]]] = None,
 ) -> GraphModule:
     """
     Creates a new GraphModule consisting of the graph of C, with the meaningful
@@ -1005,7 +1005,7 @@ def create_a_shadows_b(
                             index_of_arg=0,
                             fqn=fqn_base_a,
                         )
-                        input_logger: Node | list[Node] = dtype_cast_node
+                        input_logger: Union[Node, list[Node]] = dtype_cast_node
                     else:
                         if not isinstance(dtype_cast_node, list):
                             raise AssertionError(

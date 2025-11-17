@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, cast
+from typing import Any, cast, Optional, Union
 from collections.abc import Callable
 
 import torch
@@ -25,7 +25,7 @@ except ModuleNotFoundError:
     print("tabulate is not installed, please pip install tabulate to use this utility")
 
 if HAS_TABULATE:
-    def _enable_tensor_cores() -> None:
+    def _enable_tensor_cores():
         global _warned_tensor_cores
 
         if torch.cuda.is_available():
@@ -36,15 +36,15 @@ if HAS_TABULATE:
                     print("we will enable it automatically by setting `torch.set_float32_matmul_precision('high')`")
                     _warned_tensor_cores = True
 
-    def _disable_tensor_cores() -> None:
+    def _disable_tensor_cores():
         torch.set_float32_matmul_precision(_default_float_32_precision)
 
     def bench_loop(
-        model: torch.nn.Module | Callable,
-        sample_input: torch.Tensor | Any,
+        model: Union[torch.nn.Module, Callable],
+        sample_input: Union[torch.Tensor, Any],
         num_iters: int = 5,
-        optimizer: torch.optim.Optimizer | None = None,
-        loss_fn: Callable | None = None,
+        optimizer: Optional[torch.optim.Optimizer] = None,
+        loss_fn: Optional[Callable] = None,
     ):
         # Define the statement and setup for the benchmark
         if optimizer and loss_fn:
@@ -74,13 +74,13 @@ if HAS_TABULATE:
         return round(avg_time, 2)
 
     def benchmark_compile(
-        model: torch.nn.Module | Callable,
-        sample_input: torch.Tensor | Any,
+        model: Union[torch.nn.Module, Callable],
+        sample_input: Union[torch.Tensor, Any],
         num_iters: int = 5,
-        backend: str | None = None,
-        mode: str | None = "default",
-        optimizer: torch.optim.Optimizer | None = None,
-        loss_fn : torch.nn.Module | Callable | None = None,
+        backend: Optional[str] = None,
+        mode: Optional[str] = "default",
+        optimizer: Optional[torch.optim.Optimizer] = None,
+        loss_fn : Union[torch.nn.Module, Callable, None] = None,
     ):
         """
         Use this utility to benchmark torch.compile
@@ -119,11 +119,11 @@ if HAS_TABULATE:
 
 
     def bench_all(
-        model : torch.nn.Module | Callable,
-        sample_input: torch.Tensor | Any,
+        model : Union[torch.nn.Module, Callable],
+        sample_input: Union[torch.Tensor, Any],
         num_iters : int = 5,
-        optimizer: torch.optim.Optimizer | None = None,
-        loss_fn : torch.nn.Module | Callable | None = None,
+        optimizer: Optional[torch.optim.Optimizer] = None,
+        loss_fn : Union[torch.nn.Module, Callable, None] = None,
     ):
         """
         This is a simple utility that can be used to benchmark torch.compile
@@ -155,7 +155,7 @@ if HAS_TABULATE:
         for backend in torch._dynamo.list_backends():
 
             if backend == "inductor":
-                mode_options = cast(list[str | None], list(torch._inductor.list_mode_options().keys())) + [None]
+                mode_options = cast(list[Optional[str]], list(torch._inductor.list_mode_options().keys())) + [None]
                 for mode in mode_options:
                     if mode == "default":
                         continue

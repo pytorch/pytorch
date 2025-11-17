@@ -8,11 +8,9 @@ from abc import ABC, abstractmethod
 
 
 try:
-    from collections.abc import Callable  # Python 3.11+
-    from typing import Any, Required, TypedDict
+    from typing import Any, Callable, Required, TypedDict  # Python 3.11+
 except ImportError:
-    from collections.abc import Callable
-    from typing import Any, TypedDict
+    from typing import Any, Callable, TypedDict
 
     from typing_extensions import Required  # Fallback for Python <3.11
 

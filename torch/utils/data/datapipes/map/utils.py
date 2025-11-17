@@ -1,7 +1,7 @@
 import copy
 import warnings
 from collections.abc import Mapping, Sequence
-from typing import Any, TypeVar
+from typing import Any, TypeVar, Union
 
 from torch.utils.data.datapipes.datapipe import MapDataPipe
 
@@ -36,10 +36,10 @@ class SequenceWrapperMapDataPipe(MapDataPipe[_T]):
         100
     """
 
-    sequence: Sequence[_T] | Mapping[Any, _T]
+    sequence: Union[Sequence[_T], Mapping[Any, _T]]
 
     def __init__(
-        self, sequence: Sequence[_T] | Mapping[Any, _T], deepcopy: bool = True
+        self, sequence: Union[Sequence[_T], Mapping[Any, _T]], deepcopy: bool = True
     ) -> None:
         if deepcopy:
             try:

@@ -85,7 +85,7 @@ if _IS_MONKEYTYPE_INSTALLED:
     class JitTypeTraceStoreLogger(CallTraceStoreLogger):
         """A JitTypeCallTraceLogger that stores logged traces in a CallTraceStore."""
 
-        def __init__(self, store: CallTraceStore) -> None:
+        def __init__(self, store: CallTraceStore):
             super().__init__(store)
 
         def log(self, trace: CallTrace) -> None:
@@ -100,7 +100,7 @@ if _IS_MONKEYTYPE_INSTALLED:
             # value is list of all CallTrace
             self.trace_records: dict[str, list] = defaultdict(list)
 
-        def add(self, traces: Iterable[CallTrace]) -> None:
+        def add(self, traces: Iterable[CallTrace]):
             for t in traces:
                 qualified_name = get_qualified_name(t.func)
                 self.trace_records[qualified_name].append(t)
@@ -145,7 +145,7 @@ if _IS_MONKEYTYPE_INSTALLED:
             return self.consolidate_types(qualified_name)
 
     class JitTypeTraceConfig(monkeytype.config.Config):
-        def __init__(self, s: JitTypeTraceStore) -> None:
+        def __init__(self, s: JitTypeTraceStore):
             super().__init__()
             self.s = s
 

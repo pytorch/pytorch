@@ -5,7 +5,7 @@ import functools
 import logging
 import os
 from enum import Enum
-from typing import Optional, TYPE_CHECKING
+from typing import Callable, Optional
 
 import torch
 from torch import dtype as torch_dtype
@@ -13,10 +13,6 @@ from torch import dtype as torch_dtype
 from .. import config
 from ..virtualized import V
 from .multi_kernel import MultiKernel
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 
 log = logging.getLogger(__name__)
