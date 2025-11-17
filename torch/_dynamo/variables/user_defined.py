@@ -2538,15 +2538,22 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
     UserDefinedObjectVariable.
     """
 
+    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
+
     def __init__(
         self,
-        value: object,
-        tuple_vt: TupleVariable | None = None,
-        init_args: list[VariableTracker] | None = None,
-        **kwargs: Any,
-    ) -> None:
-        tx = kwargs.pop("tx", None)
+        value,
+        tuple_vt=None,
+        init_args=None,
+        **kwargs,
+    ):
         super().__init__(value, init_args=init_args, **kwargs)
+
+        if TYPE_CHECKING:
+            from .lists import TupleVariable
+
+            tuple_vt: Optional[TupleVariable]
+
         if tuple_vt is None:
             assert self.source is None, (
                 "tuple_vt must be constructed by builder.py when source is present"
@@ -2564,6 +2571,9 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             self._tuple_vt = variables.TupleVariable(
                 elems, mutation_type=ValueMutationNew()
             )
+        else:
+            self._tuple_vt = tuple_vt
+
         else:
             self._tuple_vt = tuple_vt
 
