@@ -39,7 +39,7 @@ import os
 import traceback
 import weakref
 from collections.abc import Callable
-from typing import Any, Optional, TYPE_CHECKING  # noqa: F401
+from typing import Any, Optional, TYPE_CHECKING, Union  # noqa: F401
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -157,21 +157,25 @@ def _arg_to_str(arg, attributes, tensor_memo=None) -> str:
     return str(arg)
 
 
-def default_hash_fn(t: torch.Tensor, use_scalar: bool = False) -> torch.Tensor:
+def norm_hash_fn(
+    t: torch.Tensor, use_scalar: bool = False
+) -> Union[torch.Tensor, float]:
     """
     from Observer. Computes a hash for a tensor by converting it to float (if needed), making it contiguous,
     replacing NaN/inf values with fixed numbers, and then computing the L1 norm in float64 or complex128.
     This is used to generate a deterministic summary value for tensor comparison.
     """
-    with torch._C._DisablePythonDispatcher(), torch._C._DisableTorchDispatch():
+    with torch._C._DisablePythonDispatcher():
         if not (t.is_floating_point() or t.is_complex()):
             t = t.float()
         t = t.contiguous()
-        # Clean the tensor to handle NaN/inf values, then compute norm
-        t_clean = torch.nan_to_num(t, nan=0.0, posinf=1.0, neginf=-1.0)
 
-        dtype = torch.complex128 if t.is_complex() else torch.float64
-        out = t_clean.norm(p=1, dtype=dtype)
+        if t.is_complex():
+            t_float = t.to(dtype=torch.complex128)
+        else:
+            t_float = t.to(dtype=torch.float64)
+
+        out = t_float.norm(p=1)
         if use_scalar:
             return out.item()
         return out
@@ -182,6 +186,28 @@ def _compute_rel_diff(hash1, hash2):
     numerator = abs(hash1 - hash2)
     denominator = max(abs(hash1), abs(hash2), 1e-10)
     return numerator / denominator
+
+
+def hash_tensor_fn(
+    t: torch.Tensor, use_scalar: bool = False
+) -> Union[torch.Tensor, int]:
+    """
+    wrapper over torch.hash_tensor
+    """
+    if isinstance(t, torch.distributed.tensor.DTensor):
+        t = t.to_local()
+
+    if t.is_floating_point():
+        t_clean = t.to(dtype=torch.float64)
+    elif t.is_complex():
+        t_clean = t.to(dtype=torch.complex128).view(torch.float64)
+    else:
+        t_clean = t.to(dtype=torch.int64)
+
+    out = torch.hash_tensor(t_clean)
+    if use_scalar:
+        return out.item()  # type: ignore[attribute]
+    return out
 
 
 def _get_stack_trace() -> str:
@@ -897,20 +923,43 @@ class DebugMode(TorchDispatchMode):
 
     @staticmethod
     @contextlib.contextmanager
-    def log_tensor_hashes(hash_fn: Callable | None = None, hash_inputs: bool = False):
+    def log_tensor_hashes(
+        hash_fn: Union[Callable, str, list[str]] = "norm", hash_inputs: bool = False
+    ):
         """
         Installs hook for tensor hash logging.
 
-        hash_fn: optional function for custom hashing
+        hash_fn: One of:
+            - Custom-defined hash function
+            - String: one of ("norm", "hash_tensor")
+                - "norm": uses norm_hash_fn; basically tensor's L1 norm
+                - "hash_tensor": uses torch.hash_tensor (XOR sum reduction)
+            - List of strings: returns tuple of hashes from above options
         hash_inputs: if True, also hashes tensors in (args, kwargs), storing them in "input_hash".
         NOTE: this is currently a post-hook, so e.g. inplace ops will log the "output" hashes.
         """
-        if hash_fn is None:
-            hash_fn = functools.partial(default_hash_fn, use_scalar=True)
+
+        def hash_fn_option(hash_type):
+            assert isinstance(hash_type, str) and hash_type in ["norm", "hash_tensor"]
+            return functools.partial(
+                norm_hash_fn if hash_type == "norm" else hash_tensor_fn, use_scalar=True
+            )
+
+        if callable(hash_fn):
+            fn = hash_fn
+        elif isinstance(hash_fn, str):
+            fn = hash_fn_option(hash_fn)
+        elif isinstance(hash_fn, list):
+            fns = [hash_fn_option(fn) for fn in hash_fn]
+            fn = lambda x: tuple(fn(x) for fn in fns)  # noqa: E731
+        else:
+            raise NotImplementedError(
+                f"log_tensor_hashes() expected hash_fn to be callable, str, or list[str], but found {type(hash_fn)}"
+            )
 
         def _tree_hash(obj):
             return tree_map(
-                lambda x: hash_fn(x) if isinstance(x, torch.Tensor) else None, obj
+                lambda x: fn(x) if isinstance(x, torch.Tensor) else None, obj
             )
 
         def _dispatch_hash_hook(func, types, args, kwargs, result):
@@ -930,9 +979,9 @@ class DebugMode(TorchDispatchMode):
         try:
             if hash_inputs:
                 _old_input_hfn = _TRITON_INPUT_HASH_FN
-                _TRITON_INPUT_HASH_FN = hash_fn
+                _TRITON_INPUT_HASH_FN = fn
             _old_output_hfn = _TRITON_OUTPUT_HASH_FN
-            _TRITON_OUTPUT_HASH_FN = hash_fn
+            _TRITON_OUTPUT_HASH_FN = fn
             with DebugMode.dispatch_hooks(log_hook=_dispatch_hash_hook):
                 yield
         finally:
