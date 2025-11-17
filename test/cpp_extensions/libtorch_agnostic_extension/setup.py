@@ -35,14 +35,15 @@ def get_extension():
     extra_compile_args = {
         "cxx": ["-fdiagnostics-color=always", "-DTORCH_STABLE_ONLY"],
     }
+    sources = list(CSRC_DIR.glob("**/*.cpp"))
 
     extension = CppExtension
     # allow including <cuda_runtime.h>
     if torch.cuda.is_available():
         extra_compile_args["cxx"].append("-DLAE_USE_CUDA")
+        extra_compile_args["nvcc"] = ["-O2"]
         extension = CUDAExtension
-
-    sources = list(CSRC_DIR.glob("**/*.cpp"))
+        sources.extend(CSRC_DIR.glob("**/*.cu"))
 
     return [
         extension(
