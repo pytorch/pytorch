@@ -552,6 +552,35 @@ graph():
     return (getitem,)""",  # noqa: B950
         )
 
+    def test_dtensor_unbacked_matmuls(self):
+        device_mesh = init_device_mesh(
+            self.device_type, mesh_shape=(self.world_size // 2, 2)
+        )
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                for i in range(2):
+                    torch._check(x.size(i) >= 8)
+                    torch._check(y.size(i) >= 8)
+                return x @ y
+
+        x = torch.randn(64, 64)
+        y = torch.randn(64, 64)
+        x_dt = distribute_tensor(x, device_mesh, placements=[Replicate(), Replicate()])
+        y_dt = distribute_tensor(y, device_mesh, placements=[Replicate(), Replicate()])
+        for i in range(2):
+            torch._dynamo.decorators.mark_unbacked(x_dt, i)
+            torch._dynamo.decorators.mark_unbacked(y_dt, i)
+
+        gm = dynamo_graph_capture_for_export(Foo())(x_dt, y_dt)
+        n = 0
+        for node in gm.graph.nodes:
+            if bindings := node.meta.get("unbacked_bindings", {}):
+                # 2 outer sizes, 2 inner sizes
+                self.assertEqual(len(bindings), 4)
+                n += 1
+        self.assertEqual(n, 2)  # 2 nodes with bindings
+
 
 instantiate_parametrized_tests(DTensorExportTest)
 
