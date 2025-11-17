@@ -202,7 +202,7 @@ def _quantize_weight_decomposed(
     _DTYPE_TO_QVALUE_BOUNDS: dict[torch.dtype, tuple[int, int]] = {
         torch.uint8: (0, 255),
         torch.int8: (-128, 127),
-        torch.int32: ((-(2**31)), (2**31 - 1)),
+        torch.int32: (-2147483648, 2147483647),  # torch.jit interprets 2**31 as a float
     }
 
     # TODO: add an util function for converting qdtype to dtype
@@ -265,7 +265,7 @@ def _dequantize_weight_decomposed(
     _DTYPE_TO_QVALUE_BOUNDS: dict[torch.dtype, tuple[int, int]] = {
         torch.uint8: (0, 255),
         torch.int8: (-128, 127),
-        torch.int32: ((-(2**31)), (2**31 - 1)),
+        torch.int32: (-2147483648, 2147483647),  # torch.jit interprets 2**31 as a float
     }
     # TODO: add an util function for converting qdtype to dtype
     _QDTYPE_TO_UNDERLYING_INT_REPR_DTYPE = {
