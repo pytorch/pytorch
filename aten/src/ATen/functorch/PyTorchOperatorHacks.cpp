@@ -6,6 +6,7 @@
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <ATen/Dispatch.h>
 #include <c10/util/irange.h>
+#include <c10/util/Exception.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
@@ -70,7 +71,7 @@ Tensor linear_hack(const Tensor& input, const Tensor& weight, const std::optiona
   return output;
 }
 
-static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
+inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
   if (reduction == at::Reduction::Mean) {
     return unreduced.mean();
   } else if (reduction == at::Reduction::Sum) {
@@ -108,9 +109,7 @@ Tensor binary_cross_entropy_with_logits_hack(
 }
 
 Tensor trace_backward_decomp(const Tensor& grad, IntArrayRef sizes) {
-  if (sizes.size() != 2) {
-    throw std::runtime_error("expected matrix input");
-  }
+  TORCH_CHECK(sizes.size() == 2, "expected matrix input");
   auto grad_input = at::zeros(sizes[0] * sizes[1], grad.options());
   auto indices = at::arange(0, grad_input.numel(), sizes[1] + 1, grad.options().dtype(at::kLong));
   // Workaround using index_put instead of yet unsupported index_fill_
@@ -128,7 +127,7 @@ namespace {
 template<bool inplace>
 using Ctype = std::conditional_t<inplace, Tensor&, Tensor>;
 
-static Tensor make_feature_noise(const Tensor& input) {
+Tensor make_feature_noise(const Tensor& input) {
   auto input_sizes = input.sizes();
   TORCH_CHECK(input.dim() >= 2, "Feature dropout requires at least 2 dimensions in the input");
   std::vector<int64_t> sizes;
@@ -142,7 +141,7 @@ static Tensor make_feature_noise(const Tensor& input) {
   return at::empty(sizes, input.options());
 }
 
-static bool is_fused_kernel_acceptable(const Tensor& input, double p) {
+bool is_fused_kernel_acceptable(const Tensor& input, double p) {
   return (input.is_cuda() || input.is_xpu() || input.is_lazy() || input.is_privateuseone()) && p > 0 && p < 1 && input.numel() > 0;
 }
 
@@ -211,7 +210,7 @@ ALIAS_SPECIALIZATION(_feature_dropout,       true,  false)
 ALIAS_SPECIALIZATION(_alpha_dropout,         false, true )
 ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 
-static Tensor dropout(const Tensor& input, double p, bool train) {
+Tensor dropout(const Tensor& input, double p, bool train) {
   auto result = [&]() {
     NoNamesGuard guard;
     if (train && is_fused_kernel_acceptable(input, p)) {

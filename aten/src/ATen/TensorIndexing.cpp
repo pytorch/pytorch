@@ -59,7 +59,7 @@ static inline void set_item(const Tensor& self, ArrayRef<TensorIndex> indices, c
     }
   }
 
-  return set_item(self, indices, value);
+  set_item(self, indices, value);
 }
 
 } // namespace indexing
