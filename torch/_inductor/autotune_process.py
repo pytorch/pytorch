@@ -37,6 +37,7 @@ from torch._inductor.utils import (
     is_gpu,
     python_subprocess_env,
 )
+from torch._inductor.virtualized import threadlocal
 from torch._logging import getArtifactLogger
 from torch.utils._ordered_set import OrderedSet
 
@@ -139,6 +140,8 @@ class TuningProcess:
             "TORCHINDUCTOR_PROFILE_WITH_DO_BENCH_USING_PROFILING": "1"
             if config.profile_bandwidth_with_do_bench_using_profiling
             else "0",
+            # pass along information about the thread process related to bypassing the gpu lock
+            "TORCHINDUCTOR_BYPASS_GPU_LOCK": getattr(threadlocal, "__torchinductor_bypass_gpu_lock", "0"),
         }
         if self.device is not None:
             env[CUDA_VISIBLE_DEVICES] = str(self.device)
