@@ -154,9 +154,9 @@ std::string jit_log_prefix(
     int l,
     const std::string& in_str) {
   std::stringstream prefix_ss;
-  prefix_ss << '[';
-  prefix_ss << level << ' ';
-  prefix_ss << c10::filesystem::path(fn).filename() << ':';
+  prefix_ss << "[";
+  prefix_ss << level << " ";
+  prefix_ss << c10::filesystem::path(fn).filename() << ":";
   prefix_ss << std::setfill('0') << std::setw(3) << l;
   prefix_ss << "] ";
 
