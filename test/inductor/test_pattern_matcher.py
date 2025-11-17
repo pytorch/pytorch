@@ -1225,8 +1225,8 @@ class TestPatternMatcher(TestCase):
         b = torch.rand(4, device=GPU_TYPE)
         m1 = torch.rand(3, 2, device=GPU_TYPE)
         m2 = torch.rand(2, 4, device=GPU_TYPE)
-        alphas = ({'alpha': 0.8}, {})  # **{} -> alpha=1
-        betas = ({'beta': 1}, {})  # **{} -> beta=1
+        alphas = ({"alpha": 0.8}, {})  # **{} -> alpha=1
+        betas = ({"beta": 1}, {})  # **{} -> beta=1
         activations = (
             lambda *args, **kwargs: torch.nn.functional.relu(*args, **kwargs),
         )
@@ -1234,6 +1234,7 @@ class TestPatternMatcher(TestCase):
         for activation in activations:
             # Cases Activation(Addmm) -> _addmm_activation
             for beta, alpha in itertools.product(betas, alphas):
+
                 def f(b, m1, m2, beta, alpha):
                     return activation(torch.addmm(b, m1, m2, **beta, **alpha))
 
@@ -1248,9 +1249,8 @@ class TestPatternMatcher(TestCase):
 
             # Cases without mapping to _addmm_activation
             # abs(beta) != 1 implies no _addmm_activation
-            _, (code) = run_and_get_code(fc, b, m1, m2, {'beta': 0.5}, alpha)
+            _, (code) = run_and_get_code(fc, b, m1, m2, {"beta": 0.5}, alpha)
             self.assertNotIn("_addmm_activation", code[0])
-
 
     def test_addmm_alpha_beta_with_pointwise(self):
         # Test that addmm with alpha/beta != 1 is unfused correctly with pointwise ops

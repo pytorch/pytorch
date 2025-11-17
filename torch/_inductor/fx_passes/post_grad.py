@@ -1549,7 +1549,7 @@ def is_valid_addmm_activation_fusion(match: Match) -> bool:
         return False
 
     # Only beta == 1 so far implies activation epilogue in addmm
-    if match.kwargs["beta"] not in (1, 1.0, 1+0j, 1-0j):
+    if match.kwargs["beta"] not in (1, 1.0, 1 + 0j, 1 - 0j):
         return False
 
     return not has_uses_tagged_as(
@@ -1561,7 +1561,14 @@ def is_valid_addmm_activation_fusion(match: Match) -> bool:
 @register_graph_pattern(
     CallFunction(
         aten.relu,
-        CallFunction(aten.addmm, KeywordArg("inp"), Arg(), Arg(), beta=KeywordArg("beta"), alpha=KeywordArg("alpha")),
+        CallFunction(
+            aten.addmm,
+            KeywordArg("inp"),
+            Arg(),
+            Arg(),
+            beta=KeywordArg("beta"),
+            alpha=KeywordArg("alpha"),
+        ),
     ),
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[1],
