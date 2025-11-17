@@ -2714,7 +2714,7 @@ def pointwise(
                     )
             if torch.xpu.is_available():
                 configs.extend(
-                    [   # will disable coalesce pass, 40% improvement in intel-xpu-backend-for-triton #5133
+                    [  # will disable coalesce pass, 40% improvement in intel-xpu-backend-for-triton #5133
                         triton_config_with_settings(size_hints, 32),
                     ]
                 )
