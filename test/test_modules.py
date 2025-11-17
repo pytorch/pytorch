@@ -555,10 +555,7 @@ class TestModule(TestCase):
                 and 'cuda' in device
                 and torch.backends.cudnn.enabled):
             return
-        if "xpu" in device and module_info.name == "nn.ConvTranspose3d" and dtype is torch.complex32:
-            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/2354")
-        if "xpu" in device and module_info.name == "nn.CrossEntropyLoss" and dtype is torch.float16:
-            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/2354")
+
         # Test cpu and gpu results are the same
         module_cls = module_info.module_cls
         module_inputs_cpu = module_info.module_inputs_func(module_info, device="cpu", dtype=dtype,
@@ -640,17 +637,6 @@ class TestModule(TestCase):
     @with_tf32_off
     @modules(module_db)
     def test_memory_format(self, device, dtype, module_info, training):
-        if (
-            "xpu" in device
-            and module_info.name in [
-                "nn.GroupNorm",
-                "nn.ReflectionPad2d",
-                "nn.ReflectionPad3d",
-                "nn.ReplicationPad2d",
-                "nn.ReplicationPad3d"
-            ]
-        ):
-            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/2357")
         is_sm86or80 = device.startswith("cuda") and (torch.cuda.get_device_capability(0) == (8, 6)
                                                      or torch.cuda.get_device_capability(0) == (8, 0))
         # TODO tighten it to a specific module
@@ -904,7 +890,7 @@ class TestModule(TestCase):
     def test_to(self, device, dtype, module_info, training, swap, set_grad):
         module_cls = module_info.module_cls
         devices = ['cpu']
-        if device_type != "cpu":
+        if torch.accelerator.is_available:
             devices += [device_type]
         dtypes = module_info.dtypes
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
