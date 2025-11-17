@@ -528,28 +528,19 @@ class Op:
                     MatchState.COLLECTIVE_TYPE_MISMATCH,
                     f"Expected collective type: '{self.type}' does not match found collective type: '{other.type}'",
                 )
-            if self.state != other.state:
-                # MatchState()
-                return MatchInfo(
-                    MatchState.COLLECTIVE_STATE_MISMATCH,
-                    f"Expected state: '{self.state}' does not match found state: '{other.state}'",
-                )
-            if self.dtype_mismatch(other):
-                return MatchInfo(
-                    MatchState.COLLECTIVE_DTYPE_MISMATCH,
-                    f"Expected dtypes: '{set(self.input_dtypes)}' does not "
-                    f"match found dtype: '{set(self.output_dtypes)}/"
-                    f"{set(other.input_dtypes)}/{set(other.output_dtypes)}'",
-                )
-            if self.type == "all_to_all":
-                return MatchInfo(MatchState.UNDECIDED)
-            if self.type != "scatter" and self.input_sizes != other.input_sizes:
+            if (
+                self.type not in ["all_to_all", "scatter"]
+                and self.input_sizes != other.input_sizes
+            ):
                 return MatchInfo(
                     MatchState.SIZE_OR_SYNTAX_MISMATCH,
                     f"Expected input sizes: '{self.input_sizes}' does not match found input sizes: "
                     f"'{other.input_sizes}'",
                 )
-            if self.type != "gather" and self.output_sizes != other.output_sizes:
+            if (
+                self.type not in ["all_to_all", "gather"]
+                and self.output_sizes != other.output_sizes
+            ):
                 return MatchInfo(
                     MatchState.SIZE_OR_SYNTAX_MISMATCH,
                     f"Expected output sizes: '{self.output_sizes}' does not match found output sizes: "
@@ -563,32 +554,51 @@ class Op:
                     MatchState.SIZE_OR_SYNTAX_MISMATCH,
                     f"Expected input sizes: '{self.input_sizes}' does not match found output sizes: '{other.output_sizes}'",
                 )
-            if self.type in [
-                "all_gather",
-                "all_gather_base",
-                "all_gather_into_tensor_coalesced",
-            ] and not (
-                math.prod(other.output_sizes[0])
-                == math.prod(self.input_sizes[0]) * self.pg_size
+            if (
+                self.type
+                in [
+                    "all_gather",
+                    "all_gather_base",
+                    "all_gather_into_tensor_coalesced",
+                ]
+                and math.prod(other.output_sizes[0])
+                != math.prod(self.input_sizes[0]) * self.pg_size
             ):
                 return MatchInfo(
                     MatchState.SIZE_OR_SYNTAX_MISMATCH,
                     f"Found input numel '{math.prod(other.input_sizes[0])} * pg size {self.pg_size}' "
                     f"does not match output numel '{math.prod(other.output_sizes[0])}'",
                 )
-            if self.type in [
-                "reduce_scatter",
-                "_reduce_scatter_base",
-                "reduce_scatter_tensor_coalesced",
-            ] and not (
-                math.prod(other.input_sizes[0])
-                == math.prod(self.output_sizes[0]) * self.pg_size
+            if (
+                self.type
+                in [
+                    "reduce_scatter",
+                    "_reduce_scatter_base",
+                    "reduce_scatter_tensor_coalesced",
+                ]
+                and math.prod(other.input_sizes[0])
+                != math.prod(self.output_sizes[0]) * self.pg_size
             ):
                 return MatchInfo(
                     MatchState.SIZE_OR_SYNTAX_MISMATCH,
                     f"Found input numel '{math.prod(other.input_sizes[0])}' does not match output numel "
                     f"'{math.prod(other.output_sizes[0])} * pg size {self.pg_size}'",
                 )
+            if self.dtype_mismatch(other):
+                return MatchInfo(
+                    MatchState.COLLECTIVE_DTYPE_MISMATCH,
+                    f"Expected dtypes: '{set(self.input_dtypes)}' does not "
+                    f"match found dtype: '{set(self.output_dtypes)}/"
+                    f"{set(other.input_dtypes)}/{set(other.output_dtypes)}'",
+                )
+            if self.state != other.state:
+                # MatchState()
+                return MatchInfo(
+                    MatchState.COLLECTIVE_STATE_MISMATCH,
+                    f"Expected state: '{self.state}' does not match found state: '{other.state}'",
+                )
+            if self.type == "all_to_all":
+                return MatchInfo(MatchState.UNDECIDED)
         elif self.type in [
             "coalesced",
             "ALLGATHER_coalesced",

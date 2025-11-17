@@ -41,6 +41,20 @@ from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 
 
+def aot_eager_regional_inductor():
+    """
+    Regional inductor backend for AOT autograd.
+    Uses regional_inductor as both forward and backward compiler.
+    """
+    from torch._dynamo.backends.common import aot_autograd
+    from torch.fx.passes.regional_inductor import regional_inductor
+
+    return aot_autograd(
+        fw_compiler=regional_inductor,
+        bw_compiler=regional_inductor,
+    )
+
+
 def saved_tensors_hooks_to_gm(
     pack_fn,
     unpack_fn,
@@ -1897,6 +1911,171 @@ class AOTAutogradCacheTests(InductorTestCase):
                 else:
                     # no recompiles
                     self.assertFalse(counters)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"bundled_autograd_cache": True})
+    def test_regional_inductor_basic(self):
+        """
+        Basic test for regional inductor with bundled autograd cache.
+        Tests that regional inductor compilation results can be cached and hit.
+        """
+        import torch.fx.traceback as fx_traceback
+
+        def fn(x, y):
+            sin = torch.sin(x)
+            # Mark this region to be compiled with inductor
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                mul = sin * y
+                add = mul + 1
+            return torch.sin(add)
+
+        x = torch.randn(10, device="cpu")
+        y = torch.randn(10, device="cpu")
+
+        # Compile with regional inductor backend
+        compiled_fn = torch.compile(
+            fn, backend=aot_eager_regional_inductor(), fullgraph=True
+        )
+
+        # First call should miss in cache
+        result1 = compiled_fn(x, y)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        # Second call should hit (after clearing dynamo)
+        self._clear_dynamo_and_codecache()
+        result2 = compiled_fn(x, y)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        # Results should be the same
+        self.assertEqual(result1, result2)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"bundled_autograd_cache": True})
+    def test_regional_inductor_with_backward(self):
+        """
+        Test regional inductor with backward pass and bundled autograd cache.
+        Note: Regional inductor triggers multiple AOT autograd compilations:
+        - One for the outer graph (with regional inductor backend)
+        - One for each marked region (via standalone_compile)
+        """
+        import torch.fx.traceback as fx_traceback
+
+        def fn(x, y):
+            sin = torch.sin(x)
+            # Mark this region to be compiled with inductor
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                mul = sin * y
+                add = mul + 1
+            return torch.sin(add)
+
+        x = torch.randn(10, requires_grad=True)
+        y = torch.randn(10, requires_grad=True)
+        x2 = x.detach().clone().requires_grad_(True)
+        y2 = y.detach().clone().requires_grad_(True)
+
+        # Compile with regional inductor backend
+        compiled_fn = torch.compile(
+            fn, backend=aot_eager_regional_inductor(), fullgraph=True
+        )
+
+        # First call: AOT autograd compiles the outer graph (1 miss)
+        # Regional inductor then compiles the marked region (1 more miss)
+        result1 = compiled_fn(x, y)
+        result1.sum().backward()
+
+        # We expect 2 cache misses: outer graph + marked region
+        initial_misses = counters["aot_autograd"]["autograd_cache_miss"]
+        initial_saves = counters["aot_autograd"]["autograd_cache_saved"]
+        self.assertGreater(initial_misses, 0)
+        self.assertGreater(initial_saves, 0)
+
+        # Second call should hit (after clearing dynamo)
+        self._clear_dynamo_and_codecache()
+        result2 = compiled_fn(x2, y2)
+        result2.sum().backward()
+
+        # Should have cache hits now
+        final_hits = counters["aot_autograd"]["autograd_cache_hit"]
+        self.assertGreater(final_hits, 0)
+
+        # Cache misses and saves should not increase
+        self.assertEqual(
+            counters["aot_autograd"]["autograd_cache_miss"], initial_misses
+        )
+        self.assertEqual(
+            counters["aot_autograd"]["autograd_cache_saved"], initial_saves
+        )
+
+        # Results and gradients should be the same
+        self.assertEqual(result1, result2)
+        self.assertEqual(x.grad, x2.grad)
+        self.assertEqual(y.grad, y2.grad)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"bundled_autograd_cache": True})
+    def test_regional_inductor_cache_miss_on_change(self):
+        """
+        Test that changing the function causes a cache miss with regional inductor.
+        Regional inductor creates multiple AOT compilations, so we track
+        the change in cache misses rather than absolute counts.
+        """
+        import torch.fx.traceback as fx_traceback
+
+        def fn1(x, y):
+            sin = torch.sin(x)
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                mul = sin * y
+                add = mul + 1
+            return torch.sin(add)
+
+        def fn2(x, y):
+            sin = torch.sin(x)
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                mul = sin * y
+                add = mul + 2  # Changed from +1 to +2
+            return torch.sin(add)
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+
+        # Compile first function
+        compiled_fn1 = torch.compile(
+            fn1, backend=aot_eager_regional_inductor(), fullgraph=True
+        )
+        result1 = compiled_fn1(x, y)
+        first_misses = counters["aot_autograd"]["autograd_cache_miss"]
+        first_saves = counters["aot_autograd"]["autograd_cache_saved"]
+        self.assertGreater(first_misses, 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertGreater(first_saves, 0)
+
+        # Compile second function (different graph)
+        self._clear_dynamo_and_codecache()
+        compiled_fn2 = torch.compile(
+            fn2, backend=aot_eager_regional_inductor(), fullgraph=True
+        )
+        result2 = compiled_fn2(x, y)
+        # Should miss because graph is different (more misses than before)
+        self.assertGreater(
+            counters["aot_autograd"]["autograd_cache_miss"], first_misses
+        )
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertGreater(
+            counters["aot_autograd"]["autograd_cache_saved"], first_saves
+        )
+
+        # Results should be different
+        self.assertNotEqual(result1, result2)
 
 
 @functorch_config.patch({"bundled_autograd_cache": True})

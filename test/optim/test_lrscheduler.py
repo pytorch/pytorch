@@ -43,7 +43,7 @@ from torch.testing._internal.common_utils import (
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 
 class TestLRScheduler(TestCase):
@@ -192,7 +192,7 @@ class TestLRScheduler(TestCase):
 
     def test_old_pattern_warning_resuming(self):
         epochs = 35
-        for i, group in enumerate(self.opt.param_groups):
+        for group in self.opt.param_groups:
             group["initial_lr"] = 0.01
 
         with warnings.catch_warnings(record=True) as ws:
@@ -209,7 +209,7 @@ class TestLRScheduler(TestCase):
 
     def test_old_pattern_warning_resuming_with_arg(self):
         epochs = 35
-        for i, group in enumerate(self.opt.param_groups):
+        for group in self.opt.param_groups:
             group["initial_lr"] = 0.01
 
         with warnings.catch_warnings(record=True) as ws:
@@ -226,7 +226,7 @@ class TestLRScheduler(TestCase):
 
     def test_old_pattern_warning_with_overridden_optim_step(self):
         epochs = 35
-        for i, group in enumerate(self.opt.param_groups):
+        for group in self.opt.param_groups:
             group["initial_lr"] = 0.01
 
         with warnings.catch_warnings(record=True) as ws:
@@ -299,7 +299,7 @@ class TestLRScheduler(TestCase):
         self.opt.step = types.MethodType(new_step, self.opt)
 
         def new_pattern():
-            for e in range(epochs):
+            for _ in range(epochs):
                 self.opt.step()
                 scheduler.step()
 
@@ -1509,7 +1509,7 @@ class TestLRScheduler(TestCase):
             14.0 / 3,
             29.0 / 6,
         ]
-        deltas = [2 * i for i in range(0, 2)]
+        deltas = [2 * i for i in range(2)]
         base_lrs = [1 + delta for delta in deltas]
         max_lrs = [5 + delta for delta in deltas]
         lr_targets = [[x + delta for x in lr_base_target] for delta in deltas]
@@ -2617,7 +2617,7 @@ class TestLRScheduler(TestCase):
         sch = SWALR(opt, swa_lr=swa_lr)
         ori_param_groups = copy.deepcopy(opt.param_groups)
 
-        for i in range(2):
+        for _ in range(2):
             lr.multiply_(0.5)
             swa_lr.multiply_(0.5)
             opt.step()

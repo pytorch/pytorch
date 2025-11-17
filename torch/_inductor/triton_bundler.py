@@ -224,11 +224,11 @@ class TritonBundler:
                     # Make sure the cubin path exists and is valid
                     for compile_result in result.kernel.compile_results:
                         compile_result.reload_cubin_path()
-                except RuntimeError as e:
+                except RuntimeError:
                     log.warning(
-                        "Failed to reload cubin file statically launchable autotuner %s: %s",
+                        "Failed to reload cubin file statically launchable autotuner %s",
                         result.kernel_name,
-                        e,
+                        exc_info=True,
                     )
                     continue
                 # We make a future instead of returning the kernel here so that
