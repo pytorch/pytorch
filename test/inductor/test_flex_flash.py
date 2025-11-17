@@ -284,7 +284,7 @@ class TestFlexFlash(InductorTestCase):
         flash_vs_triton(q, k, v, score_mod=score_view_mod)
 
     @dtypes(torch.float16, torch.bfloat16)
-    def test_force_flash_error_with_requires_grad(self, device, dtype):
+    def test_flash_impl_error_with_requires_grad(self, device, dtype):
         """Test that FORCE_IMPL='FLASH' raises error when tensor requires gradients."""
         q, k, v = create_test_tensors(dtype=dtype, device=device)
 
