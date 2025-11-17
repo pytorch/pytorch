@@ -10,7 +10,7 @@ import operator
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, NamedTuple, Union
+from typing import Any, Literal, NamedTuple, Union
 
 import torch
 from torch import Tensor
@@ -219,12 +219,17 @@ class FlexKernelOptions(TypedDict, total=False):
     """ROCm-specific waves per execution unit."""
 
     # pyrefly: ignore [invalid-annotation]
-    FORCE_FLASH: NotRequired[bool]
-    """ If True, forces use of the cute-dsl flash attention kernel.
+    FORCE_IMPL: NotRequired[Literal["DEFAULT", "TRITON", "FLASH", "DECODE", "CUDNN"]]
+    """Forces a specific kernel implementation instead of using heuristics.
 
-    Raises an error if flash attention cannot be used instead of falling back
-    to the default implementation. Useful for ensuring flash attention is used
-    when expected.
+    Options:
+        - "DEFAULT": Use current heuristics (typically Triton-based kernels with
+          automatic selection between flex_attention and flex_decoding)
+        - "TRITON": Standard Triton flex_attention kernel
+        - "DECODE": Triton flex_decoding kernel, only available for short sequence lengths with specific configurations
+        - "FLASH": Experimental: Flash Attention kernel (cute-dsl), user needs to have flash installed
+
+    Raises an error if the requested implementation cannot be used. Default: "DEFAULT"
     """
 
 
@@ -1242,6 +1247,7 @@ def _apply_kernel_options(
 ):
     kernel_options = {} if kernel_options is None else dict(kernel_options)
 
+    kernel_options.setdefault("FORCE_IMPL", "DEFAULT")
     kernel_options.setdefault("PRESCALE_QK", False)
     kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
     kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)

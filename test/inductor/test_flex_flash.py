@@ -165,7 +165,7 @@ def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2):
         v,
         score_mod=score_mod,
         block_mask=block_mask,
-        kernel_options={"FORCE_FLASH": True},
+        kernel_options={"FORCE_IMPL": "FLASH"},
     )
     out_triton = compiled_fn(
         q,
@@ -173,7 +173,7 @@ def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2):
         v,
         score_mod=score_mod,
         block_mask=block_mask,
-        kernel_options={"FORCE_FLASH": False},
+        kernel_options={"FORCE_IMPL": "TRITON"},
     )
 
     assert out_flash.shape == out_ref_fp32.shape == out_triton.shape
@@ -226,14 +226,14 @@ class TestFlexFlash(InductorTestCase):
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_kernel_called(self, device, dtype):
-        """Test that flash attention kernel is actually called when FORCE_FLASH=True."""
+        """Test that flash attention kernel is actually called when FORCE_IMPL='FLASH'."""
         q, k, v = create_test_tensors(dtype=dtype, device=device)
         compiled_fn = torch.compile(flex_attention)
 
-        # Test that flash kernel is called with FORCE_FLASH=True
+        # Test that flash kernel is called with FORCE_IMPL='FLASH'
         with cuda_kernel_profiler("flash_attncute") as prof_result:
             compiled_fn(
-                q, k, v, score_mod=_causal, kernel_options={"FORCE_FLASH": True}
+                q, k, v, score_mod=_causal, kernel_options={"FORCE_IMPL": "FLASH"}
             )
 
         self.assertTrue(
@@ -241,15 +241,15 @@ class TestFlexFlash(InductorTestCase):
             f"Flash attention kernel not found. Available kernels: {prof_result['kernel_names']}",
         )
 
-        # Test that flash kernel is NOT called with FORCE_FLASH=False
+        # Test that flash kernel is NOT called with FORCE_IMPL='TRITON'
         with cuda_kernel_profiler("flash_attncute") as prof_result:
             compiled_fn(
-                q, k, v, score_mod=_causal, kernel_options={"FORCE_FLASH": False}
+                q, k, v, score_mod=_causal, kernel_options={"FORCE_IMPL": "TRITON"}
             )
 
         self.assertFalse(
             prof_result["found"],
-            f"Flash attention kernel unexpectedly found when FORCE_FLASH=False. Kernels: {prof_result['kernel_names']}",
+            f"Flash attention kernel unexpectedly found when FORCE_IMPL='TRITON'. Kernels: {prof_result['kernel_names']}",
         )
 
     @dtypes(torch.float16, torch.bfloat16)
@@ -311,7 +311,7 @@ class TestFlexFlash(InductorTestCase):
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_force_flash_error_with_requires_grad(self, device, dtype):
-        """Test that FORCE_FLASH=True raises error when tensor requires gradients."""
+        """Test that FORCE_IMPL='FLASH' raises error when tensor requires gradients."""
         q, k, v = create_test_tensors(dtype=dtype, device=device)
 
         bias = torch.randn(4, device=device, dtype=dtype, requires_grad=True)
@@ -322,14 +322,14 @@ class TestFlexFlash(InductorTestCase):
         compiled_fn = torch.compile(flex_attention)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"FORCE_FLASH=True but flash attention cannot be used.*require gradients",
+            r"FORCE_IMPL='FLASH' but flash attention cannot be used.*require gradients",
         ):
             compiled_fn(
                 q,
                 k,
                 v,
                 score_mod=score_mod_with_grad,
-                kernel_options={"FORCE_FLASH": True},
+                kernel_options={"FORCE_IMPL": "FLASH"},
             )
 
     @dtypes(torch.float16, torch.bfloat16)
