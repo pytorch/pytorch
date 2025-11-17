@@ -233,8 +233,7 @@ struct Block {
   // constructor for search key
   Block(c10::DeviceIndex device, cudaStream_t stream, size_t size)
       : device(device), stream(stream), size(size), requested_size(0) {
-        registration_counter_global++;
-        registration_counter = registration_counter_global;	  
+        registration_counter = ++registration_counter_global;
       }
 
   size_t gc_count() {
