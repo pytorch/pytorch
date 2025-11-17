@@ -862,7 +862,8 @@ def _export_to_torch_ir(
                     # see test_export.py::test_custom_tag_metadata_re_export
                     # Once we delete the old strict export, we can use this fake mode in the
                     # subsequent logic when lowering to aten IR.
-                    del gm_torch_level.meta["fake_mode"]
+                    gm_torch_level.meta.pop("fake_mode", None)
+                    gm_torch_level.meta.pop("tracing_context", None)
 
                 else:
                     gm_torch_level, _ = torch._dynamo.export(
