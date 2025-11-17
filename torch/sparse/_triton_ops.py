@@ -4,7 +4,6 @@ import math
 import os
 import weakref
 from functools import lru_cache
-from typing import Optional
 
 import torch
 from torch._dynamo.utils import warn_once
@@ -1123,12 +1122,12 @@ def _int_bsr_dense_addmm(
     *,
     beta=1,
     alpha=1,
-    left_alpha: Optional[torch.Tensor] = None,
-    right_alpha: Optional[torch.Tensor] = None,
-    out: Optional[torch.Tensor] = None,
+    left_alpha: torch.Tensor | None = None,
+    right_alpha: torch.Tensor | None = None,
+    out: torch.Tensor | None = None,
     skip_checks: bool = False,
-    max_grid: Optional[tuple[Optional[int], Optional[int], Optional[int]]] = None,
-    meta: Optional[dict] = None,
+    max_grid: tuple[int | None, int | None, int | None] | None = None,
+    meta: dict | None = None,
 ):
     if out is None and dense.dtype is torch.int8:
         f_name = "_int_bsr_dense_addmm"
@@ -1164,12 +1163,12 @@ def bsr_dense_addmm(
     *,
     beta=1,
     alpha=1,
-    left_alpha: Optional[torch.Tensor] = None,
-    right_alpha: Optional[torch.Tensor] = None,
-    out: Optional[torch.Tensor] = None,
+    left_alpha: torch.Tensor | None = None,
+    right_alpha: torch.Tensor | None = None,
+    out: torch.Tensor | None = None,
     skip_checks: bool = False,
-    max_grid: Optional[tuple[Optional[int], Optional[int], Optional[int]]] = None,
-    meta: Optional[dict] = None,
+    max_grid: tuple[int | None, int | None, int | None] | None = None,
+    meta: dict | None = None,
 ):
     """Compute
 
@@ -1667,9 +1666,9 @@ if has_triton():
         *,
         beta=1.0,
         alpha=1.0,
-        out: Optional[torch.Tensor] = None,
+        out: torch.Tensor | None = None,
         skip_checks: bool = False,
-        max_grid: Optional[tuple[Optional[int], Optional[int], Optional[int]]] = None,
+        max_grid: tuple[int | None, int | None, int | None] | None = None,
     ):
         f_name = "sampled_addmm"
 
@@ -1751,10 +1750,10 @@ if has_triton():
         bsr: torch.Tensor,
         dense: torch.Tensor,
         *,
-        out: Optional[torch.Tensor] = None,
+        out: torch.Tensor | None = None,
         skip_checks: bool = False,
-        max_grid: Optional[tuple[Optional[int], Optional[int], Optional[int]]] = None,
-        meta: Optional[dict] = None,
+        max_grid: tuple[int | None, int | None, int | None] | None = None,
+        meta: dict | None = None,
     ):
         f_name = "bsr_dense_mm"
         m, _kl = bsr.shape[-2:]
@@ -1967,10 +1966,10 @@ if has_triton():
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        attn_mask: Optional[torch.Tensor],
+        attn_mask: torch.Tensor | None,
         dropout_p: float = 0.0,
         is_causal: bool = False,
-        scale: Optional[float] = None,
+        scale: float | None = None,
     ):
         f_name = "_scaled_dot_product_attention"
         check(not is_causal, f"{f_name}(): is_causal == True is not supported.")

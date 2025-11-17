@@ -1031,7 +1031,7 @@ std::ostream& operator<<(std::ostream& out, const Constant& constant) {
         } else if constexpr (is_same_v<T, c10::Layout>) {
           out << kLayoutPrefix << arg;
         } else if constexpr (is_same_v<T, c10::Device>) {
-          out << kDevicePrefix << "{" << arg << "}";
+          out << kDevicePrefix << '{' << arg << '}';
         } else if constexpr (is_same_v<T, vector<string>>) {
           out << fmt::format("[{}]", fmt::join(arg, ","));
         } else if constexpr (is_same_v<T, unique_ptr<Graph>>) {
@@ -1054,16 +1054,16 @@ void printValue(std::ostream& out, const Value* v) {
 }
 
 void printNamedArgument(std::ostream& out, const NamedArgument& nv) {
-  out << nv.name << "=" << *nv.value;
+  out << nv.name << '=' << *nv.value;
 }
 
 void printAttribute(std::ostream& out, const Attribute& nv) {
-  out << nv.name << "=" << nv.value;
+  out << nv.name << '=' << nv.value;
 }
 } // namespace
 
 std::ostream& operator<<(std::ostream& out, const Value& v) {
-  out << "%" << v.name();
+  out << '%' << v.name();
   // If a list, distinguish it by adding a []
   // Looks like %my_list[]
   if (v.type() == Type::Kind::TensorList) {
@@ -1085,14 +1085,14 @@ std::ostream& operator<<(std::ostream& out, const Node& node) {
     printList(out, false, node.inputs(), [](std::ostream& out, const auto& nv) {
       out << *nv.value;
     });
-    out << ")";
+    out << ')';
     return out;
   }
 
   printList(out, false, node.outputs_, printValue);
 
   out << " = ";
-  out << node.target_ << "(";
+  out << node.target_ << '(';
   printList(out, false, node.inputs_, printNamedArgument);
   if (!node.inputs_.empty() && !node.attributes_.empty()) {
     // Emit a connective ',' between inputs and attributes.
@@ -1100,13 +1100,13 @@ std::ostream& operator<<(std::ostream& out, const Node& node) {
   }
 
   printList(out, false, node.attributes_, printAttribute);
-  out << ")";
+  out << ')';
   return out;
 }
 
 std::ostream& operator<<(std::ostream& out, const Graph& graph) {
   for (const auto& node : graph.nodes_) {
-    out << node << "\n";
+    out << node << '\n';
   }
   return out;
 }
