@@ -2,7 +2,7 @@
 
 As a leading deep learning framework PyTorch capabilities are regularly expanded with the support for new compute platforms and device backends. This document provides scoring criteria to assess quality levels of PyTorch device backends to help developers identify gaps and equip them with the tool to make decisions whether certain compute platforms are ready for specific milestones.
 
-# Quality Levels
+## Quality Levels
 
 Compute Platform is hardware and software environment where computations are executed. In this document compute platform is understood as a platform which consists of PyTorch backend implementation, underlying software stack (compilers, runtime libraries, drivers and other components) and hardware. Each compute platform can be assessed according to the scoring tables defined below in this document. Scoring covers requirements for platform hardware and software availability, maturity, support obligations, platform features, ci coverage, etc. Each requirement is marked with its relative priority (P0, P1 or P2) and the Score.
 
@@ -31,15 +31,33 @@ Compute Platforms quality levels are defines as follows:
 
 ## Documentation update guideline
 
-With the evolution of PyTorch some platforms might need to be added and some removed from the PyTorch documentation. It is recommended to periodically assess quality levels of the compute platforms supported by PyTorch. When making decision to add or remove a platform from documentation use the following guideline:
+To first introduce a new compute platform (as **Engineering** Platform) to PyTorch:
+
+* Raise an RFC [issue](https://github.com/pytorch/pytorch/issues) at PyTorch Github repository. Describe proposed platform software, hardware, its availability and plans to develop respective support in PyTorch. Emphasize if new PyTorch backend is being proposed and what are development plans.
+
+* Wait for the RFC review and acceptance by PyTorch Core [maintainers](https://docs.pytorch.org/docs/stable/community/persons_of_interest.html)
+
+* Submit PR(s) to add support for the new platform
+
+* Once support for the platform has landed, submit a [New Feature for Release](https://github.com/pytorch/pytorch/issues) issue to request announcement of the new platform in the PyTorch release blog and marketing materials
+
+To change existing platform level (to **Unstable** or **Stable**) and reflect that in PyTorch documentation:
+
+* Raise a [New Feature for Release](https://github.com/pytorch/pytorch/issues) issue describing required change
+
+* Attach assessment results following the criteria outlined in this document
+
+* Post PR(s) to modify PyTorch documentation as needed and link them to the raised issue
+
+Note that with the evolution of PyTorch some platforms might need to be added and some removed from the PyTorch documentation. It is recommended to periodically assess quality levels of the compute platforms supported by PyTorch. When making decision to add or remove a platform from documentation use the following guideline:
 
 * If adding platform:
-  * Require platform to grade as Unstable platform for 2 consequetive PyTorch releases to be added to documentation as Unstable platform
-  * Require platform to grade as Stable platform for 2 consequetive PyTorch releases to be added to documentation as Stable platform
+  * Require platform to grade as Unstable platform for 2 consecutive PyTorch releases to be added to documentation as Unstable platform
+  * Require platform to grade as Stable platform for 2 consecutive PyTorch releases to be added to documentation as Stable platform
 
 * If removing platform:
-  * Require platform to grade as Unstable platform for 2 consequetive PyTorch releases to be downgraded to Unstable platform in documentation
-  * Require platform to grade as Engineering platform for 2 consequetive PyTorch releases to be downgraded to Engineering platform in documentation
+  * Require platform to grade as Unstable platform for 2 consecutive PyTorch releases to be downgraded to Unstable platform in documentation
+  * Require platform to grade as Engineering platform for 2 consecutive PyTorch releases to be downgraded to Engineering platform in documentation
 
 ## Prerequisite requirements
 
@@ -447,7 +465,7 @@ CI/CD is an effective mechanism in the PyTorch open source community to ensure c
 
 ## Feedback adopters
 
-Feedback is required for the proposed compute platform by multiple channels. Need to list Open Source users/teams that have tried the compute platforms and provided feedback.
+Feedback is required for the proposed compute platform by multiple channels. Need to list users/teams that have tried the compute platforms and provided public feedback. Feedback might include but not limited to blog posts evaluating the platform, list of submitted issues associated with the specific project, engineering articles discussing scientific results obtained using the platform, etc.
 
 ```{eval-rst}
 .. list-table::
@@ -460,7 +478,7 @@ Feedback is required for the proposed compute platform by multiple channels. Nee
      - Score
    * - 1
      - Feedback adopters
-     - Open Source users/teams have tried the compute platform, provided feedback and the feedback was addressed.
+     - Users/teams have tried the compute platform, provided feedback and the feedback was addressed.
 
        * Address 50%: \+2
        * Address 80%: \+4
@@ -474,9 +492,9 @@ Feedback is required for the proposed compute platform by multiple channels. Nee
      - 6
 ```
 
-## Support and SLA (Critical issues, Security, etc.)
+## Maintenance
 
-Support should be provided for the new compute platform in line with the existing PyTorch support policies, including critical issue fixes ([Issues](https://github.com/pytorch/pytorch/issues)) and CVE fixes ([Security Policy](https://github.com/pytorch/pytorch/?tab=security-ov-file#readme)). SLA must  follow the current PyTorch publicly announced and available SLA policy.
+Support should be provided for the new compute platform in line with the existing PyTorch support policies, including [Releasing PyTorch Policy](https://github.com/pytorch/pytorch/blob/main/RELEASE.md) and [Security Policy](https://github.com/pytorch/pytorch/blob/main/SECURITY.md).
 
 ```{eval-rst}
 .. list-table::
@@ -489,7 +507,7 @@ Support should be provided for the new compute platform in line with the existin
      - Score
    * - 1
      - Support
-     - Critical and CVE issues (“Security”) fixes are committed to support. Support SLA aligned with PyTorch public policy.
+     - Critical and CVE issues (“Security”) fixes are committed to support following [Security Policy](https://github.com/pytorch/pytorch/blob/main/SECURITY.md)
      - P1
      - 4
    * - Total
