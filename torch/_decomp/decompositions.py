@@ -63,9 +63,9 @@ def type_casts(
 ):
     @functools.wraps(f)
     def inner(*args, **kwargs):
-        allowed_types = (
-            (Tensor, torch.types._Number) if include_non_tensor_args else (Tensor,)
-        )  # type: ignore[arg-type]
+        allowed_types: tuple[type, ...] = (
+            (Tensor, torch.types.Number) if include_non_tensor_args else (Tensor,)
+        )
         flat_args = [
             x
             for x in pytree.arg_tree_leaves(*args, **kwargs)

@@ -9,7 +9,7 @@ from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.multivariate_normal import _precision_to_scale_tril
 from torch.distributions.utils import lazy_property
-from torch.types import _Number, _size, Number
+from torch.types import _size, Number
 
 
 __all__ = ["Wishart"]
@@ -102,7 +102,7 @@ class Wishart(ExponentialFamily):
                 "scale_tril must be at least two-dimensional, with optional leading batch dimensions"
             )
 
-        if isinstance(df, _Number):
+        if isinstance(df, Number):
             batch_shape = torch.Size(param.shape[:-2])
             self.df = torch.tensor(df, dtype=param.dtype, device=param.device)
         else:

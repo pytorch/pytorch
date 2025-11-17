@@ -12,7 +12,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
-from torch.types import _Number, Number
+from torch.types import Number
 
 
 __all__ = ["Geometric"]
@@ -66,7 +66,7 @@ class Geometric(Distribution):
             # pyrefly: ignore [read-only]
             (self.logits,) = broadcast_all(logits)
         probs_or_logits = probs if probs is not None else logits
-        if isinstance(probs_or_logits, _Number):
+        if isinstance(probs_or_logits, Number):
             batch_shape = torch.Size()
         else:
             assert probs_or_logits is not None  # helps mypy

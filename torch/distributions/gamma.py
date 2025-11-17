@@ -6,7 +6,7 @@ from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
-from torch.types import _Number, _size
+from torch.types import _size, Number
 
 
 __all__ = ["Gamma"]
@@ -62,7 +62,7 @@ class Gamma(ExponentialFamily):
         validate_args: Optional[bool] = None,
     ) -> None:
         self.concentration, self.rate = broadcast_all(concentration, rate)
-        if isinstance(concentration, _Number) and isinstance(rate, _Number):
+        if isinstance(concentration, Number) and isinstance(rate, Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.concentration.size()

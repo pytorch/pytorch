@@ -12,7 +12,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
-from torch.types import _Number, Number
+from torch.types import Number
 
 
 __all__ = ["Bernoulli"]
@@ -56,12 +56,12 @@ class Bernoulli(ExponentialFamily):
                 "Either `probs` or `logits` must be specified, but not both."
             )
         if probs is not None:
-            is_scalar = isinstance(probs, _Number)
+            is_scalar = isinstance(probs, Number)
             # pyrefly: ignore [read-only]
             (self.probs,) = broadcast_all(probs)
         else:
             assert logits is not None  # helps mypy
-            is_scalar = isinstance(logits, _Number)
+            is_scalar = isinstance(logits, Number)
             # pyrefly: ignore [read-only]
             (self.logits,) = broadcast_all(logits)
         self._param = self.probs if probs is not None else self.logits

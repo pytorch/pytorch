@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from torch import SymInt, Tensor
 from torch.overrides import is_tensor_like
-from torch.types import _dtype, _Number, Device, Number
+from torch.types import _dtype, Device, Number
 
 
 euler_constant: Final[float] = 0.57721566490153286060  # Euler Mascheroni Constant
@@ -40,7 +40,7 @@ def broadcast_all(*values: Union[Tensor, Number]) -> tuple[Tensor, ...]:
         ValueError: if any of the values is not a `Number` instance,
             a `torch.*Tensor` instance, or an instance implementing __torch_function__
     """
-    if not all(is_tensor_like(v) or isinstance(v, _Number) for v in values):
+    if not all(is_tensor_like(v) or isinstance(v, Number) for v in values):
         raise ValueError(
             "Input arguments must all be instances of Number, "
             "torch.Tensor or objects implementing __torch_function__."
