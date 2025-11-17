@@ -1497,7 +1497,7 @@ Tensor tensor_ctor(
         pin_memory);
     auto names = r.toDimnameListOptional(5);
     if (names) {
-      at::namedinference::propagate_names(
+      at::namedinference::propagate_names_if_nonempty(
           new_tensor, *names, /*validate_names=*/true);
     }
     new_tensor.detach_(); // ensure new_tensor a leaf node
@@ -1708,9 +1708,9 @@ bool isValidDLPackCapsule(PyObject* data) {
 
 Tensor tensor_fromDLPack(PyObject* data) {
   const char* bad_capsule =
-      ("from_dlpack received an invalid capsule. "
-       "Note that DLTensor capsules can be consumed only once, "
-       "so you might have already constructed a tensor from it once.");
+      "from_dlpack received an invalid capsule. "
+      "Note that DLTensor capsules can be consumed only once, "
+      "so you might have already constructed a tensor from it once.";
 
   if (PyCapsule_IsValid(
           data, at::DLPackTraits<DLManagedTensorVersioned>::capsule)) {

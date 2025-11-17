@@ -18,6 +18,7 @@ import torch
 
 # needs to be imported after torch
 import torch.utils.cpp_extension as cpp_extension  # noqa: F401
+from torch.utils.benchmark import Timer
 
 
 """Performance microbenchmarks.
@@ -348,10 +349,24 @@ class BenchmarkRunner:
             func = test_case.run_jit_forward
         if self.use_compile:
             func = test_case.run_compile_forward
-        forward_time = timeit.timeit(
-            functools.partial(func, iters, print_per_iter, cuda_sync), number=1
+
+        if not cuda_sync:
+            forward_time = timeit.timeit(
+                functools.partial(func, iters, print_per_iter, cuda_sync), number=1
+            )
+            return forward_time
+        # Stable timing with Timer
+        timer = Timer(
+            stmt="func(iters, print_per_iter, cuda_sync)",
+            globals={
+                "func": func,
+                "iters": iters,
+                "print_per_iter": print_per_iter,
+                "cuda_sync": cuda_sync,
+            },
         )
-        return forward_time
+        result = timer.adaptive_autorange(min_run_time=0.0001)
+        return result.median * iters
 
     def _launch_backward(self, test_case, iters, print_per_iter=False):
         """This function runs forward path of an op to get an output. Then the backward path is executed
@@ -565,6 +580,9 @@ class BenchmarkRunner:
                 else "unknown"
             )
 
+            # Extract operator name from test_name
+            operator_name = test_name.split("_")[0]
+
             # Create the record
             @dataclass
             class BenchmarkInfo:
@@ -578,6 +596,7 @@ class BenchmarkRunner:
                 name: str
                 type: str
                 origins: list[str]
+                extra_info: dict[str, Any]
 
             @dataclass
             class MetricInfo:
@@ -603,10 +622,14 @@ class BenchmarkRunner:
                         "device": device,
                         "arch": device_arch,
                         "use_compile": use_compile,
+                        "operator_name": operator_name,
                     },
                 ),
                 model=ModelInfo(
-                    name=test_name, type="micro-benchmark", origins=["pytorch"]
+                    name=test_name,
+                    type="micro-benchmark",
+                    origins=["pytorch"],
+                    extra_info={"operator_name": operator_name},
                 ),
                 metric=MetricInfo(
                     name="latency",

@@ -772,6 +772,47 @@ def gen_nn_functional(fm: FileManager) -> None:
                     "Tensor",
                 )
             ],
+            "silu": [
+                defs(
+                    "silu",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "silu_": [
+                defs(
+                    "silu_",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "smooth_l1_loss": [
+                defs(
+                    "smooth_l1_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "reduction: str = ...",
+                        "beta: float = 1.0",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "soft_margin_loss": [
+                defs(
+                    "soft_margin_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "reduction: str = ...",
+                    ],
+                    "Tensor",
+                )
+            ],
         }
     )
 
@@ -953,6 +994,7 @@ def add_docstr_to_hint(docstr: str, hint: str) -> str:
         hint = hint.removesuffix("...").rstrip()  # remove "..."
         content = hint + "\n" + textwrap.indent(f'r"""\n{docstr}\n"""', prefix="    ")
         # Remove trailing whitespace on each line
+        # pyrefly: ignore [no-matching-overload]
         return "\n".join(map(str.rstrip, content.splitlines())).rstrip()
 
     # attribute or property

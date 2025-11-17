@@ -43,7 +43,7 @@ from torch.testing._internal.common_utils import (
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 
 class TestLRScheduler(TestCase):
@@ -77,7 +77,7 @@ class TestLRScheduler(TestCase):
         self.opt = SGD(
             [
                 {"params": self.net.conv1.parameters()},
-                {"params": self.net.conv2.parameters(), "lr": 0.5},
+                {"params": self.net.conv2.parameters(), "lr": torch.tensor(0.5)},
             ],
             lr=0.05,
         )
@@ -192,7 +192,7 @@ class TestLRScheduler(TestCase):
 
     def test_old_pattern_warning_resuming(self):
         epochs = 35
-        for i, group in enumerate(self.opt.param_groups):
+        for group in self.opt.param_groups:
             group["initial_lr"] = 0.01
 
         with warnings.catch_warnings(record=True) as ws:
@@ -209,7 +209,7 @@ class TestLRScheduler(TestCase):
 
     def test_old_pattern_warning_resuming_with_arg(self):
         epochs = 35
-        for i, group in enumerate(self.opt.param_groups):
+        for group in self.opt.param_groups:
             group["initial_lr"] = 0.01
 
         with warnings.catch_warnings(record=True) as ws:
@@ -226,7 +226,7 @@ class TestLRScheduler(TestCase):
 
     def test_old_pattern_warning_with_overridden_optim_step(self):
         epochs = 35
-        for i, group in enumerate(self.opt.param_groups):
+        for group in self.opt.param_groups:
             group["initial_lr"] = 0.01
 
         with warnings.catch_warnings(record=True) as ws:
@@ -299,7 +299,7 @@ class TestLRScheduler(TestCase):
         self.opt.step = types.MethodType(new_step, self.opt)
 
         def new_pattern():
-            for e in range(epochs):
+            for _ in range(epochs):
                 self.opt.step()
                 scheduler.step()
 
@@ -1509,7 +1509,7 @@ class TestLRScheduler(TestCase):
             14.0 / 3,
             29.0 / 6,
         ]
-        deltas = [2 * i for i in range(0, 2)]
+        deltas = [2 * i for i in range(2)]
         base_lrs = [1 + delta for delta in deltas]
         max_lrs = [5 + delta for delta in deltas]
         lr_targets = [[x + delta for x in lr_base_target] for delta in deltas]
@@ -2530,7 +2530,7 @@ class TestLRScheduler(TestCase):
         ],
     )
     def test_constant_initial_lr(self, LRClass):
-        # Test that the initial learning rate is constant
+        # Test that the initial learning rate is constant and that it does not alias base_lrs
         lr = torch.as_tensor(0.1)
         opt = SGD([torch.nn.Parameter(torch.randn(1))], lr=lr)
         sch = LRClass(opt)
@@ -2544,6 +2544,7 @@ class TestLRScheduler(TestCase):
             for group, ori_group in zip(opt.param_groups, ori_param_groups):
                 self.assertEqual(group["initial_lr"], ori_group["initial_lr"])
                 self.assertEqual(sch.base_lrs, [0.1])
+                self.assertIsNot(sch.base_lrs[0], group["initial_lr"])
 
     def test_constant_initial_params_cyclelr(self):
         # Test that the initial learning rate is constant
@@ -2616,7 +2617,7 @@ class TestLRScheduler(TestCase):
         sch = SWALR(opt, swa_lr=swa_lr)
         ori_param_groups = copy.deepcopy(opt.param_groups)
 
-        for i in range(2):
+        for _ in range(2):
             lr.multiply_(0.5)
             swa_lr.multiply_(0.5)
             opt.step()

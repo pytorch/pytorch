@@ -16,8 +16,9 @@ import tempfile
 import time
 import unittest
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Optional
 from unittest import mock
 from unittest.mock import Mock, patch
 

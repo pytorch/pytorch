@@ -73,7 +73,26 @@ from tools.testing.test_selections import (
     ShardedTest,
     THRESHOLD,
 )
-from tools.testing.upload_artifacts import zip_and_upload_artifacts
+
+
+try:
+    from tools.testing.upload_artifacts import (
+        parse_xml_and_upload_json,
+        upload_adhoc_failure_json,
+        zip_and_upload_artifacts,
+    )
+except ImportError:
+    # some imports in those files might fail, e.g., boto3 not installed. These
+    # functions are only needed under specific circumstances (CI) so we can
+    # define dummy functions here.
+    def parse_xml_and_upload_json():
+        pass
+
+    def zip_and_upload_artifacts(*args, **kwargs):
+        pass
+
+    def upload_adhoc_failure_json(*args, **kwargs):
+        pass
 
 
 # Make sure to remove REPO_ROOT after import is done
@@ -248,13 +267,7 @@ S390X_BLOCKLIST = [
 
 XPU_BLOCKLIST = [
     "test_autograd",
-    "profiler/test_cpp_thread",
-    "profiler/test_execution_trace",
     "profiler/test_memory_profiler",
-    "profiler/test_profiler",
-    "profiler/test_profiler_tree",
-    "profiler/test_record_function",
-    "profiler/test_torch_tidy",
     "test_openreg",
 ]
 
@@ -284,6 +297,7 @@ RUN_PARALLEL_BLOCKLIST = [
     # temporarily sets a global config
     "test_autograd_fallback",
     "inductor/test_compiler_bisector",
+    "test_privateuseone_python_backend",
 ] + FSDP_TEST
 
 # Test files that should always be run serially with other test files,
@@ -399,7 +413,9 @@ AOT_DISPATCH_TESTS = [
     test for test in TESTS if test.startswith("functorch/test_aotdispatch")
 ]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
+DYNAMO_CORE_TESTS = [test for test in TESTS if test.startswith("dynamo")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
+QUANTIZATION_TESTS = [test for test in TESTS if test.startswith("test_quantization")]
 
 
 def _is_cpp_test(test):
@@ -625,6 +641,7 @@ def run_test(
                 output,
                 options.continue_through_error,
                 test_file,
+                options,
             )
         else:
             command.extend([f"--sc={stepcurrent_key}", "--print-items"])
@@ -711,6 +728,7 @@ def run_test_retries(
     output,
     continue_through_error,
     test_file,
+    options,
 ):
     # Run the test with -x to stop at first failure.  Rerun the test by itself.
     # If it succeeds, move on to the rest of the tests in a new process.  If it
@@ -728,6 +746,16 @@ def run_test_retries(
         print(s, file=output, flush=True)
 
     num_failures = defaultdict(int)
+
+    def read_pytest_cache(key: str) -> Any:
+        cache_file = (
+            REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key / key
+        )
+        try:
+            with open(cache_file) as f:
+                return f.read()
+        except FileNotFoundError:
+            return None
 
     print_items = ["--print-items"]
     sc_command = f"--sc={stepcurrent_key}"
@@ -749,10 +777,11 @@ def run_test_retries(
 
         # Read what just failed/ran
         try:
-            with open(
-                REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
-            ) as f:
-                current_failure = f.read()
+            current_failure = read_pytest_cache("lastrun")
+            if current_failure is None:
+                raise FileNotFoundError
+            if current_failure == "null":
+                current_failure = f"'{test_file}'"
         except FileNotFoundError:
             print_to_file(
                 "No stepcurrent file found. Either pytest didn't get to run (e.g. import error)"
@@ -772,6 +801,16 @@ def run_test_retries(
                 "Test succeeeded in new process, continuing with the rest of the tests"
             )
         elif num_failures[current_failure] >= 3:
+            # This is for log classifier so it can prioritize consistently
+            # failing tests instead of reruns. [1:-1] to remove quotes
+            print_to_file(f"FAILED CONSISTENTLY: {current_failure[1:-1]}")
+            if (
+                read_pytest_cache("made_failing_xml") == "false"
+                and IS_CI
+                and options.upload_artifacts_while_running
+            ):
+                upload_adhoc_failure_json(test_file, current_failure[1:-1])
+
             if not continue_through_error:
                 print_to_file("Stopping at first consistent failure")
                 break
@@ -786,10 +825,8 @@ def run_test_retries(
             print_to_file("Retrying single test...")
         print_items = []  # do not continue printing them, massive waste of space
 
-    if "null" in num_failures:
-        num_failures[f"'{test_file}'"] = num_failures.pop("null")
-    consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
-    flaky_failures = [x[1:-1] for x in num_failures.keys() if 0 < num_failures[x] < 3]
+    consistent_failures = [x[1:-1] for x in num_failures if num_failures[x] >= 3]
+    flaky_failures = [x[1:-1] for x in num_failures if 0 < num_failures[x] < 3]
     if len(flaky_failures) > 0:
         print_to_file(
             "The following tests failed and then succeeded when run in a new process"
@@ -836,7 +873,7 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
         "--root",
         "./install",
     ]
-    wheel_cmd = [sys.executable, "-m", "pip", "wheel", ".", "-w", "./dist"]
+    wheel_cmd = [sys.executable, "-m", "build", "--wheel", "--no-isolation"]
     return_code = shell(install_cmd, cwd=cpp_extensions_test_dir, env=shell_env)
     if return_code != 0:
         return return_code
@@ -949,10 +986,7 @@ def test_openreg(test_module, test_directory, options):
 
 
 def test_distributed(test_module, test_directory, options):
-    # MPI tests are broken with Python-3.9
-    mpi_available = subprocess.call(
-        "command -v mpiexec", shell=True
-    ) == 0 and sys.version_info < (3, 9)
+    mpi_available = shutil.which("mpiexec")
     if options.verbose and not mpi_available:
         print_to_stderr("MPI not available -- MPI backend tests will be skipped")
 
@@ -1120,6 +1154,9 @@ def run_doctests(test_module, test_directory, options):
 
     if torch.mps.is_available():
         os.environ["TORCH_DOCTEST_MPS"] = "1"
+
+    if torch.distributed.is_available():
+        os.environ["TORCH_DOCTEST_DISTRIBUTED"] = "1"
 
     if 0:
         # TODO: could try to enable some of these
@@ -1310,6 +1347,16 @@ def parse_args():
         help="Run all distributed tests",
     )
     parser.add_argument(
+        "--include-dynamo-core-tests",
+        "--include-dynamo-core-tests",
+        action="store_true",
+        help=(
+            "If this flag is present, we will only run dynamo tests. "
+            "If this flag is not present, we will run all tests "
+            "(including dynamo tests)."
+        ),
+    )
+    parser.add_argument(
         "--functorch",
         "--functorch",
         action="store_true",
@@ -1471,6 +1518,11 @@ def parse_args():
         help="exclude inductor tests",
     )
     parser.add_argument(
+        "--exclude-quantization-tests",
+        action="store_true",
+        help="exclude quantization tests",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Only list the test that will run.",
@@ -1570,6 +1622,12 @@ def get_selected_tests(options) -> list[str]:
             filter(lambda test_name: test_name in CORE_TEST_LIST, selected_tests)
         )
 
+    # Filter to only run dynamo tests when --include-dynamo-core-tests option is specified
+    if options.include_dynamo_core_tests:
+        selected_tests = list(
+            filter(lambda test_name: test_name in DYNAMO_CORE_TESTS, selected_tests)
+        )
+
     # Filter to only run functorch tests when --functorch option is specified
     if options.functorch:
         selected_tests = list(
@@ -1616,7 +1674,7 @@ def get_selected_tests(options) -> list[str]:
     if options.xpu:
         selected_tests = exclude_tests(XPU_BLOCKLIST, selected_tests, "on XPU")
     else:
-        # Exclude all xpu specifc tests otherwise
+        # Exclude all xpu specific tests otherwise
         options.exclude.extend(XPU_TEST)
 
     # Filter to only run onnx tests when --onnx option is specified
@@ -1643,6 +1701,9 @@ def get_selected_tests(options) -> list[str]:
     if options.exclude_aot_dispatch_tests:
         options.exclude.extend(AOT_DISPATCH_TESTS)
 
+    if options.exclude_quantization_tests:
+        options.exclude.extend(QUANTIZATION_TESTS)
+
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
     if torch.version.cuda is not None:
         options.exclude.extend(["distributions/test_constraints"])
@@ -1659,7 +1720,7 @@ def get_selected_tests(options) -> list[str]:
             ]
         )
 
-    if sys.version_info[:2] < (3, 13):
+    if sys.version_info[:2] < (3, 13) or sys.version_info[:2] >= (3, 14):
         # Skip tests for older Python versions as they may use syntax or features
         # not supported in those versions
         options.exclude.extend(
@@ -1813,9 +1874,14 @@ def run_test_module(
         test_name = test.name
 
         # Printing the date here can help diagnose which tests are slow
-        print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
+        start = time.perf_counter()
+        print_to_stderr(f"Running {str(test)} ... [{datetime.now()}][{start}]")
         handler = CUSTOM_HANDLERS.get(test_name, run_test)
         return_code = handler(test, test_directory, options)
+        end = time.perf_counter()
+        print_to_stderr(
+            f"Finished {str(test)} ... [{datetime.now()}][{end}], took {(end - start) / 60:.2f}min"
+        )
         assert isinstance(return_code, int) and not isinstance(return_code, bool), (
             f"While running {str(test)} got non integer return code {return_code}"
         )
@@ -1869,6 +1935,7 @@ def run_tests(
     def handle_complete(failure: Optional[TestFailure]):
         failed = failure is not None
         if IS_CI and options.upload_artifacts_while_running:
+            parse_xml_and_upload_json()
             zip_and_upload_artifacts(failed)
         if not failed:
             return False
