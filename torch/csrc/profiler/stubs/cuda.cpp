@@ -1,11 +1,7 @@
 #include <sstream>
 
 #ifndef ROCM_ON_WINDOWS
-#if CUDART_VERSION >= 13000 || defined(TORCH_CUDA_USE_NVTX3)
 #include <nvtx3/nvtx3.hpp>
-#else
-#include <nvToolsExt.h>
-#endif
 #else // ROCM_ON_WINDOWS
 #include <c10/util/Exception.h>
 #endif // ROCM_ON_WINDOWS
@@ -21,7 +17,7 @@ namespace {
 static void cudaCheck(cudaError_t result, const char* file, int line) {
   if (result != cudaSuccess) {
     std::stringstream ss;
-    ss << file << ":" << line << ": ";
+    ss << file << ':' << line << ": ";
     if (result == cudaErrorInitializationError) {
       // It is common for users to use DataLoader with multiple workers
       // and the autograd profiler. Throw a nice error message here.
