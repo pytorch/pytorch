@@ -120,6 +120,14 @@ def _needs_inductor_compile(node: torch.fx.Node):
         and "compile_with_inductor" in node.meta["custom"]
     )
 
+def _needs_inductor_fallback(node: torch.fx.Node):
+    return (
+        node.op not in ("placeholder", "output")
+        and hasattr(node, "meta")
+        and node.meta.get("custom", None)
+        and "fallback_with_inductor" in node.meta["custom"]
+    )
+
 
 def _compile_fx_annotated_nodes_with_inductor(gm):
     from torch.fx.passes.operator_support import OperatorSupport

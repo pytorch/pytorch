@@ -239,15 +239,17 @@ def aot_stage1_graph_capture(
 
     if config.selective_decompose:
         from torch.fx.experimental.proxy_tensor import selective_decompose
-        from torch.fx.passes.regional_inductor import _needs_inductor_compile
+        from torch.fx.passes.regional_inductor import _needs_inductor_compile, _needs_inductor_fallback
+        from torch.fx.traceback import preserve_node_meta
 
-        graph = selective_decompose(
-            graph,
-            *updated_flat_args,
-            decomposition=aot_config.decompositions,
-            should_decompose=_needs_inductor_compile,
-            trace_joint_graph=aot_state.needs_autograd and not aot_config.pre_dispatch,
-        )
+        with preserve_node_meta():
+            graph = selective_decompose(
+                graph,
+                *updated_flat_args,
+                decomposition=aot_config.decompositions,
+                should_decompose=lambda x: not _needs_inductor_fallback(x) and _needs_inductor_compile(x),
+                trace_joint_graph=aot_state.needs_autograd and not aot_config.pre_dispatch,
+            )
 
     return AOTGraphCapture(
         wrappers=wrappers,
