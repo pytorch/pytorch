@@ -3,6 +3,7 @@
 
 #include <ATen/Tensor.h>
 #include <c10/core/Device.h>
+#include <c10/util/FileSystem.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 
 namespace torch::inductor {
@@ -48,7 +49,7 @@ class TORCH_API AOTIModelPackageLoader {
       const std::string& model_name);
 
  private:
-  std::string temp_dir_;
+  c10::filesystem::path temp_dir_;
   std::unique_ptr<AOTIModelContainerRunner> runner_;
   std::unordered_map<std::string, std::string> metadata_;
 
