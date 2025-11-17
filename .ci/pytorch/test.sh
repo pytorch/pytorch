@@ -344,8 +344,18 @@ test_python_smoke() {
 }
 
 test_python_smoke_b200() {
-  # Targeted smoke tests for B200 - staged approach to avoid too many failures
-  time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # Targeted smoke tests for B200 including FlashAttention CuTe coverage
+  install_flash_attn_cute
+  time python test/run_test.py \
+    --include \
+      test_matmul_cuda \
+      test_scaled_matmul_cuda \
+      inductor/test_fp8 \
+      nn/attention/test_fa4 \
+      nn/attention/test_open_registry \
+      inductor/test_flex_flash \
+    $PYTHON_TEST_EXTRA_OPTION \
+    --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -379,6 +389,13 @@ test_lazy_tensor_meta_reference_disabled() {
   export -n TORCH_DISABLE_FUNCTIONALIZATION_META_REFERENCE
 }
 
+test_dynamo_core() {
+  time python test/run_test.py \
+    --include-dynamo-core-tests \
+    --verbose \
+    --upload-artifacts-while-running
+  assert_git_not_dirty
+}
 
 test_dynamo_wrapped_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
@@ -1670,6 +1687,22 @@ test_operator_microbenchmark() {
   done
 }
 
+test_attention_microbenchmark() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  TEST_DIR=$(pwd)
+
+  # Install attention-gym dependency
+  echo "Installing attention-gym..."
+  python -m pip install git+https://github.com/meta-pytorch/attention-gym.git@main
+  pip show triton
+
+  cd "${TEST_DIR}"/benchmarks/transformer
+
+  $TASKSET python score_mod.py --config configs/config_basic.yaml \
+    --output-json-for-dashboard "${TEST_REPORTS_DIR}/attention_microbenchmark.json"
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -1727,6 +1760,8 @@ elif [[ "${TEST_CONFIG}" == *operator_benchmark* ]]; then
   fi
 elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
   test_operator_microbenchmark
+elif [[ "${TEST_CONFIG}" == *attention_microbenchmark* ]]; then
+  test_attention_microbenchmark
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
@@ -1786,6 +1821,8 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   test_inductor_shard "${SHARD_NUMBER}"
 elif [[ "${TEST_CONFIG}" == *einops* ]]; then
   test_einops
+elif [[ "${TEST_CONFIG}" == *dynamo_core* ]]; then
+  test_dynamo_core
 elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   install_torchvision
   test_dynamo_wrapped_shard "${SHARD_NUMBER}"
