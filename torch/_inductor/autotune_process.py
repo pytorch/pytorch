@@ -37,6 +37,7 @@ from torch._inductor.utils import (
     is_gpu,
     python_subprocess_env,
 )
+from torch._inductor.virtualized import threadlocal
 from torch._logging import getArtifactLogger
 from torch.utils._ordered_set import OrderedSet
 
@@ -309,6 +310,14 @@ class TuningProcessPool:
 
         env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
         extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
+        # async autotuning obtains the gpu lock for an entire autotuning set, which
+        # constitutes multiple choice benchmarks. since we might already have the gpu
+        # lock, we'd want our subprocesses to skip the locking stage to avoid deadlock
+        extra_env["TORCHINDUCTOR_BYPASS_GPU_LOCK"] = (
+            "1"
+            if getattr(threadlocal, "__torchinductor_bypass_gpu_lock", False)
+            else "0"
+        )
         process = self.process_queue.get()
         process.put(choice.bmreq.benchmark, extra_env=extra_env)
         try:

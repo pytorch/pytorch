@@ -1,17 +1,30 @@
 import functools
 import inspect
+import os
+import threading
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
+from filelock import FileLock
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Concatenate, Optional, Union
+from typing import Any, Concatenate, Generator, Optional, Union
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.config import use_experimental_benchmarker
+from torch._inductor.runtime.runtime_utils import default_cache_dir
+from torch._inductor.runtime.caching import FileLockTimeoutError
+from torch._inductor.runtime.caching.locks import (
+    _acquire_flock_with_timeout,
+    _BLOCKING,
+    _NON_BLOCKING,
+    _unsafe_acquire_flock_with_timeout,
+)
+from torch._inductor.virtualized import threadlocal
 from torch.utils._debug_mode import DebugMode
 
 
@@ -24,7 +37,85 @@ use_experimental_benchmarker = (
 MILLISECONDS_PER_SECOND = 1000
 
 P = ParamSpec("P")
+R = TypeVar("R")
 T = TypeVar("T")
+
+
+@contextmanager
+def _lock_gpu(priority: bool | threading.Event = True) -> Generator[None, None, None]:
+    # is this right?
+    device: torch.device = torch.device(f"cuda:{torch.cuda.current_device()}")
+    dinfo: str = f"{device.type}_{device.index}"
+
+    ulock: FileLock = FileLock(default_cache_dir() + f"/locks/usage_{dinfo}.lock", is_singleton=True)
+    plock: FileLock = FileLock(default_cache_dir() + f"/locks/priority_{dinfo}.lock", is_singleton=True)
+    
+    def has_priority() -> bool:
+        if isinstance(priority, bool):
+            has_priority: bool = priority
+        else:
+            priority_event: threading.Event = priority
+            has_priority = priority_event.is_set()
+        return has_priority
+    
+    try:
+        has_plock: bool = False
+        while True:
+            if not has_plock:
+                # we only need to check our priority if we don't already have the plock
+                if has_priority():
+                    _unsafe_acquire_flock_with_timeout(plock, timeout=_BLOCKING)
+                    # we'll need to track our holding of plock, so that we can release it
+                    # later, and to differentiate with other threads who have priority
+                    # but not plock
+                    has_plock = True
+
+            if plock.is_locked and not has_plock:
+                # if someone else has the plock, we should not contest ulock
+                time.sleep(0.125)
+                continue
+            
+            try:
+                # for the same reason as plock acquisition, we can wait indefinitely
+                # for the ulock if we have the plock; if we don't have the plock, we
+                # should check once before circling back (which also allows us to re-check
+                # if we have obtained priority)
+                with _acquire_flock_with_timeout(ulock, timeout=(_BLOCKING if has_plock else _NON_BLOCKING)):
+                    if plock.is_locked and not has_plock:
+                        # if we happened to race a priority thread with plock control and beat
+                        # them to acquiring ulock, we should immediately hand over control
+                        continue
+                    # we've obtained the rights to use the gpu
+                    yield
+            except FileLockTimeoutError:
+                # our attempt to obtain rights to the gpu timed out, try again.
+                # we do this because if we were to wait for rights indefinitely,
+                # then threads with priority would not be able to skip the queue
+                time.sleep(0.125)
+                continue
+            
+            # we've finished using the gpu, and can exit safely
+            break
+    finally:
+        if has_plock:
+            # don't forget to release the plock if we had priority before
+            plock.release()
+
+
+def lock_gpu(fn: Callable[P, R]) -> Callable[P, R]:
+    @wraps(fn)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        if (
+            getattr(threadlocal, "__torchinductor_bypass_gpu_lock", False)
+            or os.getenv("TORCHINDUCTOR_BYPASS_GPU_LOCK", "0") == "1"
+        ):
+            # we've explicitly told this thread/process to bypass the locking
+            # mechanism, for example if we've manually obtained the lock for a larger
+            # scope than this single function call
+            return fn(*args, **kwargs)
+        with _lock_gpu():
+            return fn(*args, **kwargs)
+    return wrapper
 
 
 def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any]:
