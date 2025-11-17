@@ -866,6 +866,22 @@ class TestFlopCounter(TestCase):
 
         self.assertExpectedInline(get_total_flops(mode), """860160""")
 
+class TestFlopCounterRFFT(TestCase):  # use the same TestCase base as the suite
+    def test_rfft_decomposition_and_flops(self):
+        # shape chosen so log2(N) is an integer: (B=2, C=3, N=8)
+        x = T(2, 3, 8)
+
+        with FlopCounterMode() as mode:
+            torch.fft.rfft(x)
+
+        # Decomposition check: rfft should hit aten._fft_r2c
+        decomposed_ops = mode.get_flop_counts()["Global"]
+        self.assertIn(torch.ops.aten._fft_r2c, decomposed_ops)
+        self.assertGreater(decomposed_ops[torch.ops.aten._fft_r2c], 0)
+
+        # FLOPs = 2.5 * (B*C) * N * log2(N) = 2.5 * 6 * 8 * 3 = 360
+        # Match suite convention: hardcode the expected as a string literal.
+        self.assertExpectedInline(get_total_flops(mode), """360""")
 
 if __name__ == "__main__":
     run_tests()
