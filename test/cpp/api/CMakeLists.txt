@@ -49,25 +49,8 @@ if(USE_CUDA OR USE_ROCM)
 endif()
 
 add_executable(test_api ${TORCH_API_TEST_SOURCES})
-
-find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
-
-set(PYBIND_INCLUDE_DIRECTORIES
-    ${pybind11_INCLUDE_DIRS}
-    ${Python3_INCLUDE_DIRS}
-    )
-
-target_include_directories(test_api PRIVATE
-  ${ATen_CPU_INCLUDE}
-  ${PYBIND_INCLUDE_DIRECTORIES})
-
-target_link_libraries(test_api PRIVATE
-  torch
-  gtest_main
-  gmock
-  torch_python
-  fmt::fmt-header-only
-  ${Python3_LIBRARIES})
+target_include_directories(test_api PRIVATE ${ATen_CPU_INCLUDE})
+target_link_libraries(test_api PRIVATE torch gtest_main gmock)
 
 if(USE_CUDA)
   target_compile_definitions(test_api PRIVATE "USE_CUDA")
