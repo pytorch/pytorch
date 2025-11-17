@@ -105,7 +105,10 @@ def _explicit_order_placements(
                             )
                         aggregate_size *= mesh_shape[strided_mesh_dim]
                         ordered.append((strided_mesh_dim, Shard(p.dim)))
-
+    if len(deferred_strided_placements) != 0:
+        raise NotImplementedError(
+            f"cannot convert {placements} into explicit order because of unresolved _StridedShard {deferred_strided_placements.items()}"
+        )
     return ordered
 
 
