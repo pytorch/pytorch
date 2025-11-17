@@ -219,7 +219,7 @@ class FlexKernelOptions(TypedDict, total=False):
     """ROCm-specific waves per execution unit."""
 
     # pyrefly: ignore [invalid-annotation]
-    force_flash: NotRequired[bool]
+    FORCE_FLASH: NotRequired[bool]
     """ If True, forces use of the cute-dsl flash attention kernel.
 
     Raises an error if flash attention cannot be used instead of falling back

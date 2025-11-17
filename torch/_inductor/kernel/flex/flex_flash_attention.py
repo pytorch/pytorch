@@ -173,7 +173,7 @@ def _use_flex_flash_attention(
     num_score_mod_placeholders: int,
 ) -> bool:
     """Determine if we should use flex flash attention for the given inputs."""
-    force_flash = kernel_options.get("force_flash", False)
+    force_flash = kernel_options.get("FORCE_FLASH", False)
 
     can_use, reason = _can_use_flex_flash_attention(
         subgraph, mask_graph, num_score_mod_placeholders
@@ -181,7 +181,7 @@ def _use_flex_flash_attention(
 
     if force_flash and not can_use:
         raise RuntimeError(
-            f"force_flash=True but flash attention cannot be used: {reason}"
+            f"FORCE_FLASH=True but flash attention cannot be used: {reason}"
         )
 
     return force_flash and can_use
