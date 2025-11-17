@@ -1102,8 +1102,9 @@ _check_mxfp4_support() {
   auto dprops = at::cuda::getCurrentDeviceProperties();
   // Only on B200 GPUs
   TORCH_CHECK_NOT_IMPLEMENTED(
-    dprops->major == 10 && dprops->minor == 0,
-    "MXFP4 scaling only supported in CUDA for B200"
+    // B200 = 10.0, B300 = 10.3
+    dprops->major == 10,
+    "MXFP4 scaling only supported in CUDA for B200/B300"
   );
 #endif
 }
