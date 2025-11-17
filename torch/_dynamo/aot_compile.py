@@ -1,5 +1,4 @@
 import dataclasses
-import importlib
 import inspect
 import io
 import logging
@@ -12,6 +11,7 @@ from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
+from torch._dynamo.convert_frame import GraphRuntimeEnv
 from torch._dynamo.graph_utils import _graph_device_type
 from torch._dynamo.package import SystemInfo
 
@@ -42,15 +42,12 @@ def bind_locals(
 @dataclass
 class CompileArtifacts:
     signature: inspect.Signature
-    bytecode: types.CodeType
     guard_manager: Optional["GuardManagerWrapper"]
     guards_state: bytes
-    import_sources: dict[str, str]
     backend_id: str
     compiled_fn: SerializableCallable
     original_code: types.CodeType
-    closure: Optional[tuple[Any, ...]]
-    argdefs: Optional[tuple[Any, ...]]
+    runtime_env: GraphRuntimeEnv
     source_info: "SourceInfo"
     device_type: str
     backend_name: str
@@ -84,15 +81,14 @@ class AOTCompiledFunction:
 
     def guard_check(self, *args: Any, **kwargs: Any) -> bool:
         f_locals: dict[str, Any] = {}
-        if self._artifacts.closure:
-            assert self._artifacts.bytecode.co_freevars and len(
-                self._artifacts.closure
-            ) == len(self._artifacts.bytecode.co_freevars)
+        env = self._artifacts.runtime_env
+        if env.closure:
+            assert env.bytecode.co_freevars and len(env.closure) == len(
+                env.bytecode.co_freevars
+            )
             f_locals = {
                 name: cell.cell_contents
-                for name, cell in zip(
-                    self._artifacts.bytecode.co_freevars, self._artifacts.closure
-                )
+                for name, cell in zip(env.bytecode.co_freevars, env.closure)
             }
         f_locals.update(bind_locals(self._artifacts.signature, *args, **kwargs))
         assert self._artifacts.guard_manager is not None
@@ -103,20 +99,9 @@ class AOTCompiledFunction:
 
         self._artifacts.check_compatibility()
 
-        import_sources = {
-            alias: importlib.import_module(module_name)
-            for alias, module_name in self._artifacts.import_sources.items()
-        }
-        f_globals = {
-            **import_sources,
-            self._artifacts.backend_id: self._artifacts.compiled_fn,
-        }
         # pyrefly: ignore [read-only]
-        self.fn = types.FunctionType(
-            self._artifacts.bytecode,
-            f_globals,
-            closure=self._artifacts.closure,
-            argdefs=self._artifacts.argdefs,
+        self.fn = self._artifacts.runtime_env.forward_callable(
+            self._artifacts.backend_id, self._artifacts.compiled_fn
         )
 
         if self._artifacts.guard_manager is None:
@@ -124,7 +109,7 @@ class AOTCompiledFunction:
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
                 self._artifacts.original_code,
-                f_globals,
+                self.fn.__globals__,
             )
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
@@ -148,7 +133,10 @@ class AOTCompiledFunction:
 
         state = fn._artifacts.__dict__.copy()
         state["guard_manager"] = None
-        state["bytecode"] = SerializedCode.from_code_object(state["bytecode"])
+        state["runtime_env"] = dataclasses.replace(
+            state["runtime_env"],
+            bytecode=SerializedCode.from_code_object(state["runtime_env"].bytecode),
+        )
         compiled_fn = state["compiled_fn"]
         state["compiled_fn"] = (
             type(compiled_fn).deserialize_compile_artifacts,
@@ -165,9 +153,13 @@ class AOTCompiledFunction:
         from torch._dynamo.package import SerializedCode
 
         state = pickle.loads(data)
-        state["bytecode"] = SerializedCode.to_code_object(state["bytecode"])
+        state["runtime_env"] = dataclasses.replace(
+            state["runtime_env"],
+            bytecode=SerializedCode.to_code_object(state["runtime_env"].bytecode),
+        )
         deserializer, compiled_fn_state = state["compiled_fn"]
-        state["compiled_fn"] = deserializer(compiled_fn_state)
+        with torch._inductor.config.patch(enable_autograd_for_aot=True):
+            state["compiled_fn"] = deserializer(compiled_fn_state)
         state["original_code"] = SerializedCode.to_code_object(state["original_code"])
 
         artifacts = CompileArtifacts(**state)
@@ -263,15 +255,12 @@ def aot_compile_fullgraph(
 
         artifacts = CompileArtifacts(
             signature=convert_frame._get_signature(fn),
-            bytecode=graph_capture_output.bytecode,
             guard_manager=check_fn.guard_manager,
             guards_state=check_fn.guards_state,
-            import_sources=graph_capture_output.import_sources,
             backend_id=backend_input.backend_id,
             compiled_fn=compiled_fn,
             original_code=fn.__code__,
-            closure=fn.__closure__,
-            argdefs=fn.__defaults__,
+            runtime_env=graph_capture_output.get_runtime_env(),
             source_info=source_info,
             device_type=device_type,
             backend_name=getattr(backend, "compiler_name", "unknown"),

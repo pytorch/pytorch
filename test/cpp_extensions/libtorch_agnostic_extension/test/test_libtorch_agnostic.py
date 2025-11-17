@@ -616,6 +616,22 @@ if not IS_WINDOWS:
             expected_flat = t.view([-1])
             self.assertEqual(result_flat, expected_flat)
 
+        def test_mv_tensor_accessor(self, device):
+            import libtorch_agnostic
+
+            m = torch.rand(3, 5, device=device)
+            v = torch.rand(5, device=device)
+            result = libtorch_agnostic.ops.mv_tensor_accessor(m, v)
+            expected = torch.mv(m, v)
+            self.assertEqual(result, expected)
+
+            # non-contiguous inputs
+            m = torch.rand(3 * 2, 5 * 3, device=device)[::2, ::3]
+            v = torch.rand(5 * 4, device=device)[::4]
+            result = libtorch_agnostic.ops.mv_tensor_accessor(m, v)
+            expected = torch.mv(m, v)
+            self.assertEqual(result, expected)
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":

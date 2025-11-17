@@ -1,3 +1,5 @@
+#include "kernel.h"
+
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/device.h>
@@ -512,6 +514,32 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("test_device_index", &boxed_test_device_index);
   m.impl("test_device_is_cuda", &boxed_test_device_is_cuda);
   m.impl("test_device_is_cpu", &boxed_test_device_is_cpu);
+}
+
+Tensor mv_tensor_accessor_cpu(Tensor m, Tensor v) {
+  STD_TORCH_CHECK(m.dim() == 2, "m must be 2D");
+  STD_TORCH_CHECK(v.dim() == 1, "v must be 1D");
+  STD_TORCH_CHECK(m.size(1) == v.size(0), "m.shape[1] == v.shape[0] must hold");
+  STD_TORCH_CHECK(m.scalar_type() == v.scalar_type(), "m and v must have the same dtype");
+  STD_TORCH_CHECK(m.device() == v.device(), "m and v must be on the same device");
+  Tensor res = new_empty(m, {m.size(0)});
+  THO_DISPATCH_V2(m.scalar_type(), "mv_tensor_accessor_cpu",
+                  AT_WRAP(([&]() {
+                    auto resa = Accessor_cpu<scalar_t, 1>(reinterpret_cast<scalar_t*>(res.data_ptr()), res.sizes().data(), res.strides().data());
+                    auto ma = Accessor_cpu<scalar_t, 2>(reinterpret_cast<scalar_t*>(m.data_ptr()), m.sizes().data(), m.strides().data());
+                    auto va = Accessor_cpu<scalar_t, 1>(reinterpret_cast<scalar_t*>(v.data_ptr()), v.sizes().data(), v.strides().data());
+                    mv_tensor_accessor_kernel<Accessor_cpu, scalar_t>(resa, ma, va);
+                  })),
+                  AT_FLOATING_TYPES);
+  return res;
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("mv_tensor_accessor(Tensor m, Tensor v) -> Tensor");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
+  m.impl("mv_tensor_accessor", TORCH_BOX(&mv_tensor_accessor_cpu));
 }
 
 // Test functions for torch::stable::accelerator APIs
