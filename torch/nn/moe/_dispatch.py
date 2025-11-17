@@ -5,22 +5,22 @@ import torch.distributed._symmetric_memory as symm_mem
 
 # Helper function to determine the position of a token in an expert chunk from a
 # source rank to a destination rank
-def _get_occurrence_numbers(tensor: torch.Tensor) -> torch.Tensor:
+def _get_occurrence_numbers(topk_indices: torch.Tensor) -> torch.Tensor:
     """
-    Transform tensor to show which occurrence each element is, occurrence number starts from 0.
+    Transform topk_indices to show which occurrence each element is, occurrence number starts from 0.
 
     Example: tensor([1, 2, 1, 3, 1, 2]) -> tensor([0, 0, 1, 0, 2, 1])
     """
-    device = tensor.device
+    device = topk_indices.device
     # Get unique values and their inverse mapping
-    unique_vals, inverse = torch.unique(tensor, return_inverse=True)
+    unique_vals, inverse = torch.unique(topk_indices, return_inverse=True)
 
     # Create a tensor to count occurrences for each unique value
     n_unique = len(unique_vals)
-    n_elements = len(tensor)
+    n_elements = len(topk_indices)
 
     # Create a matrix where each row corresponds to a unique value
-    # and columns correspond to positions in the original tensor
+    # and columns correspond to positions in the original topk_indices
     indicator_matrix = torch.zeros(
         n_unique, n_elements, dtype=torch.float, device=device
     )
