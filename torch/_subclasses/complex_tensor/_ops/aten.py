@@ -48,14 +48,12 @@ def register_binary_linear(op: OpType):
     return register_complex(op, impl)
 
 
-# Not sure why torch dispatch does not hit here.
 @register_complex(aten.real)
 def real_impl(self: ComplexTensor) -> torch.Tensor:
     re, _ = split_complex_tensor(self)
     return re
 
 
-# Not sure why torch dispatch does not hit here.
 @register_complex(aten.imag)
 def imag_impl(self: ComplexTensor) -> torch.Tensor:
     _, im = split_complex_tensor(self)
