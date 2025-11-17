@@ -25,9 +25,8 @@ std::unique_ptr<AOTIModelContainerRunner> create_aoti_runner_cpu(
     const std::string& device_str,
     const std::string& cubin_dir,
     const bool run_single_threaded) {
-  if (device_str != "cpu") {
-    throw std::runtime_error("Incorrect device passed to aoti_runner_cpu");
-  }
+  TORCH_CHECK(
+      device_str == "cpu", "Incorrect device passed to aoti_runner_cpu");
   return std::make_unique<AOTIModelContainerRunnerCpu>(
       model_so_path, num_models, run_single_threaded);
 }
