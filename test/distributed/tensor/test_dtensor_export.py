@@ -7,6 +7,7 @@ import torch
 import torch.distributed as dist
 import torch.fx.traceback as fx_traceback
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+from torch._dynamo.testing import CompileCounterWithBackend
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._functorch.partitioners import min_cut_rematerialization_partition
 from torch._guards import tracing, TracingContext
@@ -559,27 +560,48 @@ graph():
 
         class Foo(torch.nn.Module):
             def forward(self, x, y):
-                for i in range(2):
-                    torch._check(x.size(i) >= 8)
-                    torch._check(y.size(i) >= 8)
                 return x @ y
 
         x = torch.randn(64, 64)
         y = torch.randn(64, 64)
-        x_dt = distribute_tensor(x, device_mesh, placements=[Replicate(), Replicate()])
-        y_dt = distribute_tensor(y, device_mesh, placements=[Replicate(), Replicate()])
-        for i in range(2):
-            torch._dynamo.decorators.mark_unbacked(x_dt, i)
-            torch._dynamo.decorators.mark_unbacked(y_dt, i)
 
-        gm = dynamo_graph_capture_for_export(Foo())(x_dt, y_dt)
-        n = 0
-        for node in gm.graph.nodes:
-            if bindings := node.meta.get("unbacked_bindings", {}):
-                # 2 outer sizes, 2 inner sizes
-                self.assertEqual(len(bindings), 4)
-                n += 1
-        self.assertEqual(n, 2)  # 2 nodes with bindings
+        for test_index, (px, py) in enumerate(
+            [
+                # these should pass as no redistribute strategy is available
+                [[Replicate(), Replicate()], [Replicate(), Replicate()]],
+                [[Replicate(), Shard(0)], [Replicate(), Replicate()]],
+                [[Replicate(), Shard(1)], [Replicate(), Shard(0)]],
+            ]
+        ):
+            # create DTensors with unbacked outer/inner sizes
+            x_dt = distribute_tensor(x, device_mesh, placements=px)
+            y_dt = distribute_tensor(y, device_mesh, placements=py)
+            for i in range(2):
+                torch._dynamo.decorators.mark_unbacked(x_dt, i)
+                torch._dynamo.decorators.mark_unbacked(y_dt, i)
+
+            # full-graph capture
+            cnt = CompileCounterWithBackend("eager")
+            fn = torch.compile(Foo(), backend=cnt, fullgraph=True)
+            fn(x_dt, y_dt)
+            if test_index == 0:
+                gm = dynamo_graph_capture_for_export(Foo())(x_dt, y_dt)
+                n = 0
+                for node in gm.graph.nodes:
+                    if bindings := node.meta.get("unbacked_bindings", {}):
+                        # 2 outer sizes, 2 inner sizes
+                        self.assertEqual(len(bindings), 4)
+                        n += 1
+                self.assertEqual(n, 2)  # 2 nodes with bindings
+
+            # test sharded matmuls with zero-size shards
+            if test_index == 2:
+                out = fn(
+                    distribute_tensor(torch.randn(3, 1), device_mesh, placements=px),
+                    distribute_tensor(torch.randn(1, 1), device_mesh, placements=py),
+                )
+                self.assertEqual(tuple(out.shape), (3, 1))
+                self.assertEqual(cnt.frame_count, 1)
 
 
 instantiate_parametrized_tests(DTensorExportTest)
