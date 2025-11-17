@@ -21,7 +21,7 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_utils import outputs_alias_inputs
 from torch.testing import make_tensor
 from torch.testing._internal import composite_compliance, opinfo
-from torch.testing._internal.common_cuda import with_tf32_off, _get_torch_cuda_version
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, with_tf32_off
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     instantiate_device_type_tests,
@@ -929,7 +929,9 @@ class TestCommon(TestCase):
         # Skip torch._scaled_mm on CUDA 13.0+ - check VERY early
         if op.name in ("torch._scaled_mm"):
             if "cuda" in device and _get_torch_cuda_version() >= (13, 0):
-                raise unittest.SkipTest("Skip _scaled_mm on CUDA 13.0+ due to known issues with FP8")
+                raise unittest.SkipTest(
+                    "Skip _scaled_mm on CUDA 13.0+ due to known issues with FP8"
+                )
         if TEST_WITH_TORCHDYNAMO and op.name == "_refs.clamp":
             self.skipTest("flaky")
         # Prefers running in float32 but has a fallback for the first listed supported dtype
