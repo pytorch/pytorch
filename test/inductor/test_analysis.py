@@ -402,6 +402,7 @@ class TestAnalysis(TestCase):
         (not torch.xpu.is_available()) and (not SM80OrLater),
         "Requires XPU or CUDA SM80",
     )
+    @skipXPUIf(msg="Intel triton issue: https://github.com/intel/intel-xpu-backend-for-triton/issues/5491")
     @skipXPUIf(TEST_WITH_SLOW, "Skip because test too slow on XPU")
     @dtypes(torch.float, torch.float16)
     @parametrize(
