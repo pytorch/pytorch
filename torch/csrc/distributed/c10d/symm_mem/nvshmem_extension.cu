@@ -1616,11 +1616,13 @@ void _all_to_all_v_2d_index_push(
 
 using T = float;
 
+#define MAX_TOP_K 32
+
 __global__ void _allToAllV_2d_index_reduce_kernel(
     void *send_data, void *recv_data,
     int64_t* topk_indices, int64_t* occurrences, int64_t* src_offsets, int64_t* dst_offsets, int64_t* output_splits,
     int topk, int n_local_experts, int nnodes, size_t stride_in_T, nvshmem_team_t team,
-    int64_t* b_start, int64_t* b_len, int64_t* b_head) {
+    int64_t* b_start, int64_t* b_len, int64_t* b_head, T* topk_weights) {
   /* Args:
    * send_data: the data to be sent
    * recv_data: the data to be received
@@ -1661,6 +1663,8 @@ __global__ void _allToAllV_2d_index_reduce_kernel(
   b_len[bid] = block_tokens;
   auto b_head_ptr = b_head + bid;
 
+  // Store the top_k weights for a token
+  __shared__ T k_weights[MAX_TOP_K];
   // Need a shared memory space to store the received tokens, up to topk tokens
   extern __shared__ T k_tokens[];
 
@@ -1670,7 +1674,8 @@ __global__ void _allToAllV_2d_index_reduce_kernel(
     // Loop over the topk experts
     int recved = 0;
     for (int k = 0; k < topk; k++) {
-      auto expert = topk_indices[abs_head * topk + k];
+      auto flattened_k = abs_head * topk + k;
+      auto expert = topk_indices[flattened_k];
       if (expert < 0 || expert >= n_experts) {
         // Ignore expert IDs out of range (in reality, these IDs refers to
         // experts in other nodes)
@@ -1680,11 +1685,15 @@ __global__ void _allToAllV_2d_index_reduce_kernel(
       auto src_rank = expert / n_local_experts;
       auto src_rank_global = nvshmem_team_translate_pe(team, src_rank, NVSHMEM_TEAM_WORLD);
       // Get the source offset
-      auto src_offset = src_offsets[expert] + occurrences[abs_head * topk + k];
+      auto src_offset = src_offsets[expert] + occurrences[flattened_k];
       // Get the source pointer
       auto src_ptr = (T*)send_data + src_offset * stride_in_T;
       // Fetch the data, i.e. 1 token
       nvshmemx_getmem_nbi_block(k_tokens + recved * stride_in_T, src_ptr, stride_in_T * sizeof(T), src_rank_global);
+      // Read in the weight for this expert
+      if (tid == 0) {
+        k_weights[recved] = topk_weights != nullptr ? topk_weights[flattened_k] : 1;
+      }
       recved++;
     }
     // Make sure all fetches have been completed
@@ -1699,10 +1708,11 @@ __global__ void _allToAllV_2d_index_reduce_kernel(
       // Loop over the received tokens
       for (int t = 0; t < recved; t++) {
         auto elems = k_tokens + t * stride_in_T + offset;
+        auto weight = k_weights[t];
         #pragma unroll UNROLL
         for (int i = 0; i < UNROLL; i++) {
           // Multiple with weight, and add into acc
-          acc[i] += elems[i];
+          acc[i] += elems[i] * weight;
         }
       }
       // Write to output
@@ -1730,7 +1740,8 @@ void _all_to_all_v_2d_index_reduce(
     std::string group_name,
     at::Tensor& b_start,
     at::Tensor& b_len,
-    at::Tensor& b_head) {
+    at::Tensor& b_head,
+    const std::optional<at::Tensor>& topk_weights = std::nullopt) {
   auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
   c10d::symmetric_memory::rendezvous(out, group_name);
   c10d::symmetric_memory::rendezvous(src_offsets, group_name);
@@ -1747,6 +1758,15 @@ void _all_to_all_v_2d_index_reduce(
   auto b_start_ptr = b_start.data_ptr<int64_t>();
   auto b_len_ptr = b_len.data_ptr<int64_t>();
   auto b_head_ptr = b_head.data_ptr<int64_t>();
+
+  // If topk_weights is passed in, give it to the kernel for mul-add on the fly
+  void* topk_weights_ptr = nullptr;
+  if (topk_weights.has_value()) {
+    TORCH_CHECK_VALUE(
+      topk_weights.value().size(1) <= MAX_TOP_K,
+      "Top K cannot be larger than ", MAX_TOP_K);
+      topk_weights_ptr = topk_weights.value().data_ptr();
+  }
 
   auto topk = topk_indices.size(1);
   auto n_local_experts = src_offsets.size(0) / input_hdl->get_world_size();
@@ -1768,7 +1788,7 @@ void _all_to_all_v_2d_index_reduce(
       &input_ptr, &out_ptr,
       &topk_indices_ptr, &occurrences_ptr, &src_offsets_ptr, &dst_offsets_ptr, &output_splits_ptr,
       &topk, &n_local_experts, &nnodes, &stride_in_T, &team,
-      &b_start_ptr, &b_len_ptr, &b_head_ptr
+      &b_start_ptr, &b_len_ptr, &b_head_ptr, &topk_weights_ptr
   };
   size_t sharedMemBytes = topk * stride_in_T * input.element_size();
   C10_CUDA_CHECK(cudaLaunchKernel(
