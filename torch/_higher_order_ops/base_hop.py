@@ -170,7 +170,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             out = self(functionalized_subgraph, *unwrapped_operands, **kwargs)
         return ctx.wrap_tensors(out)
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def gen_schema(self, subgraph, *operands, **kwargs):
         from .schema import HopSchemaGenerator
 
@@ -196,7 +196,8 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
                 "Aliasing is not supported for HOP subgraph.\n"
                 f"{subgraph.print_readable(print_output=False)}\n"
                 f"Alias info: inp-inp alias: {inp_inp_alias}, inp-out alias: {inp_out_alias}, out-out alias{out_out_alias}"
-                f"This may lead to silent incorrectness."
+                f"This may lead to silent incorrectness.",
+                stacklevel=2,
             )
 
         schema_gen = HopSchemaGenerator(self)
@@ -215,7 +216,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
 
 class BaseHOPFunction(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(ctx, hop, subgraph, kwargs, *operands):
         ctx.hop = hop
         ctx.operands = operands

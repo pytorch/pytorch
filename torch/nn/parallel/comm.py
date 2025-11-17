@@ -43,7 +43,7 @@ def broadcast(tensor, devices=None, *, out=None):
         devices = [_get_device_index(d) for d in devices]
         return torch._C._broadcast(tensor, devices)
     else:
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         return torch._C._broadcast_out(tensor, out)
 
 
@@ -141,18 +141,18 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
     output = []
     ref_order = []
     # process sparse ones first since they may have different sizes on different gpus
-    for tensor_at_gpus in zip(*inputs):
+    for tensor_at_gpus in zip(*inputs, strict=True):
         if all(t.is_sparse for t in tensor_at_gpus):
             result = reduce_add(tensor_at_gpus, destination)  # this will be sparse too
             output.append(result)
             ref_order.append(tensor_at_gpus[0])
         else:
-            for coll, t in zip(dense_tensors, tensor_at_gpus):
+            for coll, t in zip(dense_tensors, tensor_at_gpus, strict=True):
                 coll.append(t.to_dense() if t.is_sparse else t)
             ref_order.append(dense_tensors[0][-1])
     itrs = [_take_tensors(tensors, buffer_size) for tensors in dense_tensors]
     # now the dense ones, which have consistent sizes
-    for chunks in zip(*itrs):
+    for chunks in zip(*itrs, strict=True):
         flat_tensors = [
             _flatten_dense_tensors(chunk) for chunk in chunks
         ]  # (num_gpus,)
@@ -201,7 +201,7 @@ def scatter(tensor, devices=None, chunk_sizes=None, dim=0, streams=None, *, out=
     """
     tensor = _handle_complex(tensor)
     if out is None:
-        # pyrefly: ignore  # not-iterable
+        # pyrefly: ignore [not-iterable]
         devices = [_get_device_index(d) for d in devices]
         return tuple(torch._C._scatter(tensor, devices, chunk_sizes, dim, streams))
     else:

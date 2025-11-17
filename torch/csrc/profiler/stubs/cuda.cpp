@@ -1,11 +1,7 @@
 #include <sstream>
 
 #ifndef ROCM_ON_WINDOWS
-#ifdef TORCH_CUDA_USE_NVTX3
 #include <nvtx3/nvtx3.hpp>
-#else
-#include <nvToolsExt.h>
-#endif
 #else // ROCM_ON_WINDOWS
 #include <c10/util/Exception.h>
 #endif // ROCM_ON_WINDOWS

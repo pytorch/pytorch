@@ -1,20 +1,25 @@
-import abc
 import dataclasses
-import importlib
 import inspect
+import io
 import logging
 import pickle
 import types
+from collections.abc import Callable
 from contextlib import AbstractContextManager, ExitStack
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
+from torch._dynamo.convert_frame import GraphRuntimeEnv
 from torch._dynamo.graph_utils import _graph_device_type
 from torch._dynamo.package import SystemInfo
 
 from . import convert_frame
+from .aot_compile_types import (
+    BundledAOTAutogradSerializableCallable,
+    SerializableCallable,
+)
 from .hooks import Hooks
 
 
@@ -24,18 +29,6 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
-
-
-class SerializableCallable(abc.ABC):
-    @classmethod
-    @abc.abstractmethod
-    def serialize_compile_artifacts(cls, fn: Any) -> bytes:
-        pass
-
-    @classmethod
-    @abc.abstractmethod
-    def deserialize_compile_artifacts(cls, data: bytes) -> Any:
-        pass
 
 
 def bind_locals(
@@ -49,21 +42,36 @@ def bind_locals(
 @dataclass
 class CompileArtifacts:
     signature: inspect.Signature
-    bytecode: types.CodeType
     guard_manager: Optional["GuardManagerWrapper"]
     guards_state: bytes
-    import_sources: dict[str, str]
     backend_id: str
     compiled_fn: SerializableCallable
     original_code: types.CodeType
-    closure: Optional[tuple[Any, ...]]
+    runtime_env: GraphRuntimeEnv
     source_info: "SourceInfo"
     device_type: str
+    backend_name: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
 
     def check_compatibility(self) -> None:
         current_system = SystemInfo.current()
         current_system.check_compatibility(self.system_info, self.device_type)
+
+
+class AOTCompilePickler(pickle.Pickler):
+    @classmethod
+    def _unpickle_cell(cls, val: Any) -> Any:
+        def _() -> Any:
+            return val
+
+        assert _.__closure__ is not None
+        return _.__closure__[0]
+
+    # pyrefly: ignore [bad-override]
+    def reducer_override(self, obj: Any) -> Any:
+        if isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
+            return type(self)._unpickle_cell, (obj.cell_contents,)
+        return NotImplemented
 
 
 @dataclass
@@ -72,7 +80,17 @@ class AOTCompiledFunction:
     _guard_check_enabled: bool = True
 
     def guard_check(self, *args: Any, **kwargs: Any) -> bool:
-        f_locals = bind_locals(self._artifacts.signature, *args, **kwargs)
+        f_locals: dict[str, Any] = {}
+        env = self._artifacts.runtime_env
+        if env.closure:
+            assert env.bytecode.co_freevars and len(env.closure) == len(
+                env.bytecode.co_freevars
+            )
+            f_locals = {
+                name: cell.cell_contents
+                for name, cell in zip(env.bytecode.co_freevars, env.closure)
+            }
+        f_locals.update(bind_locals(self._artifacts.signature, *args, **kwargs))
         assert self._artifacts.guard_manager is not None
         return self._artifacts.guard_manager.check(f_locals)
 
@@ -81,17 +99,9 @@ class AOTCompiledFunction:
 
         self._artifacts.check_compatibility()
 
-        import_sources = {
-            alias: importlib.import_module(module_name)
-            for alias, module_name in self._artifacts.import_sources.items()
-        }
-        f_globals = {
-            **import_sources,
-            self._artifacts.backend_id: self._artifacts.compiled_fn,
-        }
-        # pyrefly: ignore  # read-only
-        self.fn = types.FunctionType(
-            self._artifacts.bytecode, f_globals, closure=self._artifacts.closure
+        # pyrefly: ignore [read-only]
+        self.fn = self._artifacts.runtime_env.forward_callable(
+            self._artifacts.backend_id, self._artifacts.compiled_fn
         )
 
         if self._artifacts.guard_manager is None:
@@ -99,7 +109,7 @@ class AOTCompiledFunction:
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
                 self._artifacts.original_code,
-                f_globals,
+                self.fn.__globals__,
             )
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
@@ -123,23 +133,33 @@ class AOTCompiledFunction:
 
         state = fn._artifacts.__dict__.copy()
         state["guard_manager"] = None
-        state["bytecode"] = SerializedCode.from_code_object(state["bytecode"])
+        state["runtime_env"] = dataclasses.replace(
+            state["runtime_env"],
+            bytecode=SerializedCode.from_code_object(state["runtime_env"].bytecode),
+        )
         compiled_fn = state["compiled_fn"]
         state["compiled_fn"] = (
             type(compiled_fn).deserialize_compile_artifacts,
             type(compiled_fn).serialize_compile_artifacts(compiled_fn),
         )
         state["original_code"] = SerializedCode.from_code_object(state["original_code"])
-        return pickle.dumps(state)
+        buf = io.BytesIO()
+        pickler = AOTCompilePickler(buf)
+        pickler.dump(state)
+        return buf.getvalue()
 
     @classmethod
     def deserialize(cls, data: bytes) -> "AOTCompiledFunction":
         from torch._dynamo.package import SerializedCode
 
         state = pickle.loads(data)
-        state["bytecode"] = SerializedCode.to_code_object(state["bytecode"])
+        state["runtime_env"] = dataclasses.replace(
+            state["runtime_env"],
+            bytecode=SerializedCode.to_code_object(state["runtime_env"].bytecode),
+        )
         deserializer, compiled_fn_state = state["compiled_fn"]
-        state["compiled_fn"] = deserializer(compiled_fn_state)
+        with torch._inductor.config.patch(enable_autograd_for_aot=True):
+            state["compiled_fn"] = deserializer(compiled_fn_state)
         state["original_code"] = SerializedCode.to_code_object(state["original_code"])
 
         artifacts = CompileArtifacts(**state)
@@ -147,53 +167,6 @@ class AOTCompiledFunction:
 
     def disable_guard_check(self) -> None:
         self._guard_check_enabled = False
-
-
-class BundledAOTAutogradSerializableCallable(SerializableCallable):
-    """
-    Represents a serializable callable generated by compile_fx.
-    This class wraps around the compiled function generated by AOTAutograd.
-
-    TODO: Instead of using PrecompileContext to grab it from AOTAutograd,
-    this object should be what's *returned* by aot_module_simplified.
-    We'll do that refactor in a later PR.
-    """
-
-    def __init__(self, compiled_fn: Any) -> None:
-        """
-        Takes in a BundledAOTAutogradCacheArtifact, which is the serialized form
-        of a compiled function generated by AOTAutograd.
-        """
-        assert hasattr(compiled_fn, "serialize")
-        self.compiled_fn = compiled_fn
-
-    def __getattr__(self, attr: Any) -> Any:
-        if hasattr(self, attr):
-            return getattr(super(), attr)
-        else:
-            return getattr(self.compiled_fn, attr)
-
-    @classmethod
-    def serialize_compile_artifacts(
-        cls, fn: "BundledAOTAutogradSerializableCallable"
-    ) -> bytes:
-        with torch._functorch.config.patch("bundled_autograd_cache", True):
-            result = pickle.dumps(fn.compiled_fn.serialize())
-            return result
-
-    @classmethod
-    def deserialize_compile_artifacts(cls, data: bytes) -> Any:
-        from torch._functorch._aot_autograd.autograd_cache import (
-            deserialize_bundled_cache_entry,
-        )
-
-        entry = pickle.loads(data)
-
-        compiled_fn = deserialize_bundled_cache_entry(entry)
-        return cls(compiled_fn)
-
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        return self.compiled_fn(*args, **kwargs)
 
 
 def aot_compile_fullgraph(
@@ -247,8 +220,10 @@ def aot_compile_fullgraph(
         assert backend_input is not None
         backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
         device_type = _graph_device_type(backend_input.graph_module.graph)
+        tracing_context = TracingContext(backend_input.fake_mode)
+        tracing_context.tensor_to_context = backend_input.tensor_to_context
         with (
-            torch._guards.tracing(TracingContext(backend_input.fake_mode)),
+            torch._guards.tracing(tracing_context),
             torch._functorch.config.patch(
                 {
                     "bundled_autograd_cache": True,
@@ -280,16 +255,15 @@ def aot_compile_fullgraph(
 
         artifacts = CompileArtifacts(
             signature=convert_frame._get_signature(fn),
-            bytecode=graph_capture_output.bytecode,
             guard_manager=check_fn.guard_manager,
             guards_state=check_fn.guards_state,
-            import_sources=graph_capture_output.import_sources,
             backend_id=backend_input.backend_id,
             compiled_fn=compiled_fn,
             original_code=fn.__code__,
-            closure=fn.__closure__,
+            runtime_env=graph_capture_output.get_runtime_env(),
             source_info=source_info,
             device_type=device_type,
+            backend_name=getattr(backend, "compiler_name", "unknown"),
         )
         aot_compiled_fn = AOTCompiledFunction(_artifacts=artifacts)
 

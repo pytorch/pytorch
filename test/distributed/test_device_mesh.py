@@ -462,7 +462,9 @@ class DeviceMeshTestNDim(DTensorTestBase):
         ep_mesh_2 = DeviceMesh(self.device_type, mesh_group_2)
         ep_mesh = ep_mesh_1 if self.rank < self.world_size // 2 else ep_mesh_2
         # ep_mesh is considered different from mesh_2d["TP"]
-        self.assertEqual(mesh_2d["TP"]._flatten_mesh_list, ep_mesh._flatten_mesh_list)
+        self.assertEqual(
+            mesh_2d["TP"].mesh.flatten().tolist(), ep_mesh.mesh.flatten().tolist()
+        )
         self.assertEqual(mesh_2d["TP"]._layout, ep_mesh._layout)
         self.assertEqual(mesh_2d["TP"].mesh.shape, ep_mesh.mesh.shape)
         self.assertEqual(mesh_2d["TP"].device_type, ep_mesh.device_type)
@@ -477,7 +479,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
             another_mesh_1 if self.rank < self.world_size // 2 else another_mesh_2
         )
         # another_mesh is considered the same as ep_mesh
-        self.assertEqual(ep_mesh._flatten_mesh_list, another_mesh._flatten_mesh_list)
+        self.assertEqual(ep_mesh._flatten_rank_map, another_mesh._flatten_rank_map)
         self.assertEqual(ep_mesh._layout, another_mesh._layout)
         self.assertEqual(ep_mesh.mesh.shape, another_mesh.mesh.shape)
         self.assertEqual(ep_mesh.device_type, another_mesh.device_type)
@@ -536,7 +538,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
         # Create shard groups (e.g. (0, 1, 2, 3), (4, 5, 6, 7))
         # and assign the correct shard group to each rank
         shard_rank_lists = (
-            list(range(0, self.world_size // 2)),
+            list(range(self.world_size // 2)),
             list(range(self.world_size // 2, self.world_size)),
         )
         shard_groups = (
@@ -1048,6 +1050,34 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             )
         )
         w.wait()
+
+    @with_comms
+    def test_concatenate_2d(self):
+        mesh_shape = (2, 4)
+        mesh_dim_names = ("dp", "tp")
+        mesh_2d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+        concatenated_mesh = DeviceMesh._concatenate([mesh_2d["dp"], mesh_2d["tp"]])
+        self.assertEqual(concatenated_mesh.mesh, mesh_2d.mesh)
+        self.assertEqual(concatenated_mesh.get_group("dp"), mesh_2d.get_group("dp"))
+        self.assertEqual(concatenated_mesh.get_group("tp"), mesh_2d.get_group("tp"))
+
+    @with_comms
+    def test_concatenate_3d(self):
+        mesh_shape = (2, 2, 2)
+        mesh_dim_names = ("pp", "dp", "tp")
+        mesh_3d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+        concatenated_mesh = DeviceMesh._concatenate([mesh_3d["dp"], mesh_3d["tp"]])
+        dp_tp_mesh = mesh_3d["dp", "tp"]
+        self.assertEqual(concatenated_mesh.mesh, dp_tp_mesh.mesh)
+        self.assertEqual(concatenated_mesh.get_group("dp"), dp_tp_mesh.get_group("dp"))
+        self.assertEqual(concatenated_mesh.get_group("tp"), dp_tp_mesh.get_group("tp"))
+        self.assertEqual(
+            mesh_3d, DeviceMesh._concatenate([mesh_3d["pp", "dp"], mesh_3d["tp"]])
+        )
 
     @with_comms
     def test_reconstruct_mesh_with_flatten_dim(self):
@@ -1664,14 +1694,14 @@ class CuTeLayoutTest(TestCase):
     def test_remap_to_tensor(self):
         """Test the remap_to_tensor method for various scenarios."""
         # Test 1: Consecutive ranks, full world - should return logical groups directly
-        original_mesh = torch.tensor([[0, 1], [2, 3]], dtype=torch.int)
+        original_mesh = torch.tensor([0, 1, 2, 3], dtype=torch.int)
         layout1 = _Layout((2, 2), (2, 1))  # row-major 2x2
         result1 = layout1.remap_to_tensor(original_mesh)
         expected1 = torch.tensor([[[0, 1], [2, 3]]], dtype=torch.int)
         self.assertEqual(result1, expected1)
 
         # Test 2: Non-consecutive ranks - should map to actual ranks
-        original_mesh = torch.tensor([[10, 20], [30, 40]], dtype=torch.int)
+        original_mesh = torch.tensor([10, 20, 30, 40], dtype=torch.int)
         layout2 = _Layout((2, 2), (2, 1))
         result2 = layout2.remap_to_tensor(original_mesh)
         expected2 = torch.tensor([[[10, 20], [30, 40]]], dtype=torch.int)
@@ -1692,7 +1722,7 @@ class CuTeLayoutTest(TestCase):
         self.assertEqual(result5, expected5)
 
         # Test 6: Tensor Cute representation of a 2D mesh
-        original_mesh = torch.tensor([[0, 2], [1, 3]], dtype=torch.int)
+        original_mesh = torch.tensor([0, 2, 1, 3], dtype=torch.int)
         layout6 = _Layout((2, 2), (1, 2))  # column-major style
         result6 = layout6.remap_to_tensor(original_mesh)
         expected6 = torch.tensor([[[0, 1], [2, 3]]], dtype=torch.int)

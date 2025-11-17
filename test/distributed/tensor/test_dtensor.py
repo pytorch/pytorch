@@ -1019,11 +1019,33 @@ class DTensorMeshTest(DTensorTestBase):
         except ValueError:
             self.fail("Unexpected ValueError raised with run_check=False")
 
+    @with_comms
+    def test_as_strided_identity(self):
+        # Test calling as_strided with the same size/stride/offset as input tensor
+        # This should be a no-op but currently fails
+        device_mesh = self.build_device_mesh()
+        placements = [Shard(0)]
+        local_tensor = torch.randn(3, 4, device=self.device_type)
+        dtensor = DTensor.from_local(local_tensor, device_mesh, placements)
+
+        # Get the current size, stride, and storage_offset
+        size = dtensor.size()
+        stride = dtensor.stride()
+        storage_offset = dtensor.storage_offset()
+
+        # Call as_strided with the exact same parameters
+        result = dtensor.as_strided(size, stride, storage_offset)
+
+        # The result should be identical to the input
+        self.assertEqual(result.size(), dtensor.size())
+        self.assertEqual(result.stride(), dtensor.stride())
+        self.assertEqual(result.to_local(), dtensor.to_local())
+
 
 DTensorMeshTestWithLocalTensor = create_local_tensor_test_class(
     DTensorMeshTest,
     skipped_tests=[
-        # Submeshes are not supported by local tensor mode
+        # Test asserts must be rewritten for local tensor
         "test_from_local_sub_mesh",
         "test_default_value_sub_mesh",
         "test_redistribute_sub_mesh",
@@ -1066,7 +1088,7 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                 assert_array_equal(expected_pad_sizes, pad_sizes)
 
                 is_tensor_empty = [
-                    False if splitted_tensor.numel() > 0 else True
+                    not splitted_tensor.numel() > 0
                     for splitted_tensor in splitted_tensor_list
                 ]
                 expected_is_tensor_empty = [True] * self.world_size
@@ -1089,12 +1111,10 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                     for i, tensor in enumerate(splitted_tensor_list)
                 ]
                 expected_is_tensor_empty = [
-                    False if idx < size else True
-                    for idx, _ in enumerate(range(self.world_size))
+                    not idx < size for idx, _ in enumerate(range(self.world_size))
                 ]
                 is_tensor_empty = [
-                    False if unpadded_tensor.numel() > 0 else True
-                    for unpadded_tensor in unpadded_list
+                    not unpadded_tensor.numel() > 0 for unpadded_tensor in unpadded_list
                 ]
                 assert_array_equal(expected_is_tensor_empty, is_tensor_empty)
 

@@ -968,11 +968,8 @@ find_package_handle_standard_args(nvtx3 DEFAULT_MSG nvtx3_dir)
 if(nvtx3_FOUND)
   add_library(torch::nvtx3 INTERFACE IMPORTED)
   target_include_directories(torch::nvtx3 INTERFACE "${nvtx3_dir}")
-  target_compile_definitions(torch::nvtx3 INTERFACE TORCH_CUDA_USE_NVTX3)
 else()
-  message(WARNING "Cannot find NVTX3, find old NVTX instead")
-  add_library(torch::nvtoolsext INTERFACE IMPORTED)
-  set_property(TARGET torch::nvtoolsext PROPERTY INTERFACE_LINK_LIBRARIES CUDA::nvToolsExt)
+  message(FATAL_ERROR "Cannot find NVTX3!")
 endif()
 
 
@@ -1043,6 +1040,17 @@ if(USE_ROCM)
        list(APPEND HIP_CXX_FLAGS -O0)
        list(APPEND HIP_HIPCC_FLAGS -fdebug-info-for-profiling)
     endif(CMAKE_BUILD_TYPE MATCHES Debug)
+
+    # Get EnVar 'USE_LAYERNORM_FAST_RECIPROCAL' (or default to on).
+    if(DEFINED ENV{USE_LAYERNORM_FAST_RECIPROCAL})
+      set(USE_LAYERNORM_FAST_RECIPROCAL $ENV{USE_LAYERNORM_FAST_RECIPROCAL})
+    else()
+      set(USE_LAYERNORM_FAST_RECIPROCAL ON)
+    endif()
+
+    if(USE_LAYERNORM_FAST_RECIPROCAL)
+      add_definitions(-DUSE_LAYERNORM_FAST_RECIPROCAL)
+    endif()
 
     # needed for compat with newer versions of hip-clang that introduced C++20 mangling rules
     list(APPEND HIP_HIPCC_FLAGS -fclang-abi-compat=17)
